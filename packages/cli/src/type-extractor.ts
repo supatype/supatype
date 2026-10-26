@@ -25,6 +25,7 @@ import {
   type FieldAstV2,
   type KernelFieldFacts,
   type FieldKind,
+  type IdentityAst,
   type ParsedField,
 } from "./schema-ast-v2.js"
 import { compileBounds, measureFormFor, type DeclaredBounds } from "./field-bounds.js"
@@ -214,7 +215,8 @@ export function collectSchemaSourcePaths(entryAbsPath: string, projectRoot: stri
   return { entryPoint, files }
 }
 
-function walkSchemaSourceAbsPaths(entryPath: string): string[] {
+/** Every schema source file the entry reaches through relative imports, entry first. */
+export function walkSchemaSourceAbsPaths(entryPath: string): string[] {
   const visited = new Set<string>()
   const paths: string[] = []
   const queue: string[] = [entryPath]
@@ -478,7 +480,6 @@ function parseFieldType(
     index: false,
     primaryKey: false,
     serverGenerated: false,
-    autoIncrement: false,
     relationCardinality: undefined as "one" | "many" | undefined,
     relationTarget: undefined as string | undefined,
     editorReadOnly: false,
@@ -489,6 +490,13 @@ function parseFieldType(
     notLocalized: false,
     searchable: false,
     bounds: {} as DeclaredBounds,
+    /** `Identity<>` / `AutoIncrement<>`: the mode, and whether the integer came as `number` or `bigint`. */
+    identity: undefined as IdentityAst | undefined,
+    identityKeyword: undefined as "integer" | "bigInt" | undefined,
+    /** `AutoIncrement<>`: an identity by default that a live serial column satisfies. */
+    autoIncrement: false,
+    /** `Generated<T, expr>`. */
+    generated: undefined as string | undefined,
   }
 
   const resolving = new Set<string>()
@@ -512,11 +520,40 @@ function parseFieldType(
         flags.serverGenerated = true
         current = current.typeArguments?.[0] ?? current
         continue
-      case "AutoIncrement":
-        flags.serverGenerated = true
-        flags.autoIncrement = true
+      case "Identity":
+      case "AutoIncrement": {
+        // `AutoIncrement<T>` is `Identity<T, "by-default">`, and says so to the engine, which then
+        // leaves a serial column made when it compiled to one (identity-contract). Either defaults
+        // to `number`.
+        const mode = typeName === "Identity" ? literalStringType(current.typeArguments?.[1]) : "by-default"
+        if (typeName === "Identity" && current.typeArguments?.[1] !== undefined && mode === null) {
+          throw new Error(`Field "${fieldName}": an identity is "always" or "by-default".`)
+        }
+        flags.identity = identityAst(mode ?? "always", fieldName)
+        flags.autoIncrement = typeName === "AutoIncrement"
+        const inner = current.typeArguments?.[0]
+        if (inner === undefined || inner.kind === ts.SyntaxKind.NumberKeyword) {
+          flags.identityKeyword = "integer"
+          break
+        }
+        if (inner.kind === ts.SyntaxKind.BigIntKeyword) {
+          flags.identityKeyword = "bigInt"
+          break
+        }
+        current = inner
+        continue
+      }
+      case "Generated": {
+        const expression = literalStringType(current.typeArguments?.[1])
+        if (expression === null || expression.trim() === "") {
+          throw new Error(
+            `Field "${fieldName}": Generated<T, expression> takes the column's SQL expression as a string literal, such as Generated<string, "lower(name)">.`,
+          )
+        }
+        flags.generated = expression
         current = current.typeArguments?.[0] ?? current
         continue
+      }
       case "PrimaryKey":
         flags.primaryKey = true
         flags.required = true
@@ -665,17 +702,20 @@ function parseFieldType(
     break
   }
 
-  const scalarBase = parseScalarType(
-    current,
-    sourceFile,
-    blockAliases,
-    bucketAliases,
-    bucketsById,
-    context,
-    resolveCtx,
-    fieldName,
-    resolving,
-  )
+  const scalarBase =
+    flags.identityKeyword !== undefined
+      ? scalar(flags.identityKeyword)
+      : parseScalarType(
+          current,
+          sourceFile,
+          blockAliases,
+          bucketAliases,
+          bucketsById,
+          context,
+          resolveCtx,
+          fieldName,
+          resolving,
+        )
 
   let parsed: ParsedField = {
     kind: scalarBase.kind,
@@ -696,9 +736,8 @@ function parseFieldType(
     },
   }
 
-  if (flags.autoIncrement && parsed.kind === "integer") {
-    parsed = { ...parsed, kind: "serial", db: { ...parsed.db, pgType: "SERIAL" } }
-  }
+  parsed = withGeneration(fieldName, parsed, flags.identity, flags.generated)
+  if (flags.autoIncrement) parsed = { ...parsed, kernel: { ...parsed.kernel, autoIncrement: true } }
 
   if (fieldName === "id" && parsed.kind === "uuid" && flags.primaryKey === false) {
     parsed = {
@@ -797,6 +836,43 @@ function parseFieldType(
   return emitField(finalizeParsedField(parsed, flags, context))
 }
 
+/**
+ * The field with how the database fills it (identity-contract): the alias forms (`Identity<>`,
+ * `AutoIncrement<>`, `Generated<>`) and the options form arrive here as one. An identity column is an
+ * integer and NOT NULL; neither kind takes a default; both may be left out of an insert.
+ */
+function withGeneration(
+  fieldName: string,
+  parsed: ParsedField,
+  aliasIdentity: IdentityAst | undefined,
+  aliasGenerated: string | undefined,
+): ParsedField {
+  const identity = aliasIdentity ?? parsed.kernel.identity
+  const generated =
+    aliasGenerated !== undefined ? { expression: aliasGenerated, stored: true as const } : parsed.kernel.generated
+  if (identity === undefined && generated === undefined) return parsed
+  if (identity !== undefined && generated !== undefined) {
+    throw new Error(`Field "${fieldName}": a column is an identity column or a generated one, not both.`)
+  }
+  if (identity !== undefined && !["integer", "smallInt", "bigInt"].includes(parsed.kind)) {
+    throw new Error(
+      `Field "${fieldName}": only an integer field (Int, SmallInt or BigInt) can be an identity column.`,
+    )
+  }
+  if (parsed.kernel.default !== undefined) {
+    throw new Error(`Field "${fieldName}": an identity or generated column cannot also have a default.`)
+  }
+  return {
+    ...parsed,
+    kernel: {
+      ...parsed.kernel,
+      ...(identity !== undefined && { identity, required: true }),
+      ...(generated !== undefined && { generated }),
+    },
+    db: { ...parsed.db, serverGenerated: true },
+  }
+}
+
 function finalizeParsedField(
   parsed: ParsedField,
   flags: { localized: boolean; notLocalized: boolean },
@@ -808,7 +884,10 @@ function finalizeParsedField(
     !localized &&
     !flags.notLocalized &&
     context.autoLocalize &&
-    shouldAutoLocalizeFieldKind(parsed.kind)
+    shouldAutoLocalizeFieldKind(parsed.kind) &&
+    // The database computes it from the row: one value, not one per locale.
+    parsed.kernel.generated === undefined &&
+    parsed.kernel.identity === undefined
   ) {
     localized = true
   }
@@ -933,10 +1012,13 @@ function parseScalarType(
     const ref = ts.isIdentifier(typeNode.typeName)
       ? applyImportRename(typeNode.typeName.text, sourceFile, resolveCtx.renameMap)
       : typeNode.typeName.getText(sourceFile)
+    // A scalar field type's options, its last type argument: `Int<{ identity: "always" }>`.
+    const options = (allow: { identity?: boolean } = {}) =>
+      parseScalarFieldOptions(typeNode.typeArguments?.[0], fieldName, ref, allow.identity === true)
     switch (ref) {
       case "UUID":
       case "SupatypeAuthUserId":
-        return scalar("uuid")
+        return scalar("uuid", { kernel: options() })
       case "RichText": {
         const defaultArg = typeNode.typeArguments?.[0]
         if (!defaultArg) return scalar("richText")
@@ -961,28 +1043,28 @@ function parseScalarType(
         return scalar("slug", { kernel: { from: fromLiteral ?? "title" } })
       }
       case "Email":
-        return scalar("email")
+        return scalar("email", { kernel: options() })
       case "URL":
-        return scalar("url")
+        return scalar("url", { kernel: options() })
       case "Markdown":
       case "PhoneNumber":
-        return scalar("text")
+        return scalar("text", { kernel: options() })
       case "Color":
-        return scalar("color")
+        return scalar("color", { kernel: options() })
       case "IPAddress":
-        return scalar("ip")
+        return scalar("ip", { kernel: options() })
       case "CIDR":
-        return scalar("cidr")
+        return scalar("cidr", { kernel: options() })
       case "MacAddress":
-        return scalar("macaddr")
+        return scalar("macaddr", { kernel: options() })
       case "XML":
-        return scalar("xml")
+        return scalar("xml", { kernel: options() })
       case "TSQuery":
-        return scalar("tsQuery")
+        return scalar("tsQuery", { kernel: options() })
       case "TSVector":
-        return scalar("tsVector")
+        return scalar("tsVector", { kernel: options() })
       case "Money":
-        return scalar("money")
+        return scalar("money", { kernel: options() })
       case "Decimal": {
         // `Decimal<10, 2>` names a precision and a scale, and the engine renders `NUMERIC(p, s)`
         // from them: but nothing used to read the type arguments, so every Decimal became an
@@ -997,21 +1079,21 @@ function parseScalarType(
         })
       }
       case "DateOnly":
-        return scalar("date")
+        return scalar("date", { kernel: options() })
       case "Date":
       case "DateTime":
       case "Timestamp":
-        return scalar("datetime", { db: { pgType: "TIMESTAMP WITH TIME ZONE" } })
+        return scalar("datetime", { db: { pgType: "TIMESTAMP WITH TIME ZONE" }, kernel: options() })
       case "Int":
-        return scalar("integer")
+        return scalar("integer", { kernel: options({ identity: true }) })
       case "SmallInt":
-        return scalar("smallInt")
+        return scalar("smallInt", { kernel: options({ identity: true }) })
       case "BigInt":
-        return scalar("bigInt")
+        return scalar("bigInt", { kernel: options({ identity: true }) })
       case "Float":
-        return scalar("float")
+        return scalar("float", { kernel: options() })
       case "Bytea":
-        return scalar("bytes")
+        return scalar("bytes", { kernel: options() })
       case "JSON":
         return scalar("json")
       case "Button":
@@ -1514,6 +1596,61 @@ function parseInlineBlockDefinition(
     ...(icon !== undefined && { icon }),
     fields,
   }
+}
+
+/** `"always"` / `"by-default"`, the TypeScript spelling, as the AST spells it (identity-contract). */
+function identityAst(mode: string, fieldName: string): IdentityAst {
+  if (mode === "always") return "always"
+  if (mode === "by-default") return "byDefault"
+  throw new Error(`Field "${fieldName}": an identity is "always" or "by-default", not "${mode}".`)
+}
+
+/**
+ * A scalar field type's options object, `{ identity?, generated? }`, read from its syntax: the
+ * root form `Identity<>` and `Generated<>` resolve to (identity-contract). `identity` only where the
+ * type is an integer one.
+ */
+function parseScalarFieldOptions(
+  node: ts.TypeNode | undefined,
+  fieldName: string,
+  typeName: string,
+  allowIdentity: boolean,
+): Pick<KernelFieldFacts, "identity" | "generated"> {
+  if (node === undefined) return {}
+  if (!ts.isTypeLiteralNode(node)) {
+    throw new Error(
+      `Field "${fieldName}": the options of ${typeName}<…> are an object type, such as { generated: "lower(name)" }.`,
+    )
+  }
+  const out: Pick<KernelFieldFacts, "identity" | "generated"> = {}
+  for (const member of node.members) {
+    if (!ts.isPropertySignature(member) || !member.name || !member.type) continue
+    const key = getPropertyName(member.name)
+    const text = literalStringType(member.type)
+    if (key === "identity") {
+      if (!allowIdentity) {
+        throw new Error(
+          `Field "${fieldName}": only an integer field (Int, SmallInt or BigInt) can be an identity column, not ${typeName}.`,
+        )
+      }
+      if (text === null) {
+        throw new Error(`Field "${fieldName}": identity is "always" or "by-default".`)
+      }
+      out.identity = identityAst(text, fieldName)
+    } else if (key === "generated") {
+      if (text === null || text.trim() === "") {
+        throw new Error(
+          `Field "${fieldName}": generated is the column's SQL expression as a string literal, such as "lower(name)".`,
+        )
+      }
+      out.generated = { expression: text, stored: true }
+    } else {
+      throw new Error(
+        `Field "${fieldName}": ${typeName}<…> takes ${allowIdentity ? "identity and generated" : "generated"}, not ${key ?? "that option"}.`,
+      )
+    }
+  }
+  return out
 }
 
 function literalStringType(typeNode: ts.TypeNode | undefined): string | null {

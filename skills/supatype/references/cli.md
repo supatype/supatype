@@ -37,8 +37,8 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 
 | Command | Purpose |
 |---------|---------|
-| `supatype doctor` | Schema drift report. Flags: `--env`, `--direct`, `--strict` |
-| `supatype adopt` | Stamp managed comments on existing DB objects. Flags: `--env`, `--yes`. `push` and `dev` offer to run it when they find unmanaged tables |
+| `supatype doctor` | What a push would find: missing, drifted, stale, conflicting, unmanaged and released objects. Flags: `--env`, `--direct`, `--strict` (fail when a push would change or refuse something) |
+| `supatype adopt` | Hand Supatype the objects a push refuses because their names are taken; records ownership, never edits the object. Agreed at the prompt, it adopts only what its preview listed; `--yes` alone adopts every conflict there is and lists what it took; `--key kind:table.name` (repeatable) adopts only those. If an object it was to adopt is no longer a conflict, it writes nothing and exits 1 asking you to run it again. `--release kind:table.name` makes every push leave an object alone. `--key column:table.name` adopts a column added outside Supatype (one the schema does not declare, e.g. one doctor or push says has no write grant), and adopted means managed: the CLI then adds the field to the model whose table it is, keyed by the column name, with the field type whose column is exactly the live one (an identity column as `Identity<number>`, `Identity<bigint, "by-default">` or `SmallInt<{ identity: … }>`, a generated one as `Generated<T, "<expression>">`), and regenerates types, so the next `push` treats it as declared. In a terminal it shows the file, model and field line and asks (y/N) first; `--yes` edits without asking, CI included. If the model cannot be found, its fields are not written inline, or the column's type has no exact field type (for example `varchar`, `timestamp` without time zone, an unbounded `numeric`, or a generated `jsonb` column), or the field's import would clash with a name the file already has, or you decline, or the file changed while you were asked, the file is left alone and it prints the field line and where to add it; the adopt still succeeds and it exits 0. Flags: `--env`, `--yes` (required when not interactive), `--release`, `--key` (checked against the server or engine first). `push` and `dev` offer to run it when they find unmanaged tables |
 | `supatype introspect` | Introspect live Postgres. Flags: `--env`, `--json`, `--direct` |
 | `supatype migrate` | Migration utilities |
 | `supatype rollback` | Undo the last applied migration (linked or direct). Flags: `--env`, `--connection`, `--direct`, `--sync-schema`, `--no-sync-schema` |
@@ -46,7 +46,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype db connection-string` | Show DB URL (cloud linked projects) |
 | `supatype db reset-password` | Reset cloud project DB password |
 | `supatype pg` | Postgres helpers |
-| `supatype pull` | Draft `schema/index.ts` from live DB introspection (review before push). Flags: `--connection`, `--out`, `--dry-run` |
+| `supatype pull` | Draft `schema/index.ts` from live DB introspection (review before push); identity and generated columns are declared as such. Flags: `--connection`, `--out`, `--dry-run` |
 
 ## App and deploy
 
@@ -98,7 +98,7 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 
 **Stopping the stack:**
 - `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit.
-- Ownership flags (such as `--overwrite-drift`) are checked first against what will run them: a linked server's `GET .../schema/capabilities`, or the engine binary's `capabilities` (its version for an older one). A server or engine that lacks one is refused with "this server does not support <flag>; update it", never sent the flag to drop it.
+- Ownership flags (`--overwrite-drift`, `adopt --key/--release`, and the keys an agreed adopt sends) are checked first against what will run them: a linked server's `GET .../schema/capabilities`, or the engine binary's `capabilities` (its version for an older one). A server or engine that lacks one is refused with "this server does not support <flag>; update it", never sent the flag to drop it.
 - A failed schema push never resets the database. `dev` retries only while Postgres is unreachable; an engine refusal (for example unmanaged tables, fixed with `supatype adopt`) stops `dev` with the engine's message. `supatype dev --reset-db` is the only way `dev` removes data, and it removes only the Postgres volume.
 - `.supatype/dev-session.json` tracks the active dev session; the next `supatype dev` offers to clean up a stack left running after an unclean exit.
 - `supatype push` may start **Postgres only** and leave it running (intentional for prod/self-host workflows). Stop with `supatype self-host compose down`.

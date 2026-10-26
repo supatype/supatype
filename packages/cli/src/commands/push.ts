@@ -36,7 +36,7 @@ import {
 } from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
 import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
-import type { FeatureNeed } from "../engine-ownership-gate.js"
+import { adoptKeysNeed, type FeatureNeed } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
@@ -241,11 +241,9 @@ async function pushViaTarget(
         }),
       ),
     targetAdoptionSteps(
-      async (yes) =>
-        (await targetSchemaAdopt(target, ast, { schema: pgSchema, yes })) as {
-          stampStatements?: string[]
-          stamped?: number
-        },
+      (yes, keys) => targetSchemaAdopt(target, ast, { schema: pgSchema, yes, ...(keys !== undefined && { keys }) }),
+      // Before anyone is asked: applying sends the previewed keys, which this target must honour.
+      (keys) => requireTargetFeatures(target, [adoptKeysNeed(keys)]),
     ),
     { yes: run.yes, retry: "supatype push" },
   )

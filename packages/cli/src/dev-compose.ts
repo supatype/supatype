@@ -81,11 +81,19 @@ import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
 import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
-import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
+import {
+  offerAdoption,
+  targetAdoptionSteps,
+  unmanagedTables,
+  type AdoptionSteps,
+  type AdoptOutcome,
+} from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
 import {
+  adoptKeysNeed,
   assertSupported,
   engineCapabilities,
+  identityColumnsNeed,
   probeCapabilities,
   type Capabilities,
   type FeatureNeed,
@@ -766,6 +774,9 @@ async function runComposeSchemaPush(
   if (!existsSync(astPath)) {
     throw new Error(`Failed to write schema AST at ${astPath}`)
   }
+  // Identity and generated columns only to an engine that reads them (the override's binary is
+  // asked by `engineRequest`).
+  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
 
   // Admin + types come from the AST only (no DB), refresh before push so Studio stays
   // in sync even when migration fails (e.g. bad engine image, lossy column change).
@@ -917,10 +928,13 @@ async function runComposeEnginePush(
  */
 export async function dockerEngineCapabilities(cwd: string, config: SupatypeProjectConfig): Promise<Capabilities> {
   if (hasEngineOverride(config)) return engineCapabilities()
+  const engineImage = await schemaEngineImageForPush(config)
+  const cacheKey = `${cwd}\0${engineImage ?? ""}`
+  const known = dockerCapabilities.get(cacheKey)
+  if (known !== undefined) return known
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
   const project = composeProjectName(config.project.name)
-  const engineImage = await schemaEngineImageForPush(config)
-  return probeCapabilities((args) => {
+  const caps = probeCapabilities((args) => {
     const envFile = resolve(cwd, ".env")
     const composeArgs = ["compose", "--progress", "quiet", "-p", project, "--project-directory", cwd, "-f", paths.composePath]
     if (existsSync(envFile)) composeArgs.push("--env-file", envFile)
@@ -930,7 +944,12 @@ export async function dockerEngineCapabilities(cwd: string, config: SupatypeProj
     const run = spawnSync("docker", composeArgs, { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024, env })
     return { status: run.status, stdout: run.stdout ?? "" }
   })
+  dockerCapabilities.set(cacheKey, caps)
+  return caps
 }
+
+/** One answer per project and engine image for the life of the process: each costs a container. */
+const dockerCapabilities = new Map<string, Capabilities>()
 
 /** Refuse, before anything is sent, an ownership feature the docker project's engine lacks. */
 export async function requireDockerFeatures(
@@ -991,8 +1010,8 @@ export interface EngineRun {
  * whole, and with stderr joined on (a compose warning about an unset variable, an engine log line)
  * it did not parse at all, so a preview that worked was reported as a failed adopt.
  */
-export function adoptResultFrom(run: EngineRun): AdoptResult | null {
-  return run.status === 0 ? parseEngineJsonOutput<AdoptResult>(run.stdout) : null
+export function adoptResultFrom(run: EngineRun): AdoptOutcome | null {
+  return run.status === 0 ? parseEngineJsonOutput<AdoptOutcome>(run.stdout) : null
 }
 
 async function runComposeEngineCommand(
@@ -1050,23 +1069,28 @@ async function runComposeEngineDiff(
   return { ...result, diff: parseEngineJsonOutput<DiffResult>(result.output) }
 }
 
-/** Adoption against a docker project's own database, for the push walkthrough. */
-export function dockerAdoptionSteps(cwd: string, config: SupatypeProjectConfig): AdoptionSteps {
-  return {
-    preview: async () => (await adoptSchemaDocker(cwd, config, false)).stampStatements ?? [],
-    apply: async () => (await adoptSchemaDocker(cwd, config, true)).stamped ?? 0,
-  }
+/**
+ * The compose schema-engine's `adopt` arguments. `keys: []` is "adopt none", which the binary
+ * spells `--adopt-none`: no `--key` at all would adopt every conflict. Exported for its tests.
+ */
+export function adoptCommand(yes: boolean, keys?: readonly string[]): string[] {
+  if (!yes) return ["adopt"]
+  if (keys === undefined) return ["adopt", "--yes"]
+  if (keys.length === 0) return ["adopt", "--yes", "--adopt-none"]
+  return ["adopt", "--yes", ...keys.flatMap((k) => ["--key", k])]
 }
 
-/** What `adopt` reports, previewing or applying. */
-export interface AdoptResult {
-  status?: string
-  stampStatements?: string[]
-  stamped?: number
+/** Adoption against a docker project's own database, for the push walkthrough. */
+export function dockerAdoptionSteps(cwd: string, config: SupatypeProjectConfig): AdoptionSteps {
+  return targetAdoptionSteps(
+    (yes, keys) => adoptSchemaDocker(cwd, config, yes, keys),
+    (keys) => requireDockerFeatures(cwd, config, [adoptKeysNeed(keys)]),
+  )
 }
 
 /**
- * Adopt on a docker project's own database: the stamp preview, or with `yes`, the stamps applied.
+ * Adopt on a docker project's own database: the preview, or with `yes`, the ledger rows written,
+ * for only the conflicts `keys` names when it is given (as a preview listed them).
  *
  * Through the compose schema-engine, or the local engine binary when `overrides.engine` is set,
  * the same way `diffSchemaDocker` reaches the database. The stack's database must be running,
@@ -1076,20 +1100,31 @@ export async function adoptSchemaDocker(
   cwd: string,
   config: SupatypeProjectConfig,
   yes: boolean,
-): Promise<AdoptResult> {
+  keys?: string[],
+): Promise<AdoptOutcome> {
   const project = composeProjectName(config.project.name)
+  // Only these conflicts, or none for an empty list: never sent to an engine that would read
+  // either as "every conflict".
+  if (keys !== undefined) await requireDockerFeatures(cwd, config, [adoptKeysNeed(keys)])
   if (hasEngineOverride(config)) {
     await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Adopt" })
     await ensureEngine()
-    return engineRequest<AdoptResult>("/adopt", {
+    return engineRequest<AdoptOutcome>("/adopt", {
       ast: withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
       database_url: projectDatabaseUrl(cwd, config),
       schema: config.schema?.pg_schema ?? "public",
       yes,
+      ...(keys !== undefined && { keys }),
     })
   }
+  await requireDockerFeatures(
+    cwd,
+    config,
+    identityColumnsNeed(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
+  )
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
-  const result = await runComposeEngineCommand(paths, cwd, project, config, yes ? ["adopt", "--yes"] : ["adopt"])
+  const command = adoptCommand(yes, keys)
+  const result = await runComposeEngineCommand(paths, cwd, project, config, command)
   const parsed = adoptResultFrom(result)
   if (parsed === null) {
     throw new Error(filterComposeNoise(result.output) || `Engine adopt failed (exit ${result.status})`)
@@ -1136,6 +1171,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+  await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })

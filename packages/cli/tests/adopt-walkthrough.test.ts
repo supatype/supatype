@@ -100,6 +100,28 @@ describe("offerAdoption()", () => {
     expect(await offerAdoption(["orders"], steps, POLICY)).toBe("declined")
     expect(steps.apply).not.toHaveBeenCalled()
   })
+
+  it("declines, saying so, when the database changed since the preview", async () => {
+    answers.push(true, true)
+    const steps = adoptSteps()
+    steps.apply.mockRejectedValueOnce(
+      new EngineError(
+        "Engine /adopt failed (exit 1): Error: table:orders was to be adopted but is not a conflict now: " +
+          "the database changed since the preview. Nothing was written",
+        "/adopt",
+        1,
+      ),
+    )
+    expect(await offerAdoption(["orders"], steps, POLICY)).toBe("declined")
+    expect(printed.join("\n")).toContain("warn: The database changed since the preview; run `supatype adopt` again.")
+  })
+
+  it("throws any other failure to apply as it came", async () => {
+    answers.push(true, true)
+    const steps = adoptSteps()
+    steps.apply.mockRejectedValueOnce(new Error("connection refused"))
+    await expect(offerAdoption(["orders"], steps, POLICY)).rejects.toThrow("connection refused")
+  })
 })
 
 describe("pushOfferingAdoption()", () => {

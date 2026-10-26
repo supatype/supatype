@@ -107,7 +107,7 @@ export function registerDoctor(program: Command): void {
       // As push sends it: the engine refuses a versioned schema that carries no publishing config.
       const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
-      const target = await doctorTarget(cwd, config, opts)
+      const target = await schemaCommandTarget(cwd, config, opts)
       const report = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
 
       printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
@@ -121,10 +121,11 @@ export function registerDoctor(program: Command): void {
 }
 
 /**
- * Where doctor looks: the linked environment, else the local dev database, unless `--direct` or
- * `--connection` asks for the engine subprocess.
+ * Where `doctor` and `adopt` look: the linked environment, else the local dev database, unless
+ * `--direct` or `--connection` asks for the engine subprocess. One answer for both, so `adopt` takes
+ * exactly what `doctor` reported.
  */
-async function doctorTarget(
+export async function schemaCommandTarget(
   cwd: string,
   config: ReturnType<typeof loadConfig>,
   opts: { connection?: string; env?: string; direct?: boolean },

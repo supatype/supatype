@@ -4,9 +4,11 @@ import {
   boundsRequiringHelpers,
   compareVersions,
   ENGINE_MIN_FOR_BOUNDS,
+  ENGINE_MIN_FOR_GENERATED_COLUMNS,
   ENGINE_MIN_FOR_RICHTEXT_TRIGGER,
   ENGINE_MIN_FOR_SEED,
   ENGINE_MIN_FOR_VERSIONS,
+  fieldsGeneratedByTheDatabase,
   fieldsNeedingRichTextTrigger,
   modelsRequiringVersions,
   seedUnsupportedByPinnedEngine,
@@ -234,5 +236,38 @@ describe("the floors themselves", () => {
     expect(ENGINE_MIN_FOR_VERSIONS).toBe("0.3.0")
     expect(ENGINE_MIN_FOR_RICHTEXT_TRIGGER).toBe("0.4.0")
     expect(ENGINE_MIN_FOR_SEED).toBe("0.4.0")
+  })
+})
+
+describe("the identity and generated column floor", () => {
+  const GENERATED = schema([
+    model("Post", {
+      id: field({ kind: "integer", identity: "always" }),
+      title: field(),
+      title_lower: field({ generated: { expression: "lower(title)", stored: true } }),
+    }),
+  ])
+
+  it("names the columns that need it", () => {
+    expect(fieldsGeneratedByTheDatabase(GENERATED)).toEqual(["Post.id", "Post.title_lower"])
+    expect(fieldsGeneratedByTheDatabase(WITHOUT_BOUND)).toEqual([])
+  })
+
+  it("refuses them on an engine that would ignore them, saying what would go wrong", () => {
+    try {
+      assertEngineSupportsSchema(GENERATED, "0.6.0")
+      expect.unreachable("an identity column on an older engine has to be refused")
+    } catch (err) {
+      const message = (err as Error).message
+      expect(message).toContain("Post.id")
+      expect(message).toContain("identity and generated columns")
+      expect(message).toContain("every insert fails on")
+    }
+  })
+
+  it("allows the release itself, unpinned and local", () => {
+    for (const pin of [ENGINE_MIN_FOR_GENERATED_COLUMNS, undefined, "local"]) {
+      expect(() => { assertEngineSupportsSchema(GENERATED, pin) }).not.toThrow()
+    }
   })
 })

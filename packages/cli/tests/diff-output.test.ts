@@ -97,6 +97,28 @@ describe("plannedChanges()", () => {
     expect(plannedChanges(diff).map((c) => c.label)).toEqual(["create enum type mood"])
   })
 
+  it("asks before taking a column's identity or generation expression away, as before a drop", () => {
+    // The engine reports both as destructive (and refuses them without --force).
+    const diff: DiffResult = {
+      operations: [
+        {
+          type: "alter_column",
+          table: "posts",
+          column: "id",
+          risk: "destructive",
+          warning: "posts.id: is no longer an identity column; an insert must now give it a value. Use --force to proceed (destructive).",
+        },
+      ],
+    }
+    const changes = plannedChanges(diff)
+    expect(changes.filter(isRisky)).toEqual([
+      {
+        label: "posts.id: is no longer an identity column; an insert must now give it a value. Use --force to proceed (destructive).",
+        risk: "destructive",
+      },
+    ])
+  })
+
   it("is the differ's operations alone for an engine without a reconcile", () => {
     const diff: DiffResult = { operations: [{ type: "create_table", table: "posts" }] }
     expect(plannedChanges(diff).map((c) => c.label)).toEqual(["create_table posts"])

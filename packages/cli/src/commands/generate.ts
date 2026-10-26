@@ -14,32 +14,34 @@ export function registerGenerate(program: Command): void {
     .command("generate")
     .description("Regenerate TypeScript types without running a migration")
     .option("--connection <url>", "Database connection URL (overrides config)")
-    .action(async (opts: { connection?: string }) => {
-      const cwd = process.cwd()
-      const config = loadConfig(cwd)
-      const schemaPath = schemaPathFromProject(config, cwd)
-      const outputTypesPath = config.output?.types ?? DEFAULT_TYPES_PATH
-      const outputClientPath = config.output?.client ?? DEFAULT_CLIENT_PATH
-
+    .action(async (_opts: { connection?: string }) => {
       info("Loading schema...")
-      const ast = loadSchemaAst(schemaPath, cwd)
-
-      // Shared with push, which used to delegate the writing to the engine and produce no files.
-      // Unlike push, this command always writes: the defaults above are the point of running it.
       try {
-        const written = await writeGeneratedTypes({
-          cwd,
-          ast,
-          typesPath: outputTypesPath,
-          clientPath: outputClientPath,
-        })
-        for (const message of written) info(message)
+        for (const message of await regenerateTypes(process.cwd())) info(message)
       } catch (err) {
         error(err instanceof Error ? err.message : String(err))
         process.exit(1)
       }
-
-      const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
-      if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
     })
+}
+
+/**
+ * What `supatype generate` writes: the generated types and client, and the hook handler types.
+ * The messages to print; throws when the types cannot be written. `adopt` runs it after declaring
+ * an adopted column.
+ */
+export async function regenerateTypes(cwd: string): Promise<string[]> {
+  const config = loadConfig(cwd)
+  const schemaPath = schemaPathFromProject(config, cwd)
+  const ast = loadSchemaAst(schemaPath, cwd)
+  // Shared with push, which used to delegate the writing to the engine and produce no files.
+  // Unlike push, this command always writes: the defaults are the point of running it.
+  const written = await writeGeneratedTypes({
+    cwd,
+    ast,
+    typesPath: config.output?.types ?? DEFAULT_TYPES_PATH,
+    clientPath: config.output?.client ?? DEFAULT_CLIENT_PATH,
+  })
+  const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
+  return hooksPath === null ? written : [...written, `Hook handler types written to ${hooksPath}`]
 }

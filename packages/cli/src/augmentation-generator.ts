@@ -171,10 +171,23 @@ function widenForWrites(ts: string, meta: Record<string, unknown>): string {
 
 function insertColumnOptionalOnInsert(meta: Record<string, unknown>): boolean {
   // `slug` has neither a declared default nor a `serverGenerated` flag, but the engine emits
-  // a trigger that fills it, which is the same thing from an insert's point of view.
+  // a trigger that fills it, which is the same thing from an insert's point of view. A `by-default`
+  // identity is numbered when the insert leaves it out.
   return (
-    meta["default"] !== undefined || fieldServerGenerated(meta) || meta["kind"] === "slug"
+    meta["default"] !== undefined ||
+    fieldServerGenerated(meta) ||
+    meta["kind"] === "slug" ||
+    meta["identity"] !== undefined
   )
+}
+
+/**
+ * Whether Postgres refuses to have the column written: a generated column, or a `GENERATED ALWAYS`
+ * identity. Such a column is `?: never` on insert and update, as the engine's types say; an optional
+ * key, so a row read back can still be spread into a write.
+ */
+function neverWritten(meta: Record<string, unknown>): boolean {
+  return meta["generated"] !== undefined || meta["identity"] === "always"
 }
 
 export function generateInsertType(fields: Record<string, Record<string, unknown>>): string {
@@ -182,6 +195,7 @@ export function generateInsertType(fields: Record<string, Record<string, unknown
   if (columns.length === 0) return "Record<string, unknown>"
   const body = columns
     .map(({ column, ts, meta }) => {
+      if (neverWritten(meta)) return `  ${quoteKey(column)}?: never`
       const required = meta["required"] === true && !insertColumnOptionalOnInsert(meta)
       return `  ${quoteKey(column)}${required ? "" : "?"}: ${widenForWrites(ts, meta)}`
     })
@@ -193,7 +207,11 @@ export function generateUpdateType(fields: Record<string, Record<string, unknown
   const columns = columnsOf(fields)
   if (columns.length === 0) return "Record<string, unknown>"
   const body = columns
-    .map(({ column, ts, meta }) => `  ${quoteKey(column)}?: ${widenForWrites(ts, meta)}`)
+    .map(({ column, ts, meta }) =>
+      neverWritten(meta)
+        ? `  ${quoteKey(column)}?: never`
+        : `  ${quoteKey(column)}?: ${widenForWrites(ts, meta)}`,
+    )
     .join("\n")
   return `{\n${body}\n}`
 }
