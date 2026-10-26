@@ -233,6 +233,12 @@
                 versions with <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> if you need to.
               </p>
               <p>
+                Every function is handed two addresses. <code>ctx.url</code> is for calling the API
+                from inside the function; under Docker it is <code>http://kong:8000</code>, which no
+                browser can open. <code>ctx.publicUrl</code> is the project's public address,
+                <code>API_EXTERNAL_URL</code> in <code>.env</code>, for links you give to people.
+              </p>
+              <p>
                 Functions get no database connection by default. Setting
                 <code>SUPATYPE_FUNCTIONS_DB_URL</code> in <code>.env</code> hands every function that
                 URL as <code>ctx.dbUrl</code>: a raw Postgres connection as whichever role it names,

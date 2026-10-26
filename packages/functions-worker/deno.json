@@ -2,6 +2,9 @@
   "name": "@supatype/functions-worker",
   "version": "0.1.0",
   "exports": "./main.ts",
+  "tasks": {
+    "test": "deno test --allow-run --allow-env --allow-read --allow-write --allow-net tests/"
+  },
   "compilerOptions": {
     "lib": ["deno.ns", "deno.window", "esnext", "dom"]
   }

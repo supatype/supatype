@@ -123,7 +123,10 @@ ${imports.join("\n")}
 interface FunctionContext {
   readonly executionId: string
   readonly functionName: string
+  /** For calling the API from inside the function. */
   readonly url: string
+  /** The project's public address, for links you give to people. */
+  readonly publicUrl: string
   readonly anonKey: string
   readonly serviceRoleKey?: string
   readonly dbUrl?: string
@@ -225,6 +228,19 @@ async function scopedEnvForFunction(fnName: string): Promise<Record<string, stri
   return { ...shared, ...fnVars }
 }
 
+// Once, at start, as the deployed worker does: the value never differs between calls, and an unset
+// variable is worth one warning rather than one per call.
+function resolvePublicUrl(): string {
+  const configured = (Deno.env.get("SUPATYPE_PUBLIC_URL") ?? "").trim()
+  if (configured !== "") return configured
+  const internal = Deno.env.get("SUPATYPE_URL") ?? ""
+  emit("warn", "SUPATYPE_PUBLIC_URL is not set, so ctx.publicUrl falls back to ctx.url ("
+    + (internal || "unset") + "), which may be an address only this stack can reach")
+  return internal
+}
+
+const publicUrl = resolvePublicUrl()
+
 Deno.serve({
   port,
   onListen: ({ hostname, port: bound }) => {
@@ -253,6 +269,7 @@ Deno.serve({
     executionId: crypto.randomUUID(),
     functionName: fnName,
     url: Deno.env.get("SUPATYPE_URL") ?? "",
+    publicUrl,
     anonKey,
     ...(serviceRoleKey ? { serviceRoleKey } : {}),
     ...(dbUrl ? { dbUrl } : {}),
