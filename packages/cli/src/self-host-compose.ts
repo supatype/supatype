@@ -33,6 +33,7 @@ import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
 import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
+import { studioRuntimeJson } from "./studio-auth-config.js"
 
 /**
  * The control plane secret as the server and the control plane receive it, and nobody else.
@@ -574,7 +575,7 @@ export function renderSelfHostCompose(
   studio:
 ${studioService}
     environment:
-      SUPATYPE_CLOUD_JSON: '{"url":"\${API_EXTERNAL_URL:-${externalUrlFallback}}","anonKey":"\${ANON_KEY:-}"}'
+      SUPATYPE_CLOUD_JSON: '${studioRuntimeJson(config, `\${API_EXTERNAL_URL:-${externalUrlFallback}}`)}'
     expose:
       - "3002"
 `

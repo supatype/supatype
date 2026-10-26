@@ -137,6 +137,13 @@ Studio's CORS tab.
 
 ## Studio roles
 
+Studio signs in with email and password or with any of the project's enabled OAuth providers
+(`auth.providers`; narrow the list with `studio.auth.providers`, see
+[config](config.md#studio-sign-in-with-the-projects-providers)). However somebody signs in, Studio
+lets them in only with a Studio role: a provider sign-in with no role shows "Access denied", and
+no role is granted automatically. Provider sign-ins link to an existing user by verified email, so
+only enable a provider whose "email verified" you trust (a self-run Keycloak realm included).
+
 Studio members are separate from the app's users. One role set serves self-host and Cloud:
 `owner`, `admin`, `developer`, `editor`, `billing`, `viewer`. Self-host grants `admin`,
 `developer`, `editor` and `viewer` (a row naming `owner` or `billing` grants nothing there):

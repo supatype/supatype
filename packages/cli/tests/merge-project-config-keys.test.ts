@@ -33,6 +33,7 @@ const LOCAL: Required<SupatypeProjectConfig> = {
   environments: { default: "dev", branchDefaults: { main: "production" } },
   connection: "postgres://local",
   admin: { roles: ["admin"] },
+  studio: { auth: { providers: ["keycloak"] } },
 }
 
 /** Every key of the config, read off `LOCAL`, which has to set each one. */
