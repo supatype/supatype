@@ -6,8 +6,10 @@ import type { ModelConfig } from "../config.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
 import { defaultFirstLocales } from "../lib/localized-field.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
-import { IconX } from "./icons.js"
+import { IconSearch, IconX } from "./icons.js"
 import { JUMP_PAGE_SIZE, liveRows, useLiveSearch, type SearchItem } from "./jump-live-search.js"
+import { SlidePanel } from "./SlidePanel.js"
+import { Button } from "./ui.js"
 
 // ─── Static route index ───────────────────────────────────────────────────────
 
@@ -78,6 +80,12 @@ export function jumpTargetsFor(
 interface JumpToSearchProps {
   /** Compact variant for the header, smaller padding, narrower placeholder */
   compact?: boolean
+  /**
+   * Present when the search fills its own sheet, as it does at phone width: the input takes
+   * focus, the results lie in the sheet's flow at full width rather than in a dropdown, and this
+   * is called once a result is chosen or the search is dismissed, to close the sheet.
+   */
+  onDone?: () => void
 }
 
 /** The static routes whose label, description or category holds `query`. */
@@ -101,18 +109,22 @@ function routeRows(matches: SearchItem[], shown: number): SearchItem[] {
 
 const PAGES_GROUP = "pages"
 
+const POPOVER = "absolute top-full left-0 right-0 mt-1 z-50 rounded-lg border border-border bg-popover shadow-lg"
+
 interface JumpResultsProps {
   results: SearchItem[]
   activeIndex: number
   onHover: (index: number) => void
   onChoose: (item: SearchItem) => void
+  /** In the flow of a sheet, rather than a dropdown under the input. */
+  inline: boolean
 }
 
 /** The dropdown's rows, with a rule above the first live result. */
-function JumpResults({ results, activeIndex, onHover, onChoose }: JumpResultsProps): React.ReactElement {
+function JumpResults({ results, activeIndex, onHover, onChoose, inline }: JumpResultsProps): React.ReactElement {
   const firstLiveIndex = results.findIndex((r) => r.kind === "record" || (r.kind === "more" && r.group !== PAGES_GROUP))
   return (
-    <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-lg border border-border bg-popover shadow-lg max-h-[70vh] overflow-y-auto">
+    <div className={inline ? "mt-3 rounded-lg border border-border bg-popover" : `${POPOVER} max-h-[70vh] overflow-y-auto`}>
       {results.map((item, i) => (
         <React.Fragment key={`${item.kind}-${item.group ?? ""}-${item.href}-${i}`}>
           {i === firstLiveIndex && firstLiveIndex > 0 && <div className="border-t border-border mx-3" />}
@@ -134,20 +146,15 @@ function JumpResults({ results, activeIndex, onHover, onChoose }: JumpResultsPro
   )
 }
 
-export function JumpToSearch({ compact = false }: JumpToSearchProps): React.ReactElement {
+/** The routes and live records matching `query`, and how to load more of either. */
+function useJumpResults(query: string): { results: SearchItem[]; searching: boolean; more: (item: SearchItem) => void } {
   const config = useAdminConfig()
   const capability = useStudioCapability()
   const client = useAdminClient()
-  const navigate = useNavigate()
-  const [query, setQuery] = useState("")
-  const [open, setOpen] = useState(false)
-  const [activeIndex, setActiveIndex] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
   // Keyed by the codes, so a config re-read on focus does not search again for the same locales.
   const localeKey = defaultFirstLocales(config.locale?.defaultLocale ?? "en", config.locale?.locales ?? []).join(",")
   const locales = useMemo(() => localeKey.split(","), [localeKey])
   const live = useLiveSearch(client, config.models, query, locales)
-
   const routeItems = useMemo(
     () => jumpTargetsFor(capability, config.models, config.globals),
     [capability, config.models, config.globals],
@@ -157,74 +164,111 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
     () => [...routeRows(matchRoutes(routeItems, query), routesShown), ...liveRows(live.groups)],
     [routeItems, query, routesShown, live.groups],
   )
+  useEffect(() => setRoutesShown(JUMP_PAGE_SIZE), [query])
+  const more = useCallback((item: SearchItem) => {
+    if (item.group === PAGES_GROUP) setRoutesShown((n) => n + JUMP_PAGE_SIZE)
+    else if (item.group !== undefined) live.loadMore(item.group)
+  }, [live])
+  return { results, searching: live.searching, more }
+}
 
-  useEffect(() => {
-    setActiveIndex(0)
-    setRoutesShown(JUMP_PAGE_SIZE)
-  }, [query])
+type JumpInputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, "value"> & {
+  inputRef: React.RefObject<HTMLInputElement | null>
+  value: string
+  searching: boolean
+  onClear: () => void
+}
+
+/** The search box: its icon or spinner, the input, and a clear button once there is a query. */
+function JumpInput({ inputRef, searching, onClear, value, className, ...props }: JumpInputProps): React.ReactElement {
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
+        {searching ? <SpinnerIcon /> : <IconSearch />}
+      </span>
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        className={`w-full pl-9 pr-8 ${className ?? ""} rounded-lg border border-border bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow`}
+        {...props}
+      />
+      {value && (
+        <button
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Clear search"
+          onMouseDown={(e) => { e.preventDefault(); onClear() }}
+        >
+          <IconX />
+        </button>
+      )}
+    </div>
+  )
+}
+
+interface JumpKeys {
+  count: number
+  move: (to: (i: number) => number) => void
+  choose: () => void
+  close: () => void
+}
+
+/** Up and down move through the results, Enter chooses one, Escape dismisses the search. */
+function onJumpKey(e: React.KeyboardEvent<HTMLInputElement>, { count, move, choose, close }: JumpKeys): void {
+  if (e.key === "ArrowDown")    { e.preventDefault(); move((i) => Math.min(i + 1, count - 1)) }
+  else if (e.key === "ArrowUp") { e.preventDefault(); move((i) => Math.max(i - 1, 0)) }
+  else if (e.key === "Enter")   choose()
+  else if (e.key === "Escape")  close()
+}
+
+export function JumpToSearch({ compact = false, onDone }: JumpToSearchProps): React.ReactElement {
+  const navigate = useNavigate()
+  const [query, setQuery] = useState("")
+  const [focused, setFocused] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const { results, searching, more } = useJumpResults(query)
+  const sheet = onDone !== undefined
+  useEffect(() => setActiveIndex(0), [query])
 
   const close = useCallback(() => {
     setQuery("")
-    setOpen(false)
+    setFocused(false)
     inputRef.current?.blur()
-  }, [])
+    onDone?.()
+  }, [onDone])
 
   const choose = useCallback((item: SearchItem) => {
-    if (item.kind === "more") {
-      if (item.group === PAGES_GROUP) setRoutesShown((n) => n + JUMP_PAGE_SIZE)
-      else if (item.group !== undefined) live.loadMore(item.group)
-      return
-    }
+    if (item.kind === "more") return more(item)
     navigate(item.href)
     close()
-  }, [live, navigate, close])
+  }, [more, navigate, close])
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown")    { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, results.length - 1)) }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)) }
-    else if (e.key === "Enter")   { const item = results[activeIndex]; if (item) choose(item) }
-    else if (e.key === "Escape")  close()
-  }, [activeIndex, results, choose, close])
-
-  const inputPadding = compact ? "py-1.5" : "py-2.5"
-  const placeholder = compact ? "Jump to…" : "Jump to…  (pages, users, records…)"
-
-  const showDropdown = open && query.trim().length >= 1
-  const noResults = !live.searching && query.trim().length >= 2 && results.length === 0
+  // A sheet has nothing else on it, so its results stay while the keyboard is down.
+  const showDropdown = (sheet || focused) && query.trim().length >= 1
+  const noResults = !searching && query.trim().length >= 2 && results.length === 0
+  const keys: JumpKeys = { count: results.length, move: setActiveIndex, close, choose: () => { const item = results[activeIndex]; if (item) choose(item) } }
 
   return (
     <div className="relative w-full">
-      <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
-          {live.searching ? <SpinnerIcon /> : <SearchIcon />}
-        </span>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder={placeholder}
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          onKeyDown={handleKeyDown}
-          className={`w-full pl-9 pr-8 ${inputPadding} rounded-lg border border-border bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow`}
-        />
-        {query && (
-          <button
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => { e.preventDefault(); setQuery(""); setOpen(false) }}
-          >
-            <IconX />
-          </button>
-        )}
-      </div>
-
+      <JumpInput
+        inputRef={inputRef}
+        value={query}
+        searching={searching}
+        onClear={() => { setQuery(""); setFocused(false) }}
+        placeholder={compact ? "Jump to…" : "Jump to…  (pages, users, records…)"}
+        className={compact ? "py-1.5" : "py-2.5"}
+        autoFocus={sheet}
+        onChange={(e) => { setQuery(e.target.value); setFocused(true) }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        onKeyDown={(e) => onJumpKey(e, keys)}
+      />
       {showDropdown && results.length > 0 && (
-        <JumpResults results={results} activeIndex={activeIndex} onHover={setActiveIndex} onChoose={choose} />
+        <JumpResults results={results} activeIndex={activeIndex} onHover={setActiveIndex} onChoose={choose} inline={sheet} />
       )}
-
       {showDropdown && noResults && (
-        <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-lg border border-border bg-popover shadow-lg px-4 py-3">
+        <div className={sheet ? "mt-3 px-4 py-3" : `${POPOVER} px-4 py-3`}>
           <p className="text-sm text-muted-foreground">No results for &ldquo;{query}&rdquo;</p>
         </div>
       )}
@@ -232,16 +276,29 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
   )
 }
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
-
-function SearchIcon(): React.ReactElement {
+/**
+ * Jump to, at phone width: a search button that opens the search in a full-width sheet.
+ *
+ * In the header at 360px the inline box was squeezed to a few dozen pixels, and its results
+ * dropdown took the box's width, so neither the query nor the results could be read. Supabase
+ * Studio does the same on mobile: a search icon that opens its command menu in a sheet.
+ */
+export function JumpToSearchSheet({ className }: { className?: string }): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const close = useCallback(() => setOpen(false), [])
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
+    <>
+      <Button variant="ghost" size="icon" aria-label="Search" aria-expanded={open} onClick={() => setOpen(true)} {...(className !== undefined && { className })}>
+        <IconSearch size={16} />
+      </Button>
+      <SlidePanel open={open} onClose={close} title="Jump to" width="max-w-full">
+        {open && <JumpToSearch onDone={close} />}
+      </SlidePanel>
+    </>
   )
 }
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
 
 function SpinnerIcon(): React.ReactElement {
   return (

@@ -5,10 +5,12 @@ import { useLocation } from "react-router-dom"
 import type { AdminConfig } from "../config.js"
 import { LocaleSwitcher } from "./LocaleSwitcher.js"
 import { SupatypeIcon } from "./SupatypeLogo.js"
-import { Badge } from "./ui.js"
+import { Badge, Button } from "./ui.js"
 import { ConnectModal } from "./ConnectModal.js"
-import { JumpToSearch } from "./JumpToSearch.js"
+import { JumpToSearch, JumpToSearchSheet } from "./JumpToSearch.js"
 import { UserAccountMenu } from "./UserAccountMenu.js"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
+import { cn } from "../lib/utils.js"
 
 const FEEDBACK_URL = "https://github.com/supatype/supatype/issues/new/choose"
 const DOCS_URL = "https://supatype.com/docs"
@@ -58,7 +60,7 @@ function HamburgerIcon(): React.ReactElement {
   )
 }
 
-function PlugIcon() {
+function PlugIcon(): React.ReactElement {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 22v-5" /><path d="M9 8V2" /><path d="M15 8V2" />
@@ -67,130 +69,125 @@ function PlugIcon() {
   )
 }
 
-export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSidebar }: TopBarProps): React.ReactElement {
-  const location = useLocation()
-  const [connectOpen, setConnectOpen] = useState(false)
-
-  // Determine locale-switcher visibility: show when on content/collection routes
-  const showLocaleSwitcher = config != null && (
-    location.pathname === "/" ||
-    location.pathname.startsWith("/models") ||
-    location.pathname.startsWith("/collections") ||
-    location.pathname.startsWith("/models/globals") ||
-    location.pathname === "/media"
-  )
-
-  const hasLeftItems = leftItems && leftItems.length > 0
-
+function MoreIcon(): React.ReactElement {
   return (
-    <header className="z-50 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4">
-      {/* Logo */}
-      <div className="flex shrink-0 items-center gap-2">
-        <SupatypeIcon size={22} className="h-[22px] w-[25px]" />
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
+    </svg>
+  )
+}
 
-        {/* Mobile sidebar toggle */}
-        <button
-          type="button"
-          onClick={onToggleSidebar}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
-          aria-label="Toggle sidebar"
-        >
-          <HamburgerIcon />
-        </button>
-      </div>
+function Slash({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg width="8" height="22" viewBox="0 0 8 22" className={cn("shrink-0 text-muted-foreground/50", className)} aria-hidden>
+      <path d="M6.5 1.5 1.5 20.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    </svg>
+  )
+}
 
-      {/* Left slot: "/" + extension components (project name, branch indicator) */}
-      {hasLeftItems && (
-        <>
-          <svg
-            width="8"
-            height="22"
-            viewBox="0 0 8 22"
-            className="shrink-0 text-muted-foreground/50"
-            aria-hidden
-          >
-            <path d="M6.5 1.5 1.5 20.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
-          </svg>
-          <div className="flex min-w-0 items-center gap-2">
-            {leftItems!.map((Item, i) => (
-              <Item key={i} />
-            ))}
-          </div>
-        </>
-      )}
+/** The locale switcher shows on content routes, where records have per-locale values. */
+function isContentRoute(path: string): boolean {
+  return path === "/" || path.startsWith("/models") || path.startsWith("/collections") || path === "/media"
+}
 
-      {!hasLeftItems && (
-        <>
-          <svg
-            width="8"
-            height="22"
-            viewBox="0 0 8 22"
-            className="shrink-0 text-muted-foreground/50"
-            aria-hidden
-          >
-            <path d="M6.5 1.5 1.5 20.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
-          </svg>
-          <span className="max-w-[200px] truncate text-sm text-muted-foreground">Studio</span>
-          <BranchPill />
-        </>
-      )}
+/**
+ * After the logo: an extension's own items (project name, branch), or Studio's name and branch.
+ * Studio's are dropped below `sm`, where the header has no room for a label nobody acts on.
+ */
+function HeaderContext({ leftItems }: { leftItems: React.ComponentType[] | undefined }): React.ReactElement {
+  if (leftItems && leftItems.length > 0) {
+    return (
+      <>
+        <Slash />
+        <div className="flex min-w-0 items-center gap-2">
+          {leftItems.map((Item, i) => <Item key={i} />)}
+        </div>
+      </>
+    )
+  }
+  return (
+    <>
+      <Slash className="hidden sm:block" />
+      <span className="hidden sm:inline max-w-[200px] truncate text-sm text-muted-foreground">Studio</span>
+      <span className="hidden sm:inline-flex"><BranchPill /></span>
+    </>
+  )
+}
 
-      {demoMode && (
-        <Badge variant="outline" className="shrink-0 border-primary/40 text-primary">
-          Demo
-        </Badge>
-      )}
-
-      {/* Centre: jump-to search (hidden on dashboard where it lives inline) */}
-      <div className="flex-1 flex items-center justify-center px-4">
-        {location.pathname !== "/" && (
-          <div className="w-full max-w-md">
-            <JumpToSearch compact />
-          </div>
-        )}
-      </div>
-
-      {/* Right: extra items from extension */}
-      {extraItems?.map((Item, i) => (
-        <Item key={i} />
-      ))}
-
-      {/* Locale switcher (content routes only) */}
-      {showLocaleSwitcher && <LocaleSwitcher />}
-
-      {/* Connect button */}
+/**
+ * Connect, Feedback and the docs. From `sm` up each sits in the header; below it they share one
+ * overflow menu, so the header fits a 360px phone without cropping the account menu off its end.
+ */
+function HeaderLinks({ onConnect }: { onConnect: () => void }): React.ReactElement {
+  return (
+    <>
       <button
         type="button"
-        onClick={() => setConnectOpen(true)}
+        onClick={onConnect}
         className="hidden sm:flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-accent transition-colors shrink-0 font-medium"
       >
         <PlugIcon />
         Connect
       </button>
-
-      {/* Feedback link */}
-      <a
-        href={FEEDBACK_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="hidden sm:block text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-      >
+      <a href={FEEDBACK_URL} target="_blank" rel="noreferrer" className="hidden sm:block text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
         Feedback
       </a>
-
-      {/* Help: docs */}
       <a
         href={DOCS_URL}
         target="_blank"
         rel="noreferrer"
-        className="flex items-center justify-center w-7 h-7 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors shrink-0"
+        className="hidden sm:flex items-center justify-center w-7 h-7 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors shrink-0"
         aria-label="Documentation"
       >
         <HelpIcon />
       </a>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label="More" className="sm:hidden"><MoreIcon /></Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={onConnect}>Connect</DropdownMenuItem>
+          <DropdownMenuItem asChild><a href={FEEDBACK_URL} target="_blank" rel="noreferrer">Feedback</a></DropdownMenuItem>
+          <DropdownMenuItem asChild><a href={DOCS_URL} target="_blank" rel="noreferrer">Documentation</a></DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  )
+}
 
+export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSidebar }: TopBarProps): React.ReactElement {
+  const { pathname } = useLocation()
+  const [connectOpen, setConnectOpen] = useState(false)
+  const onDashboard = pathname === "/"
+
+  return (
+    <header className="z-50 flex h-14 shrink-0 items-center gap-2 sm:gap-3 border-b border-border bg-background px-3 sm:px-4">
+      <div className="flex shrink-0 items-center gap-2">
+        <SupatypeIcon size={22} className="h-[22px] w-[25px]" />
+        <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="md:hidden" aria-label="Toggle sidebar">
+          <HamburgerIcon />
+        </Button>
+      </div>
+      <HeaderContext leftItems={leftItems} />
+      {demoMode && (
+        <Badge variant="outline" className="shrink-0 border-primary/40 text-primary">
+          Demo
+        </Badge>
+      )}
+      {/* Centre: jump-to search (hidden on dashboard where it lives inline). Below `md` it is a
+          button opening a full-width sheet: inline, it was squeezed too narrow to read. */}
+      <div className="flex-1 flex items-center justify-center md:px-4">
+        {!onDashboard && (
+          <div className="hidden md:block w-full max-w-md">
+            <JumpToSearch compact />
+          </div>
+        )}
+      </div>
+      {!onDashboard && <JumpToSearchSheet className="md:hidden" />}
+      {extraItems?.map((Item, i) => <Item key={i} />)}
+      {config != null && isContentRoute(pathname) && <LocaleSwitcher />}
+      <HeaderLinks onConnect={() => setConnectOpen(true)} />
       <UserAccountMenu demoMode={demoMode} />
-
       <ConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} />
     </header>
   )

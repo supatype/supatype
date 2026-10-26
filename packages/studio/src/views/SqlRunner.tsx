@@ -213,7 +213,6 @@ function SqlEditor({
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
 
   // Create the editor once on mount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!containerRef.current) return
     const view = new EditorView({
