@@ -153,6 +153,7 @@ describe("update on a model that keeps no drafts", () => {
     expect(fetchCalls(fetch)).toHaveLength(0)
     expect(data).toBeNull()
     expect(error?.message).toContain("keeps drafts")
+    expect(error?.message).toContain("./supatype/generated/client")
   })
 })
 

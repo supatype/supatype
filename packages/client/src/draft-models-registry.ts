@@ -1,7 +1,7 @@
 /**
  * Which tables belong to models that keep drafts, told to the client by generated code.
  *
- * `supatype push` writes `supatype/client.ts`, which calls {@link registerDraftModels} at import
+ * `supatype push` writes `supatype/generated/client.ts`, which calls {@link registerDraftModels} at import
  * time, as it calls `registerFieldKinds`. The client reads it to send `insert` on such a table
  * through `supatype.create_record`, or `supatype.create_records` for several rows, rather than a
  * plain `POST`.

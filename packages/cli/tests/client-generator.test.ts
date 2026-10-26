@@ -3,7 +3,7 @@
  *
  * An app writes one import and nothing else:
  *
- *     import { createClient } from "./supatype/client"
+ *     import { createClient } from "./supatype/generated/client"
  *
  * That single file carries three things that previously arrived by three different routes, two of
  * which could silently fail:
