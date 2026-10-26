@@ -103,6 +103,7 @@ import {
 } from "./engine-ownership-gate.js"
 import { devPushConsentingToDrift } from "./drift-consent.js"
 import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
+import { waitForDatabaseAfterUp } from "./dev-db-ready.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 import {
   grantAuthSchemaAccess,
@@ -334,9 +335,9 @@ export function upsertDevComposeEnv(
     // with a published constant. This guarantees presence without overwriting: only keys
     // genuinely absent from `.env` are filled, and with the value the project has been running
     // with rather than a fresh one.
-    ...seedMissingLocalSecrets(cwd),
+    ...seedMissingLocalSecrets(cwd, config),
     // Project configuration, seeded not overwritten, see seedMissingDatabaseIdentity.
-    ...seedMissingDatabaseIdentity(cwd),
+    ...seedMissingDatabaseIdentity(cwd, config),
     // Shared with `supatype keys --write`, so a front end's prefix cannot be written by one and
     // forgotten by the other. See `anonKeyEnvUpdates`.
     //
@@ -1631,6 +1632,20 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       endDevSession()
       exitComposeFailed(status, `Could not recreate the ${service} container.`, devBrand)
     }
+  }
+
+  // `up -d` recreates `db` when its definition changed since Postgres was started above for the
+  // schema push (a new image on upgrade, a different host port). Postgres then restarts under the
+  // services just started, and the admin seed and bucket provisioning below met "the database
+  // system is starting up" while the panel said the stack was running. Wait for it again: on a db
+  // that was left alone this returns at once.
+  if (!usesExternalDatabase(config)) {
+    await waitForDatabaseAfterUp({
+      waitHealthy: () => waitComposeHealthy(paths, cwd, 180_000, project),
+      dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
+      onFailure: endDevSession,
+      brand: devBrand,
+    })
   }
 
   console.log("[supatype] Waiting for API gateway...")

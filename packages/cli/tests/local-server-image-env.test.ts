@@ -40,6 +40,9 @@ function project(versions?: SupatypeProjectConfig["versions"]): {
     cwd,
     config: {
       project: { name: "demo" },
+      // Every loaded config has one; the env write reads it to tell a bundled database from an
+      // external one.
+      database: { provider: "docker" },
       ...(versions !== undefined && { versions }),
       overrides: { server: join(serverRoot, "supatype-server.exe") },
     } as SupatypeProjectConfig,
