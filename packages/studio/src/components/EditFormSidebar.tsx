@@ -25,7 +25,8 @@ export interface EditFormSidebarProps {
   defaultLocale: string
   recordSyncKey: string
   saving: boolean
-  onSave: () => void
+  /** Saves the form; left out for a reader who may not change the record, so no Save is offered. */
+  onSave?: () => void
   isCreate?: boolean
   onDuplicate?: () => void
   onDelete?: () => void
@@ -71,7 +72,7 @@ export function EditFormSidebar({
       )}
 
       <div className="st-edit-sidebar-actions">
-        {publishing === undefined && (
+        {publishing === undefined && onSave !== undefined && (
           <Button type="button" variant="primary" size="md" className={FULL_WIDTH} onClick={onSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}
           </Button>

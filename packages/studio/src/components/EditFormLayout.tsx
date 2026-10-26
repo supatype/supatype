@@ -14,7 +14,8 @@ export interface EditFormLayoutProps {
   recordSyncKey: string
   slugFollowSource: boolean
   saving: boolean
-  onSave: () => void
+  /** Saves the form; left out for a reader who may not change the record. */
+  onSave?: () => void
   isCreate?: boolean
   onDuplicate?: () => void
   onDelete?: () => void
@@ -56,7 +57,7 @@ export function EditFormLayout({
           className="st-edit-form"
           onSubmit={(e) => {
             e.preventDefault()
-            onSave()
+            onSave?.()
           }}
         >
           <EditFormFieldList
@@ -84,7 +85,7 @@ export function EditFormLayout({
           defaultLocale={defaultLocale}
           recordSyncKey={recordSyncKey}
           saving={saving}
-          onSave={onSave}
+          {...(onSave !== undefined && { onSave })}
           {...(isCreate !== undefined && { isCreate })}
           {...(onDuplicate !== undefined && { onDuplicate })}
           {...(onDelete !== undefined && { onDelete })}

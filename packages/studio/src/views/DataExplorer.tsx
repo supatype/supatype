@@ -19,6 +19,7 @@ import type { FieldConfig } from "../config.js"
 import { explainRefusal, fieldErrorOf, type Explained, type RefusalInput } from "../lib/database-refusal.js"
 import { useRefusal } from "../hooks/useRefusal.js"
 import { UuidCell } from "../components/UuidCell.js"
+import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -457,6 +458,8 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
 
   const client = useStudioClient()
   const proxy = useProjectProxy()
+  // A viewer reads rows: no insert, inline edit or delete is offered.
+  const canWrite = useContentWriteOffered()
 
   const { data: tables, loading: tablesLoading, error: tablesError, refetch: refetchTables } = useApiQuery(
     () => proxy.introspect(),
@@ -603,7 +606,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   // Cell editing
   const handleCellEdit = (rowIdx: number, col: string) => {
     const row = rows[rowIdx]
-    if (!row) return
+    if (!row || !canWrite) return
     setEditingCell({ rowIdx, col })
     setEditValue(String(row[col] ?? ""))
   }
@@ -805,7 +808,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
             Filters {filters.length > 0 ? `(${filters.length})` : ""}
           </Button>
 
-          {selectedIds.size > 0 ? (
+          {canWrite && selectedIds.size > 0 ? (
             <Button
               variant="destructive"
               size="sm"
@@ -815,9 +818,11 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
             </Button>
           ) : null}
 
-          <Button variant="primary" size="sm" onClick={() => setShowNewRecord(true)}>
-            + Insert Row
-          </Button>
+          {canWrite ? (
+            <Button variant="primary" size="sm" onClick={() => setShowNewRecord(true)}>
+              + Insert Row
+            </Button>
+          ) : null}
 
           <Select
             className="w-[80px]"
@@ -988,15 +993,17 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
                           >
                             View
                           </Button>
-                          <ConfirmButton
-                            size="xs"
-                            variant="destructive"
-                            ask={deleteRowAsk}
-                            act={() => { void handleDeleteRow(rowId) }}
-                            title="Delete record"
-                          >
-                            Del
-                          </ConfirmButton>
+                          {canWrite ? (
+                            <ConfirmButton
+                              size="xs"
+                              variant="destructive"
+                              ask={deleteRowAsk}
+                              act={() => { void handleDeleteRow(rowId) }}
+                              title="Delete record"
+                            >
+                              Del
+                            </ConfirmButton>
+                          ) : null}
                         </div>
                       </Td>
                     </tr>

@@ -20,8 +20,9 @@ import {
   readJson,
   readJsonObject,
 } from "../lib/json.js"
-import { signedInToken, studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import type { SupatypeClient } from "@supatype/client"
+import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
+import { useSendAs } from "../hooks/useSendAs.js"
+import { SendAsField } from "../components/SendAsField.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,8 +62,6 @@ async function adminError(res: Response, fallback: string): Promise<Error> {
 }
 
 const isHttpMethod = isOneOf(["GET", "POST"] as const)
-const isAuthMode = isOneOf(["none", "session", "custom"] as const)
-
 const BUILTIN_RUNTIME_ENV_VARS: Array<{ key: string; description: string }> = [
   { key: "SUPATYPE_URL", description: "API gateway URL for this project." },
   { key: "SUPATYPE_DB_URL", description: "Direct Postgres connection URL (server-only)." },
@@ -104,19 +103,15 @@ function buildFunctionInvokeUrl(clientUrl: string, functionName: string, querySt
 export function InvokeTab({
   functionName,
   clientUrl,
-  client,
 }: {
   functionName: string
   clientUrl: string
-  client: SupatypeClient
 }): React.ReactElement {
   const [method, setMethod] = useState<"GET" | "POST">("POST")
   const [queryString, setQueryString] = useState("")
   const [body, setBody] = useState("{}")
-  // The signed-in user's own token unless the editor picks otherwise: anonymous, or a token of
-  // their choosing, which starts as theirs so it can be edited rather than found and pasted.
-  const [authMode, setAuthMode] = useState<"none" | "session" | "custom">("session")
-  const [customToken, setCustomToken] = useState(() => signedInToken(client))
+  // The signed-in user unless the editor picks otherwise (`send-as.ts`).
+  const sendAs = useSendAs()
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<number | null>(null)
@@ -144,14 +139,8 @@ export function InvokeTab({
         opts.body = body
       }
 
-      if (authMode === "session") {
-        const auth = studioAuthHeaders(client)
-        if (!auth.Authorization) throw new Error("Studio authentication required")
-        Object.assign(headers, auth)
-      } else if (authMode === "custom") {
-        if (!customToken.trim()) throw new Error("Custom Bearer token is empty")
-        headers["Authorization"] = `Bearer ${customToken.trim()}`
-      }
+      if (sendAs.choice === "token" && !sendAs.token.trim()) throw new Error("The pasted token is empty")
+      Object.assign(headers, sendAs.headers())
 
       const started = performance.now()
       const url = buildFunctionInvokeUrl(clientUrl, functionName, queryString)
@@ -190,16 +179,6 @@ export function InvokeTab({
             <option value="GET">GET</option>
           </select>
 
-          <label className="text-xs text-muted-foreground ml-3">Auth</label>
-          <select
-            value={authMode}
-            onChange={(e) => { const next = e.target.value; if (isAuthMode(next)) setAuthMode(next) }}
-            className="rounded-md border border-border bg-background px-2 py-1 text-xs"
-          >
-            <option value="session">My Studio session</option>
-            <option value="none">None (anonymous)</option>
-            <option value="custom">Custom Bearer token</option>
-          </select>
         </div>
 
         <div>
@@ -212,14 +191,7 @@ export function InvokeTab({
           />
         </div>
 
-        {authMode === "custom" && (
-          <Input
-            placeholder="Bearer token"
-            value={customToken}
-            onChange={(e) => setCustomToken(e.target.value)}
-            className="font-mono text-xs"
-          />
-        )}
+        <SendAsField sendAs={sendAs} />
 
         {method === "POST" && (
           <textarea
@@ -720,7 +692,6 @@ export function EdgeFunctions(): React.ReactElement {
                   key={selectedFn.name}
                   functionName={selectedFn.name}
                   clientUrl={client.url}
-                  client={client}
                 />
               )}
               {activeTab === "logs" && (

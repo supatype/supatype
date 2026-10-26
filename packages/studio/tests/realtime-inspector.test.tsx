@@ -114,7 +114,7 @@ describe("roles", () => {
     const nav = container.querySelector('[aria-label="Studio navigation"]')?.innerHTML ?? ""
     expect(nav).not.toContain('title="Realtime"')
     expect(nav).toContain('title="Edge Functions"')
-    expect(main(container)).toContain("not available to your role")
+    expect(main(container)).toContain("Your Studio role (editor) can't use the Realtime Inspector.")
     expect(container.innerHTML).not.toContain("room:lobby")
   })
 })

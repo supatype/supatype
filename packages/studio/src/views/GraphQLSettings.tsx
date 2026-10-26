@@ -5,6 +5,8 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
+import { useRoleRefusalText } from "../components/RoleGate.js"
+import { proxyFailure } from "../lib/role-refusal.js"
 import {
   bodyMessage,
   isBoolean,
@@ -32,6 +34,7 @@ const AUTH_TYPES = [
 export function GraphQLSettings(): React.ReactElement {
   const config = useAdminConfig()
   const client = useStudioClient()
+  const refused = useRoleRefusalText()
 
   const endpoint = `${client.url.replace(/\/+$/, "")}/graphql/v1`
 
@@ -54,7 +57,7 @@ export function GraphQLSettings(): React.ReactElement {
       headers: studioAuthHeaders(client),
       credentials: "include",
     })
-      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return readJson(r, isGraphqlConfig) })
+      .then(async (r) => { if (!r.ok) throw await proxyFailure(r, refused); return readJson(r, isGraphqlConfig) })
       .then((d) => {
         if (cancelled) return
         setIntrospection(d.introspection ?? true)
@@ -65,7 +68,7 @@ export function GraphQLSettings(): React.ReactElement {
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message ?? "Failed to load") })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [client, retryCount])
+  }, [client, refused, retryCount])
 
   const isDirty =
     introspection !== committed.introspection ||

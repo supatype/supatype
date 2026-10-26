@@ -3,8 +3,8 @@ import { useStudioClient } from "../StudioCore.js"
 import { AdminConfigContext } from "../hooks/useAdminConfig.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { cn } from "../lib/utils.js"
-import { signedInToken } from "../lib/studio-auth-headers.js"
-import { BearerTokenField } from "../components/BearerTokenField.js"
+import { useSendAs } from "../hooks/useSendAs.js"
+import { SendAsField } from "../components/SendAsField.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import type { ModelConfig, FieldConfig, WidgetType } from "../config.js"
 
@@ -324,7 +324,7 @@ function TryItPanel({
   baseUrl: string
   onClose: () => void
 }): React.ReactElement {
-  const signedIn = signedInToken(useStudioClient())
+  const sendAs = useSendAs()
   const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
     for (const p of endpoint.params) {
@@ -332,7 +332,6 @@ function TryItPanel({
     }
     return init
   })
-  const [authToken, setAuthToken] = useState(signedIn)
   const [requestBody, setRequestBody] = useState(endpoint.request_body_example ?? "")
   const [response, setResponse] = useState<TryItResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -368,8 +367,7 @@ function TryItPanel({
       const qs = queryParts.length > 0 ? "?" + queryParts.join("&") : ""
       const url = `${baseUrl}${resolvedPath}${qs}`
 
-      const headers: Record<string, string> = { "Content-Type": "application/json" }
-      if (authToken) headers["Authorization"] = `Bearer ${authToken}`
+      const headers: Record<string, string> = { "Content-Type": "application/json", ...sendAs.headers() }
       for (const p of endpoint.params.filter((p) => p.location === "header")) {
         const v = paramValues[p.name]
         if (v) headers[p.name] = v
@@ -415,7 +413,7 @@ function TryItPanel({
         <Button size="xs" onClick={onClose}>Close</Button>
       </div>
 
-      <BearerTokenField value={authToken} onChange={setAuthToken} signedIn={signedIn} />
+      <SendAsField sendAs={sendAs} />
 
       {/* Query/path params */}
       {endpoint.params.filter((p) => p.location === "query" || p.location === "path").length > 0 ? (

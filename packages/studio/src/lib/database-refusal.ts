@@ -134,7 +134,19 @@ const tooLong: Explainer = ({ error, fields, values }) => {
   return { banner: `A value is longer than the database allows (${limit} characters).` }
 }
 
-const permission: Explainer = () => ({ banner: "You do not have permission to make this change." })
+/**
+ * A privilege refusal, said as whichever rule made it: a row rule (row level security), a field
+ * rule on one column, placed on that field, or otherwise the caller's access to the table.
+ */
+const permission: Explainer = ({ error, fields }) => {
+  if (/row-level security/.test(error.message)) return { banner: "This change isn't allowed by the project's row rules." }
+  const field = fieldNamed(fields, /permission denied for column "?([^"\s]+)"?/.exec(error.message)?.[1])
+  if (field !== undefined) return { field, message: "can't be changed: its field rule doesn't allow it" }
+  return { banner: "You do not have permission to make this change." }
+}
+
+/** The Studio proxy refusing the caller's Studio role, or a service-role-only upstream refusing them. */
+const studioRole: Explainer = () => ({ banner: "This change isn't allowed by your Studio role." })
 
 const GEOMETRY_MESSAGE = "is not a point the database can read. Enter a latitude and a longitude."
 
@@ -163,7 +175,8 @@ const BY_WORDING: ReadonlyArray<readonly [RegExp, Explainer]> = [
   [/violates foreign key constraint/, foreignKey],
   [/invalid input (?:syntax|value) for/, invalidInput],
   [/value too long for type/, tooLong],
-  [/permission denied|not permitted/, permission],
+  [/^Studio role "|service_role required/, studioRole],
+  [/permission denied|not permitted|row-level security/, permission],
   [/invalid geometry/i, geometry],
 ]
 

@@ -15,7 +15,7 @@ import { deleteSelection } from "../lib/storage-delete.js"
 import { IconFile, IconFileText, IconFilm, IconFolder, IconImage, IconMusic } from "../components/icons.js"
 import { UuidCell } from "../components/UuidCell.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
-import { bucketManagementOffered } from "../lib/capability-offers.js"
+import { bucketManagementOffered, contentWriteOffered } from "../lib/capability-offers.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -467,7 +467,10 @@ export function StorageBrowser(): React.ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Bucket management is for admins and developers; editors and viewers work with the files in them.
-  const canManageBuckets = bucketManagementOffered(useStudioCapability())
+  const capability = useStudioCapability()
+  const canManageBuckets = bucketManagementOffered(capability)
+  // A viewer browses and downloads; uploading, new folders and deleting are changes.
+  const canWrite = contentWriteOffered(capability)
   const createBucketAction = canManageBuckets
     ? { action: () => setShowCreateBucketWarning(true), actionLabel: "Create Bucket" }
     : {}
@@ -533,6 +536,9 @@ export function StorageBrowser(): React.ReactElement {
   const handleUpload = () => {
     fileInputRef.current?.click()
   }
+  const emptyBucketOffer = canWrite
+    ? { description: "Upload files or drag and drop to get started.", action: handleUpload, actionLabel: "Upload Files" }
+    : { description: "Nothing has been uploaded here yet." }
 
   const handleFileSelect = async (fileList: FileList) => {
     const newUploads: UploadProgress[] = Array.from(fileList).map((f) => ({
@@ -570,7 +576,7 @@ export function StorageBrowser(): React.ReactElement {
   // Drag and drop
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
-    setIsDragOver(true)
+    setIsDragOver(canWrite)
   }
 
   const handleDragLeave = () => {
@@ -580,7 +586,7 @@ export function StorageBrowser(): React.ReactElement {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
-    if (e.dataTransfer.files.length > 0) {
+    if (canWrite && e.dataTransfer.files.length > 0) {
       void handleFileSelect(e.dataTransfer.files)
     }
   }
@@ -698,14 +704,18 @@ export function StorageBrowser(): React.ReactElement {
           Grid
         </Button>
 
-        {selectedIds.size > 0 ? (
+        {canWrite && selectedIds.size > 0 ? (
           <Button variant="destructive" size="sm" onClick={() => requestDelete(selectedIds)}>
             Delete {selectedIds.size} selected
           </Button>
         ) : null}
 
-        <Button size="sm" onClick={() => setShowCreateFolder(true)}>New Folder</Button>
-        <Button variant="primary" size="sm" onClick={handleUpload}>Upload Files</Button>
+        {canWrite ? (
+          <>
+            <Button size="sm" onClick={() => setShowCreateFolder(true)}>New Folder</Button>
+            <Button variant="primary" size="sm" onClick={handleUpload}>Upload Files</Button>
+          </>
+        ) : null}
         <input
           ref={fileInputRef}
           type="file"
@@ -863,9 +873,9 @@ export function StorageBrowser(): React.ReactElement {
                           <div className="flex gap-1">
                             <Button size="xs" onClick={() => setSelectedFile(f)}>Details</Button>
                             <Button size="xs" onClick={() => { void handleDownload(f) }}>Download</Button>
-                            <Button size="xs" variant="destructive" onClick={() => requestDelete(new Set([f.id]))}>
-                              Delete
-                            </Button>
+                            {canWrite ? (
+                              <Button size="xs" variant="destructive" onClick={() => requestDelete(new Set([f.id]))}>Delete</Button>
+                            ) : null}
                           </div>
                         ) : null}
                       </Td>
@@ -876,9 +886,7 @@ export function StorageBrowser(): React.ReactElement {
                       <td colSpan={7}>
                         <EmptyState
                           title="This bucket is empty"
-                          description="Upload files or drag and drop to get started."
-                          action={handleUpload}
-                          actionLabel="Upload Files"
+                          {...emptyBucketOffer}
                         />
                       </td>
                     </tr>
@@ -945,9 +953,7 @@ export function StorageBrowser(): React.ReactElement {
                 <div className="col-span-full">
                   <EmptyState
                     title="This bucket is empty"
-                    description="Upload files or drag and drop to get started."
-                    action={handleUpload}
-                    actionLabel="Upload Files"
+                    {...emptyBucketOffer}
                   />
                 </div>
               ) : null}
@@ -972,9 +978,9 @@ export function StorageBrowser(): React.ReactElement {
               <FilePreview file={selectedFile} bucket={currentBucket} client={client} currentPath={path} />
               <div className="flex gap-2 mt-4">
                 <Button size="xs" onClick={() => { void handleDownload(selectedFile) }}>Download</Button>
-                <Button size="xs" variant="destructive" onClick={() => requestDelete(new Set([selectedFile.id]))}>
-                  Delete
-                </Button>
+                {canWrite ? (
+                  <Button size="xs" variant="destructive" onClick={() => requestDelete(new Set([selectedFile.id]))}>Delete</Button>
+                ) : null}
               </div>
             </Card>
           </div>
