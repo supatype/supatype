@@ -105,6 +105,20 @@ export interface DiffResult {
   reconcile?: ReconcileAction[]
   warnings?: string[]
   summary?: string
+  /** Drops and adds a person may have meant as renames. Absent from engines that guessed them. */
+  renameCandidates?: RenameCandidate[]
+}
+
+/**
+ * A dropped table or column and an added one the engine offers as a possible rename. Renames are
+ * declared in the schema, never guessed, so this is only ever asked about.
+ */
+export interface RenameCandidate {
+  kind: "column" | "table"
+  /** The table, for a column; the old table, for a table. */
+  table: string
+  from: string
+  to: string
 }
 
 export interface IntrospectResult {

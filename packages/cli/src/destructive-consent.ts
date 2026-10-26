@@ -6,8 +6,12 @@
  * column and a new empty one, with every value gone and nothing printed about it. Pushes now go
  * unforced: the engine refuses a destructive change, and this asks in a terminal, or refuses with
  * the command that applies it on purpose anywhere else.
+ *
+ * Renames are declared in the schema, never guessed (D1). When the engine names a drop and an add
+ * a person may have meant as a rename, a terminal is asked about that first, and a yes writes the
+ * declaration through a {@link RenameDeclarationWriter} and pushes again.
  */
-import type { DiffResult } from "./engine-client.js"
+import type { DiffResult, RenameCandidate } from "./engine-client.js"
 import { plannedChanges } from "./diff-output.js"
 import { destructiveRefusal, engineOutputOf } from "./push-refusal.js"
 import { confirm } from "./ui/confirm.js"
@@ -16,8 +20,9 @@ import { plain, warn } from "./ui/messages.js"
 
 /** What a refused rename means, said with every refusal. */
 export const DESTRUCTIVE_CHANGE_HINT =
-  "If you renamed a field, the engine did not recognise it as a rename and would drop the column " +
-  "and its data. Rename it back to keep the data."
+  "If you renamed a field: renames are applied only when the schema declares them, so this push " +
+  "would drop the column and its data and add an empty one. Rename it back, or declare the rename, " +
+  "to keep the data."
 
 /** The changes a diff would make that lose data, one line each. */
 export function destructiveLines(diff: Pick<DiffResult, "operations" | "reconcile">): string[] {
@@ -33,11 +38,61 @@ export interface DestructiveConsentPolicy {
   apply: string
 }
 
+/**
+ * Writes a rename declaration into the project's schema, so the next push applies it as a rename
+ * and keeps the data. Pluggable: how a rename is declared in `schema/index.ts` is a separate
+ * decision, and nothing is offered until a caller passes one.
+ */
+export interface RenameDeclarationWriter {
+  write(candidate: RenameCandidate): Promise<void>
+}
+
 export interface DestructiveConsentDeps {
   ask?: (question: string) => Promise<boolean>
   interactive?: () => boolean
   /** What the push would destroy, one line each. Best effort: a failure only loses the list. */
   describe?: () => Promise<string[]>
+  /** The drops and adds the engine says may be renames. Best effort, like `describe`. */
+  renameCandidates?: () => Promise<RenameCandidate[]>
+  /**
+   * Writes a declaration the person agreed to. With it (and `renameCandidates`), a terminal is
+   * asked "was this a rename?" before "drop the data?", and a yes pushes again. The push given to
+   * {@link pushConsentingToDestructive} must then read the schema afresh each time it runs.
+   */
+  renameWriter?: RenameDeclarationWriter
+}
+
+/** The line a rename candidate is asked about with. */
+export function renameLabel(candidate: RenameCandidate): string {
+  return candidate.kind === "table"
+    ? `table ${candidate.from} -> ${candidate.to}`
+    : `${candidate.table}.${candidate.from} -> ${candidate.to}`
+}
+
+/**
+ * Asks about each candidate in turn, skipping one whose source or target an earlier yes took, and
+ * writes the declaration on a yes. Returns how many were written; none when either dep is absent.
+ */
+export async function offerRenames(
+  deps: DestructiveConsentDeps,
+  ask: (question: string) => Promise<boolean>,
+): Promise<number> {
+  const writer = deps.renameWriter
+  if (writer === undefined || deps.renameCandidates === undefined) return 0
+  const candidates = await deps.renameCandidates().catch((): RenameCandidate[] => [])
+  const taken = new Set<string>()
+  let written = 0
+  for (const candidate of candidates) {
+    const from = `${candidate.kind}:${candidate.table}:${candidate.from}`
+    const to = `${candidate.kind}:${candidate.table}:${candidate.to}`
+    if (taken.has(from) || taken.has(to)) continue
+    if (!(await ask(`Was this a rename: ${renameLabel(candidate)}? (writes the declaration)`))) continue
+    await writer.write(candidate)
+    taken.add(from)
+    taken.add(to)
+    written++
+  }
+  return written
 }
 
 /** A destructive push that was not applied: declined, or nobody there to ask. */
@@ -72,6 +127,13 @@ export async function pushConsentingToDestructive<T>(
     const refused = new DestructiveChangeRefused(refusalMessage(output, policy))
     if (!(deps.interactive ?? isInteractive)()) throw refused
     const ask = deps.ask ?? ((question: string) => confirm(question, { default: false }))
+    // A declaration written is a different schema: push it again, asking about what is left, with
+    // no second round of rename offers.
+    if ((await offerRenames(deps, ask)) > 0) {
+      const again: DestructiveConsentDeps = { ...deps }
+      delete again.renameWriter
+      return pushConsentingToDestructive(push, policy, again)
+    }
     if (!(await ask("Apply it and lose that data?"))) throw refused
     return push(true)
   }
