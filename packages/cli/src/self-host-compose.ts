@@ -15,6 +15,7 @@ import {
 import { hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
+import { postgresImageFor } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { composeDbPublish } from "./db-port.js"
@@ -84,28 +85,16 @@ const OBJECT_STORE_SECRET_KEY = "supatype-secret"
  */
 export const DB_VOLUME_KEY = "db-data"
 
-type DockerPinComponent = "engine" | "server" | "postgres"
+type DockerPinComponent = "engine" | "server"
 
-/** Map a config version pin to a Docker Hub image reference. */
-export function dockerImageRef(
-  component: DockerPinComponent,
-  version: string,
-  config?: SupatypeProjectConfig,
-): string {
+/**
+ * Map a config version pin to a Docker Hub image reference. Postgres is not here: its image and
+ * its keyspace capability are one decision, made by `postgresImageFor`.
+ */
+export function dockerImageRef(component: DockerPinComponent, version: string): string {
   const trimmed = version.trim()
-  switch (component) {
-    case "engine":
-      return `supatype/schema-engine:${trimmed.startsWith("v") ? trimmed : `v${trimmed}`}`
-    case "server":
-      return `supatype/server:${trimmed.startsWith("v") ? trimmed : `v${trimmed}`}`
-    case "postgres": {
-      const override = config?.database?.image?.trim()
-      if (override) return override
-      if (trimmed.includes("-latest")) return `supatype/postgres:${trimmed}`
-      const major = trimmed.split(".")[0]
-      return `supatype/postgres:${major}-latest`
-    }
-  }
+  const tag = trimmed.startsWith("v") ? trimmed : `v${trimmed}`
+  return component === "engine" ? `supatype/schema-engine:${tag}` : `supatype/server:${tag}`
 }
 
 /**
@@ -118,8 +107,8 @@ export function dockerImageRef(
  */
 export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<string, string> {
   const env: Record<string, string> = {}
-  const image = config.database?.image?.trim()
-  if (image) env.SUPATYPE_POSTGRES_IMAGE = image
+  const postgres = postgresImageFor(config).ref
+  if (postgres) env.SUPATYPE_POSTGRES_IMAGE = postgres
   const versions = config.versions
   if (!versions) return env
 
@@ -128,9 +117,6 @@ export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<str
   }
   if (versions.server && versions.server !== VERSION_PIN_LOCAL) {
     env.SUPATYPE_SERVER_IMAGE = dockerImageRef("server", versions.server)
-  }
-  if (versions.postgres && versions.postgres !== VERSION_PIN_LOCAL) {
-    env.SUPATYPE_POSTGRES_IMAGE = dockerImageRef("postgres", versions.postgres, config)
   }
   return env
 }
@@ -807,7 +793,7 @@ ${dbDependency}`
   # database still needs (roles, extensions, wal_level for realtime).
 `
     : `  db:
-    image: \${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}
+    image: \${SUPATYPE_POSTGRES_IMAGE:-${postgresImageFor(config).ref ?? "supatype/postgres:latest"}}
 ${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    environment:
       POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}

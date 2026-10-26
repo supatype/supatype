@@ -239,21 +239,24 @@ for `pg_keyspace` explicitly is refused rather than quietly downgraded, because
 a stack that runs the thing you switched away from is worse than one that will
 not start.
 
-**A pinned `versions.postgres` keeps Valkey.** The keyspace is served by the
-image, and the entrypoint honours `SUPATYPE_KEYSPACE_ENABLED` only from the
-release that introduced it. An older image ignores the variable and starts with
-no RESP listener, and that is not an error anywhere: the stack comes up, the cache
-never hits, and with TLS on Kong cannot store its certificate. A pin says this
-project's image is fixed, and the default does not assume something about a
-fixed image it cannot check.
+**The default follows the Postgres image that runs.** The keyspace is served by
+the image, and the entrypoint honours `SUPATYPE_KEYSPACE_ENABLED` only from
+17.2.9. An older image ignores the variable and starts with no RESP listener,
+and that is not an error anywhere: the stack comes up, the cache never hits,
+and with TLS on Kong cannot store its certificate. So the image decides:
 
-So an unpinned project (tracking latest) gets the keyspace, and a pinned one
-keeps the sidecar until it says otherwise:
+| `versions.postgres` / `database.image` | Image run | Default cache |
+|---|---|---|
+| unset | `supatype/postgres:latest` | pg_keyspace |
+| `"17"`, `"17.2"`, `"17-latest"` | `supatype/postgres:17-latest` | pg_keyspace |
+| `"17.2.9"` or later, published | that exact tag | pg_keyspace |
+| `"17.2.8"` or earlier, published | that exact tag | Valkey |
+| an exact version that is not published | `17-latest`, with a warning | pg_keyspace |
+| `database.image` other than a `supatype/postgres` tag | that image | Valkey |
 
-```ts
-versions: { postgres: "17.2.10" },
-cache: { provider: "pg_keyspace" },
-```
+An explicit `cache.provider` always wins. The native provider keeps its own
+rule: any `versions.postgres` pin there keeps Valkey unless you name
+`cache: { provider: "pg_keyspace" }`.
 
 ### What survives a restart, and what does not
 
