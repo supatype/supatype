@@ -23,7 +23,6 @@ import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import {
   pgSchema,
-  postgrestSchemaEnv,
   functionsPathCandidatesFromProject,
   localDSN,
   nativeDataDir,
@@ -37,8 +36,6 @@ import {
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
 import { discoverFunctionsOrExit, writeDevFunctionsRouter } from "../functions-router-gen.js"
-import { fieldMaskingTierFromProject } from "../field-masking-tier.js"
-import { projectHasVersionedModels } from "../model-versioning.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
@@ -79,7 +76,8 @@ import { patchRouteManifest } from "../route-manifest.js"
 import { resolveRealtimeLaunch } from "../realtime-launch.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
-import { AUTHENTICATOR_PASSWORD_ENV, nativeRolesSql } from "../native-roles-sql.js"
+import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
+import { nativeDevRolesSql, nativePostgrestSchemaEnv, nativeServerCoreEnv } from "../native-dev-env.js"
 import { ensureValkeySidecar, probeTcp, stopValkeySidecar } from "../valkey-sidecar.js"
 import {
   firstFreePort,
@@ -87,7 +85,6 @@ import {
   KEYSPACE_PORT_BASE,
   KEYSPACE_PORT_SPAN,
   nativeKeyspaceLibraryPresent,
-  nativeMaskLibraryPresent,
   start as pgStart,
   stop as pgStop,
   waitReady as pgWaitReady,
@@ -404,7 +401,7 @@ export function registerDev(program: Command): void {
         const rolesResult = spawnSync(psqlBin, [...pgConnArgs, "-d", projectName, "-X", "-v", "ON_ERROR_STOP=1", "-f", "-"], {
           stdio: "pipe",
           encoding: "utf8",
-          input: nativeRolesSql(nativeMaskLibraryPresent(pgBinDir)),
+          input: nativeDevRolesSql(pgBinDir),
           env: { ...pgEnv, [AUTHENTICATOR_PASSWORD_ENV]: authenticatorPassword },
         })
         // Unchecked, a failure here surfaced much later as PostgREST refusing to connect or
@@ -557,13 +554,15 @@ export function registerDev(program: Command): void {
       const providerEnvironment = { ...loadDotEnv(cwd), ...process.env }
       warnMissingAuthProviderSecrets(config, providerEnvironment)
       const serverEnv: Record<string, string> = {
-        // supatype-server outer layer
-        SUPATYPE_MODE: config.server.mode ?? "dev",
-        ...(valkeySidecar.addr ? { SUPATYPE_VALKEY_ADDR: valkeySidecar.addr } : {}),
-        SUPATYPE_MANAGED_PROJECT_REF: projectName,
-        SUPATYPE_MANIFEST_PATH: manifestPath,
-        SUPATYPE_ADMIN_CONFIG_PATH: adminConfigPath,
-        SUPATYPE_POSTGREST_URL: `http://127.0.0.1:${postgrestPort}`,
+        ...nativeServerCoreEnv({
+          mode: config.server.mode ?? "dev",
+          valkeyAddr: valkeySidecar.addr,
+          projectRef: projectName,
+          manifestPath,
+          adminConfigPath,
+          postgrestPort,
+          pgBinDir,
+        }),
         SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
         ...(denoFunctionsDir !== "" ? { SUPATYPE_SHARED_ENV_FILE: resolve(denoFunctionsDir, ".env.local") } : {}),
         ...(denoBinPath !== undefined ? { SUPATYPE_DENO_PATH: denoBinPath } : {}),
@@ -672,14 +671,7 @@ export function registerDev(program: Command): void {
           // `api` here too: the case an "is the database external" rule would have got wrong. The
           // same tier picks the extra search path, which is what pg_graphql reflects: `api` under
           // tier 2, `public` otherwise. Parity with self-host, which writes both from one call.
-          ...postgrestSchemaEnv(config, {
-            // The installed archive decides: one downloaded before the masking library was bundled
-            // has no extension, so its field rules are enforced by views instead.
-            tier: fieldMaskingTierFromProject(cwd, config, nativeMaskLibraryPresent(pgBinDir)),
-            // A versioned model adds the generated `draft` schema, or `.draft()` would answer
-            // PGRST106 against a stack that had migrated the views into place.
-            drafts: projectHasVersionedModels(cwd, config),
-          }),
+          ...nativePostgrestSchemaEnv(cwd, config, pgBinDir),
           PGRST_DB_ANON_ROLE: "anon",
           PGRST_SERVER_PORT: postgrestPort,
           PGRST_SERVER_HOST: "127.0.0.1",
