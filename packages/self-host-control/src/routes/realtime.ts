@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { Readable } from "node:stream"
-import type { ReadableStream as WebReadableStream } from "node:stream/web"
+import { isJsonObject } from "@supatype/shared"
 import { route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
@@ -33,10 +33,9 @@ const STREAM_FILTERS = ["channel", "schema", "table", "event", "kinds", "rate"] 
 
 /** Send realtime's JSON answer on, status and all, with anything added to `data`. */
 async function relayJson(res: ServerResponse, upstream: Response, extra: Record<string, unknown> = {}): Promise<void> {
-  const body = (await upstream.json()) as Record<string, unknown>
-  const data = body["data"]
-  if (upstream.ok && typeof data === "object" && data !== null) {
-    sendJson(res, upstream.status, { ...body, data: { ...data, ...extra } })
+  const body = await upstream.json()
+  if (upstream.ok && isJsonObject(body) && isJsonObject(body["data"])) {
+    sendJson(res, upstream.status, { ...body, data: { ...body["data"], ...extra } })
     return
   }
   sendJson(res, upstream.status, body)
@@ -89,9 +88,16 @@ async function relayStream(req: IncomingMessage, res: ServerResponse, url: URL):
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
   })
-  Readable.fromWeb(upstream.body as WebReadableStream<Uint8Array>)
+  Readable.from(upstream.body)
     .on("error", () => res.end())
     .pipe(res)
+}
+
+/** How many subscribers realtime says a broadcast reached: `data.recipients`, else 0. */
+function recipientsOf(answer: unknown): number {
+  const data = isJsonObject(answer) ? answer["data"] : undefined
+  const recipients = isJsonObject(data) ? data["recipients"] : undefined
+  return typeof recipients === "number" ? recipients : 0
 }
 
 async function broadcast(req: IncomingMessage, res: ServerResponse, body: unknown): Promise<void> {
@@ -101,17 +107,17 @@ async function broadcast(req: IncomingMessage, res: ServerResponse, body: unknow
     method: "POST",
     body: serialised,
   })
-  const answer = (await upstream.json()) as { data?: { recipients?: number } }
+  const answer = await upstream.json()
   if (upstream.ok) {
-    const input = body as { channel?: unknown; event?: unknown; payload?: unknown }
+    const input = isJsonObject(body) ? body : {}
     await audit({
       actorId: auditActor(caller.actor),
       action: "realtime_broadcast",
       detail: {
-        channel: input.channel,
-        event: input.event,
-        payloadBytes: Buffer.byteLength(JSON.stringify(input.payload ?? {}), "utf8"),
-        recipients: answer.data?.recipients ?? 0,
+        channel: input["channel"],
+        event: input["event"],
+        payloadBytes: Buffer.byteLength(JSON.stringify(input["payload"] ?? {}), "utf8"),
+        recipients: recipientsOf(answer),
       },
     })
   }

@@ -12,6 +12,7 @@ import { collectSchemaSourcePaths, type SchemaSourceGraph } from "./type-extract
 import { loadConfig } from "./config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "./project-config.js"
 import { projectAuthor } from "./push-audit.js"
+import { isArrayOf, isNumber, isOneOf, isShape, isString, optional, type Guard } from "@supatype/shared"
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024
 const WARN_COMPRESSED_BYTES = 512 * 1024
@@ -26,6 +27,18 @@ export interface SchemaSourcesManifest {
   files: Array<{ path: string; sha256: string; bytes: number }>
   pushedBy?: string
 }
+
+/** A manifest as `buildSchemaSourcesPayload` writes it, read back from a migration's snapshot. */
+export const isSchemaSourcesManifest: Guard<SchemaSourcesManifest> = isShape({
+  version: isNumber,
+  format: isOneOf(["tar+gzip"] as const),
+  entryPoint: isString,
+  fileCount: isNumber,
+  uncompressedBytes: isNumber,
+  compressedBytes: isNumber,
+  files: isArrayOf(isShape({ path: isString, sha256: isString, bytes: isNumber })),
+  pushedBy: optional(isString),
+})
 
 export interface SchemaSourcesPayload {
   manifest: SchemaSourcesManifest

@@ -6,7 +6,7 @@
     "composite": true,
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src"],
+  "include": ["../../ts-reset.d.ts", "src"],
   "references": [
     { "path": "../client" },
     { "path": "../types" }

@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { SecondaryPanel } from "../src/components/SecondaryPanel.js"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { normalizeAdminConfig } from "../src/lib/normalize-admin-config.js"
+import { testClient } from "./support.js"
 
 /**
  * A long model label in the Models list (issue #95).
@@ -22,7 +22,7 @@ function modelsList(): string {
   const config = normalizeAdminConfig({
     models: [{ name: LONG, tableName: "child_education_experiences", fields: [] }],
   })
-  const client = { url: "http://localhost:8000" } as unknown as SupatypeClient
+  const client = testClient({ url: "http://localhost:8000" })
   return renderToStaticMarkup(
     React.createElement(
       MemoryRouter,

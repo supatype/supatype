@@ -17,6 +17,7 @@
  * {@link fieldKindsAreRegistered} is false, and the caller can say so.
  */
 import type { ExactFields, ExactKind } from "./exact-values.js"
+import { isJsonObject, isOneOf } from "./json.js"
 
 /** Table name to its exact-value columns. */
 export type ExactFieldsByTable = Readonly<Record<string, ExactFields>>
@@ -27,7 +28,17 @@ export type FieldKindsDocument = {
   readonly tables: Readonly<Record<string, Readonly<Record<string, ExactKind>>>>
 }
 
+/**
+ * A document from a generator this client predates: a version it does not know, or kinds it does
+ * not. Accepted so that generated code type-checks against an older client, and then ignored.
+ */
+export type UnrecognisedFieldKindsDocument = {
+  readonly version: number
+  readonly tables: unknown
+}
+
 const SUPPORTED_VERSION = 1
+const isExactKind = isOneOf(["bigint", "numeric"])
 const NO_FIELDS: ExactFields = {}
 
 // Module level, and deliberately not per client. Server-side rendering builds a client per
@@ -40,17 +51,19 @@ let registered: ExactFieldsByTable | null = null
  * A document whose version this client does not understand is ignored rather than guessed at: a
  * newer shape read by older rules is how a client starts converting the wrong columns.
  */
-export function registerFieldKinds(document: FieldKindsDocument): void {
-  if (document === null || typeof document !== "object") return
-  if (document.version !== SUPPORTED_VERSION) return
-  if (document.tables === null || typeof document.tables !== "object") return
+export function registerFieldKinds(document: FieldKindsDocument | UnrecognisedFieldKindsDocument): void {
+  // Checked as JSON, whatever the type says: plain JavaScript calls this too.
+  if (!isJsonObject(document)) return
+  if (document["version"] !== SUPPORTED_VERSION) return
+  const declared = document["tables"]
+  if (!isJsonObject(declared)) return
 
   const tables: Record<string, ExactFields> = {}
-  for (const [table, columns] of Object.entries(document.tables)) {
-    if (columns === null || typeof columns !== "object") continue
+  for (const [table, columns] of Object.entries(declared)) {
+    if (!isJsonObject(columns)) continue
     const fields: Record<string, ExactKind> = {}
     for (const [column, kind] of Object.entries(columns)) {
-      if (kind === "bigint" || kind === "numeric") fields[column] = kind
+      if (isExactKind(kind)) fields[column] = kind
     }
     if (Object.keys(fields).length > 0) tables[table] = fields
   }

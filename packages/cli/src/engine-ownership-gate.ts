@@ -25,7 +25,8 @@
  */
 import { spawnSync } from "node:child_process"
 import { statSync } from "node:fs"
-import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
+import { capabilitiesCache, isJsonObject, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
+import { astModels, objectAt } from "./ast-read.js"
 import { engineBinPath } from "./engine-client.js"
 import { compareVersions } from "./engine-floor.js"
 
@@ -99,12 +100,11 @@ export const REBASELINE_KEYS_NEED: FeatureNeed = {
  * without `identity_columns` would drop: none when it declares neither.
  */
 export function identityColumnsNeed(ast: unknown): FeatureNeed[] {
-  const models = (ast as { models?: unknown } | null)?.models
-  if (!Array.isArray(models)) return []
   const fields: string[] = []
-  for (const model of models as { name?: string; fields?: Record<string, Record<string, unknown>> }[]) {
-    for (const [name, field] of Object.entries(model.fields ?? {})) {
-      if (field["identity"] !== undefined || field["generated"] !== undefined) fields.push(`${model.name}.${name}`)
+  for (const model of astModels(ast)) {
+    for (const [name, field] of Object.entries(objectAt(model, "fields") ?? {})) {
+      if (!isJsonObject(field)) continue
+      if (field["identity"] !== undefined || field["generated"] !== undefined) fields.push(`${String(model["name"])}.${name}`)
     }
   }
   if (fields.length === 0) return []
@@ -160,7 +160,7 @@ export function assertSupported(caps: Capabilities, needs: readonly FeatureNeed[
 
 /** The features in a `capabilities` answer, or undefined when it is not one. */
 export function parseCapabilities(json: unknown): Set<string> | undefined {
-  const features = (json as { features?: unknown } | null)?.features
+  const features = isJsonObject(json) ? json["features"] : undefined
   if (!Array.isArray(features)) return undefined
   return new Set(features.filter((f): f is string => typeof f === "string"))
 }

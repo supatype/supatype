@@ -110,7 +110,7 @@ export function TicketScreen({ userId }: { userId: string }): React.ReactElement
             <dt>Price</dt>
             <dd>{formatMoney(ticket.price)}</dd>
             <dt>VAT</dt>
-            <dd>{ticket.vatRate != null ? `${ticket.vatRate}%` : "—"}</dd>
+            <dd>{ticket.vatRate != null ? `${ticket.vatRate}%` : "Not set"}</dd>
             <dt>Holder</dt>
             <dd className="ks-mono ks-truncate" title={userId}>{userId.slice(0, 8)}…</dd>
           </dl>
@@ -135,11 +135,11 @@ export function TicketScreen({ userId }: { userId: string }): React.ReactElement
  * `ticket-files` is `BucketPrivate` with `read: BucketOwner`, so there is no public URL to link:
  * pasting one gets a 403 for everybody, its owner included.
  */
-function TicketPdf({ pdf }: { pdf: unknown }): React.ReactElement {
+function TicketPdf({ pdf }: { pdf: Ticket["pdf"] }): React.ReactElement {
   const [link, setLink] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const path = (pdf as { path?: string } | null)?.path ?? null
+  const path = pdf?.path ?? null
 
   if (path === null) {
     return (
@@ -178,18 +178,13 @@ function TicketPdf({ pdf }: { pdf: unknown }): React.ReactElement {
   )
 }
 
-/** `Currency<"GBP">` crosses the wire as `{ currency, amount }`, with amount a string. */
-function formatMoney(value: unknown): string {
-  const money = value as { currency?: string; amount?: string | number } | null
-  if (money == null || money.amount == null) return "—"
-  const amount = Number(money.amount)
-  if (!Number.isFinite(amount)) return String(money.amount)
+/** `Currency<"GBP">` crosses the wire as `{ amount, code }`, with amount a string of minor units. */
+function formatMoney({ amount: minor, code }: Ticket["price"]): string {
+  const amount = Number(minor)
+  if (!Number.isFinite(amount)) return minor
   try {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency: money.currency ?? "GBP",
-    }).format(amount / 100)
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency: code }).format(amount / 100)
   } catch {
-    return `${money.currency ?? ""} ${amount}`.trim()
+    return `${code} ${amount}`
   }
 }

@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { AuthManagement } from "../src/views/AuthManagement.js"
+import { testClient } from "./support.js"
 
 /**
  * AU1: the auth server confirms a user created through its admin API only when the request says
@@ -18,7 +18,7 @@ import { AuthManagement } from "../src/views/AuthManagement.js"
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "token" })
 /** A user as the auth admin API answers it, trimmed to what the view reads. */
 interface RawUser {
   id: string
@@ -81,7 +81,7 @@ function answer(url: string, method: string, s: Scenario): Response {
 }
 
 function stubFetch(s: Scenario): void {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   calls = []
   referrerPolicies = []
   pendingConfirmedAt = null

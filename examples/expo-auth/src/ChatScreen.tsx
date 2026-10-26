@@ -77,7 +77,7 @@ export function ChatScreen({
     })
 
     const channel = rt
-      .channel("public:chat_message")
+      .channel<ChatRow>("public:chat_message")
       .on(
         "postgres_changes",
         {
@@ -87,7 +87,7 @@ export function ChatScreen({
           filter: `room=eq.${LOBBY_ROOM}`,
         },
         (payload) => {
-          const raw = payload.new as ChatRow | null
+          const raw = payload.new
           if (raw === null || seenIds.current.has(raw.id)) return
           const row: ChatRow = {
             ...raw,

@@ -3,13 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { DataExplorer } from "../src/views/DataExplorer.js"
 import { ModelSchema } from "../src/views/ModelSchema.js"
 import { SchemaView } from "../src/views/SchemaView.js"
+import { metadataBody, testClient, type MetadataBody } from "./support.js"
 
 /**
  * The screens that list a schema's tables and columns read them through the metadata route's
@@ -20,9 +20,9 @@ import { SchemaView } from "../src/views/SchemaView.js"
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "token" })
 
-type Call = { url: string; body: { name?: string; params?: Record<string, unknown> } }
+type Call = { url: string; body: MetadataBody }
 
 const COLUMNS = [
   { table_name: "posts", table_schema: "public", column_name: "id", udt_name: "uuid", is_nullable: "NO", column_default: null, is_primary: true, is_foreign_key: false, references_col: null, is_unique: false, row_count: 3 },
@@ -44,10 +44,12 @@ function stubFetch(): void {
   vi.stubGlobal("ResizeObserver", NoResizeObserver)
   calls = []
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-    const body = init?.body ? (JSON.parse(String(init.body)) as Call["body"]) : {}
+    const body = metadataBody(init)
     calls.push({ url, body })
     if (url.endsWith("/sql")) return Response.json({ error: "forbidden", message: "Your role cannot use the SQL editor" }, { status: 403 })
     if (url.endsWith("/metadata/introspect")) return Response.json({ rows: COLUMNS, rowCount: COLUMNS.length })
+    // A row read through the REST API, which PostgREST answers with an array.
+    if (url.includes("/rest/v1/")) return Response.json([])
     const rows = body.name === "schemas" ? [{ schema_name: "public" }] : []
     return Response.json({ rows, rowCount: rows.length })
   })

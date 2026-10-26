@@ -5,6 +5,7 @@
 import type { Command } from "commander"
 import { resolve } from "node:path"
 import { pathToFileURL } from "node:url"
+import { isJsonObject } from "@supatype/shared"
 import { downloadAll } from "../binary-cache.js"
 import { error, info } from "../ui/messages.js"
 
@@ -36,8 +37,8 @@ export function registerInternalCommands(program: Command): void {
     .action(async (target: string) => {
       try {
         const href = target.startsWith("file:") ? target : pathToFileURL(resolve(target)).href
-        const mod = (await import(href)) as { default?: unknown }
-        const value = mod.default ?? mod
+        const mod: unknown = await import(href)
+        const value = (isJsonObject(mod) ? mod["default"] : undefined) ?? mod
         process.stdout.write(JSON.stringify(value))
       } catch (err) {
         // stderr, because the caller parses stdout as JSON and a message there would corrupt it.

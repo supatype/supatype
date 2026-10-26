@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import { discoverTsFunctionsInDir } from "../src/functions-router-gen.js"
+import { errorMessage } from "../src/error-message.js"
 
 const CLI_BIN = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/supatype.js")
 const RULE = 'use lowercase letters, digits, "-" and "_", starting with a letter or digit'
@@ -52,7 +53,7 @@ describe("function discovery", () => {
       thrown = err
     }
     expect(thrown).toBeInstanceOf(Error)
-    const message = (thrown as Error).message
+    const message = errorMessage(thrown)
     expect(message).toContain("sendEmail")
     expect(message).toContain("Webhook.ts")
     expect(message).not.toContain('"hello"')

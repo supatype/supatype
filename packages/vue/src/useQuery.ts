@@ -1,7 +1,8 @@
-import { ref, onMounted, onUnmounted, watch, type Ref } from "vue"
+import { ref, shallowRef, onMounted, onUnmounted, watch, type Ref } from "vue"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { isRowsOf } from "./caller-types.js"
 
 export interface UseQueryOptions {
   columns?: string | undefined
@@ -43,7 +44,8 @@ export function useQuery<
   options?: UseQueryOptions | undefined,
 ): UseQueryReturn<TRow> {
   const client = useSupatype<TDatabase>()
-  const data = ref<TRow[] | null>(null) as Ref<TRow[] | null>
+  // Shallow: each fetch replaces the rows whole, and `ref` would type them as `UnwrapRef<TRow>`.
+  const data = shallowRef<TRow[] | null>(null)
   const error = ref<SupatypeError | null>(null)
   const loading = ref(false)
 
@@ -84,7 +86,7 @@ export function useQuery<
       }
 
       const result = await query
-      data.value = result.data as TRow[] | null
+      data.value = isRowsOf<TRow>(result.data) ? result.data : null
       if (result.error) {
         error.value = result.error
       }

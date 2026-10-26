@@ -2,6 +2,7 @@ import React, { useState } from "react"
 import { Badge, Button, Card, CodeBlock, Input, Select } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { isOneOf } from "../../lib/json.js"
 import { NO_FILTERS, useRealtimeStream, type StreamFilters, type StreamKind, type StreamState } from "../../hooks/useRealtimeStream.js"
 import type { InspectorTabProps } from "./InspectorTab.js"
 import { InspectorFailureView, PayloadBlock, When } from "./shared.js"
@@ -24,16 +25,19 @@ function rowKey(row: StreamRow): string {
   }
 }
 
+const isStreamKind = isOneOf(["all", "change", "broadcast", "presence"] as const satisfies readonly StreamKind[])
+const isEventFilter = isOneOf(["", "INSERT", "UPDATE", "DELETE"] as const satisfies readonly StreamFilters["event"][])
+
 function FilterBar({ filters, onChange }: { filters: StreamFilters; onChange: (next: StreamFilters) => void }): React.ReactElement {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Select aria-label="Kind" value={filters.kind} onChange={(e) => onChange({ ...filters, kind: e.target.value as StreamKind })}>
+      <Select aria-label="Kind" value={filters.kind} onChange={(e) => { const kind = e.target.value; if (isStreamKind(kind)) onChange({ ...filters, kind }) }}>
         <option value="all">All kinds</option>
         <option value="change">Changes</option>
         <option value="broadcast">Broadcasts</option>
         <option value="presence">Presence</option>
       </Select>
-      <Select aria-label="Event" value={filters.event} onChange={(e) => onChange({ ...filters, event: e.target.value as StreamFilters["event"] })}>
+      <Select aria-label="Event" value={filters.event} onChange={(e) => { const event = e.target.value; if (isEventFilter(event)) onChange({ ...filters, event }) }}>
         <option value="">All events</option>
         <option value="INSERT">INSERT</option>
         <option value="UPDATE">UPDATE</option>

@@ -43,7 +43,7 @@ import { adoptKeysNeed, OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
 import { signJwt } from "../jwt.js"
-import { provisionBucketsFromAst } from "../storage-provision.js"
+import { isParsedBuckets, provisionBucketsFromAst } from "../storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
@@ -517,7 +517,7 @@ async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig
   const serviceRoleKey = localServiceRoleKey(config)
   if (!serviceRoleKey) return
   await ensureEngine()
-  const parsedAst = await engineRequest<Pick<ExtractedSchemaAstV2, "storageBuckets">>("/parse", { ast })
+  const parsedAst = await engineRequest("/parse", { ast }, isParsedBuckets)
   await provisionBucketsFromAst(parsedAst, `${baseUrl}/storage/v1`, serviceRoleKey)
 }
 
@@ -539,7 +539,7 @@ async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig
   const dir = join(cwd, ".supatype")
   mkdirSync(dir, { recursive: true })
   await ensureEngine()
-  const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }), config)
+  const admin = withAdminRoles(await engineRequest("/admin", { ast }), config)
   restoreSystemRelationTargets(admin, ast)
   writeFileSync(join(dir, "admin-config.json"), `${JSON.stringify(admin, null, 2)}\n`)
 }

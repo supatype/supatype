@@ -22,7 +22,9 @@ import { deploySchemaToLinkedProject, loadCloudConfig, pushSchemaToLinkedProject
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
+import { isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
 import { ensureEngine, enginePush, engineRequest, type DiffResult } from "../engine-client.js"
+import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
 import { formatSecurityDrift, plannedChanges, securityDrift } from "../diff-output.js"
 import { OVERWRITE_DRIFT_NEED, requireEngineFeatures } from "../engine-ownership-gate.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
@@ -115,11 +117,15 @@ export function registerDeploy(program: Command): void {
           await ensureEngine()
           if (overwriteDrift) await requireEngineFeatures([OVERWRITE_DRIFT_NEED])
 
-          const diff = await engineRequest<DiffResult>("/diff", {
-            ast,
-            database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
-            schema: pgSchema(config),
-          })
+          const diff = await engineRequest(
+            "/diff",
+            {
+              ast,
+              database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
+              schema: pgSchema(config),
+            },
+            isDiffResult,
+          )
 
           const changes = plannedChanges(diff)
           const refusal = deploySecurityDriftRefusal(diff, overwriteDrift)
@@ -131,13 +137,17 @@ export function registerDeploy(program: Command): void {
           if (changes.length > 0) {
             info(`${changes.length} schema change(s) to apply.`)
             const result = await explainingRefusal("supatype deploy --local", () =>
-              enginePush<EnginePushResult>(cwd, {
-                ast,
-                database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
-                schema: pgSchema(config),
-                force: true,
-                ...(overwriteDrift && { overwrite_drift: true }),
-              }),
+              enginePush(
+                cwd,
+                {
+                  ast,
+                  database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
+                  schema: pgSchema(config),
+                  force: true,
+                  ...(overwriteDrift && { overwrite_drift: true }),
+                },
+                isEnginePushResult,
+              ),
             )
             info("Schema changes applied.")
             printPushWarnings(result)
@@ -187,8 +197,8 @@ export function registerDeploy(program: Command): void {
           plain()
 
           // Inject environment variables
-          const buildEnv: Record<string, string> = {
-            ...process.env as Record<string, string>,
+          const buildEnv: NodeJS.ProcessEnv = {
+            ...process.env,
             ...appConfig.env,
           }
 
@@ -274,7 +284,7 @@ export function registerDeploy(program: Command): void {
 
       const target = resolveTarget(cwd, { env: opts.env })
       const body = opts.to ? { to: opts.to } : undefined
-      const data = await targetFetch<{ version: string; message: string }>(
+      const data = await targetFetch(
         target.apiBaseUrl,
         target.apiPrefix,
         {
@@ -285,6 +295,7 @@ export function registerDeploy(program: Command): void {
           orgId: target.orgId,
           environment: target.mode === "cloud" ? target.environment : undefined,
         },
+        isShape({ version: optional(nullable(isString)) }),
       )
 
       info(`Rolled back to deployment ${data.version ?? "previous"}.`)
@@ -304,16 +315,7 @@ export function registerDeploy(program: Command): void {
       }
 
       const target = resolveTarget(cwd, { env: opts.env })
-      const data = await targetFetch<{
-        version?: string
-        id?: string
-        timestamp?: string
-        createdAt?: string
-        size?: number
-        buildDuration?: number
-        url?: string
-        status?: string
-      } | null>(
+      const data = await targetFetch(
         target.apiBaseUrl,
         target.apiPrefix,
         {
@@ -323,6 +325,7 @@ export function registerDeploy(program: Command): void {
           orgId: target.orgId,
           environment: target.mode === "cloud" ? target.environment : undefined,
         },
+        nullable(isCurrentDeployment),
       )
 
       if (!data) {
@@ -355,7 +358,7 @@ export function registerDeploy(program: Command): void {
 
       const target = resolveTarget(cwd, { env: opts.env })
       const versionPath = version ? `/${version}` : "/current"
-      const data = await targetFetch<{ logs: string }>(
+      const data = await targetFetch(
         target.apiBaseUrl,
         target.apiPrefix,
         {
@@ -365,11 +368,27 @@ export function registerDeploy(program: Command): void {
           orgId: target.orgId,
           environment: target.mode === "cloud" ? target.environment : undefined,
         },
+        isShape({ logs: optional(nullable(isString)) }),
       )
 
       plain(data.logs ?? "(no logs)")
     })
 }
+
+/** The deployment `deploy status` describes; every field is shown only when present. */
+const isCurrentDeployment = isShape({
+  version: optional(nullable(isString)),
+  id: optional(nullable(isString)),
+  timestamp: optional(nullable(isString)),
+  createdAt: optional(nullable(isString)),
+  size: optional(nullable(isNumber)),
+  buildDuration: optional(nullable(isNumber)),
+  url: optional(nullable(isString)),
+  status: optional(nullable(isString)),
+})
+
+/** A deployment created for upload: where its files go, and its id. */
+const isCreatedUpload = isShape({ data: isShape({ deploymentId: isString, uploadUrl: isString }) })
 
 async function deployStaticSite(
   cwd: string,
@@ -395,7 +414,7 @@ async function deployStaticSite(
       encoding: "base64",
     }))
 
-    const created = await targetFetch<{ id: string }>(
+    const created = await targetFetch(
       target.apiBaseUrl,
       target.apiPrefix,
       {
@@ -405,6 +424,7 @@ async function deployStaticSite(
         token,
         orgId: target.orgId,
       },
+      isShape({ id: isString }),
     )
 
     await targetFetch(
@@ -441,7 +461,7 @@ async function deployStaticSite(
     throw new Error(`Failed to create deployment: ${createRes.status} ${body}`)
   }
 
-  const { data } = await createRes.json() as { data: { deploymentId: string; uploadUrl: string } }
+  const { data } = await readJson(createRes, isCreatedUpload)
 
   for (const file of files) {
     const content = readFileSync(file.absolutePath)

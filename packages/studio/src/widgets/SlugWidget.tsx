@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef } from "react"
 import type { WidgetProps } from "./FieldWidget.js"
 import { slugifyInput } from "../lib/slugify.js"
 import { readScalarFromRecord } from "./read-record-scalar.js"
+import { stringOption } from "./field-options.js"
 
 export function SlugWidget({
   config,
@@ -14,7 +15,7 @@ export function SlugWidget({
   recordSyncKey,
   slugFollowSource = false,
 }: WidgetProps): React.ReactElement {
-  const fromField = (config.options?.["from"] as string | undefined) ?? "title"
+  const fromField = stringOption(config, "from") ?? "title"
   const strValue = value === null || value === undefined ? "" : String(value)
   const maxLength = config.validation?.maxLength
 

@@ -1,21 +1,16 @@
 import React, { useState, useRef } from "react"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import type { WidgetProps } from "./FieldWidget.js"
-
-interface StorageRef {
-  bucket: string
-  path: string
-  mimeType?: string
-  size?: number
-}
+import { parseStorageRef } from "../lib/storage-ref.js"
+import { stringOption } from "./field-options.js"
 
 export function FileWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
   const client = useAdminClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
 
-  const storageRef = value as StorageRef | null
-  const bucket = (config.options?.["bucket"] as string) ?? "files"
+  const bucket = stringOption(config, "bucket") ?? "files"
+  const storageRef = parseStorageRef(value, bucket)
 
   const handleUpload = async (file: File) => {
     setUploading(true)
@@ -30,6 +25,8 @@ export function FileWidget({ config, value, onChange, readOnly }: WidgetProps): 
       } else {
         onChange({ bucket, path, mimeType: file.type, size: file.size })
       }
+    } catch (err) {
+      console.error("Upload failed:", err instanceof Error ? err.message : err)
     } finally {
       setUploading(false)
     }

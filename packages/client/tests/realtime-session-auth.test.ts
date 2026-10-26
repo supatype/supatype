@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { RealtimeClient } from "../src/realtime.js"
 import {
   createMockWebSocketClass,
+  subscribedChannels,
   tokenOf,
   type MockWebSocketInstance,
 } from "./helpers/mock-websocket.js"
@@ -128,10 +129,7 @@ describe("realtime authenticates as the session, not as anon", () => {
     await settle()
 
     const replacement = MockWS.instances[1]!
-    const subscribes = replacement.send.mock.calls
-      .map(([raw]) => JSON.parse(String(raw)) as { type: string; channel: string })
-      .filter((m) => m.type === "subscribe")
-    expect(subscribes.map((m) => m.channel)).toContain("public:task")
+    expect(subscribedChannels(replacement)).toContain("public:task")
   })
 
   it("reconnects when the identity changes while the first connect is still resolving its token", async () => {

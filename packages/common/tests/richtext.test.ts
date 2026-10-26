@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { SerializedLexicalNode } from "@supatype/types/lexical"
-import { renderRichText, safeHref, type RichTextContent } from "../src/richtext.js"
+import { renderRichText, safeHref } from "../src/richtext.js"
 import { RENDER_CASES } from "./richtext-cases.js"
 
 function paragraph(children: SerializedLexicalNode[]): SerializedLexicalNode {
@@ -33,9 +33,8 @@ describe("renderRichText input forms", () => {
   })
 
   it("renders nothing for a column value that is not a document at all", () => {
-    for (const value of ["plain words", 42, true] as const) {
-      const fromColumn: unknown = value
-      expect(renderRichText(fromColumn as RichTextContent)).toBe("")
+    for (const value of ["plain words", 42, true]) {
+      expect(renderRichText(value)).toBe("")
     }
   })
 

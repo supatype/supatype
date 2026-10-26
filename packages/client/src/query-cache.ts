@@ -1,6 +1,7 @@
 import type { QueryResult } from "./types.js"
 import { sha256Hex } from "./sha256-hex.js"
 import { bearerToken } from "./query.js"
+import { decodeJwtPayload } from "./jwt.js"
 
 export interface QueryCacheOptions {
   /** Client-side TTL in milliseconds. */
@@ -22,20 +23,23 @@ interface CacheEntry<T> {
 
 const DEFAULT_MAX_ENTRIES = 256
 
-interface JwtPayload {
-  sub?: string
-  role?: string
+/** A string claim off the token, or undefined when the token or the claim is not readable. */
+function stringClaim(token: string, claim: "sub" | "role"): string | undefined {
+  const parts = token.split(".")
+  if (parts.length !== 3) return undefined
+  const value = decodeJwtPayload(parts[1] ?? "")?.[claim]
+  return typeof value === "string" ? value : undefined
 }
 
-function parseJwtPayload(token: string): JwtPayload | null {
-  const parts = token.split(".")
-  if (parts.length !== 3) return null
-  try {
-    const payloadJson = atob(parts[1] ?? "")
-    return JSON.parse(payloadJson) as JwtPayload
-  } catch {
-    return null
-  }
+/**
+ * The boundary between the cache's stored results and the type a reader asks for.
+ *
+ * Nothing about a stored result can be checked against `T`: the cache holds whatever `set` was
+ * given. A key names one request (method, URL, select, identity), so the reader of a key is the
+ * request that stored it, and `T` is that request's own claim about its rows.
+ */
+function isResultFor<T>(result: QueryResult<unknown>): result is QueryResult<T> {
+  return result.error === null
 }
 
 /** Auth component for cache keys, mirrors server IdentityForCache. */
@@ -46,9 +50,8 @@ export function identityFingerprint(
   if (scope === "public") return "global"
   const token = bearerToken(headers)
   if (!token) return "anon"
-  const claims = parseJwtPayload(token)
-  const role = claims?.role?.trim() || "authenticated"
-  const sub = claims?.sub?.trim()
+  const role = stringClaim(token, "role")?.trim() || "authenticated"
+  const sub = stringClaim(token, "sub")?.trim()
   if (sub) return `${role}:${sub}`
   return sha256Hex(token).slice(0, 16)
 }
@@ -80,7 +83,7 @@ export class QueryCache {
       this.store.delete(key)
       return null
     }
-    return entry.result as QueryResult<T>
+    return isResultFor<T>(entry.result) ? entry.result : null
   }
 
   set<T>(key: string, result: QueryResult<T>, ttlMs: number): void {

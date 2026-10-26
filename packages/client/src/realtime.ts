@@ -1,5 +1,6 @@
 import { asHeadersProvider, bearerToken, type HeadersProvider } from "./query.js"
-import { coerceExactKinds, type ExactFields } from "./exact-values.js"
+import { coerceRecordKinds, type ExactFields } from "./exact-values.js"
+import { isArrayOf, isJsonObject, isOneOf, isRecordOf, isShape, isString, nullable, optional, type Guard } from "./json.js"
 
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "*"
 
@@ -65,7 +66,28 @@ function coerceRecord(
   exact: ExactFields,
 ): Record<string, unknown> | null {
   if (record === null) return null
-  return coerceExactKinds(record, exact) as Record<string, unknown>
+  return coerceRecordKinds(record, exact)
+}
+
+/**
+ * The boundary between a change's records and the row type the caller named for the channel.
+ *
+ * The frame guard below has already checked each record is a JSON object or null. That an object
+ * holds `TRow`'s columns is the caller's claim about the table behind the channel (usually the
+ * generated schema's), which nothing on the client can check.
+ */
+function isCallerRow<TRow>(record: unknown): record is TRow {
+  return isJsonObject(record)
+}
+
+/** A listener for the channel's row type, registered as one for the plain records the frame holds. */
+function forCallerRows<TRow>(callback: RealtimeCallback<TRow>): RealtimeCallback<Record<string, unknown>> {
+  return (payload) =>
+    callback({
+      ...payload,
+      new: isCallerRow<TRow>(payload.new) ? payload.new : null,
+      old: isCallerRow<TRow>(payload.old) ? payload.old : null,
+    })
 }
 
 /**
@@ -118,6 +140,44 @@ interface ServerSystemMessage {
 }
 
 type ServerMessage = ServerChangeMessage | ServerPresenceMessage | ServerBroadcastMessage | ServerSystemMessage
+
+// Each guard is declared as the interface it checks, so the compiler holds the two to the same shape.
+const isRecordOrNull = nullable(isJsonObject)
+const isPresenceEntries: Guard<PresenceEntry[]> = isArrayOf(isShape({ user_id: isString }))
+
+const isChangeMessage: Guard<ServerChangeMessage> = isShape({
+  type: isOneOf(["change"]),
+  channel: isString,
+  event: isOneOf(["INSERT", "UPDATE", "DELETE"]),
+  payload: isShape({ old: isRecordOrNull, new: isRecordOrNull }),
+  exactColumns: optional(isRecordOf(isOneOf(["bigint", "numeric"]))),
+  timestamp: isString,
+})
+
+const isPresenceMessage: Guard<ServerPresenceMessage> = isShape({
+  type: isOneOf(["presence"]),
+  channel: isString,
+  joins: isPresenceEntries,
+  leaves: isPresenceEntries,
+})
+
+const isBroadcastMessage: Guard<ServerBroadcastMessage> = isShape({
+  type: isOneOf(["broadcast"]),
+  channel: isString,
+  event: isString,
+  payload: isJsonObject,
+})
+
+const isSystemMessage: Guard<ServerSystemMessage> = isShape({
+  type: isOneOf(["system"]),
+  status: isOneOf(["ok", "error"]),
+  message: isString,
+})
+
+/** A frame from the realtime service (packages/realtime/src/types.ts) in one of the four shapes. */
+function isServerMessage(value: unknown): value is ServerMessage {
+  return isChangeMessage(value) || isPresenceMessage(value) || isBroadcastMessage(value) || isSystemMessage(value)
+}
 
 // ─── Realtime client ─────────────────────────────────────────────────────────
 
@@ -255,7 +315,7 @@ export class RealtimeClient {
           schema: opts.schema ?? named.schema,
           table: opts.table ?? named.table,
           filter: opts.filter,
-          callback: callback as RealtimeCallback<Record<string, unknown>>,
+          callback: forCallerRows(callback),
         })
         return sub
       },
@@ -439,8 +499,9 @@ export class RealtimeClient {
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(String(event.data)) as ServerMessage
-        this.handleServerMessage(msg)
+        const msg = JSON.parse(String(event.data))
+        // A frame in no shape this client knows is ignored, as an unknown `type` always was.
+        if (isServerMessage(msg)) this.handleServerMessage(msg)
       } catch {
         // Ignore unparseable messages
       }

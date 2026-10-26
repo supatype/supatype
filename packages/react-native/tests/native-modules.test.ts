@@ -60,10 +60,19 @@ function tokenFetch(): ReturnType<typeof vi.fn> {
   return fetchSpy
 }
 
+function isTextRecord(value: unknown): value is Record<string, string> {
+  return typeof value === "object" && value !== null && Object.values(value).every((v) => typeof v === "string")
+}
+
 /** The body of the PKCE token exchange, or undefined when none was made. */
 function exchangeBody(fetchSpy: ReturnType<typeof vi.fn>): Record<string, string> | undefined {
   const call = fetchSpy.mock.calls.find((c) => String(c[0]).includes("grant_type=pkce"))
-  return call === undefined ? undefined : (JSON.parse(String((call[1] as RequestInit).body)) as Record<string, string>)
+  if (call === undefined) return undefined
+  const init: unknown = call[1]
+  const sent = typeof init === "object" && init !== null && "body" in init ? init.body : undefined
+  const body = JSON.parse(String(sent))
+  if (!isTextRecord(body)) throw new Error(`The token exchange sent ${String(sent)}`)
+  return body
 }
 
 beforeEach(() => vi.restoreAllMocks())

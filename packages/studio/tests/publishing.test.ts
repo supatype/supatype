@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   createRecord,
   fetchRecordStates,
@@ -12,6 +12,7 @@ import {
   type RecordVersion,
 } from "../src/lib/publishing.js"
 import type { ModelVersionsConfig } from "../src/config.js"
+import { testClient, testModel } from "./support.js"
 
 // What the editor shows about a record is derived from its version rows rather than stored, because
 // a stored answer is a second source of truth about publication and the rows already say it exactly.
@@ -141,19 +142,18 @@ describe("what the history says about a record", () => {
 })
 
 describe("what a list says each record is", () => {
-  const model = {
-    tableName: "posts",
-    primaryKey: "id",
+  const model = testModel({
     versions: versions({ versionsTable: "posts_versions", localizedColumns: ["body"] }),
-  } as unknown as Parameters<typeof fetchRecordStates>[1]
+  })
 
-  function clientReturning(rows: unknown[]): Parameters<typeof fetchRecordStates>[0] {
-    const chain = {
-      select: () => chain,
-      in: () => chain,
-      order: () => Promise.resolve({ data: rows, error: null }),
-    }
-    return { from: () => chain } as unknown as Parameters<typeof fetchRecordStates>[0]
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** A real client whose version query is answered with `rows`, as PostgREST would. */
+  function clientReturning(rows: unknown[]): ReturnType<typeof testClient> {
+    vi.stubGlobal("fetch", async () => Response.json(rows))
+    return testClient({ url: "http://localhost:8000" })
   }
 
   const LIVE = "2026-09-05T09:00:00Z"
@@ -204,21 +204,17 @@ describe("what a list says each record is", () => {
 
   it("asks nothing of the server when there is nothing to ask about", async () => {
     // A list of fifty records should cost one request; an empty page should cost none.
-    let called = false
-    const client = {
-      from: () => {
-        called = true
-        return { select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }) }
-      },
-    } as unknown as Parameters<typeof fetchRecordStates>[0]
+    const sent = vi.fn(async () => Response.json([]))
+    vi.stubGlobal("fetch", sent)
+    const client = testClient({ url: "http://localhost:8000" })
     expect((await fetchRecordStates(client, model, [], ["en"])).size).toBe(0)
-    expect(called).toBe(false)
+    expect(sent).not.toHaveBeenCalled()
   })
 })
 
 describe("the state a shut publishing section stands for", () => {
   function state(locales: Record<string, LocaleState>): PublishingState {
-    return { locales, newest: null } as unknown as PublishingState
+    return { versions: [], newest: null, hasPendingDraft: false, locales }
   }
 
   // It returns a state rather than a label. The words live in one table beside the badge that
@@ -256,7 +252,7 @@ describe("the state a shut publishing section stands for", () => {
 
 describe("partly published", () => {
   function state(locales: Record<string, LocaleState>): PublishingState {
-    return { locales, newest: null } as unknown as PublishingState
+    return { versions: [], newest: null, hasPendingDraft: false, locales }
   }
 
   it("outranks every other state, because every other word hides it", () => {
@@ -293,47 +289,51 @@ describe("creating a record", () => {
   // with drafts creates its record through `supatype.create_record`, which leaves every locale out of
   // the live row until it is published.
 
-  type Calls = { rpc: { fn: string; params: unknown; schema: string | undefined }[]; inserted: unknown[] }
+  interface Sent {
+    path: string
+    profile: string | null
+    body: unknown
+  }
 
-  function recordingClient(calls: Calls): Parameters<typeof createRecord>[0] {
-    return {
-      rpc: (fn: string, params: unknown, options?: { schema?: string }) => {
-        calls.rpc.push({ fn, params, schema: options?.schema })
-        return Promise.resolve({ data: { record_id: "new-id", version: 1 }, error: null })
-      },
-      from: () => ({
-        insert: (values: unknown) => {
-          calls.inserted.push(values)
-          return Promise.resolve({ data: [{ id: "row-id" }], error: null })
-        },
-      }),
-    } as unknown as Parameters<typeof createRecord>[0]
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** A real client whose requests are recorded and answered as PostgREST would. */
+  function recordingClient(sent: Sent[]): ReturnType<typeof testClient> {
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname
+      const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      sent.push({ path, profile: new Headers(init?.headers).get("Content-Profile"), body })
+      return path.endsWith("/rpc/create_record")
+        ? Response.json({ record_id: "new-id", version: 1 })
+        : Response.json([{ id: "row-id" }], { status: 201 })
+    })
+    return testClient({ url: "http://localhost:8000" })
   }
 
   const model = (drafts: boolean) =>
-    ({
-      tableName: "posts",
-      primaryKey: "id",
-      versions: drafts ? versions({ localizedColumns: ["title"] }) : null,
-    }) as unknown as Parameters<typeof createRecord>[1]
+    testModel({ versions: drafts ? versions({ localizedColumns: ["title"] }) : null })
 
   const values = { title: { en: "Hello", de: "Hallo" } }
 
   it("creates a drafts model's record as its first draft, never inserting the live row", async () => {
-    const calls: Calls = { rpc: [], inserted: [] }
-    const created = await createRecord(recordingClient(calls), model(true), values)
+    const sent: Sent[] = []
+    const created = await createRecord(recordingClient(sent), model(true), values)
     expect(created).toEqual({ id: "new-id", error: null })
-    expect(calls.inserted).toEqual([])
-    expect(calls.rpc).toEqual([
-      { fn: "create_record", params: { model_table: "posts", data: values }, schema: "supatype" },
+    expect(sent).toEqual([
+      {
+        path: "/rest/v1/rpc/create_record",
+        profile: "supatype",
+        body: { model_table: "posts", data: values },
+      },
     ])
   })
 
   it("inserts the row of a model without drafts", async () => {
-    const calls: Calls = { rpc: [], inserted: [] }
-    const created = await createRecord(recordingClient(calls), model(false), values)
+    const sent: Sent[] = []
+    const created = await createRecord(recordingClient(sent), model(false), values)
     expect(created).toEqual({ id: "row-id", error: null })
-    expect(calls.inserted).toEqual([values])
-    expect(calls.rpc).toEqual([])
+    expect(sent).toEqual([{ path: "/rest/v1/posts", profile: null, body: values }])
   })
 })

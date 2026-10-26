@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import type { Guard } from "@supatype/shared"
 
 export type RouteHandler = (ctx: {
   req: IncomingMessage
@@ -23,6 +24,16 @@ export class HttpError extends Error {
 /** A 400 for a request whose input fails validation. */
 export function badRequest(message: string): HttpError {
   return new HttpError(400, "validation_error", message)
+}
+
+/**
+ * A request body as the route reads it: an object whose keys have the types the guard names. A body
+ * that is not one (an array, a string, a key of the wrong type) is a 400, never a 500 from deep in
+ * the handler.
+ */
+export function bodyOf<T>(body: unknown, guard: Guard<T>): T {
+  if (!guard(body)) throw badRequest("Request body does not have the fields this route reads, with their types")
+  return body
 }
 
 export function sendJson(res: ServerResponse, status: number, payload: unknown): void {

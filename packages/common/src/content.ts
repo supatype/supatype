@@ -1,4 +1,5 @@
 import { createClient } from "@supatype/client"
+import { importMetaEnv } from "./build-env.js"
 
 declare const process: { env?: Record<string, string | undefined> } | undefined
 
@@ -7,11 +8,7 @@ function getContentEnv(name: string): string {
   if (proc?.env?.[name]) {
     return proc.env[name]!
   }
-  if (typeof import.meta !== "undefined") {
-    const env = (import.meta as unknown as { env?: Record<string, string> }).env
-    if (env?.[name]) return env[name]
-  }
-  return ""
+  return importMetaEnv(name) ?? ""
 }
 
 /**

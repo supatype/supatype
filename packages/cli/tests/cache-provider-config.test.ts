@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { validateProjectConfig } from "../src/project-config.js"
+import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 import { cacheProvider, nativeKeyspaceWanted } from "../src/cache-provider.js"
 
 /**
@@ -82,14 +83,8 @@ describe("which provider a project actually runs", () => {
    * disagreeing about which server is running, which is a cache that silently never hits and, with
    * TLS on, a Kong that cannot store its certificate.
    */
-  const project = (over: Record<string, unknown>) =>
-    ({
-      project: { name: "acme" },
-      database: { provider: "docker" },
-      server: { mode: "dev" },
-      app: { mode: "none" },
-      ...over,
-    }) as unknown as Parameters<typeof cacheProvider>[0]
+  const project = (over: Partial<SupatypeProjectConfig>) =>
+    projectConfig({ project: { name: "acme" }, database: { provider: "docker" }, ...over })
 
   it("runs the keyspace in Postgres when nothing says otherwise", () => {
     expect(cacheProvider(project({}))).toBe("pg_keyspace")
@@ -113,11 +108,11 @@ describe("which provider a project actually runs", () => {
   })
 
   it("keeps an explicit provider and an external database deciding for native dev", () => {
-    const pinned = { versions: { postgres: "17.2" } }
+    const pinned: Partial<SupatypeProjectConfig> = { versions: { postgres: "17.2" } }
     expect(nativeKeyspaceWanted(project({ ...pinned, cache: { provider: "pg_keyspace" } }))).toBe(true)
     expect(nativeKeyspaceWanted(project({ ...pinned, cache: { provider: "valkey" } }))).toBe(false)
     expect(nativeKeyspaceWanted(project({ cache: { provider: "valkey" } }))).toBe(false)
-    const external = { database: { external: { url: "postgres://u:p@h:5432/d" } } }
+    const external: Partial<SupatypeProjectConfig> = { database: { external: { url: "postgres://u:p@h:5432/d" } } }
     expect(nativeKeyspaceWanted(project(external))).toBe(false)
     expect(nativeKeyspaceWanted(project({ ...pinned, ...external }))).toBe(false)
   })

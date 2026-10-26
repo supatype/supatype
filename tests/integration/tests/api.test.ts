@@ -8,6 +8,7 @@
 import { strict as assert } from "node:assert"
 import { test, describe, before, after } from "node:test"
 import { createClient } from "@supatype/client"
+import { at, stringColumn as strings } from "../lib/json.js"
 
 const BASE_URL = process.env["SUPATYPE_URL"] ?? "http://localhost:54399"
 const ANON_KEY = process.env["SUPATYPE_ANON_KEY"] ?? "anon-key-placeholder"
@@ -46,9 +47,8 @@ describe("posts REST CRUD", () => {
 
     assert.ifError(error)
     assert.ok(Array.isArray(data) && data.length > 0, "No rows returned")
-    const row = data[0] as { id: string; title: string }
-    assert.equal(row.title, "Hello Integration")
-    createdId = row.id
+    assert.equal(data[0]?.["title"], "Hello Integration")
+    createdId = strings(data, "id")[0]
   })
 
   test("select posts", async () => {
@@ -69,8 +69,7 @@ describe("posts REST CRUD", () => {
       .eq("id", createdId)
 
     assert.ifError(error)
-    const row = (data as Array<{ title: string }>)[0]
-    assert.equal(row?.title, "Hello Integration (updated)")
+    assert.equal(data?.[0]?.["title"], "Hello Integration (updated)")
   })
 
   test("delete a post", async () => {
@@ -100,15 +99,15 @@ describe("writes filtered with or()", () => {
   const ids = new Map<string, string>()
   const firstTwo = `slug.eq.${first},slug.eq.${second}`
 
-  const sortedIds = (rows: Array<{ id: string }> | null): string[] =>
-    (rows ?? []).map((row) => row.id).sort()
+  const sortedIds = (rows: readonly Record<string, unknown>[] | null): string[] => strings(rows, "id").sort()
 
   before(async () => {
     const { data, error } = await client
       .from("post")
       .insert(slugs.map((slug) => ({ title: `Or filter ${slug}`, slug })))
     assert.ifError(error)
-    for (const row of data as Array<{ id: string; slug: string }>) ids.set(row.slug, row.id)
+    const slugsBack = strings(data, "slug")
+    strings(data, "id").forEach((id, i) => ids.set(slugsBack[i] ?? "", id))
     assert.equal(ids.size, 3)
   })
 
@@ -124,18 +123,18 @@ describe("writes filtered with or()", () => {
       .select("id")
 
     assert.ifError(error)
-    assert.deepEqual(sortedIds(data as Array<{ id: string }>), [ids.get(first), ids.get(second)].sort())
+    assert.deepEqual(sortedIds(data), [ids.get(first), ids.get(second)].sort())
   })
 
   test("delete returns the rows it deleted and leaves the rest", async () => {
     const { data, error } = await client.from("post").delete().or(firstTwo).select("id")
 
     assert.ifError(error)
-    assert.deepEqual(sortedIds(data as Array<{ id: string }>), [ids.get(first), ids.get(second)].sort())
+    assert.deepEqual(sortedIds(data), [ids.get(first), ids.get(second)].sort())
 
     const { data: left, error: readError } = await client.from("post").select("id").in("slug", slugs)
     assert.ifError(readError)
-    assert.deepEqual(sortedIds(left as Array<{ id: string }>), [ids.get(third)])
+    assert.deepEqual(sortedIds(left), [ids.get(third)])
   })
 })
 
@@ -152,14 +151,14 @@ describe("comments REST CRUD", () => {
       .from("author")
       .insert({ email: `comment-test-${suffix}@example.com`, username: `comment-${suffix}`, role: "user" })
     assert.ifError(authorError)
-    authorId = (authorRows as Array<{ id: string }>)[0]?.id
+    authorId = strings(authorRows, "id")[0]
     assert.ok(authorId)
 
     const { data, error } = await client
       .from("post")
       .insert({ title: "Temp Post", slug: `temp-${suffix}`, author_id: authorId })
     assert.ifError(error)
-    postId = (data as Array<{ id: string }>)[0]?.id
+    postId = strings(data, "id")[0]
     assert.ok(postId)
   })
 
@@ -179,7 +178,7 @@ describe("comments REST CRUD", () => {
       .insert({ body: "Great post!", post_id: postId, author_id: authorId })
 
     assert.ifError(error)
-    commentId = (data as Array<{ id: string }>)[0]?.id
+    commentId = strings(data, "id")[0]
     assert.ok(commentId)
   })
 
@@ -231,14 +230,10 @@ describe("edge functions", () => {
     const res = await fetch(`${BASE_URL}/functions/v1/ping`)
     assert.equal(res.status, 200)
 
-    const body = await res.json() as {
-      ok: boolean
-      function: string
-      method: string
-    }
-    assert.equal(body.ok, true)
-    assert.equal(body.function, "ping")
-    assert.equal(body.method, "GET")
+    const body = await res.json()
+    assert.equal(at(body, "ok"), true)
+    assert.equal(at(body, "function"), "ping")
+    assert.equal(at(body, "method"), "GET")
   })
 
   test("invoke echo function with JSON payload", async () => {
@@ -250,14 +245,10 @@ describe("edge functions", () => {
     })
     assert.equal(res.status, 200)
 
-    const body = await res.json() as {
-      ok: boolean
-      function: string
-      body: { source: string; value: number }
-    }
-    assert.equal(body.ok, true)
-    assert.equal(body.function, "echo")
-    assert.deepEqual(body.body, payload)
+    const body = await res.json()
+    assert.equal(at(body, "ok"), true)
+    assert.equal(at(body, "function"), "echo")
+    assert.deepEqual(at(body, "body"), payload)
   })
 
   test("auth-required rejects missing authorization header", async () => {
@@ -272,27 +263,22 @@ describe("edge functions", () => {
       },
     })
     assert.equal(res.status, 200)
-    const body = await res.json() as { ok: boolean; function: string }
-    assert.equal(body.ok, true)
-    assert.equal(body.function, "auth-required")
+    const body = await res.json()
+    assert.equal(at(body, "ok"), true)
+    assert.equal(at(body, "function"), "auth-required")
   })
 
   test("env-check has runtime Supatype environment variables", async () => {
     const res = await fetch(`${BASE_URL}/functions/v1/env-check`)
     assert.equal(res.status, 200)
-    const body = await res.json() as {
-      ok: boolean
-      hasSupatypeUrl: boolean
-      hasAnonKey: boolean
-      hasServiceRoleKey: boolean
-    }
-    assert.equal(body.ok, true)
-    assert.equal(body.hasSupatypeUrl, true)
-    assert.equal(body.hasAnonKey, true)
+    const body = await res.json()
+    assert.equal(at(body, "ok"), true)
+    assert.equal(at(body, "hasSupatypeUrl"), true)
+    assert.equal(at(body, "hasAnonKey"), true)
     // False by design, and the point of the least-privilege work: the worker withholds the
     // service role key and hands it back only to a route that declared it needs one, or to a
     // model hook. env-check declares nothing, so it must not see an ambient admin credential.
     // This assertion said true, from before that change, and had been failing CI since.
-    assert.equal(body.hasServiceRoleKey, false)
+    assert.equal(at(body, "hasServiceRoleKey"), false)
   })
 })

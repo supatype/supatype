@@ -19,7 +19,8 @@ export const PROJECT_DIR = resolve(process.env["MASKING_PROJECT_DIR"] ?? join(he
 
 export function currentTier(): Tier {
   const raw = process.env["MASKING_TIER"]
-  if (raw === "1" || raw === "2") return Number(raw) as Tier
+  if (raw === "1") return 1
+  if (raw === "2") return 2
   throw new Error("MASKING_TIER must be 1 or 2: the suite asserts different defects per tier")
 }
 

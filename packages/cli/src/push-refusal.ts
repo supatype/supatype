@@ -12,10 +12,10 @@
  * server answers 409 with the same `reason` and what it names. By wording second, for an engine or
  * a server from before the code, and for what is not the engine's at all (Docker's own errors).
  */
-import { ENGINE_BUSY, ENGINE_BUSY_WORDING } from "@supatype/shared"
+import { ENGINE_BUSY, ENGINE_BUSY_WORDING, isString } from "@supatype/shared"
 import { EngineError } from "./engine-client.js"
 import { TargetApiError } from "./target-client.js"
-import { formatDriftedObjects, SECURITY_DRIFT, type DriftedObject } from "./diff-output.js"
+import { formatDriftedObjects, isDriftedObjects, SECURITY_DRIFT, type DriftedObject } from "./diff-output.js"
 import { findJsonLine, type JsonObject } from "./engine-json-line.js"
 import { fatalError } from "./ui/fatal.js"
 
@@ -94,7 +94,8 @@ export function classifyPushRefusal(err: unknown): PushRefusal | null {
 /** The same reading, of what a push printed and the code it came with, if any. */
 export function classifyRefusalOutput(output: string, code?: string, busyWording = true): PushRefusal | null {
   const line = findJsonLine(output, (value) => typeof value["reason"] === "string")
-  return byCode(code ?? (line?.["reason"] as string | undefined), line) ?? byWording(output, busyWording)
+  const reason = line?.["reason"]
+  return byCode(code ?? (typeof reason === "string" ? reason : undefined), line) ?? byWording(output, busyWording)
 }
 
 /** The tables an unmanaged-tables refusal names, or null when `output` is not that refusal. */
@@ -145,7 +146,7 @@ function byCode(code: string | undefined, line: JsonObject | undefined): PushRef
     case UNMANAGED_MODEL_TABLES:
       return { kind: "unmanaged-tables", tables: stringsOf(line?.["tables"]) }
     case SECURITY_DRIFT:
-      return { kind: "security-drift", objects: listOf<DriftedObject>(line?.["objects"]) }
+      return { kind: "security-drift", objects: driftedObjectsOf(line?.["objects"]) }
     case ENGINE_BUSY:
       return { kind: "engine-busy" }
     case DRIFT_CHANGED:
@@ -155,12 +156,12 @@ function byCode(code: string | undefined, line: JsonObject | undefined): PushRef
   }
 }
 
-function listOf<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : []
+function driftedObjectsOf(value: unknown): DriftedObject[] {
+  return isDriftedObjects(value) ? value : []
 }
 
 function stringsOf(value: unknown): string[] {
-  return listOf<unknown>(value).filter((v): v is string => typeof v === "string")
+  return Array.isArray(value) ? value.filter(isString) : []
 }
 
 function byWording(output: string, busyWording: boolean): PushRefusal | null {

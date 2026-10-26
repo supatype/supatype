@@ -14,6 +14,7 @@ import {
 } from "../src/hooks/useStudioFieldAccess.js"
 import { applyFieldAccess } from "../src/lib/field-access-layout.js"
 import type { FieldConfig } from "../src/config.js"
+import { testField } from "./support.js"
 
 // Studio renders from advisory answers: the database is what refuses. So every rule here fails
 // open, and: the point that reshaped this module, the interface must never hide a value that
@@ -33,8 +34,7 @@ const UNRESOLVED: StudioFieldAccess = {
   tables: {},
 }
 
-const field = (name: string, extra: Partial<FieldConfig> = {}): FieldConfig =>
-  ({ name, label: name, widget: "text", ...extra }) as FieldConfig
+const field = (name: string, extra: Partial<FieldConfig> = {}): FieldConfig => testField({ name, ...extra })
 
 const RESTRICTED = { posts: { secret: { read: "deny", write: "deny", create: "deny" } } } as const
 

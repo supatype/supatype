@@ -16,6 +16,7 @@
     ]
   },
   "include": [
+    "../../ts-reset.d.ts",
     "specs",
     "playwright.config.ts",
     "masking/lib",

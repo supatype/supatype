@@ -11,6 +11,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { execSync } from "node:child_process"
+import { at, stringAt } from "../lib/json.js"
 
 const BASE_URL = process.env["SUPATYPE_URL"] ?? "http://localhost:18473"
 const SERVICE_ROLE_KEY = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? process.env["SERVICE_ROLE_KEY"]
@@ -27,6 +28,41 @@ function platformFetch(path: string, init?: RequestInit): Promise<Response> {
   })
 }
 
+/**
+ * A response body read once: its text for a failure message and its JSON for the assertions.
+ *
+ * Reading it twice is not possible. `assert.ok(res.ok, await res.text())` evaluates its message
+ * whether or not the assertion fails, so a `res.json()` after it threw "Body is unusable".
+ */
+async function readBody(res: Response): Promise<{ text: string; json: unknown }> {
+  const text = await res.text()
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch {
+    // Not JSON: left undefined, and the assertion that reads it fails with the text.
+  }
+  return { text, json }
+}
+
+/** Create a static deployment of one page and finalize it, returning its id. */
+async function deployStatic(html: string): Promise<string> {
+  const created = await platformFetch(`/projects/${PROJECT_REF}/deployments`, {
+    method: "POST",
+    body: JSON.stringify({ files: [{ path: "index.html", content: html, encoding: "utf8" }] }),
+  })
+  const body = await readBody(created)
+  assert.equal(created.status, 201, body.text)
+  const id = stringAt(at(body.json, "data"), "id")
+  assert.ok(id !== undefined, `the deployment has no data.id: ${body.text}`)
+
+  const finalized = await platformFetch(`/projects/${PROJECT_REF}/deployments/${id}/finalize`, {
+    method: "POST",
+  })
+  assert.ok(finalized.ok, await finalized.text())
+  return id
+}
+
 describe("control plane via Kong", () => {
   before(() => {
     if (!SERVICE_ROLE_KEY) {
@@ -37,8 +73,8 @@ describe("control plane via Kong", () => {
   test("GET /projects/:ref/status", async () => {
     const res = await platformFetch(`/projects/${PROJECT_REF}/status`)
     assert.ok(res.ok, `status failed: ${res.status}`)
-    const json = await res.json() as { data: { projectRef?: string } }
-    assert.ok(json.data)
+    const json = await res.json()
+    assert.ok(at(json, "data"))
   })
 
   test("POST /projects/:ref/schema/diff", async () => {
@@ -85,10 +121,10 @@ describe("control plane via Kong", () => {
         `node --import tsx/esm -e "import { resolveTarget } from './src/resolve-target.ts'; const t = resolveTarget('${tmp.replace(/\\/g, "/")}'); console.log(JSON.stringify({ mode: t.mode, prefix: t.apiPrefix, ref: t.projectRef }));"`,
         { cwd: cliRoot, encoding: "utf8" },
       )
-      const parsed = JSON.parse(out.trim()) as { mode: string; prefix: string; ref: string }
-      assert.equal(parsed.mode, "self-host")
-      assert.equal(parsed.prefix, "/platform/v1")
-      assert.equal(parsed.ref, PROJECT_REF)
+      const parsed = JSON.parse(out.trim())
+      assert.equal(at(parsed, "mode"), "self-host")
+      assert.equal(at(parsed, "prefix"), "/platform/v1")
+      assert.equal(at(parsed, "ref"), PROJECT_REF)
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
@@ -98,51 +134,26 @@ describe("control plane via Kong", () => {
     const v1 = `<html>rollback-v1-${Date.now()}</html>`
     const v2 = `<html>rollback-v2-${Date.now()}</html>`
 
-    const create1 = await platformFetch(`/projects/${PROJECT_REF}/deployments`, {
-      method: "POST",
-      body: JSON.stringify({
-        files: [{ path: "index.html", content: v1, encoding: "utf8" }],
-      }),
-    })
-    assert.equal(create1.status, 201, await create1.text())
-    const id1 = ((await create1.json()) as { data: { id: string } }).data.id
-
-    const fin1 = await platformFetch(`/projects/${PROJECT_REF}/deployments/${id1}/finalize`, {
-      method: "POST",
-    })
-    assert.ok(fin1.ok, await fin1.text())
-
-    const create2 = await platformFetch(`/projects/${PROJECT_REF}/deployments`, {
-      method: "POST",
-      body: JSON.stringify({
-        files: [{ path: "index.html", content: v2, encoding: "utf8" }],
-      }),
-    })
-    assert.equal(create2.status, 201, await create2.text())
-    const id2 = ((await create2.json()) as { data: { id: string } }).data.id
-
-    const fin2 = await platformFetch(`/projects/${PROJECT_REF}/deployments/${id2}/finalize`, {
-      method: "POST",
-    })
-    assert.ok(fin2.ok, await fin2.text())
+    const id1 = await deployStatic(v1)
+    await deployStatic(v2)
 
     const rolled = await platformFetch(`/projects/${PROJECT_REF}/deployments/rollback`, {
       method: "POST",
     })
-    assert.ok(rolled.ok, await rolled.text())
-    const rolledJson = (await rolled.json()) as { data: { version: string } }
-    assert.equal(rolledJson.data.version, id1)
+    const rolledBody = await readBody(rolled)
+    assert.ok(rolled.ok, rolledBody.text)
+    assert.equal(at(at(rolledBody.json, "data"), "version"), id1)
 
     const current = await platformFetch(`/projects/${PROJECT_REF}/deployments/current`)
-    assert.ok(current.ok, await current.text())
-    const currentJson = (await current.json()) as { data: { id: string } }
-    assert.equal(currentJson.data.id, id1)
+    const currentBody = await readBody(current)
+    assert.ok(current.ok, currentBody.text)
+    assert.equal(at(at(currentBody.json, "data"), "id"), id1)
   })
 
   test("GET /projects/:ref/schema/migrations", async () => {
     const res = await platformFetch(`/projects/${PROJECT_REF}/schema/migrations`)
-    assert.ok(res.ok, `migrations list failed: ${res.status} ${await res.text()}`)
-    const json = await res.json() as { data: unknown }
-    assert.ok(Array.isArray(json.data) || json.data !== undefined)
+    const body = await readBody(res)
+    assert.ok(res.ok, `migrations list failed: ${res.status} ${body.text}`)
+    assert.ok(at(body.json, "data") !== undefined, `no data in ${body.text}`)
   })
 })

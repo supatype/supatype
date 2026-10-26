@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true,
     "types": []
   },
-  "include": ["./**/*.ts", "./deno.d.ts"]
+  "include": ["../../../ts-reset.d.ts", "./**/*.ts", "./deno.d.ts"]
 }

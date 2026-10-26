@@ -7,6 +7,8 @@ import { stringifyWithBigInts } from "./exact-values.js"
 import { FilterBuilder } from "./filters.js"
 import { PostgrestErrorCodes, transportFailure } from "./errors.js"
 import { plainFetch, type FetchOptions, type RequestTransport } from "./fetch-with-retry.js"
+import { isJsonObject, isOneOf, readJsonObject } from "./json.js"
+import { decodeJwtPayload } from "./jwt.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -18,16 +20,30 @@ function decodeJwtRoleFromAuthHeader(headers: Record<string, string>): string | 
   const token = auth.slice("Bearer ".length)
   const parts = token.split(".")
   if (parts.length !== 3) return null
-  try {
-    const payloadJson =
-      typeof atob === "function"
-        ? atob(parts[1] ?? "")
-        : Buffer.from(parts[1] ?? "", "base64").toString("utf-8")
-    const payload = JSON.parse(payloadJson) as Record<string, unknown>
-    return typeof payload["role"] === "string" ? payload["role"] : null
-  } catch {
-    return null
-  }
+  const role = decodeJwtPayload(parts[1] ?? "")?.["role"]
+  return typeof role === "string" ? role : null
+}
+
+/**
+ * The boundary between a parsed body and the row type the caller declared for the table.
+ *
+ * PostgREST answers a table read or write with JSON objects, which is what is checked. That each
+ * object holds `TRow`'s columns is the generated schema's claim about the database, or the
+ * caller's own for `select<TResult>()`, which nothing on the client can check.
+ */
+function isCallerRow<TRow>(value: unknown): value is TRow {
+  return isJsonObject(value)
+}
+
+/** The rows a body holds: an array of objects, or one object (the single-object Accept). */
+function callerRows<TRow>(value: unknown): TRow[] | null {
+  if (Array.isArray(value)) return value.every(isCallerRow<TRow>) ? value : null
+  return isCallerRow<TRow>(value) ? [value] : null
+}
+
+/** The body was JSON but not rows: PostgREST does not answer a table request that way. */
+function notRows(status: number): SupatypeError {
+  return { message: `Unexpected response body: expected rows (HTTP ${status})`, status }
 }
 
 /**
@@ -74,6 +90,46 @@ function refusal(err: Record<string, unknown>, status: number): SupatypeError {
     // the message, so a form can mark the input.
     ...(typeof err["field"] === "string" && { field: err["field"] }),
   }
+}
+
+/** The refusal a failed request answered with, logged with `context` when auth debugging is on. */
+async function readRefusal(
+  res: Response,
+  label: string,
+  context: () => Promise<Record<string, unknown>>,
+): Promise<SupatypeError> {
+  const err = await readJsonObject(res, { message: "Error" })
+  if (DEBUG_AUTH) {
+    console.log(label, {
+      ...(await context()),
+      status: res.status,
+      message: String(err["message"] ?? err["hint"] ?? "Request failed"),
+      code: typeof err["code"] === "string" ? err["code"] : null,
+    })
+  }
+  return refusal(err, res.status)
+}
+
+/**
+ * The rows a successful body holds.
+ *
+ * Read from the text rather than `res.json()`: a bigInt, decimal or money column is already ruined
+ * by the time `JSON.parse` returns, and the digits are only recoverable from the body.
+ */
+function readRows<TRow>(body: string, path: string, status: number, count: number | null): QueryResult<TRow[]> {
+  const parsed = parseRowsExactly(body, tableFromPath(path))
+  if (!parsed.ok) return { data: null, error: { message: parsed.message, status }, count: null }
+  const rows = callerRows<TRow>(parsed.value)
+  if (rows === null) return { data: null, error: notRows(status), count: null }
+  return { data: rows, error: null, count }
+}
+
+const isServerCacheStatus = isOneOf(["HIT", "MISS", "BYPASS"])
+
+/** What the server said of its cache, else MISS for a cached read, else nothing. */
+function cacheStatusOf(header: string | null, cached: boolean): CacheStatus {
+  if (isServerCacheStatus(header)) return header
+  return cached ? "MISS" : undefined
 }
 
 function withMeta<T>(
@@ -244,8 +300,9 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
       Accept: "application/vnd.pgrst.object+json",
     })
     if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
-    // Some proxies drop Accept and return a one-element array, unwrap.
-    const row = (Array.isArray(data) ? data[0] : data) as TRow | undefined
+    // The single-object body and a one-element array (from a proxy that dropped Accept) both
+    // arrive here as rows: `callerRows` reads either.
+    const row = data === null ? null : data[0]
     if (row === undefined) {
       return {
         data: null,
@@ -261,8 +318,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
   async maybeSingle(): Promise<QueryResult<TRow | null>> {
     const { data, error, count, meta } = await this._fetch({})
     if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
-    const rows = data as TRow[]
-    const row = rows.length > 0 ? (rows[0] ?? null) : null
+    const row = data?.[0] ?? null
     return { data: row, error: null, count, ...(meta && { meta }) }
   }
 
@@ -307,93 +363,75 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     const mergedExtra = this.mergePreferHeader(this.extraHeaders, fetchHeaders)
     const url = this.buildRequestUrl()
     const method = this.head ? "HEAD" : "GET"
-    const resolveRequestHeaders = async (): Promise<Record<string, string>> => {
-      const authHeaders = await this.getHeaders()
-      return this.applyServerCacheHeader({ ...authHeaders, ...mergedExtra })
-    }
+    const resolveRequestHeaders = async (): Promise<Record<string, string>> =>
+      this.applyServerCacheHeader({ ...(await this.getHeaders()), ...mergedExtra })
 
-    if (this.cacheOptions && !this.head) {
-      const requestHeaders = await resolveRequestHeaders()
-      const cacheKey = buildCacheKey("GET", url, requestHeaders, {
-        partition: this.cacheOptions.key,
-        public: this.cacheOptions.public,
-      })
-      const cached = this.queryCache.get<TRow[]>(cacheKey)
-      if (cached) {
-        return withMeta(cached, { cacheStatus: "HIT" })
-      }
-    }
+    const cached = await this.cachedResult(url, resolveRequestHeaders)
+    if (cached) return withMeta(cached, { cacheStatus: "HIT" })
 
     let res: Response
     try {
-      res = await fetchWithOptional401Retry(
-        this.send,
-        url,
-        { method },
-        resolveRequestHeaders,
-        this.onUnauthorized,
-      )
+      res = await fetchWithOptional401Retry(this.send, url, { method }, resolveRequestHeaders, this.onUnauthorized)
     } catch (e) {
       return { data: null, error: transportFailure(e), count: null }
     }
 
-    const count = parseContentRangeTotal(res.headers.get("content-range"))
+    const result = await this.readResult(res, method, url, resolveRequestHeaders)
+    await this.remember(url, resolveRequestHeaders, result)
+    return withMeta(result, {
+      cacheStatus: cacheStatusOf(res.headers.get("X-Supatype-Cache-Status"), this.cacheOptions !== undefined),
+      maskedFields: parseMaskedFields(res.headers.get("X-Supatype-Masked-Fields")),
+    })
+  }
 
-    const maskedFields = parseMaskedFields(res.headers.get("X-Supatype-Masked-Fields"))
-    const serverCacheStatus = res.headers.get("X-Supatype-Cache-Status") as CacheStatus | null
-    const cacheStatus: CacheStatus =
-      serverCacheStatus === "HIT" || serverCacheStatus === "MISS" || serverCacheStatus === "BYPASS"
-        ? serverCacheStatus
-        : this.cacheOptions
-          ? "MISS"
-          : undefined
+  /** The cached result for this read, when it is cached and the cache holds one. */
+  private async cachedResult(
+    url: string,
+    resolveRequestHeaders: () => Promise<Record<string, string>>,
+  ): Promise<QueryResult<TRow[]> | null> {
+    if (!this.cacheOptions || this.head) return null
+    return this.queryCache.get<TRow[]>(await this.cacheKey(url, this.cacheOptions, resolveRequestHeaders))
+  }
 
+  /** Cache a read's rows, when this read is cached and it returned rows. */
+  private async remember(
+    url: string,
+    resolveRequestHeaders: () => Promise<Record<string, string>>,
+    result: QueryResult<TRow[]>,
+  ): Promise<void> {
+    if (!this.cacheOptions || result.error !== null || result.data === null) return
+    const key = await this.cacheKey(url, this.cacheOptions, resolveRequestHeaders)
+    this.queryCache.set(key, result, this.cacheOptions.ttl)
+  }
+
+  /** What the response says: a refusal, no body (HEAD or 204), or the rows. */
+  private async readResult(
+    res: Response,
+    method: "GET" | "HEAD",
+    url: string,
+    resolveRequestHeaders: () => Promise<Record<string, string>>,
+  ): Promise<QueryResult<TRow[]>> {
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: "Error" })) as Record<string, unknown>
-      const debugHeaders = await resolveRequestHeaders()
-      if (DEBUG_AUTH) {
-        console.log("[supatype:query] request failed", {
-          url,
-          status: res.status,
-          role: decodeJwtRoleFromAuthHeader(debugHeaders),
-          message: String(err["message"] ?? err["hint"] ?? "Request failed"),
-          code: typeof err["code"] === "string" ? err["code"] : null,
-        })
-      }
-      return withMeta<TRow[]>(
-        { data: null, error: refusal(err, res.status), count: null },
-        { cacheStatus, maskedFields },
-      )
+      const error = await readRefusal(res, "[supatype:query] request failed", async () => ({
+        url,
+        role: decodeJwtRoleFromAuthHeader(await resolveRequestHeaders()),
+      }))
+      return { data: null, error, count: null }
     }
+    const count = parseContentRangeTotal(res.headers.get("content-range"))
+    if (method === "HEAD" || res.status === 204) return { data: null, error: null, count }
+    return readRows<TRow>(await res.text(), this.path, res.status, count)
+  }
 
-    if (method === "HEAD" || res.status === 204) {
-      return withMeta<TRow[]>(
-        { data: null, error: null, count },
-        { cacheStatus, maskedFields },
-      )
-    }
-
-    // Read from the text rather than `res.json()`: a bigInt, decimal or money column is already
-    // ruined by the time `JSON.parse` returns, and the digits are only recoverable from the body.
-    const parsed = parseRowsExactly(await res.text(), tableFromPath(this.path))
-    if (!parsed.ok) {
-      return withMeta<TRow[]>(
-        { data: null, error: { message: parsed.message, status: res.status }, count: null },
-        { cacheStatus, maskedFields },
-      )
-    }
-
-    const result: QueryResult<TRow[]> = { data: parsed.value as TRow[], error: null, count }
-
-    if (this.cacheOptions) {
-      const cacheKey = buildCacheKey("GET", url, await resolveRequestHeaders(), {
-        partition: this.cacheOptions.key,
-        public: this.cacheOptions.public,
-      })
-      this.queryCache.set(cacheKey, result, this.cacheOptions.ttl)
-    }
-
-    return withMeta(result, { cacheStatus, maskedFields })
+  private async cacheKey(
+    url: string,
+    options: QueryCacheOptions,
+    resolveRequestHeaders: () => Promise<Record<string, string>>,
+  ): Promise<string> {
+    return buildCacheKey("GET", url, await resolveRequestHeaders(), {
+      partition: options.key,
+      public: options.public,
+    })
   }
 }
 
@@ -464,11 +502,13 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   ): MutationBuilder<ReturnedRow<TRow, TTables, TName, TColumns>, TTables, TName>
   /** Return the written rows typed as `TResult`, for a shape the select string cannot describe. */
   select<TResult>(columns?: string | undefined): MutationBuilder<TResult, TTables, TName>
-  select<TResult>(columns?: string | undefined): MutationBuilder<TResult, TTables, TName> {
+  // The same request, now described as returning the selected shape rather than the whole row. The
+  // overloads above say which shape; the row type is the caller's claim, checked by nothing at
+  // runtime, so the builder itself is returned rather than a copy that would split the request.
+  select(columns?: string | undefined): MutationBuilder<unknown, TTables, TName> {
     this.params.set("select", columns ?? "*")
     this.prefer("return=representation")
-    // The same request, now described as returning the selected shape rather than the whole row.
-    return this as MutationBuilder<unknown, TTables, TName> as MutationBuilder<TResult, TTables, TName>
+    return this
   }
 
   async single(): Promise<QueryResult<TRow>> {
@@ -476,7 +516,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
       Accept: "application/vnd.pgrst.object+json",
     })
     if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
-    const row = data !== null && data.length > 0 ? (data[0] as TRow) : null
+    const row = data?.[0] ?? null
     if (row === null) {
       return {
         data: null,
@@ -502,6 +542,16 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     return this._execute().then(onfulfilled, onrejected)
   }
 
+  /** POST, PATCH and DELETE: the transport applies the timeout and never retries them. */
+  private requestInit(): RequestInit {
+    return {
+      method: this.method,
+      // Not `JSON.stringify`: it throws on a bigint, so reading a row with a bigInt column and
+      // writing it back would fail now that the generated types declare one.
+      ...(this.body !== undefined && { body: stringifyWithBigInts(this.body) }),
+    }
+  }
+
   private async _execute(fetchHeaders: Record<string, string> = {}): Promise<QueryResult<TRow[]>> {
     const qs = this.params.toString()
     const url = `${this.baseUrl}${this.path}${qs ? `?${qs}` : ""}`
@@ -510,39 +560,20 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
       ...this.extraHeaders,
       ...fetchHeaders,
     })
-    // POST, PATCH and DELETE: the transport applies the timeout and never retries them.
-    const init: RequestInit = {
-      method: this.method,
-      // Not `JSON.stringify`: it throws on a bigint, so reading a row with a bigInt column and
-      // writing it back would fail now that the generated types declare one.
-      ...(this.body !== undefined && { body: stringifyWithBigInts(this.body) }),
-    }
     let res: Response
     try {
-      res = await fetchWithOptional401Retry(
-        this.send,
-        url,
-        init,
-        resolveRequestHeaders,
-        this.onUnauthorized,
-      )
+      res = await fetchWithOptional401Retry(this.send, url, this.requestInit(), resolveRequestHeaders, this.onUnauthorized)
     } catch (e) {
       return { data: null, error: transportFailure(e), count: null }
     }
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: "Error" })) as Record<string, unknown>
-      if (DEBUG_AUTH) {
-        console.log("[supatype:mutation] request failed", {
-          url,
-          method: this.method,
-          status: res.status,
-          role: decodeJwtRoleFromAuthHeader(await resolveRequestHeaders()),
-          message: String(err["message"] ?? err["hint"] ?? "Request failed"),
-          code: typeof err["code"] === "string" ? err["code"] : null,
-        })
-      }
-      return { data: null, error: refusal(err, res.status), count: null }
+      const error = await readRefusal(res, "[supatype:mutation] request failed", async () => ({
+        url,
+        method: this.method,
+        role: decodeJwtRoleFromAuthHeader(await resolveRequestHeaders()),
+      }))
+      return { data: null, error, count: null }
     }
 
     if (res.status === 204) {
@@ -550,13 +581,8 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     }
 
     // The returned representation of what was just written, so it needs the same care as a read.
-    const parsed = parseRowsExactly(await res.text(), tableFromPath(this.path))
-    if (!parsed.ok) {
-      return { data: null, error: { message: parsed.message, status: res.status }, count: null }
-    }
-
-    const data = Array.isArray(parsed.value) ? (parsed.value as TRow[]) : [parsed.value as TRow]
-    return { data, error: null, count: data.length }
+    const result = readRows<TRow>(await res.text(), this.path, res.status, null)
+    return result.data === null ? result : { ...result, count: result.data.length }
   }
 }
 

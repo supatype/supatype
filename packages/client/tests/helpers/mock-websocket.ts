@@ -1,4 +1,5 @@
-import { vi } from "vitest"
+import { vi, type Mock } from "vitest"
+import { isJsonObject } from "../../src/json.js"
 
 /**
  * A stand-in WebSocket for the realtime suites.
@@ -17,17 +18,26 @@ export interface MockWebSocketInstance {
   onclose: ((event: CloseEvent) => void) | null
   onmessage: ((event: MessageEvent) => void) | null
   onerror: ((event: Event) => void) | null
-  send: ReturnType<typeof vi.fn>
-  close: ReturnType<typeof vi.fn>
+  /** The client only ever sends JSON text. */
+  send: Mock<(data: string) => void>
+  close: Mock<() => void>
+}
+
+/** What the realtime client uses of the WebSocket constructor: `new` and the ready states. */
+export interface MockWebSocketClass {
+  new (url: string): MockWebSocketInstance
+  readonly OPEN: number
+  readonly CONNECTING: number
+  readonly CLOSED: number
 }
 
 export function createMockWebSocketClass(): {
-  MockWebSocket: typeof WebSocket
+  MockWebSocket: MockWebSocketClass
   instances: MockWebSocketInstance[]
 } {
   const instances: MockWebSocketInstance[] = []
 
-  class MockWebSocket {
+  class MockWebSocket implements MockWebSocketInstance {
     static OPEN = 1
     static CONNECTING = 0
     static CLOSED = 3
@@ -38,22 +48,22 @@ export function createMockWebSocketClass(): {
     onclose: ((event: CloseEvent) => void) | null = null
     onmessage: ((event: MessageEvent) => void) | null = null
     onerror: ((event: Event) => void) | null = null
-    send = vi.fn()
-    close = vi.fn()
+    send = vi.fn<(data: string) => void>()
+    close = vi.fn<() => void>()
 
     constructor(url: string) {
       this.url = url
-      instances.push(this as unknown as MockWebSocketInstance)
+      instances.push(this)
 
       // Auto-open after a microtask
       queueMicrotask(() => {
         this.readyState = 1 // OPEN
-        this.onopen?.({} as Event)
+        this.onopen?.(new Event("open"))
       })
     }
   }
 
-  return { MockWebSocket: MockWebSocket as unknown as typeof WebSocket, instances }
+  return { MockWebSocket, instances }
 }
 
 /** Simulate a server message arriving on a WebSocket instance. */
@@ -61,10 +71,33 @@ export function simulateServerMessage(
   ws: MockWebSocketInstance,
   msg: Record<string, unknown>,
 ): void {
-  ws.onmessage?.({ data: JSON.stringify(msg) } as MessageEvent)
+  ws.onmessage?.(new MessageEvent("message", { data: JSON.stringify(msg) }))
 }
 
 /** The token a socket was opened with, read back out of its URL. */
 export function tokenOf(ws: MockWebSocketInstance): string | null {
   return new URL(ws.url.replace(/^ws/, "http")).searchParams.get("token")
+}
+
+/** Every frame the client sent on a socket, parsed. A frame that is not a JSON object fails the test. */
+export function sentFrames(ws: MockWebSocketInstance): Array<Record<string, unknown>> {
+  return ws.send.mock.calls.map(([raw]) => {
+    const frame = JSON.parse(raw)
+    if (!isJsonObject(frame)) throw new Error(`the client sent a frame that is not a JSON object: ${raw}`)
+    return frame
+  })
+}
+
+/** The channels a socket was asked to join, in the order the subscribe frames went out. */
+export function subscribedChannels(ws: MockWebSocketInstance): string[] {
+  return sentFrames(ws)
+    .filter((frame) => frame["type"] === "subscribe")
+    .map(channelOf)
+}
+
+/** The channel a frame names. Fails the test when it names none. */
+export function channelOf(frame: Record<string, unknown> | undefined): string {
+  const channel = frame?.["channel"]
+  if (typeof channel !== "string") throw new Error(`the frame names no channel: ${JSON.stringify(frame)}`)
+  return channel
 }

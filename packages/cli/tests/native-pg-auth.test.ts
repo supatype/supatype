@@ -6,7 +6,8 @@ import * as ctl from "../src/postgres-ctl.js"
 import * as auth from "../src/native-pg-auth.js"
 import * as secrets from "../src/local-secrets.js"
 import { nativeRolesSql } from "../src/native-roles-sql.js"
-import { localDSN, STACK_API_SCHEMAS, type SupatypeProjectConfig } from "../src/project-config.js"
+import { localDSN, STACK_API_SCHEMAS } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 // Native `supatype dev` initialised its cluster with `--auth trust`: the passwords the CLI
 // generates were never checked, so any local process could connect as any role, the superuser
@@ -80,7 +81,7 @@ describe("the superuser's password", () => {
   })
 
   it("is what the default local connection string carries", () => {
-    const cfg = { project: { name: "demo" } } as SupatypeProjectConfig
+    const cfg = projectConfig()
     expect(localDSN(cfg, "s3cret")).toBe("postgres://postgres:s3cret@127.0.0.1:5432/demo?sslmode=disable")
   })
 })

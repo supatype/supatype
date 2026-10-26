@@ -1,24 +1,30 @@
 import { createHmac } from "node:crypto"
 import type { IncomingMessage } from "node:http"
 import { config } from "./env.js"
+import { isJsonObject, isNumber, isShape, isString, isUnknown, optional, type FromShape } from "./json.js"
 
-export interface JwtPayload {
+const JWT_PAYLOAD = {
   /** Absent on the anon key, which is a JWT with a role and no subject. */
-  sub?: string
-  role: string
-  aud?: string
-  exp?: number
-  iat?: number
-  app_metadata?: Record<string, unknown>
-  user_metadata?: Record<string, unknown>
-}
+  sub: optional(isString),
+  role: isString,
+  aud: optional(isUnknown),
+  exp: optional(isNumber),
+  iat: optional(isNumber),
+  app_metadata: optional(isJsonObject),
+  user_metadata: optional(isJsonObject),
+} as const
+
+/** The claims storage reads: a token that has them with other types is not one it accepts. */
+export type JwtPayload = FromShape<typeof JWT_PAYLOAD>
+
+const isJwtPayload = isShape(JWT_PAYLOAD)
 
 /** Decode and verify a HS256 JWT. Returns null if invalid. */
 export function verifyJwt(token: string): JwtPayload | null {
   const parts = token.split(".")
   if (parts.length !== 3) return null
 
-  const [header, payload, sig] = parts as [string, string, string]
+  const [header = "", payload = "", sig = ""] = parts
 
   // Verify signature
   const expected = createHmac("sha256", config.jwtSecret)
@@ -28,9 +34,8 @@ export function verifyJwt(token: string): JwtPayload | null {
   if (sig !== expected) return null
 
   try {
-    const decoded = JSON.parse(
-      Buffer.from(payload, "base64url").toString("utf8"),
-    ) as JwtPayload
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))
+    if (!isJwtPayload(decoded)) return null
 
     // Check expiry
     if (decoded.exp !== undefined && decoded.exp < Math.floor(Date.now() / 1000)) {

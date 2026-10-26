@@ -1,4 +1,5 @@
 import type { FieldConfig, ModelConfig } from "../config.js"
+import { isJsonObject } from "./json.js"
 
 /**
  * A blank text value is absent, not empty.
@@ -12,9 +13,9 @@ import type { FieldConfig, ModelConfig } from "../config.js"
  */
 function blankToNull(value: unknown): unknown {
   if (value === "") return null
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+  if (isJsonObject(value)) {
     // Localized columns are a locale map, so a blank translation is an absent one per locale.
-    const entries = Object.entries(value as Record<string, unknown>)
+    const entries = Object.entries(value)
     if (entries.some(([, v]) => v === "")) {
       return Object.fromEntries(entries.map(([k, v]) => [k, v === "" ? null : v]))
     }

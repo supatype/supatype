@@ -1,12 +1,11 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import type { AnyClient, AnyDatabase, AugmentedDatabase, MutationBuilder, SupatypeError } from "@supatype/client"
+import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { runMutation, type MutationOperation, type MutationOutcome } from "./mutation-request.js"
 
-export type MutationOperation = "insert" | "update" | "delete" | "upsert"
-
-type MutationRows = Record<string, unknown> | Record<string, unknown>[]
+export type { MutationOperation }
 
 export interface MutationOptions {
   /** Simple equality filters for update/delete operations */
@@ -17,7 +16,7 @@ export interface UseMutationResult<TRow> {
   mutate(
     data?: Record<string, unknown> | Record<string, unknown>[] | undefined,
     options?: MutationOptions | undefined,
-  ): Promise<{ data: TRow[] | null; error: SupatypeError | null; count: number | null }>
+  ): Promise<MutationOutcome<TRow>>
   loading: boolean
   error: SupatypeError | null
 }
@@ -53,28 +52,13 @@ export function useMutation<
     ) => {
       setLoading(true)
       setError(null)
-
-      // Through the untyped client: the generated Insert and Update types do not survive a table
-      // name known only at run time, so `data` goes out as the caller wrote it and PostgREST is
-      // what checks it.
-      const tableClient = (client as AnyClient).from(table)
-      let pending: MutationBuilder<Record<string, unknown>>
-      if (operation === "insert") {
-        pending = tableClient.insert(data as MutationRows)
-      } else if (operation === "upsert") {
-        pending = tableClient.upsert(data as MutationRows)
-      } else {
-        pending =
-          operation === "update" ? tableClient.update(data as Record<string, unknown>) : tableClient.delete()
-        for (const [col, val] of Object.entries(options?.filter ?? {})) {
-          pending = pending.eq(col, val)
-        }
+      try {
+        const result = await runMutation<TRow>(client as AnyClient, table, operation, data, options?.filter)
+        if (result.error !== null) setError(result.error)
+        return result
+      } finally {
+        setLoading(false)
       }
-      const result = (await pending) as { data: TRow[] | null; error: SupatypeError | null; count: number | null }
-
-      setLoading(false)
-      if (result.error !== null) setError(result.error)
-      return result
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [client, table, operation],

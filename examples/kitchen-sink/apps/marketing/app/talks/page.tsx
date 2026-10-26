@@ -1,7 +1,5 @@
 import React from "react"
 import { createClient } from "@/lib/supatype-server"
-import type { TableRow } from "@supatype/client"
-type Talk = TableRow<"talk">
 
 export default async function TalksPage(): Promise<React.ReactElement> {
   const supatype = await createClient()
@@ -13,7 +11,7 @@ export default async function TalksPage(): Promise<React.ReactElement> {
 
   if (error !== null) return <p className="ks-error">Error: {error.message}</p>
 
-  const talks = (data as Talk[] | null) ?? []
+  const talks = data ?? []
   if (talks.length === 0) return <p className="ks-muted">No talks published yet.</p>
 
   return (

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { resolveRealtimeLaunch } from "../src/realtime-launch.js"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 describe("resolveRealtimeLaunch", () => {
   it("uses overrides.realtime .js entry via node", async () => {
@@ -12,9 +12,7 @@ describe("resolveRealtimeLaunch", () => {
       const entry = join(dir, "fake-realtime.js")
       const { writeFileSync } = await import("node:fs")
       writeFileSync(entry, "export {}\n")
-      const config = {
-        overrides: { realtime: entry },
-      } as SupatypeProjectConfig
+      const config = projectConfig({ overrides: { realtime: entry } })
       const spec = await resolveRealtimeLaunch(config, dir)
       expect(spec.bin).toBe(process.execPath)
       expect(spec.args).toEqual([entry])

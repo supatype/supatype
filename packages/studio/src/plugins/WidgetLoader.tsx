@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo } from "react"
+import { isJsonObject } from "../lib/json.js"
 import { WidgetErrorBoundary } from "./WidgetErrorBoundary.js"
 
 // -- Props -------------------------------------------------------------------
@@ -17,23 +18,39 @@ export interface WidgetLoaderProps {
 
 // -- Widget component cache --------------------------------------------------
 
-const componentCache = new Map<string, React.LazyExoticComponent<React.ComponentType<Record<string, unknown>>>>()
+type PluginWidget = React.ComponentType<Record<string, unknown>>
 
-function getLazyComponent(
-  pluginName: string,
-  componentPath: string,
-): React.LazyExoticComponent<React.ComponentType<Record<string, unknown>>> {
+const componentCache = new Map<string, React.LazyExoticComponent<PluginWidget>>()
+
+/**
+ * Whether a module's default export is something React can render: a function or class component,
+ * or the object `memo` and `forwardRef` return.
+ *
+ * The boundary for plugin widgets. A plugin is code loaded by name at runtime, so the props it
+ * expects cannot be checked here; what can be checked is that React will accept it at all, and a
+ * module that fails that is reported by the error boundary rather than rendered.
+ */
+function isPluginWidget(value: unknown): value is PluginWidget {
+  if (typeof value === "function") return true
+  return isJsonObject(value) && "$$typeof" in value
+}
+
+async function importWidget(pluginName: string, componentPath: string): Promise<{ default: PluginWidget }> {
+  const mod: unknown = await import(/* @vite-ignore */ `${pluginName}/${componentPath}`)
+  const component = isJsonObject(mod) ? mod["default"] : undefined
+  if (!isPluginWidget(component)) {
+    throw new Error(`${pluginName}/${componentPath} has no default export that renders as a component`)
+  }
+  return { default: component }
+}
+
+function getLazyComponent(pluginName: string, componentPath: string): React.LazyExoticComponent<PluginWidget> {
   const cacheKey = `${pluginName}::${componentPath}`
 
   const cached = componentCache.get(cacheKey)
   if (cached) return cached
 
-  const LazyComponent = lazy(
-    () => import(/* @vite-ignore */ `${pluginName}/${componentPath}`) as Promise<{
-      default: React.ComponentType<Record<string, unknown>>
-    }>,
-  ) as React.LazyExoticComponent<React.ComponentType<Record<string, unknown>>>
-
+  const LazyComponent = lazy(() => importWidget(pluginName, componentPath))
   componentCache.set(cacheKey, LazyComponent)
   return LazyComponent
 }

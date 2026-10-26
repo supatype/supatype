@@ -4,6 +4,8 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import type { ModelConfig } from "../config.js"
 import type { SupatypeClient } from "@supatype/client"
+import { isJsonObject } from "../lib/json.js"
+import { authUsersIn } from "../lib/relation-auth-users.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
@@ -107,9 +109,9 @@ async function searchLiveData(
     (async () => {
       const res = await fetch(`${client.url}/auth/v1/admin/users?per_page=200`, { headers, signal })
       if (!res.ok) return
-      const data = await res.json() as { users?: Array<{ id: string; email?: string; user_metadata?: Record<string, unknown> }> }
+      const users = authUsersIn(await res.json())
       let count = 0
-      for (const u of data.users ?? []) {
+      for (const u of users) {
         const email = (u.email ?? "").toLowerCase()
         const name = String(u.user_metadata?.["name"] ?? u.user_metadata?.["full_name"] ?? "").toLowerCase()
         if (email.includes(q) || name.includes(q)) {
@@ -137,7 +139,8 @@ async function searchLiveData(
         { headers, signal },
       )
       if (!res.ok) return
-      const rows = await res.json() as Record<string, unknown>[]
+      const body = await res.json()
+      const rows = Array.isArray(body) ? body.filter(isJsonObject) : []
       for (const row of rows) {
         const label = String(
           row["name"] ?? row["title"] ?? row["email"] ?? row["label"] ?? row[model.primaryKey] ?? "Record",

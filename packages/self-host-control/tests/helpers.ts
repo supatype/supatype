@@ -1,3 +1,5 @@
+import { strict as assert } from "node:assert"
+import { isJsonObject, isString } from "@supatype/shared"
 import { createControlPlaneServer } from "../src/server.js"
 import { CONTROL_PLANE_SECRET_HEADER } from "../src/auth.js"
 
@@ -40,6 +42,30 @@ export async function request(
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   const text = await res.text()
-  const json = (text === "" ? {} : JSON.parse(text)) as Record<string, unknown>
-  return { status: res.status, json }
+  return { status: res.status, json: jsonObject(text === "" ? {} : JSON.parse(text)) }
+}
+
+/** `value` as an object, failing the test when it is not one. */
+export function jsonObject(value: unknown): Record<string, unknown> {
+  if (!isJsonObject(value)) assert.fail(`expected a JSON object, got ${JSON.stringify(value)}`)
+  return value
+}
+
+/** A response body's `data`, failing the test when it is not an object. */
+export function dataOf(json: Record<string, unknown>): Record<string, unknown> {
+  return jsonObject(json["data"])
+}
+
+/** The string at `data[key]`, failing the test when it is not one. */
+export function dataString(json: Record<string, unknown>, key: string): string {
+  const value = dataOf(json)[key]
+  if (typeof value !== "string") assert.fail(`expected a string at data.${key}, got ${JSON.stringify(value)}`)
+  return value
+}
+
+/** The list of strings at `data[key]`, failing the test when it is not one. */
+export function dataStrings(json: Record<string, unknown>, key: string): string[] {
+  const value = dataOf(json)[key]
+  if (!Array.isArray(value) || !value.every(isString)) assert.fail(`expected strings at data.${key}, got ${JSON.stringify(value)}`)
+  return value
 }

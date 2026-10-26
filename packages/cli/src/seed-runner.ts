@@ -18,6 +18,7 @@ import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { cliModuleUrl, evalTsSnippet } from "./tsx-runner.js"
 import type { SeedConfig, SeedIr } from "./seed.js"
+import { isArrayOf, isBoolean, isJsonObject, isShape, isString, optional } from "@supatype/shared"
 
 /** What a seed module turned out to be. */
 export type Collected =
@@ -34,6 +35,27 @@ export type Collected =
        */
       shape: "legacy"
     }
+
+const isSeedConfig = isShape({ transaction: optional(isBoolean), runOnce: optional(isBoolean) })
+
+/** The IR's header, and that each operation names its `op`. */
+const isIrHeader = isShape({
+  irVersion: (value: unknown): value is 1 => value === 1,
+  schemaFingerprint: isString,
+  operations: isArrayOf(isShape({ op: isString })),
+})
+
+/**
+ * What the child this module spawns wrote: the seed module's shape, the collector's document and
+ * the module's `config`. The header and the config are checked here; the operations are the
+ * collector's own output (`SeedCollector.finish`), each checked to name its `op`, and the engine
+ * validates every one before anything runs.
+ */
+function isCollected(value: unknown): value is Collected {
+  if (!isJsonObject(value)) return false
+  if (value["shape"] === "legacy") return true
+  return value["shape"] === "collected" && isIrHeader(value["ir"]) && isSeedConfig(value["config"])
+}
 
 export interface CollectOptions {
   cwd: string
@@ -62,7 +84,8 @@ export function collectSeed(file: string, options: CollectOptions): { result: Co
     if (run.exitCode !== 0 || !existsSync(outPath)) {
       throw new SeedCollectionFailed(file, [run.stdout, run.stderr].filter(Boolean).join("\n").trim())
     }
-    const result = JSON.parse(readFileSync(outPath, "utf8")) as Collected
+    const result = JSON.parse(readFileSync(outPath, "utf8"))
+    if (!isCollected(result)) throw new SeedCollectionFailed(file, "The seed module's collected document could not be read")
     return { result, stdout: run.stdout }
   } finally {
     rmSync(scratch, { recursive: true, force: true })

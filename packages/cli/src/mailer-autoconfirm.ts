@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { envValueOwner, readEnvFile } from "./env-file.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
+import { isJsonObject } from "@supatype/shared"
 
 /**
  * Whether the auth server confirms a new email sign-up by itself, from `auth.email.enableConfirmations`.
@@ -38,13 +39,13 @@ export function devMailerAutoconfirm(cwd: string, config: SupatypeProjectConfig)
 /** `auth.email`, when present, is an object whose `enableConfirmations` is a boolean. */
 export function validateAuthEmail(cfg: Record<string, unknown>, filename: string): void {
   const auth = cfg["auth"]
-  if (typeof auth !== "object" || auth === null) return
-  const email = (auth as Record<string, unknown>)["email"]
+  if (!isJsonObject(auth)) return
+  const email = auth["email"]
   if (email === undefined) return
-  if (typeof email !== "object" || email === null || Array.isArray(email)) {
+  if (!isJsonObject(email)) {
     throw new Error(`${filename}: auth.email must be an object`)
   }
-  const flag = (email as Record<string, unknown>)["enableConfirmations"]
+  const flag = email["enableConfirmations"]
   if (flag !== undefined && typeof flag !== "boolean") {
     throw new Error(`${filename}: auth.email.enableConfirmations must be true or false`)
   }

@@ -1,4 +1,5 @@
 import type { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import { p, runClackFlow } from "../ui/clack.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { selfHostTlsEnabled } from "../project-config.js"
@@ -62,7 +63,7 @@ async function addDomain(domainArg?: string, emailArg?: string): Promise<void> {
       }
       printDomainNextSteps(cwd, domain)
     } catch (err) {
-      error((err as Error).message)
+      error(errorMessage(err))
       process.exit(1)
     }
   }
@@ -101,5 +102,5 @@ function printDomainNextSteps(cwd: string, domain: string): void {
     `Platform URL: https://${domain}`,
   ])
   plain("  App, REST, Auth, Storage, Realtime, Functions, and Studio, one HTTPS domain.")
-  plain("  Certificates outlive restarts — in the keyspace's durable store, or the valkey-data volume.\n")
+  plain("  Certificates outlive restarts: in the keyspace's durable store, or the valkey-data volume.\n")
 }

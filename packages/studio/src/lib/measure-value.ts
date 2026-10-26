@@ -1,3 +1,5 @@
+import { isJsonObject } from "./json.js"
+
 /**
  * How much of a value there is, in the same unit the column's `CHECK` counts.
  *
@@ -6,7 +8,7 @@
  * do not.
  */
 /** Plain text of a lexical document, mirroring `_supatype.richtext_text` in the database. */
-function richTextLength(value: Record<string, unknown>): number | undefined {
+function richTextLength(value: object): number | undefined {
   let total = 0
   let sawText = false
   const walk = (node: unknown): void => {
@@ -14,17 +16,16 @@ function richTextLength(value: Record<string, unknown>): number | undefined {
       node.forEach(walk)
       return
     }
-    if (typeof node !== "object" || node === null) return
-    const record = node as Record<string, unknown>
-    if (typeof record["text"] === "string") {
-      total += record["text"].length
+    if (!isJsonObject(node)) return
+    if (typeof node["text"] === "string") {
+      total += node["text"].length
       sawText = true
     }
-    walk(record["children"])
-    walk(record["root"])
+    walk(node["children"])
+    walk(node["root"])
   }
   walk(value)
-  return sawText || value["root"] !== undefined ? total : undefined
+  return sawText || (isJsonObject(value) && value["root"] !== undefined) ? total : undefined
 }
 
 /**
@@ -41,9 +42,7 @@ function richTextLength(value: Record<string, unknown>): number | undefined {
  */
 export function lengthOf(value: unknown): number | undefined {
   if (typeof value === "string") return value.length
-  if (typeof value === "object" && value !== null) {
-    return richTextLength(value as Record<string, unknown>)
-  }
+  if (typeof value === "object" && value !== null) return richTextLength(value)
   return undefined
 }
 

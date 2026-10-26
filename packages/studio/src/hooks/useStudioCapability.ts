@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { isBoolean, isJsonObject, isRecordOf } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
@@ -51,10 +52,28 @@ const UNRESOLVED: StudioCapability = {
 
 /** The server's `identityLink`, or null when it sent none or sent something else. */
 function readIdentityLink(raw: unknown): StudioCapability["identityLink"] {
-  if (typeof raw !== "object" || raw === null) return null
-  const { linked, email } = raw as { linked?: unknown; email?: unknown }
+  if (!isJsonObject(raw)) return null
+  const { linked, email } = raw
   if (typeof linked !== "boolean") return null
   return { linked, email: typeof email === "string" ? email : null }
+}
+
+const isPermissionMap = isRecordOf(isBoolean)
+
+/** What the verify route's answer grants. A key it leaves out, or sends as another type, grants nothing. */
+function capabilityFrom(json: Record<string, unknown>): StudioCapability {
+  const { sub, role, mode, canElevate, seesDrafts } = json
+  const permissions = isPermissionMap(json["permissions"]) ? json["permissions"] : {}
+  return {
+    userId: typeof sub === "string" ? sub : null,
+    role: typeof role === "string" ? role : null,
+    mode: mode === "elevated" ? "elevated" : "self",
+    canElevate: canElevate === true,
+    canManageMembers: permissions["manageMembers"] === true,
+    seesDrafts: seesDrafts === true,
+    permissions,
+    identityLink: readIdentityLink(json["identityLink"]),
+  }
 }
 
 /**
@@ -80,28 +99,9 @@ export function useStudioCapability(): StudioCapability {
           headers: { ...studioGatewayHeaders(), ...studioAuthHeaders(client) },
         })
         if (!res.ok) return
-        const json = (await res.json()) as {
-          sub?: string
-          role?: string
-          mode?: string
-          canElevate?: boolean
-          seesDrafts?: boolean
-          permissions?: Record<string, boolean>
-          identityLink?: unknown
-        }
-        if (cancelled) return
-
-        const permissions = json.permissions ?? {}
-        setCapability({
-          userId: json.sub ?? null,
-          role: json.role ?? null,
-          mode: json.mode === "elevated" ? "elevated" : "self",
-          canElevate: json.canElevate === true,
-          canManageMembers: permissions["manageMembers"] === true,
-          seesDrafts: json.seesDrafts === true,
-          permissions,
-          identityLink: readIdentityLink(json.identityLink),
-        })
+        const json = await res.json()
+        if (cancelled || !isJsonObject(json)) return
+        setCapability(capabilityFrom(json))
       } catch {
         // Leave it unresolved: the UI then offers nothing, and the server refuses
         // anything attempted anyway. Failing open here would show controls that

@@ -10,6 +10,8 @@
  *
  * Run by extension-schema-e2e.sh against a stack it pushed `schema.ts` to.
  */
+import { at, isRecord, isRecordArray } from "../lib/json.js"
+
 const BASE = process.env["SUPATYPE_URL"] ?? "http://127.0.0.1:18473"
 const ANON = process.env["ANON_KEY"] ?? ""
 if (!ANON) throw new Error("ANON_KEY must be set")
@@ -55,7 +57,7 @@ async function send(path: string, request: Request = {}): Promise<Sent> {
 type Row = Record<string, unknown>
 
 function rowsOf(sent: Sent): Row[] {
-  return Array.isArray(sent.json) ? (sent.json as Row[]) : []
+  return isRecordArray(sent.json) ? sent.json : []
 }
 
 const LONDON = "SRID=4326;POINT(-0.1276 51.5072)"
@@ -93,13 +95,18 @@ async function restRoundTrip(): Promise<Row | undefined> {
 
 async function gql(query: string): Promise<{ status: number; data: Row | null; errors: string[] }> {
   const sent = await send("/graphql/v1", { method: "POST", body: { query } })
-  const body = (sent.json ?? {}) as { data?: Row | null; errors?: { message?: string }[] }
-  return { status: sent.status, data: body.data ?? null, errors: (body.errors ?? []).map((e) => String(e.message)) }
+  const data = at(sent.json, "data")
+  const errors = at(sent.json, "errors")
+  return {
+    status: sent.status,
+    data: isRecord(data) ? data : null,
+    errors: Array.isArray(errors) ? errors.map((e) => String(at(e, "message"))) : [],
+  }
 }
 
 function nodes(data: Row | null): Row[] {
-  const edges = ((data?.["placeCollection"] as { edges?: { node: Row }[] } | undefined)?.edges ?? [])
-  return edges.map((e) => e.node)
+  const edges = at(data?.["placeCollection"], "edges")
+  return Array.isArray(edges) ? edges.map((e) => at(e, "node")).filter(isRecord) : []
 }
 
 async function graphqlRoundTrip(rest: Row | undefined): Promise<void> {

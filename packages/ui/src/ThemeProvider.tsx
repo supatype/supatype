@@ -1,6 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from "react"
 
-type Theme = "light" | "dark" | "system"
+const THEMES = ["light", "dark", "system"] as const
+
+type Theme = (typeof THEMES)[number]
+
+/** The theme saved in this browser, when it is one: anything else stored under the key is ignored. */
+function storedTheme(): Theme | undefined {
+  const saved = localStorage.getItem("supatype-theme")
+  return THEMES.find((theme) => theme === saved)
+}
 
 interface ThemeContextValue {
   theme: Theme
@@ -27,7 +35,7 @@ export const ThemeProvider: React.FC<{ defaultTheme?: Theme; children: React.Rea
 }) => {
   const [theme, setThemeState] = useState<Theme>(() => {
     if (typeof window === "undefined") return defaultTheme
-    return (localStorage.getItem("supatype-theme") as Theme) ?? defaultTheme
+    return storedTheme() ?? defaultTheme
   })
   const [resolvedTheme, setResolved] = useState<"light" | "dark">(() =>
     theme === "system" ? getSystemTheme() : theme,

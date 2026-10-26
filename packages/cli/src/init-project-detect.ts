@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
+import { parsePackageJson } from "./package-json.js"
 
 const VITE_CONFIG_NAMES = [
   "vite.config.ts",
@@ -30,11 +31,8 @@ function hasPackageVite(cwd: string): boolean {
   const pkgPath = join(cwd, "package.json")
   if (!existsSync(pkgPath)) return false
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-      dependencies?: Record<string, string>
-      devDependencies?: Record<string, string>
-    }
-    return Boolean(pkg.devDependencies?.["vite"] ?? pkg.dependencies?.["vite"])
+    const pkg = parsePackageJson(readFileSync(pkgPath, "utf8"))
+    return Boolean(pkg.devDependencies["vite"] ?? pkg.dependencies["vite"])
   } catch {
     return false
   }

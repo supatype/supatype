@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
 import type { SupatypeClient } from "@supatype/client"
 import { studioAuthHeaders, usesSessionProxy } from "../src/lib/studio-auth-headers.js"
+import { testClient } from "./support.js"
+
+const PROXY = "http://localhost:18473/studio/proxy"
 
 function clientWithToken(token: string | null): SupatypeClient {
-  return {
-    url: "http://localhost:18473/studio/proxy",
-    auth: { currentAccessToken: token },
-  } as unknown as SupatypeClient
+  return testClient({ url: PROXY, token })
 }
 
 describe("studioAuthHeaders", () => {
@@ -15,11 +15,8 @@ describe("studioAuthHeaders", () => {
   // opens devtools, and it bypasses Studio membership, the role's permissions,
   // the acting identity and the audit trail, every control the server applies.
   it("never sends a service role key, even when one is attached to the client", () => {
-    const client = {
-      url: "http://localhost:18473/studio/proxy",
-      serviceRoleKey: "service-role-key",
-      auth: { currentAccessToken: "user-token" },
-    } as unknown as SupatypeClient
+    const client = testClient({ url: PROXY, token: "user-token", serviceRoleKey: "service-role-key" })
+    expect(client.serviceRoleKey).toBe("service-role-key")
 
     const headers = studioAuthHeaders(client)
     expect(headers["Authorization"]).toBe("Bearer user-token")

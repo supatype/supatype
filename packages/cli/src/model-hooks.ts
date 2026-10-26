@@ -8,10 +8,13 @@
  * Kept out of the extractor on purpose: resolving the functions directory needs the project config,
  * and the extractor is a leaf that reads type syntax and nothing else.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { generateHooksModule } from "./hooks-generator.js"
 import { manifestCache } from "./model-cache.js"
+import { astModels, objectAt } from "./ast-read.js"
+import { readJsonObjectFile } from "./json-file.js"
+import { isJsonObject } from "@supatype/shared"
 
 export interface DeclaredHook {
   model: string
@@ -21,28 +24,67 @@ export interface DeclaredHook {
 
 /** Every hook declared across the schema, in a stable order for reporting. */
 export function declaredHooks(ast: unknown): DeclaredHook[] {
-  const models = (ast as { models?: unknown[] })?.models
-  if (!Array.isArray(models)) return []
+  return modelFunctions(ast, "hooks")
+    .flatMap(({ model, entries }) => entries.map((entry) => ({ model, event: entry.key, function: entry.function })))
+    .sort((a, b) => `${a.model}.${a.event}`.localeCompare(`${b.model}.${b.event}`))
+}
 
-  const out: DeclaredHook[] = []
-  for (const model of models) {
-    // Guarded before the optional chains, not by them: see manifestHooks.
-    if (typeof model !== "object" || model === null) continue
-    const shaped = model as {
-      name?: string
-      annotations?: { platform?: { hooks?: Record<string, unknown> } }
-    }
-    const hooks = shaped.annotations?.platform?.hooks
-    if (typeof hooks !== "object" || hooks === null) continue
+/** One entry of a model's hook or validator map that names a function. */
+interface FunctionEntry {
+  /** The event (`beforeInsert`) or the field the entry is for. */
+  key: string
+  function: string
+  value: Record<string, unknown>
+}
 
-    for (const [event, value] of Object.entries(hooks)) {
-      const fn = (value as { function?: unknown })?.function
-      if (typeof fn === "string" && fn.length > 0) {
-        out.push({ model: shaped.name ?? "?", event, function: fn })
-      }
+/** A model's name and table, with the entries of one of its function maps. */
+interface ModelFunctions {
+  model: string
+  table: unknown
+  entries: FunctionEntry[]
+}
+
+/**
+ * Per model, the entries of its `hooks` or `validate` map that name a function. Each step is
+ * checked, so a malformed model or entry is skipped rather than throwing a TypeError out of
+ * `supatype push`.
+ */
+function modelFunctions(ast: unknown, map: "hooks" | "validate"): ModelFunctions[] {
+  const out: ModelFunctions[] = []
+  for (const model of astModels(ast)) {
+    const declared = objectAt(model, "annotations", "platform", map)
+    if (declared === undefined) continue
+    const entries: FunctionEntry[] = []
+    for (const [key, value] of Object.entries(declared)) {
+      if (!isJsonObject(value)) continue
+      const fn = value["function"]
+      if (typeof fn === "string" && fn.length > 0) entries.push({ key, function: fn, value })
     }
+    const name = model["name"]
+    const table = objectAt(model, "annotations", "db")?.["tableName"]
+    out.push({ model: typeof name === "string" ? name : "?", table, entries })
   }
-  return out.sort((a, b) => `${a.model}.${a.event}`.localeCompare(`${b.model}.${b.event}`))
+  return out
+}
+
+/** Each table's entries as manifest entries, leaving out tables with no name or no entries. */
+function manifestMap(
+  ast: unknown,
+  map: "hooks" | "validate",
+  toEntry: (entry: FunctionEntry) => ManifestHookEntry,
+): Record<string, Record<string, ManifestHookEntry>> {
+  const out: Record<string, Record<string, ManifestHookEntry>> = {}
+  for (const { table, entries } of modelFunctions(ast, map)) {
+    if (typeof table !== "string" || table.length === 0 || entries.length === 0) continue
+    out[table] = Object.fromEntries(entries.map((entry) => [entry.key, toEntry(entry)]))
+  }
+  return out
+}
+
+/** An entry's own `timeout`, or the default. */
+function timeoutOf(entry: FunctionEntry): number {
+  const timeout = entry.value["timeout"]
+  return typeof timeout === "number" ? timeout : DEFAULT_HOOK_TIMEOUT_MS
 }
 
 /** Function directory names available to be used as hooks. */
@@ -131,45 +173,12 @@ export interface ManifestHookEntry {
  * cannot disagree about the safe direction.
  */
 export function manifestHooks(ast: unknown): Record<string, Record<string, ManifestHookEntry>> {
-  const models = (ast as { models?: unknown[] })?.models
-  if (!Array.isArray(models)) return {}
-
-  const out: Record<string, Record<string, ManifestHookEntry>> = {}
-  for (const model of models) {
-    // Guarded before the optional chains, not by them: `x?.y` protects against `x.y` being
-    // nullish, not against `x` itself being null, so a malformed entry in the models array would
-    // throw a TypeError out of `supatype push` rather than being skipped.
-    if (typeof model !== "object" || model === null) continue
-    const shaped = model as {
-      annotations?: {
-        db?: { tableName?: string }
-        platform?: { hooks?: Record<string, { function?: string; timeout?: number; onUnavailable?: string }> }
-      }
-    }
-    const table = shaped.annotations?.db?.tableName
-    const hooks = shaped.annotations?.platform?.hooks
-    if (typeof table !== "string" || table.length === 0) continue
-    if (typeof hooks !== "object" || hooks === null) continue
-
-    const entries: Record<string, ManifestHookEntry> = {}
-    for (const [event, value] of Object.entries(hooks)) {
-      const fn = value?.function
-      if (typeof fn !== "string" || fn.length === 0) continue
-      const onUnavailable =
-        value.onUnavailable === "reject" || value.onUnavailable === "log"
-          ? value.onUnavailable
-          : event.startsWith("before")
-            ? "reject"
-            : "log"
-      entries[event] = {
-        function: fn,
-        timeout: typeof value.timeout === "number" ? value.timeout : DEFAULT_HOOK_TIMEOUT_MS,
-        onUnavailable,
-      }
-    }
-    if (Object.keys(entries).length > 0) out[table] = entries
-  }
-  return out
+  return manifestMap(ast, "hooks", (entry) => {
+    const declared = entry.value["onUnavailable"]
+    const onUnavailable =
+      declared === "reject" || declared === "log" ? declared : entry.key.startsWith("before") ? "reject" : "log"
+    return { function: entry.function, timeout: timeoutOf(entry), onUnavailable }
+  })
 }
 
 
@@ -182,28 +191,9 @@ export interface DeclaredValidator {
 
 /** Every per-field validator declared across the schema, in a stable order for reporting. */
 export function declaredValidators(ast: unknown): DeclaredValidator[] {
-  const models = (ast as { models?: unknown[] })?.models
-  if (!Array.isArray(models)) return []
-
-  const out: DeclaredValidator[] = []
-  for (const model of models) {
-    // Guarded before the optional chains, not by them: see manifestHooks.
-    if (typeof model !== "object" || model === null) continue
-    const shaped = model as {
-      name?: string
-      annotations?: { platform?: { validate?: Record<string, unknown> } }
-    }
-    const validators = shaped.annotations?.platform?.validate
-    if (typeof validators !== "object" || validators === null) continue
-
-    for (const [field, value] of Object.entries(validators)) {
-      const fn = (value as { function?: unknown })?.function
-      if (typeof fn === "string" && fn.length > 0) {
-        out.push({ model: shaped.name ?? "?", field, function: fn })
-      }
-    }
-  }
-  return out.sort((a, b) => `${a.model}.${a.field}`.localeCompare(`${b.model}.${b.field}`))
+  return modelFunctions(ast, "validate")
+    .flatMap(({ model, entries }) => entries.map((entry) => ({ model, field: entry.key, function: entry.function })))
+    .sort((a, b) => `${a.model}.${a.field}`.localeCompare(`${b.model}.${b.field}`))
 }
 
 /**
@@ -215,39 +205,11 @@ export function declaredValidators(ast: unknown): DeclaredValidator[] {
  * failure found when that path was built. Saying it here means neither side has to be right alone.
  */
 export function manifestValidators(ast: unknown): Record<string, Record<string, ManifestHookEntry>> {
-  const models = (ast as { models?: unknown[] })?.models
-  if (!Array.isArray(models)) return {}
-
-  const out: Record<string, Record<string, ManifestHookEntry>> = {}
-  for (const model of models) {
-    // Guarded before the optional chains, not by them: `x?.y` protects against `x.y` being
-    // nullish, not against `x` itself being null, so a malformed entry in the models array would
-    // throw a TypeError out of `supatype push` rather than being skipped.
-    if (typeof model !== "object" || model === null) continue
-    const shaped = model as {
-      annotations?: {
-        db?: { tableName?: string }
-        platform?: { validate?: Record<string, { function?: string; timeout?: number }> }
-      }
-    }
-    const table = shaped.annotations?.db?.tableName
-    const validators = shaped.annotations?.platform?.validate
-    if (typeof table !== "string" || table.length === 0) continue
-    if (typeof validators !== "object" || validators === null) continue
-
-    const entries: Record<string, ManifestHookEntry> = {}
-    for (const [field, value] of Object.entries(validators)) {
-      const fn = value?.function
-      if (typeof fn !== "string" || fn.length === 0) continue
-      entries[field] = {
-        function: fn,
-        timeout: typeof value.timeout === "number" ? value.timeout : DEFAULT_HOOK_TIMEOUT_MS,
-        onUnavailable: "reject",
-      }
-    }
-    if (Object.keys(entries).length > 0) out[table] = entries
-  }
-  return out
+  return manifestMap(ast, "validate", (entry) => ({
+    function: entry.function,
+    timeout: timeoutOf(entry),
+    onUnavailable: "reject",
+  }))
 }
 
 /**
@@ -311,13 +273,9 @@ export function syncManifestHooks(cwd: string, ast: unknown): boolean {
   const manifestPath = join(cwd, ".supatype", "manifest.json")
   if (!existsSync(manifestPath)) return false
 
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>
-  } catch {
-    return false // Malformed: the server will complain about it far more clearly than we can here.
-  }
-  if (typeof parsed !== "object" || parsed === null) return false
+  // Malformed: the server will complain about it far more clearly than we can here.
+  const parsed = readJsonObjectFile(manifestPath)
+  if (parsed === undefined) return false
 
   const changedHooks = applyManifestMap(parsed, "hooks", manifestHooks(ast))
   const changedValidators = applyManifestMap(parsed, "validators", manifestValidators(ast))
@@ -397,13 +355,12 @@ export function hooksReport(cwd: string, hooksDir: string, ast: unknown): HooksR
   let mapMissing = false
   let validatorMapMissing = false
   if ((declared.length > 0 || validators.length > 0) && existsSync(manifestPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>
+    // Unparseable: the server reports that far better than a doctor line could.
+    const parsed = readJsonObjectFile(manifestPath)
+    if (parsed !== undefined) {
       functionsDisabled = parsed["functions_enabled"] === false
       mapMissing = declared.length > 0 && parsed["hooks"] === undefined
       validatorMapMissing = validators.length > 0 && parsed["validators"] === undefined
-    } catch {
-      // Unparseable: the server reports that far better than a doctor line could.
     }
   }
 

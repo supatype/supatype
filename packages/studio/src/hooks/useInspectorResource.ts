@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { bodyMessage, readJsonObject, type Guard } from "../lib/json.js"
 import type { ProjectFetch } from "./usePlatformApi.js"
 
 /**
@@ -23,24 +24,36 @@ export interface InspectorResource<T> {
   refresh: () => void
 }
 
-/** The `data` of a `{ data }` answer, or the failure a refusal describes. */
-export async function readInspectorJson<T>(res: Response): Promise<{ data: T } | { failure: InspectorFailure }> {
-  let body: { data?: T; error?: string; message?: string } = {}
-  try {
-    body = (await res.json()) as typeof body
-  } catch {
-    // An empty or non-JSON body still has a status worth reporting.
+/**
+ * The `data` of a `{ data }` answer when the guard accepts it, or the failure a refusal describes.
+ * An empty or non-JSON body reads as `{}`: it still has a status worth reporting.
+ */
+export async function readInspectorJson<T>(
+  res: Response,
+  guard: Guard<T>,
+): Promise<{ data: T } | { failure: InspectorFailure }> {
+  const body = await readJsonObject(res)
+  const data = body["data"]
+  if (res.ok && guard(data)) return { data }
+  if (res.ok && data !== undefined) {
+    return { failure: { status: res.status, code: null, message: `Unexpected response (${res.status})` } }
   }
-  if (res.ok && body.data !== undefined) return { data: body.data }
+  const code = body["error"]
   return {
-    failure: { status: res.status, code: body.error ?? null, message: body.message ?? `Request failed (${res.status})` },
+    failure: {
+      status: res.status,
+      code: typeof code === "string" ? code : null,
+      message: bodyMessage(body) ?? `Request failed (${res.status})`,
+    },
   }
 }
 
+/** `guard` checks each answer's `data`; pass a module-level constant so the refresh stays stable. */
 export function useInspectorResource<T>(
   projectFetch: ProjectFetch,
   path: string,
   intervalMs: number | null,
+  guard: Guard<T>,
 ): InspectorResource<T> {
   const [data, setData] = useState<T | null>(null)
   const [failure, setFailure] = useState<InspectorFailure | null>(null)
@@ -51,7 +64,7 @@ export function useInspectorResource<T>(
     const request = ++latest.current
     void (async () => {
       try {
-        const answer = await readInspectorJson<T>(await projectFetch(path))
+        const answer = await readInspectorJson(await projectFetch(path), guard)
         if (request !== latest.current) return
         if ("data" in answer) {
           setData(answer.data)
@@ -67,7 +80,7 @@ export function useInspectorResource<T>(
         if (request === latest.current) setLoading(false)
       }
     })()
-  }, [projectFetch, path])
+  }, [projectFetch, path, guard])
 
   useEffect(() => {
     refresh()

@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { AppConfig, AppFramework } from "../config.js"
+import { parsePackageJson } from "../package-json.js"
 
 export interface ResolvedAppConfig {
   framework: AppFramework
@@ -52,10 +53,7 @@ export function detectFramework(appDir: string): AppFramework | undefined {
   const pkgPath = join(appDir, "package.json")
   if (!existsSync(pkgPath)) return undefined
 
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-    dependencies?: Record<string, string>
-    devDependencies?: Record<string, string>
-  }
+  const pkg = parsePackageJson(readFileSync(pkgPath, "utf8"))
 
   const allDeps = { ...pkg.dependencies, ...pkg.devDependencies }
 
@@ -139,8 +137,7 @@ export function resolveAppConfig(
 function getPackageName(dir: string): string | undefined {
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) return undefined
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { name?: string }
-  return pkg.name
+  return parsePackageJson(readFileSync(pkgPath, "utf8")).name
 }
 
 /**
@@ -182,10 +179,8 @@ export function validateStaticMode(framework: AppFramework, appDir: string): str
   if (framework === "sveltekit") {
     const pkgPath = join(appDir, "package.json")
     if (existsSync(pkgPath)) {
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-        devDependencies?: Record<string, string>
-      }
-      if (!pkg.devDependencies?.["@sveltejs/adapter-static"]) {
+      const pkg = parsePackageJson(readFileSync(pkgPath, "utf8"))
+      if (!pkg.devDependencies["@sveltejs/adapter-static"]) {
         return (
           "Supatype requires @sveltejs/adapter-static for SvelteKit.\n" +
           "Install it: npm install -D @sveltejs/adapter-static"

@@ -13,19 +13,20 @@ import {
   type Capabilities,
   type EngineProbe,
 } from "../src/engine-ownership-gate.js"
+import { isJsonObject } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
 
 const ALL = ["adopt_keys", "adopt_none", "release", "reclaim", "rebaseline", "accept_access_drift", "overwrite_drift", "engine_busy"]
 
 /** An engine that answers `capabilities` and `--version` as given (null: exits non-zero). */
 function engine(answers: { capabilities?: string | null; version?: string | null }): EngineProbe & { calls: string[][] } {
   const calls: string[][] = []
-  const probe = ((args: readonly string[]) => {
+  const probe: EngineProbe = (args) => {
     calls.push([...args])
     const out = args[0] === "capabilities" ? answers.capabilities : answers.version
     return out === null || out === undefined ? { status: 2, stdout: "" } : { status: 0, stdout: out }
-  }) as EngineProbe & { calls: string[][] }
-  probe.calls = calls
-  return probe
+  }
+  return Object.assign(probe, { calls })
 }
 
 describe("probeCapabilities()", () => {
@@ -95,9 +96,9 @@ describe("capabilityRefusal() / assertSupported()", () => {
       ])
       expect.unreachable()
     } catch (err) {
-      expect(err).toBeInstanceOf(OwnershipUnsupportedError)
-      expect((err as OwnershipUnsupportedError).need.feature).toBe("adopt_none")
-      expect((err as Error).message).toBe("this server does not support --adopt-none; update it")
+      if (!(err instanceof OwnershipUnsupportedError)) throw err
+      expect(err.need.feature).toBe("adopt_none")
+      expect(err.message).toBe("this server does not support --adopt-none; update it")
     }
   })
 })
@@ -200,7 +201,7 @@ describe("targetSchemaPush() against a server", () => {
     const { targetSchemaPush } = await import("../src/resolve-target.js")
     await targetSchemaPush(selfHost(), {}, { cwd: process.cwd(), overwriteDrift: true })
     const push = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/schema/push"))!
-    const body = JSON.parse(String(push[1]?.body)) as Record<string, unknown>
+    const body = parseJsonAs(String(push[1]?.body), isJsonObject)
     expect(body["overwrite_drift"]).toBe(true)
     expect(body).not.toHaveProperty("overwriteDrift")
   })
@@ -238,7 +239,7 @@ describe("targetSchemaPush() against a server", () => {
     const { targetSchemaPush } = await import("../src/resolve-target.js")
     await targetSchemaPush(selfHost(), {}, { cwd: process.cwd() })
     expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(["http://cp.test/platform/v1/projects/app/schema/push"])
-    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as Record<string, unknown>
+    const body = parseJsonAs(String(fetchMock.mock.calls[0]![1]?.body), isJsonObject)
     expect(body).not.toHaveProperty("overwrite_drift")
   })
 
@@ -265,7 +266,7 @@ describe("targetSchemaPush() against a server", () => {
     )
     await targetSchemaDoctor(selfHost(), {}, { rebaseline: true, acceptAccessDrift: true })
     const sent = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/schema/doctor"))!
-    const body = JSON.parse(String(sent[1]?.body)) as Record<string, unknown>
+    const body = parseJsonAs(String(sent[1]?.body), isJsonObject)
     expect(body).toMatchObject({ rebaseline: true, accept_access_drift: true })
     expect(body).not.toHaveProperty("overwrite_drift")
   })

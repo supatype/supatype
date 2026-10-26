@@ -6,11 +6,13 @@
  */
 
 import type { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
+import { isArrayOf, isShape, isString, nullable, optional } from "@supatype/shared"
 import { error, info, plain, warn } from "../ui/messages.js"
 import {
   applyRemedies,
@@ -51,7 +53,7 @@ export function registerDb(program: Command): void {
       const envName = opts.env || "production"
 
       try {
-        const data = await targetFetch<Array<{ name: string; databaseUrl?: string }>>(
+        const data = await targetFetch(
           target.apiBaseUrl,
           target.apiPrefix,
           {
@@ -60,6 +62,7 @@ export function registerDb(program: Command): void {
             token: target.token!,
             orgId: target.orgId,
           },
+          isArrayOf(isShape({ name: isString, databaseUrl: optional(nullable(isString)) })),
         )
 
         const env = data.find((e) => e.name === envName)
@@ -75,7 +78,7 @@ export function registerDb(program: Command): void {
         plain("Session mode (port 5432): for interactive tools (psql, DataGrip, TablePlus)")
         plain("Transaction mode (port 6432): for application servers and serverless functions")
       } catch (err) {
-        error(`Failed to fetch connection string: ${(err as Error).message}`)
+        error(`Failed to fetch connection string: ${errorMessage(err)}`)
         process.exitCode = 1
       }
     })
@@ -98,7 +101,7 @@ export function registerDb(program: Command): void {
       const envName = opts.env || "production"
 
       try {
-        const data = await targetFetch<{ password?: string; databaseUrl?: string }>(
+        const data = await targetFetch(
           target.apiBaseUrl,
           target.apiPrefix,
           {
@@ -107,6 +110,7 @@ export function registerDb(program: Command): void {
             token: target.token!,
             orgId: target.orgId,
           },
+          isShape({ password: optional(nullable(isString)), databaseUrl: optional(nullable(isString)) }),
         )
 
         info("Database password reset successfully.")
@@ -116,7 +120,7 @@ export function registerDb(program: Command): void {
           plain(`\nNew password: ${data.password}`)
         }
       } catch (err) {
-        error(`Failed to reset password: ${(err as Error).message}`)
+        error(`Failed to reset password: ${errorMessage(err)}`)
         process.exitCode = 1
       }
     })
@@ -172,7 +176,7 @@ export function registerDb(program: Command): void {
       try {
         await client.connect()
       } catch (err) {
-        error(`Could not connect: ${(err as Error).message}`)
+        error(`Could not connect: ${errorMessage(err)}`)
         process.exitCode = 1
         return
       }
@@ -224,7 +228,7 @@ export function registerDb(program: Command): void {
             try {
               await applyRemedies(client, fixable)
             } catch (err) {
-              error(`Rolled back: the database is unchanged: ${(err as Error).message}`)
+              error(`Rolled back: the database is unchanged: ${errorMessage(err)}`)
               process.exitCode = 1
               return
             }
@@ -275,7 +279,7 @@ export function registerDb(program: Command): void {
         }
       } catch (err) {
         // An unexpected failure must not read as a clean bill of health.
-        error(`Preflight could not complete: ${(err as Error).message}`)
+        error(`Preflight could not complete: ${errorMessage(err)}`)
         process.exitCode = 1
       } finally {
         await client.end().catch(() => undefined)

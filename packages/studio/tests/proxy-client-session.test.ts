@@ -19,10 +19,12 @@ import type { Session } from "@supatype/client"
 function session(userId: string, token = "jwt-token"): Session {
   return {
     accessToken: token,
+    tokenType: "bearer",
+    expiresIn: 3600,
     refreshToken: "refresh",
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
-    user: { id: userId, email: "someone@example.com" },
-  } as unknown as Session
+    user: { id: userId, email: "someone@example.com", appMetadata: {}, userMetadata: {}, createdAt: "", updatedAt: "" },
+  }
 }
 
 describe("the proxy client's options", () => {

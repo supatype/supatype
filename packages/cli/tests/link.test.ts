@@ -119,7 +119,7 @@ describe("link model", () => {
       },
     }))
 
-    const fetchMock = vi.fn().mockResolvedValue({
+    const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<unknown>>().mockResolvedValue({
       ok: true,
       json: async () => ({
         data: {
@@ -135,10 +135,10 @@ describe("link model", () => {
     await targetSchemaRollback(target, { schema: "public" })
 
     expect(fetchMock).toHaveBeenCalledOnce()
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe("https://app.example.com/platform/v1/projects/demo/schema/rollback")
-    expect(init.method).toBe("POST")
-    expect(init.headers).toMatchObject({
+    expect(init?.method).toBe("POST")
+    expect(init?.headers).toMatchObject({
       Authorization: "Bearer srk",
       "Content-Type": "application/json",
     })

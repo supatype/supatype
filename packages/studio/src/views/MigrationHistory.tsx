@@ -7,23 +7,21 @@ import { useProjectProxy, type ProjectProxy } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
-import { safeParseJson } from "../lib/json.js"
+import { isJsonObject, safeParseJson } from "../lib/json.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type MigrationStatus = "applied" | "rolled_back"
 
+/** What the change summary reads from a migration's schema snapshot: names and Postgres types. */
 interface AstField {
-  kind: string
   pgType: string
-  required?: boolean
 }
 
 interface AstModel {
   name: string
   tableName: string
   fields: Record<string, AstField>
-  options?: { timestamps?: boolean; softDelete?: boolean }
 }
 
 interface AstSnapshot {
@@ -97,10 +95,10 @@ function boolOrNull(value: unknown): boolean | null {
 
 /** The `renames` column, which arrives as JSON or as its text depending on the proxy. */
 function mapRenames(raw: unknown): AppliedRename[] {
-  const value: unknown = typeof raw === "string" ? safeParseJson(raw) : raw
+  const value = typeof raw === "string" ? safeParseJson(raw) : raw
   if (!Array.isArray(value)) return []
   return value
-    .filter((r): r is Record<string, unknown> => typeof r === "object" && r !== null)
+    .filter(isJsonObject)
     .map((r) => ({
       kind: String(r["kind"] ?? "column"),
       table: String(r["table"] ?? ""),
@@ -122,11 +120,44 @@ function mapAuthor(row: Record<string, unknown>): MigrationAuthor {
   }
 }
 
+/**
+ * A name a snapshot node carries. The engine's v2 AST keeps a model's table name and a field's
+ * Postgres type under `annotations.db`; older snapshots, and the tests, carry them flat.
+ */
+function snapshotName(node: Record<string, unknown>, key: string): string {
+  const flat = node[key]
+  if (typeof flat === "string") return flat
+  const annotations = node["annotations"]
+  const db = isJsonObject(annotations) ? annotations["db"] : undefined
+  const nested = isJsonObject(db) ? db[key] : undefined
+  return typeof nested === "string" ? nested : ""
+}
+
+function mapSnapshotModel(model: Record<string, unknown>): AstModel {
+  const rawFields = model["fields"]
+  const fields: Record<string, AstField> = {}
+  if (isJsonObject(rawFields)) {
+    for (const [name, field] of Object.entries(rawFields)) {
+      if (isJsonObject(field)) fields[name] = { pgType: snapshotName(field, "pgType") }
+    }
+  }
+  return { name: String(model["name"] ?? ""), tableName: snapshotName(model, "tableName"), fields }
+}
+
+/** The `schema_snapshot` column: the AST the engine pushed, or null when the row has none. */
+function mapSnapshot(raw: unknown): AstSnapshot | null {
+  if (!isJsonObject(raw)) return null
+  const models = raw["models"]
+  return { models: Array.isArray(models) ? models.filter(isJsonObject).map(mapSnapshotModel) : [] }
+}
+
+function textColumn(value: unknown): string | null {
+  return typeof value === "string" ? value : null
+}
+
 function mapMigrationRow(row: Record<string, unknown>): Migration {
-  let snapshot: AstSnapshot | null = null
-  const raw = row["schema_snapshot"]
-  if (raw && typeof raw === "object") snapshot = raw as AstSnapshot
-  const legacySql = (row["sql_up"] as string | null) ?? null
+  const snapshot = mapSnapshot(row["schema_snapshot"])
+  const legacySql = textColumn(row["sql_up"])
   const hasSql =
     row["has_sql"] === true ||
     row["has_sql"] === "t" ||
@@ -137,7 +168,7 @@ function mapMigrationRow(row: Record<string, unknown>): Migration {
     hash: String(row["hash"] ?? ""),
     applied_at: String(row["applied_at"] ?? ""),
     rolled_back: row["rolled_back"] === true || row["rolled_back"] === "t",
-    rolled_back_at: (row["rolled_back_at"] as string | null) ?? null,
+    rolled_back_at: textColumn(row["rolled_back_at"]),
     engine_version: String(row["engine_version"] ?? ""),
     schema_snapshot: snapshot,
     has_sql: hasSql,

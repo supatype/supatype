@@ -136,8 +136,13 @@ function assertCell(kind: FieldKind, family: string, cell: Cell, run: () => { ch
   expect(check, `${kind}.${family} must compile to its own expression`).toBe(cell.sql)
 }
 
+/** Every field kind, read off `MATRIX`, whose type makes it list each one. */
+const isFieldKind = (key: string): key is FieldKind => key in MATRIX
+const KINDS = Object.keys(MATRIX).filter(isFieldKind)
+
 describe("bounds matrix", () => {
-  for (const [kind, row] of Object.entries(MATRIX) as Array<[FieldKind, KindRow]>) {
+  for (const kind of KINDS) {
+    const row = MATRIX[kind]
     describe(kind, () => {
       it("length", () => {
         assertCell(kind, "length", row.length, () => compileBounds("f", kind, { maxLength: 5 }))

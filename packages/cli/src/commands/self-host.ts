@@ -6,6 +6,7 @@
  */
 
 import { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import { existsSync, readFileSync, mkdirSync, copyFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
@@ -262,7 +263,7 @@ export function registerSelfHost(program: Command): void {
         process.kill(pid, "SIGHUP")
         info(`Sent SIGHUP to supatype-server (pid ${pid}).`)
       } catch (err) {
-        error(`Failed to signal pid ${pid}: ${(err as Error).message}`)
+        error(`Failed to signal pid ${pid}: ${errorMessage(err)}`)
         process.exitCode = 1
       }
     })
@@ -388,7 +389,7 @@ export function registerSelfHost(program: Command): void {
         writeFileSync(outFile, compressed)
         info("Backup complete.")
       } catch (err) {
-        error(`Backup failed: ${(err as Error).message}`)
+        error(`Backup failed: ${errorMessage(err)}`)
         process.exit(1)
       }
     })

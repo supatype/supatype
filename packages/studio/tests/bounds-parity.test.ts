@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { MEASURES, validateRecord } from "../src/lib/validate-record.js"
 import { serializeRecordForApi } from "../src/lib/recordValues.js"
-import type { FieldConfig, ModelConfig } from "../src/config.js"
+import type { FieldConfig } from "../src/config.js"
+import { testField as field, testModel } from "./support.js"
 
 /**
  * Studio must refuse exactly what Postgres refuses. Not approximately.
@@ -20,14 +21,6 @@ import type { FieldConfig, ModelConfig } from "../src/config.js"
  * two suites are written against the same semantics rather than the same table. That is the honest
  * remaining seam, and it is why the boundary cases here name the SQL they mirror.
  */
-
-const field = (over: Partial<FieldConfig> & Pick<FieldConfig, "name">): FieldConfig => ({
-  label: over.name,
-  widget: "text",
-  required: false,
-  localized: false,
-  ...over,
-})
 
 const accepts = (config: FieldConfig, value: unknown): boolean =>
   validateRecord([config], { [config.name]: value }).length === 0
@@ -138,7 +131,7 @@ describe("bounds parity: absence", () => {
     const config = field({ name: "summary", validation: { minLength: 5 } })
     expect(accepts(config, ""), "Studio treats blank as absent").toBe(true)
 
-    const model = { fields: [config] } as ModelConfig
+    const model = testModel({ fields: [config] })
     expect(
       serializeRecordForApi(model, { summary: "" })["summary"],
       "and it must reach Postgres as NULL, or the database will reject what Studio allowed",
@@ -150,7 +143,7 @@ describe("bounds parity: absence", () => {
   it("does not treat an empty collection as absent", () => {
     const config = field({ name: "tags", validation: { minItems: 1 } })
     expect(accepts(config, [])).toBe(false)
-    expect(serializeRecordForApi({ fields: [config] } as ModelConfig, { tags: [] })["tags"]).toEqual(
+    expect(serializeRecordForApi(testModel({ fields: [config] }), { tags: [] })["tags"]).toEqual(
       [],
     )
   })

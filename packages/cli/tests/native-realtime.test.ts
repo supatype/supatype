@@ -3,7 +3,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { startNativeRealtime, type NativeRealtimeOptions } from "../src/native-realtime.js"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { isJsonObject } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * Native dev printed "Realtime unavailable" when it found no realtime binary, but had already told
@@ -16,7 +18,7 @@ let dir = ""
 
 function options(): NativeRealtimeOptions {
   return {
-    config: {} as SupatypeProjectConfig,
+    config: projectConfig(),
     cwd: dir,
     manifestPath: join(dir, "routes.json"),
     pidDir: dir,
@@ -27,8 +29,7 @@ function options(): NativeRealtimeOptions {
   }
 }
 
-const manifest = (): Record<string, unknown> =>
-  JSON.parse(readFileSync(join(dir, "routes.json"), "utf8")) as Record<string, unknown>
+const manifest = (): Record<string, unknown> => parseJsonAs(readFileSync(join(dir, "routes.json"), "utf8"), isJsonObject)
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "supatype-native-realtime-"))

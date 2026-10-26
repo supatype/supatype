@@ -16,6 +16,7 @@
     ]
   },
   "include": [
+    "../../ts-reset.d.ts",
     "schema",
     "supatype.config.ts",
     "verify.ts",

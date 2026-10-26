@@ -15,6 +15,12 @@ import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { uniqueFileToken } from "./unique-file-token.js"
 import { envReference, type EnvReference } from "./auth-providers.js"
 import { applyProjectNameOverride } from "./project-name-override.js"
+import { isJsonObject } from "@supatype/shared"
+
+/** A config module's default export, as the module printed it. */
+interface LoadedConfig {
+  value: unknown
+}
 
 export type { SupatypeProjectConfig } from "./project-config.js"
 export {
@@ -119,8 +125,8 @@ export function hasProjectConfig(cwd: string): boolean {
  * Normalize a config object parsed from JSON (e.g. shorthand `schema: "./x"`).
  */
 function normalizeProjectJson(raw: unknown): unknown {
-  if (typeof raw !== "object" || raw === null) return raw
-  const o = { ...(raw as Record<string, unknown>) }
+  if (!isJsonObject(raw)) return raw
+  const o = { ...raw }
   const sch = o["schema"]
   if (typeof sch === "string") {
     o["schema"] = {
@@ -158,18 +164,20 @@ function loadConfigFiles(cwd: string): SupatypeProjectConfig {
     )
   }
 
-  const baseNorm = normalizeProjectJson(baseRaw)
+  const baseNorm = normalizeProjectJson(baseRaw.value)
   const base = validateProjectConfig(baseNorm, "supatype.config.ts")
 
   const localRaw = loadFirstTsConfig(cwd, LOCAL_CONFIG_CANDIDATES)
   if (localRaw === null) return base
 
-  const localNorm = normalizeProjectJson(localRaw) as Partial<SupatypeProjectConfig>
+  // Not an object, it sets nothing; what it does set is validated once merged.
+  const localNorm = normalizeProjectJson(localRaw.value)
+  const local = isJsonObject(localNorm) ? localNorm : {}
   // Re-validated after merging: the local override can reintroduce a combination the base file was
   // rejected for: `database.provider` beside an inherited `database.external`, say, and merging
   // has no opinion about that.
   return validateProjectConfig(
-    mergeProjectConfig(base, localNorm),
+    mergeProjectConfig(base, local),
     "supatype.local.config.ts (merged with supatype.config.ts)",
   )
 }
@@ -220,7 +228,7 @@ export function rethrowIfConfigBroken(err: unknown): void {
 function loadFirstTsConfig(
   cwd: string,
   candidates: string[],
-): Record<string, unknown> | null {
+): LoadedConfig | null {
   for (const candidate of candidates) {
     const configPath = resolve(cwd, candidate)
     if (!existsSync(configPath)) continue
@@ -228,7 +236,7 @@ function loadFirstTsConfig(
     const urlPath = "file:///" + configPath.replace(/\\/g, "/")
     const result = importModuleAsJson(urlPath, { cwd, env: configLoadEnv(cwd) })
     if (result.exitCode === 0) {
-      return JSON.parse(result.stdout) as Record<string, unknown>
+      return { value: JSON.parse(result.stdout) }
     }
 
     const failure = result.stderr || result.stdout
@@ -261,7 +269,7 @@ const CLI_VALUE_IMPORT = /^import\s+\{[^}]*\b(?:defineConfig|env)\b[^}]*\}\s+fro
 function loadTsConfigWithoutCliImport(
   configPath: string,
   cwd: string,
-): Record<string, unknown> | null {
+): LoadedConfig | null {
   const original = readFileSync(configPath, "utf8")
   const patched = original
     .replace(/^import\s+type\s+\{[^}]*\}\s+from\s+["']@supatype\/cli["'];?\s*$/gm, "")
@@ -283,7 +291,7 @@ function loadTsConfigWithoutCliImport(
     const urlPath = "file:///" + tmpPath.replace(/\\/g, "/")
     const result = importModuleAsJson(urlPath, { cwd, env: configLoadEnv(cwd) })
     if (result.exitCode !== 0) return null
-    return JSON.parse(result.stdout) as Record<string, unknown>
+    return { value: JSON.parse(result.stdout) }
   } finally {
     try {
       unlinkSync(tmpPath)

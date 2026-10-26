@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { isArrayOf, isBoolean, isShape, isString, nullable, optional } from "@supatype/shared"
 import { isIdentityDependent, type AccessRuleNode } from "../src/cache-identity-scope.js"
+import { parseJsonAs } from "./support/json.js"
 
 /**
  * The corpus is shared with supatype-server's `internal/studiobootstrap.IsIdentityDependent`,
@@ -10,13 +12,25 @@ import { isIdentityDependent, type AccessRuleNode } from "../src/cache-identity-
  * to share is a feature that quietly does nothing; a push that permits it where the runtime *does*
  * share is a data leak. Running both against one file is what makes the pair falsifiable.
  */
-interface Corpus {
-  cases: { name: string; rule: AccessRuleNode | null; identityDependent: boolean }[]
+const isOperand = isShape({ kind: optional(isString) })
+
+/** An access rule as the corpus writes it, nested rules included. */
+function isRuleNode(value: unknown): value is AccessRuleNode {
+  return isShape({
+    type: optional(isString),
+    left: optional(isOperand),
+    right: optional(isOperand),
+    operand: optional(isOperand),
+    rules: optional(isArrayOf(isRuleNode)),
+    rule: optional(isRuleNode),
+  })(value)
 }
 
-const corpus = JSON.parse(
-  readFileSync(join(__dirname, "fixtures", "identity-scope-corpus.json"), "utf8"),
-) as Corpus
+const isCorpus = isShape({
+  cases: isArrayOf(isShape({ name: isString, rule: nullable(isRuleNode), identityDependent: isBoolean })),
+})
+
+const corpus = parseJsonAs(readFileSync(join(__dirname, "fixtures", "identity-scope-corpus.json"), "utf8"), isCorpus)
 
 describe("the identity-dependence rule, against the shared corpus", () => {
   it.each(corpus.cases)("$name", ({ rule, identityDependent }) => {
@@ -24,7 +38,7 @@ describe("the identity-dependence rule, against the shared corpus", () => {
   })
 
   it("covers both answers, so a stuck implementation cannot pass", () => {
-    // A classifier hardcoded to `true` is the dangerous failure — it refuses every public cache
+    // A classifier hardcoded to `true` is the dangerous failure: it refuses every public cache
     // and looks conservative while making the feature unusable. One hardcoded to `false` is the
     // leak. The corpus has to be able to catch both.
     const yes = corpus.cases.filter(c => c.identityDependent).length

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * A3-N4, A4-N2: `push --connection` provisioned storage against `http://localhost:18473` and printed
@@ -25,7 +26,7 @@ vi.mock("node:child_process", async (importOriginal) => ({
 const { isProjectDatabase, projectStackUrl, projectStudioUrl } = await import("../src/local-stack.js")
 const { serverBaseUrl } = await import("../src/project-config.js")
 
-const docker = { project: { name: "demo" }, provider: "docker", database: { provider: "docker" }, server: { mode: "dev" } } as SupatypeProjectConfig
+const docker = projectConfig({ provider: "docker", database: { provider: "docker" } })
 const OWN = "postgresql://supatype_admin:pw@127.0.0.1:54880/demo?sslmode=disable"
 let dir: string
 
@@ -69,7 +70,7 @@ describe("projectStackUrl", () => {
 
 describe("isProjectDatabase", () => {
   it("is false for an external database, whatever the URL", () => {
-    const external = { ...docker, database: { external: { url: OWN } } } as SupatypeProjectConfig
+    const external: SupatypeProjectConfig = { ...docker, database: { external: { url: OWN } } }
     expect(isProjectDatabase(dir, external, OWN)).toBe(false)
   })
 })

@@ -1,0 +1,117 @@
+import { createClient, type Session, type SupatypeClient } from "@supatype/client"
+import type { AdminConfig, FieldConfig, ModelConfig } from "../src/config.js"
+import type { ProjectProxy } from "../src/hooks/useProjectProxy.js"
+import { isRecordOf, isShape, isString, isUnknown, optional } from "../src/lib/json.js"
+
+/**
+ * Builders the Studio suites share, so a test states only the parts of a value it is about and
+ * still hands the code under test a complete one.
+ */
+
+/** A signed-in session for `token` that stays valid for an hour and never schedules a refresh. */
+function sessionFor(token: string): Session {
+  return {
+    accessToken: token,
+    tokenType: "bearer",
+    expiresIn: 3600,
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    // Empty, so the client sets no refresh timer and never calls the auth server on its own.
+    refreshToken: "",
+    user: { id: "test-user", appMetadata: {}, userMetadata: {}, createdAt: "", updatedAt: "" },
+  }
+}
+
+export interface TestClientOptions {
+  url: string
+  /** The signed-in user's access token; omitted or null for nobody signed in. */
+  token?: string | null
+  serviceRoleKey?: string
+}
+
+/**
+ * A real client for `url`, signed in with `token` when one is given.
+ *
+ * Built without persistence or URL detection, so constructing it reads no storage and sends nothing.
+ */
+export function testClient({ url, token = null, serviceRoleKey }: TestClientOptions): SupatypeClient {
+  return createClient({
+    url,
+    anonKey: "anon-key",
+    ...(serviceRoleKey !== undefined && { serviceRoleKey }),
+    ...(token !== null && { initialSession: sessionFor(token) }),
+    auth: { persistSession: false, detectSessionInUrl: false },
+  })
+}
+
+/** A field with the defaults the engine writes, plus whatever the test sets. */
+export function testField(over: Partial<FieldConfig> & Pick<FieldConfig, "name">): FieldConfig {
+  return { label: over.name, widget: "text", required: false, localized: false, ...over }
+}
+
+/** A plain model named `post` with no fields, versions or flags, plus whatever the test sets. */
+export function testModel(over: Partial<ModelConfig> = {}): ModelConfig {
+  return {
+    name: "post",
+    label: "Post",
+    labelPlural: "Posts",
+    tableName: "posts",
+    apiPath: "/rest/v1/posts",
+    primaryKey: "id",
+    fields: [],
+    listColumns: [],
+    searchFields: [],
+    publishable: false,
+    versions: null,
+    softDelete: false,
+    timestamps: false,
+    hasHooks: false,
+    ...over,
+  }
+}
+
+/** A config with no models, globals or navigation, plus whatever the test sets. */
+export function testConfig(over: Partial<AdminConfig> = {}): AdminConfig {
+  return { models: [], globals: [], navigation: [], ...over }
+}
+
+function unused(method: string): () => Promise<never> {
+  return () => Promise.reject(new Error(`ProjectProxy.${method} was not expected in this test`))
+}
+
+/** A project proxy whose every method fails loudly unless the test supplies it. */
+export function testProxy(over: Partial<ProjectProxy> = {}): ProjectProxy {
+  return {
+    sql: unused("sql"),
+    metadata: unused("metadata"),
+    introspect: unused("introspect"),
+    schemas: unused("schemas"),
+    studioExtension: unused("studioExtension"),
+    studioRls: unused("studioRls"),
+    studioPolicy: unused("studioPolicy"),
+    ...over,
+  }
+}
+
+const isMetadataBody = isShape({ name: optional(isString), params: optional(isRecordOf(isUnknown)) })
+
+/** The body of a named metadata read (`{ name, params }`). */
+export type MetadataBody = { name?: string; params?: Record<string, unknown> }
+
+/** A metadata request's body; anything that is not one reads as `{}`, which names no query. */
+export function metadataBody(init?: RequestInit): MetadataBody {
+  const body = typeof init?.body === "string" ? JSON.parse(init.body) : {}
+  return isMetadataBody(body) ? body : {}
+}
+
+/** The element `selector` finds, checked to be a `type`; throws naming what was there instead. */
+export function elementOf<T extends Element>(
+  root: ParentNode,
+  selector: string,
+  type: abstract new () => T,
+): T {
+  const el = root.querySelector(selector)
+  if (!(el instanceof type)) {
+    throw new Error(`expected ${type.name} at "${selector}", found ${el === null ? "nothing" : el.tagName}`)
+  }
+  return el
+}

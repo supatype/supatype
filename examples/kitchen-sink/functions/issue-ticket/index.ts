@@ -15,7 +15,7 @@ import type { FunctionContext } from "../_shared/context.ts"
  * The service-role key arrives in the context, not the environment: two concurrent calls sharing a
  * process must not see each other's credentials.
  */
-type Caller = { id?: string; email?: string; user_metadata?: { full_name?: string; name?: string } }
+type Caller = { id: string | undefined; email: string | undefined; name: string | undefined }
 
 export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   const auth = req.headers.get("Authorization") ?? ""
@@ -37,7 +37,7 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     headers: { apikey: ctx.anonKey, Authorization: `Bearer ${token}` },
   })
   if (!who.ok) return json({ error: "That session is not valid." }, 401)
-  const user = (await who.json()) as Caller
+  const user = readCaller(await who.json())
   if (typeof user.id !== "string") return json({ error: "That session names no user." }, 401)
 
   const attendee = await ensureAttendee(ctx, user.id, displayName(user))
@@ -69,9 +69,28 @@ function ensureAttendee(ctx: FunctionContext, id: string, name: string): Promise
 
 /** The provider's name for the account, else the email's local part. */
 function displayName(user: Caller): string {
-  const named = user.user_metadata?.full_name ?? user.user_metadata?.name
+  const named = user.name
   const fallback = (user.email ?? "attendee").split("@")[0] ?? "attendee"
   return (named !== undefined && named.trim() !== "" ? named : fallback).slice(0, 80)
+}
+
+/** The fields this function reads off the auth service's user, each checked rather than assumed. */
+function readCaller(body: unknown): Caller {
+  const user = isRecord(body) ? body : {}
+  const meta = isRecord(user["user_metadata"]) ? user["user_metadata"] : {}
+  return {
+    id: stringOrUndefined(user["id"]),
+    email: stringOrUndefined(user["email"]),
+    name: stringOrUndefined(meta["full_name"]) ?? stringOrUndefined(meta["name"]),
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined
 }
 
 function asServer(ctx: FunctionContext, path: string, prefer: string, body: unknown): Promise<Response> {

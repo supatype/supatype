@@ -100,8 +100,9 @@ export function registerCache(program: Command): void {
           return
         }
 
+        // An empty name passed the check above and names no component, so nothing is cleaned.
         const components: Component[] =
-          component !== undefined ? [component as Component] : [...BINARY_COMPONENTS]
+          component === undefined ? [...BINARY_COMPONENTS] : isComponent(component) ? [component] : []
         const result = cleanCachedBinaries({
           components,
           ...(version !== undefined && version !== "" ? { version } : {}),

@@ -14,10 +14,10 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function captureRequests(): Array<Record<string, string>> {
-  const seen: Array<Record<string, string>> = []
+function captureRequests(): Headers[] {
+  const seen: Headers[] = []
   vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
-    seen.push({ ...(init?.headers as Record<string, string>) })
+    seen.push(new Headers(init?.headers))
     return new Response("[]", { status: 200, headers: { "content-type": "application/json" } })
   })
   return seen
@@ -33,13 +33,13 @@ describe("headers", () => {
     mode = "self"
     await client.from("posts").select()
 
-    expect(seen.map((h) => h["X-Supatype-Acting-Mode"])).toEqual(["elevated", "self"])
+    expect(seen.map((h) => h.get("X-Supatype-Acting-Mode"))).toEqual(["elevated", "self"])
   })
 
   it("are still sent when given as a plain object", async () => {
     const seen = captureRequests()
     const client = createClient({ url: BASE, anonKey: ANON_KEY, headers: { "X-Supatype-Environment": "staging" } })
     await client.from("posts").select()
-    expect(seen[0]?.["X-Supatype-Environment"]).toBe("staging")
+    expect(seen[0]?.get("X-Supatype-Environment")).toBe("staging")
   })
 })

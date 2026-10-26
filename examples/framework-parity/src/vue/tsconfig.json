@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["./**/*.ts", "./**/*.vue", "../client.ts", "../../supatype/generated"]
+  "include": ["../../../../ts-reset.d.ts", "./**/*.ts", "./**/*.vue", "../client.ts", "../../supatype/generated"]
 }

@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { test, describe, before, after } from "node:test"
-import { request, startServer, type ControlPlaneServer } from "./helpers.js"
+import { dataString, dataStrings, jsonObject, request, startServer, type ControlPlaneServer } from "./helpers.js"
 import { resetEngineCapabilities } from "../src/engine-runner.js"
 
 const PROJECT = "test-project"
@@ -30,9 +30,9 @@ describe("schema routes (mock engine)", () => {
   test("GET /schema/migrations returns list", async () => {
     const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/migrations`)
     assert.equal(res.status, 200)
-    const data = res.json.data as unknown[]
-    assert.ok(Array.isArray(data))
-    assert.equal((data[0] as { name: string }).name, "20240101_test")
+    const data = res.json["data"]
+    if (!Array.isArray(data)) assert.fail("expected a list of migrations")
+    assert.equal(jsonObject(data[0])["name"], "20240101_test")
   })
 
   test("GET /schema/migrations/:name/sources returns snapshot", async () => {
@@ -42,21 +42,20 @@ describe("schema routes (mock engine)", () => {
       `/projects/${PROJECT}/schema/migrations/20240101_test/sources`,
     )
     assert.equal(res.status, 200)
-    const data = res.json.data as { name: string; schema_sources_base64: string }
-    assert.equal(data.name, "20240101_test")
-    assert.ok(data.schema_sources_base64)
+    assert.equal(dataString(res.json, "name"), "20240101_test")
+    assert.ok(dataString(res.json, "schema_sources_base64"))
   })
 
   /** The engine arguments the mock was run with for this request. */
-  const argsOf = (json: Record<string, unknown>): string[] => (json.data as { args: string[] }).args
+  const argsOf = (json: Record<string, unknown>): string[] => dataStrings(json, "args")
 
   test("GET /schema/capabilities proxies the engine's answer", async () => {
     resetEngineCapabilities()
     const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
     assert.equal(res.status, 200)
-    const data = res.json.data as { features: string[] }
-    assert.ok(data.features.includes("accept_access_drift"))
-    assert.ok(data.features.includes("adopt_none"))
+    const features = dataStrings(res.json, "features")
+    assert.ok(features.includes("accept_access_drift"))
+    assert.ok(features.includes("adopt_none"))
   })
 
   test("GET /schema/capabilities is empty for an engine from before the subcommand", async () => {
@@ -234,8 +233,7 @@ describe("schema routes (mock engine)", () => {
   test("POST /schema/rollback applies rollback", async () => {
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/rollback`, {})
     assert.equal(res.status, 200)
-    const data = res.json.data as { status: string }
-    assert.equal(data.status, "rolled_back")
+    assert.equal(dataString(res.json, "status"), "rolled_back")
   })
 
   /** Run `work` with the mock engine refusing with `reason`, as an engine from before reasons when `wordsOnly`. */

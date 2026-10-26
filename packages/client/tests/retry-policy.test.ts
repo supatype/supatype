@@ -1,32 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fetchWithRetry } from "../src/fetch-with-retry.js"
 import { createClient } from "../src/index.js"
+import { fetchReturning, jsonResponse, type FetchMock, mockFetch } from "./support/fetch-mock.js"
 
 const URL_BASE = "http://localhost:18473"
 
-function respond(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(body),
-    text: vi.fn().mockResolvedValue(JSON.stringify(body)),
-    blob: vi.fn().mockResolvedValue(new Blob([JSON.stringify(body)])),
-    headers: new Headers({ "content-type": "application/json" }),
-  } as unknown as Response
-}
-
 /** 503 once, then 200 with `body`. */
-function flaky(body: unknown): ReturnType<typeof vi.fn> {
-  const fetch = vi.fn()
-    .mockResolvedValueOnce(respond({ message: "unavailable" }, 503))
-    .mockResolvedValue(respond(body))
+function flaky(body: unknown): FetchMock {
+  const fetch = mockFetch()
+    .mockResolvedValueOnce(jsonResponse({ message: "unavailable" }, 503))
+    .mockImplementation(() => Promise.resolve(jsonResponse(body)))
   vi.stubGlobal("fetch", fetch)
   return fetch
 }
 
 /** A fetch that never answers, and gives up only when its signal is aborted. */
-function hanging(): ReturnType<typeof vi.fn> {
-  const fetch = vi.fn((_url: string, init?: RequestInit) =>
+function hanging(): FetchMock {
+  const fetch = mockFetch((_input, init) =>
     new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => {
         const err = new Error("aborted")
@@ -68,7 +58,7 @@ describe("fetchWithRetry retries only GET and HEAD unless the call opts in", () 
   })
 
   it("a 429 on a request that may not be retried comes back as the response, not a throw", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond({ msg: "slow down" }, 429)))
+    vi.stubGlobal("fetch", fetchReturning({ msg: "slow down" }, 429))
     const res = await fetchWithRetry("http://api.test/x", { method: "POST" })
     expect(res.status).toBe(429)
   })
@@ -79,14 +69,14 @@ describe("rpc, graphql and functions: retried only when the call says it is idem
 
   it("rpc is not retried by default", async () => {
     const fetch = flaky(1)
-    const { error } = await client().rpc("do_thing" as never)
+    const { error } = await client().rpc("do_thing")
     expect(error?.status).toBe(503)
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
   it("rpc with idempotent: true is retried", { timeout: 5000 }, async () => {
     const fetch = flaky(1)
-    const { data, error } = await client().rpc("read_thing" as never, undefined, { idempotent: true })
+    const { data, error } = await client().rpc("read_thing", undefined, { idempotent: true })
     expect(error).toBeNull()
     expect(data).toBe(1)
     expect(fetch).toHaveBeenCalledTimes(2)
@@ -108,13 +98,13 @@ describe("rpc, graphql and functions: retried only when the call says it is idem
 
   it("functions.invoke (POST) is not retried by default", async () => {
     const fetch = flaky({ ok: true })
-    await client().functions.invoke("fn" as never)
+    await client().functions.invoke("fn")
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
   it("functions.invoke with idempotent: true is retried", { timeout: 5000 }, async () => {
     const fetch = flaky({ ok: true })
-    const { error } = await client().functions.invoke("fn" as never, { idempotent: true })
+    const { error } = await client().functions.invoke("fn", { idempotent: true })
     expect(error).toBeNull()
     expect(fetch).toHaveBeenCalledTimes(2)
   })
@@ -138,9 +128,10 @@ describe("auth and storage use the client's transport", () => {
   })
 
   it("a rate-limited sign-in returns the server's error rather than throwing", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      respond({ code: 429, error_code: "over_request_rate_limit", msg: "Request rate limit reached" }, 429),
-    ))
+    vi.stubGlobal(
+      "fetch",
+      fetchReturning({ code: 429, error_code: "over_request_rate_limit", msg: "Request rate limit reached" }, 429),
+    )
     const { error } = await client().auth.signInWithPassword({ email: "a@example.com", password: "pw" })
     expect(error).toEqual({ message: "Request rate limit reached", status: 429, code: "over_request_rate_limit" })
   })

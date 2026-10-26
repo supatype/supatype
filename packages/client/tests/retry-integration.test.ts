@@ -11,13 +11,8 @@ import { NetworkError } from "../src/errors.js"
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function mockResponse(status: number, body: unknown = {}): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(body),
-    headers: new Headers(),
-    statusText: status === 503 ? "Service Unavailable" : "OK",
-  } as unknown as Response
+  const statusText = status === 503 ? "Service Unavailable" : "OK"
+  return new Response(JSON.stringify(body), { status, statusText, headers: { "Content-Type": "application/json" } })
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -154,7 +149,7 @@ describe("Task 90: SDK retry integration", () => {
       expect.fail("Should have thrown")
     } catch (err) {
       expect(err).toBeInstanceOf(NetworkError)
-      expect((err as NetworkError).code).toBe("NETWORK_CONNECTION_REFUSED")
+      expect(err).toMatchObject({ code: "NETWORK_CONNECTION_REFUSED" })
     }
     vi.useFakeTimers()
   })

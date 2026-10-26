@@ -4,6 +4,7 @@ import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card, Input } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { cellText, cellTextOrNull } from "../metadata-row.js"
 
 export function ExtensionsView(): React.ReactElement {
   const proxy = useProjectProxy()
@@ -29,15 +30,15 @@ export function ExtensionsView(): React.ReactElement {
       await proxy.studioExtension(name, enable)
       refetchInstalled()
     } catch (e) {
-      setError((e as Error).message)
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
     }
   }
 
-  const installedNames = new Set((installed ?? []).map((r) => r["extname"] as string))
+  const installedNames = new Set((installed ?? []).map((r) => cellText(r, "extname")))
   const filteredAvailable = (available ?? []).filter((r) =>
-    !search || (r["name"] as string).toLowerCase().includes(search.toLowerCase()),
+    !search || cellText(r, "name").toLowerCase().includes(search.toLowerCase()),
   )
 
   return (
@@ -64,17 +65,17 @@ export function ExtensionsView(): React.ReactElement {
               </thead>
               <tbody>
                 {installed?.map((row) => (
-                  <tr key={row["extname"] as string} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 font-mono text-sm text-foreground">{row["extname"] as string}</td>
-                    <td className="px-4 py-3"><Badge variant="blue">{row["extversion"] as string}</Badge></td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{(row["description"] as string | null) ?? "-"}</td>
+                  <tr key={cellText(row, "extname")} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "extname")}</td>
+                    <td className="px-4 py-3"><Badge variant="blue">{cellText(row, "extversion")}</Badge></td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{cellTextOrNull(row, "description") ?? "-"}</td>
                     <td className="px-4 py-3 text-right">
                       {sqlWrites ? (
                         <Button
                           variant="destructive"
                           size="xs"
-                          disabled={busy === (row["extname"] as string)}
-                          onClick={() => { void toggleExtension(row["extname"] as string, false) }}
+                          disabled={busy === cellText(row, "extname")}
+                          onClick={() => { void toggleExtension(cellText(row, "extname"), false) }}
                         >
                           Disable
                         </Button>
@@ -102,15 +103,15 @@ export function ExtensionsView(): React.ReactElement {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredAvailable.map((row) => {
-            const name = row["name"] as string
+            const name = cellText(row, "name")
             const isInstalling = busy === name
             return (
               <div key={name} className="p-3 rounded-lg border border-border bg-card space-y-1.5">
                 <div className="flex items-start justify-between gap-2">
                   <span className="font-mono text-sm text-foreground font-medium">{name}</span>
-                  <Badge variant="blue">{row["default_version"] as string}</Badge>
+                  <Badge variant="blue">{cellText(row, "default_version")}</Badge>
                 </div>
-                {row["comment"] ? <p className="text-xs text-muted-foreground line-clamp-2">{row["comment"] as string}</p> : null}
+                {row["comment"] ? <p className="text-xs text-muted-foreground line-clamp-2">{cellText(row, "comment")}</p> : null}
                 {sqlWrites ? (
                   <Button
                     variant="primary"

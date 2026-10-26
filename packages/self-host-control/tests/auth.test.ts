@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { test, describe, before, after } from "node:test"
-import { request, startServer, TEST_SECRET, type ControlPlaneServer } from "./helpers.js"
+import { dataOf, request, startServer, TEST_SECRET, type ControlPlaneServer } from "./helpers.js"
 
 /**
  * The control plane answers only the gateway.
@@ -92,7 +92,7 @@ describe("control plane authentication", () => {
   test("the right secret is served", async () => {
     const res = await request(baseUrl, "GET", `/projects/${PROJECT}/status`)
     assert.equal(res.status, 200)
-    assert.equal((res.json["data"] as Record<string, unknown>)["projectRef"], PROJECT)
+    assert.equal(dataOf(res.json)["projectRef"], PROJECT)
   })
 })
 

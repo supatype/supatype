@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 import { cachedBinaryPath, currentPlatform, resolveBinary } from "../src/binary-cache.js"
 import { binaryCapabilities } from "../src/engine-ownership-gate.js"
 
@@ -15,7 +16,7 @@ let cwd: string
 const saved = { HOME: process.env["HOME"], USERPROFILE: process.env["USERPROFILE"] }
 
 function config(extra: Partial<SupatypeProjectConfig> = {}): SupatypeProjectConfig {
-  return { project: { name: "offline" }, ...extra } as SupatypeProjectConfig
+  return projectConfig({ project: { name: "offline" }, ...extra })
 }
 
 beforeEach(() => {
@@ -44,7 +45,7 @@ describe("resolveBinary() offline", () => {
     // Windows spawns an extensionless path as `<path>.exe`, so the override is copied there and that
     // copy is what resolves.
     const resolved = process.platform === "win32" ? `${bin}.exe` : bin
-    expect(await resolveBinary("engine", config({ overrides: { engine: bin } } as Partial<SupatypeProjectConfig>))).toBe(resolved)
+    expect(await resolveBinary("engine", config({ overrides: { engine: bin } }))).toBe(resolved)
     expect(fetch).not.toHaveBeenCalled()
   })
 

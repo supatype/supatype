@@ -6,6 +6,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { cn } from "../lib/utils.js"
+import { isJsonObject } from "../lib/json.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
@@ -96,7 +97,7 @@ function JsonTreeNode({ data, depth = 0 }: { data: unknown; depth?: number }): R
         </button>
         {expanded ? (
           <div className="ml-4">
-            {(data as unknown[]).map((item, i) => (
+            {data.map((item, i) => (
               <div key={i} className="flex gap-1">
                 <span className="text-zinc-600">{i}:</span>
                 <JsonTreeNode data={item} depth={depth + 1} />
@@ -108,8 +109,8 @@ function JsonTreeNode({ data, depth = 0 }: { data: unknown; depth?: number }): R
     )
   }
 
-  if (typeof data === "object") {
-    const entries = Object.entries(data as Record<string, unknown>)
+  if (isJsonObject(data)) {
+    const entries = Object.entries(data)
     if (entries.length === 0) return <span className="text-zinc-500">{"{}"}</span>
     return (
       <span>
@@ -164,7 +165,10 @@ function ColumnFilterRow({
       <Select
         className="w-[170px]"
         value={filter.operator}
-        onChange={(e) => onChange({ ...filter, operator: e.target.value as FilterOperator })}
+        onChange={(e) => {
+          const picked = FILTER_OPERATORS.find((op) => op.value === e.target.value)
+          if (picked) onChange({ ...filter, operator: picked.value })
+        }}
       >
         {FILTER_OPERATORS.map((op) => (
           <option key={op.value} value={op.value}>{op.label}</option>
@@ -369,12 +373,12 @@ function CellValue({
 
   // Enum dropdown display
   if (column.enum_values) {
-    const colorMap: Record<string, string> = {
+    const colorMap: Record<string, "green" | "yellow" | "red"> = {
       draft: "yellow",
       published: "green",
       archived: "red",
     }
-    const variant = (colorMap[String(value)] ?? "blue") as "green" | "yellow" | "red" | "blue"
+    const variant = colorMap[String(value)] ?? "blue"
     return <Badge variant={variant}>{String(value)}</Badge>
   }
 
@@ -507,9 +511,16 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
         return
       }
 
-      setRows(data ?? [])
-      if ((data?.length ?? 0) < pageSize) {
-        setTotalCount(from + (data?.length ?? 0))
+      // The client types the body as rows without checking it; a proxy error page or an object
+      // here used to crash the table on `rows.map`.
+      const body: unknown = data ?? []
+      if (!Array.isArray(body) || !body.every(isJsonObject)) {
+        setRowsError("The server did not answer with a list of rows.")
+        return
+      }
+      setRows(body)
+      if (body.length < pageSize) {
+        setTotalCount(from + body.length)
       } else if (filters.length === 0) {
         setTotalCount(currentTable?.row_count ?? 0)
       }

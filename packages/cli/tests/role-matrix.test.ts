@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { isArrayOf, isShape, isString } from "@supatype/shared"
 import { STUDIO_ROLES } from "../src/commands/admin.js"
-import { draftVisibilityRoles, type SupatypeProjectConfig } from "../src/project-config.js"
+import { draftVisibilityRoles, validateProjectConfig } from "../src/project-config.js"
+import { parseJsonAs } from "./support/json.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * The shared role document. supatype-server embeds the same file and the control plane carries it,
@@ -11,7 +14,7 @@ import { draftVisibilityRoles, type SupatypeProjectConfig } from "../src/project
 const ROLE_MATRIX_SHA256 = "db2e046d93ac5142cbf5a1920d9715f5f4537ddce8394059dffeceeb4e2ead0b"
 
 const raw = readFileSync(new URL("../src/role-matrix.json", import.meta.url), "utf8")
-const document = JSON.parse(raw) as { selfHostRoles: string[] }
+const document = parseJsonAs(raw, isShape({ selfHostRoles: isArrayOf(isString) }))
 
 describe("the shared role matrix", () => {
   it("is the document the other hosts carry", () => {
@@ -26,7 +29,9 @@ describe("the shared role matrix", () => {
   })
 
   it("lets a project name the viewer among the roles that see drafts", () => {
-    const cfg = { publishing: { draft_visibility: ["viewer", "owner"] } } as unknown as SupatypeProjectConfig
+    // "owner" is no Studio role, so it can only arrive as a config file's text, through the loader.
+    const fromFile = { ...projectConfig(), publishing: { draft_visibility: ["viewer", "owner"] } }
+    const cfg = validateProjectConfig(fromFile, "supatype.config.ts")
     expect(draftVisibilityRoles(cfg)).toEqual(["viewer"])
   })
 })

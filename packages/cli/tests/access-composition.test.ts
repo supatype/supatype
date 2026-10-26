@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { isArrayOf, isJsonObject, isShape } from "@supatype/shared"
 import type { ModelAstV2 } from "../src/schema-ast-v2.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
+import { expectShape } from "./support/json.js"
 
 const dirs: string[] = []
 
@@ -770,8 +772,9 @@ export type Post = Model<{
       "exists",
     )
 
-    const read = access(post)["read"] as { rules: Record<string, unknown>[] }
-    const editorBranch = read.rules[1] as { rules: Record<string, unknown>[] }
+    const isComposite = isShape({ rules: isArrayOf(isJsonObject) })
+    const read = expectShape(access(post)["read"], isComposite)
+    const editorBranch = expectShape(read.rules[1], isComposite)
     expect(editorBranch.rules[1]).toEqual({
       type: "exists",
       source: {

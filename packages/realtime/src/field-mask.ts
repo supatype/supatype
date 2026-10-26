@@ -1,5 +1,6 @@
 import type pg from "pg"
 import { TtlCache } from "./ttl-cache.js"
+import { isJsonObject } from "./json.js"
 import { fieldReadPredicateName, rowReadPredicateName } from "./predicate-names.js"
 import type { TableCatalog } from "./table-catalog.js"
 
@@ -165,8 +166,8 @@ export interface RecordedFieldPredicate {
 }
 
 function isRecordedFieldPredicate(entry: unknown): entry is RecordedFieldPredicate {
-  if (typeof entry !== "object" || entry === null) return false
-  const { table, column, read } = entry as Record<string, unknown>
+  if (!isJsonObject(entry)) return false
+  const { table, column, read } = entry
   const readIsNameOrAbsent = read === null || read === undefined || typeof read === "string"
   return typeof table === "string" && typeof column === "string" && readIsNameOrAbsent
 }

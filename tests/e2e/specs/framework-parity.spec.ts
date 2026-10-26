@@ -1,4 +1,12 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test"
+import { isRecord, stringAt } from "../lib/json.js"
+
+declare global {
+  interface Window {
+    /** Exposed by `recordStatus` for the init script to report each status line through. */
+    __parityStatus?: (text: string) => void
+  }
+}
 
 /**
  * The framework-parity example: the same screen in Vue, Svelte and Solid, against one stack.
@@ -60,17 +68,16 @@ async function api(path: string, init: { method?: string; token?: string; body?:
   })
   const text = await res.text()
   if (!res.ok) throw new Error(`${init.method ?? "GET"} ${path}: ${res.status} ${text.slice(0, 200)}`)
-  return text === "" ? null : (JSON.parse(text) as unknown)
+  return text === "" ? null : JSON.parse(text)
 }
 
 async function signUp(label: string): Promise<Account> {
   const email = `parity-${label}-${RUN}@example.com`
-  const body = (await api("/auth/v1/signup", { method: "POST", body: { email, password: PASSWORD } })) as {
-    access_token?: string
-    user?: { id?: string }
-  }
-  if (body.access_token === undefined || body.user?.id === undefined) throw new Error(`sign-up for ${email} returned no session`)
-  return { email, token: body.access_token, id: body.user.id }
+  const body = await api("/auth/v1/signup", { method: "POST", body: { email, password: PASSWORD } })
+  const token = stringAt(body, "access_token")
+  const id = isRecord(body) ? stringAt(body["user"], "id") : undefined
+  if (token === undefined || id === undefined) throw new Error(`sign-up for ${email} returned no session`)
+  return { email, token, id }
 }
 
 async function insertTask(account: Account, title: string): Promise<void> {
@@ -78,10 +85,10 @@ async function insertTask(account: Account, title: string): Promise<void> {
 }
 
 async function taskOwner(account: Account, title: string): Promise<string | null> {
-  const rows = (await api(`/rest/v1/task?title=eq.${encodeURIComponent(title)}&select=auth_user_id`, {
+  const rows = await api(`/rest/v1/task?title=eq.${encodeURIComponent(title)}&select=auth_user_id`, {
     token: account.token,
-  })) as { auth_user_id: string | null }[]
-  return rows[0]?.auth_user_id ?? null
+  })
+  return Array.isArray(rows) ? (stringAt(rows[0], "auth_user_id") ?? null) : null
 }
 
 /**
@@ -105,7 +112,7 @@ function socketRole(url: string): string {
   const token = new URL(url).searchParams.get("token") ?? ""
   const payload = token.split(".")[1] ?? ""
   try {
-    return (JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { role?: string }).role ?? "none"
+    return stringAt(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")), "role") ?? "none"
   } catch {
     return "none"
   }
@@ -135,7 +142,7 @@ async function recordStatus(page: Page): Promise<void> {
       const text = line?.textContent ?? ""
       if (text === "" || text === last) return
       last = text
-      ;(window as unknown as { __parityStatus(text: string): void }).__parityStatus(text)
+      window.__parityStatus?.(text)
     }
     new MutationObserver(report).observe(document, { subtree: true, childList: true, characterData: true })
   })

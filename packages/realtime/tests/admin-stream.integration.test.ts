@@ -4,6 +4,8 @@ import jwt from "jsonwebtoken"
 import { RealtimeServer } from "../src/server.js"
 import { PREAMBLE } from "./fixtures/owned-table.js"
 import { nextText } from "./fixtures/stream.js"
+import { expectJson, expectObject } from "./fixtures/expect-json.js"
+import { isArrayOf, isBoolean, isJsonObject, isShape, isString, nullable, optional } from "../src/json.js"
 import {
   SECRET,
   connect,
@@ -100,7 +102,7 @@ async function openStream(
       raw
         .split("\n\n")
         .filter((block) => block.startsWith(`event: ${name}\n`))
-        .map((block) => ({ event: name, data: JSON.parse(block.split("\ndata: ")[1]!) as Record<string, unknown> })),
+        .map((block) => ({ event: name, data: expectObject(JSON.parse(block.split("\ndata: ")[1]!)) })),
     close: () => controller.abort(),
   }
   return { status: 200, stream, body: "" }
@@ -119,11 +121,20 @@ const viewerHeader = (sub: string): Record<string, string> => ({
   "X-Supatype-Studio-Actor": `viewer-${sub}`,
 })
 
-interface Delivery {
-  connectionId: string
-  payload?: { new: Record<string, unknown> | null }
-  redacted?: { new: string[] }
-}
+/** One delivery in a change event, as far as these tests read it. */
+const isDeliveries = isArrayOf(
+  isShape({
+    connectionId: isString,
+    payload: optional(isShape({ new: nullable(isJsonObject) })),
+    redacted: optional(isShape({ new: isArrayOf(isString) })),
+  }),
+)
+
+const isViewerVerdict = isShape({
+  visible: isBoolean,
+  payload: isShape({ new: isJsonObject }),
+  redacted: isShape({ new: isArrayOf(isString) }),
+})
 
 describe.skipIf(!databaseUrl)("GET /admin/v1/stream payload views", () => {
   let admin: pg.Client
@@ -186,7 +197,7 @@ describe.skipIf(!databaseUrl)("GET /admin/v1/stream payload views", () => {
       await until(() => s.events("change").length === 1, 5000)
     }
 
-    const deliveries = delivered.events("change")[0]!.data["deliveries"] as Delivery[]
+    const deliveries = expectJson(delivered.events("change")[0]!.data["deliveries"], isDeliveries)
     expect(deliveries).toHaveLength(2)
     const toBob = deliveries.find((d) => d.payload?.new?.["salary"] === null)!
     const toAlice = deliveries.find((d) => d !== toBob)!
@@ -194,20 +205,20 @@ describe.skipIf(!databaseUrl)("GET /admin/v1/stream payload views", () => {
     expect(JSON.stringify(toBob)).not.toContain(String(SALARY))
     expect(JSON.stringify(toAlice)).toContain(String(SALARY))
 
-    for (const d of redacted.events("change")[0]!.data["deliveries"] as Delivery[]) {
+    for (const d of expectJson(redacted.events("change")[0]!.data["deliveries"], isDeliveries)) {
       expect(d.payload?.new?.["salary"]).toBeNull()
       expect(d.redacted?.new).toContain("salary")
     }
 
-    const bobView = asBob.events("change")[0]!.data["viewer"] as { visible: boolean; payload: { new: Record<string, unknown> }; redacted: { new: string[] } }
+    const bobView = expectJson(asBob.events("change")[0]!.data["viewer"], isViewerVerdict)
     expect(bobView.visible).toBe(true)
     expect(bobView.payload.new["salary"]).toBeNull()
     expect(bobView.redacted.new).toContain("salary")
-    for (const d of asBob.events("change")[0]!.data["deliveries"] as Delivery[]) {
+    for (const d of expectJson(asBob.events("change")[0]!.data["deliveries"], isDeliveries)) {
       expect(d).not.toHaveProperty("payload")
     }
 
-    const carolView = asCarol.events("change")[0]!.data["viewer"] as Record<string, unknown>
+    const carolView = expectObject(asCarol.events("change")[0]!.data["viewer"])
     expect(carolView).toEqual({ visible: false })
 
     expect(none.raw()).not.toContain('"payload"')

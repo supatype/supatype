@@ -11,14 +11,8 @@ import { RateLimitError } from "../src/errors.js"
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function mockResponse(status: number, body: unknown = {}, headers?: Record<string, string>): Response {
-  const headersObj = new Headers(headers)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(body),
-    headers: headersObj,
-    statusText: status === 429 ? "Too Many Requests" : "OK",
-  } as unknown as Response
+  const statusText = status === 429 ? "Too Many Requests" : "OK"
+  return new Response(JSON.stringify(body), { status, statusText, headers: { "Content-Type": "application/json", ...headers } })
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -126,9 +120,7 @@ describe("Task 91: SDK rate limit integration", () => {
       expect.fail("Should have thrown RateLimitError")
     } catch (err) {
       expect(err).toBeInstanceOf(RateLimitError)
-      expect((err as RateLimitError).retryAfterSeconds).toBe(2)
-      expect((err as RateLimitError).statusCode).toBe(429)
-      expect((err as RateLimitError).code).toBe("RATE_LIMITED")
+      expect(err).toMatchObject({ retryAfterSeconds: 2, statusCode: 429, code: "RATE_LIMITED" })
     }
     vi.useFakeTimers()
   })

@@ -1,4 +1,4 @@
-import { PEOPLE, PERSONS, personOf, type Caller, type Person } from "./world.js"
+import { PEOPLE, personOf, type Caller, type Person } from "./world.js"
 
 /**
  * What each caller should read, in every tier: the rules in project/schema/index.ts applied by hand.
@@ -43,11 +43,16 @@ export function byPerson(rows: Record<string, unknown>[], idColumn: string): Par
   return out
 }
 
+/** One value per person, built from each. */
+export function perPerson<T>(make: (person: Person) => T): Record<Person, T> {
+  return { a: make("a"), b: make("b"), admin: make("admin") }
+}
+
 export function expectedEmployees(caller: Caller): Record<Person, Record<string, unknown>> {
-  return Object.fromEntries(PERSONS.map((p) => [p, expectedEmployee(caller, p)])) as Record<Person, Record<string, unknown>>
+  return perPerson((p) => expectedEmployee(caller, p))
 }
 
 export function expectedPayslips(caller: Caller): Record<Person, Record<string, unknown>> {
-  return Object.fromEntries(PERSONS.map((p) => [p, expectedPayslip(caller, p)])) as Record<Person, Record<string, unknown>>
+  return perPerson((p) => expectedPayslip(caller, p))
 }
 

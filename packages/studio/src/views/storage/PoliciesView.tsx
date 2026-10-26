@@ -8,13 +8,14 @@ import { PolicyCreatePanel, type PolicyTarget } from "../../components/database/
 import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { cellText, cellTextOrNull } from "../metadata-row.js"
 
 /** The storage tables whose policies this view shows. */
 const STORAGE_TABLES = new Set(["objects", "buckets"])
 
 /** The rows that belong to one of the storage tables. */
 function storageRows(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-  return rows.filter((r) => STORAGE_TABLES.has(r["tablename"] as string))
+  return rows.filter((r) => STORAGE_TABLES.has(cellText(r, "tablename")))
 }
 
 /** Where a new storage policy may go. */
@@ -38,19 +39,19 @@ export function StoragePoliciesView(): React.ReactElement {
     [proxy],
   )
 
-  const rlsMap = new Map((rlsStatus ?? []).map((r) => [r["tablename"] as string, r["rls_enabled"] as boolean]))
+  const rlsMap = new Map((rlsStatus ?? []).map((r) => [cellText(r, "tablename"), r["rls_enabled"] === true]))
 
   const grouped = new Map<string, typeof policies>()
   const selectedBucket = params.bucket ? decodeURIComponent(params.bucket) : null
   const bucketNeedle = selectedBucket ? `'${selectedBucket.replace(/'/g, "''")}'` : null
   const filteredPolicies = (policies ?? []).filter((p) => {
     if (!bucketNeedle) return true
-    const qual = (p["qual"] as string | null) ?? ""
-    const withCheck = (p["with_check"] as string | null) ?? ""
+    const qual = cellText(p, "qual")
+    const withCheck = cellText(p, "with_check")
     return qual.includes(bucketNeedle) || withCheck.includes(bucketNeedle)
   })
   for (const p of filteredPolicies) {
-    const t = p["tablename"] as string
+    const t = cellText(p, "tablename")
     if (!grouped.has(t)) grouped.set(t, [])
     grouped.get(t)!.push(p)
   }
@@ -114,15 +115,15 @@ export function StoragePoliciesView(): React.ReactElement {
                   </thead>
                   <tbody>
                     {tablePolicies?.map((p) => {
-                      const qual = p["qual"] as string | null
-                      const withCheck = p["with_check"] as string | null
+                      const qual = cellTextOrNull(p, "qual")
+                      const withCheck = cellTextOrNull(p, "with_check")
                       const exprLabel = withCheck ? "WITH CHECK" : "USING"
                       const expr = withCheck ?? qual ?? "(none)"
                       return (
-                      <tr key={p["policyname"] as string} className="border-b border-border last:border-0">
-                        <td className="px-4 py-2.5 font-mono text-xs text-foreground">{p["policyname"] as string}</td>
-                        <td className="px-4 py-2.5"><Badge variant="blue">{p["cmd"] as string}</Badge></td>
-                        <td className="px-4 py-2.5"><Badge variant={(p["permissive"] as string) === "PERMISSIVE" ? "green" : "yellow"}>{p["permissive"] as string}</Badge></td>
+                      <tr key={cellText(p, "policyname")} className="border-b border-border last:border-0">
+                        <td className="px-4 py-2.5 font-mono text-xs text-foreground">{cellText(p, "policyname")}</td>
+                        <td className="px-4 py-2.5"><Badge variant="blue">{cellText(p, "cmd")}</Badge></td>
+                        <td className="px-4 py-2.5"><Badge variant={cellText(p, "permissive") === "PERMISSIVE" ? "green" : "yellow"}>{cellText(p, "permissive")}</Badge></td>
                         <td className="px-4 py-2.5">
                           <div className="inline-flex items-center gap-2">
                             <Badge variant="blue">{exprLabel}</Badge>
@@ -130,7 +131,7 @@ export function StoragePoliciesView(): React.ReactElement {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { void writes.dropPolicy("storage", tableName, p["policyname"] as string) }}>Drop</button>) : null}
+                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { void writes.dropPolicy("storage", tableName, cellText(p, "policyname")) }}>Drop</button>) : null}
                         </td>
                       </tr>
                     )})}

@@ -5,7 +5,23 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
-import { bodyMessage, readJsonObject } from "../lib/json.js"
+import {
+  bodyMessage,
+  isBoolean,
+  isNumber,
+  isShape,
+  nullable,
+  optional,
+  readJson,
+  readJsonObject,
+} from "../lib/json.js"
+
+/** `GET /admin/v1/config/graphql`. A key left out or null shows its default. */
+const isGraphqlConfig = isShape({
+  introspection: optional(nullable(isBoolean)),
+  max_query_depth: optional(nullable(isNumber)),
+  max_rows: optional(nullable(isNumber)),
+})
 
 const AUTH_TYPES = [
   { label: "Users",      types: "UsersNode · UsersEdge · UsersConnection" },
@@ -38,8 +54,8 @@ export function GraphQLSettings(): React.ReactElement {
       headers: studioAuthHeaders(client),
       credentials: "include",
     })
-      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json() })
-      .then((d: { introspection: boolean; max_query_depth: number; max_rows: number }) => {
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return readJson(r, isGraphqlConfig) })
+      .then((d) => {
         if (cancelled) return
         setIntrospection(d.introspection ?? true)
         setMaxQueryDepth(String(d.max_query_depth ?? 10))

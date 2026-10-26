@@ -4,7 +4,6 @@ import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { SupatypeClient } from "@supatype/client"
 import { StudioCore } from "../src/StudioCore.js"
 import type { AdminConfig } from "../src/config.js"
 import type { PlatformContext } from "../src/hooks/usePlatform.js"
@@ -15,6 +14,7 @@ import { Broadcast } from "../src/views/realtime/Broadcast.js"
 import { Stream } from "../src/views/realtime/Stream.js"
 import { INITIAL_STREAM } from "../src/hooks/useRealtimeStream.js"
 import type { InspectorApi } from "../src/views/realtime/InspectorTab.js"
+import { testClient, testConfig } from "./support.js"
 
 /**
  * ST-3: the Realtime Inspector, built from the shared Studio components, shown only where this
@@ -23,15 +23,8 @@ import type { InspectorApi } from "../src/views/realtime/InspectorTab.js"
 
 const SELF_HOST: PlatformContext = { platformUrl: undefined, projectRef: undefined }
 const CLOUD: PlatformContext = { platformUrl: "https://api.example.test/api/v1", projectRef: "abc123" }
-const CONFIG: AdminConfig = { models: [], globals: [] } as unknown as AdminConfig
-const CLIENT = {
-  url: "http://localhost:8000/studio/proxy",
-  auth: {
-    currentAccessToken: "token",
-    getSession: () => new Promise(() => {}),
-    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
-  },
-} as unknown as SupatypeClient
+const CONFIG: AdminConfig = testConfig()
+const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
 
 interface Backend {
   role: string
@@ -93,7 +86,7 @@ function main(): string {
 }
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
 })
 
 afterEach(() => {

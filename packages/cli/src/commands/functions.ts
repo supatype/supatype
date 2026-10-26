@@ -1,4 +1,5 @@
 import type { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import {
   existsSync,
   mkdirSync,
@@ -28,6 +29,7 @@ import { loadProjectLink } from "../link.js"
 import { resolveCloudAccessToken } from "../cloud-credentials.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
+import { isArrayOf, isJsonObject, isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
 import {
   ensureFunctionsDenoTypes,
   sharedFunctionsReadmeSource,
@@ -298,7 +300,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   try {
     denoBin = await ensureBinary("deno", config)
   } catch (err) {
-    error(`Could not provision Deno: ${(err as Error).message}`)
+    error(`Could not provision Deno: ${errorMessage(err)}`)
     process.exit(1)
   }
 
@@ -500,8 +502,8 @@ async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: st
       })
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as Record<string, string>
-        plain(`  ${fn.name} ✗ ${body["message"] ?? res.statusText}`)
+        const reason = await failureReason(res)
+        plain(`  ${fn.name} ✗ ${reason}`)
         continue
       }
 
@@ -531,6 +533,30 @@ export function serviceRoleRoutesFor(cwd: string): string[] | undefined {
   }
 }
 
+/** The control plane's reason for a refusal: its `message`, else the status text. */
+async function failureReason(res: Response): Promise<string> {
+  const body = await res.json().catch(() => ({}))
+  const message = isJsonObject(body) ? body["message"] : undefined
+  return typeof message === "string" ? message : res.statusText
+}
+
+/** `GET /functions`: each deployed function, with its last day's use. */
+const isDeployedFunctions = isShape({
+  data: isArrayOf(
+    isShape({
+      name: isString,
+      deployedAt: optional(nullable(isString)),
+      invocations24h: optional(nullable(isNumber)),
+      avgDurationMs: optional(nullable(isNumber)),
+    }),
+  ),
+})
+
+/** `GET /functions/:name/logs`: the newest entries first. */
+const isFunctionLogs = isShape({
+  data: isArrayOf(isShape({ timestamp: isString, level: isString, message: optional(nullable(isString)) })),
+})
+
 function readFunctionSource(fn: DiscoveredFunctionRoute): string {
   const stat = statSync(fn.path)
   if (stat.isFile()) {
@@ -539,7 +565,7 @@ function readFunctionSource(fn: DiscoveredFunctionRoute): string {
 
   // Directory function: read all .ts files
   const files: Record<string, string> = {}
-  const entries = readdirSync(fn.path, { recursive: true }) as string[]
+  const entries = readdirSync(fn.path, { recursive: true, encoding: "utf8" })
   for (const entry of entries) {
     const fullPath = join(fn.path, entry)
     if (statSync(fullPath).isFile() && (entry.endsWith(".ts") || entry.endsWith(".js"))) {
@@ -589,7 +615,7 @@ async function listFunctions(cwd: string): Promise<void> {
       process.exit(1)
     }
 
-    const { data } = await res.json() as { data: Array<{ name: string; deployedAt: string; invocations24h: number; avgDurationMs: number }> }
+    const { data } = await readJson(res, isDeployedFunctions)
 
     if (data.length === 0) {
       info("No deployed functions.")
@@ -640,8 +666,8 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
     })
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as Record<string, string>
-      error(`Failed to delete "${name}": ${body["message"] ?? res.statusText}`)
+      const reason = await failureReason(res)
+      error(`Failed to delete "${name}": ${reason}`)
       process.exit(1)
     }
 
@@ -686,7 +712,7 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
       process.exit(1)
     }
 
-    const { data } = await res.json() as { data: Array<{ timestamp: string; level: string; message: string }> }
+    const { data } = await readJson(res, isFunctionLogs)
 
     if (data.length === 0) {
       info(`No logs for "${name}" in the last ${opts.since}.`)
@@ -768,7 +794,7 @@ async function invoke(
       plain(responseBody)
     }
   } catch (err) {
-    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+    if (err instanceof TypeError && errorMessage(err).includes("fetch")) {
       error(`Cannot reach ${url}`)
       error("Is the function server running? Start it with: npx supatype functions serve")
     } else {
@@ -826,7 +852,7 @@ async function envList(cwd: string): Promise<void> {
       process.exit(1)
     }
 
-    const { data } = await res.json() as { data: string[] }
+    const { data } = await readJson(res, isShape({ data: isArrayOf(isString) }))
 
     if (data.length === 0) {
       info("No environment variables set.")
@@ -893,8 +919,8 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
     })
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as Record<string, string>
-      error(`Failed to set env var: ${body["message"] ?? res.statusText}`)
+      const reason = await failureReason(res)
+      error(`Failed to set env var: ${reason}`)
       process.exit(1)
     }
 
@@ -941,8 +967,8 @@ async function envUnset(cwd: string, key: string): Promise<void> {
     })
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as Record<string, string>
-      error(`Failed to unset env var: ${body["message"] ?? res.statusText}`)
+      const reason = await failureReason(res)
+      error(`Failed to unset env var: ${reason}`)
       process.exit(1)
     }
 

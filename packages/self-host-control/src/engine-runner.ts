@@ -4,7 +4,18 @@ import { writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import { CAPABILITIES_TTL_MS, ENGINE_BUSY, capabilitiesCache, engineBusySentence, rememberCapabilities } from "@supatype/shared"
+import {
+  CAPABILITIES_TTL_MS,
+  ENGINE_BUSY,
+  capabilitiesCache,
+  engineBusySentence,
+  isArrayOf,
+  isJsonObject,
+  isShape,
+  isString,
+  rememberCapabilities,
+  type FromShape,
+} from "@supatype/shared"
 
 function engineBin(): string {
   return process.env["SUPATYPE_ENGINE_BIN"] ?? "supatype-engine"
@@ -54,10 +65,15 @@ function runEngine(subcommand: string, args: string[], opts?: { inputPath?: stri
   })
 }
 
-export interface DiffResult {
-  operations: Array<{ kind: string; description: string; risk: string; sql?: string }>
-  warnings: string[]
-}
+const DIFF_RESULT = { operations: isArrayOf(isJsonObject), warnings: isArrayOf(isString) } as const
+
+/**
+ * The engine's `diff` output (its `DiffOutput`), passed on to the client as it is. Each operation is
+ * tagged by `type` and carries what that kind of change needs, so only the outline is read here.
+ */
+export type DiffResult = FromShape<typeof DIFF_RESULT>
+
+const isDiffResult = isShape(DIFF_RESULT)
 
 export async function runEngineDiff(databaseUrl: string, ast: unknown, schema = "public"): Promise<DiffResult> {
   const astPath = await writeTempJson(ast)
@@ -66,7 +82,9 @@ export async function runEngineDiff(databaseUrl: string, ast: unknown, schema = 
       "--database-url", databaseUrl,
       "--schema", schema,
     ], { inputPath: astPath })
-    return JSON.parse(out) as DiffResult
+    const diff = JSON.parse(out)
+    if (!isDiffResult(diff)) throw new Error("Engine diff printed something other than a diff")
+    return diff
   } finally {
     await deleteTempFile(astPath)
   }
@@ -276,11 +294,9 @@ export async function runEngineCapabilities(): Promise<{ features: string[] }> {
 }
 
 function parseFeatures(out: string): { features: string[] } {
-  const parsed = JSON.parse(out.slice(Math.max(out.indexOf("{"), 0))) as { features?: unknown }
-  const features = Array.isArray(parsed.features)
-    ? parsed.features.filter((f): f is string => typeof f === "string")
-    : []
-  return { features }
+  const parsed = JSON.parse(out.slice(Math.max(out.indexOf("{"), 0)))
+  const listed = isJsonObject(parsed) ? parsed["features"] : undefined
+  return { features: Array.isArray(listed) ? listed.filter(isString) : [] }
 }
 
 /** Forget the engine's answer (tests, or an engine swapped under a running control plane). */
@@ -307,7 +323,8 @@ function refusalOnStdout(stdout: string, message: string): EngineRefusal | undef
     const candidate = line.trim()
     if (!candidate.startsWith("{")) continue
     try {
-      const parsed = JSON.parse(candidate) as Record<string, unknown>
+      const parsed = JSON.parse(candidate)
+      if (!isJsonObject(parsed)) continue
       // Whatever the refusal names (`tables`, `objects`, a rebaseline's `unseen` and `gone`) is
       // passed on as the engine sent it, so a refusal added later needs no change here.
       const { status, reason, message: _said, ...details } = parsed

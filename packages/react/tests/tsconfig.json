@@ -5,5 +5,5 @@
     "composite": false,
     "rootDir": "../.."
   },
-  "include": ["./**/*.ts", "./**/*.tsx", "../src/**/*.ts", "../src/**/*.tsx", "../../client/tests/helpers/*.ts"]
+  "include": ["../../../ts-reset.d.ts", "./**/*.ts", "./**/*.tsx", "../src/**/*.ts", "../src/**/*.tsx", "../../client/tests/helpers/*.ts"]
 }

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { RichTextEditor } from "@supatype/ui"
 import { useAuth } from "./useAuth"
 import { earnStars, redeemReward, updateProfile, type RichTextDoc } from "./api"
@@ -11,8 +11,12 @@ const money = (pence: number): string => `£${(pence / 100).toFixed(2)}`
 /** True if a Lexical doc has any text content (so we don't render an empty bio block). */
 function richTextHasContent(doc: RichTextDoc | null): boolean {
   if (!doc) return false
-  const root = (doc as unknown as { root?: { children?: unknown[] } }).root
-  return JSON.stringify(root?.children ?? []).includes('"text":"')
+  return JSON.stringify(doc.root.children ?? []).includes('"text":"')
+}
+
+/** The message to show for a failed action. */
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
 }
 
 /** Stable fingerprint of a doc, used as a remount key so the read-only editor
@@ -30,11 +34,14 @@ export default function App() {
   const { ready, user } = useAuth()
   const [view, setView] = useState<View>("home")
   const [flash, setFlash] = useState<string | null>(null)
+  // Kept across renders, so a new flash cancels the previous one's timer instead of being
+  // cleared early by it.
+  const flashTimer = useRef<number | undefined>(undefined)
 
   const showFlash = (msg: string) => {
     setFlash(msg)
-    window.clearTimeout((showFlash as unknown as { t?: number }).t)
-    ;(showFlash as unknown as { t?: number }).t = window.setTimeout(() => setFlash(null), 3200)
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlash(null), 3200)
   }
 
   if (!ready) {
@@ -215,7 +222,7 @@ function EarnGrid({ onFlash }: { onFlash: (m: string) => void }) {
       await refreshActivity()
       onFlash(`+${item.stars}★ for your ${item.label}`)
     } catch (e) {
-      onFlash((e as Error).message)
+      onFlash(errorText(e))
     } finally {
       setBusy(null)
     }
@@ -269,7 +276,7 @@ function RewardCard({ reward, compact, onFlash }: { reward: Reward; compact?: bo
       await refreshActivity()
       onFlash?.(`Enjoy your ${reward.name}! ${reward.emoji}`)
     } catch (e) {
-      onFlash?.((e as Error).message)
+      onFlash?.(errorText(e))
     } finally {
       setBusy(false)
     }
@@ -349,7 +356,7 @@ function ProfileEditor() {
       setSaved(true)
       window.setTimeout(() => setSaved(false), 2200)
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorText(e))
     } finally {
       setBusy(false)
     }

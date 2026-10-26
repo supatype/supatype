@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { isNumber, isOneOf, isShape, isString, optional, type Guard } from "../lib/json.js"
 import { parseSseEvents, sseJson } from "../lib/sse-reader.js"
 
 /** One structured line as the worker writes it. */
@@ -12,6 +13,18 @@ export interface FunctionLogLine {
   status?: number
   duration_ms?: number
 }
+
+/** The worker's `LogLine` (`packages/functions-worker/logging.ts`), less the keys Studio does not read. */
+const isFunctionLogLine: Guard<FunctionLogLine> = isShape({
+  timestamp: isString,
+  level: isOneOf(["debug", "info", "warn", "error"] as const),
+  project_ref: isString,
+  request_id: optional(isString),
+  function: optional(isString),
+  message: isString,
+  status: optional(isNumber),
+  duration_ms: optional(isNumber),
+})
 
 export type TailState =
   | { kind: "connecting" }
@@ -44,7 +57,7 @@ export function parseTailEvents(
   const { events, rest } = parseSseEvents(buffered)
   const lines: FunctionLogLine[] = []
   for (const event of events) {
-    const line = sseJson<FunctionLogLine>(event)
+    const line = sseJson(event, isFunctionLogLine)
     // The stream carries every function's lines, and the worker's own. This tab is about one
     // function, so the rest would read as somebody else's output.
     if (line !== null && line.function === functionName) lines.push(line)

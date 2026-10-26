@@ -251,18 +251,18 @@ export function fillMissingKeys(dir: string, expYears = 10): string[] {
     return current === undefined || current.trim() === ""
   }
 
-  const needed = ["ANON_KEY", "SERVICE_ROLE_KEY"].filter(blank)
+  const needed = (["ANON_KEY", "SERVICE_ROLE_KEY"] as const).filter(blank)
   if (needed.length === 0) return []
 
   const secret = resolveSecret(dir)
   if (!secret) return []
 
   const { anonKey, serviceKey } = signKeyPair(secret, expYears)
-  const minted: Record<string, string> = { ANON_KEY: anonKey, SERVICE_ROLE_KEY: serviceKey }
+  const minted = { ANON_KEY: anonKey, SERVICE_ROLE_KEY: serviceKey }
 
   let next = content
   for (const name of needed) {
-    next = upsertEnvVar(next, name, minted[name] as string)
+    next = upsertEnvVar(next, name, minted[name])
   }
   writeFileSync(envPath, next, "utf8")
   return needed

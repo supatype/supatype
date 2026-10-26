@@ -2,10 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
 import { ProvidersView } from "../src/views/auth/ProvidersView.js"
+import { testClient } from "./support.js"
 
 /**
  * The Providers page showed a hard-coded list with every OAuth provider disabled, and Enable and
@@ -17,10 +17,7 @@ import { ProvidersView } from "../src/views/auth/ProvidersView.js"
 
 const SELF_HOST: PlatformContext = { platformUrl: undefined, projectRef: undefined }
 const CLOUD: PlatformContext = { platformUrl: "https://api.example.test/api/v1", projectRef: "abc123" }
-const CLIENT = {
-  url: "http://localhost:8000/studio/proxy",
-  auth: { currentAccessToken: "token" },
-} as unknown as SupatypeClient
+const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
 
 const SETTINGS = {
   external: {
@@ -67,7 +64,7 @@ function statusOf(provider: string): string | undefined {
 }
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
 })
 
 afterEach(() => {

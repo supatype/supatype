@@ -185,9 +185,9 @@ function boundsForKind(kind: FieldKind, jsonIsArray: boolean): KindBounds {
 /** How a column is measured, once the kind has decided. */
 export type MeasureForm = LengthForm | ItemsForm
 
-export interface MeasureResolution {
+export interface MeasureResolution<F extends MeasureForm = MeasureForm> {
   /** How to measure, when this kind can be measured this way. */
-  form?: MeasureForm
+  form?: F
   /** Why it cannot, and what to use instead. Present exactly when `form` is not. */
   instead?: string
 }
@@ -200,6 +200,21 @@ export interface MeasureResolution {
  * gets `char_length` in one place and `cardinality` in the other. A second table for the constraint
  * path is how `char_length(text[])` would come back, in a new file, having been fixed once already.
  */
+export function measureFormFor(
+  kind: FieldKind,
+  measure: "length",
+  options?: { jsonIsArray?: boolean },
+): MeasureResolution<LengthForm>
+export function measureFormFor(
+  kind: FieldKind,
+  measure: "items",
+  options?: { jsonIsArray?: boolean },
+): MeasureResolution<ItemsForm>
+export function measureFormFor(
+  kind: FieldKind,
+  measure: "length" | "items",
+  options?: { jsonIsArray?: boolean },
+): MeasureResolution
 export function measureFormFor(
   kind: FieldKind,
   measure: "length" | "items",
@@ -282,7 +297,7 @@ export function compileBounds(
     if (resolved.form === undefined) {
       refuse(field, maxLength !== undefined ? "MaxLength" : "MinLength", kind, resolved.instead)
     }
-    const expr = lengthExpr(resolved.form as LengthForm)
+    const expr = lengthExpr(resolved.form)
     if (maxLength !== undefined) {
       clauses.push(`${expr} <= ${maxLength}`)
       validation.maxLength = maxLength
@@ -308,7 +323,7 @@ export function compileBounds(
       comparisons.push(`>= ${minItems}`)
       validation.minItems = minItems
     }
-    clauses.push(itemsClause(itemsResolved.form as ItemsForm, comparisons))
+    clauses.push(itemsClause(itemsResolved.form, comparisons))
   }
 
   const { min, max } = bounds
@@ -340,18 +355,20 @@ function joinClauses(clauses: string[]): string {
 
 /** A number bounds a number and a string bounds a date. Crossing them is a mistake, not a cast. */
 function assertRangeShape(field: string, kind: FieldKind, form: RangeForm, bound: number | string): void {
-  const isNumeric = form === "numeric"
-  if (isNumeric && typeof bound !== "number") {
-    throw new Error(
-      `Field "${field}": Between on a ${kind} field takes numbers, but "${bound}" is a string.`,
-    )
+  if (form === "numeric") {
+    if (typeof bound !== "number") {
+      throw new Error(
+        `Field "${field}": Between on a ${kind} field takes numbers, but "${bound}" is a string.`,
+      )
+    }
+    return
   }
-  if (!isNumeric && typeof bound !== "string") {
+  if (typeof bound !== "string") {
     throw new Error(
       `Field "${field}": Between on a ${kind} field takes ISO-8601 string bounds, but ${bound} is a number.`,
     )
   }
-  if (!isNumeric && !isTemporalLiteral(form, bound as string)) {
+  if (!isTemporalLiteral(form, bound)) {
     throw new Error(
       `Field "${field}": Between bound "${bound}" is not a valid ${form === "interval" ? "interval" : "ISO-8601 date"}.`,
     )

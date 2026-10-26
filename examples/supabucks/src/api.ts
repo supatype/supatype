@@ -1,36 +1,24 @@
 import { supatype } from "./supatype"
+import type { TableRow } from "../supatype/generated/client"
 import type { MenuItem, Reward } from "./catalog"
 import type { SerializedEditorState } from "@supatype/types/lexical"
 
-// Column names match the Supatype schema (RelatedTo<> becomes <field>_id).
-// bio is a RichText column → stored as a Lexical document (jsonb).
+// Row types come from the generated client, so they follow the schema (RelatedTo<> becomes
+// <field>_id). bio is a RichText column, stored as a Lexical document (jsonb).
 export type RichTextDoc = SerializedEditorState
+export type Customer = TableRow<"customer">
+export type Activity = TableRow<"activity">
 
-export interface Customer {
-  id: string
-  name: string
-  bio: RichTextDoc | null
-  stars: number
-  lifetimeStars: number
-  created_at: string
-  updated_at: string
-}
-
-export interface Activity {
-  id: string
-  auth_user_id: string
-  customer_id: string
-  kind: "earn" | "redeem"
-  label: string
-  emoji: string
-  stars: number
-  amount: number | null
-  created_at: string
+/** The row a write handed back. One that matched nothing (wrong id, or RLS refused it) is an error. */
+function writtenRow<T>(data: T[] | null): T {
+  const row = data?.[0]
+  if (row === undefined) throw new Error("The write returned no row")
+  return row
 }
 
 export async function fetchCustomer(uid: string): Promise<Customer | null> {
   const { data } = await supatype.from("customer").select("*").eq("id", uid).limit(1)
-  return (data?.[0] as Customer | undefined) ?? null
+  return data?.[0] ?? null
 }
 
 /** Get-or-create the loyalty profile for a freshly signed-in user. */
@@ -41,7 +29,7 @@ export async function ensureCustomer(uid: string, name: string): Promise<Custome
     .from("customer")
     .insert({ id: uid, name, stars: 0, lifetimeStars: 0 })
   if (error) throw new Error(error.message)
-  return (data as Customer[])[0]!
+  return writtenRow(data)
 }
 
 export async function fetchActivity(uid: string): Promise<Activity[]> {
@@ -51,7 +39,7 @@ export async function fetchActivity(uid: string): Promise<Activity[]> {
     .eq("auth_user_id", uid)
     .order("created_at", { ascending: false })
     .limit(50)
-  return (data as Activity[] | null) ?? []
+  return data ?? []
 }
 
 /** Simulate paying for a drink: log the activity and credit the stars. */
@@ -73,7 +61,7 @@ export async function earnStars(customer: Customer, item: MenuItem): Promise<Cus
     })
     .eq("id", customer.id)
   if (error) throw new Error(error.message)
-  return (data as Customer[])[0]!
+  return writtenRow(data)
 }
 
 /** Update the customer's profile (name and bio). bio is a RichText (jsonb) column;
@@ -84,7 +72,7 @@ export async function updateProfile(
 ): Promise<Customer> {
   const { data, error } = await supatype.from("customer").update(fields).eq("id", uid)
   if (error) throw new Error(error.message)
-  return (data as Customer[])[0]!
+  return writtenRow(data)
 }
 
 /** Redeem a reward: log it and debit the stars. */
@@ -103,5 +91,5 @@ export async function redeemReward(customer: Customer, reward: Reward): Promise<
     .update({ stars: customer.stars - reward.cost })
     .eq("id", customer.id)
   if (error) throw new Error(error.message)
-  return (data as Customer[])[0]!
+  return writtenRow(data)
 }

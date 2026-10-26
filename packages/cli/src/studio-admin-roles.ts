@@ -1,4 +1,5 @@
 import type { SupatypeProjectConfig } from "./project-config.js"
+import { isJsonObject } from "@supatype/shared"
 
 export const DEFAULT_STUDIO_ADMIN_ROLES = ["admin", "supatype_admin"] as const
 
@@ -18,7 +19,7 @@ export function studioAdminRoles(cfg: SupatypeProjectConfig): string[] {
  * in here, at the one place the file is written.
  */
 export function withAdminRoles(admin: unknown, cfg: SupatypeProjectConfig): Record<string, unknown> {
-  const base = typeof admin === "object" && admin !== null ? (admin as Record<string, unknown>) : {}
+  const base = isJsonObject(admin) ? admin : {}
   const livePreview = cfg.admin?.livePreview
   return {
     ...base,

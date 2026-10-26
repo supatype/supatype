@@ -51,7 +51,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     setLoading(true)
     setError(null)
     try {
-      let query = client.from(model.tableName as never).select()
+      let query = client.from(model.tableName).select()
 
       if (search && model.searchFields.length > 0) {
         query = query.ilike(model.searchFields[0]!, `%${search}%`)
@@ -138,7 +138,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   const handleBulkDelete = async () => {
     if (selected.size === 0) return
     for (const id of selected) {
-      await client.from(model.tableName as never).delete().eq(model.primaryKey, id)
+      await client.from(model.tableName).delete().eq(model.primaryKey, id)
     }
     setSelected(new Set())
     void fetchData()
@@ -334,7 +334,7 @@ function CellRenderer({
       return <span className={`st-cell-bool st-cell-bool--${resolved ? "true" : "false"}`}>{resolved ? "Yes" : "No"}</span>
     case "image":
     case "file":
-      if (typeof resolved === "object" && resolved !== null && "path" in (resolved as Record<string, unknown>)) {
+      if (typeof resolved === "object" && resolved !== null && "path" in resolved) {
         return <span className="st-cell-image">[Image]</span>
       }
       return <span>{formatCellText(resolved)}</span>

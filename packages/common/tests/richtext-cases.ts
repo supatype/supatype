@@ -14,9 +14,27 @@ import type { SerializedEditorState } from "@supatype/types/lexical"
 
 type Documents = Record<string, SerializedEditorState>
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * A saved document: an object whose `root` has a list of children. A boundary: the fixtures were
+ * written by Lexical itself, so the nodes under the root are taken as Lexical wrote them.
+ */
+function isEditorState(value: unknown): value is SerializedEditorState {
+  return isObject(value) && isObject(value["root"]) && Array.isArray(value["root"]["children"])
+}
+
+function asEditorState(value: unknown, name: string): SerializedEditorState {
+  if (!isEditorState(value)) throw new Error(`${name} is not a saved Lexical document`)
+  return value
+}
+
 function load(name: string): Documents {
-  const raw = readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")
-  return JSON.parse(raw) as Documents
+  const raw = JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8"))
+  if (!isObject(raw)) throw new Error(`${name} is not a map of documents`)
+  return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, asEditorState(value, key)]))
 }
 
 const documents: Documents = { ...load("lexical-documents.json"), ...load("lexical-code-block.json") }
@@ -27,9 +45,9 @@ function doc(name: string): SerializedEditorState {
   return found
 }
 
-const kitchenSinkAbstract: SerializedEditorState = JSON.parse(
+const kitchenSinkAbstract = asEditorState(JSON.parse(
   '{"root": {"type": "root", "format": "", "indent": 0, "version": 1, "children": [{"type": "paragraph", "format": "", "indent": 0, "version": 1, "children": [{"mode": "normal", "text": "A talk in the main hall, and the abstract an editor would have written.", "type": "text", "style": "", "detail": 0, "format": 0, "version": 1}], "direction": "ltr"}], "direction": "ltr"}}',
-) as SerializedEditorState
+), "kitchenSinkAbstract")
 
 export interface RenderCase {
   name: string

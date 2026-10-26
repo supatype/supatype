@@ -21,6 +21,7 @@ import {
   nativeRealtimePort,
   type SupatypeProjectConfig,
 } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 let dir: string
 const saved: Record<string, string | undefined> = {}
@@ -43,11 +44,10 @@ afterEach(() => {
 })
 
 function config(extra: { dbPort?: number; realtimePort?: number } = {}): SupatypeProjectConfig {
-  return {
-    project: { name: "demo" },
+  return projectConfig({
     database: { ...(extra.dbPort !== undefined && { port: extra.dbPort }) },
     server: { mode: "dev", ...(extra.realtimePort !== undefined && { realtimePort: extra.realtimePort }) },
-  } as SupatypeProjectConfig
+  })
 }
 
 describe("the native Postgres port", () => {

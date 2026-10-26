@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
@@ -12,6 +11,7 @@ import { StoragePoliciesView } from "../src/views/storage/PoliciesView.js"
 import { MigrationHistory } from "../src/views/MigrationHistory.js"
 import { SeedHistory } from "../src/views/SeedHistory.js"
 import { Settings } from "../src/views/Settings.js"
+import { metadataBody, testClient, type MetadataBody } from "./support.js"
 
 /**
  * RQ3b: the Policies lists, Migration History, Seed History and the Database settings read through
@@ -20,9 +20,9 @@ import { Settings } from "../src/views/Settings.js"
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "token" })
 
-type Call = { url: string; body: { name?: string; params?: Record<string, unknown> } }
+type Call = { url: string; body: MetadataBody }
 
 const ROWS: Record<string, Array<Record<string, unknown>>> = {
   schemas: [{ schema_name: "public" }],
@@ -40,7 +40,7 @@ let calls: Call[] = []
 function stubFetch(): void {
   calls = []
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-    const body = init?.body ? (JSON.parse(String(init.body)) as Call["body"]) : {}
+    const body = metadataBody(init)
     calls.push({ url, body })
     if (url.endsWith("/sql")) return Response.json({ error: "forbidden", message: "Your role cannot use the SQL editor" }, { status: 403 })
     const rows = (body.name !== undefined ? ROWS[body.name] : undefined) ?? []

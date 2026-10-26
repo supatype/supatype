@@ -1,3 +1,5 @@
+import { importMetaEnv } from "./build-env.js"
+
 export type AppEnvironment = "development" | "staging" | "production"
 
 function detectEnvironment(): AppEnvironment {
@@ -10,11 +12,7 @@ function detectEnvironment(): AppEnvironment {
 
 function getEnvVar(name: string, fallback: string): string {
   // Vite-style env vars
-  if (typeof import.meta !== "undefined") {
-    const env = (import.meta as unknown as { env?: Record<string, string> }).env
-    if (env?.[name]) return env[name]
-  }
-  return fallback
+  return importMetaEnv(name) ?? fallback
 }
 
 export const config = {

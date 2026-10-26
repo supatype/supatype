@@ -370,13 +370,12 @@ export class RlsFilter {
     predicate: PredicateRef,
     record: Record<string, unknown>,
   ): Promise<boolean> {
-    const result = await client.query(
+    const result = await client.query<{ visible: unknown }>(
       `SELECT ${quotePredicateRef(predicate)}(r) AS visible ` +
         `FROM jsonb_populate_record(null::${relationOf(change)}, $1::jsonb) AS r`,
       [JSON.stringify(record)],
     )
-    const row = result.rows[0] as { visible?: unknown } | undefined
-    return row?.visible === true
+    return result.rows[0]?.visible === true
   }
 
   /**
@@ -400,9 +399,9 @@ export class RlsFilter {
     if (sides.length === 0) return { send: change, redacted: NOTHING_REDACTED }
 
     // Columns whose label could not be parsed are masked without asking.
-    const askable = columns.filter((column) => masks.get(column) != null)
+    const askable = askableColumns(columns, masks)
     const verdicts = askable.length > 0
-      ? await this.readVerdicts(client, change, sides, askable, masks)
+      ? await this.readVerdicts(client, change, sides, askable)
       : new Map<string, Map<string, boolean | null>>()
 
     const masked = {
@@ -420,28 +419,27 @@ export class RlsFilter {
     client: pg.PoolClient,
     change: WalChange,
     sides: Side[],
-    askable: string[],
-    masks: ReadMasks,
+    askable: ReadonlyArray<readonly [string, PredicateRef]>,
   ): Promise<Map<string, Map<string, boolean | null>>> {
     const from = sides.map(
       (side, index) =>
         `jsonb_populate_record(null::${relationOf(change)}, $${index + 1}::jsonb) AS ${side.alias}`,
     )
-    const terms = askable.flatMap((column, columnIndex) => {
-      const predicate = quotePredicateRef(masks.get(column) as PredicateRef)
+    const terms = askable.flatMap(([, ref], columnIndex) => {
+      const predicate = quotePredicateRef(ref)
       return sides.map((side) => `${predicate}(${side.alias}) AS ${side.alias}_${columnIndex}`)
     })
 
-    const result = await client.query(
+    const result = await client.query<Record<string, unknown>>(
       `SELECT ${terms.join(", ")} FROM ${from.join(", ")}`,
       sides.map((side) => JSON.stringify(side.record)),
     )
-    const row = (result.rows[0] ?? {}) as Record<string, unknown>
+    const row = result.rows[0] ?? {}
 
     const verdicts = new Map<string, Map<string, boolean | null>>()
     for (const side of sides) {
       const perColumn = new Map<string, boolean | null>()
-      askable.forEach((column, columnIndex) => {
+      askable.forEach(([column], columnIndex) => {
         perColumn.set(column, row[`${side.alias}_${columnIndex}`] === true ? true : null)
       })
       verdicts.set(side.key, perColumn)
@@ -478,6 +476,14 @@ interface Side {
   key: "new" | "old"
   alias: string
   record: Record<string, unknown>
+}
+
+/** The restricted columns whose predicate is known, each with it, in the order given. */
+function askableColumns(columns: string[], masks: ReadMasks): Array<[string, PredicateRef]> {
+  return columns.flatMap((column): Array<[string, PredicateRef]> => {
+    const predicate = masks.get(column)
+    return predicate == null ? [] : [[column, predicate]]
+  })
 }
 
 function sidesOf(change: WalChange): Side[] {

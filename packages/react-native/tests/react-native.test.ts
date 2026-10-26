@@ -6,7 +6,19 @@ import {
   createNativeClient,
   openOAuth,
   secureStoreAdapter,
+  type WebBrowserLike,
 } from "../src/index.js"
+
+function isFrame(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** A frame the client sent, failing the test when it is not a JSON object. */
+function frameOf(raw: string): Record<string, unknown> {
+  const frame = JSON.parse(raw)
+  if (!isFrame(frame)) throw new Error(`Not a frame: ${raw}`)
+  return frame
+}
 
 const AUTH_URL = "http://localhost:9999"
 const ANON = "test-anon"
@@ -146,7 +158,7 @@ describe("createNativeClient", () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       const joins = sent
-        .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+        .map(frameOf)
         .filter((frame) => frame["type"] === "subscribe")
       expect(joins).toHaveLength(1)
       expect(joins[0]!["table"]).toBe("post")
@@ -171,7 +183,7 @@ describe("openOAuth", () => {
     const client = { auth }
 
     const webBrowser = {
-      openAuthSessionAsync: vi.fn().mockResolvedValue({
+      openAuthSessionAsync: vi.fn<WebBrowserLike["openAuthSessionAsync"]>().mockResolvedValue({
         type: "success",
         url: "myapp://auth/callback?code=auth-code-1",
       }),
@@ -209,7 +221,7 @@ describe("openOAuth", () => {
     expect(result.error).toBeNull()
     expect(result.data.session?.accessToken).toBe("at-oauth")
     expect(webBrowser.openAuthSessionAsync).toHaveBeenCalled()
-    const [authorizeUrl] = webBrowser.openAuthSessionAsync.mock.calls[0] as [string]
+    const [authorizeUrl] = webBrowser.openAuthSessionAsync.mock.calls[0] ?? []
     expect(authorizeUrl).toContain("code_challenge=")
     expect(authorizeUrl).toContain("code_challenge_method=s256")
   })

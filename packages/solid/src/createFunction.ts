@@ -2,6 +2,7 @@ import { createSignal } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { isCallerValue } from "./caller-types.js"
 
 export interface FunctionResult<TResponse> {
   invoke: (body?: unknown) => Promise<{ data: TResponse | null; error: SupatypeError | null }>
@@ -25,14 +26,17 @@ export function createFunction<
     setLoading(true)
     setError(null)
 
-    const result = await client.functions.invoke(functionName, {
-      ...(body !== undefined ? { body } : {}),
-    })
-
-    setLoading(false)
-    setData(() => result.data as TResponse | null)
-    if (result.error) setError(result.error)
-    return result as { data: TResponse | null; error: SupatypeError | null }
+    try {
+      const result = await client.functions.invoke(functionName, {
+        ...(body !== undefined ? { body } : {}),
+      })
+      const answer = { data: isCallerValue<TResponse>(result.data) ? result.data : null, error: result.error }
+      setData(() => answer.data)
+      if (answer.error) setError(answer.error)
+      return answer
+    } finally {
+      setLoading(false)
+    }
   }
 
   return { invoke, data, error, loading }

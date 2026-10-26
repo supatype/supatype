@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { isJsonObject } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
@@ -83,17 +84,13 @@ export function useStudioFieldAccess(): StudioFieldAccess {
           headers: { ...studioGatewayHeaders(), ...studioAuthHeaders(client) },
         })
         if (!res.ok) return
-        const json = (await res.json()) as {
-          fields?: unknown
-          mode?: unknown
-          access?: unknown
-        }
-        if (cancelled) return
+        const json = await res.json()
+        if (cancelled || !isJsonObject(json)) return
         setState({
           resolved: true,
-          mode: json.mode === "elevated" ? "elevated" : "self",
-          fields: normaliseFieldAccess(json.fields),
-          tables: normaliseTableAccess(json.access),
+          mode: json["mode"] === "elevated" ? "elevated" : "self",
+          fields: normaliseFieldAccess(json["fields"]),
+          tables: normaliseTableAccess(json["access"]),
         })
       } catch {
         // Leave `resolved` false so the UI keeps its unrestricted behaviour.
@@ -116,16 +113,15 @@ export function useStudioFieldAccess(): StudioFieldAccess {
  * hide a column the caller is entitled to edit.
  */
 export function normaliseFieldAccess(raw: unknown): FieldAccessMap {
-  if (raw === null || typeof raw !== "object") return {}
+  if (!isJsonObject(raw)) return {}
 
   const out: FieldAccessMap = {}
-  for (const [table, columns] of Object.entries(raw as Record<string, unknown>)) {
-    if (columns === null || typeof columns !== "object") continue
+  for (const [table, columns] of Object.entries(raw)) {
+    if (!isJsonObject(columns)) continue
 
     const resolved: Record<string, FieldAccess> = {}
-    for (const [column, verdicts] of Object.entries(columns as Record<string, unknown>)) {
-      if (verdicts === null || typeof verdicts !== "object") continue
-      const v = verdicts as Record<string, unknown>
+    for (const [column, v] of Object.entries(columns)) {
+      if (!isJsonObject(v)) continue
       resolved[column] = {
         read: verdictOf(v["read"]),
         write: verdictOf(v["write"]),
@@ -229,14 +225,14 @@ export function isFieldCreatable(
  * {@link normaliseFieldAccess}.
  */
 export function normaliseTableAccess(raw: unknown): TableAccessMap {
-  if (raw === null || typeof raw !== "object") return {}
+  if (!isJsonObject(raw)) return {}
 
   const out: TableAccessMap = {}
-  for (const [table, operations] of Object.entries(raw as Record<string, unknown>)) {
-    if (operations === null || typeof operations !== "object") continue
+  for (const [table, operations] of Object.entries(raw)) {
+    if (!isJsonObject(operations)) continue
 
     const resolved: Record<string, FieldVerdict> = {}
-    for (const [operation, verdict] of Object.entries(operations as Record<string, unknown>)) {
+    for (const [operation, verdict] of Object.entries(operations)) {
       resolved[operation] = verdictOf(verdict)
     }
     out[table] = resolved

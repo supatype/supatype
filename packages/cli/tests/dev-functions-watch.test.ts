@@ -24,7 +24,8 @@ const fakeWatch: WatchFn = (dir, _options, listener) => {
   return { close: () => closed.push(dir) }
 }
 
-function save(dir: string, filename: string): void {
+/** A save event in `dir`; `null` is what `fs.watch` reports when it cannot name the file. */
+function save(dir: string, filename: string | null): void {
   listeners.get(join(project, dir))?.("change", filename)
 }
 
@@ -65,7 +66,7 @@ describe("dev's functions watch", () => {
     const restart = vi.fn()
     watchFunctionSources(project, restart, fakeWatch)
     save("functions", ".env.local")
-    save("functions", null as unknown as string)
+    save("functions", null)
     vi.advanceTimersByTime(500)
     expect(restart).not.toHaveBeenCalled()
   })

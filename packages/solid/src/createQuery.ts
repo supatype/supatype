@@ -3,6 +3,7 @@ import type { Accessor } from "solid-js"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { isRowsOf } from "./caller-types.js"
 
 export interface QueryOptions {
   columns?: string | undefined
@@ -65,7 +66,7 @@ export function createQuery<
       }
 
       const result = await query
-      setData(() => result.data as TRow[] | null)
+      setData(() => (isRowsOf<TRow>(result.data) ? result.data : null))
       if (result.error) {
         setError(result.error)
       }

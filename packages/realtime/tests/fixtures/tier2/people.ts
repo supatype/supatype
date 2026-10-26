@@ -10,9 +10,9 @@ export const A = "0a0a0a0a-0000-4000-8000-00000000000a"
 export const B = "0b0b0b0b-0000-4000-8000-00000000000b"
 export const ADMIN = "0d0d0d0d-0000-4000-8000-00000000000d"
 
-export const userA = { sub: A, role: "authenticated" } as JwtClaims
-export const userB = { sub: B, role: "authenticated" } as JwtClaims
-export const admin = { sub: ADMIN, role: "authenticated", app_metadata: { role: "admin" } } as JwtClaims
+export const userA: JwtClaims = { sub: A, role: "authenticated" }
+export const userB: JwtClaims = { sub: B, role: "authenticated" }
+export const admin: JwtClaims = { sub: ADMIN, role: "authenticated", app_metadata: { role: "admin" } }
 
 /** Bob's `Employee` row: `name` any signed-in user, `salary` admin only, `ssn` Bob only. */
 export const bob = { id: B, name: "Bob", salary: 90000, ssn: "B-SSN-222" }

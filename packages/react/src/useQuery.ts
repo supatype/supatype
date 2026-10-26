@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { isRowsOf } from "./caller-types.js"
 
 export interface UseQueryOptions {
   /** PostgREST select expression (default: '*') */
@@ -111,8 +112,8 @@ export function useQuery<
       query = query.cache(options.cache)
     }
 
-    const result = (await query) as { data: TRow[] | null; error: SupatypeError | null; count: number | null }
-    setData(result.data)
+    const result = await query
+    setData(isRowsOf<TRow>(result.data) ? result.data : null)
     setError(result.error)
     setCount(result.count)
     setLoading(false)

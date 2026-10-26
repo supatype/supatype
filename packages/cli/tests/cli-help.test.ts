@@ -7,12 +7,12 @@ import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { isShape, isString } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const CLI_BIN = resolve(__dirname, "../bin/supatype.js")
-const PACKAGE_VERSION = (
-  JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf8")) as { version: string }
-).version
+const PACKAGE_VERSION = parseJsonAs(readFileSync(join(__dirname, "../package.json"), "utf8"), isShape({ version: isString })).version
 
 function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
   const result = spawnSync(process.execPath, [CLI_BIN, ...args], {

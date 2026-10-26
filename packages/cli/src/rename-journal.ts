@@ -14,6 +14,8 @@
  * removed only by `supatype rename --prune`, once the target database's history shows it applied.
  */
 import { randomUUID } from "node:crypto"
+import { errorMessage } from "./error-message.js"
+import { isJsonObject } from "@supatype/shared"
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import type { RenameCandidate } from "./engine-client.js"
@@ -61,28 +63,28 @@ export function readRenameJournal(cwd: string): RenameJournal {
   try {
     raw = JSON.parse(readFileSync(path, "utf8"))
   } catch (err) {
-    throw new Error(`${RENAME_JOURNAL_FILE} is not valid JSON: ${(err as Error).message}`)
+    throw new Error(`${RENAME_JOURNAL_FILE} is not valid JSON: ${errorMessage(err)}`)
   }
   return parseJournal(raw)
 }
 
 function parseJournal(raw: unknown): RenameJournal {
-  const doc = raw as { version?: unknown; renames?: unknown }
-  if (typeof doc !== "object" || doc === null) throw malformed("expected an object")
-  if (doc.version !== RENAME_JOURNAL_VERSION) {
+  if (!isJsonObject(raw)) throw malformed("expected an object")
+  const { version, renames } = raw
+  if (version !== RENAME_JOURNAL_VERSION) {
     throw new Error(
-      `${RENAME_JOURNAL_FILE} is version ${String(doc.version)}, and this CLI reads version ` +
+      `${RENAME_JOURNAL_FILE} is version ${String(version)}, and this CLI reads version ` +
         `${RENAME_JOURNAL_VERSION}. Update the CLI rather than edit the file.`,
     )
   }
-  if (!Array.isArray(doc.renames)) throw malformed("`renames` must be a list")
-  return { version: RENAME_JOURNAL_VERSION, renames: doc.renames.map(parseEntry) }
+  if (!Array.isArray(renames)) throw malformed("`renames` must be a list")
+  return { version: RENAME_JOURNAL_VERSION, renames: renames.map(parseEntry) }
 }
 
 function parseEntry(raw: unknown, index: number): RenameJournalEntry {
-  const entry = raw as Record<string, unknown>
+  const entry = isJsonObject(raw) ? raw : {}
   const text = (key: string): string => {
-    const value = entry?.[key]
+    const value = entry[key]
     if (typeof value !== "string" || value === "") throw malformed(`entry ${index + 1} has no ${key}`)
     return value
   }

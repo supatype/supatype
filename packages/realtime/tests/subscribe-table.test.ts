@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ChannelManager } from "../src/channels.js"
+import { ChannelManager, type ClientSocket } from "../src/channels.js"
 import type { Subscription } from "../src/types.js"
 
 /**
@@ -67,7 +67,7 @@ describe("the table a subscription watches", () => {
 describe("a subscriber registered under a name unlike its table", () => {
   it("receives changes for the table it named", () => {
     const channels = new ChannelManager()
-    const ws = { readyState: 1, send: () => {} } as unknown as Parameters<ChannelManager["addClient"]>[0]
+    const ws: ClientSocket = { readyState: 1, send: () => {} }
     const clientId = channels.addClient(ws, null)
 
     const subscription: Subscription = {

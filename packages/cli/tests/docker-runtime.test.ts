@@ -35,6 +35,7 @@ import {
   reportDockerUnavailable,
   requireDockerDaemon,
 } from "../src/docker-runtime.js"
+import { exitThrows } from "./support/process-exit.js"
 
 function spawnResult(
   overrides: Partial<SpawnSyncReturns<string>> & Pick<SpawnSyncReturns<string>, "status">,
@@ -186,13 +187,13 @@ describe("reportDockerUnavailable", () => {
 })
 
 describe("requireDockerDaemon", () => {
-  let exitMock: MockInstance<(code?: string | number | null | undefined) => never>
+  let exitMock: MockInstance<typeof process.exit>
   let errorMock: MockInstance<typeof console.error>
 
   beforeEach(() => {
     spawnSyncMock.mockReset()
     isInteractiveMock.mockReturnValue(false)
-    exitMock = vi.spyOn(process, "exit").mockImplementation((() => {}) as typeof process.exit)
+    exitMock = exitThrows()
     errorMock = vi.spyOn(console, "error").mockImplementation(() => {})
   })
 
@@ -206,7 +207,7 @@ describe("requireDockerDaemon", () => {
       .mockReturnValueOnce(spawnResult({ status: 0, stdout: "24.0.0" }))
       .mockReturnValueOnce(spawnResult({ status: 1, stderr: "daemon down" }))
 
-    requireDockerDaemon()
+    expect(() => requireDockerDaemon()).toThrow("exit 1")
 
     expect(errorMock).toHaveBeenCalled()
     expect(exitMock).toHaveBeenCalledWith(1)

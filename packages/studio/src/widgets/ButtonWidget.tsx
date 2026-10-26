@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react"
 import type { WidgetProps } from "./FieldWidget.js"
+import { isJsonObject } from "../lib/json.js"
 
 export type ButtonFieldValue = {
   label?: string
@@ -34,7 +35,7 @@ function coerceButton(value: unknown): ButtonFieldValue {
     if (!trimmed) return { ...EMPTY }
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
-        return coerceButton(JSON.parse(trimmed) as unknown)
+        return coerceButton(JSON.parse(trimmed))
       } catch {
         return { ...EMPTY, label: trimmed }
       }
@@ -42,20 +43,16 @@ function coerceButton(value: unknown): ButtonFieldValue {
     return { ...EMPTY, label: trimmed }
   }
 
-  if (typeof value !== "object" || Array.isArray(value)) return { ...EMPTY }
+  if (!isJsonObject(value)) return { ...EMPTY }
 
-  const row = value as Record<string, unknown>
-  if (typeof row.label === "string" || typeof row.href === "string") {
-    return parseButtonRow(row)
+  if (typeof value.label === "string" || typeof value.href === "string") {
+    return parseButtonRow(value)
   }
 
   // Localized JSONB map, e.g. { en: { label, href } }
-  for (const nested of Object.values(row)) {
-    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-      const candidate = nested as Record<string, unknown>
-      if (typeof candidate.label === "string" || typeof candidate.href === "string") {
-        return parseButtonRow(candidate)
-      }
+  for (const candidate of Object.values(value)) {
+    if (isJsonObject(candidate) && (typeof candidate.label === "string" || typeof candidate.href === "string")) {
+      return parseButtonRow(candidate)
     }
   }
 

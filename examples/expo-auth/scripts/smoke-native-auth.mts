@@ -86,9 +86,15 @@ const NOT_OAUTH = new Set(["email", "phone", "anonymous_users"])
 async function enabledOAuthProviders(): Promise<string[]> {
   const res = await fetch(`${GATEWAY}/auth/v1/settings`, { headers: { apikey: ANON } })
   assert(res.ok, `auth settings failed: ${res.status}`)
-  const { external } = (await res.json()) as { external: Record<string, boolean> }
+  const body = await res.json()
+  assert(
+    typeof body === "object" && body !== null && "external" in body,
+    "auth settings returned no `external` map",
+  )
+  const { external } = body
+  assert(typeof external === "object" && external !== null, "auth settings `external` is not an object")
   return Object.entries(external)
-    .filter(([name, on]) => on && !NOT_OAUTH.has(name))
+    .filter(([name, on]) => on === true && !NOT_OAUTH.has(name))
     .map(([name]) => name)
 }
 

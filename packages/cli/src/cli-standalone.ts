@@ -12,7 +12,7 @@ import { createHash } from "node:crypto"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
-import { currentPlatform, fetchChecksums, type PlatformId } from "./binary-cache.js"
+import { currentPlatform, fetchChecksums, readLatestVersion, type PlatformId } from "./binary-cache.js"
 import {
   cliArchiveName,
   cliArchivePath,
@@ -47,11 +47,7 @@ export async function fetchStandaloneCliLatestVersion(): Promise<string> {
   if (!resp.ok) {
     throw new Error(`Failed to fetch CLI latest.json: HTTP ${resp.status}`)
   }
-  const data = await resp.json() as { version?: unknown }
-  if (typeof data.version !== "string" || data.version.trim() === "") {
-    throw new Error("Invalid cli/latest.json: missing version")
-  }
-  return data.version.trim()
+  return readLatestVersion(resp, "cli/latest.json")
 }
 
 async function fetchBytes(url: string, what: string): Promise<Buffer> {

@@ -118,10 +118,10 @@ describe("maskRecord", () => {
   // Unknown must never resolve to disclosure: a predicate returning NULL, and a column the
   // verdict query never answered for, both mask.
   it.each([
-    ["a null verdict", new Map([["salary", null]])],
-    ["no verdict at all", new Map()],
+    ["a null verdict", new Map<string, boolean | null>([["salary", null]])],
+    ["no verdict at all", new Map<string, boolean | null>()],
   ])("masks on %s", (_label, verdicts) => {
-    const masked = maskRecord(record, ["salary"], verdicts as Map<string, boolean | null>)
+    const masked = maskRecord(record, ["salary"], verdicts)
     expect(masked?.["salary"]).toBeNull()
   })
 

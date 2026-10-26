@@ -4,24 +4,16 @@ import { describe, expect, it } from "vitest"
 import { LivePreviewPane } from "../src/components/LivePreviewPane.js"
 import { EditFormSidebar } from "../src/components/EditFormSidebar.js"
 import type { ModelConfig } from "../src/config.js"
+import { testModel } from "./support.js"
 
 // The create screen used to embed the project's preview page for a record that had no row yet.
 // That page answers, correctly for its own context, "this needs a preview link, open the post in
-// Studio and use Share a preview" — and `SharePreview` mounts only in the edit view, because a link
+// Studio and use Share a preview". But `SharePreview` mounts only in the edit view, because a link
 // is minted against a row id. So the reader was told to use a control that was not on the screen,
 // which reads as a missing feature rather than a missing save.
 
 function model(): ModelConfig {
-  return {
-    name: "Post",
-    label: "Post",
-    labelPlural: "Posts",
-    tableName: "posts",
-    primaryKey: "id",
-    fields: [],
-    listColumns: [],
-    searchFields: [],
-  } as unknown as ModelConfig
+  return testModel({ name: "Post" })
 }
 
 const previewUrl = "http://localhost:3001/preview/hello"

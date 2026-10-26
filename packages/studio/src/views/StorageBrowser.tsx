@@ -6,6 +6,7 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
+import { isJsonObject } from "../lib/json.js"
 import { resolveStorageObjectPath } from "../lib/storage-ref.js"
 import { Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 
@@ -395,10 +396,10 @@ export function StorageBrowser(): React.ReactElement {
 
   // Bucket state
   const { data: buckets, loading: bucketsLoading, error: bucketsError, refetch: refetchBuckets } = useApiQuery(
-    async () => {
+    async (): Promise<Bucket[]> => {
       const { data, error } = await client.storage.listBuckets()
       if (error) throw new Error(error.message)
-      return data as Bucket[]
+      return data ?? []
     },
     [],
   )
@@ -471,8 +472,8 @@ export function StorageBrowser(): React.ReactElement {
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string> | null>(null)
 
   useEffect(() => {
-    const navState = location.state as { openCreateBucket?: boolean } | null
-    if (!navState?.openCreateBucket) return
+    const navState: unknown = location.state
+    if (!isJsonObject(navState) || navState["openCreateBucket"] !== true) return
     setShowCreateBucketWarning(true)
     navigate(`${location.pathname}${location.search}`, { replace: true, state: {} })
   }, [location.pathname, location.search, location.state, navigate])

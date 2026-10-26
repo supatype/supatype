@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { ExtensionsView } from "../src/views/database/ExtensionsView.js"
 import { PoliciesView as AuthPoliciesView } from "../src/views/auth/PoliciesView.js"
 import { StoragePoliciesView } from "../src/views/storage/PoliciesView.js"
+import { metadataBody, testClient } from "./support.js"
 
 /**
  * SQ2: the SQL editor's login is not a superuser, so Studio's extension, RLS and auth/storage
@@ -17,7 +17,7 @@ import { StoragePoliciesView } from "../src/views/storage/PoliciesView.js"
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "token" })
 
 interface Call {
   path: string
@@ -50,8 +50,8 @@ function stubFetch(rows: Catalogue): void {
     }
     calls.push({ path, body })
     if (path.startsWith("/metadata")) {
-      const name = (body as { name: string }).name
-      return Response.json({ rows: rows[name] ?? [], rowCount: (rows[name] ?? []).length })
+      const found = rows[metadataBody(init).name ?? ""] ?? []
+      return Response.json({ rows: found, rowCount: found.length })
     }
     if (path.startsWith("/studio-admin/")) return Response.json({ ok: true })
     return Response.json({ rows: [], rowCount: 0 })
@@ -94,7 +94,11 @@ async function click(label: string): Promise<void> {
 async function fill(label: string, value: string): Promise<void> {
   const el = document.body.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`[aria-label="${label}"]`)
   if (!el) throw new Error(`no control "${label}"`)
-  const proto = Object.getPrototypeOf(el) as object
+  // React tracks the value through the element type's own setter, so the write has to go through it.
+  const proto =
+    el instanceof HTMLSelectElement ? HTMLSelectElement.prototype
+    : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+    : HTMLInputElement.prototype
   const setter = Object.getOwnPropertyDescriptor(proto, "value")!.set!
   await act(async () => {
     setter.call(el, value)

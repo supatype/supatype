@@ -4,6 +4,7 @@
  */
 
 import type { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
@@ -106,7 +107,7 @@ export function registerUpdate(program: Command): void {
               await download(component, latest, platform)
               info(`${component} v${latest} downloaded.`)
             } catch (err) {
-              error(`Failed: ${(err as Error).message}`)
+              error(`Failed: ${errorMessage(err)}`)
             }
           }
           continue
@@ -135,7 +136,7 @@ export function registerUpdate(program: Command): void {
         try {
           await download(component, to, platform)
         } catch (err) {
-          error(`Failed: ${(err as Error).message}`)
+          error(`Failed: ${errorMessage(err)}`)
           continue
         }
         info(`${component} v${to} downloaded.`)

@@ -86,7 +86,7 @@ async function focusWindow(): Promise<void> {
 }
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   handle = null
   container = document.createElement("div")
   root = createRoot(container)

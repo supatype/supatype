@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { QueryBuilder, MutationBuilder } from "../src/query.js"
+import { fetchCall, fetchReturning, header, type FetchMock } from "./support/fetch-mock.js"
 
 const BASE = "http://localhost:18473"
 const PATH = "/rest/v1/posts"
@@ -7,22 +8,15 @@ const HEADERS: Record<string, string> = { apikey: "anon-key", "Content-Type": "a
 
 interface Post { id: string; title: string; tags: string[]; meta: Record<string, unknown> }
 
-function stubFetch(): ReturnType<typeof vi.fn> {
-  const fetch = vi.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: vi.fn().mockResolvedValue([]),
-    text: vi.fn().mockResolvedValue("[]"),
-    headers: { get: () => null },
-  })
+function stubFetch(): FetchMock {
+  const fetch = fetchReturning([])
   vi.stubGlobal("fetch", fetch)
   return fetch
 }
 
 /** The filters exactly as PostgREST will read them, after URL decoding. */
-function sentFilters(fetch: ReturnType<typeof vi.fn>): string[] {
-  const [url] = fetch.mock.calls[0] as [string, RequestInit]
-  return [...new URL(url).searchParams.entries()].map(([key, value]) => `${key}=${value}`)
+function sentFilters(fetch: FetchMock): string[] {
+  return [...new URL(fetchCall(fetch).url).searchParams.entries()].map(([key, value]) => `${key}=${value}`)
 }
 
 describe("contains / containedBy: PostgREST operand syntax", () => {
@@ -114,8 +108,7 @@ describe("MutationBuilder: the same filter set as QueryBuilder", () => {
   it("delete can filter with a range and a pattern", async () => {
     const fetch = stubFetch()
     await new MutationBuilder<Post>(BASE, PATH, HEADERS, "DELETE").lt("created_at", "2026-01-01").ilike("title", "tmp%")
-    const [, init] = fetch.mock.calls[0] as [string, RequestInit]
-    expect(init.method).toBe("DELETE")
+    expect(fetchCall(fetch).init.method).toBe("DELETE")
     expect(sentFilters(fetch)).toEqual(["created_at=lt.2026-01-01", "title=ilike.tmp%"])
   })
 
@@ -136,21 +129,18 @@ describe("MutationBuilder: delete().select() returns the deleted rows", () => {
   it("asks PostgREST for the representation once select() is called", async () => {
     const fetch = stubFetch()
     await new MutationBuilder<Post>(BASE, PATH, HEADERS, "DELETE").eq("id", "1").select("id")
-    const [, init] = fetch.mock.calls[0] as [string, RequestInit]
-    expect((init.headers as Record<string, string>)["Prefer"]).toBe("return=representation")
+    expect(header(fetchCall(fetch).init, "Prefer")).toBe("return=representation")
   })
 
   it("a plain delete still asks for no body", async () => {
     const fetch = stubFetch()
     await new MutationBuilder<Post>(BASE, PATH, HEADERS, "DELETE").eq("id", "1")
-    const [, init] = fetch.mock.calls[0] as [string, RequestInit]
-    expect((init.headers as Record<string, string>)["Prefer"]).toBeUndefined()
+    expect(header(fetchCall(fetch).init, "Prefer")).toBeNull()
   })
 
   it("an upsert keeps both preferences, without a stray comma", async () => {
     const fetch = stubFetch()
     await new MutationBuilder<Post>(BASE, PATH, HEADERS, "POST", { id: "1" }, { upsert: true }).select("id")
-    const [, init] = fetch.mock.calls[0] as [string, RequestInit]
-    expect((init.headers as Record<string, string>)["Prefer"]).toBe("resolution=merge-duplicates,return=representation")
+    expect(header(fetchCall(fetch).init, "Prefer")).toBe("resolution=merge-duplicates,return=representation")
   })
 })

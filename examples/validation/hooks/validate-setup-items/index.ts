@@ -18,7 +18,7 @@ const validateSetupItems: FieldValidator<"product", "setupItems"> = (ctx) => {
 
   let total = 0
   for (const item of items) {
-    const minutes = (item as { minutes?: unknown }).minutes
+    const minutes = typeof item === "object" && item !== null && "minutes" in item ? item.minutes : undefined
     if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 0) {
       return "Every setup item needs a positive number of minutes."
     }

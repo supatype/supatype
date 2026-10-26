@@ -20,6 +20,7 @@ import {
   sharedFunctionsReadmeSource,
 } from "../functions-deno-types.js"
 import { mergeSupatypePackageJson } from "../init-package-json.js"
+import { parseJsonObject } from "@supatype/shared"
 import { cliPackageVersion } from "../cli-package-version.js"
 import {
   initDependencyVersionsFallback,
@@ -686,8 +687,9 @@ export function scaffold(
     write("package.json", packageJsonTemplate(opts, deps))
   } else {
     try {
-      const existing = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown>
-      const merged = mergeSupatypePackageJson(existing, opts, deps)
+      const existing = parseJsonObject(readFileSync(pkgPath, "utf8"))
+      if (!existing.ok) throw new Error("package.json is not a JSON object")
+      const merged = mergeSupatypePackageJson(existing.value, opts, deps)
       writeFileSync(pkgPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8")
       file("updated", "package.json (added Supatype dependencies)")
     } catch {

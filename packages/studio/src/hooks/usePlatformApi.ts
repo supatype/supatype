@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import type { SupatypeClient } from "@supatype/client"
 import { useAdminClient } from "./useAdminClient.js"
 import { usePlatform } from "./usePlatform.js"
+import { isJsonObject } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { projectPlatformUrl, selfHostPlatformBase } from "../lib/platform-url.js"
@@ -61,8 +62,10 @@ export async function selfHostProjectRef(target: PlatformTarget): Promise<SelfHo
   try {
     const res = await fetch(`${target.base}/project`, withInit(target))
     if (!res.ok) return { status: res.status }
-    const body = (await res.json()) as { data?: { ref?: unknown } }
-    return typeof body.data?.ref === "string" ? { ref: body.data.ref } : { status: res.status }
+    const body = await res.json()
+    const data = isJsonObject(body) ? body["data"] : undefined
+    const ref = isJsonObject(data) ? data["ref"] : undefined
+    return typeof ref === "string" ? { ref } : { status: res.status }
   } catch {
     return { status: null }
   }

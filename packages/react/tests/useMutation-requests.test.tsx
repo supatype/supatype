@@ -94,6 +94,21 @@ describe("useMutation requests", () => {
     await mutateOnce("delete", undefined, { filter: { id: 7 } })
     expect(sent).toEqual([{ method: "DELETE", path: "/rest/v1/posts?id=eq.7", body: null, profile: null, range: null }])
   })
+
+  // Each used to go out as a request the server could only refuse: a POST or PATCH with no body,
+  // or a PATCH whose body was a list.
+  const refusals: Array<[string, MutationOperation, Parameters<UseMutationResult<unknown>["mutate"]>[0], string]> = [
+    ["an insert with nothing to write", "insert", undefined, "insert needs the row or rows to write"],
+    ["an upsert with nothing to write", "upsert", undefined, "upsert needs the row or rows to write"],
+    ["an update with no changes", "update", undefined, "update needs one object of the changes to make"],
+    ["an update given a list", "update", [{ title: "a" }], "update needs one object of the changes to make"],
+  ]
+  it.each(refusals)("refuses %s without a request", async (_label, operation, data, message) => {
+    const sent = stubFetch()
+    const result = await mutateOnce(operation, data)
+    expect(sent).toEqual([])
+    expect(result).toEqual({ data: null, error: { message }, count: null })
+  })
 })
 
 describe("useQuery requests", () => {

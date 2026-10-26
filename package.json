@@ -10,7 +10,7 @@
     "pg:psql": "tsx tests/integration/run-dev.ts pg psql",
     "test": "turbo run test",
     "lint": "eslint --quiet .",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && tsc --project tsconfig.json",
     "build:engine": "cargo build --workspace",
     "build:engine:release": "cargo build --workspace --release",
     "test:engine": "cargo test --workspace",
@@ -19,7 +19,7 @@
     "coverage:examples": "node scripts/check-example-coverage.mjs --write"
   },
   "devDependencies": {
-    "astro-eslint-parser": "3.2.0",
+    "@types/node": "^22",
     "eslint": "10.13.0",
     "svelte-eslint-parser": "1.9.0",
     "turbo": "^2",

@@ -2,7 +2,7 @@
  * Whether an access rule's outcome varies by *who* is asking.
  *
  * This decides whether a model may declare `cache: { public: true }`. A public cache entry is
- * global — one response served to every caller — so on a table whose read rule varies by caller it
+ * global, one response served to every caller, so on a table whose read rule varies by caller it
  * serves one user's rows to another.
  *
  * **Row-dependence is not the same question, and getting that wrong in either direction is a bug.**
@@ -19,9 +19,11 @@
  *
  * Two implementations of one rule drift, and the drift is silent: the push says "shareable" and the
  * runtime says "not", or worse the other way round. `tests/fixtures/identity-scope-corpus.json` is
- * the defence — a shared corpus of rules and expected answers that both sides run against. Change
+ * the defence: a shared corpus of rules and expected answers that both sides run against. Change
  * this file and you change that corpus; the Go side reads the same cases.
  */
+
+import { isJsonObject } from "@supatype/shared"
 
 /** A rule node, in the shape the extractor emits and the server parses. */
 export interface AccessRuleNode {
@@ -43,18 +45,24 @@ export interface AccessOperand {
  */
 const IDENTITY_OPERANDS = new Set(["authUid", "authRole", "claim"])
 
-function operandIsIdentityDependent(o: AccessOperand | undefined): boolean {
-  if (!o) return false
-  return IDENTITY_OPERANDS.has(o.kind ?? "")
+function operandIsIdentityDependent(o: unknown): boolean {
+  if (!isJsonObject(o)) return false
+  return typeof o["kind"] === "string" && IDENTITY_OPERANDS.has(o["kind"])
 }
 
-export function isIdentityDependent(rule: AccessRuleNode | undefined | null): boolean {
+/**
+ * Whether `rule` varies by caller. Takes the rule as the extractor wrote it, an `AccessRuleNode`
+ * or anything else found under `access.read`, and reads each part with a check.
+ */
+export function isIdentityDependent(rule: unknown): boolean {
   // No rule at all is not a caller-varying rule. An absent `access.read` means the table's
   // readability is decided elsewhere, and treating that as identity-dependent would refuse public
   // caching on every model that never wrote one.
   if (!rule) return false
+  // Not a rule node at all: unrecognised, so assumed to depend on identity, as below.
+  if (!isJsonObject(rule)) return true
 
-  switch (rule.type) {
+  switch (rule["type"]) {
     case "public":
     case "private":
       return false
@@ -72,17 +80,19 @@ export function isIdentityDependent(rule: AccessRuleNode | undefined | null): bo
       return true
 
     case "compare":
-      return operandIsIdentityDependent(rule.left) || operandIsIdentityDependent(rule.right)
+      return operandIsIdentityDependent(rule["left"]) || operandIsIdentityDependent(rule["right"])
 
     case "nullCheck":
-      return operandIsIdentityDependent(rule.operand)
+      return operandIsIdentityDependent(rule["operand"])
 
     case "any":
-    case "all":
-      return (rule.rules ?? []).some(isIdentityDependent)
+    case "all": {
+      const rules = rule["rules"]
+      return Array.isArray(rules) && rules.some(isIdentityDependent)
+    }
 
     case "not":
-      return rule.rule ? isIdentityDependent(rule.rule) : false
+      return rule["rule"] ? isIdentityDependent(rule["rule"]) : false
 
     default:
       // An unrecognised rule is assumed to depend on identity. Guessing the other way would share

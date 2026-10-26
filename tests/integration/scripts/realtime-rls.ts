@@ -24,6 +24,7 @@
  * failure to measure anything at all.
  */
 import { createClient } from "@supatype/client"
+import { stringAt } from "../lib/json.js"
 
 const PORT = process.env["SUPATYPE_KONG_PORT"] ?? "18473"
 const BASE = process.env["SUPATYPE_URL"] ?? `http://127.0.0.1:${PORT}`
@@ -54,21 +55,16 @@ const FENCE_MARK = `${RUN}-fence`
 /** The marker a delivered row carries, whatever shape `metadata` arrives in. */
 function markOf(row: Row): string | undefined {
   const meta = row["metadata"]
-  if (meta !== null && typeof meta === "object") {
-    const probe = (meta as Record<string, unknown>)["probe"]
-    return typeof probe === "string" ? probe : undefined
-  }
   // jsonb can arrive in its text form depending on the decoder, so that case is handled rather
   // than assumed away.
   if (typeof meta === "string") {
     try {
-      const probe = (JSON.parse(meta) as Record<string, unknown>)["probe"]
-      return typeof probe === "string" ? probe : undefined
+      return stringAt(JSON.parse(meta), "probe")
     } catch {
       return undefined
     }
   }
-  return undefined
+  return stringAt(meta, "probe")
 }
 
 /** A REST call as the service role, which is how rows are seeded past the policies. */

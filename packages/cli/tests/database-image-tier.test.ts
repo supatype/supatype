@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * A3-N1: with `database.image` set to a tag of `supatype/postgres` and no `versions.postgres`, the
@@ -29,14 +30,15 @@ const { fieldMaskingTier } = await import("../src/field-masking-tier.js")
 
 const MASKED = { models: [{ annotations: { platform: { access: { fields: { secret: { read: {} } } } } } }] }
 
-function project(database: Record<string, unknown>, versions?: Record<string, string>): SupatypeProjectConfig {
-  return {
-    project: { name: "demo" },
+function project(
+  database: SupatypeProjectConfig["database"],
+  versions?: SupatypeProjectConfig["versions"],
+): SupatypeProjectConfig {
+  return projectConfig({
     provider: "docker",
     database: { provider: "docker", ...database },
-    server: { mode: "dev" },
     ...(versions !== undefined && { versions }),
-  } as SupatypeProjectConfig
+  })
 }
 
 beforeEach(() => {

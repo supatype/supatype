@@ -40,8 +40,14 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
 
   let text = "hello from write-note"
   try {
-    const parsed = (await req.json()) as { text?: unknown }
-    if (typeof parsed.text === "string" && parsed.text.trim().length > 0) {
+    const parsed = await req.json()
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "text" in parsed &&
+      typeof parsed.text === "string" &&
+      parsed.text.trim().length > 0
+    ) {
       text = parsed.text.trim()
     }
   } catch {

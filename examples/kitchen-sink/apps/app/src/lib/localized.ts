@@ -2,8 +2,8 @@
  * Pick one language out of a localized column.
  *
  * At runtime the API hands back the whole locale record (`{ en: …, fr: … }`), because the column
- * holds every language at once and the API does not guess which one a caller wanted. So the cast
- * is the boundary where this app decides, not laziness.
+ * holds every language at once and the API does not guess which one a caller wanted. So this is
+ * the boundary where this app decides, and it checks the shape rather than assuming it.
  *
  * A locale's value is a string for a text column and a Lexical document for a rich text one, since
  * the engine normalises prose into a document on the way in. Both come back as the words to show.
@@ -15,15 +15,14 @@
 export function localized(value: unknown, locale: string): string | null {
   if (value === null || value === undefined) return null
   if (typeof value === "string") return value
-  if (typeof value !== "object") return String(value)
+  if (!isObject(value)) return String(value)
 
-  const record = value as Record<string, unknown>
   // A column that is not localized still arrives as its own object (a lexical root, say), so a
   // missing locale key only means something when some locale key is present.
-  const looksLocalized = Object.keys(record).some((k) => /^[a-z]{2}(-[A-Z]{2})?$/.test(k))
+  const looksLocalized = Object.keys(value).some((k) => /^[a-z]{2}(-[A-Z]{2})?$/.test(k))
   if (!looksLocalized) return null
 
-  const picked = record[locale]
+  const picked = value[locale]
   if (picked === null || picked === undefined) return null
   return typeof picked === "string" ? picked : plainText(picked)
 }
@@ -43,10 +42,9 @@ function plainText(node: unknown): string | null {
   const parts: string[] = []
 
   const walk = (current: unknown): void => {
-    if (current === null || typeof current !== "object") return
-    const record = current as Record<string, unknown>
-    if (typeof record["text"] === "string") parts.push(record["text"])
-    const children = record["children"] ?? record["root"]
+    if (!isObject(current)) return
+    if (typeof current["text"] === "string") parts.push(current["text"])
+    const children = current["children"] ?? current["root"]
     if (Array.isArray(children)) {
       for (const child of children) walk(child)
     } else if (children !== undefined) {
@@ -57,6 +55,11 @@ function plainText(node: unknown): string | null {
   walk(node)
   const joined = parts.join("").trim()
   return joined === "" ? null : joined
+}
+
+/** Any object, arrays included, read key by key: what a JSON column can hold besides a scalar. */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }
 
 /** A localized value with a stated fallback, for chrome that must render something. */

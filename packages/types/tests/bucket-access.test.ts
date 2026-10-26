@@ -10,12 +10,11 @@ describe("BucketStorageAccess", () => {
   })
 
   it("accepts a fully declared bucket", () => {
-    const crud = {} as {
+    expectTypeOf<{
       read: BucketPublic
       create: BucketLoggedIn
       update: BucketOwner
       delete: BucketOwner
-    }
-    expectTypeOf(crud).toExtend<BucketStorageAccess>()
+    }>().toExtend<BucketStorageAccess>()
   })
 })

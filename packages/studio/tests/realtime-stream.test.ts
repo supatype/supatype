@@ -8,6 +8,7 @@ import {
   type StreamAction,
   type StreamState,
 } from "../src/hooks/useRealtimeStream.js"
+import type { StreamChange } from "../src/views/realtime/types.js"
 
 // ST-2: the Inspector's stream, from the bytes the control plane sends to the rows the Stream tab
 // shows. The control plane chooses the payload view; Studio only reports it.
@@ -37,7 +38,7 @@ async function run(response: Response): Promise<StreamState> {
   return state
 }
 
-const change = { seq: 1, at: "t", commitTimestamp: "t", schema: "public", table: "posts", event: "INSERT", deliveries: [], withheld: [], notMatched: 0 }
+const change: StreamChange = { seq: 1, at: "t", commitTimestamp: "t", schema: "public", table: "posts", event: "INSERT", deliveries: [], withheld: [], notMatched: 0 }
 const broadcast = { seq: 2, at: "t", channel: "room:1", event: "ping", origin: "studio", senderConnectionId: null, recipients: 1, bytes: 10 }
 
 describe("consumeStream", () => {
@@ -63,7 +64,7 @@ describe("streamReducer", () => {
   it(`keeps the newest ${STREAM_ROWS_MAX} rows`, () => {
     let state = INITIAL_STREAM
     for (let seq = 0; seq < STREAM_ROWS_MAX + 5; seq++) {
-      state = streamReducer(state, { type: "row", row: { kind: "change", change: { ...change, seq } as never } })
+      state = streamReducer(state, { type: "row", row: { kind: "change", change: { ...change, seq } } })
     }
     expect(state.rows).toHaveLength(STREAM_ROWS_MAX)
     expect(state.rows[0]).toMatchObject({ change: { seq: STREAM_ROWS_MAX + 4 } })

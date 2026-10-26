@@ -3,6 +3,7 @@ import type { WalChange, ChangeEvent } from "./types.js"
 import { isSchemaPushLockHeld } from "./schema-push-lock.js"
 import { isTransientConnectionError, withDatabaseRetry } from "./db-retry.js"
 import { exactColumnsOf, valueForColumn } from "./exact-columns.js"
+import { isArrayOf, isShape, isString, isUnknown, optional, type FromShape } from "./json.js"
 import {
   RealtimeUnsupportedError,
   unsupportedRealtimeReason,
@@ -242,9 +243,9 @@ export class ReplicationListener {
         this.onSchemaChangeCallback?.()
       }
 
-      const result = await this.client.query(SLOT_READ_QUERY, [this.config.slotName])
+      const result = await this.client.query<{ data: string }>(SLOT_READ_QUERY, [this.config.slotName])
 
-      for (const row of result.rows as Array<{ data: string }>) {
+      for (const row of result.rows) {
         const changes = parseWal2json(row.data)
         const onChange = this.onChangeCallback
         if (!onChange) return
@@ -275,10 +276,11 @@ export class ReplicationListener {
  */
 export function parseWal2json(data: string): WalChange[] {
   try {
-    const parsed = JSON.parse(data) as Wal2JsonOutput
+    const parsed = JSON.parse(data)
+    if (!isWal2JsonOutput(parsed)) throw new Error("not wal2json output")
     if (!parsed.change) return []
     const timestamp = parsed.timestamp ?? new Date().toISOString()
-    return parsed.change.map((entry) => changeFromEntry(entry, timestamp))
+    return parsed.change.filter(isWal2JsonChange).map((entry) => changeFromEntry(entry, timestamp))
   } catch {
     console.error("[realtime] failed to parse wal2json data:", data)
     return []
@@ -327,25 +329,30 @@ function columnTypesOf(names?: string[], types?: string[]): Record<string, strin
 
 // ─── wal2json types ──────────────────────────────────────────────────────────
 
-interface Wal2JsonOutput {
-  timestamp?: string | undefined
-  change: Wal2JsonChange[]
-}
+/** One transaction: its entries are checked one by one, so one odd entry does not lose the rest. */
+const isWal2JsonOutput = isShape({ timestamp: optional(isString), change: optional(isArrayOf(isUnknown)) })
 
-interface Wal2JsonChange {
-  kind: string
-  schema: string
-  table: string
-  columnnames?: string[] | undefined
-  columnvalues?: unknown[] | undefined
+const WAL2JSON_CHANGE = {
+  kind: isString,
+  schema: isString,
+  table: isString,
+  columnnames: optional(isArrayOf(isString)),
+  columnvalues: optional(isArrayOf(isUnknown)),
   /** Declared types, which wal2json has always sent and this service used to discard. */
-  columntypes?: string[] | undefined
-  oldkeys?: {
-    keynames?: string[] | undefined
-    keyvalues?: unknown[] | undefined
-    keytypes?: string[] | undefined
-  } | undefined
-}
+  columntypes: optional(isArrayOf(isString)),
+  oldkeys: optional(
+    isShape({
+      keynames: optional(isArrayOf(isString)),
+      keyvalues: optional(isArrayOf(isUnknown)),
+      keytypes: optional(isArrayOf(isString)),
+    }),
+  ),
+} as const
+
+/** A row change; a `message` entry (`pg_logical_emit_message`) names no table and is not one. */
+type Wal2JsonChange = FromShape<typeof WAL2JSON_CHANGE>
+
+const isWal2JsonChange = isShape(WAL2JSON_CHANGE)
 
 function mapKind(kind: string): ChangeEvent {
   switch (kind) {

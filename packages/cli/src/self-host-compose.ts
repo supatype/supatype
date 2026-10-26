@@ -3,6 +3,7 @@ import { dirname, join, resolve, sep } from "node:path"
 import { spawnSync } from "node:child_process"
 import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
 import { fatalError } from "./ui/fatal.js"
+import { readJsonObjectFile } from "./json-file.js"
 import {
   postgrestSchemaEnv,
   externalDatabaseUrl,
@@ -1123,13 +1124,9 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
  * obvious thing to try, does not fix it.
  */
 function repairComposeFunctionsFlag(manifestPath: string): void {
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>
-  } catch {
-    return // Malformed: leave it for the server to complain about rather than overwrite it here.
-  }
-  if (typeof parsed !== "object" || parsed === null) return
+  // Malformed: leave it for the server to complain about rather than overwrite it here.
+  const parsed = readJsonObjectFile(manifestPath)
+  if (parsed === undefined) return
   if (parsed["functions_enabled"] === true && parsed["functions_worker_url"] !== undefined) return
 
   parsed["functions_enabled"] = true

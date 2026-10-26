@@ -4,17 +4,19 @@
 
 import { configuredServiceRoleKey } from "./dev-api-keys.js"
 import { resolveProjectApiUrl } from "./resolve-api-url.js"
+import { isArrayOf, isNumber, isShape, isString, isUnknown, nullable, optional, readJson, type Guard } from "@supatype/shared"
 
+/** One cached response. The server may send `null` for a field it has no value for. */
 export interface RestCacheEntrySummary {
   key: string
-  table?: string
-  scope?: string
-  method?: string
-  path?: string
-  raw_query?: string
+  table?: string | null
+  scope?: string | null
+  method?: string | null
+  path?: string | null
+  raw_query?: string | null
   ttl_seconds: number
   size_bytes: number
-  cached_at?: string
+  cached_at?: string | null
 }
 
 export interface RestCacheListResponse {
@@ -24,10 +26,38 @@ export interface RestCacheListResponse {
 
 export interface RestCacheDetail extends RestCacheEntrySummary {
   status_code: number
-  content_type?: string
-  body_preview?: string
+  content_type?: string | null
+  body_preview?: string | null
   body_json?: unknown
 }
+
+const optionalText = optional(nullable(isString))
+
+const summaryShape = {
+  key: isString,
+  table: optionalText,
+  scope: optionalText,
+  method: optionalText,
+  path: optionalText,
+  raw_query: optionalText,
+  ttl_seconds: isNumber,
+  size_bytes: isNumber,
+  cached_at: optionalText,
+}
+
+/** `GET /admin/v1/cache`: a page of entries, and where the next one starts. */
+const isListAnswer = isShape({
+  entries: optional(nullable(isArrayOf(isShape(summaryShape)))),
+  cursor: optional(nullable(isString)),
+})
+
+const isRestCacheDetail: Guard<RestCacheDetail> = isShape({
+  ...summaryShape,
+  status_code: isNumber,
+  content_type: optionalText,
+  body_preview: optionalText,
+  body_json: optional(isUnknown),
+})
 
 function serviceRoleKey(cwd: string): string {
   const key = configuredServiceRoleKey(cwd)
@@ -75,7 +105,10 @@ function formatCacheApiError(
   return `${operation} failed (${status}): ${trimmed || "(empty body)"}`
 }
 
-function normalizeListResponse(data: RestCacheListResponse): RestCacheListResponse {
+function normalizeListResponse(data: {
+  entries?: RestCacheEntrySummary[] | null
+  cursor?: string | null
+}): RestCacheListResponse {
   return {
     entries: data.entries ?? [],
     cursor: data.cursor ?? "0",
@@ -98,8 +131,7 @@ export async function listRestCacheEntries(
     const body = await res.text()
     throw new Error(formatCacheApiError("list cache", res.status, body, baseUrl))
   }
-  const data = (await res.json()) as RestCacheListResponse
-  return normalizeListResponse(data)
+  return normalizeListResponse(await readJson(res, isListAnswer))
 }
 
 export async function getRestCacheEntry(cwd: string, key: string): Promise<RestCacheDetail> {
@@ -111,7 +143,7 @@ export async function getRestCacheEntry(cwd: string, key: string): Promise<RestC
     const body = await res.text()
     throw new Error(formatCacheApiError("get cache entry", res.status, body, baseUrl))
   }
-  return res.json() as Promise<RestCacheDetail>
+  return readJson(res, isRestCacheDetail)
 }
 
 export async function deleteRestCacheEntry(cwd: string, key: string): Promise<void> {

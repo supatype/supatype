@@ -15,6 +15,7 @@
  */
 
 import { execFile } from "node:child_process"
+import { errorCode } from "./error-message.js"
 
 export interface ProcessProbe {
   ppid(): number
@@ -27,7 +28,7 @@ export function pidAlive(pid: number): boolean {
     process.kill(pid, 0)
     return true
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM"
+    return errorCode(err) === "EPERM"
   }
 }
 

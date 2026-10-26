@@ -26,6 +26,13 @@ describe("shouldExcludeCommandChrome", () => {
   })
 })
 
+/** The handler commander runs for a subcommand: its private `_actionHandler`, which wrapping replaces. */
+function actionHandler(program: Command, name: string): unknown {
+  const cmd = program.commands.find((c) => c.name() === name)
+  if (cmd === undefined || !("_actionHandler" in cmd)) throw new Error(`no action handler on ${name}`)
+  return cmd._actionHandler
+}
+
 describe("wrapProgramActionsWithChrome", () => {
   it("wraps leaf actions but skips excluded paths", () => {
     const program = new Command()
@@ -35,18 +42,13 @@ describe("wrapProgramActionsWithChrome", () => {
     program.command("push").action(pushFn)
     program.command("dev").action(devFn)
 
-    type CommandWithAction = Command & {
-      _actionHandler?: ((args: unknown) => unknown) | null
-    }
-
-    const pushCmd = program.commands.find((c) => c.name() === "push") as CommandWithAction
-    const devCmd = program.commands.find((c) => c.name() === "dev") as CommandWithAction
-    const pushHandlerBefore = pushCmd._actionHandler
-    const devHandlerBefore = devCmd._actionHandler
+    const pushHandlerBefore = actionHandler(program, "push")
+    const devHandlerBefore = actionHandler(program, "dev")
+    expect(pushHandlerBefore).toBeTypeOf("function")
 
     wrapProgramActionsWithChrome(program)
 
-    expect(pushCmd._actionHandler).not.toBe(pushHandlerBefore)
-    expect(devCmd._actionHandler).toBe(devHandlerBefore)
+    expect(actionHandler(program, "push")).not.toBe(pushHandlerBefore)
+    expect(actionHandler(program, "dev")).toBe(devHandlerBefore)
   })
 })

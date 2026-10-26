@@ -17,6 +17,9 @@
  */
 
 import pg from "pg"
+import { isBoolean, isShape, isString, nullable, type Guard } from "@supatype/shared"
+import { queryRows, type UnknownRow } from "./db-rows.js"
+import { errorCode } from "./error-message.js"
 
 export type Severity = "pass" | "warn" | "degrade" | "fail"
 
@@ -46,10 +49,17 @@ export interface PreflightReport {
 /** Slot name for the decoding probe. Dropped immediately; never left behind. */
 const PROBE_SLOT = "supatype_preflight_probe"
 
-type QueryFn = <T extends pg.QueryResultRow = pg.QueryResultRow>(
-  sql: string,
-  params?: unknown[],
-) => Promise<T[]>
+type QueryFn = (sql: string, params?: unknown[]) => Promise<UnknownRow[]>
+
+/**
+ * The rows of `sql`, each checked by `guard`. A row it refuses is a catalog answering in a shape
+ * this check was not written for, which is worth stopping on rather than reporting from.
+ */
+async function queryAs<T>(q: QueryFn, guard: Guard<T>, sql: string, params: unknown[] = []): Promise<T[]> {
+  const rows: unknown[] = await q(sql, params)
+  if (!rows.every(guard)) throw new Error(`Preflight probe returned a row it cannot read: ${sql}`)
+  return rows
+}
 
 /**
  * Tables in `schema` Supatype did not create: not in its ledger (`_supatype.managed_objects`), and
@@ -58,15 +68,15 @@ type QueryFn = <T extends pg.QueryResultRow = pg.QueryResultRow>(
  * ledger is only read where it exists, since SQL cannot name a table that is not there.
  */
 export async function foreignTables(q: QueryFn, schema: string): Promise<string[]> {
-  const [ledger] = await q<{ present: boolean }>(
-    "SELECT to_regclass('_supatype.managed_objects') IS NOT NULL AS present",
-  )
-  const recorded = ledger?.present
+  const [ledger] = await q("SELECT to_regclass('_supatype.managed_objects') IS NOT NULL AS present")
+  const recorded = ledger?.["present"] === true
     ? `AND NOT EXISTS (SELECT 1 FROM _supatype.managed_objects m
                           WHERE m.kind = 'table' AND m.schema_name = n.nspname
                             AND m.name = c.relname AND m.status <> 'released')`
     : ""
-  const rows = await q<{ relname: string }>(
+  const rows = await queryAs(
+    q,
+    isShape({ relname: isString }),
     `SELECT c.relname FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = $1 AND c.relkind = 'r'
@@ -90,7 +100,7 @@ async function probeLogicalDecoding(q: QueryFn): Promise<CheckResult> {
   try {
     await q(`SELECT pg_create_logical_replication_slot($1, 'wal2json')`, [PROBE_SLOT])
   } catch (error) {
-    const code = (error as { code?: unknown }).code
+    const code = errorCode(error)
     const detail =
       code === "58P01"
         ? "the wal2json output plugin is not installed on this server"
@@ -157,6 +167,12 @@ export interface ClaimsSchemaUsageRow {
   owner: string
 }
 
+const isClaimsSchemaUsageRow: Guard<ClaimsSchemaUsageRow> = isShape({
+  rolname: nullable(isString),
+  has_usage: nullable(isBoolean),
+  owner: isString,
+})
+
 /**
  * Stands in for the `authenticator` password when the operator has not supplied one.
  *
@@ -196,23 +212,17 @@ export async function runPreflight(
   opts: PreflightOptions,
 ): Promise<PreflightReport> {
   const results: CheckResult[] = []
-  const q = async <T extends pg.QueryResultRow = pg.QueryResultRow>(
-    sql: string,
-    params: unknown[] = [],
-  ): Promise<T[]> => (await client.query<T>(sql, params)).rows
+  const q: QueryFn = (sql, params = []) => queryRows(client, sql, params)
 
   /** For probes that always return exactly one row. */
-  const one = async <T extends pg.QueryResultRow>(sql: string, params: unknown[] = []): Promise<T> => {
-    const rows = await q<T>(sql, params)
-    const row = rows[0]
-    if (!row) throw new Error(`Preflight probe returned no rows: ${sql}`)
+  const one = async <T>(guard: Guard<T>, sql: string, params: unknown[] = []): Promise<T> => {
+    const [row] = await queryAs(q, guard, sql, params)
+    if (row === undefined) throw new Error(`Preflight probe returned no rows: ${sql}`)
     return row
   }
 
   // ── Server version ─────────────────────────────────────────────────────────
-  const { server_version_num } = await one<{ server_version_num: string }>(
-    "SHOW server_version_num",
-  )
+  const { server_version_num } = await one(isShape({ server_version_num: isString }), "SHOW server_version_num")
   const major = Math.floor(Number(server_version_num) / 10000)
   results.push({
     id: "server-version",
@@ -225,11 +235,9 @@ export async function runPreflight(
   })
 
   // ── Who are we, and what can we do ─────────────────────────────────────────
-  const privs = await one<{
-    current_user: string
-    is_super: boolean
-    can_create_role: boolean
-  }>(`SELECT current_user,
+  const privs = await one(
+    isShape({ current_user: isString, is_super: isBoolean, can_create_role: isBoolean }),
+    `SELECT current_user,
              rolsuper      AS is_super,
              rolcreaterole AS can_create_role
         FROM pg_roles WHERE rolname = current_user`)
@@ -244,12 +252,13 @@ export async function runPreflight(
   })
 
   // ── Target schema ──────────────────────────────────────────────────────────
-  const schemaRows = await q<{ nspname: string }>(
+  const schemaRows = await q(
     "SELECT nspname FROM pg_namespace WHERE nspname = $1",
     [opts.schema],
   )
   const schemaExists = schemaRows.length > 0
-  const { can_create, database } = await one<{ can_create: boolean; database: string }>(
+  const { can_create, database } = await one(
+    isShape({ can_create: isBoolean, database: isString }),
     `SELECT has_database_privilege(current_database(), 'CREATE') AS can_create,
             current_database() AS database`,
   )
@@ -292,9 +301,11 @@ export async function runPreflight(
   })
 
   // ── The four API roles ─────────────────────────────────────────────────────
-  const roleRows = await q<{ rolname: string; rolinherit: boolean; rolcanlogin: boolean }>(
+  const roleRows = await queryAs(
+    q,
+    isShape({ rolname: isString, rolinherit: isBoolean, rolcanlogin: isBoolean }),
     `SELECT rolname, rolinherit, rolcanlogin FROM pg_roles WHERE rolname = ANY($1)`,
-    [REQUIRED_ROLES as unknown as string[]],
+    [[...REQUIRED_ROLES]],
   )
   const present = new Map(roleRows.map((r) => [r.rolname, r]))
   const missing = REQUIRED_ROLES.filter((r) => !present.has(r))
@@ -346,7 +357,9 @@ export async function runPreflight(
       }),
     })
 
-    const memberships = await q<{ rolname: string }>(
+    const memberships = await queryAs(
+      q,
+      isShape({ rolname: isString }),
       `SELECT r.rolname FROM pg_auth_members m
          JOIN pg_roles r ON r.oid = m.roleid
          JOIN pg_roles g ON g.oid = m.member
@@ -368,23 +381,25 @@ export async function runPreflight(
 
   // USAGE on the claims schema, asked by OID so a role that does not exist cannot raise
   // `role "x" does not exist` the way the name-taking overload would.
-  const claimsUsage = await q<ClaimsSchemaUsageRow>(
+  const claimsUsage = await queryAs(
+    q,
+    isClaimsSchemaUsageRow,
     `SELECT r.rolname,
             has_schema_privilege(r.oid, n.oid, 'USAGE') AS has_usage,
             pg_get_userbyid(n.nspowner) AS owner
        FROM pg_namespace n
        LEFT JOIN pg_roles r ON r.rolname = ANY($1)
       WHERE n.nspname = $2`,
-    [API_ROLES as unknown as string[], CLAIMS_SCHEMA],
+    [[...API_ROLES], CLAIMS_SCHEMA],
   )
   results.push(claimsSchemaUsageCheck(claimsUsage, privs))
 
   // ── Extensions ─────────────────────────────────────────────────────────────
   const installed = new Set(
-    (await q<{ extname: string }>("SELECT extname FROM pg_extension")).map((r) => r.extname),
+    (await queryAs(q, isShape({ extname: isString }), "SELECT extname FROM pg_extension")).map((r) => r.extname),
   )
   const available = new Set(
-    (await q<{ name: string }>("SELECT name FROM pg_available_extensions")).map((r) => r.name),
+    (await queryAs(q, isShape({ name: isString }), "SELECT name FROM pg_available_extensions")).map((r) => r.name),
   )
 
   results.push(
@@ -433,7 +448,7 @@ export async function runPreflight(
   })
 
   // ── Realtime ───────────────────────────────────────────────────────────────
-  const { wal_level } = await one<{ wal_level: string }>("SHOW wal_level")
+  const { wal_level } = await one(isShape({ wal_level: isString }), "SHOW wal_level")
   const walLogical = wal_level === "logical"
   results.push({
     id: "wal-level",
@@ -450,7 +465,8 @@ export async function runPreflight(
     }),
   })
 
-  const slots = await one<{ used: string; max: string }>(
+  const slots = await one(
+    isShape({ used: isString, max: isString }),
     `SELECT (SELECT count(*) FROM pg_replication_slots)::text AS used,
             current_setting('max_replication_slots') AS max`,
   )

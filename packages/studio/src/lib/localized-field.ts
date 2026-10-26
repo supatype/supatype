@@ -1,3 +1,5 @@
+import { isJsonObject } from "./json.js"
+
 /** Resolve a localized column or sub-field for display (falls back to default locale). */
 export function getLocalizedFieldValue(
   raw: unknown,
@@ -5,10 +7,8 @@ export function getLocalizedFieldValue(
   currentLocale: string,
   defaultLocale: string,
 ): unknown {
-  if (!localized) return raw
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw
-  const locMap = raw as Record<string, unknown>
-  return locMap[currentLocale] ?? locMap[defaultLocale] ?? null
+  if (!localized || !isJsonObject(raw)) return raw
+  return raw[currentLocale] ?? raw[defaultLocale] ?? null
 }
 
 /** Resolve a localized value for editing, current locale only, no fallback. */
@@ -17,10 +17,8 @@ export function getLocalizedEditValue(
   localized: boolean,
   currentLocale: string,
 ): unknown {
-  if (!localized) return raw
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw
-  const locMap = raw as Record<string, unknown>
-  return locMap[currentLocale] ?? null
+  if (!localized || !isJsonObject(raw)) return raw
+  return raw[currentLocale] ?? null
 }
 
 function isEmptyLocalizedValue(value: unknown): boolean {
@@ -30,9 +28,8 @@ function isEmptyLocalizedValue(value: unknown): boolean {
   return false
 }
 
-function lexicalPlainText(node: unknown): string {
-  if (!node || typeof node !== "object") return ""
-  const n = node as Record<string, unknown>
+function lexicalPlainText(n: unknown): string {
+  if (!isJsonObject(n)) return ""
   if (n["type"] === "text" && typeof n["text"] === "string") return n["text"]
   const children = n["children"]
   if (Array.isArray(children)) {
@@ -48,8 +45,8 @@ function valueToPlaceholderText(value: unknown): string {
   if (typeof value === "string") return value
   if (typeof value === "number" || typeof value === "boolean") return String(value)
   if (typeof value === "object") {
-    const obj = value as Record<string, unknown>
-    if (typeof obj["bucket"] === "string" && typeof obj["path"] === "string") return ""
+    // A storage reference names a file, which has no text to show.
+    if (isJsonObject(value) && typeof value["bucket"] === "string" && typeof value["path"] === "string") return ""
     const text = lexicalPlainText(value)
     if (text) return text
     try {
@@ -79,10 +76,9 @@ export function getLocalizedFallbackPlaceholder(
   defaultLocale: string,
 ): string | undefined {
   if (!localized || currentLocale === defaultLocale) return undefined
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined
-  const locMap = raw as Record<string, unknown>
-  if (!isEmptyLocalizedValue(locMap[currentLocale])) return undefined
-  const fallback = locMap[defaultLocale]
+  if (!isJsonObject(raw)) return undefined
+  if (!isEmptyLocalizedValue(raw[currentLocale])) return undefined
+  const fallback = raw[defaultLocale]
   if (isEmptyLocalizedValue(fallback)) return undefined
   const text = valueToPlaceholderText(fallback)
   if (!text) return undefined
@@ -97,9 +93,6 @@ export function setLocalizedFieldValue(
   value: unknown,
 ): unknown {
   if (!localized) return value
-  const existing =
-    typeof raw === "object" && raw !== null && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : {}
+  const existing = isJsonObject(raw) ? raw : {}
   return { ...existing, [currentLocale]: value }
 }

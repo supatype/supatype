@@ -7,6 +7,7 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 import { CONSTRAINT_KINDS, isOwned, useOwnedObjects } from "../../lib/owned-objects.js"
+import { cellText } from "../metadata-row.js"
 
 /**
  * Every constraint the database enforces, whether or not Supatype declared it.
@@ -89,7 +90,7 @@ export function ConstraintsView(): React.ReactElement {
                     onClick={() => setSelected(row)}
                   >
                     <Td className="px-4 py-3 font-mono">
-                      {row["name"] as string}
+                      {cellText(row, "name")}
                       {/* An unbadged constraint is one no push maintains: hand-written, or left
                           behind by a schema that no longer declares it. */}
                       {isOwned(owned, CONSTRAINT_KINDS[String(row["type"])] ?? [], row["table_name"], row["name"], row["comment"]) && (
@@ -99,17 +100,17 @@ export function ConstraintsView(): React.ReactElement {
                       )}
                     </Td>
                     <Td className="px-4 py-3 text-muted-foreground text-xs font-mono">
-                      {row["table_name"] as string}
+                      {cellText(row, "table_name")}
                     </Td>
                     <Td className="px-4 py-3">
-                      <Badge variant={TYPE_VARIANT[row["type"] as string] ?? "blue"}>
-                        {row["type"] as string}
+                      <Badge variant={TYPE_VARIANT[cellText(row, "type")] ?? "blue"}>
+                        {cellText(row, "type")}
                       </Badge>
                     </Td>
                     {/* Truncated: a check expression runs long, and the full text is one click
                         away rather than pushing every other column off the screen. */}
                     <Td className="px-4 py-3 text-xs font-mono text-muted-foreground max-w-md truncate">
-                      {row["definition"] as string}
+                      {cellText(row, "definition")}
                     </Td>
                   </tr>
                 ))}
@@ -122,11 +123,11 @@ export function ConstraintsView(): React.ReactElement {
       <SlidePanel
         open={selected !== null}
         onClose={() => setSelected(null)}
-        title={(selected?.["name"] as string) ?? ""}
-        subtitle={selected ? `${selected["type"] as string} on ${selected["table_name"] as string}` : undefined}
+        title={selected ? cellText(selected, "name") : ""}
+        subtitle={selected ? `${cellText(selected, "type")} on ${cellText(selected, "table_name")}` : undefined}
         width="max-w-[540px]"
       >
-        {selected && <CodeBlock>{(selected["definition"] as string) ?? ""}</CodeBlock>}
+        {selected && <CodeBlock>{cellText(selected, "definition")}</CodeBlock>}
       </SlidePanel>
     </div>
   )

@@ -2,9 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { EmailTemplatesView } from "../src/views/auth/EmailTemplatesView.js"
+import { testClient } from "./support.js"
 
 /**
  * TP1: the auth server keeps a template saved from Studio in the database and says so (`saved`,
@@ -13,10 +13,7 @@ import { EmailTemplatesView } from "../src/views/auth/EmailTemplatesView.js"
  * a saved edit to undo, and shows the server's own reason when a save is refused.
  */
 
-const CLIENT = {
-  url: "http://localhost:8000/studio/proxy",
-  auth: { currentAccessToken: "token" },
-} as unknown as SupatypeClient
+const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
 
 const SAVED_AT = "2026-10-13T17:00:00Z"
 const SAVED = { subject: "Welcome aboard", content: "<p>Saved edit</p>", saved: true, saved_at: SAVED_AT }
@@ -75,7 +72,7 @@ function fieldValues(): { subject: string; content: string } {
 }
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
 })
 
 afterEach(() => {

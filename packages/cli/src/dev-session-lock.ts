@@ -3,7 +3,7 @@
  * without graceful shutdown (terminal closed, kill signal, etc.).
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { runDockerCompose } from "./self-host-compose.js"
@@ -12,6 +12,9 @@ import type { SupatypeProjectConfig } from "./project-config.js"
 import { confirm as uiConfirm } from "./ui/confirm.js"
 import { success, warn } from "./ui/messages.js"
 import { isInteractive } from "./ui/interactive.js"
+import { isNumber, isOneOf, isShape, isString, optional, type Guard } from "@supatype/shared"
+import { readJsonFile } from "./json-file.js"
+import { pidAlive } from "./parent-watch.js"
 
 const LOCK_VERSION = 1 as const
 
@@ -26,6 +29,17 @@ export interface DevSessionLock {
   pid?: number
 }
 
+/** A lock this version of the CLI wrote. One from another version reads as no lock. */
+const isDevSessionLock: Guard<DevSessionLock> = isShape({
+  version: isOneOf([LOCK_VERSION]),
+  composeProject: isString,
+  projectRef: isString,
+  composePath: isString,
+  kongPort: isNumber,
+  startedAt: isString,
+  pid: optional(isNumber),
+})
+
 export function devSessionLockPath(cwd: string): string {
   return resolve(cwd, ".supatype/dev-session.json")
 }
@@ -33,23 +47,7 @@ export function devSessionLockPath(cwd: string): string {
 export function readDevSessionLock(cwd: string): DevSessionLock | null {
   const path = devSessionLockPath(cwd)
   if (!existsSync(path)) return null
-  try {
-    const data = JSON.parse(readFileSync(path, "utf8")) as DevSessionLock
-    if (data.version !== LOCK_VERSION) return null
-    return data
-  } catch {
-    return null
-  }
-}
-
-/** True when a process is alive under `pid`. EPERM means it exists and belongs to someone else. */
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM"
-  }
+  return readJsonFile(path, isDevSessionLock) ?? null
 }
 
 /**
@@ -63,7 +61,7 @@ function processAlive(pid: number): boolean {
 export function liveDevSessionLock(cwd: string): DevSessionLock | null {
   const lock = readDevSessionLock(cwd)
   if (lock === null) return null
-  if (lock.pid !== undefined && processAlive(lock.pid)) return lock
+  if (lock.pid !== undefined && pidAlive(lock.pid)) return lock
   clearDevSessionLock(cwd)
   return null
 }

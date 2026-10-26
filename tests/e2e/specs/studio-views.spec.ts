@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
+import { isRecord } from "../lib/json.js"
 import { signInToStudio } from "../lib/studio-session.js"
 
 /**
@@ -265,7 +266,8 @@ test.describe("Studio views", () => {
     await page.goto("/studio/authentication/providers", { waitUntil: "networkidle" })
     const response = await settings
     expect(response.status(), "GET /studio/proxy/auth/v1/settings").toBe(200)
-    const { external } = (await response.json()) as { external: Record<string, boolean> }
+    const body: unknown = await response.json()
+    const external = isRecord(body) && isRecord(body["external"]) ? body["external"] : {}
 
     // Sign-in methods the server reports beside the OAuth providers, which the page leaves out.
     const providers = Object.keys(external).filter((name) => !["email", "phone", "anonymous_users"].includes(name))

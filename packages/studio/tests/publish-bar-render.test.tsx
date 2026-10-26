@@ -8,23 +8,18 @@ import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { LocaleContext } from "../src/hooks/useLocale.js"
 import type { LocaleState } from "../src/hooks/useLocale.js"
 import type { ModelConfig } from "../src/config.js"
-import type { SupatypeClient } from "@supatype/client"
+import { testClient, testModel } from "./support.js"
 
 // Typecheck says these components are well typed. It does not say they render: a hook called in the
 // wrong place, a context read that throws, a `.map` over something that is undefined on the first
 // pass all pass `tsc` and fail on screen. Rendering them once is cheap and catches that class
 // outright.
 //
-// Static markup rather than a DOM: no effects run, which is the point — the first paint is what an
+// Static markup rather than a DOM: no effects run, which is the point. The first paint is what an
 // editor sees before any data arrives, and it is the state most likely to be written without ever
 // being looked at.
 
-const client = {
-  url: "http://localhost:8000/studio/proxy",
-  from: () => ({
-    select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
-  }),
-} as unknown as SupatypeClient
+const client = testClient({ url: "http://localhost:8000/studio/proxy" })
 
 const locale: LocaleState = {
   currentLocale: "en",
@@ -34,18 +29,11 @@ const locale: LocaleState = {
     { code: "fr", label: "French" },
   ],
   setLocale: () => {},
-} as unknown as LocaleState
+}
 
 function model(overrides: Partial<ModelConfig> = {}): ModelConfig {
-  return {
+  return testModel({
     name: "Post",
-    label: "Post",
-    labelPlural: "Posts",
-    tableName: "posts",
-    primaryKey: "id",
-    fields: [],
-    listColumns: [],
-    searchFields: [],
     publishable: true,
     versions: {
       drafts: true,
@@ -56,7 +44,7 @@ function model(overrides: Partial<ModelConfig> = {}): ModelConfig {
     softDelete: false,
     timestamps: true,
     ...overrides,
-  } as unknown as ModelConfig
+  })
 }
 
 function render(node: React.ReactElement): string {

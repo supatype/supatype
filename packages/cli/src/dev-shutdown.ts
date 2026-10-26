@@ -4,6 +4,7 @@
  */
 
 import { existsSync } from "node:fs"
+import { errorMessage } from "./error-message.js"
 import { endDevSession } from "./dev-session.js"
 import { clearDevSessionLock } from "./dev-session-lock.js"
 import { runDockerCompose } from "./self-host-compose.js"
@@ -186,7 +187,7 @@ async function runDevShutdown(): Promise<void> {
     if (shutdownCwd) clearDevSessionLock(shutdownCwd)
     process.exit(0)
   } catch (err) {
-    process.stderr.write(`[supatype] Shutdown failed: ${(err as Error).message}\n`)
+    process.stderr.write(`[supatype] Shutdown failed: ${errorMessage(err)}\n`)
     process.stderr.write(
       "[supatype] Docker containers may still be running, try: supatype self-host compose down\n",
     )

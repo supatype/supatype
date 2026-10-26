@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest"
+import { isBoolean, isShape } from "@supatype/shared"
 import { targetFetch, TargetApiError } from "../src/target-client.js"
 
 describe("targetFetch cloud auth refresh", () => {
@@ -9,7 +10,7 @@ describe("targetFetch cloud auth refresh", () => {
 
   it("refreshes once on TOKEN_EXPIRED then retries", async () => {
     const fetchMock = vi
-      .fn()
+      .fn<(url: string, init?: RequestInit) => Promise<unknown>>()
       .mockResolvedValueOnce({
         ok: false,
         status: 401,
@@ -33,16 +34,21 @@ describe("targetFetch cloud auth refresh", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     const onRefreshed = vi.fn()
-    const result = await targetFetch<{ ok: boolean }>("http://api.test", "/api/v1", {
-      method: "GET",
-      path: "/projects/x/status",
-      token: "old-access",
-      authRefresh: {
-        cloudApiUrl: "http://api.test",
-        refreshToken: "old-refresh",
-        onRefreshed,
+    const result = await targetFetch(
+      "http://api.test",
+      "/api/v1",
+      {
+        method: "GET",
+        path: "/projects/x/status",
+        token: "old-access",
+        authRefresh: {
+          cloudApiUrl: "http://api.test",
+          refreshToken: "old-refresh",
+          onRefreshed,
+        },
       },
-    })
+      isShape({ ok: isBoolean }),
+    )
 
     expect(result).toEqual({ ok: true })
     expect(onRefreshed).toHaveBeenCalledWith({
@@ -50,8 +56,7 @@ describe("targetFetch cloud auth refresh", () => {
       refreshToken: "new-refresh",
     })
     expect(fetchMock).toHaveBeenCalledTimes(3)
-    const retryAuth = (fetchMock.mock.calls[2]![1] as RequestInit).headers as Record<string, string>
-    expect(retryAuth.Authorization).toBe("Bearer new-access")
+    expect(fetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({ Authorization: "Bearer new-access" })
   })
 
   it("points to supatype login when expired without refresh token", async () => {

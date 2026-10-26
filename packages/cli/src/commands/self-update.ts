@@ -7,6 +7,7 @@
  */
 
 import type { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import { copyFileSync, renameSync } from "node:fs"
 import { cliPackageVersion } from "../cli-package-version.js"
 import { detectCliInstallMethod, runningBinaryPath } from "../cli-install-method.js"
@@ -78,7 +79,7 @@ export function registerSelfUpdate(program: Command): void {
         plain("Run `supatype --version` to verify.")
       } catch (err) {
         error(
-          `Standalone CLI self-update failed: ${(err as Error).message}\n\n` +
+          `Standalone CLI self-update failed: ${errorMessage(err)}\n\n` +
             "Install or upgrade via npm:\n  npm install -g @supatype/cli\n\n" +
             "Or Homebrew:\n  brew upgrade supatype\n\n" +
             "Component binaries (engine, server, postgres, deno, realtime):\n  supatype update\n",

@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { composeProjectName, writeSelfHostCompose } from "../src/self-host-compose.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
+import { isString } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
 
 /**
  * SA3: the generated compose file lives in `.supatype/self-host/`, and its bind mounts were written
@@ -48,7 +50,7 @@ function scalar(line: string, key: string): string | undefined {
   const match = new RegExp(`^\\s+(?:- )?${key}: (.+)$`).exec(line)
   if (match?.[1] === undefined) return undefined
   const raw = match[1].trim()
-  return raw.startsWith("\"") ? (JSON.parse(raw) as string) : raw
+  return raw.startsWith("\"") ? parseJsonAs(raw, isString) : raw
 }
 
 /**

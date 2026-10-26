@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { StorageClient } from "../src/storage.js"
+import { fetchCall, fetchReturning, header, type FetchMock } from "./support/fetch-mock.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -22,17 +23,8 @@ function createMockBlob(sizeBytes: number): Blob {
   return new Blob([data])
 }
 
-function mockFetchResponse(
-  status: number,
-  body: unknown,
-  ok?: boolean,
-): ReturnType<typeof vi.fn> {
-  return vi.fn().mockResolvedValue({
-    ok: ok ?? (status >= 200 && status < 300),
-    status,
-    json: vi.fn().mockResolvedValue(body),
-    headers: new Headers(),
-  })
+function mockFetchResponse(status: number, body: unknown): FetchMock {
+  return fetchReturning(body, status)
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -73,7 +65,7 @@ describe("Task 92: File upload size limit integration", () => {
         message: "Payload too large: file exceeds the maximum upload size of 50MB",
         statusCode: 413,
         error: "Payload Too Large",
-      }, false))
+      }))
 
       const client = freshClient()
       const blob = createMockBlob(100 * 1024 * 1024) // 100 MB
@@ -88,7 +80,7 @@ describe("Task 92: File upload size limit integration", () => {
     it("error message mentions the size limit", async () => {
       vi.stubGlobal("fetch", mockFetchResponse(413, {
         message: "Payload too large: file exceeds the maximum upload size of 50MB",
-      }, false))
+      }))
 
       const client = freshClient()
       const { error } = await client.from("uploads").upload("huge.zip", createMockBlob(200 * 1024 * 1024))
@@ -99,7 +91,7 @@ describe("Task 92: File upload size limit integration", () => {
     it("returns 413 for just-over-limit file", async () => {
       vi.stubGlobal("fetch", mockFetchResponse(413, {
         message: "Payload too large: file exceeds the maximum upload size of 50MB",
-      }, false))
+      }))
 
       const client = freshClient()
       const blob = createMockBlob(50 * 1024 * 1024 + 1) // 50 MB + 1 byte
@@ -118,9 +110,9 @@ describe("Task 92: File upload size limit integration", () => {
       const client = freshClient()
       await client.from("bucket").upload("file.txt", createMockBlob(100))
 
-      const [url, opts] = fetchSpy.mock.calls[0] as [string, RequestInit]
+      const { url, init } = fetchCall(fetchSpy)
       expect(url).toBe(`${STORAGE_URL}/object/bucket/file.txt`)
-      expect(opts.method).toBe("POST")
+      expect(init.method).toBe("POST")
     })
 
     it("includes content-type header", async () => {
@@ -132,8 +124,7 @@ describe("Task 92: File upload size limit integration", () => {
         contentType: "image/jpeg",
       })
 
-      const [, opts] = fetchSpy.mock.calls[0] as [string, RequestInit]
-      expect((opts.headers as Record<string, string>)["Content-Type"]).toBe("image/jpeg")
+      expect(header(fetchCall(fetchSpy).init, "Content-Type")).toBe("image/jpeg")
     })
 
     it("sends x-upsert header when upsert option is true", async () => {
@@ -143,8 +134,7 @@ describe("Task 92: File upload size limit integration", () => {
       const client = freshClient()
       await client.from("bucket").upload("file.txt", createMockBlob(100), { upsert: true })
 
-      const [, opts] = fetchSpy.mock.calls[0] as [string, RequestInit]
-      expect((opts.headers as Record<string, string>)["x-upsert"]).toBe("true")
+      expect(header(fetchCall(fetchSpy).init, "x-upsert")).toBe("true")
     })
   })
 
@@ -152,7 +142,7 @@ describe("Task 92: File upload size limit integration", () => {
     it("handles 400 Bad Request", async () => {
       vi.stubGlobal("fetch", mockFetchResponse(400, {
         message: "Invalid file name",
-      }, false))
+      }))
 
       const client = freshClient()
       const { error } = await client.from("bucket").upload("", createMockBlob(100))
@@ -164,7 +154,7 @@ describe("Task 92: File upload size limit integration", () => {
     it("handles 401 Unauthorized", async () => {
       vi.stubGlobal("fetch", mockFetchResponse(401, {
         message: "Unauthorized",
-      }, false))
+      }))
 
       const client = freshClient()
       const { error } = await client.from("private-bucket").upload("secret.doc", createMockBlob(100))

@@ -14,6 +14,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { execFileSync } from "node:child_process"
 import { createClient } from "@supatype/client"
 import { sql, stack } from "../masking/lib/stack.js"
+import { isRecord, stringAt } from "../lib/json.js"
 import { signInToStudio } from "../lib/studio-session.js"
 
 test.skip(process.env["REALTIME_INSPECTOR_E2E"] !== "1", "needs the masking project's stack, see the header")
@@ -54,8 +55,11 @@ async function account(name: string): Promise<Account> {
   })
   expect(created.status, `create ${name}`).toBeLessThan(300)
   const signedIn = await api("POST", "/auth/v1/token?grant_type=password", stack().anonKey, { email, password: PASSWORD })
-  const session = (await signedIn.json()) as { access_token: string; user: { id: string } }
-  return { id: session.user.id, email, token: session.access_token }
+  const session = await signedIn.json()
+  const token = stringAt(session, "access_token")
+  const id = isRecord(session) ? stringAt(session["user"], "id") : undefined
+  if (token === undefined || id === undefined) throw new Error(`sign in ${name}: ${signedIn.status} returned no session`)
+  return { id, email, token }
 }
 
 async function subscriberClient(who: Account): Promise<ReturnType<typeof createClient>> {
@@ -116,7 +120,9 @@ test.beforeAll(async () => {
   }
   const project = await api("GET", "/studio/proxy/platform/v1/project", developer.token)
   expect(project.status).toBe(200)
-  const ref = ((await project.json()) as { data: { ref: string } }).data.ref
+  const body = await project.json()
+  const ref = isRecord(body) ? stringAt(body["data"], "ref") : undefined
+  if (ref === undefined) throw new Error("the platform project answer has no data.ref")
   world = { owner, developer, editor, admin, ref }
 })
 

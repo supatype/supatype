@@ -3,7 +3,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { ModelAstV2 } from "../src/schema-ast-v2.js"
+import { isArrayOf, isJsonObject, isShape, isString, optional } from "@supatype/shared"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
+import { expectShape } from "./support/json.js"
 
 const dirs: string[] = []
 
@@ -574,13 +576,14 @@ export type Note = Model<{
     )
     const ast = extractSchemaAstFromTypes(schemaPath, dir)
     const note = ast?.models.find((m) => m.name === "Note")
-    const summary = note?.fields["summary"] as { sources?: string[]; template?: string } | undefined
+    const isComputed = isShape({ sources: optional(isArrayOf(isString)), template: optional(isString) })
+    const summary = expectShape(note?.fields["summary"], isComputed)
     expect(summary).toMatchObject({
       kind: "text",
       required: false,
       template: "Author: {author} | Date: {published_at}\n{truncate(description, 100)}",
     })
-    expect(new Set(summary?.sources ?? [])).toEqual(new Set(["author", "published_at", "description"]))
+    expect(new Set(summary.sources ?? [])).toEqual(new Set(["author", "published_at", "description"]))
   })
 
   it("extracts singleton: true with default _global_ table name", () => {
@@ -779,7 +782,7 @@ export type Message = Model<{
       kind: "text",
       check: 'char_length("{name}") <= 2000',
     })
-    const messageIndexes = message?.annotations.db.indexes as Array<Record<string, unknown>>
+    const messageIndexes = message?.annotations.db.indexes
     expect(messageIndexes).toHaveLength(1)
     expect(messageIndexes?.[0]).toMatchObject({
       using: "btree",
@@ -814,7 +817,7 @@ export type Doc = Model<{
     )
 
     const doc = extractSchemaAstFromTypes(schemaPath, dir)?.models.find((m) => m.name === "Doc")
-    const indexes = doc?.annotations.db.indexes as Array<Record<string, unknown>>
+    const indexes = doc?.annotations.db.indexes
     expect(indexes).toEqual([
       { using: "gist", unique: false, fields: ["near"] },
       { using: "hnsw", unique: false, fields: ["embedding"] },
@@ -989,8 +992,9 @@ export type Homepage = LocalizedModel<{
       kind: "image",
       localized: true,
     })
-    const slides = homepage?.fields["hero_slides"] as { blocks?: { fields: Record<string, unknown> }[] }
-    expect(slides?.blocks?.[0]?.fields["text"]).toMatchObject({
+    const isBlocks = isShape({ blocks: optional(isArrayOf(isShape({ fields: isJsonObject }))) })
+    const slides = expectShape(homepage?.fields["hero_slides"], isBlocks)
+    expect(slides.blocks?.[0]?.fields["text"]).toMatchObject({
       kind: "text",
       localized: true,
       pgType: "JSONB",
@@ -1664,10 +1668,8 @@ export type Speaker = Model<{
 
     const ast = extractSchemaAstFromTypes(schemaPath, dir)
     const speaker = ast?.models.find((m) => m.name === "Speaker")
-    const fields = speaker?.fields as Record<string, { annotations?: { db?: { pgType?: string } } }>
-
-    expect(fields["headshot"]?.annotations?.db?.pgType).toBe("JSONB")
-    expect(fields["handout"]?.annotations?.db?.pgType).toBe("JSONB")
+    expect(speaker?.fields["headshot"]?.annotations?.db?.pgType).toBe("JSONB")
+    expect(speaker?.fields["handout"]?.annotations?.db?.pgType).toBe("JSONB")
   })
 })
 

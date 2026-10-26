@@ -1,9 +1,12 @@
 import type { Command } from "commander"
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { resolve, join } from "node:path"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
+import { isArrayOf, isNumber, isShape, isString, optional, readJson } from "@supatype/shared"
+import { objectAt } from "../ast-read.js"
+import { parsePackageJson, type PackageJson } from "../package-json.js"
 
 // ─── Registration ────────────────────────────────────────────────────────────
 
@@ -99,17 +102,7 @@ async function searchPlugins(query: string): Promise<void> {
       return
     }
 
-    const data = await res.json() as {
-      objects: Array<{
-        package: {
-          name: string
-          version: string
-          description: string
-          keywords: string[]
-        }
-        score: { final: number }
-      }>
-    }
+    const data = await readJson(res, isRegistrySearch)
 
     if (data.objects.length === 0) {
       info("No plugins found.")
@@ -159,11 +152,10 @@ function addPlugin(cwd: string, pkg: string): void {
   // Check compatibility
   const pluginPkgPath = resolvePackageJson(cwd, pkg)
   if (pluginPkgPath) {
-    const pkgJson = JSON.parse(readFileSync(pluginPkgPath, "utf8")) as Record<string, unknown>
-    const supatype = pkgJson["supatype"] as Record<string, unknown> | undefined
+    const pkgJson = parsePackageJson(readFileSync(pluginPkgPath, "utf8"))
+    const pluginApi = objectAt(pkgJson.raw, "supatype")?.["pluginApi"]
 
-    if (supatype?.["pluginApi"] !== undefined) {
-      const pluginApi = supatype["pluginApi"] as number
+    if (pluginApi !== undefined) {
       if (pluginApi !== 1) {
         warn(`${pkg} targets plugin API v${pluginApi}, current is v1.`)
         warn("The plugin may not work correctly.")
@@ -447,34 +439,16 @@ function discoverInstalledPlugins(cwd: string): DiscoveredPlugin[] {
   const pkgJsonPath = resolve(cwd, "package.json")
   if (!existsSync(pkgJsonPath)) return []
 
-  const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8")) as Record<string, Record<string, string>>
-  const deps = {
-    ...pkgJson["dependencies"],
-    ...pkgJson["devDependencies"],
-  }
+  const pkgJson = parsePackageJson(readFileSync(pkgJsonPath, "utf8"))
+  const deps = { ...pkgJson.dependencies, ...pkgJson.devDependencies }
 
   for (const depName of Object.keys(deps)) {
     const depPkgPath = resolvePackageJson(cwd, depName)
     if (!depPkgPath) continue
 
     try {
-      const depPkg = JSON.parse(readFileSync(depPkgPath, "utf8")) as Record<string, unknown>
-
-      // Check if it's a Supatype plugin
-      const keywords = (depPkg["keywords"] as string[] | undefined) ?? []
-      const supatype = depPkg["supatype"] as Record<string, unknown> | undefined
-
-      if (keywords.includes("supatype-plugin") || supatype) {
-        plugins.push({
-          name: depName,
-          version: (depPkg["version"] as string) ?? "unknown",
-          supatype: supatype ? {
-            pluginApi: supatype["pluginApi"] as number | undefined,
-            types: supatype["types"] as string[] | undefined,
-          } : undefined,
-          compatible: !supatype?.["pluginApi"] || supatype["pluginApi"] === 1,
-        })
-      }
+      const plugin = pluginOf(depName, parsePackageJson(readFileSync(depPkgPath, "utf8")))
+      if (plugin !== undefined) plugins.push(plugin)
     } catch {
       // Skip packages we can't read
     }
@@ -482,6 +456,32 @@ function discoverInstalledPlugins(cwd: string): DiscoveredPlugin[] {
 
   return plugins
 }
+
+/** The dependency as a plugin, when its keywords or a `supatype` key say it is one. */
+function pluginOf(name: string, depPkg: PackageJson): DiscoveredPlugin | undefined {
+  const supatype = objectAt(depPkg.raw, "supatype")
+  if (!depPkg.keywords.includes("supatype-plugin") && supatype === undefined) return undefined
+  const pluginApi = supatype?.["pluginApi"]
+  const types = supatype?.["types"]
+  return {
+    name,
+    version: depPkg.version ?? "unknown",
+    supatype: supatype
+      ? {
+          pluginApi: isNumber(pluginApi) ? pluginApi : undefined,
+          types: Array.isArray(types) ? types.filter(isString) : undefined,
+        }
+      : undefined,
+    compatible: !pluginApi || pluginApi === 1,
+  }
+}
+
+/** The part of an npm registry search answer the list reads. */
+const isRegistrySearch = isShape({
+  objects: isArrayOf(
+    isShape({ package: isShape({ name: isString, version: isString, description: optional(isString) }) }),
+  ),
+})
 
 function resolvePackageJson(cwd: string, packageName: string): string | null {
   // Handle scoped packages
@@ -502,7 +502,6 @@ function findSchemaFiles(cwd: string): string[] {
 
   const files: string[] = []
   try {
-    const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs")
     const entries = readdirSync(schemaDir)
     for (const entry of entries) {
       const fullPath = join(schemaDir, entry)

@@ -1,0 +1,23 @@
+{
+  // The TypeScript files that sit beside a package's build config rather than inside the source tree
+  // that config compiles (its `rootDir` is `src`), and the type reset every tsconfig here includes.
+  //
+  // Nothing is built from this. It types these files for `pnpm typecheck` and for the lint: the lint's
+  // project service gives each file the nearest tsconfig.json that includes it, and for these that is
+  // this one, found by walking up past the package's own. A new file of this kind that no glob here
+  // matches fails the lint, by name, until it is added.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["node"]
+  },
+  "include": [
+    "ts-reset.d.ts",
+    "packages/*/vitest.config.ts",
+    "packages/*/vite.config.ts",
+    "packages/*/tailwind.*.ts",
+    "packages/cli/deno.d.ts"
+  ]
+}

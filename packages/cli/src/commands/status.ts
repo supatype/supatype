@@ -2,6 +2,7 @@
  * supatype status: show linked target or local stack state.
  */
 import type { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { composeContext, composeServices } from "../compose-services.js"
@@ -9,6 +10,7 @@ import { localKongBaseUrl } from "../local-gateway.js"
 import { loadLocalEnvironment, loadProjectLink } from "../link.js"
 import { resolveTarget, targetStatus } from "../resolve-target.js"
 import { error, info, plain, warn } from "../ui/messages.js"
+import { isJsonObject } from "@supatype/shared"
 
 export function registerStatus(program: Command): void {
   program
@@ -28,7 +30,7 @@ export function registerStatus(program: Command): void {
             return
           }
         } catch (err) {
-          error((err as Error).message)
+          error(errorMessage(err))
           process.exitCode = 1
           return
         }
@@ -45,23 +47,25 @@ async function printLinkedStatus(target: ReturnType<typeof resolveTarget>): Prom
   plain()
 
   try {
-    const data = (await targetStatus(target)) as Record<string, unknown>
-    if (data.functions && Array.isArray(data.functions)) {
-      plain(`Functions (${data.functions.length}):`)
-      for (const fn of data.functions as Array<{ name?: string } | string>) {
-        const name = typeof fn === "string" ? fn : fn.name
-        if (name) plain(`  • ${name}`)
+    const answer = await targetStatus(target)
+    const data = isJsonObject(answer) ? answer : {}
+    const functions = data["functions"]
+    if (Array.isArray(functions)) {
+      plain(`Functions (${functions.length}):`)
+      for (const fn of functions) {
+        const name = typeof fn === "string" ? fn : isJsonObject(fn) ? fn["name"] : undefined
+        if (name) plain(`  • ${String(name)}`)
       }
       plain()
     }
-    if (data.deploymentId) {
-      info(`Active deployment: ${data.deploymentId}`)
+    if (data["deploymentId"]) {
+      info(`Active deployment: ${String(data["deploymentId"])}`)
     }
-    if (data.controlPlane) {
-      info(`Control plane: ${data.controlPlane}`)
+    if (data["controlPlane"]) {
+      info(`Control plane: ${String(data["controlPlane"])}`)
     }
   } catch (err) {
-    warn(`Could not fetch remote status: ${(err as Error).message}`)
+    warn(`Could not fetch remote status: ${errorMessage(err)}`)
   }
 }
 

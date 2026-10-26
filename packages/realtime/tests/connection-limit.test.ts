@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { WebSocket } from "ws"
 import { RealtimeServer } from "../src/server.js"
+import { expectObject } from "./fixtures/expect-json.js"
 import { connect, freePort, serviceToken, testEnv, userToken, type Peer } from "./fixtures/socket.js"
 
 /**
@@ -21,8 +22,7 @@ async function connectionsLimit(adminPort: number): Promise<unknown> {
   const res = await fetch(`http://127.0.0.1:${adminPort}/admin/v1/connections`, {
     headers: { Authorization: `Bearer ${serviceToken()}` },
   })
-  const body = (await res.json()) as { data: { limit: unknown; total: number } }
-  return body.data
+  return expectObject(expectObject(await res.json())["data"])
 }
 
 describe("CONNECTION_LIMIT", () => {
