@@ -45,7 +45,12 @@ another database: `supatype push --env <name>`, or a linked target.
 It also stops, and stops its stack the way Ctrl+C does, within a few seconds of the process that
 started it exiting: a script that was killed, a cancelled CI job, an agent's command that timed out.
 So start it in the foreground, or from a process that stays alive. To leave a stack running with
-nothing attached, use `supatype self-host compose up -d` instead.
+nothing attached, use `supatype self-host compose up -d` instead. A script that backgrounds it
+should `exec` it, `(cd app && exec npx supatype dev) &`, so `$!` is `dev` itself.
+
+To run a second stack of the same project (another checkout, a test run), set
+`SUPATYPE_PROJECT_NAME=<name>` or pass `--project-name <name>`, with its own `SUPATYPE_KONG_PORT`:
+the compose project and the database follow the name for that run, and no file is written.
 
 Install matching versions of CLI, client, and types from npm:
 
@@ -113,7 +118,11 @@ Add `@supatype/client` when wiring a frontend. `supatype dev` applies schema cha
 | Wrong project / holding page | Another stack may own your Kong port; use the URL from `supatype dev` output |
 | Docker still running after dev | Run `supatype self-host compose down`; check Docker Desktop for orphaned `supatype-*` stacks |
 | Renamed project, old containers | Next `supatype dev` offers to stop the old stack; or `docker compose -p supatype-<old-name> down` |
-| Missing JWT keys | `supatype keys` → update `.env` |
+| Missing JWT keys | `supatype keys --write` |
+| `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` | Put a longer secret in `.env` (`openssl rand -base64 48`), then `supatype keys --write --force` |
+| REST answers `503` / `PGRST002` on a fresh self-host stack | Expected until the first `supatype push`; push waits up to 40 s for REST to load the schema |
+| ``The process that started `supatype dev` has exited, so dev is stopping its stack.`` | The starter (script, CI step, agent command) exited. Keep `dev` in the foreground, or use `supatype self-host compose up -d` |
+| `.env` change not picked up by a running stack | `supatype self-host compose restart <service>` (not `docker compose restart`) |
 | No supatype.config.ts | `supatype init` |
 | Types out of sync | `supatype push` or `supatype generate` |
 | Destructive migration blocked | Review `supatype diff`; use `supatype push --yes` if intended |

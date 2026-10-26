@@ -20,13 +20,12 @@ For local dev, `supatype dev` writes `.supatype/environment.json` with the Kong 
 ## Local dev (Docker)
 
 ```bash
-supatype keys          # if keys not in .env
-supatype dev           # Compose stack + control-plane; Kong on :18473
-supatype push          # → /platform/v1/.../schema/push via server auth
+supatype keys --write  # only if init skipped the keys
+supatype dev           # Compose stack + control-plane; Kong on :18473; applies the schema on every save
 supatype status        # local services or linked target summary
 ```
 
-`supatype dev` renders compose, starts services, and may write `SUPATYPE_KONG_PORT`, `SUPATYPE_DEV_DB_PORT`, and `.supatype/environment.json` to the project.
+`supatype dev` renders compose, starts services, and may write `SUPATYPE_KONG_PORT`, `SUPATYPE_DEV_DB_PORT`, and `.supatype/environment.json` to the project. It refuses a `JWT_SECRET` shorter than 32 characters before starting anything. It stops its stack when the process that started it exits; to keep a stack up with nothing attached, use `supatype self-host compose up -d`.
 
 Use `--direct` on schema commands to bypass the control plane and invoke the local engine subprocess directly.
 
@@ -54,8 +53,8 @@ GRANT SELECT ON public.orders TO functions_reader;
 SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:a-long-random-password@db:5432/my-project
 ```
 
-Re-render and restart (`supatype self-host compose render`, then `up -d`; or restart
-`supatype dev`). In a function, check `ctx.dbUrl !== undefined` before connecting, and never
+Apply it with `supatype self-host compose up -d` (it renders the file again and recreates what
+changed), or restart `supatype dev`. In a function, check `ctx.dbUrl !== undefined` before connecting, and never
 return or log it. Prefer `createClient` with the caller's token for anything a user asks for: that
 path keeps the schema's rules.
 
@@ -78,17 +77,29 @@ supatype self-host compose up -d     # start production stack
 supatype self-host compose down      # stop
 supatype self-host compose status    # health check
 supatype self-host compose restart server   # recreate one service after a .env change
+supatype self-host compose restart functions-worker   # load edited functions/
+supatype self-host compose logs --service postgrest
 ```
 
-Use `restart <service>` rather than a hand-typed `docker compose` command. The generated
-`.supatype/self-host/docker-compose.yml` names the project's folders by absolute path, and every
-`self-host compose` command renders it again, so a project that moved is picked up there.
+Use `restart <service>` rather than a hand-typed `docker compose` command (Compose's own `restart`
+keeps the old container, so a changed `.env` never reaches it). The generated
+`.supatype/self-host/docker-compose.yml` names the project's folders by absolute path and names its
+compose project (`name: supatype-<project.name>`), so a hand-run
+`docker compose -f .supatype/self-host/docker-compose.yml --env-file .env ...` reaches the same
+stack. Every `self-host compose` command renders it again, so a project that moved is picked up there.
+
+**`compose up` checks `JWT_SECRET`.** Shorter than 32 characters stops it with
+`JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` (PostgREST 14 would
+otherwise restart in a loop). Fix: `openssl rand -base64 48` into `.env` as `JWT_SECRET`, then
+`supatype keys --write --force` (plain `--write` only fills blank keys).
 
 **A stack keeps its mode.** Every command that renders the compose file (`push`, `diff`, `adopt`,
 `update`, every `self-host compose` command) uses one rule: dev while `supatype dev` runs for the
 project, otherwise the mode the running server is in, otherwise standalone. So `supatype push` on a
 production stack leaves it standalone and leaves `.env` alone, and `self-host compose restart` on a
-`supatype dev` stack keeps it dev.
+`supatype dev` stack keeps it dev. "`supatype dev` runs" means `.supatype/dev-session.json` names a
+live process: a file left by a killed `dev` (or written by a CLI older than this rule, which kept no
+process ID) is removed and does not count.
 
 **REST answers 503 until the first push.** A fresh stack returns `503` with `PGRST002` on every
 `/rest/v1/` request: PostgREST will not serve until the schemas it exposes exist, and `supatype
@@ -116,6 +127,47 @@ Dev mode reflects every origin, whatever the list says.
 ```ts
 api: { corsOrigins: ["https://admin.example.com", "http://localhost:5173"] },
 ```
+
+Entries must be `scheme://host[:port]` (http or https) or `*`; anything else stops the config
+loading with `api.corsOrigins must be an array of origins (scheme://host[:port]) or "*"`. Before
+this, a standalone server with no `SUPATYPE_CORS_ALLOW_ORIGINS` allowed every origin, so add any
+production web app's origin before upgrading. On Cloud, `api.corsOrigins` is not deployed: the
+project's own URL and Cloud Studio are always allowed, and owners and admins edit the rest in
+Studio's CORS tab.
+
+## Studio roles
+
+Studio members are separate from the app's users. One role set serves self-host and Cloud:
+`owner`, `admin`, `developer`, `editor`, `billing`, `viewer`. Self-host grants `admin`,
+`developer`, `editor` and `viewer` (a row naming `owner` or `billing` grants nothing there):
+
+```bash
+supatype admin create-user --email dev@example.com --role developer
+supatype admin set-role --email dev@example.com --role viewer
+supatype admin list-users
+```
+
+| Role | May |
+|---|---|
+| `admin` | everything: members, auth users, keys, domains, CORS list, elevated access |
+| `developer` | read and write rows, schema screens, push, deploy, SQL editor and Database write controls, Realtime Inspector, logs |
+| `editor` | read and write rows; Data Explorer works, schema screens do not |
+| `viewer` | read rows, schema screens and logs; changes nothing |
+
+- **SQL editor** (and creating or dropping tables, views, functions, triggers, types, policies,
+  extensions, RLS switches): owner, admin, developer. It runs as the project's owning role, so RLS
+  does not apply; every query is recorded.
+- **Acting mode:** owners and admins act **elevated** (service role key, no RLS) by default and can
+  switch to **self** in Studio ("Act as myself" / "Use elevated access"). Studio sends
+  `X-Supatype-Acting-Mode: self|elevated`; asking for `elevated` without the permission is `403`,
+  never a silent downgrade. Everyone else always acts as themselves, under RLS and field masks.
+- Viewers read the Database screens, policies, migration and seed history through a read-only
+  metadata catalogue, not the SQL editor. Sessions on the Users screen are listed and revoked
+  through the auth admin API (`/admin/sessions`).
+- **Cloud:** the org role applies to every project in the org; a project's Studio membership row
+  can only narrow it, and owners are never narrowed. The old org role `member` is now `developer`.
+  To act as themselves a member links a project user by signing in to it once (same email as their
+  Supatype account); until then self-mode requests answer `identity_link_required`.
 
 ## Custom domain + automatic HTTPS
 

@@ -128,8 +128,8 @@ show them. The columns are added to `_supatype.migrations` on the first push.
   than guess.
 - **Deploy order:** see [Before you upgrade](#before-you-upgrade). The realtime image must be
   the 0.7.0 one before the first push.
-- **Supatype Cloud free tier:** realtime is now on for Free projects, limited to 50 concurrent
-  connections. Paid tiers keep their limits.
+- **Supatype Cloud free tier:** realtime is now on for Free projects, at the plan's concurrent
+  connection limit (see the pricing page).
 
 ### WAL volume
 
@@ -143,36 +143,43 @@ your own Postgres.
 
 ## Field rules on INSERT
 
-Field write rules (`access.fields`) are now judged on INSERT against the row being stored, as
-Postgres RLS `WITH CHECK` does. 0.6.0 judged them against an empty row, so a rule that reads the row,
-such as a private `ssn` writable by `Owner<"owner_id">`, never passed on create and the value was
-silently stored as NULL: a user signing up could not save their own private field.
+Field write rules (`access.fields`) are now judged on INSERT against the row being stored, defaults
+included, as Postgres RLS `WITH CHECK` does. 0.6.0 judged them against a row of NULLs, so a rule
+that reads the row (`Owner<"id">`, `OwnerFrom`, a membership) never passed on create and the value
+was silently replaced by the column default: a user creating their own row could not set their own
+owner-only field. Now an `owner_id DEFAULT auth.uid()`, a `gen_random_uuid()` key or a serial key is
+what the rule reads.
 
-On INSERT, for each masked field:
+| The caller sends | What happens |
+|---|---|
+| A value the rule allows | It is stored. |
+| A value the rule refuses, other than the column's default | The insert fails with `42501`: `permission denied for column <column> of relation <table>` with masking in views (tier 2), `column "<table>"."<column>" cannot be written by this role` with masking in the database (tier 1). It used to succeed and drop the value. |
+| Nothing, `DEFAULT`, `NULL`, or the column default's own value | The column takes its default, and the rule is not judged. |
 
-- **Left out, sent as `NULL` or sent as `DEFAULT`:** the column takes its default (NULL if it has
-  none), and the rule is not judged.
-- **A value the caller may write:** it is stored. Rules see the row as it will be stored, defaults
-  included, so a rule that reads the row (`Owner<"owner_id">`) works on create.
-- **A value the caller may not write:** the whole insert is refused with SQLSTATE `42501`, naming the
-  table and column. With masking in the database (tier 1) the message is
-  `column "<table>"."<col>" cannot be written by this role`; with masking in views (tier 2) it is
-  `permission denied for column <col> of relation <table>`.
+The default's own value counts as no write, because PostgREST's `Prefer: missing=default` sends it
+for a key a row leaves out. So an admin-only `verified` with `DEFAULT false` is accepted from anyone
+when it is left out or sent as `false`, and `verified: true` from a non-admin is refused. A volatile
+default (`gen_random_uuid()`, a sequence) never equals a value sent.
 
 UPDATE is unchanged. A field the caller cannot read keeps its stored value whatever is sent, and the
 same value sent back is kept; a real change is judged by the write rule and refused with `42501` if
 it is not allowed.
 
-**This is a breaking change.** A create that sends a value the caller may not write, for example
-`verified: false` from a sign-up form used by non-admins, used to succeed with the value silently
-replaced; it now fails with `42501`. Fix it by not sending that field and letting the column default
-set it. The service role is exempt from field rules.
+What changes for an existing project:
 
-One difference between the tiers remains: when the service role sends `NULL` for a masked column that
-has a default, tier 2 stores the default and tier 1 stores `NULL`.
-
-**When it takes effect:** with masking in views (tier 2) on the next `supatype push`; with masking in
-the database (tier 1) when Postgres restarts on the new `supatype/postgres` image.
+- **Clients that sent a value they could not write** on create, and relied on it being dropped, now
+  get an error, unless the value is the column's default. Leave the field out, or send `NULL`.
+- **Tier 2 (the `api` views):** the next push rewrites each masked view's write trigger.
+- **Tier 1 (`supatype_mask`):** the behaviour comes with the new `supatype/postgres` image; restarting
+  Postgres on it is enough.
+- **Column privileges:** the push no longer takes `INSERT` away from `authenticated` on a column
+  whose write rule reads the row. Until that push, an insert naming such a column is refused.
+- **`supatype diff`** no longer refuses a required column without a default whose write rule reads
+  the row. It still refuses one whose write rule denies everyone.
+- **The service role** is exempt from field rules. When it sends `NULL` for a masked column that has
+  a default, tier 2 stores the default and tier 1 stores the `NULL`.
+- **A `BEFORE INSERT` trigger** on the table runs after the rules are judged, so a rule does not see
+  what such a trigger changes.
 
 ## Auth providers in dev and self-host
 
@@ -311,6 +318,146 @@ masking. Use a least-privilege role, never the admin URL. See
   so: "This Postgres trusted every local connection; it now checks passwords."
 - Tools that connected without a password now need `.env`'s `POSTGRES_PASSWORD` (for `psql`,
   `PGPASSWORD`). `supatype pg psql` passes it for you.
+
+## Client changes
+
+- **Writes take every filter.** `update()` and `delete()` accept the same filters as `select()`
+  (`gt`, `like`, `or`, `is`, `match` and the rest), so a ranged or patterned write no longer needs
+  the ids read first. `delete().select()` now returns the deleted rows.
+- **Arrays in `contains` and `containedBy`.** An array is sent as a Postgres array literal, so
+  filtering an array column works; a string is sent as written (range types), anything else as
+  JSON (`jsonb`). `in()` quotes values that hold a comma or parenthesis.
+- **`count` is `null` unless you asked for one** (`count: "exact"` and the others). It used to be
+  `NaN` on every ordinary query.
+- **Timeouts and retries.** The configured `timeout` now covers every request, tables, auth and
+  storage included. Only `GET` and `HEAD` requests (and storage reads sent as `POST`, such as
+  `list` and signed URLs) are retried. Writes, sign-in, uploads and `rpc`, `graphql` and
+  `functions.invoke` calls are sent once, because a request that failed in flight may already
+  have been applied; pass `idempotent: true` to `rpc`, `graphql` or `functions.invoke` for a
+  call that is safe to repeat.
+- **Auth errors keep their code.** Every auth call's `error.code` now carries the auth server's
+  code (`invalid_credentials`, `weak_password`, `otp_expired` and the rest). `updateUser` emits
+  `USER_UPDATED` and updates the session's user; a session from a recovery link emits
+  `PASSWORD_RECOVERY` after `SIGNED_IN`.
+- **Error codes follow PostgREST 14:** an expired token is `PGRST303`, a missing table
+  `PGRST205`, a database error arrives under its own SQLSTATE (`23505`, `42501`), and `.single()`
+  without exactly one row answers `PGRST116` on reads and writes alike. Code that compared
+  against the old constants should use the client's error code constants.
+- **`headers` may be a function**, called for each request.
+
+## PostgREST 14
+
+Every stack now runs PostgREST 14.18 (compose and native dev used 12.2.x).
+
+- **The JWT secret must be at least 32 characters.** PostgREST 13 and later refuse a shorter one at
+  startup, so `supatype dev` and `supatype self-host compose up` now stop first and say how to make
+  a longer one and re-sign the keys. Secrets the CLI generates already pass. If yours is shorter,
+  replace `JWT_SECRET` in `.env` (for example `openssl rand -base64 48`) and run
+  `supatype keys --write --force` to re-sign `ANON_KEY` and `SERVICE_ROLE_KEY`.
+- **An update or delete filtered with `or()` or `and()`, with a `select` that leaves out the
+  filtered column, now works.** On 12.x it answered "column ... does not exist" and rolled back.
+- **REST before the first push answers `503` (`PGRST002`):** PostgREST will not serve until the
+  schemas it exposes exist. A push to a compose or self-host stack now waits, up to 40 seconds,
+  until REST answers, printing one line while it does.
+
+## Studio roles
+
+Studio has one role set on both hosts: **owner, admin, developer, editor, billing and viewer**.
+Self-host projects use admin, developer, editor and viewer; owner and billing are Supatype Cloud
+organisation roles. On Cloud, the organisation role `member` is now `developer`. Existing
+members and invitations are migrated; scripts that send `role: "member"` must send `developer`.
+
+| Role | What it may do |
+|---|---|
+| owner | Everything, including the organisation itself |
+| admin | Everything in the project: members, keys, domains, settings, elevated access |
+| developer | Read and write content, view the schema, push, deploy, use the SQL editor, inspect realtime, read logs |
+| editor | Read and write content |
+| billing | Billing and usage only (Cloud) |
+| viewer | Read content and the schema, and read logs; changes nothing |
+
+- **Organisation roles apply to every project** in the organisation. A per-project role can only
+  narrow what the organisation role gives, never widen it, and an owner is never narrowed.
+- **Acting as yourself or elevated.** Owners and admins act elevated (as the service role) by
+  default, visibly and audited, and can switch to act as themselves from the notice Studio shows;
+  every other role always acts as itself, so the project's row and field rules apply to what it
+  sees and changes.
+- **Linking your Cloud login to a project user.** On Cloud, a member acting as themselves acts as
+  their linked project user. Studio asks a member with no link to sign in once with their login
+  for the project; that sign-in is the proof, and the link is stored. A member with no link is
+  refused project data rather than shown everything.
+- **The SQL editor and Database write controls are for owners, admins and developers.** The SQL
+  editor runs as the project's owning role, so row level security does not apply to it. Studio
+  hides the Database screens' create, drop and policy controls from other roles; viewers still read
+  the Database views, policies and migration history through a read-only metadata catalogue.
+- **Sessions** in the Users view are listed and revoked through the auth admin API.
+
+## The SQL editor's connection
+
+This section is being finalised; it will describe how the SQL editor connects to the database.
+
+## Allowed origins (CORS)
+
+Outside dev mode, the gateway now decides CORS for every service behind it. 0.6.0 allowed every
+origin on a production server unless you set a list.
+
+- **Allowed by default:** the origin of `SITE_URL`, plus the origins in `api.corsOrigins` in
+  `supatype.config.ts` and in `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env`.
+- **Studio's Settings > CORS page** lets owners and admins save a list, kept in the database, which
+  replaces the default until it is reset. The site URL stays allowed whatever is saved.
+- **`*`** allows every origin, and only when you write it. Any other origin's preflight is refused
+  with `403`.
+- `supatype dev` is unchanged.
+- On Supatype Cloud, `api.corsOrigins` is not used: set the list on Studio's Settings > CORS page.
+
+If your app is served from an origin other than `SITE_URL`, add it to `api.corsOrigins` before you
+upgrade a production server.
+
+## Foreign keys and recreated columns
+
+- **`onUpdate` on a relation is honoured.** It used to be ignored, and every foreign key was
+  `ON UPDATE CASCADE`. Left out, it is still `CASCADE`, so existing projects see no change.
+- **A column the push drops and adds again keeps its dependents.** Every index, constraint, trigger,
+  policy and view on it is dropped first and made again from its own definition, enabled state
+  included. A view or object in another schema that is not Supatype's makes the push refuse before
+  any change, naming each one.
+
+## Auth server
+
+- **Email templates saved from Studio are kept in the database** and survive restarts and replicas;
+  a saved template wins over `SUPATYPE_MAILER_TEMPLATES_*`. Studio shows when a saved edit is in
+  force and can reset it to the configured or built-in template.
+- **GraphQL runs as the caller,** so row level security applies to it on every host.
+- **Custom OAuth providers' callbacks live under `/auth/v1`**, like the built-in providers'. If you registered a custom provider's callback as `<API URL>/callback`, register
+  `<API URL>/auth/v1/callback` with the provider instead.
+- Studio's auth Configuration page is read-only and shows where each setting comes from.
+
+## CLI
+
+- **`--project-name` or `SUPATYPE_PROJECT_NAME`** renames the project for one run (its compose
+  project, database and state directory follow) without changing any file.
+- **`supatype self-host compose restart <service>`** recreates one service with the current config
+  and `.env`. The generated compose file names its folders by absolute path and its compose
+  project by name, so a hand-run `docker compose -f .supatype/self-host/docker-compose.yml` reaches
+  the same stack.
+- **The compose file follows the stack's mode:** dev while a `supatype dev` session holds the
+  project, otherwise the mode the running server is in, otherwise standalone. A push to a stack
+  started with `self-host compose up` no longer recreates it in dev mode. A dev lock left by a
+  killed `supatype dev` is ignored.
+- **`supatype dev` stops when the process that started it exits**, as it does on Ctrl+C, so a killed
+  script or a cancelled CI job leaves nothing running. To leave a stack running with nothing
+  attached, use `supatype self-host compose up -d`.
+- **The engine's licence** is saved beside a downloaded engine, and the CLI prints once:
+  `[supatype] Supatype engine is licensed under BUSL-1.1; see <path>`.
+
+## Supatype Cloud
+
+- **Realtime is on for every plan,** Free included, each at its plan's connection limit.
+- **Plan limits come from one source.** The pricing page, Studio and the control plane read the same
+  definitions, and limits are enforced by the organisation's plan, counted across the organisation.
+- **Three environments** (production, staging and preview) on every paid plan.
+- **Resetting an environment's database password** now changes it everywhere it is held and ends
+  the old sessions.
 
 ## Configuration checks
 
