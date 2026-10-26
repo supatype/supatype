@@ -43,7 +43,7 @@ export function Badge({
   className?: string
 } & Omit<React.HTMLAttributes<HTMLSpanElement>, "className">): React.ReactElement {
   return (
-    <span className={cn("inline-block px-1.5 py-0.5 rounded-full text-[11px] font-medium", badgeColors[variant], className)} {...props}>
+    <span className={cn("inline-block whitespace-nowrap px-1.5 py-0.5 rounded-full text-[11px] font-medium", badgeColors[variant], className)} {...props}>
       {children}
     </span>
   )
@@ -297,7 +297,7 @@ export function Th({
   children?: React.ReactNode
 } & Omit<React.ThHTMLAttributes<HTMLTableCellElement>, "className">): React.ReactElement {
   return (
-    <th className={cn("text-left px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider", className)} {...props}>
+    <th className={cn("text-left px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap", className)} {...props}>
       {children}
     </th>
   )
