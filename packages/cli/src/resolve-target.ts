@@ -457,28 +457,39 @@ export async function targetListMigrations(
   )
 }
 
+/**
+ * `doctor` on a target. With `rebaseline`, the drift it finds is first recorded as the new baseline
+ * (no object changes) and listed as rebaselined; access drift (policies, grants, labels, RLS) only
+ * with `acceptAccessDrift` as well (`accept_access_drift`; `overwrite_drift` is push's alone), else
+ * listed as `rebaselineRefused`.
+ */
 export async function targetSchemaDoctor(
   target: DeployTarget,
   ast: unknown,
-  opts?: { schema?: string },
+  opts?: { schema?: string; rebaseline?: boolean; acceptAccessDrift?: boolean },
 ): Promise<unknown> {
-  await requireTargetFeatures(target, identityColumnsNeed(ast))
-  if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
+  const rebaseline = opts?.rebaseline === true
+  const acceptAccessDrift = rebaseline && opts?.acceptAccessDrift === true
+  const body = {
+    ast,
+    schema: opts?.schema ?? "public",
+    ...(rebaseline && { rebaseline: true }),
+    ...(acceptAccessDrift && { accept_access_drift: true }),
+  }
+  await requireTargetFeatures(target, [
+    ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
+    ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
+    ...identityColumnsNeed(ast),
+  ])
+  if (runsEngineHere(target)) {
     await ensureEngine()
-    return engineRequest("/doctor", {
-      ast,
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-    })
+    return engineRequest("/doctor", { ...body, database_url: target.databaseUrl! })
   }
 
   return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
-    apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), {
-      ast,
-      schema: opts?.schema ?? "public",
-    }),
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), body),
   )
 }
 

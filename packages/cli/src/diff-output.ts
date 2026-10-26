@@ -171,6 +171,11 @@ export function printDiffOperations(diff: Pick<DiffResult, "operations" | "recon
 /** The kinds that decide who may read or write: drift on them needs a person's consent. */
 const ACCESS_KINDS = new Set(["policy", "table_grant", "security_label", "rls_attributes"])
 
+/** Whether objects of this kind decide who may read or write (the engine's `security_relevant`). */
+export function isAccessKind(kind: string): boolean {
+  return ACCESS_KINDS.has(kind)
+}
+
 /**
  * Plan 3.5: the policies, grants, labels and RLS attributes this push would put back because
  * they were changed or removed outside Supatype. A pipeline must not revert a deliberate hand

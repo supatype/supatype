@@ -119,3 +119,15 @@ describe("hasStrictIssues", () => {
     expect(hasStrictIssues({ ...empty, unmanagedDrift: [item("a")], released: [item("b")] })).toBe(false)
   })
 })
+
+describe("rebaselined objects", () => {
+  it("print in their own section, counted in the summary, and never fail --strict", () => {
+    const captured = lines()
+    const report = { ...empty, rebaselined: [item("a")] }
+    printReport(report)
+    const text = captured.join("\n")
+    expect(text).toContain("Rebaselined (recorded as they are now) (1)")
+    expect(text).toContain("Summary: 1 rebaselined")
+    expect(hasStrictIssues(report)).toBe(false)
+  })
+})

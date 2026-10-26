@@ -177,3 +177,30 @@ describe("endpointToArgs() for /adopt", () => {
     expect(endpointToArgs("/adopt", { ...body, yes: true, keys: ["table:w"] }, "req.json")).not.toContain("--adopt-none")
   })
 })
+
+describe("endpointToArgs() for /doctor", () => {
+  const body = { ast: {}, database_url: "postgres://x", schema: "public" }
+
+  it("passes --rebaseline only when asked", () => {
+    expect(endpointToArgs("/doctor", body, "req.json")).not.toContain("--rebaseline")
+    expect(endpointToArgs("/doctor", { ...body, rebaseline: true }, "req.json")).toContain("--rebaseline")
+  })
+})
+
+describe("endpointToArgs() for /doctor --accept-access-drift", () => {
+  const body = { ast: {}, database_url: "postgres://x", schema: "public" }
+
+  it("passes --accept-access-drift only alongside --rebaseline", () => {
+    expect(endpointToArgs("/doctor", { ...body, accept_access_drift: true }, "req.json")).not.toContain(
+      "--accept-access-drift",
+    )
+    expect(
+      endpointToArgs("/doctor", { ...body, rebaseline: true, accept_access_drift: true }, "req.json").slice(-2),
+    ).toEqual(["--rebaseline", "--accept-access-drift"])
+  })
+
+  it("never sends --overwrite-drift to doctor, which the engine now rejects there", () => {
+    const args = endpointToArgs("/doctor", { ...body, rebaseline: true, overwrite_drift: true }, "req.json")
+    expect(args).not.toContain("--overwrite-drift")
+  })
+})
