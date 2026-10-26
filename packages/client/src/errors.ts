@@ -122,20 +122,37 @@ export class RateLimitError extends SupatypeError {
 
 // ── Common error codes ────────────────────────────────────────────
 
+/**
+ * The `code` an auth error carries, as the auth server sends it in `error_code`.
+ *
+ * These were `AUTH_INVALID_CREDENTIALS` and the like, which the server never sends, so comparing
+ * an error's code with them never matched. The names are unchanged; the values are the server's.
+ */
 export const AuthErrorCodes = {
-  INVALID_CREDENTIALS: "AUTH_INVALID_CREDENTIALS",
-  USER_NOT_FOUND: "AUTH_USER_NOT_FOUND",
-  EMAIL_NOT_CONFIRMED: "AUTH_EMAIL_NOT_CONFIRMED",
-  PHONE_NOT_CONFIRMED: "AUTH_PHONE_NOT_CONFIRMED",
-  SESSION_EXPIRED: "AUTH_SESSION_EXPIRED",
-  INVALID_TOKEN: "AUTH_INVALID_TOKEN",
-  MFA_REQUIRED: "AUTH_MFA_REQUIRED",
-  MFA_CHALLENGE_EXPIRED: "AUTH_MFA_CHALLENGE_EXPIRED",
-  MFA_VERIFICATION_FAILED: "AUTH_MFA_VERIFICATION_FAILED",
-  WEAK_PASSWORD: "AUTH_WEAK_PASSWORD",
-  USER_ALREADY_EXISTS: "AUTH_USER_ALREADY_EXISTS",
-  OAUTH_CALLBACK_ERROR: "AUTH_OAUTH_CALLBACK_ERROR",
-  MAGIC_LINK_EXPIRED: "AUTH_MAGIC_LINK_EXPIRED",
+  /** Wrong email or password */
+  INVALID_CREDENTIALS: "invalid_credentials",
+  USER_NOT_FOUND: "user_not_found",
+  EMAIL_NOT_CONFIRMED: "email_not_confirmed",
+  PHONE_NOT_CONFIRMED: "phone_not_confirmed",
+  SESSION_EXPIRED: "session_expired",
+  /** The access token could not be verified */
+  INVALID_TOKEN: "bad_jwt",
+  /** The request needs a session at a higher assurance level: complete an MFA challenge first */
+  MFA_REQUIRED: "insufficient_aal",
+  MFA_CHALLENGE_EXPIRED: "mfa_challenge_expired",
+  MFA_VERIFICATION_FAILED: "mfa_verification_failed",
+  WEAK_PASSWORD: "weak_password",
+  /** Sign-up with an email that is already registered sends EMAIL_EXISTS */
+  USER_ALREADY_EXISTS: "user_already_exists",
+  EMAIL_EXISTS: "email_exists",
+  OAUTH_CALLBACK_ERROR: "bad_oauth_callback",
+  /** An emailed link or one-time code that has expired or was already used */
+  MAGIC_LINK_EXPIRED: "otp_expired",
+  OTP_EXPIRED: "otp_expired",
+  SIGNUP_DISABLED: "signup_disabled",
+  SAME_PASSWORD: "same_password",
+  OVER_EMAIL_SEND_RATE_LIMIT: "over_email_send_rate_limit",
+  OVER_REQUEST_RATE_LIMIT: "over_request_rate_limit",
 } as const
 
 export const StorageErrorCodes = {
