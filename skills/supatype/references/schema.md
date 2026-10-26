@@ -39,6 +39,8 @@ export type Profile = Model<{
 
 Define `access` per operation: `read`, `create`, `update`, `delete`.
 
+Owner rules are checked when the schema is read. The owner must be `"id"`, a relation whose key is on this model, or a `UUID` / `SupatypeAuthUserId` field. Owning through a relation is followed one relation deep, and the related model must be a user model (keyed by `SupatypeAuthUserId`) or have an Owner rule of its own; anything else is an error. A plain `UUID` owner works but warns: declare it `SupatypeAuthUserId` if it holds an auth user id.
+
 ## Relations
 
 ```typescript

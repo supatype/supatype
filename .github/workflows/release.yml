@@ -353,6 +353,10 @@ jobs:
         id: meta
         with:
           images: supatype/control-plane
+          # Explicit, so the repository-level Apache-2.0 the action detects cannot hide the engine binary
+          # (BUSL-1.1) that this image also carries.
+          labels: |
+            org.opencontainers.image.licenses=Apache-2.0 AND BUSL-1.1
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

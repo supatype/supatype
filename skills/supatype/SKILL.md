@@ -32,14 +32,15 @@ Node.js 18+, Docker (default provider), npm/pnpm/yarn.
 ```bash
 npx @supatype/cli init <project-name> --mode standalone  # self-host target
 cd <project-name>
-npm install
-supatype keys                              # → ANON_KEY + SERVICE_ROLE_KEY in .env
-supatype dev                               # terminal 1: Docker Compose, Kong :18473; applies the schema, generates types, watches both
+npm install                                # only if init skipped the install
+supatype keys                              # only if init skipped the keys: ANON_KEY + SERVICE_ROLE_KEY in .env
+supatype dev                               # terminal 1: Docker Compose (Kong :18473); applies the schema and watches it
 npm run vite                               # terminal 2: if app.vite_dev_url is set
 ```
 
-`supatype dev` applies the schema to the local stack, so there is no `push` step locally. `push` is
-for another database: `supatype push --env <name>`, or a linked target.
+`supatype dev` keeps running. It pushes the schema when it starts and on every save, and
+regenerates the typed client each time; there is no separate `push` step locally. `push` is for
+another database: `supatype push --env <name>`, or a linked target.
 
 Install matching versions of CLI, client, and types from npm:
 
@@ -63,9 +64,12 @@ Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
 ## Daily workflow
 
 1. Edit `schema/index.ts` (source of truth: type-first, not DB introspection)
-2. With `supatype dev` running, the change is applied and the types regenerated on save
+2. With `supatype dev` running, saving applies the change and regenerates types
 3. `supatype diff --env <name>` then `supatype push --env <name>`: apply it to another database
-4. Use generated types with `@supatype/client` in app code
+4. Renaming a field or model: record it with `supatype rename <table>.<old> <table>.<new>` (or
+   `supatype rename <old_table> <new_table>`) and commit `supatype/renames.json`. Renames are
+   never guessed; an unrecorded rename is a drop plus an add, which loses the column's data
+5. Use generated types with `@supatype/client` in app code
 
 ## Core facts
 
@@ -101,7 +105,7 @@ Add `@supatype/client` when wiring a frontend. `supatype dev` applies schema cha
 |-------|-----|
 | Docker not running | Start Docker before `supatype dev` |
 | Port in use | `supatype dev` prompts for another port, or set a unique `SUPATYPE_KONG_PORT` per project in `.env` |
-| Wrong project / holding page | Another stack may own your Kong port: use the URL from `supatype dev` output |
+| Wrong project / holding page | Another stack may own your Kong port; use the URL from `supatype dev` output |
 | Docker still running after dev | Run `supatype self-host compose down`; check Docker Desktop for orphaned `supatype-*` stacks |
 | Renamed project, old containers | Next `supatype dev` offers to stop the old stack; or `docker compose -p supatype-<old-name> down` |
 | Missing JWT keys | `supatype keys` → update `.env` |

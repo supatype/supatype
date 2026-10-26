@@ -22,17 +22,20 @@ User guides: [docs](https://www.supatype.com/docs/) · [local dev](https://www.s
 npm install -g @supatype/cli
 mkdir my-app && cd my-app
 supatype init
-supatype keys
 supatype dev
 ```
 
-Then edit your schema and apply it:
+`supatype dev` applies your schema, then watches it: save a change to `schema/index.ts` and it
+migrates the database and regenerates the typed client. It keeps running, so use a second terminal
+for everything else:
 
 ```bash
-supatype diff       # preview the migration
-supatype push       # apply migrations, RLS and generated types
+supatype diff       # preview what a push would change
+supatype push       # apply the schema to another database (staging, production, a self-hosted server)
 supatype generate   # regenerate types and clients only
 ```
+
+Upgrading from 0.6.0? Read [UPGRADING.md](UPGRADING.md) first.
 
 ---
 
@@ -40,7 +43,7 @@ supatype generate   # regenerate types and clients only
 
 | Mode | Command | Postgres | Everything else |
 |------|---------|----------|-----------------|
-| **Dev** | `supatype dev` | Native (default) or **Docker for Postgres only** (`database.provider: "docker"`) | Native **engine** + **supatype-server** binaries |
+| **Dev** | `supatype dev` | **Docker** (`provider: "docker"`, what `init` writes) or native (`provider: "native"`) | **Docker Compose** with the self-host images, or native **engine** + **supatype-server** binaries |
 | **Self-host** | `supatype self-host compose up` | Docker (`supatype/postgres:17-latest`) | **Docker Compose**, images default to **`:latest`** on Docker Hub |
 | **Cloud** | `supatype login`, `supatype link`, `supatype deploy` | Managed | Supatype Cloud (early access) |
 
@@ -52,7 +55,7 @@ Every package consumes the same generated types; nothing in your app introspects
 
 | Package | What it is |
 |---------|------------|
-| [`@supatype/cli`](packages/cli) | The `supatype` CLI: init, dev, diff, push, generate, introspect, migrate, self-host, functions |
+| [`@supatype/cli`](packages/cli) | The `supatype` CLI: init, dev, diff, push, generate, pull, rename, migrate, self-host, functions |
 | [`@supatype/types`](packages/types) | Type primitives for schemas: `Model<…>`, field types, relations, access rules, `Bucket<…>` |
 | [`@supatype/client`](packages/client) | Typed client: REST, auth, storage, realtime |
 | [`@supatype/react`](packages/react) | React hooks: `useQuery`, `useMutation`, `useAuth`, `SupatypeProvider` |
@@ -113,6 +116,13 @@ supatype cache list
 Licensing is per package, and each package directory has its own `LICENSE` file:
 
 - **MIT:** the libraries you install in your app: `client`, `types`, the framework bindings (`react`, `react-native`, `vue`, `svelte`, `solid`), `ssr`, the auth UI packages, the plugin packages, `ui` and `common`.
-- **Apache 2.0:** the CLI and services (`cli`, `studio`, `storage`, `realtime`) and the rest of this repository ([LICENSE](LICENSE)).
+- **Apache 2.0:** the CLI and services (`cli`, `studio`, `storage`, `realtime`, `functions-worker`, `self-host-control`) and the rest of this repository ([LICENSE](LICENSE)).
 
-The schema engine binary the CLI downloads is not in this repository and is distributed under its own proprietary license. See [NOTICE](NOTICE).
+The schema engine the CLI downloads is not in this repository. It is source-available under the
+Business Source License 1.1: you can run it in production for your own applications, self-hosted
+or for clients, but not offer it to others as a hosted service or sell a product whose primary
+value is the engine, and each version becomes Apache 2.0 four years after its release.
+`supatype-engine licence` prints the terms. See the [licensing page](https://www.supatype.com/licensing.html) and [NOTICE](NOTICE).
+
+Contributions need a signed [Contributor License Agreement](CLA.md); see
+[CONTRIBUTING.md](CONTRIBUTING.md).
