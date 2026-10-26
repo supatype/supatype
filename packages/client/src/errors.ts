@@ -147,31 +147,39 @@ export const StorageErrorCodes = {
   PRESIGNED_URL_EXPIRED: "STORAGE_PRESIGNED_URL_EXPIRED",
 } as const
 
+/**
+ * The `code` a REST error carries, as PostgREST 14 sends it.
+ *
+ * PostgREST's own errors are `PGRST` codes. A database error is passed through under its Postgres
+ * SQLSTATE, with no prefix: a unique violation is `23505`, never `PGRST23505`.
+ */
 export const PostgrestErrorCodes = {
-  /** JWT expired or missing */
-  JWT_EXPIRED: "PGRST301",
-  /** No permission: RLS policy denied access */
-  PERMISSION_DENIED: "PGRST302",
-  /** Requested resource not found */
+  /** The token could not be decoded or verified: a bad signature, a malformed or empty token */
+  JWT_INVALID: "PGRST301",
+  /** The token's claims were rejected, an expired token among them (`PGRST301` before PostgREST 13) */
+  JWT_EXPIRED: "PGRST303",
+  /** Row-level security or a missing grant refused the operation */
+  PERMISSION_DENIED: "42501",
+  /** `.single()` found no row */
   NOT_FOUND: "PGRST116",
-  /** Multiple rows returned when single expected */
+  /** `.single()` found more than one row */
   MULTIPLE_ROWS: "PGRST116",
-  /** Schema cache miss: PostgREST needs reload */
+  /** The request named a column the schema cache does not have */
   SCHEMA_CACHE_MISS: "PGRST204",
   /** Foreign key violation */
-  FK_VIOLATION: "PGRST23503",
+  FK_VIOLATION: "23503",
   /** Unique constraint violation */
-  UNIQUE_VIOLATION: "PGRST23505",
+  UNIQUE_VIOLATION: "23505",
   /** Not-null constraint violation */
-  NOT_NULL_VIOLATION: "PGRST23502",
+  NOT_NULL_VIOLATION: "23502",
   /** Check constraint violation */
-  CHECK_VIOLATION: "PGRST23514",
+  CHECK_VIOLATION: "23514",
   /** Invalid input syntax */
-  INVALID_INPUT: "PGRST22P02",
-  /** Undefined table */
-  UNDEFINED_TABLE: "PGRST42P01",
+  INVALID_INPUT: "22P02",
+  /** The table is not in the schema cache (the SQLSTATE `42P01` before PostgREST 13) */
+  UNDEFINED_TABLE: "PGRST205",
   /** Undefined column */
-  UNDEFINED_COLUMN: "PGRST42703",
+  UNDEFINED_COLUMN: "42703",
 } as const
 
 export const RealtimeErrorCodes = {

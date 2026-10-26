@@ -14,7 +14,8 @@ import { gzipSync } from "node:zlib"
 import { loadConfig } from "../config.js"
 import { connectionString } from "../project-config.js"
 import { splitPassword } from "../host-database.js"
-import { fillMissingKeys } from "./keys.js"
+import { fillMissingKeys, resolveSecret } from "./keys.js"
+import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import { resolveBinary } from "../binary-cache.js"
 import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
@@ -55,6 +56,9 @@ export function registerSelfHost(program: Command): void {
       const config = loadConfig(cwd)
       const project = composeProjectName(config.project.name)
       const args = opts.detach ? ["up", "-d"] : ["up"]
+      // A missing secret is compose's to report; a short one only PostgREST would notice.
+      const secret = resolveSecret(cwd)
+      if (secret !== undefined) requireUsableJwtSecret(secret)
       // A .env copied from the template arrives with both keys blank, and the
       // server will not serve without a service role key outside dev mode.
       // Only blanks are filled: reissuing a key an operator is already using
