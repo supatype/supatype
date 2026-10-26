@@ -2,6 +2,10 @@ FROM node:22-slim AS builder
 WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY packages/realtime/ packages/realtime/
+# The tests' fixtures import @supatype/types, a dev dependency. Nothing from it ships, but pnpm
+# resolves every workspace dependency of the package it installs and deploys, so its manifest has to
+# be present.
+COPY packages/types/package.json packages/types/
 RUN corepack enable pnpm && pnpm install --frozen-lockfile --filter @supatype/realtime
 RUN pnpm --filter @supatype/realtime build
 
@@ -10,7 +14,7 @@ RUN pnpm --filter @supatype/realtime build
 # alone, which re-resolved every dependency from the registry: the image shipped whatever npm
 # picked on the day it was built rather than the versions the lockfile pins and the tests ran
 # against. `--legacy` is what pnpm 10 calls a deploy without injected workspace dependencies,
-# which is this package: it depends on nothing in the workspace.
+# which is this package: nothing it needs at run time comes from the workspace.
 RUN pnpm --filter @supatype/realtime deploy --legacy --prod /out
 
 FROM node:22-slim
