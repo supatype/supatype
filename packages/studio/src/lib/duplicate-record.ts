@@ -4,6 +4,7 @@ import { isJsonObject, isRecordOf, isShape, isString, type Guard } from "./json.
 import { likeLiteral } from "./postgrest-search.js"
 import { createRecord, duplicateValues, type RecordError } from "./publishing.js"
 import { serializeRecordForApi } from "./recordValues.js"
+import { SQLSTATE, unquoteColumn } from "./database-error.js"
 
 /**
  * Duplicate: a new record from an existing one's values, valid under the table's unique rules.
@@ -39,17 +40,9 @@ export type DuplicateOutcome =
 /** Retries after a slug collided; each one moves past every value seen taken so far. */
 const MAX_ATTEMPTS = 5
 
-const UNIQUE_VIOLATION = "23505"
-
-/** A Postgres column name in a detail line: bare, or double-quoted with `""` for a quote. */
-function unquoteColumn(raw: string): string {
-  const name = raw.trim()
-  return name.startsWith('"') && name.endsWith('"') ? name.slice(1, -1).replace(/""/g, '"') : name
-}
-
 /** The columns a unique violation names (`Key (a, b)=(x, y) already exists.`), or none. */
 export function uniqueViolationColumns(error: RecordError): string[] {
-  if (error.code !== UNIQUE_VIOLATION || error.details === undefined) return []
+  if (error.code !== SQLSTATE.uniqueViolation || error.details === undefined) return []
   const match = /^Key \((.+?)\)=\(/.exec(error.details)
   return match?.[1] === undefined ? [] : match[1].split(",").map(unquoteColumn)
 }
