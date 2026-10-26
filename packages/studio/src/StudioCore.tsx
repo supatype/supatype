@@ -441,9 +441,9 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
                 <Route path="migrations"  element={<MigrationHistory />} />
                 <Route path="objects"     element={<SchemaObjects />} />
                 <Route path="seeds"       element={<SeedHistory />} />
-                <Route path="wrappers"    element={<ComingSoon title="Database Wrappers" description="Connect to external data sources (Postgres FDW, S3, BigQuery, Stripe). Coming in Phase 26." />} />
-                <Route path="replication" element={<ComingSoon title="Read Replicas" description="Cross-region read replicas, publication management, replication slot monitoring. Coming in Phase 27." />} />
-                <Route path="warehouse"   element={<ComingSoon title="Analytical Warehouse" description="Columnar OLAP engine for analytics queries without impacting OLTP. Coming in Phase 28." />} />
+                <Route path="wrappers"    element={<ComingSoon title="Database Wrappers" description="Connect to external data sources (Postgres FDW, S3, BigQuery, Stripe). Coming soon." />} />
+                <Route path="replication" element={<ComingSoon title="Read Replicas" description="Cross-region read replicas, publication management, replication slot monitoring. Coming soon." />} />
+                <Route path="warehouse"   element={<ComingSoon title="Analytical Warehouse" description="Columnar OLAP engine for analytics queries without impacting OLTP. Coming soon." />} />
                 <Route path="backups"     element={<ComingSoon title="Backups" description="Point-in-time recovery and scheduled database backups." />} />
               </Route>
               <Route path="data" element={<DataExplorer />} />
@@ -462,26 +462,26 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="authentication/providers"       element={<ProvidersView />} />
               <Route path="authentication/configuration"   element={<ConfigurationView />} />
               <Route path="authentication/email-templates" element={<EmailTemplatesView />} />
-              <Route path="authentication/hooks"    element={<ComingSoon title="Auth Hooks" description="Configure pre/post hooks for auth events. Coming in Phase 11." />} />
-              <Route path="authentication/sso"      element={<ComingSoon title="SSO & OAuth Clients" description="SAML 2.0, OIDC, and OAuth2 client management. Coming in Phase 11." />} />
-              <Route path="authentication/security" element={<ComingSoon title="Attack Protection" description="CAPTCHA, IP blocking, leaked password detection, rate limits. Coming in Phase 14." />} />
+              <Route path="authentication/hooks"    element={<ComingSoon title="Auth Hooks" description="Configure pre/post hooks for auth events. Coming soon." />} />
+              <Route path="authentication/sso"      element={<ComingSoon title="SSO & OAuth Clients" description="SAML 2.0, OIDC, and OAuth2 client management. Coming soon." />} />
+              <Route path="authentication/security" element={<ComingSoon title="Attack Protection" description="CAPTCHA, IP blocking, leaked password detection, rate limits. Coming soon." />} />
 
               {/* Observability (Logs + Metrics + Advisors) */}
               <Route path="observability">
                 <Route index element={<Navigate to="logs" replace />} />
                 <Route path="logs" element={<Navigate to="api" replace />} />
                 <Route path="logs/api"       element={<LogsViewer />} />
-                <Route path="logs/auth"      element={<ComingSoon title="Auth Logs" description="Auth event logging coming in Phase 30." />} />
-                <Route path="logs/storage"   element={<ComingSoon title="Storage Logs" description="Storage access logging coming in Phase 30." />} />
+                <Route path="logs/auth"      element={<ComingSoon title="Auth Logs" description="Auth event logging is coming soon." />} />
+                <Route path="logs/storage"   element={<ComingSoon title="Storage Logs" description="Storage access logging is coming soon." />} />
                 {/* Shipped: the tail lives on the function itself, beside invoke and env, because a
                     log is about one function rather than about the project. This route existed
                     saying the feature was "coming in Phase 30", which is now simply false, so it
                     sends people to the thing that works. */}
                 <Route path="logs/functions" element={<Navigate to="/edge-functions" replace />} />
-                <Route path="logs/realtime"  element={<ComingSoon title="Realtime Logs" description="Realtime connection logs coming in Phase 30." />} />
-                <Route path="logs/postgres"  element={<ComingSoon title="Postgres Logs" description="Database server logs coming in Phase 30." />} />
-                <Route path="metrics"   element={<ComingSoon title="Metrics" description="Metrics, traces, and alerts for your database and API infrastructure. Coming in Phase 30." />} />
-                <Route path="advisors"  element={<ComingSoon title="Advisors" description="Performance, security, and schema recommendations powered by your live database. Coming in Phase 29." />} />
+                <Route path="logs/realtime"  element={<ComingSoon title="Realtime Logs" description="Realtime connection logs are coming soon." />} />
+                <Route path="logs/postgres"  element={<ComingSoon title="Postgres Logs" description="Database server logs are coming soon." />} />
+                <Route path="metrics"   element={<ComingSoon title="Metrics" description="Metrics, traces, and alerts for your database and API infrastructure. Coming soon." />} />
+                <Route path="advisors"  element={<ComingSoon title="Advisors" description="Performance, security, and schema recommendations powered by your live database. Coming soon." />} />
               </Route>
 
               {/* Legacy log/advisor/observability redirects */}
@@ -508,25 +508,25 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="realtime/metrics"  element={<ComingSoon title="Realtime Metrics" description="Connection, throughput and latency charts are coming in a later release." />} />
               <Route path="realtime/:tab"     element={<RealtimeInspector demoMode={demoMode ?? false} />} />
               <Route path="plugins"        element={<PluginsMarketplace />} />
-              <Route path="webhooks"       element={<ComingSoon title="Webhooks" description="Schema-driven webhooks that fire on record create/update/delete. Configure endpoints, retry policies, and delivery history. Coming in Phase 17." />} />
-              <Route path="jobs"           element={<ComingSoon title="Scheduled Jobs" description="Cron-scheduled SQL jobs and edge function invocations. View execution history and trigger manually. Coming in Phase 18." />} />
+              <Route path="webhooks"       element={<ComingSoon title="Webhooks" description="Schema-driven webhooks that fire on record create/update/delete. Configure endpoints, retry policies, and delivery history. Coming soon." />} />
+              <Route path="jobs"           element={<ComingSoon title="Scheduled Jobs" description="Cron-scheduled SQL jobs and edge function invocations. View execution history and trigger manually. Coming soon." />} />
 
               {/* Intelligence (AI & Agents) */}
               <Route path="ai" element={<Navigate to="/ai/usage" replace />} />
-              <Route path="ai/usage"   element={<ComingSoon title="AI Usage" description="Track AI call volume, feature breakdown, and spending caps across schema generation, migration copilot, content assist, and RAG. Coming in Phase 15." />} />
-              <Route path="ai/vectors" element={<ComingSoon title="Vector Management" description="Embedding browser, similarity search tester, index management, and vector space visualisation. Coming in Phase 15." />} />
-              <Route path="ai/rag"     element={<ComingSoon title="RAG Pipeline" description="Schema-declared retrieval-augmented generation. Embed content from any model's fields, search by semantic meaning, and ground LLM answers in your real data, with RLS enforced automatically. Coming in Phase 15." />} />
+              <Route path="ai/usage"   element={<ComingSoon title="AI Usage" description="Track AI call volume, feature breakdown, and spending caps across schema generation, migration copilot, content assist, and RAG. Coming soon." />} />
+              <Route path="ai/vectors" element={<ComingSoon title="Vector Management" description="Embedding browser, similarity search tester, index management, and vector space visualisation. Coming soon." />} />
+              <Route path="ai/rag"     element={<ComingSoon title="RAG Pipeline" description="Schema-declared retrieval-augmented generation. Embed content from any model's fields, search by semantic meaning, and ground LLM answers in your real data, with RLS enforced automatically. Coming soon." />} />
               <Route path="ai/agents" element={<Navigate to="/ai/agents/list" replace />} />
-              <Route path="ai/agents/list"       element={<ComingSoon title="Agents" description="Declare LLM agents in your schema with tools, access rules, and triggers. Platform agents run on schedules or database events. User-facing agents are callable via the SDK. Coming in Phase 18.5." />} />
-              <Route path="ai/agents/runs"       element={<ComingSoon title="Agent Run History" description="Step-by-step tool call history for every agent run, trigger source, cost estimate, injection detection alerts, and full conversation archive. Coming in Phase 18.5." />} />
-              <Route path="ai/agents/playground" element={<ComingSoon title="Agent Playground" description="Run any declared agent from Studio with a custom input. Streams tool calls and the final answer in real time. Coming in Phase 18.5." />} />
+              <Route path="ai/agents/list"       element={<ComingSoon title="Agents" description="Declare LLM agents in your schema with tools, access rules, and triggers. Platform agents run on schedules or database events. User-facing agents are callable via the SDK. Coming soon." />} />
+              <Route path="ai/agents/runs"       element={<ComingSoon title="Agent Run History" description="Step-by-step tool call history for every agent run, trigger source, cost estimate, injection detection alerts, and full conversation archive. Coming soon." />} />
+              <Route path="ai/agents/playground" element={<ComingSoon title="Agent Playground" description="Run any declared agent from Studio with a custom input. Streams tool calls and the final answer in real time. Coming soon." />} />
 
               {/* Commerce, Analytics, Branching, Integrations */}
-              <Route path="commerce"     element={<ComingSoon title="Commerce" description="Order management, subscription billing, Stripe Connect payouts, and revenue analytics. Coming in Phase 16." />} />
-              <Route path="analytics"    element={<ComingSoon title="Analytics" description="Auto-generated dashboards from your schema, KPI cards, time-series charts, and CSV export. Coming in Phase 21." />} />
-              <Route path="branching"    element={<ComingSoon title="Branching & Environments" description="Schema-aware preview environments, branch diff view, and one-click merge. Coming in Phase 22." />} />
-              <Route path="integrations" element={<ComingSoon title="Integrations" description="Connect GitHub for CI/CD deployments and Vercel for preview environment sync. Coming in Phase 25." />} />
-              <Route path="audit"        element={<ComingSoon title="Audit Log" description="Immutable log of all data changes with before/after snapshots and user attribution. Coming in Phase 13." />} />
+              <Route path="commerce"     element={<ComingSoon title="Commerce" description="Order management, subscription billing, Stripe Connect payouts, and revenue analytics. Coming soon." />} />
+              <Route path="analytics"    element={<ComingSoon title="Analytics" description="Auto-generated dashboards from your schema, KPI cards, time-series charts, and CSV export. Coming soon." />} />
+              <Route path="branching"    element={<ComingSoon title="Branching & Environments" description="Schema-aware preview environments, branch diff view, and one-click merge. Coming soon." />} />
+              <Route path="integrations" element={<ComingSoon title="Integrations" description="Connect GitHub for CI/CD deployments and Vercel for preview environment sync. Coming soon." />} />
+              <Route path="audit"        element={<ComingSoon title="Audit Log" description="Immutable log of all data changes with before/after snapshots and user attribution. Coming soon." />} />
 
               {/* Legacy observability/advisor redirects */}
               <Route path="advisors"      element={<Navigate to="/observability/advisors"  replace />} />

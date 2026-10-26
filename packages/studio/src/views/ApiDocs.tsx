@@ -3,6 +3,8 @@ import { useStudioClient } from "../StudioCore.js"
 import { AdminConfigContext } from "../hooks/useAdminConfig.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { cn } from "../lib/utils.js"
+import { signedInToken } from "../lib/studio-auth-headers.js"
+import { BearerTokenField } from "../components/BearerTokenField.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import type { ModelConfig, FieldConfig, WidgetType } from "../config.js"
 
@@ -322,6 +324,7 @@ function TryItPanel({
   baseUrl: string
   onClose: () => void
 }): React.ReactElement {
+  const signedIn = signedInToken(useStudioClient())
   const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
     for (const p of endpoint.params) {
@@ -329,7 +332,7 @@ function TryItPanel({
     }
     return init
   })
-  const [authToken, setAuthToken] = useState("")
+  const [authToken, setAuthToken] = useState(signedIn)
   const [requestBody, setRequestBody] = useState(endpoint.request_body_example ?? "")
   const [response, setResponse] = useState<TryItResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -412,16 +415,7 @@ function TryItPanel({
         <Button size="xs" onClick={onClose}>Close</Button>
       </div>
 
-      {/* Auth token */}
-      <div className="mb-3">
-        <label className="block text-[0.7rem] text-muted-foreground uppercase mb-1">Authorization Bearer Token</label>
-        <Input
-          value={authToken}
-          onChange={(e) => setAuthToken(e.target.value)}
-          placeholder="eyJ..."
-          className="font-mono text-xs"
-        />
-      </div>
+      <BearerTokenField value={authToken} onChange={setAuthToken} signedIn={signedIn} />
 
       {/* Query/path params */}
       {endpoint.params.filter((p) => p.location === "query" || p.location === "path").length > 0 ? (

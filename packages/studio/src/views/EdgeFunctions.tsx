@@ -20,7 +20,7 @@ import {
   readJson,
   readJsonObject,
 } from "../lib/json.js"
-import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.js"
+import { signedInToken, studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import type { SupatypeClient } from "@supatype/client"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ async function adminError(res: Response, fallback: string): Promise<Error> {
 }
 
 const isHttpMethod = isOneOf(["GET", "POST"] as const)
-const isAuthMode = isOneOf(["none", "service_role", "custom"] as const)
+const isAuthMode = isOneOf(["none", "session", "custom"] as const)
 
 const BUILTIN_RUNTIME_ENV_VARS: Array<{ key: string; description: string }> = [
   { key: "SUPATYPE_URL", description: "API gateway URL for this project." },
@@ -100,7 +100,8 @@ function buildFunctionInvokeUrl(clientUrl: string, functionName: string, querySt
   return `${base}?${qs}`
 }
 
-function InvokeTab({
+/** Invoke a function, by default as the signed-in Studio user. Exported for its suite. */
+export function InvokeTab({
   functionName,
   clientUrl,
   client,
@@ -112,9 +113,10 @@ function InvokeTab({
   const [method, setMethod] = useState<"GET" | "POST">("POST")
   const [queryString, setQueryString] = useState("")
   const [body, setBody] = useState("{}")
-  const [authMode, setAuthMode] = useState<"none" | "service_role" | "custom">("none")
-  const privilegedAuthLabel = usesSessionProxy(client) ? "Studio session" : "Privileged"
-  const [customToken, setCustomToken] = useState("")
+  // The signed-in user's own token unless the editor picks otherwise: anonymous, or a token of
+  // their choosing, which starts as theirs so it can be edited rather than found and pasted.
+  const [authMode, setAuthMode] = useState<"none" | "session" | "custom">("session")
+  const [customToken, setCustomToken] = useState(() => signedInToken(client))
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<number | null>(null)
@@ -142,7 +144,7 @@ function InvokeTab({
         opts.body = body
       }
 
-      if (authMode === "service_role") {
+      if (authMode === "session") {
         const auth = studioAuthHeaders(client)
         if (!auth.Authorization) throw new Error("Studio authentication required")
         Object.assign(headers, auth)
@@ -194,8 +196,8 @@ function InvokeTab({
             onChange={(e) => { const next = e.target.value; if (isAuthMode(next)) setAuthMode(next) }}
             className="rounded-md border border-border bg-background px-2 py-1 text-xs"
           >
-            <option value="none">None</option>
-            <option value="service_role">{privilegedAuthLabel}</option>
+            <option value="session">My Studio session</option>
+            <option value="none">None (anonymous)</option>
             <option value="custom">Custom Bearer token</option>
           </select>
         </div>

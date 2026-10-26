@@ -73,3 +73,47 @@ describe("serializeRecordForApi: blank normalisation", () => {
     expect(out).toEqual({ author_id: "abc" })
   })
 })
+
+/**
+ * A blank slug is sent as one made from its source field, never as null.
+ *
+ * The engine's slug trigger fills an empty slug from its source only on INSERT. On UPDATE it leaves
+ * an empty slug empty, so a slug cleared in the editor reached the table as NULL and the save (or,
+ * on a drafts model, the publish that copied the draft into the live row) failed with `null value in
+ * column "slug" ... violates not-null constraint`. Studio now makes the slug the trigger would have.
+ */
+describe("serializeRecordForApi: blank slugs", () => {
+  const slugged = (from: FieldConfig): ModelConfig =>
+    model([from, field({ name: "slug", widget: "slug", required: true, options: { from: from.name } })])
+
+  it("makes a cleared slug from its source field", () => {
+    const out = serializeRecordForApi(slugged(field({ name: "name" })), { name: "Ada Lovelace", slug: "" })
+    expect(out["slug"]).toBe("ada-lovelace")
+  })
+
+  it("makes a slug the form never held from its source field", () => {
+    const out = serializeRecordForApi(slugged(field({ name: "name" })), { name: "Grace Hopper", slug: null })
+    expect(out["slug"]).toBe("grace-hopper")
+  })
+
+  it("makes it from the first translation of a localized source", () => {
+    const source = field({ name: "title", localized: true })
+    const out = serializeRecordForApi(slugged(source), { title: { en: "Hello World", fr: "Bonjour" }, slug: null })
+    expect(out["slug"]).toBe("hello-world")
+  })
+
+  it("keeps a slug the editor typed", () => {
+    const out = serializeRecordForApi(slugged(field({ name: "name" })), { name: "Ada", slug: "the-countess" })
+    expect(out["slug"]).toBe("the-countess")
+  })
+
+  it("leaves it null when the source is blank too, for the required check to report", () => {
+    const out = serializeRecordForApi(slugged(field({ name: "name" })), { name: "", slug: "" })
+    expect(out["slug"]).toBeNull()
+  })
+
+  it("adds no slug to a write that does not touch it", () => {
+    const out = serializeRecordForApi(slugged(field({ name: "name" })), { name: "Ada" })
+    expect("slug" in out).toBe(false)
+  })
+})

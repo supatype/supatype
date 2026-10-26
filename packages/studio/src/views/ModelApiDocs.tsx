@@ -3,6 +3,8 @@ import type { ModelConfig, FieldConfig } from "../config.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { useStudioClient } from "../StudioCore.js"
 import { cn } from "../lib/utils.js"
+import { signedInToken } from "../lib/studio-auth-headers.js"
+import { BearerTokenField } from "../components/BearerTokenField.js"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -154,12 +156,13 @@ const METHOD_BG: Record<Method, string> = {
 }
 
 function TryItPanel({ ep, baseUrl, onClose }: { ep: Endpoint; baseUrl: string; onClose: () => void }) {
+  const signedIn = signedInToken(useStudioClient())
   const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
     for (const p of ep.params) init[p.name] = p.example ?? ""
     return init
   })
-  const [authToken, setAuthToken] = useState("")
+  const [authToken, setAuthToken] = useState(signedIn)
   const [requestBody, setRequestBody] = useState(ep.requestBody ?? "")
   const [response, setResponse] = useState<TryItResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -223,10 +226,7 @@ function TryItPanel({ ep, baseUrl, onClose }: { ep: Endpoint; baseUrl: string; o
         <Button size="xs" onClick={onClose}>Close</Button>
       </div>
 
-      <div className="mb-3">
-        <label className="block text-[0.7rem] text-muted-foreground uppercase mb-1">Authorization Bearer Token</label>
-        <Input value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="eyJ..." className="font-mono text-xs" />
-      </div>
+      <BearerTokenField value={authToken} onChange={setAuthToken} signedIn={signedIn} />
 
       {queryParams.length > 0 && (
         <div className="mb-3">

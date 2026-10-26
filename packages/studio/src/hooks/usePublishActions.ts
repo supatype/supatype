@@ -11,6 +11,7 @@ import {
   unschedulePublish,
   type PublishingState,
 } from "../lib/publishing.js"
+import { explainRefusal } from "../lib/database-refusal.js"
 
 /** The form a publish panel sits beside, as far as publishing needs it. */
 export interface RecordEditor {
@@ -108,7 +109,9 @@ export function usePublishActions(
     setError(null)
     void runSteps(ctx, mode, steps)
       .then((outcome) => {
-        if (outcome.error !== null) setError(outcome.error)
+        // A publish copies the draft into the live row, where the table's constraints hold, so its
+        // refusals are the database's and are said in the editor's words like a save's.
+        if (outcome.error !== null) setError(explainRefusal({ message: outcome.error }, target.model.fields, {}).banner)
         if (outcome.id !== null) editor.onChanged(outcome.id, reloadForm)
       })
       .catch((err: unknown) => {
