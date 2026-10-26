@@ -85,7 +85,9 @@ function InitialStatePlugin({ value }: { value: unknown }): null {
     if (value !== null && value !== undefined && typeof value === "object") {
       try {
         const state = editor.parseEditorState(JSON.stringify(value))
-        editor.setEditorState(state)
+        // Tagged so `OnChangePlugin` (which ignores history-merge updates) does not report loading
+        // the saved value as an edit: that marked every record with rich text as changed on open.
+        editor.setEditorState(state, { tag: "history-merge" })
       } catch {
         // Invalid saved state: leave editor empty
       }

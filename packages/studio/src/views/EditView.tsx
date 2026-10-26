@@ -21,10 +21,11 @@ import {
 } from "../hooks/useStudioFieldAccess.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
-import { describeViolations, validateRecord } from "../lib/validate-record.js"
+import { getLocalizedFieldValue } from "../lib/localized-field.js"
+import { isJsonObject } from "../lib/json.js"
+import { useRecordPersist } from "../hooks/useRecordPersist.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import {
-  createDraft,
   createRecord,
   duplicateValues,
   fetchRecordForEditing,
@@ -46,7 +47,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const { currentLocale, defaultLocale } = useLocale()
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(!!recordId)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Keyed by column. Both sources land here: a bound or constraint Studio checked itself, and a
   // field validator's refusal from the server, which names the column it refused.
@@ -55,7 +55,13 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   // Bumped on every successful save, so the publish bar re-reads the history it summarises. A
   // saved draft changes what that bar should say, and nothing else tells it.
   const [savedAt, setSavedAt] = useState(0)
-  const isDirty = useRef(false)
+  // The form holds edits nobody has saved. State rather than a ref: the publish panel says
+  // "Changed" and offers to publish them.
+  const [dirty, setDirty] = useState(false)
+  // Bumped when an act changed the record's values under the form (Discard changes), so it re-reads
+  // them without the loading screen a first open shows.
+  const [formNonce, setFormNonce] = useState(0)
+  const quietReload = useRef(false)
   const createTimestampDefaultsApplied = useRef(false)
 
   const isCreate = recordId === undefined
@@ -111,10 +117,10 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         .eq(model.primaryKey, recordId)
         .single()
       if (cancelled) return
-      const row = result.data as Record<string, unknown> | null
+      const row: unknown = result.data
       // Fails open: an error or a missing answer leaves the control offered, and the database
       // refuses the delete if it should.
-      setRecordDeletable(result.error !== null || row === null ? null : row[column] === true)
+      setRecordDeletable(result.error !== null || !isJsonObject(row) ? null : row[column] === true)
     })()
 
     return () => {
@@ -124,7 +130,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
   useEffect(() => {
     if (!recordId) return
-    setLoading(true)
+    if (!quietReload.current) setLoading(true)
+    quietReload.current = false
     void (async () => {
       try {
         // The pending draft when the model has one, because that is what an editor is editing.
@@ -135,6 +142,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           setError(loaded.error)
         } else if (loaded.values !== null) {
           setValues(loaded.values)
+          setDirty(false)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load record")
@@ -142,98 +150,39 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         setLoading(false)
       }
     })()
-  }, [client, model, recordId])
+  }, [client, model, recordId, formNonce])
 
-  /**
-   * Put a refused write's message on the input it names.
-   *
-   * The server attaches the column when a field validator refuses. Everything else keeps the banner
-   * alone: a constraint violation from Postgres names a generated constraint, not a field, and
-   * guessing which input it meant would point the author at the wrong one.
-   */
-  const noteFieldError = useCallback(
-    (err: { message: string; field?: string | undefined }) => {
-      if (err.field === undefined) return
-      setFieldErrors({ [err.field]: err.message })
-    },
-    [],
-  )
+  const { saving, persist } = useRecordPersist(model, recordId, values, { setError, setFieldErrors })
 
   const handleChange = useCallback((fieldName: string, value: unknown) => {
-    isDirty.current = true
+    setDirty(true)
     setValues((prev) => ({ ...prev, [fieldName]: value }))
   }, [])
 
-  const handleSave = async () => {
-    const violations = validateRecord(model.fields, values, model.constraints ?? [])
-    if (violations.length > 0) {
-      setError(describeViolations(violations))
-      // A violation attributed to one field goes on that input; a cross-field rule has no single
-      // input to blame and stays in the banner alone.
-      setFieldErrors(
-        Object.fromEntries(
-          violations
-            .filter((v) => model.fields.some((f) => f.name === v.field))
-            .map((v) => [v.field, v.locale ? `(${v.locale}) ${v.message}` : v.message]),
-        ),
-      )
+  /**
+   * After a write reached the record: a new one opens as itself, an existing one re-reads what
+   * summarises it, and the form re-reads its values when the act changed them under it.
+   */
+  const onChanged = (id: string, reloadForm: boolean): void => {
+    if (isCreate) {
+      onNavigate(`/models/${model.name}/${id}`)
       return
     }
+    setSavedAt(Date.now())
+    if (!reloadForm) return
+    quietReload.current = true
+    setFormNonce((n) => n + 1)
+  }
 
-    setSaving(true)
-    setError(null)
-    setFieldErrors({})
-    try {
-      if (isCreate) {
-        const { [model.primaryKey]: _pk, ...insertValues } = serializeRecordForApi(model, values)
-        // On a model with drafts the first save creates the record as its first draft, in one
-        // call: the live row holds no locale until one is published, and the record has a
-        // version to preview from the start.
-        const created = await createRecord(client, model, insertValues)
-        if (created.error !== null) {
-          setError(created.error.message)
-          noteFieldError(created.error)
-        } else if (created.id !== null) {
-          isDirty.current = false
-          onNavigate(`/models/${model.name}/${created.id}`)
-        }
-      } else {
-        const { [model.primaryKey]: _pk, ...updateValues } = serializeRecordForApi(model, values)
+  const persistAndMark = async (): Promise<string | null> => {
+    const id = await persist()
+    if (id !== null) setDirty(false)
+    return id
+  }
 
-        // On a versioned model, saving records a draft and the live row does not move. That is the
-        // largest single change this feature makes to Studio, and it is the point of it: an author
-        // can save work in progress on a published record without the world seeing it, and
-        // publishing is a separate decision made from the bar above.
-        if (model.versions?.drafts === true) {
-          const drafted = await createDraft(client, model, recordId!, updateValues)
-          if (drafted.error !== null) {
-            setError(drafted.error)
-          } else {
-            isDirty.current = false
-            setSavedAt(Date.now())
-          }
-          setSaving(false)
-          return
-        }
-
-        const result = await client
-          .from(model.tableName)
-          .update(updateValues)
-          .eq(model.primaryKey, recordId!)
-
-        if (result.error) {
-          setError(result.error.message)
-          noteFieldError(result.error)
-        } else {
-          isDirty.current = false
-          setSavedAt(Date.now())
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save")
-    } finally {
-      setSaving(false)
-    }
+  const handleSave = async () => {
+    const id = await persistAndMark()
+    if (id !== null) onChanged(id, false)
   }
 
   const handleDelete = async () => {
@@ -298,24 +247,27 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   }
 
   // Publishing lives in the sidebar beside the record's other metadata rather than as a banner
-  // above the form. Only on an existing record: one that does not exist yet has nothing to publish,
-  // and the first save creates both the row and its first draft.
+  // above the form. On a model with drafts it holds the form's save as "Save draft", so it is
+  // there on a new record too: the first save or publish creates the record.
   //
   // Named once because two things read it. The preview pane has to explain the publish controls'
   // absence, and when the two asked the question separately the pane embedded a preview page whose
   // advice was to use a control that was not on the screen.
   const awaitingFirstSave = isCreate || recordId === undefined
-  const publishing = awaitingFirstSave ? null : (
-    <PublishBar
-      model={model}
-      recordId={recordId}
-      savedAt={savedAt}
-      seesDrafts={capability.seesDrafts}
-      {...(previewUrl !== "" && { previewUrl })}
-      onNavigate={onNavigate}
-    />
-  )
-
+  const publishing =
+    model.versions?.drafts === true && capability.seesDrafts ? (
+      <PublishBar
+        record={{
+          model,
+          recordId,
+          title: recordTitle(model, values, currentLocale, defaultLocale),
+          ...(previewUrl !== "" && { previewUrl }),
+        }}
+        editor={{ dirty, saving, savedAt, onSave: () => { void handleSave() }, persist: persistAndMark, onChanged }}
+        seesDrafts={capability.seesDrafts}
+        onNavigate={onNavigate}
+      />
+    ) : undefined
   return (
     <div className="st-edit-view">
       <Header title={isCreate ? `Create ${model.label}` : `Edit ${model.label}`} />
@@ -329,7 +281,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
       {error && <div className="st-error" role="alert">{error}</div>}
 
       <EditFormLayout
-        publishing={publishing}
+        {...(publishing !== undefined && { publishing })}
         mainFields={accessibleMainFields}
         metaFields={accessibleMetaFields}
         values={values}
@@ -383,4 +335,18 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
       )}
     </div>
   )
+}
+
+/** What the record is called: its first list column's value, or the model's name for it. */
+function recordTitle(
+  model: ModelConfig,
+  values: Record<string, unknown>,
+  currentLocale: string,
+  defaultLocale: string,
+): string {
+  const column = model.listColumns[0]
+  const field = model.fields.find((f) => f.name === column)
+  if (column === undefined || field === undefined) return `this ${model.label.toLowerCase()}`
+  const value = getLocalizedFieldValue(values[column], field.localized, currentLocale, defaultLocale)
+  return typeof value === "string" && value.trim() !== "" ? value : `this ${model.label.toLowerCase()}`
 }

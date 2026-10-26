@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    /** Page chrome + main workspace (unified — no sidebar/content seam). */
+    /** Page chrome + main workspace (one surface: no seam between sidebar and content). */
     --background: 240 8% 6%;
     --canvas: 240 8% 6%;
     --foreground: 0 0% 98%;
@@ -26,7 +26,15 @@
     --input: 240 3.7% 15.9%;
     --ring: 263 70% 50%;
     --radius: 0.5rem;
+    /* The tokens above are a dark theme, and native controls have to be told: without this, date
+       and time inputs drew a light-mode calendar icon (black on the dark field) and their own
+       light-mode segments. A light theme would set `color-scheme: light` beside its tokens. */
+    color-scheme: dark;
   }
+
+  /* One rule for every date and time field: the picker icon offers a picker, so a read-only field
+     (Record info's Created at and Updated at) shows none rather than one that does nothing. */
+  input[readonly]::-webkit-calendar-picker-indicator { display: none; }
 
   * {
     box-sizing: border-box;

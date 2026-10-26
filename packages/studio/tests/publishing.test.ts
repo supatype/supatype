@@ -3,6 +3,7 @@ import {
   createRecord,
   duplicateValues,
   fetchRecordStates,
+  liveRowLocaleStates,
   publishableLocales,
   publishingState,
   liveLocales,
@@ -29,7 +30,9 @@ function version(
     status: "draft",
     created_at: "2026-09-05T09:00:00Z",
     created_by: null,
-    data: {},
+    // Each version says something different, as a real edit does. A version repeating the live one
+    // is a case of its own below.
+    data: { title: `edit ${String(n)}` },
     published_locales: {},
     scheduled_locales: {},
     ...overrides,
@@ -140,6 +143,34 @@ describe("what the history says about a record", () => {
     expect(state.hasPendingDraft).toBe(false)
     expect(state.locales[WHOLE_RECORD]).toBe("absent")
   })
+
+  it("reports live when the newest version repeats the published one", () => {
+    // What "Discard changes" leaves (the published version restored as the newest draft), and what a
+    // save with no edits leaves. Calling it an edit waiting offered to publish nothing, and kept a
+    // discarded record marked as changed.
+    const published = version(1, { data: { title: "Live" }, published_locales: { [WHOLE_RECORD]: "2026-09-05T09:00:00Z" } })
+    const state = publishingState([version(3, { data: { title: "Live" } }), version(2), published], [WHOLE_RECORD])
+    expect(state.locales[WHOLE_RECORD]).toBe("live")
+    expect(state.discardTo).toBeNull()
+  })
+
+  it("says when each locale went live, from the version that claims it", () => {
+    const state = publishingState(
+      [version(2), version(1, { published_locales: { en: "2026-09-05T09:00:00Z" } })],
+      ["en", "fr"],
+    )
+    expect(state.liveAt).toEqual({ en: "2026-09-05T09:00:00Z" })
+  })
+
+  it("discards to the one version every live locale reads", () => {
+    const at = "2026-09-05T09:00:00Z"
+    expect(publishingState([version(2), version(1, { published_locales: { en: at, fr: at } })], ["en", "fr"]).discardTo).toBe(1)
+    // Languages live from different versions: there is no one published state to go back to.
+    const mixed = [version(3), version(2, { published_locales: { en: at } }), version(1, { published_locales: { fr: at } })]
+    expect(publishingState(mixed, ["en", "fr"]).discardTo).toBeNull()
+    // Nothing waiting: nothing to discard.
+    expect(publishingState([version(1, { published_locales: { en: at } })], ["en"]).discardTo).toBeNull()
+  })
 })
 
 describe("what a list says each record is", () => {
@@ -159,10 +190,50 @@ describe("what a list says each record is", () => {
 
   const LIVE = "2026-09-05T09:00:00Z"
 
-  async function stateOf(rows: unknown[], locales = ["en", "fr"]): Promise<string | undefined> {
-    const states = await fetchRecordStates(clientReturning(rows), model, ["a"], locales)
+  /** Record `a`'s state, its version query answered with `rows` and its live row being `live`. */
+  async function stateOf(
+    rows: unknown[],
+    locales = ["en", "fr"],
+    live: Record<string, unknown> = {},
+  ): Promise<string | undefined> {
+    const states = await fetchRecordStates(clientReturning(rows), model, [{ ...live, id: "a" }], locales)
     return states.get("a")
   }
+
+  // Seeded rows, rows inserted through the API and rows saved before 0.7.0 have no version rows.
+  // The list said nothing about them, which reads as live for a draft, and the editor called the
+  // live ones "Not published". Their live row says what the read rule shows.
+  const PAST = "2026-01-01T00:00:00Z"
+  const FUTURE = "2999-01-01T00:00:00Z"
+
+  it("reads a record with no history as live in the locales its published row holds", async () => {
+    expect(await stateOf([], ["en", "fr"], { published_at: PAST, body: { en: "Hello", fr: "Salut" } })).toBe(
+      "live",
+    )
+    expect(await stateOf([], ["en", "fr"], { published_at: PAST, body: { en: "Hello", fr: null } })).toBe(
+      "partial",
+    )
+  })
+
+  it("reads a record with no history and a future publish date as scheduled", async () => {
+    expect(await stateOf([], ["en", "fr"], { published_at: FUTURE, body: { en: "Soon", fr: "Bientôt" } })).toBe(
+      "scheduled",
+    )
+  })
+
+  it("reads a record with no history and no publish date as never published", async () => {
+    expect(await stateOf([], ["en", "fr"], { published_at: null, body: { en: "Not yet" } })).toBe("absent")
+  })
+
+  it("prefers the history over the live row when there is one", async () => {
+    expect(
+      await stateOf(
+        [{ record_id: "a", version: 1, published_locales: {}, scheduled_locales: {} }],
+        ["en", "fr"],
+        { published_at: PAST, body: { en: "Hello", fr: "Salut" } },
+      ),
+    ).toBe("absent")
+  })
 
   it("calls a record with an unpublished edit published, because it is", async () => {
     // This is the case that made the old badge wrong. The record's English is live and being read;
@@ -203,6 +274,29 @@ describe("what a list says each record is", () => {
     ).toBe("live")
   })
 
+  it("agrees with the editor that a version repeating the live one is no edit", async () => {
+    // The list's state query leaves content out, so a second asks for the content of just the
+    // versions that decide it: the newest, and the live one beneath it.
+    const sent: string[] = []
+    vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+      sent.push(url)
+      if (url.includes("data")) {
+        return Response.json([
+          { record_id: "a", version: 2, data: { title: "Same" } },
+          { record_id: "a", version: 1, data: { title: "Same" } },
+        ])
+      }
+      return Response.json([
+        { record_id: "a", version: 2, published_locales: {}, scheduled_locales: {} },
+        { record_id: "a", version: 1, published_locales: { en: LIVE, fr: LIVE }, scheduled_locales: {} },
+      ])
+    })
+    const states = await fetchRecordStates(testClient({ url: "http://localhost:8000" }), model, [{ id: "a" }], ["en", "fr"])
+    expect(states.get("a")).toBe("live")
+    expect(sent).toHaveLength(2)
+  })
+
   it("asks nothing of the server when there is nothing to ask about", async () => {
     // A list of fifty records should cost one request; an empty page should cost none.
     const sent = vi.fn(async () => Response.json([]))
@@ -213,9 +307,39 @@ describe("what a list says each record is", () => {
   })
 })
 
+describe("what a live row says when there is no history", () => {
+  const NOW = Date.parse("2026-10-19T12:00:00Z")
+  const whole = versions()
+  const localized = versions({ localizedColumns: ["abstract"] })
+
+  it("is live, scheduled or a draft by its publish date", () => {
+    const at = (published_at: string | null) =>
+      liveRowLocaleStates({ published_at }, whole, [WHOLE_RECORD], NOW)[WHOLE_RECORD]
+    expect(at("2026-10-15T15:49:15Z")).toBe("live")
+    expect(at("2026-10-20T00:00:00Z")).toBe("scheduled")
+    expect(at(null)).toBe("absent")
+  })
+
+  it("is live on a model with no publish date, since nothing in the row withholds it", () => {
+    expect(liveRowLocaleStates({ title: "Always on" }, whole, [WHOLE_RECORD], NOW)).toEqual({
+      [WHOLE_RECORD]: "live",
+    })
+  })
+
+  it("counts only the locales the row holds content in", () => {
+    const row = { published_at: "2026-10-15T15:49:15Z", abstract: { en: "Talk", fr: "", de: {} } }
+    expect(liveRowLocaleStates(row, localized, ["en", "fr", "de", "es"], NOW)).toEqual({
+      en: "live",
+      fr: "absent",
+      de: "absent",
+      es: "absent",
+    })
+  })
+})
+
 describe("the state a shut publishing section stands for", () => {
   function state(locales: Record<string, LocaleState>): PublishingState {
-    return { versions: [], newest: null, hasPendingDraft: false, locales }
+    return { versions: [], newest: null, hasPendingDraft: false, locales, liveAt: {}, scheduledAt: {}, discardTo: null }
   }
 
   // It returns a state rather than a label. The words live in one table beside the badge that
@@ -253,7 +377,7 @@ describe("the state a shut publishing section stands for", () => {
 
 describe("partly published", () => {
   function state(locales: Record<string, LocaleState>): PublishingState {
-    return { versions: [], newest: null, hasPendingDraft: false, locales }
+    return { versions: [], newest: null, hasPendingDraft: false, locales, liveAt: {}, scheduledAt: {}, discardTo: null }
   }
 
   it("outranks every other state, because every other word hides it", () => {
