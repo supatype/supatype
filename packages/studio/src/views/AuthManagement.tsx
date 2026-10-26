@@ -599,7 +599,21 @@ function authErrorMessage(body: Record<string, unknown>): string {
   return (typeof msg === "string" ? msg : bodyMessage(body)) ?? "Auth API error"
 }
 
-function mapAuthUser(raw: AuthUserResponse): AuthUser {
+/**
+ * How a user signs in. A password user made outside the sign-up flow (`supatype admin create-user`)
+ * has no identity row, so a user with an email and no identity signs in with email.
+ */
+function providersOf(raw: AuthUserResponse): AuthIdentity[] {
+  const identities = (raw.identities ?? []).map((i) => ({
+    provider: i.provider,
+    provider_id: i.identity_id ?? i.id ?? "",
+    linked_at: i.created_at ?? "",
+  }))
+  if (identities.length > 0 || !raw.email) return identities
+  return [{ provider: "email", provider_id: raw.id, linked_at: raw.created_at ?? "" }]
+}
+
+export function mapAuthUser(raw: AuthUserResponse): AuthUser {
   return {
     id: raw.id,
     email: raw.email ?? "",
@@ -611,13 +625,7 @@ function mapAuthUser(raw: AuthUserResponse): AuthUser {
     created_at: raw.created_at ?? "",
     updated_at: raw.updated_at ?? "",
     metadata: raw.user_metadata ?? {},
-    providers: Array.isArray(raw.identities)
-      ? raw.identities.map((i) => ({
-          provider: i.provider,
-          provider_id: i.identity_id ?? i.id ?? "",
-          linked_at: i.created_at ?? "",
-        }))
-      : [],
+    providers: providersOf(raw),
     mfa_factors: Array.isArray(raw.factors)
       ? raw.factors.map((f) => ({
           id: f.id,

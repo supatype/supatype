@@ -21,6 +21,11 @@ export interface PanelInput {
   state: PublishingState | null
   /** The form holds edits nobody has saved. Publishing saves them first. */
   dirty: boolean
+  /**
+   * A draft was saved from this form since it opened or since its last publishing act. Trusted over
+   * a history read that does not show it: a Studio role may save a version it cannot read back.
+   */
+  savedDraft?: boolean
   /** The record does not exist yet: the first save or publish creates it. */
   creating: boolean
   /**
@@ -96,12 +101,13 @@ function scopeOf(input: PanelInput, locales: string[]): Scope {
   const liveAt = input.state?.liveAt ?? {}
   const readable = locales.some((l) => l in liveAt)
   const waiting = input.state !== null && states.some((s) => s !== "live")
+  const unpublished = input.dirty || input.savedDraft === true
   return {
     states,
     status: STATUS[publishingSummary(input.state, locales)],
     readable,
-    changed: states.includes("pending") || (input.dirty && readable),
-    publishable: input.creating || input.dirty || waiting,
+    changed: states.includes("pending") || (unpublished && readable),
+    publishable: input.creating || unpublished || waiting,
   }
 }
 

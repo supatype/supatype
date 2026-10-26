@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from "react"
 import { EditorView, basicSetup } from "codemirror"
 import { EditorState, Compartment } from "@codemirror/state"
 import { keymap } from "@codemirror/view"
+import { closeCompletion } from "@codemirror/autocomplete"
 import { sql as sqlLang, PostgreSQL } from "@codemirror/lang-sql"
 import { useStudioClient } from "../StudioCore.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
@@ -193,6 +194,13 @@ const studioSqlTheme = EditorView.theme({
 
 // ─── SQL Editor ───────────────────────────────────────────────────────────────
 
+/** Mod-Enter: close the autocomplete list, which otherwise stays open over the editor, then run. */
+export function runAndCloseCompletion(view: EditorView, run: () => void): boolean {
+  closeCompletion(view)
+  run()
+  return true
+}
+
 function SqlEditor({
   value,
   onChange,
@@ -227,7 +235,7 @@ function SqlEditor({
           ),
           keymap.of([{
             key: "Mod-Enter",
-            run: () => { onRunRef.current(); return true },
+            run: (view) => runAndCloseCompletion(view, onRunRef.current),
           }]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString())
@@ -308,8 +316,8 @@ function exportJson(rows: Record<string, unknown>[]): void {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 /**
- * The SQL editor, for the roles offered it (RX1): owners, admins and developers. It runs as the
- * project's owning role, so row level security does not apply to it. Anyone else who opens its URL
+ * The SQL editor, for the roles offered it (RX1): owners, admins and developers. It runs as
+ * supatype_sql_editor, which holds the owning role's rights, so row level security does not apply. Anyone else who opens its URL
  * is told why there is nothing here rather than shown an editor whose every query is refused.
  */
 export function SqlRunner(): React.ReactElement {
@@ -321,14 +329,23 @@ export function SqlRunner(): React.ReactElement {
   // data requests act in, so the banner would say "acting as yourself" over rows that are not.
   return (
     <>
-      <ElevatedNotice>
-        <span>
-          <strong className="font-medium">Full access</strong>: the SQL editor runs as the
-          project&apos;s owning role, so Row Level Security does not apply to it. Every query is recorded.
-        </span>
-      </ElevatedNotice>
+      <SqlEditorAccessNotice />
       <SqlEditorView />
     </>
+  )
+}
+
+/** What the editor's queries run as, over the editor. */
+export function SqlEditorAccessNotice(): React.ReactElement {
+  return (
+    <ElevatedNotice>
+      <span>
+        <strong className="font-medium">Full access</strong>: queries run as{" "}
+        <code>supatype_sql_editor</code>, which holds the rights of the role that owns the project&apos;s
+        tables, so Row Level Security does not apply to them and masked columns show in full. It is not a
+        superuser. Every query is recorded.
+      </span>
+    </ElevatedNotice>
   )
 }
 

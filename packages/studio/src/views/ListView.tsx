@@ -19,6 +19,7 @@ import { formatFieldValue } from "../lib/field-display.js"
 import { isUuid } from "../lib/uuid.js"
 import { UuidCell } from "../components/UuidCell.js"
 import { WithheldValue } from "../components/WithheldValue.js"
+import { useRowsFieldAccess } from "../hooks/useRecordAccess.js"
 import {
   fetchRecordStates,
   publishableLocales,
@@ -94,6 +95,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   }, [client, model, searchable, search, sort, page])
 
   const freshness = useListFreshness(fetchData, { viewKey: `list.${model.name}` })
+  const rowsFieldAccess = useRowsFieldAccess(model, rows, fieldAccess)
   // The column the rows are in order of, whether the user chose it or the model did.
   const shownSort = sort ?? model.defaultSort ?? null
 
@@ -281,7 +283,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                     {columns.map((col, index) => (
                       <td key={col.name} className="st-table-cell">
                         <AccessAwareCell
-                          access={cellAccess(fieldAccess, model.tableName, col.name, row[col.name])}
+                          access={cellAccess(fieldAccess, model.tableName, col.name, row[col.name], rowsFieldAccess.get(id))}
                         >
                           <CellRenderer
                             value={row[col.name]}

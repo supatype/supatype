@@ -5,21 +5,9 @@ import { useStudioClient } from "../StudioCore.js"
 import { cn } from "../lib/utils.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
+import { exampleRecord, exampleText, exampleValue, isRowColumn } from "../lib/api-examples.js"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function exampleValue(f: FieldConfig): unknown {
-  switch (f.widget) {
-    case "uuid": case "relation": case "multirelation":
-      return "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-    case "number": return 1
-    case "boolean": case "publish": return true
-    case "datetime": return "2026-01-15T10:30:00Z"
-    case "date": return "2026-01-15"
-    case "json": case "blocks": return {}
-    default: return `example_${f.name}`
-  }
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,19 +48,11 @@ function buildEndpoints(model: ModelConfig): Endpoint[] {
   const pkField = model.fields.find((f) => f.name === pk)
   const pkEx = pkField ? String(exampleValue(pkField)) : "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
   const AUTO = new Set(["created_at", "updated_at", "deleted_at"])
-  const writeable = model.fields.filter((f) => f.name !== pk && !AUTO.has(f.name))
+  const writeable = model.fields.filter((f) => f.name !== pk && !AUTO.has(f.name) && isRowColumn(f))
   const t = model.tableName
 
-  const rowObj = () => {
-    const obj: Record<string, unknown> = {}
-    for (const f of model.fields) obj[f.name] = exampleValue(f)
-    return obj
-  }
-  const bodyObj = (fields: FieldConfig[]) => {
-    const obj: Record<string, unknown> = {}
-    for (const f of fields) obj[f.name] = exampleValue(f)
-    return JSON.stringify(obj, null, 2)
-  }
+  const rowObj = () => exampleRecord(model.fields)
+  const bodyObj = (fields: FieldConfig[]) => JSON.stringify(exampleRecord(fields), null, 2)
 
   return [
     {
@@ -108,7 +88,7 @@ function buildEndpoints(model: ModelConfig): Endpoint[] {
       description: `Inserts a new ${model.label}. Add \`Prefer: return=representation\` header to get the created row back.`,
       params: [
         { name: "Prefer", type: "string", required: false, description: "Return=representation to get created row", location: "header", example: "return=representation" },
-        ...writeable.map((f) => ({ name: f.name, type: typeof exampleValue(f), required: !!f.required, description: f.label || f.name, location: "body" as const, example: String(exampleValue(f)) })),
+        ...writeable.map((f) => ({ name: f.name, type: typeof exampleValue(f), required: !!f.required, description: f.label || f.name, location: "body" as const, example: exampleText(f) })),
       ],
       requestBody: bodyObj(writeable),
       response: JSON.stringify(rowObj(), null, 2),
@@ -121,7 +101,7 @@ function buildEndpoints(model: ModelConfig): Endpoint[] {
       description: `Updates a ${model.label} matching \`${pk}\`. Only include fields you want to change.`,
       params: [
         { name: pk, type: "string", required: true, description: `Filter by ${pk}`, location: "query", example: `eq.${pkEx}` },
-        ...writeable.slice(0, 3).map((f) => ({ name: f.name, type: typeof exampleValue(f), required: false, description: f.label || f.name, location: "body" as const, example: String(exampleValue(f)) })),
+        ...writeable.slice(0, 3).map((f) => ({ name: f.name, type: typeof exampleValue(f), required: false, description: f.label || f.name, location: "body" as const, example: exampleText(f) })),
       ],
       requestBody: bodyObj(writeable.slice(0, 3)),
       sdkSnippet: `const { data, error } = await client\n  .from('${t}')\n  .update({ /* fields to change */ })\n  .eq('${pk}', '${pkEx}')`,
