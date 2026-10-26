@@ -118,9 +118,19 @@ describe.each([
     expect(main()).not.toContain("Supatype Cloud")
   })
 
-  it("explains realtime is off rather than failing", async () => {
-    await studioAt("/realtime/channels", platform, { role: "admin", realtimeInspect: true, inspector: 501 })
+})
+
+describe("realtime turned off", () => {
+  it("explains it on self-host, where a project can run without realtime", async () => {
+    await studioAt("/realtime/channels", SELF_HOST, { role: "admin", realtimeInspect: true, inspector: 501 })
     expect(main()).toContain("Realtime is off for this project")
+    expect(main()).toContain("database.external.realtime")
+  })
+
+  it("never tells a Cloud project realtime is outside its plan, since every plan has it", async () => {
+    await studioAt("/realtime/channels", CLOUD, { role: "admin", realtimeInspect: true, inspector: 501 })
+    expect(main()).not.toContain("plan")
+    expect(main()).not.toContain("Realtime is off for this project")
   })
 })
 

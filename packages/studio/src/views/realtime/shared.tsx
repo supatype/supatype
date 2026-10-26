@@ -13,15 +13,15 @@ export function When({ at }: { at: string | null }): React.ReactElement {
   return <span title={date.toISOString()}>{date.toLocaleTimeString()}</span>
 }
 
-const REALTIME_OFF: Record<PlatformMode, string> = {
-  "self-host":
-    "This project runs without realtime (database.external.realtime is false). Remove that setting and restart the stack to turn it on.",
-  cloud: "Realtime is not part of this project's plan. Upgrade the plan to use realtime and its Inspector.",
-}
+const SELF_HOST_REALTIME_OFF =
+  "This project runs without realtime (database.external.realtime is false). Remove that setting and restart the stack to turn it on."
 
 /**
  * What a tab shows when the control plane would not answer: realtime turned off for the project is
  * a state to explain, anything else an error to retry.
+ *
+ * Only self-host can turn realtime off. Every Cloud plan includes it, so on Cloud the same answer
+ * would be a fault, shown as one rather than explained away as a plan limit.
  */
 export function InspectorFailureView({
   failure,
@@ -32,8 +32,8 @@ export function InspectorFailureView({
   mode: PlatformMode
   onRetry: () => void
 }): React.ReactElement {
-  if (failure.code === "realtime_disabled" || failure.status === 501) {
-    return <EmptyState title="Realtime is off for this project" description={REALTIME_OFF[mode]} />
+  if (mode === "self-host" && (failure.code === "realtime_disabled" || failure.status === 501)) {
+    return <EmptyState title="Realtime is off for this project" description={SELF_HOST_REALTIME_OFF} />
   }
   return <ErrorBanner message={failure.message} onRetry={onRetry} />
 }
