@@ -28,6 +28,7 @@ import type {
   SeedIr,
   SeedOperation,
   SeedValue,
+  SqlParam,
 } from "./seed.js"
 
 /** A model's own name and the facts the encoder needs about its columns. */
@@ -73,10 +74,10 @@ export class SeedCollector {
     api["$if"] = (condition: SeedConditionInput, body: () => void): void => {
       this.group(condition, body)
     }
-    api["$sql"] = (text: string, params?: readonly SeedValue[]): void => {
+    api["$sql"] = (text: string, params?: readonly SqlParam[]): void => {
       // Always present, even when empty: the engine defaults it either way, and a document
       // whose shape changes with its contents is harder to read and to diff.
-      this.push({ op: "sql", text, params: params === undefined ? [] : [...params] })
+      this.push({ op: "sql", text, params: (params ?? []).map((p) => this.encodeLoose(p)) })
     }
     if (!isSeedDb(api)) throw new Error("The seed db was built without its $if and $sql")
     return api

@@ -322,6 +322,34 @@ export type SeedValue =
 
 export type SeedData = Record<string, SeedValue>
 
+/**
+ * A value a `$sql` placeholder can carry.
+ *
+ * Narrower than {@link SeedValue}: the engine binds each param as a value, so a time
+ * expression (SQL, not a value) and `$default` (a column's, and a placeholder has no column)
+ * are refused there, and refused here so the mistake shows where it was typed. An object
+ * binds as `jsonb`, and one with a `$default` or `kind` key would read as one of those, so
+ * such an object goes in as `JSON.stringify(value)` with a `$1::jsonb` cast instead.
+ */
+export type SqlParam =
+  | string
+  | number
+  | boolean
+  | bigint
+  | Date
+  | null
+  | readonly SqlParam[]
+  | RefValue
+  | NumericValue
+  | SqlJsonObject
+
+/** An object bound as `jsonb`, without the keys that would make it an expression. */
+export interface SqlJsonObject {
+  readonly $default?: never
+  readonly kind?: never
+  readonly [key: string]: SqlParam | undefined
+}
+
 export type SeedOperation =
   | { op: "create"; model: string; id?: string; data: SeedData }
   | { op: "createMany"; model: string; rows: SeedData[] }
@@ -433,7 +461,7 @@ export type SeedDb = RegisteredModels & {
    * operations and raw SQL still runs as one thing instead of the author opening a second
    * connection the engine knows nothing about.
    */
-  $sql(text: string, params?: readonly SeedValue[]): void
+  $sql(text: string, params?: readonly SqlParam[]): void
 }
 
 /** What the runner hands a seed's default export. */
