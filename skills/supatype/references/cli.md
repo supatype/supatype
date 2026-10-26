@@ -61,6 +61,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype self-host compose up -d` | Start production stack |
 | `supatype self-host compose down` | Stop stack |
 | `supatype self-host compose status` | Health check |
+| `supatype self-host compose restart <service>` | Recreate one service (e.g. `server`) with the current config and `.env`; the others keep running |
 | `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only`, `--overwrite-drift` (without it a deploy refuses on access changed outside Supatype) |
 | `supatype deploy status` | Current static deployment |
 | `supatype deploy rollback` | Roll back static deployment. Flags: `--env`, `--to <deployment-id>` |

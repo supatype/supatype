@@ -50,6 +50,7 @@ import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
 import { refreshFunctionsContext } from "../functions-context-refresh.js"
+import { waitForRestReady } from "../rest-ready.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
   requireTargetFeatures,
@@ -281,6 +282,8 @@ async function pushViaTarget(
   if (target.mode === "cloud" || target.mode === "self-host") {
     await deployHooksToTarget(cwd, config, target, ast)
   }
+  // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
+  if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
 
   if (target.mode === "direct" || target.mode === "local") {
     await finishLocalPush(cwd, config, target, ast)
@@ -371,6 +374,9 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
     followRecordedTier(cwd, config, { recreate: true })
   }
   if (stackUrl !== undefined) await provisionLocalStorage(ast, config, stackUrl)
+  if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
+    await waitForRestReady(stackUrl, devApiKeys(cwd).anonKey)
+  }
   reportCacheSeeding(cwd, ast)
   if (stackUrl !== undefined) plain(`\nStudio: ${stackUrl}/studio/`)
 }

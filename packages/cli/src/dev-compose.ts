@@ -105,6 +105,7 @@ import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } f
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 import { grantAuthSchemaAccess, privatizeTableDefaults, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
 import { spawnComposeEngine } from "./compose-engine-run.js"
+import { waitForRestReady } from "./rest-ready.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
@@ -1359,6 +1360,9 @@ export async function pushSchemaDocker(
     compose: { project, composePath: paths.composePath },
   })
 
+  // Last, so the admin user and the buckets are not held up by it. `supatype dev` never comes
+  // through here: it pushes before PostgREST starts, so PostgREST finds the schemas on its first try.
+  await waitForRestReady(loopbackBase(kongPort), anonKey)
   console.log("[supatype] Schema pushed.")
 }
 
