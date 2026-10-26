@@ -121,6 +121,7 @@ cmd_set() {
   released_image "$tag" "$sha" >/dev/null
   printf '%s\n' "$sha" >"$PIN_FILE"
   printf 'engine-pin: %s now names %s (%s)\n' "${PIN_FILE#"$ROOT/"}" "$sha" "$tag" >&2
+  printf 'engine-pin: regenerate the examples with it and commit them too: pnpm generate:examples\n' >&2
 }
 
 case "${1:-}" in

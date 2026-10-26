@@ -33,7 +33,7 @@ import { pathToFileURL } from "node:url"
 /**
  * Load the project's generated client, which is what registers its exact-value columns.
  *
- * An application does this with a static import, `import { createClient } from "./supatype/client"`.
+ * An application does this with a static import, `import { createClient } from "./supatype/generated/client"`.
  * This file is compiled from the repository and runs against a project scaffolded into a temporary
  * directory, so the path is only known at runtime, but the effect is identical: importing the
  * generated module is what tells the client which columns must not be read as doubles.

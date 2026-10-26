@@ -5,7 +5,7 @@
  * exactly two states worth distinguishing, and the design turns on telling them apart:
  *
  *   nothing registered   the project never generated, or the app imported `createClient` from the
- *                        package instead of from `supatype/client`
+ *                        package instead of from `supatype/generated/client`
  *   registered, unknown  the column is new since the last push, or reached through an embed
  *
  * Neither is papered over. The previous design fell back to fetching PostgREST's OpenAPI document,
@@ -61,7 +61,7 @@ describe("parseRowsExactly", () => {
     expect(out.ok).toBe(false)
     expect(!out.ok && out.columns).toEqual(["views"])
     expect(!out.ok && out.message).toContain("supatype push")
-    expect(!out.ok && out.message).toContain('import { createClient } from "./supatype/client"')
+    expect(!out.ok && out.message).toContain('import { createClient } from "./supatype/generated/client"')
   })
 
   it("says something different when the kinds are registered but the column is not", () => {
