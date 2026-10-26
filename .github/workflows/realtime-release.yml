@@ -97,7 +97,7 @@ jobs:
       - name: Install and bundle realtime
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @supatype/realtime build
+          pnpm --filter "@supatype/realtime..." build
           node packages/realtime/scripts/build-release-bundle.mjs
 
       - name: Package standalone binary
