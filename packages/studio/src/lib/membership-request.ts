@@ -1,5 +1,5 @@
 import type { SupatypeClient } from "@supatype/client"
-import { bodyMessage, isJsonObject, type Guard } from "./json.js"
+import { bodyErrorText, isJsonObject, type Guard } from "./json.js"
 import { membershipBase } from "./membership-url.js"
 import { studioAuthHeaders } from "./studio-auth-headers.js"
 import { studioGatewayHeaders } from "./studio-gateway-headers.js"
@@ -12,9 +12,7 @@ export interface MembershipInit {
 
 /** Why the server refused, in its own words: `message`, then `error`, then the status. */
 function refusalMessage(body: unknown, status: number): string {
-  const object = isJsonObject(body) ? body : {}
-  const error = object["error"]
-  return bodyMessage(object) ?? (typeof error === "string" ? error : undefined) ?? `Request failed (${status})`
+  return bodyErrorText(isJsonObject(body) ? body : {}) ?? `Request failed (${status})`
 }
 
 /**

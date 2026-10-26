@@ -1,4 +1,4 @@
-import { isJsonObject } from "./json.js"
+import { bodyErrorText, isJsonObject } from "./json.js"
 
 /**
  * What Studio says when a Studio role cannot do something: one sentence naming the role and what it
@@ -39,10 +39,14 @@ export function roleRefusalText(refusal: RoleRefusal): string {
  */
 const ROLE_REFUSALS = [/^Studio role "/, /service_role required/]
 
-/** The message a refusal body carries, under whichever key its upstream uses. */
+/**
+ * The message a refusal body carries, under whichever key its upstream uses. The proxy puts its
+ * code in `error` and the sentence in `message`, so `message` is read before `error`, which is
+ * where an older proxy put the sentence.
+ */
 function refusalMessage(body: unknown): string | null {
   if (!isJsonObject(body)) return null
-  const text = body["error"] ?? body["message"] ?? body["msg"]
+  const text = bodyErrorText(body) ?? body["msg"]
   return typeof text === "string" ? text : null
 }
 

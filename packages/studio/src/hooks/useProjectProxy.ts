@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react"
 import { DatabaseError, sqlstateInMessage, sqlstateOf } from "../lib/database-error.js"
-import { isJsonObject, isString } from "../lib/json.js"
+import { bodyErrorText, isJsonObject, isString } from "../lib/json.js"
 import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import type { SupatypeClient } from "@supatype/client"
@@ -117,7 +117,7 @@ export async function readSqlResponse(res: Response): Promise<SqlResult> {
   const body = await res.json()
   const json = isJsonObject(body) ? body : {}
   if (!res.ok) {
-    const message = text(json["message"]) ?? text(json["error"]) ?? "SQL execution failed"
+    const message = bodyErrorText(json) ?? "SQL execution failed"
     throw new DatabaseError(message, sqlstateOf(json) ?? sqlstateInMessage(message))
   }
   const rows = Array.isArray(json["rows"]) ? json["rows"].filter(isJsonObject) : []

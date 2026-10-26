@@ -1,7 +1,7 @@
 import { useAdminClient } from "./useAdminClient.js"
 import { useApiQuery, type ApiQueryResult } from "./useApiQuery.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { type Guard, isNumber, isShape, isString, nullable, optional, readJson, readJsonObject } from "../lib/json.js"
+import { bodyErrorText, type Guard, isNumber, isShape, isString, nullable, optional, readJson, readJsonObject } from "../lib/json.js"
 
 /** One Postgres address as the operator's own machine reaches it. Never carries a password. */
 export interface DbEndpoint {
@@ -64,8 +64,7 @@ export function connectionString(endpoint: DbEndpoint, password?: string): strin
 async function fetchConnection(url: string, headers: Record<string, string>): Promise<DatabaseConnection> {
   const res = await fetch(`${url}/admin/v1/database/connection`, { headers, credentials: "include" })
   if (!res.ok) {
-    const error = (await readJsonObject(res))["error"]
-    throw new Error(typeof error === "string" ? error : `connection details request failed (${res.status})`)
+    throw new Error(bodyErrorText(await readJsonObject(res)) ?? `connection details request failed (${res.status})`)
   }
   return readJson(res, isDatabaseConnection)
 }

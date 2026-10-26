@@ -8,6 +8,7 @@ import { useFunctionLogTail } from "../hooks/useFunctionLogTail.js"
 import { useInterval } from "../hooks/useTabActivity.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import {
+  bodyErrorText,
   type Guard,
   isArrayOf,
   isNumber,
@@ -55,9 +56,7 @@ function isDataList<T>(item: Guard<T>): Guard<{ data?: T[] | null }> {
 
 /** The admin API's refusal, in its own words when it gave any. */
 async function adminError(res: Response, fallback: string): Promise<Error> {
-  const body = await readJsonObject(res)
-  const error = body["error"]
-  return new Error(typeof error === "string" ? error : fallback)
+  return new Error(bodyErrorText(await readJsonObject(res)) ?? fallback)
 }
 
 const isHttpMethod = isOneOf(["GET", "POST"] as const)

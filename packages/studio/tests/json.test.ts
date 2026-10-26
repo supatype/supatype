@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import {
+  bodyErrorText,
   isArrayOf,
   isNumber,
   isOneOf,
@@ -64,5 +65,17 @@ describe("readJson", () => {
   it("throws, with the status, on a body the guard refuses", async () => {
     const res = new Response(JSON.stringify({ id: 1 }), { status: 200 })
     await expect(readJson(res, isUser)).rejects.toThrow(/Unexpected response .*HTTP 200/)
+  })
+})
+
+describe("bodyErrorText", () => {
+  // A Studio API refusal carries a code in `error` and the sentence in `message`. An older server put
+  // the sentence in `error` alone, so that is read when there is no `message`.
+  it.each([
+    ["the sentence, not the code", { error: "forbidden", message: "Studio role \"viewer\" cannot perform this request" }, "Studio role \"viewer\" cannot perform this request"],
+    ["the sentence an older server put in error", { error: "Authentication required" }, "Authentication required"],
+    ["nothing from a body with no sentence", { code: 403 }, undefined],
+  ])("reads %s", (_, body, sentence) => {
+    expect(bodyErrorText(body)).toBe(sentence)
   })
 })
