@@ -108,7 +108,9 @@ test.describe("Studio views", () => {
     // Id, Email and Username, and `role` is on the record rather than in the list.
     const grid = page.locator("table").first()
     await expect(grid).toBeVisible()
-    await expect(grid.locator("th").first()).toHaveText(/^id\b/i)
+    // The first header cell is the "Select all" checkbox, so the first column is the first
+    // header with a name.
+    await expect(grid.locator("th").filter({ hasText: /\S/ }).first()).toHaveText(/^id\b/i)
     await expect(grid).toContainText(/email/i)
     await expect(grid).toContainText(/username/i)
     await expect(page.getByRole("button", { name: /create author/i }).first()).toBeVisible()
