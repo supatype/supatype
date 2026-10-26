@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test"
 import { expectDefects } from "../lib/defects.js"
 import { byPerson, expectedEmployees, expectedPayslips } from "../lib/expect-rows.js"
 import { gql, nodes } from "../lib/http.js"
-import { graphqlDefects } from "../lib/matrix.js"
 import { currentTier } from "../lib/stack.js"
 import { CALLERS, PEOPLE, personOf, seed, tokenOf, type Caller } from "../lib/world.js"
 
@@ -11,7 +10,6 @@ import { CALLERS, PEOPLE, personOf, seed, tokenOf, type Caller } from "../lib/wo
  * and cursors GraphQL offers on a masked column. Ported from verify-scripts/t1/gql.mjs,
  * t1/gql-queries.mjs, t1/gql-nested.mjs and t2/matrix.mjs ("GraphQL").
  */
-const tier = currentTier()
 const cursor = (value: number, id: string): string => Buffer.from(JSON.stringify([value, id])).toString("base64")
 
 test.beforeAll(() => seed())
@@ -23,14 +21,12 @@ test("anon is offered no model", async () => {
 
 for (const caller of CALLERS.filter((c) => c !== "anon")) {
   test(`${caller} reads employees`, async () => {
-    expectDefects(graphqlDefects(tier, caller))
     const r = await gql(tokenOf(caller), "{ employeeCollection { edges { node { id name grade salary ssn } } } }")
     expect(r.errors).toEqual([])
     expect(byPerson(nodes(r, "employeeCollection"), "id")).toEqual(expectedEmployees(caller))
   })
 
   test(`${caller} reads payslips`, async () => {
-    expectDefects(graphqlDefects(tier, caller))
     const r = await gql(tokenOf(caller), "{ payslipCollection { edges { node { dept employee_id amount bank_account } } } }")
     expect(r.errors).toEqual([])
     expect(byPerson(nodes(r, "payslipCollection"), "employee_id")).toEqual(expectedPayslips(caller))
@@ -91,7 +87,6 @@ const ordered = (o: GqlOracle): boolean => o.name.startsWith("order")
 for (const o of ORACLES) {
   for (const caller of ["a", "b", "admin", "service_role"] as const) {
     test(`${caller}: ${o.name}`, async () => {
-      expectDefects(graphqlDefects(tier, caller))
       const r = await gql(tokenOf(caller), o.query)
       expect(r.errors).toEqual([])
       const got = nodes(r, o.collection).map(o.read)
@@ -101,10 +96,11 @@ for (const o of ORACLES) {
 }
 
 // A nested collection over a table with a masked column (T1-N2, fixed by F66). service_role is
-// unmasked, so it is the control.
+// unmasked, so it is the control. Under tier 2 every caller, service_role included, reads the `api`
+// views, which tell pg_graphql their primary key and no foreign key, so no relation is offered.
 for (const caller of ["a", "admin", "service_role"] as const) {
   test(`${caller} reads a nested relation (T1-N2)`, async () => {
-    expectDefects(caller === "service_role" ? [] : graphqlDefects(tier, caller))
+    expectDefects(currentTier() === 2 ? ["TRAIN-FIX-N1"] : [])
     const r = await gql(tokenOf(caller), "{ employeeCollection { edges { node { id payslipCollection { edges { node { dept } } } } } } }")
     expect(r.errors).toEqual([])
     const employees = nodes(r, "employeeCollection")
