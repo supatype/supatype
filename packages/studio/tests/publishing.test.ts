@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  createRecord,
   fetchRecordStates,
   publishableLocales,
   publishingState,
@@ -283,5 +284,56 @@ describe("partly published", () => {
     expect(liveLocales(state({ en: "live", fr: "absent" }), ["en", "fr"])).toEqual(["en"])
     expect(liveLocales(state({ en: "pending", fr: "absent" }), ["en", "fr"])).toEqual(["en"])
     expect(liveLocales(state({ en: "scheduled", fr: "absent" }), ["en", "fr"])).toEqual([])
+  })
+})
+
+describe("creating a record", () => {
+  // DR5: Studio inserted the live row with the whole form and drafted it after, so a record created
+  // with English and German titles put the German live the moment English was published. A model
+  // with drafts creates its record through `supatype.create_record`, which leaves every locale out of
+  // the live row until it is published.
+
+  type Calls = { rpc: { fn: string; params: unknown; schema: string | undefined }[]; inserted: unknown[] }
+
+  function recordingClient(calls: Calls): Parameters<typeof createRecord>[0] {
+    return {
+      rpc: (fn: string, params: unknown, options?: { schema?: string }) => {
+        calls.rpc.push({ fn, params, schema: options?.schema })
+        return Promise.resolve({ data: { record_id: "new-id", version: 1 }, error: null })
+      },
+      from: () => ({
+        insert: (values: unknown) => {
+          calls.inserted.push(values)
+          return Promise.resolve({ data: [{ id: "row-id" }], error: null })
+        },
+      }),
+    } as unknown as Parameters<typeof createRecord>[0]
+  }
+
+  const model = (drafts: boolean) =>
+    ({
+      tableName: "posts",
+      primaryKey: "id",
+      versions: drafts ? versions({ localizedColumns: ["title"] }) : null,
+    }) as unknown as Parameters<typeof createRecord>[1]
+
+  const values = { title: { en: "Hello", de: "Hallo" } }
+
+  it("creates a drafts model's record as its first draft, never inserting the live row", async () => {
+    const calls: Calls = { rpc: [], inserted: [] }
+    const created = await createRecord(recordingClient(calls), model(true), values)
+    expect(created).toEqual({ id: "new-id", error: null })
+    expect(calls.inserted).toEqual([])
+    expect(calls.rpc).toEqual([
+      { fn: "create_record", params: { model_table: "posts", data: values }, schema: "supatype" },
+    ])
+  })
+
+  it("inserts the row of a model without drafts", async () => {
+    const calls: Calls = { rpc: [], inserted: [] }
+    const created = await createRecord(recordingClient(calls), model(false), values)
+    expect(created).toEqual({ id: "row-id", error: null })
+    expect(calls.inserted).toEqual([values])
+    expect(calls.rpc).toEqual([])
   })
 })
