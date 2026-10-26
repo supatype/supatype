@@ -131,3 +131,10 @@ describe("rebaselined objects", () => {
     expect(hasStrictIssues(report)).toBe(false)
   })
 })
+
+describe("hasStrictIssues() with the engine's own answer", () => {
+  it("takes `blocking` when the engine sends it, whatever the lists say", () => {
+    expect(hasStrictIssues({ ...empty, drifted: [item("a")], blocking: false })).toBe(false)
+    expect(hasStrictIssues({ ...empty, blocking: true })).toBe(true)
+  })
+})
