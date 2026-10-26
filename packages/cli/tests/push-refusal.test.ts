@@ -20,7 +20,7 @@ const { EngineError, engineBusyMessage } = await import("../src/engine-client.js
 const { ENGINE_BUSY, isJsonObject } = await import("@supatype/shared")
 const { TargetApiError } = await import("../src/target-client.js")
 const { isEngineBusy } = await import("../src/adopt-walkthrough.js")
-const { exitInitialPushFailed, pushInitialSchema } = await import("../src/dev-initial-push.js")
+const { pushInitialSchema, settleInitialPush } = await import("../src/dev-initial-push.js")
 const { parseJsonAs } = await import("./support/json.js")
 /** Imported per test, so the paths that exist on the base still run without the new module. */
 const refusal = () => import("../src/push-refusal.js")
@@ -87,12 +87,11 @@ describe("C02: dev's first push", () => {
   it("security_drift is its own refusal, and dev names `supatype dev --overwrite-drift`", async () => {
     const outcome = await pushInitialSchema(steps([`${DRIFT_JSON}\n${DRIFT_STDERR}`]))
     expect(outcome).toMatchObject({ kind: "refused", refusal: { kind: "security-drift" } })
-    if (outcome.kind === "applied") throw new Error("the push was applied")
     const exit = vi.spyOn(process, "exit").mockImplementation(() => {
       throw new Error("exit")
     })
-    expect(() => exitInitialPushFailed(outcome)).toThrow("exit")
-    expect(exit).toHaveBeenCalledWith(1)
+    expect(settleInitialPush(outcome, { beforeExit: () => undefined })).toBe(false)
+    expect(exit).not.toHaveBeenCalled()
     const said = lines.join("\n")
     expect(said).toContain("`supatype dev --overwrite-drift`")
     expect(said).toContain("policy post.post_select")
@@ -104,11 +103,7 @@ describe("C02: dev's first push", () => {
     const outcome = await pushInitialSchema(s)
     expect(outcome).toMatchObject({ kind: "refused", refusal: { kind: "engine-busy" } })
     expect(s.recoverDatabase).not.toHaveBeenCalled()
-    if (outcome.kind === "applied") throw new Error("the push was applied")
-    vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("exit")
-    })
-    expect(() => exitInitialPushFailed(outcome)).toThrow("exit")
+    expect(settleInitialPush(outcome, { beforeExit: () => undefined })).toBe(false)
     const said = lines.join("\n")
     expect(said).toMatch(/another push is running/i)
     expect(said).toMatch(/try again/i)

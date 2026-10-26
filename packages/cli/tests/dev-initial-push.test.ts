@@ -10,8 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
  * again. An engine refusal is deterministic, so the reset was the only thing that changed between
  * attempts: the second push "succeeded" against an empty database and the developer's rows and
  * uploaded files were gone. These tests pin the answers a failure can get: retried (Postgres
- * was not reachable yet), refused (the engine said no, or Docker could not pull the image it runs
- * in, and `dev` stops with what was said), and exhausted.
+ * was not reachable yet), refused (the engine said no, and `dev` carries on with what was said; or
+ * Docker could not pull the image it runs in, and `dev` stops with it), and exhausted.
  */
 
 const lines: string[] = []
@@ -20,7 +20,7 @@ vi.mock("../src/ui/messages.js", () => ({
   plain: (line?: string) => lines.push(line ?? ""),
 }))
 
-const { exitInitialPushFailed, pushInitialSchema } = await import("../src/dev-initial-push.js")
+const { pushInitialSchema, settleInitialPush } = await import("../src/dev-initial-push.js")
 const { classifyRefusalOutput } = await import("../src/push-refusal.js")
 
 /** A refused first push, as `pushInitialSchema` would return it for `message`. */
@@ -54,6 +54,7 @@ function steps(failures: string[]) {
 beforeEach(() => {
   lines.length = 0
   vi.spyOn(console, "error").mockImplementation(() => {})
+  vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void lines.push(args.join(" ")))
   vi.spyOn(console, "log").mockImplementation(() => {})
 })
 afterEach(() => {
@@ -106,16 +107,14 @@ describe("an engine refusal on the first attempt", () => {
     expect(s.recoverDatabase).not.toHaveBeenCalled()
   })
 
-  it("ends dev non-zero with the engine's message and the adopt remedy", () => {
+  it("keeps dev running with the engine's message and the adopt remedy", () => {
     const exit = vi.spyOn(process, "exit").mockImplementation((code) => {
       throw new Error(`exit ${String(code)}`)
     })
 
-    expect(() =>
-      exitInitialPushFailed(refused(UNMANAGED)),
-    ).toThrow("exit 1")
+    expect(settleInitialPush(refused(UNMANAGED), { beforeExit: () => undefined })).toBe(false)
 
-    expect(exit).toHaveBeenCalledWith(1)
+    expect(exit).not.toHaveBeenCalled()
     const out = lines.join("\n")
     expect(out).toContain("Supatype did not create them: public.orders")
     expect(out).toContain("supatype adopt")
@@ -157,9 +156,7 @@ describe("an image Docker could not pull", () => {
     vi.spyOn(process, "exit").mockImplementation((code) => {
       throw new Error(`exit ${String(code)}`)
     })
-    expect(() => exitInitialPushFailed(refused(message))).toThrow(
-      "exit 1",
-    )
+    expect(() => settleInitialPush(refused(message), { beforeExit: () => undefined })).toThrow("exit 1")
     return lines.join("\n")
   }
 
