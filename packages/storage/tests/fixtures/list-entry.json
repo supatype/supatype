@@ -1,5 +1,5 @@
 {
-  "description": "One object as the storage service's list route answers it, captured from a real response (caller-rules.test.ts). The contract for every storage server: the Node service checks its answers against this file, @supatype/client builds its fixture from it, and supatype-server's local objstore keeps a byte-identical copy at internal/objstore/testdata/node-list-entry.json. `nullable` names the fields that may be null instead of the kind shown.",
+  "description": "One object as the storage service's list route answers it, captured from a real response (caller-rules.test.ts), and one folder. The contract for every storage server: the Node service checks its answers against this file, @supatype/client builds its fixture from it, and supatype-server's local objstore keeps a byte-identical copy at internal/objstore/testdata/node-list-entry.json. A list answers a folder's direct children: one `folder` entry per subfolder, then the files in it as `entry`, each named relative to the folder. `nullable` names the fields of a file entry that may be null instead of the kind shown; a folder entry is null in every field but `bucket_id` and `name`.",
   "entry": {
     "id": "c385ffde-42b3-45e5-8981-863515e0dbf6",
     "bucket_id": "avatars",
@@ -11,6 +11,18 @@
     "last_accessed_at": "2026-10-18T07:52:09.909Z",
     "size": 4,
     "mimetype": "text/plain"
+  },
+  "folder": {
+    "id": null,
+    "bucket_id": "avatars",
+    "name": "photos",
+    "owner": null,
+    "metadata": null,
+    "created_at": null,
+    "updated_at": null,
+    "last_accessed_at": null,
+    "size": null,
+    "mimetype": null
   },
   "nullable": ["owner", "metadata", "size", "mimetype"]
 }

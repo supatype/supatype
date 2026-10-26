@@ -157,6 +157,29 @@ export function emptyCacheDescription(table: string | null | undefined, enabled:
   )
 }
 
+interface CursorPages {
+  cursor: string
+  page: number
+  next: (cursor: string) => void
+  previous: () => void
+}
+
+/**
+ * The pages of a scan cursor: the cursor each page starts at, the last being the page on screen.
+ * Back to the first page whenever `scope` changes, since a cursor belongs to one scan.
+ */
+function useCursorPages(scope: string): CursorPages {
+  const [pages, setPages] = useState({ scope, cursors: ["0"] })
+  const cursors = pages.scope === scope ? pages.cursors : ["0"]
+  const next = useCallback((cursor: string) => {
+    setPages((p) => ({ scope, cursors: [...(p.scope === scope ? p.cursors : ["0"]), cursor] }))
+  }, [scope])
+  const previous = useCallback(() => {
+    setPages((p) => ({ scope, cursors: p.scope === scope && p.cursors.length > 1 ? p.cursors.slice(0, -1) : ["0"] }))
+  }, [scope])
+  return { cursor: cursors[cursors.length - 1] ?? "0", page: cursors.length - 1, next, previous }
+}
+
 export function RestCacheBrowser({
   tableFilter,
   title = "REST Cache",
@@ -165,7 +188,9 @@ export function RestCacheBrowser({
 }: RestCacheBrowserProps): React.ReactElement {
   const client = useStudioClient()
   const serverCacheOffered = useServerRestCacheOffered()
-  const [cursor, setCursor] = useState("0")
+  // Paged rather than appended: the list refreshes on a timer, and only the page on screen can.
+  const pages = useCursorPages(tableFilter ?? "")
+  const cursor = pages.cursor
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [detail, setDetail] = useState<RestCacheDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -569,10 +594,11 @@ export function RestCacheBrowser({
         </Card>
       )}
 
-      {data && data.cursor !== "0" && (
-        <Button size="xs" variant="secondary" onClick={() => setCursor(data.cursor)}>
-          Load more
-        </Button>
+      {data && (pages.page > 0 || data.cursor !== "0") && (
+        <div className="flex items-center justify-end gap-2">
+          <Button size="sm" onClick={pages.previous} disabled={pages.page === 0}>Previous</Button>
+          <Button size="sm" onClick={() => pages.next(data.cursor)} disabled={data.cursor === "0"}>Next</Button>
+        </div>
       )}
 
       <SlidePanel

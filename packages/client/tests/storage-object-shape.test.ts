@@ -12,9 +12,9 @@
  */
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest"
 import { StorageClient } from "../src/storage.js"
-import type { RemovedObject, StorageObject } from "../src/index.js"
-import { fetchReturning } from "./support/fetch-mock.js"
-import { LISTED, UNOWNED } from "./support/storage-object.js"
+import type { RemovedObject, StorageFolder, StorageObject } from "../src/index.js"
+import { fetchCall, fetchReturning } from "./support/fetch-mock.js"
+import { FOLDER, LISTED, UNOWNED } from "./support/storage-object.js"
 import { readFileSync } from "node:fs"
 import { isArrayOf, isJsonObject, isShape, isString } from "../src/json.js"
 
@@ -52,6 +52,28 @@ describe("StorageObject", () => {
     expect(data).toEqual([LISTED, UNOWNED])
   })
 
+  // A list answers a folder's direct children: subfolders, then objects, each named relative to it.
+  it("reads a folder's subfolders alongside its objects", async () => {
+    expectTypeOf<StorageFolder>().toEqualTypeOf<typeof FOLDER>()
+    expectTypeOf<Awaited<ReturnType<ReturnType<typeof bucket>["list"]>>["data"]>().toEqualTypeOf<Array<StorageObject | StorageFolder> | null>()
+    vi.stubGlobal("fetch", fetchReturning([FOLDER, LISTED]))
+    const { data } = await bucket().list()
+    expect(data).toEqual([FOLDER, LISTED])
+  })
+
+  it("sends a search and answers with the total the server counts", async () => {
+    const fetch = fetchReturning([LISTED], 200, { "X-Total-Count": "42" })
+    vi.stubGlobal("fetch", fetch)
+    const { count } = await bucket().list("photos", { search: "shape", limit: 10, offset: 20 })
+    expect(count).toBe(42)
+    expect(JSON.parse(String(fetchCall(fetch).init.body))).toEqual({ prefix: "photos", search: "shape", limit: 10, offset: 20 })
+  })
+
+  it("answers a null total when the server sends none", async () => {
+    vi.stubGlobal("fetch", fetchReturning([LISTED]))
+    expect((await bucket().list()).count).toBeNull()
+  })
+
   it("refuses a list answer that is not a list of objects", async () => {
     vi.stubGlobal("fetch", fetchReturning([{ name: "a.txt", bucket_id: "avatars" }]))
     await expect(bucket().list()).rejects.toThrow(/Unexpected response/)
@@ -60,9 +82,10 @@ describe("StorageObject", () => {
   // The contract every storage server is checked against: if it changes, this type must follow.
   it("is the storage servers' list-entry contract", () => {
     const contract: unknown = JSON.parse(readFileSync(CONTRACT, "utf8"))
-    const isContract = isShape({ entry: isJsonObject, nullable: isArrayOf(isString) })
-    if (!isContract(contract)) throw new Error("list-entry.json is not { entry, nullable }")
+    const isContract = isShape({ entry: isJsonObject, folder: isJsonObject, nullable: isArrayOf(isString) })
+    if (!isContract(contract)) throw new Error("list-entry.json is not { entry, folder, nullable }")
     expect(contract.entry).toEqual(LISTED)
+    expect(contract.folder).toEqual(FOLDER)
     expect([...contract.nullable].sort()).toEqual(["metadata", "mimetype", "owner", "size"])
   })
 })

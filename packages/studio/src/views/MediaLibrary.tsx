@@ -1,15 +1,19 @@
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useMemo, useRef } from "react"
 import { Header } from "../components/Header.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
-import type { StorageObject } from "@supatype/client"
+import { listedOfTotal, useStorageList } from "../hooks/useStorageList.js"
+import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
+import type { StorageListEntry } from "@supatype/client"
 import { storagePublicUrl } from "../lib/storage-ref.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 type ViewMode = "grid" | "list"
 
-interface MediaFile extends StorageObject {
+type MediaFile = StorageListEntry & {
   publicUrl?: string
 }
+
+const SEARCH_DEBOUNCE_MS = 300
 
 export function MediaLibrary(): React.ReactElement {
   // Rows here are read with the service role, so the elevated-access notice applies
@@ -20,8 +24,7 @@ export function MediaLibrary(): React.ReactElement {
   const [buckets, setBuckets] = useState<Array<{ id: string; name: string; public: boolean }>>([])
   const [currentBucket, setCurrentBucket] = useState<string | null>(null)
   const [prefix, setPrefix] = useState("")
-  const [files, setFiles] = useState<MediaFile[]>([])
-  const [loading, setLoading] = useState(true)
+  const [bucketsLoading, setBucketsLoading] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [search, setSearch] = useState("")
   const [uploading, setUploading] = useState(false)
@@ -37,31 +40,20 @@ export function MediaLibrary(): React.ReactElement {
       } catch {
         // Buckets may not be accessible without service_role
       } finally {
-        setLoading(false)
+        setBucketsLoading(false)
       }
     })()
   }, [client])
 
-  useEffect(() => {
-    if (!currentBucket) return
-    void (async () => {
-      setLoading(true)
-      try {
-        const result = await client.storage.from(currentBucket).list(prefix || undefined, { limit: 100 })
-        if (result.data) {
-          const mapped: MediaFile[] = result.data.map((obj) => ({
-            ...obj,
-            publicUrl: storagePublicUrl(client, { bucket: currentBucket, path: obj.name }),
-          }))
-          setFiles(mapped)
-        }
-      } catch {
-        setFiles([])
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [client, currentBucket, prefix])
+  // A page at a time with more on request: it read a fixed 100 and hid the rest of a bigger folder.
+  // Searched by the storage server once typing pauses, so a search covers the whole folder.
+  const settledSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS)
+  const listing = useStorageList(client, { bucket: currentBucket, prefix, search: settledSearch })
+  const files = useMemo((): MediaFile[] => {
+    if (currentBucket === null) return []
+    return listing.items.map((obj) => ({ ...obj, publicUrl: storagePublicUrl(client, { bucket: currentBucket, path: obj.name }) }))
+  }, [client, currentBucket, listing.items])
+  const loading = bucketsLoading || (currentBucket !== null && listing.loading)
 
   const handleUpload = async (fileList: FileList) => {
     if (!currentBucket || fileList.length === 0) return
@@ -75,7 +67,7 @@ export function MediaLibrary(): React.ReactElement {
           upsert: true,
         })
       }
-      setPrefix(prefix)
+      listing.reload()
     } finally {
       setUploading(false)
     }
@@ -84,7 +76,7 @@ export function MediaLibrary(): React.ReactElement {
   const handleDelete = async (fileName: string) => {
     if (!currentBucket) return
     await client.storage.from(currentBucket).remove([fileName])
-    setFiles((prev) => prev.filter((f) => f.name !== fileName))
+    listing.reload()
   }
 
   const breadcrumbs = prefix
@@ -94,9 +86,7 @@ export function MediaLibrary(): React.ReactElement {
       }))
     : []
 
-  const filteredFiles = search
-    ? files.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()))
-    : files
+  const filteredFiles = files
 
   const isImage = (name: string): boolean => {
     return /\.(jpg|jpeg|png|gif|webp|avif|svg)$/i.test(name)
@@ -239,6 +229,17 @@ export function MediaLibrary(): React.ReactElement {
           </tbody>
         </table>
       )}
+
+      {!loading && currentBucket ? (
+        <div className="st-media-toolbar">
+          <span>{listedOfTotal(listing)}</span>
+          {listing.more ? (
+            <button type="button" className="st-btn st-btn-sm" onClick={listing.loadMore} disabled={listing.loadingMore}>
+              Load more
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

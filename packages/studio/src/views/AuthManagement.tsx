@@ -1,7 +1,17 @@
 import React, { useState, useCallback, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useStudioClient } from "../StudioCore.js"
-import { useApiQuery } from "../hooks/useApiQuery.js"
+import { useApiQuery, type ApiQueryResult } from "../hooks/useApiQuery.js"
+import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
+import {
+  authUserListPath,
+  NO_USER_FILTERS,
+  USER_ID_PATTERN,
+  userFilterParams,
+  userListTotal,
+  userSearchTerm,
+  type UserFilters,
+} from "../lib/auth-user-search.js"
 import { useStudioMembers } from "../hooks/useStudioMembers.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { useAuthSettings } from "../hooks/useAuthSettings.js"
@@ -21,7 +31,7 @@ import {
   readJson,
   readJsonObject,
 } from "../lib/json.js"
-import { Badge, Button, Card, Checkbox, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, Input, Pager, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
@@ -577,6 +587,113 @@ function mapAuthUser(raw: AuthUserResponse): AuthUser {
   }
 }
 
+// ─── The user list, a page at a time ─────────────────────────────────────────
+
+/** The auth server's own default page size (`defaultPerPage` in its pagination.go). */
+const USERS_PAGE_SIZE = 50
+const SEARCH_DEBOUNCE_MS = 300
+
+/** One request to the auth admin API, answered whatever its status. */
+type AuthRequest = (path: string, options?: RequestInit) => Promise<Response>
+
+/** The page asked for, zero based, and the search and choices the server filters the users by. */
+interface UserQuery {
+  filter: string
+  page: number
+  filters: UserFilters
+}
+
+/** The users on one page, which page it is, and how many users match in all. */
+interface UserPage {
+  users: AuthUser[]
+  page: number
+  total: number
+}
+
+const NO_USERS: UserPage = { users: [], page: 0, total: 0 }
+
+/** `res` when the auth server accepted the request; its refusal, in its own words, when not. */
+async function acceptedResponse(res: Response): Promise<Response> {
+  if (!res.ok) throw new Error(authErrorMessage(await readJsonObject(res)))
+  return res
+}
+
+/** One page of the list, with the total the server sends in X-Total-Count. */
+async function readUserPage(res: Response, page: number): Promise<UserPage> {
+  const users = (await readJson(res, isUserList)).users.map(mapAuthUser)
+  return { users, page, total: userListTotal(res, { filter: "", page, perPage: USERS_PAGE_SIZE }, users.length) }
+}
+
+/** The list path for one page of `query`. */
+function userPagePath(query: UserQuery): string {
+  return authUserListPath({ ...query, perPage: USERS_PAGE_SIZE })
+}
+
+/** The one user with this ID, since the server's filter does not search IDs. */
+async function fetchUserById(request: AuthRequest, id: string): Promise<UserPage> {
+  const res = await request(`/users/${encodeURIComponent(id)}`)
+  if (res.status === 404) return NO_USERS
+  const user = await readJson(await acceptedResponse(res), isAuthUserResponse)
+  return { users: [mapAuthUser(user)], page: 0, total: 1 }
+}
+
+/**
+ * The page `query` asks for. A page left empty under the viewer, by deleting its last user, falls
+ * back to the last page that still has users rather than showing none.
+ */
+async function fetchUserPage(request: AuthRequest, query: UserQuery): Promise<UserPage> {
+  if (USER_ID_PATTERN.test(query.filter)) return fetchUserById(request, query.filter)
+  const page = await readUserPage(await acceptedResponse(await request(userPagePath(query))), query.page)
+  const last = Math.max(0, Math.ceil(page.total / USERS_PAGE_SIZE) - 1)
+  if (page.users.length > 0 || query.page <= last) return page
+  return readUserPage(await acceptedResponse(await request(userPagePath({ ...query, page: last }))), last)
+}
+
+interface UserList extends ApiQueryResult<UserPage> {
+  /** The search box's text, every keystroke of it. */
+  search: string
+  setSearch: (search: string) => void
+  /** What was last asked of the server: the search once typing paused, the choices, and the page. */
+  query: UserQuery
+  setPage: (page: number) => void
+  /** New role, status or provider choices, from the first page. */
+  setFilters: (filters: UserFilters) => void
+}
+
+/**
+ * The user list, searched and paged by the auth server, so every user can be seen and found. It used
+ * to read the first 50 users and search those in the browser, which hid everyone after them.
+ *
+ * The search is handed on only once typing pauses, together with a return to the first page, so a
+ * new search and its first page are asked for in one request.
+ */
+function useUserList(request: AuthRequest): UserList {
+  const [search, setSearch] = useState("")
+  const [query, setQuery] = useState<UserQuery>({ filter: "", page: 0, filters: NO_USER_FILTERS })
+  // Lower case because the server stores emails that way and matches them case sensitively.
+  const settled = useDebouncedValue(userSearchTerm(search), SEARCH_DEBOUNCE_MS)
+  useEffect(() => {
+    setQuery((q) => (q.filter === settled ? q : { ...q, filter: settled, page: 0 }))
+  }, [settled])
+  const result = useApiQuery(() => fetchUserPage(request, query), [request, query])
+  const setPage = useCallback((page: number) => setQuery((q) => ({ ...q, page })), [])
+  const setFilters = useCallback((filters: UserFilters) => setQuery((q) => ({ ...q, filters, page: 0 })), [])
+  return { ...result, search, setSearch, query, setPage, setFilters }
+}
+
+/** "Users 51-62 of 62". */
+function userRangeText(page: UserPage): string {
+  if (page.users.length === 0) return `0 of ${page.total} users`
+  const first = page.page * USERS_PAGE_SIZE + 1
+  return `Users ${first}-${first + page.users.length - 1} of ${page.total}`
+}
+
+/** The providers to filter by: those the project has switched on, or the common ones until it says. */
+function providerChoices(external: Record<string, boolean> | undefined): string[] {
+  const enabled = Object.entries(external ?? {}).filter(([name, on]) => on && name !== "anonymous_users").map(([name]) => name)
+  return enabled.length > 0 ? enabled : providerFilters.slice(1)
+}
+
 export function AuthManagement(): React.ReactElement {
   // Rows here are read with the service role, so the elevated-access notice applies
   // to this view. See `useShowsProjectRows`.
@@ -598,55 +715,55 @@ export function AuthManagement(): React.ReactElement {
   }
 
   /** One call to the auth server through Studio's proxy, which adds the service role key. */
-  const authFetch = useCallback(async <T,>(path: string, guard: Guard<T>, options?: RequestInit): Promise<T> => {
-    const res = await fetch(`${client.url}/auth/v1${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...studioAuthHeaders(client),
-        ...options?.headers,
-      },
-      credentials: "include",
-    })
-    if (!res.ok) throw new Error(authErrorMessage(await readJsonObject(res)))
-    return readJson(res, guard)
-  }, [client])
+  const authRequest = useCallback<AuthRequest>((path, options) => fetch(`${client.url}/auth/v1${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...studioAuthHeaders(client),
+      ...options?.headers,
+    },
+    credentials: "include",
+  }), [client])
+  const authAdminRequest = useCallback<AuthRequest>(
+    (path, options) => authRequest(`/admin${path}`, options),
+    [authRequest],
+  )
+  const authFetch = useCallback(
+    async <T,>(path: string, guard: Guard<T>, options?: RequestInit): Promise<T> =>
+      readJson(await acceptedResponse(await authRequest(path, options)), guard),
+    [authRequest],
+  )
   const authAdminFetch = useCallback(
     <T,>(path: string, guard: Guard<T>, options?: RequestInit) => authFetch(`/admin${path}`, guard, options),
     [authFetch],
   )
 
-  const { data: usersData, loading, error, refetch } = useApiQuery(
-    async () => {
-      const json = await authAdminFetch("/users?page=1&per_page=50", isUserList)
-      return json.users.map(mapAuthUser)
-    },
-    [authAdminFetch],
-  )
+  const { data: userPage, loading, error, refetch, search, setSearch, query, setPage, setFilters } = useUserList(authAdminRequest)
+  const filters = query.filters
 
-  // Through the auth admin API, like the rest of user administration, rather than the SQL editor's
-  // route, which is for different roles and cannot touch the tables the auth service owns.
-  const { data: sessionsData, refetch: refetchSessions } = useApiQuery(
-    async () => {
-      const json = await authAdminFetch("/sessions", isSessionList)
-      return json.sessions.map(mapAuthSession)
-    },
-    [authAdminFetch],
-  )
-
-  const users = usersData ?? []
-  const sessions = sessionsData ?? []
+  const users = userPage?.users ?? []
   const [searchParams, setSearchParams] = useSearchParams()
   const userIdParam = searchParams.get("user")
 
-  // Filters
-  const [search, setSearch] = useState("")
-  const [filterRole, setFilterRole] = useState("all")
-  const [filterStatus, setFilterStatus] = useState("all")
-  const [filterProvider, setFilterProvider] = useState("all")
+  // Filters on the page on screen; the search box is the server's, in `useUserList`.
 
   // Panels
   const [selectedUser, setSelectedUser] = useState<AuthUser | null>(null)
+  const selectedUserId = selectedUser?.id ?? null
+
+  // The open user's sessions, asked of the auth admin API by user: it used to read every active
+  // session in the project and keep that user's in the browser. Through the auth admin API, like
+  // the rest of user administration, rather than the SQL editor's route, which is for different
+  // roles and cannot touch the tables the auth service owns.
+  const { data: sessionsData, refetch: refetchSessions } = useApiQuery(
+    async () => {
+      if (selectedUserId === null) return []
+      const json = await authAdminFetch(`/users/${encodeURIComponent(selectedUserId)}/sessions`, isSessionList)
+      return json.sessions.map(mapAuthSession)
+    },
+    [authAdminFetch, selectedUserId],
+  )
+  const sessions = sessionsData ?? []
   const [editingUser, setEditingUser] = useState<AuthUser | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [showInviteForm, setShowInviteForm] = useState(false)
@@ -682,22 +799,8 @@ export function AuthManagement(): React.ReactElement {
   }, [userIdParam, users, loading, authAdminFetch, setSearchParams])
 
   // Filtering logic
-  const filtered = users.filter((u) => {
-    if (search) {
-      const s = search.toLowerCase()
-      const fullName = u.metadata["full_name"]
-      const name = typeof fullName === "string" ? fullName : ""
-      if (!u.email.toLowerCase().includes(s) && !name.toLowerCase().includes(s) && !u.id.includes(s)) {
-        return false
-      }
-    }
-    if (filterRole !== "all" && u.role !== filterRole) return false
-    if (filterStatus === "active" && (u.disabled || !u.confirmed)) return false
-    if (filterStatus === "disabled" && !u.disabled) return false
-    if (filterStatus === "unconfirmed" && u.confirmed) return false
-    if (filterProvider !== "all" && !u.providers.some((p) => p.provider === filterProvider)) return false
-    return true
-  })
+  // Filtered by the server, across every user: the choices used to apply only to the page on screen.
+  const filtered = users
 
   const handleToggleDisable = useCallback(async (userId: string) => {
     const user = users.find((u) => u.id === userId)
@@ -785,7 +888,9 @@ export function AuthManagement(): React.ReactElement {
     refetchSessions()
   }, [authAdminFetch, refetchSessions])
 
-  if (loading) {
+  // Only before the first page arrives: a search or a page change keeps the list, and its search
+  // box, on screen while the next one loads.
+  if (loading && userPage === null) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
         Loading users…
@@ -821,7 +926,9 @@ export function AuthManagement(): React.ReactElement {
     }
   }
 
-  if (users.length === 0 && !panelOpen) {
+  // A search or a choice that matches nobody is not an empty project: the list stays, saying so.
+  const narrowed = query.filter !== "" || search.trim() !== "" || Object.keys(userFilterParams(filters)).length > 0
+  if (userPage?.total === 0 && !narrowed && !panelOpen) {
     return (
       <EmptyState
         title="No users registered yet."
@@ -842,17 +949,17 @@ export function AuthManagement(): React.ReactElement {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <Select className="w-[140px]" value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
+        <Select className="w-[140px]" value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value })}>
           <option value="all">All roles</option>
           {availableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
         </Select>
-        <Select className="w-[140px]" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+        <Select className="w-[140px]" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
           <option value="all">All status</option>
           {statusFilters.slice(1).map((s) => <option key={s} value={s}>{s}</option>)}
         </Select>
-        <Select className="w-[140px]" value={filterProvider} onChange={(e) => setFilterProvider(e.target.value)}>
+        <Select className="w-[140px]" value={filters.provider} onChange={(e) => setFilters({ ...filters, provider: e.target.value })}>
           <option value="all">All providers</option>
-          {providerFilters.slice(1).map((p) => <option key={p} value={p}>{p}</option>)}
+          {providerChoices(authSettings?.external).map((p) => <option key={p} value={p}>{p}</option>)}
         </Select>
         <Button onClick={() => setShowInviteForm(true)}>Invite User</Button>
         <Button variant="primary" onClick={() => setShowCreateForm(true)}>+ Create User</Button>
@@ -861,7 +968,7 @@ export function AuthManagement(): React.ReactElement {
       {panelOpen ? null : actionBanner}
 
       {/* User list */}
-      <Card className="overflow-auto">
+      <Card className={loading ? "overflow-auto opacity-60 transition-opacity" : "overflow-auto"} aria-busy={loading}>
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">
@@ -941,7 +1048,7 @@ export function AuthManagement(): React.ReactElement {
             ))}
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                <td colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                   No users found
                 </td>
               </tr>
@@ -950,9 +1057,17 @@ export function AuthManagement(): React.ReactElement {
         </table>
       </Card>
 
-      <div className="text-xs text-muted-foreground mt-2">
-        {filtered.length} of {users.length} users shown
-      </div>
+      {userPage ? (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground mt-2">{userRangeText(userPage)}</span>
+          {/* The page of the rows on screen, not the one being asked for: they differ while it loads. */}
+          <Pager
+            at={{ page: userPage.page, pageSize: USERS_PAGE_SIZE, total: userPage.total }}
+            onPage={setPage}
+            busy={loading}
+          />
+        </div>
+      ) : null}
 
       <SlidePanel
         open={panelOpen}

@@ -14,7 +14,7 @@ const PUBLIC_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type, apikey, x-upsert",
-  "Access-Control-Expose-Headers": "Content-Length, Content-Type, ETag",
+  "Access-Control-Expose-Headers": "Content-Length, Content-Type, ETag, X-Total-Count",
   "Access-Control-Max-Age": "86400",
 }
 

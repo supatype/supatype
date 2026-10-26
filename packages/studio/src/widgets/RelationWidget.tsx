@@ -8,14 +8,17 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { bodyMessage, isJsonObject, readJsonObject } from "../lib/json.js"
 import { stringOption } from "./field-options.js"
 import type { WidgetProps } from "./FieldWidget.js"
+import type { ModelConfig } from "../config.js"
+import { containsPattern } from "../lib/postgrest-search.js"
 import type { SupatypeClient } from "@supatype/client"
 import {
   fetchAuthUserById,
-  fetchAuthUsers,
   fetchAuthUsersByIds,
   inferAuthUserRelation,
   relationDisplayFromAuthUser,
   SYSTEM_AUTH_USER,
+  searchAuthUsers,
+  type AuthUserSummary,
   type RelationDisplay,
 } from "../lib/relation-auth-users.js"
 
@@ -80,6 +83,66 @@ function rowToOption(row: Record<string, unknown>, displayField: string): Relati
   const id = String(row["id"] ?? row[Object.keys(row)[0]!] ?? "")
   const label = String(row[displayField] ?? row["name"] ?? row["title"] ?? row["email"] ?? id)
   return { id, label, initials: initialsFromLabel(label) }
+}
+
+// ─── Options, a page at a time ───────────────────────────────────────────────
+
+/** Options per page of the picker. */
+const RELATION_PAGE_SIZE = 30
+
+/** One page of options, and whether the server holds more after it. */
+interface OptionPage {
+  items: RelationOption[]
+  more: boolean
+}
+
+function authUserOption(user: AuthUserSummary): RelationOption {
+  const display = relationDisplayFromAuthUser(user)
+  return { id: user.id, label: display.label, initials: display.initials, ...(display.sublabel !== undefined && { sublabel: display.sublabel }) }
+}
+
+function optionDisplay(opt: RelationOption): RelationDisplay {
+  return { label: opt.label, initials: opt.initials, ...(opt.sublabel !== undefined && { sublabel: opt.sublabel }) }
+}
+
+/** Users matching `term`, searched by the auth server, so any user can be picked. */
+async function authUserOptions(client: SupatypeClient, term: string, page: number): Promise<OptionPage> {
+  const { users, total } = await searchAuthUsers(client, term, { page, perPage: RELATION_PAGE_SIZE })
+  return { items: users.map(authUserOption), more: page * RELATION_PAGE_SIZE + users.length < total }
+}
+
+/**
+ * The column a picker pages a table in order of, so an offset means the same rows on every request:
+ * the primary key of the model the table belongs to. A table no model describes has no key Studio
+ * knows, so it pages by `ctid`, the row's physical position. That holds while the rows stay put:
+ * an update or a vacuum can move a row, so a picker open across such a change may show one twice or
+ * miss one, which is the most a table without a known key allows. It is still better than no order,
+ * where Postgres may answer any rows for any offset.
+ */
+function recordOrderKey(models: readonly ModelConfig[], table: string): string {
+  return models.find((m) => m.tableName === table || m.name === table)?.primaryKey ?? "ctid"
+}
+
+/** Where the picker reads its records: the table, its schema, the column it shows, and its order. */
+interface RecordSource {
+  table: string
+  schema: string | undefined
+  displayField: string
+  orderKey: string
+}
+
+/** Rows of `source.table` whose display field holds `term`; a full page means there may be more. */
+async function recordOptions(client: SupatypeClient, source: RecordSource, term: string, page: number): Promise<OptionPage> {
+  const params: Record<string, string> = {
+    limit: String(RELATION_PAGE_SIZE),
+    offset: String(page * RELATION_PAGE_SIZE),
+    order: `${source.orderKey}.asc`,
+  }
+  if (term) params[source.displayField] = `ilike.${containsPattern(term)}`
+  const result = await postgrestQuery(client, source.table, source.schema, params)
+  if (result.error) return { items: [], more: false }
+  const items = result.data.map((row) => rowToOption(row, source.displayField))
+  return { items, more: items.length === RELATION_PAGE_SIZE }
 }
 
 // ─── Auth user preview ────────────────────────────────────────────────────────
@@ -268,6 +331,7 @@ export function RelationWidget({ config, value, onChange, readOnly }: WidgetProp
   const client = useAdminClient()
   const [searchTerm, setSearchTerm] = useState("")
   const [options, setOptions] = useState<RelationOption[]>([])
+  const [optionsAt, setOptionsAt] = useState({ page: 0, more: false })
   const [displayMap, setDisplayMap] = useState<Record<string, RelationDisplay>>({})
   const [resolvingIds, setResolvingIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -279,6 +343,7 @@ export function RelationWidget({ config, value, onChange, readOnly }: WidgetProp
   const rawTarget = stringOption(config, "target") ?? ""
   const isAuthUser = inferAuthUserRelation(rawTarget, config.name, config.label)
   const { table: target, schema: targetSchema } = resolveTarget(rawTarget, isAuthUser)
+  const orderKey = recordOrderKey(useAdminConfig().models, target)
   const defaultDisplay = isAuthUser ? "email" : "name"
   const displayField = stringOption(config, "displayField") ?? defaultDisplay
   const isMulti = config.widget === "multirelation"
@@ -299,42 +364,26 @@ export function RelationWidget({ config, value, onChange, readOnly }: WidgetProp
     })
   }, [])
 
-  const fetchOptions = useCallback(async (term: string) => {
+  /** Page `page` of the options matching `term`: the first replaces the list, later ones extend it. */
+  const fetchOptions = useCallback(async (term: string, page: number) => {
     if (!target && !isAuthUser) return
-    setLoading(true)
+    // Only a new search blanks the list; loading more keeps what is shown.
+    if (page === 0) setLoading(true)
     try {
-      if (isAuthUser) {
-        const users = await fetchAuthUsers(client, term)
-        const items = users.map((u) => {
-          const display = relationDisplayFromAuthUser(u)
-          const opt: RelationOption = {
-            id: u.id,
-            label: display.label,
-            initials: display.initials,
-          }
-          if (display.sublabel) opt.sublabel = display.sublabel
-          return opt
-        })
-        setOptions(items)
-        mergeDisplay(Object.fromEntries(users.map((u) => [u.id, relationDisplayFromAuthUser(u)])))
-        return
-      }
-      const params: Record<string, string> = { limit: "30" }
-      if (term) params[displayField] = `ilike.%${term}%`
-      const result = await postgrestQuery(client, target, targetSchema, params)
-      if (!result.error && result.data) {
-        const items = result.data.map((row) => rowToOption(row, displayField))
-        setOptions(items)
-        mergeDisplay(Object.fromEntries(items.map((o) => [o.id, { label: o.label, initials: o.initials }])))
-      }
+      const next = isAuthUser
+        ? await authUserOptions(client, term, page)
+        : await recordOptions(client, { table: target, schema: targetSchema, displayField, orderKey }, term, page)
+      setOptions((prev) => (page === 0 ? next.items : [...prev, ...next.items]))
+      setOptionsAt({ page, more: next.more })
+      mergeDisplay(Object.fromEntries(next.items.map((o) => [o.id, optionDisplay(o)])))
     } finally {
       setLoading(false)
     }
-  }, [client, target, targetSchema, displayField, isAuthUser, mergeDisplay])
+  }, [client, target, targetSchema, displayField, orderKey, isAuthUser, mergeDisplay])
 
   useEffect(() => {
     if (!pickerOpen) return
-    const t = setTimeout(() => { void fetchOptions(searchTerm) }, searchTerm ? 200 : 0)
+    const t = setTimeout(() => { void fetchOptions(searchTerm, 0) }, searchTerm ? 200 : 0)
     return () => clearTimeout(t)
   }, [pickerOpen, searchTerm, fetchOptions])
 
@@ -449,6 +498,19 @@ export function RelationWidget({ config, value, onChange, readOnly }: WidgetProp
               onSelect={() => handleSelect(opt.id)}
             />
           ))}
+          {optionsAt.more && (
+            <li>
+              <button
+                type="button"
+                className="st-relation-option"
+                onClick={() => { void fetchOptions(searchTerm, optionsAt.page + 1) }}
+              >
+                <span className="st-relation-option-text">
+                  <span className="st-relation-option-sublabel">Load more</span>
+                </span>
+              </button>
+            </li>
+          )}
           {options.length === 0 && (
             <li className="st-relation-option-empty">
               {searchTerm ? `No results for "${searchTerm}"` : "No records found"}

@@ -74,6 +74,16 @@ function matchRoute(
   return null
 }
 
+/** The matching route, or "malformed" when the path's percent-encoding cannot be decoded. */
+function matchedOrMalformed(method: string, pathname: string): ReturnType<typeof matchRoute> | "malformed" {
+  try {
+    return matchRoute(method, pathname)
+  } catch (err) {
+    if (err instanceof URIError) return "malformed"
+    throw err
+  }
+}
+
 // ─── Register routes ────────────────────────────────────────────────────────────
 
 // Bucket routes (all require service_role)
@@ -140,7 +150,11 @@ export function createServer() {
       return
     }
 
-    const matched = matchRoute(method, url.pathname)
+    const matched = matchedOrMalformed(method, url.pathname)
+    if (matched === "malformed") {
+      sendJson(res, 400, { error: "Malformed percent-encoding in the path" })
+      return
+    }
     if (!matched) {
       sendJson(res, 404, { error: "Not found" })
       return

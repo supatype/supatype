@@ -267,13 +267,19 @@ Deno.serve({
       { executionId: context.executionId, functionName: fnName },
       async () => handlers[fnName]!(req, context),
     )
+    // After the invocation's context has ended, so it names its function itself: the server keeps a
+    // function's own log by this field.
     emit("info", req.method + " /functions/v1/" + fnName + " -> " + response.status, {
+      request_id: context.executionId,
+      function: fnName,
       status: response.status,
       duration_ms: Number((performance.now() - start).toFixed(1)),
     })
     return response
   } catch (err) {
     emit("error", err instanceof Error ? err.message : "Unknown error", {
+      request_id: context.executionId,
+      function: fnName,
       status: 500,
       duration_ms: Number((performance.now() - start).toFixed(1)),
     })
