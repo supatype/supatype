@@ -746,6 +746,9 @@ importers:
 
   packages/realtime:
     dependencies:
+      '@supatype/shared':
+        specifier: workspace:*
+        version: link:../shared
       jsonwebtoken:
         specifier: ^9.0.0
         version: 9.0.3

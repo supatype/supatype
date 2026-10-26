@@ -1,26 +1,35 @@
 /** Restore system relation targets (e.g. supatype:user) in engine-generated admin config. */
 
-import { isJsonObject } from "@supatype/shared"
+import { isJsonObject, keptName } from "@supatype/shared"
 import { astModels, objectAt } from "./ast-read.js"
+import { resolveTableName } from "./augmentation-generator.js"
 
+/** The key column a relation field is stored in, as Postgres keeps it. */
 function fieldNameToForeignKey(fieldName: string): string {
+  return keptName(snakeKey(fieldName))
+}
+
+function snakeKey(fieldName: string): string {
   return fieldName
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
     .replace(/([a-z\d])([A-Z])/g, "$1_$2")
     .toLowerCase() + "_id"
 }
 
-/** Each model's relations to a system target (`supatype:user`), by lowercased model name then foreign key. */
+/**
+ * Each model's relations to a system target (`supatype:user`), by table then foreign key. By the
+ * table as Postgres keeps it, which is what the admin config names: a lowercased model name missed
+ * every multi-word model (`blogpost` for `blog_post`) and every table with a declared name.
+ */
 function systemRelationTargets(ast: unknown): Map<string, Map<string, string>> {
   const targets = new Map<string, Map<string, string>>()
   for (const model of astModels(ast)) {
-    const name = model["name"]
-    if (typeof name !== "string") continue
+    const table = resolveTableName(model)
     for (const [fieldName, field] of Object.entries(objectAt(model, "fields") ?? {})) {
       const target = isJsonObject(field) && field["kind"] === "relation" ? field["target"] : undefined
       if (typeof target !== "string" || !target.includes(":")) continue
-      const forModel = targets.get(name.toLowerCase()) ?? new Map<string, string>()
-      targets.set(name.toLowerCase(), forModel)
+      const forModel = targets.get(table) ?? new Map<string, string>()
+      targets.set(table, forModel)
       forModel.set(fieldNameToForeignKey(fieldName), target)
     }
   }

@@ -20,7 +20,7 @@ import { isAbsolute, normalize, relative, sep } from "node:path"
 import { Node, Project, ts, type SourceFile, type TypeLiteralNode, type TypeNode } from "ts-morph"
 import { extractSchemaAstFromTypes, walkSchemaSourceAbsPaths } from "./type-extractor.js"
 import type { DbColumnState } from "./pull-utils.js"
-import { isJsonObject } from "@supatype/shared"
+import { isJsonObject, keptName } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
 import { isDbColumnState } from "./engine-answers.js"
 import type { ExtractedSchemaAstV2, ModelAstV2 } from "./schema-ast-v2.js"
@@ -293,6 +293,19 @@ export interface PlanInput {
   identityColumns?: boolean
 }
 
+/**
+ * The models stored in `table`, a name the database reported. A model's table name is compared as
+ * Postgres keeps it, since the database never holds more than its first 63 bytes.
+ */
+function modelsWithTable(ast: ExtractedSchemaAstV2 | null, table: string): ModelAstV2[] {
+  return (ast?.models ?? []).filter((m) => keptName(m.annotations.db.tableName) === table)
+}
+
+/** Whether `model` has a field stored in `column`, as Postgres keeps the field's name. */
+function declaresColumn(model: ModelAstV2, column: string): boolean {
+  return Object.keys(model.fields).some((key) => keptName(key) === column)
+}
+
 /** Work out how to declare an adopted column, without writing anything. */
 export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
   const { table, column } = input
@@ -311,12 +324,12 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
     return withCanonicalLine(manual(`the schema could not be read (${messageOf(err)})`), input.live, input.identityColumns)
   }
   // Declared already (adopting a table hands over its declared columns too): nothing to add.
-  const declaring = (ast?.models ?? []).filter((m) => m.annotations.db.tableName === table && column in m.fields)
+  const declaring = modelsWithTable(ast, table).filter((m) => declaresColumn(m, column))
   if (declaring.length === 1) return { status: "declared", table, column, model: declaring[0]!.name }
   if (input.live === undefined) {
     return manual(`the database did not report column ${table}.${column}, so its type is not known`)
   }
-  const models = (ast?.models ?? []).filter((m) => m.annotations.db.tableName === table)
+  const models = modelsWithTable(ast, table)
   if (models.length !== 1) {
     const reason =
       models.length === 0
@@ -440,7 +453,7 @@ function verify(plan: ColumnDeclarationPlan, entryPath: string, cwd: string): st
   } catch (err: unknown) {
     return messageOf(err)
   }
-  const models = (ast?.models ?? []).filter((m) => m.annotations.db.tableName === plan.table)
+  const models = modelsWithTable(ast, plan.table)
   if (models.length !== 1 || models[0]!.name !== plan.model) return `model ${plan.model} is not found`
   const field = models[0]!.fields[plan.key]
   if (field === undefined) return `field ${plan.key} is not found`

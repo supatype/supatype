@@ -13,6 +13,13 @@ export {
 } from "./capabilities-cache.js"
 export { FUNCTION_NAME, FUNCTION_NAME_RULE, isFunctionName } from "./function-name.js"
 export {
+  MAX_IDENTIFIER_BYTES,
+  keptName,
+  makeObjectName,
+  utf8ByteLength,
+  versionsTableName,
+} from "./identifier-names.js"
+export {
   isArrayOf,
   isBoolean,
   isJsonObject,

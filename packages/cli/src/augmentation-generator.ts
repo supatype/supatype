@@ -3,6 +3,7 @@ import {
   junctionTablesOf,
   relationshipsOf,
   renderRelationships,
+  toSnakeCase,
   type JunctionTable,
 } from "./augmentation-relationships.js"
 import {
@@ -12,6 +13,7 @@ import {
   isShape,
   isString,
   isUnknown,
+  keptName,
   optional,
   type Guard,
 } from "@supatype/shared"
@@ -49,19 +51,28 @@ export function astModelsOf(ast: unknown): AstModel[] {
 }
 
 /**
- * Shared with the hooks generator on purpose.
+ * The table a model is stored in, as Postgres keeps it (63 bytes, as the engine cuts it). Shared with
+ * the hooks generator on purpose.
  *
  * A hook's `row` must be the same shape the client sees for that table, and two copies of this logic
  * would drift: the client would gain a column type the hook handler did not, which is the failure
  * mode this codebase has already paid for once.
  */
-export function resolveTableName(model: AstModel): string {
-  const fromAnnotations = model.annotations?.db?.tableName
+export function resolveTableName(model: unknown): string {
+  return keptName(statedTableName(model))
+}
+
+/**
+ * The table name as the schema states it, before Postgres cuts it: its declared name, else the
+ * model name in snake_case, as the engine names it. A junction is named from these, joined and then
+ * cut, so it needs the full names rather than the kept ones.
+ */
+export function statedTableName(model: unknown): string {
+  const fromAnnotations = objectAt(model, "annotations", "db")?.["tableName"]
   if (typeof fromAnnotations === "string" && fromAnnotations.length > 0) return fromAnnotations
-  if (typeof model.tableName === "string" && model.tableName.length > 0) return model.tableName
-  if (typeof model.name === "string" && model.name.length > 0) {
-    return model.name.replace(/([A-Z])/g, "_$1").replace(/^_/, "").toLowerCase()
-  }
+  const own = objectAt(model)
+  if (typeof own?.["tableName"] === "string" && own["tableName"].length > 0) return own["tableName"]
+  if (typeof own?.["name"] === "string" && own["name"].length > 0) return toSnakeCase(own["name"])
   return "unknown"
 }
 
@@ -76,7 +87,7 @@ export function generateClientAugmentation(ast: unknown): string {
   const models = astModelsOf(ast)
   const junctions = junctionTablesOf({
     models,
-    tableName: resolveTableName,
+    tableName: statedTableName,
     tsOf: toTsType,
   })
 
@@ -185,7 +196,7 @@ function modelLines(model: AstModel, models: AstModel[]): string[] {
     `      Update: ${indent(generateUpdateType(model.fields), 6)}`,
     // Where `update` saves drafts and takes `{ publish: true }`.
     ...(keepsDrafts(model) ? ["      Drafts: true"] : []),
-    `      ${renderRelationships(relationshipsOf(model, models, resolveTableName), 6)}`,
+    `      ${renderRelationships(relationshipsOf(model, models, statedTableName), 6)}`,
     "    }",
   ]
 }
