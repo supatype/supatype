@@ -39,7 +39,7 @@ import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
-import { syncDatabaseUrlPort } from "./db-port.js"
+import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
@@ -741,9 +741,7 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
 function syncDatabaseUrlToStack(cwd: string, config: SupatypeProjectConfig): void {
   const dbPort = syncDatabaseUrlPort(cwd, composeRenderMode(cwd, config.project.name) === "dev")
   if (dbPort === null) return
-  console.log(
-    `[supatype] DATABASE_URL port ${dbPort.from} -> ${dbPort.to} in .env, to match ${dbPort.envKey}.`,
-  )
+  console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
 }
 
 /**
@@ -1880,6 +1878,24 @@ async function runComposeEngineGenerator(
 }
 
 /**
+ * The in-compose engine as {@link engineRequest} takes it, for generating only. No database URL:
+ * `/generate` reads the AST alone and runs without starting the database.
+ */
+async function composeGeneratorEngine(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  config: SupatypeProjectConfig,
+): Promise<ComposeEngine> {
+  const engineImage = await schemaEngineImageForPush(config, cwd)
+  return {
+    target: { cwd, project: composeProject, composePath: paths.composePath, engineImage },
+    databaseUrl: "",
+    capabilities: () => dockerEngineCapabilities(cwd, config),
+  }
+}
+
+/**
  * Write `admin-config.json` and the generated types using the in-compose engine.
  *
  * The fallback for a host engine that could not be fetched. Without it, a `supatype dev` that
@@ -1908,6 +1924,7 @@ export async function generateViaComposeEngine(
   // could not be fetched, and these need no engine at all, so there is no reason for a project on
   // this path to end up with fewer generated files than one on the other.
   writeDevAstOutputs(cwd, ast, config, " (in-compose engine).")
+  await writeDevSeedBuilder(cwd, config, ast, await composeGeneratorEngine(paths, cwd, composeProject, config))
 
   const adminOut = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["admin"])
   if (!adminOut) return false

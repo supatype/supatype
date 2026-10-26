@@ -105,6 +105,11 @@ export interface DbPortSync {
   envKey: ComposeDbPublish["envKey"]
 }
 
+/** The line every caller prints for a {@link DbPortSync}, naming the variable it read. */
+export function databaseUrlSyncMessage(sync: DbPortSync): string {
+  return `DATABASE_URL port ${sync.from} -> ${sync.to} in .env, to match ${sync.envKey}.`
+}
+
 /**
  * Rewrite `DATABASE_URL`'s port to match the port the stack's layout publishes Postgres on, and
  * report it.

@@ -17,7 +17,8 @@ import { join, relative, resolve, sep } from "node:path"
 import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import { engineRequest, ensureEngine, type ComposeEngine } from "../engine-client.js"
-import { isLocalDatabaseUrl } from "../db-port.js"
+import { DEFAULT_DB_PORT, isLocalDatabaseUrl } from "../db-port.js"
+import { composeRenderMode } from "../compose-render-mode.js"
 import {
   isArrayOf,
   isBoolean,
@@ -31,7 +32,7 @@ import {
 } from "@supatype/shared"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
-import { redact, resolveHostDatabaseUrl } from "../host-database.js"
+import { composeDbHostPort, redact, resolveHostDatabaseUrl } from "../host-database.js"
 import { collectSeed, SeedCollectionFailed } from "../seed-runner.js"
 import { seedBuilderPathWithDefaults } from "../type-generation.js"
 import type { SeedConfig, SeedIr } from "../seed.js"
@@ -191,9 +192,20 @@ export async function seedEngine(
   dsn: string,
 ): Promise<ComposeEngine | undefined> {
   if (connection !== undefined && connection.trim() !== "") return undefined
-  if (!isLocalDatabaseUrl(dsn)) return undefined
+  if (!isStackDatabaseUrl(cwd, config, dsn)) return undefined
   const { projectComposeEngine } = await import("../dev-compose.js")
   return projectComposeEngine(cwd, config)
+}
+
+/**
+ * True when `dsn` is the stack's own database as the host reaches it: on this machine, at the port
+ * the stack's layout publishes Postgres on. A local URL at any other port is another Postgres, which
+ * the compose engine, connecting inside the stack network, would not be seeding.
+ */
+function isStackDatabaseUrl(cwd: string, config: SupatypeConfig, dsn: string): boolean {
+  if (!isLocalDatabaseUrl(dsn)) return false
+  const port = new URL(dsn).port || String(DEFAULT_DB_PORT)
+  return port === String(composeDbHostPort(cwd, composeRenderMode(cwd, config.project.name)))
 }
 
 // --- Discovery ---
