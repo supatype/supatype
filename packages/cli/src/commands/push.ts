@@ -26,8 +26,17 @@ import {
   unresolvablePreviewMessage,
 } from "../preview-config-check.js"
 import { pinnedVersion } from "../binary-cache.js"
-import { isRisky, plannedChanges, printDiffOperations, printDiffWarnings } from "../diff-output.js"
+import {
+  formatSecurityDrift,
+  isRisky,
+  plannedChanges,
+  printDiffOperations,
+  printDiffWarnings,
+  securityDrift,
+} from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
+import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
+import type { FeatureNeed } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
@@ -39,6 +48,7 @@ import { cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
 import { refreshFunctionsContext } from "../functions-context-refresh.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
+  requireTargetFeatures,
   resolveTarget,
   targetSchemaAdopt,
   targetSchemaDiff,
@@ -72,8 +82,13 @@ export function registerPush(program: Command): void {
     .option("--env <name>", "Target environment when linked")
     .option("--direct", "Use local engine subprocess (skip control plane)")
     .option("--local", "Alias for --direct")
+    .option(
+      "--overwrite-drift",
+      "Put back policies, grants, labels and RLS changed outside Supatype without asking",
+    )
     .action(async (opts: {
       yes?: boolean
+      overwriteDrift?: boolean
       connection?: string
       env?: string
       direct?: boolean
@@ -88,24 +103,36 @@ export function registerPush(program: Command): void {
       assertEngineSupportsSchema(ast, pinnedVersion("engine", config))
       assertPreviewAddressesResolve(config)
 
+      const run: PushRun = { yes: opts.yes ?? false, overwriteDrift: opts.overwriteDrift ?? false }
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || opts.local || Boolean(opts.connection)
 
       if (linked && !useDirect && !opts.connection) {
         const target = resolveTarget(cwd, { env: opts.env })
-        await pushViaTarget(cwd, config, target, ast, pgSchema, opts.yes ?? false)
+        await pushViaTarget(cwd, config, target, ast, pgSchema, run)
         return
       }
 
       if (!opts.connection && !useDirect && resolveRuntimeProvider(config) === "docker") {
         const localTarget = resolveTarget(cwd, { env: opts.env })
         if (localTarget.mode === "local" && localTarget.token) {
-          await pushViaTarget(cwd, config, localTarget, ast, pgSchema, opts.yes ?? false)
+          await pushViaTarget(cwd, config, localTarget, ast, pgSchema, run)
           return
         }
-        const { dockerAdoptionSteps, pushSchemaDocker } = await import("../dev-compose.js")
+        const { dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } = await import("../dev-compose.js")
+        const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT])
+        if (run.overwriteDrift) await gate()
         await pushOfferingAdoption(
-          () => withSpinner("Applying schema via Docker Compose", () => pushSchemaDocker(cwd, config)),
+          // No diff is read first on this path, so the engine's refusal is where drift shows up.
+          () =>
+            pushConsentingToDrift(
+              (overwriteDrift) =>
+                withSpinner("Applying schema via Docker Compose", () =>
+                  pushSchemaDocker(cwd, config, { overwriteDrift }),
+                ),
+              run,
+              { beforeOverwrite: gate },
+            ),
           dockerAdoptionSteps(cwd, config),
           { yes: opts.yes ?? false, retry: "supatype push" },
         )
@@ -117,8 +144,43 @@ export function registerPush(program: Command): void {
         direct: true,
         connection: opts.connection,
       })
-      await pushViaTarget(cwd, config, target, ast, pgSchema, opts.yes ?? false)
+      await pushViaTarget(cwd, config, target, ast, pgSchema, run)
     })
+}
+
+const OVERWRITE_DRIFT: FeatureNeed = { feature: "overwrite_drift", flag: "--overwrite-drift" }
+
+/** How this push was asked to treat what needs a person's say. */
+export interface PushRun {
+  /** `--yes`: skip the prompts. */
+  yes: boolean
+  /** `--overwrite-drift`: put back access changed outside Supatype without asking (plan 3.5). */
+  overwriteDrift: boolean
+}
+
+/**
+ * Plan 3.5: access changed or removed outside Supatype is put back only with consent. Shows each
+ * object, then asks when a person is there; a push that cannot ask stops, since a pipeline must not
+ * revert a deliberate hand edit and a rollback could not bring it back. Returns whether to
+ * overwrite, or `null` when the push should not go ahead.
+ */
+export async function consentToSecurityDrift(
+  diff: Pick<DiffResult, "reconcile">,
+  run: PushRun,
+): Promise<boolean | null> {
+  if (run.overwriteDrift) return true
+  const drifted = securityDrift(diff)
+  if (drifted.length === 0) return false
+  plain(`\n${drifted.length} object(s) that decide who may read or write were changed outside Supatype:\n`)
+  for (const line of formatSecurityDrift(drifted)) plain(line)
+  if (run.yes || !isInteractive()) {
+    plain(
+      "\nNothing was applied. Run the push interactively to review this, or pass --overwrite-drift to put Supatype's definitions back.",
+    )
+    process.exitCode = 1
+    return null
+  }
+  return (await askToOverwrite()) ? true : null
 }
 
 async function pushViaTarget(
@@ -127,8 +189,10 @@ async function pushViaTarget(
   target: DeployTarget,
   ast: unknown,
   pgSchema: string,
-  skipConfirm: boolean,
+  run: PushRun,
 ): Promise<void> {
+  // Before anything is read or asked: a server or engine that cannot honour the flag says so now.
+  if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT])
   const diff = await withSpinner("Diffing against database", () =>
     targetSchemaDiff(target, ast, { schema: pgSchema }),
   )
@@ -142,7 +206,7 @@ async function pushViaTarget(
   } else {
     printDiffOperations(diff)
     const risky = changes.filter(isRisky)
-    if (risky.length > 0 && !skipConfirm) {
+    if (risky.length > 0 && !run.yes) {
       if (!isInteractive()) {
         logSkippedConfirm(`${risky.length} risky change(s) require confirmation`)
         plain("Aborted.")
@@ -159,6 +223,13 @@ async function pushViaTarget(
     }
   }
 
+  const overwriteDrift = await consentToSecurityDrift(diff, run)
+  if (overwriteDrift === null) return
+  // Consent given at the prompt rather than by the flag still sends the flag.
+  if (overwriteDrift && !run.overwriteDrift) {
+    await requireTargetFeatures(target, [OVERWRITE_DRIFT])
+  }
+
   const pushResult = await pushOfferingAdoption(
     () =>
       withSpinner(changes.length > 0 ? "Applying migration" : "Syncing with engine", () =>
@@ -166,6 +237,7 @@ async function pushViaTarget(
           force: true,
           schema: pgSchema,
           schemaSources: buildSchemaSourcesPayload(cwd, resolvePushedBy()),
+          overwriteDrift,
         }),
       ),
     targetAdoptionSteps(
@@ -175,7 +247,7 @@ async function pushViaTarget(
           stamped?: number
         },
     ),
-    { yes: skipConfirm, retry: "supatype push" },
+    { yes: run.yes, retry: "supatype push" },
   )
 
   if ((pushResult as { status?: string }).status === "up_to_date") {

@@ -10,8 +10,8 @@ Global flags (all commands): `--config`, `--env`, `--verbose`, `--json`, `--no-c
 |---------|---------|
 | `supatype init [name]` | Scaffold project. Flags: `--mode dev \| standalone` |
 | `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` |
-| `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY) |
-| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct` |
+| `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY), `--overwrite-drift` (every push of the session puts back access changed outside Supatype) |
+| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct`, `--overwrite-drift`. On the Docker provider a push the engine refuses over access changed outside Supatype shows each object and, in a terminal, asks before putting it back. On every path, declining keeps the hand edits, applies nothing and exits 1 |
 | `supatype diff` | Dry-run schema changes. Flags: `--connection`, `--env`, `--direct` |
 | `supatype generate` | Regenerate types without migration |
 | `supatype seed [file]` | Apply seed data in one transaction. Flags: `--atomic`, `--status`, `--connection`, `--environment`, `--force`. See [references/seeding.md](references/seeding.md) |
@@ -59,7 +59,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype self-host compose up -d` | Start production stack |
 | `supatype self-host compose down` | Stop stack |
 | `supatype self-host compose status` | Health check |
-| `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only` |
+| `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only`, `--overwrite-drift` (without it a deploy refuses on access changed outside Supatype) |
 | `supatype deploy status` | Current static deployment |
 | `supatype deploy rollback` | Roll back static deployment. Flags: `--env`, `--to <deployment-id>` |
 
@@ -98,6 +98,7 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 
 **Stopping the stack:**
 - `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit.
+- Ownership flags (such as `--overwrite-drift`) are checked first against what will run them: a linked server's `GET .../schema/capabilities`, or the engine binary's `capabilities` (its version for an older one). A server or engine that lacks one is refused with "this server does not support <flag>; update it", never sent the flag to drop it.
 - A failed schema push never resets the database. `dev` retries only while Postgres is unreachable; an engine refusal (for example unmanaged tables, fixed with `supatype adopt`) stops `dev` with the engine's message. `supatype dev --reset-db` is the only way `dev` removes data, and it removes only the Postgres volume.
 - `.supatype/dev-session.json` tracks the active dev session; the next `supatype dev` offers to clean up a stack left running after an unclean exit.
 - `supatype push` may start **Postgres only** and leave it running (intentional for prod/self-host workflows). Stop with `supatype self-host compose down`.

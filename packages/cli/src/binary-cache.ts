@@ -24,6 +24,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   rmdirSync,
@@ -242,8 +243,11 @@ export function currentPlatform(): PlatformId {
  * Resolve the binary path for a component.
  *
  * Resolution order:
- * 1. config.overrides?.[component]: local build path (must exist)
- * 2. Cached binary at ~/.supatype/cache/{component}/{version}/
+ * 1. config.overrides?.[component]: local build path (must exist). Looked at before any version is
+ *    resolved, so an override never needs the CDN: offline, an unpinned project with an override
+ *    used to fail looking up `latest`, and the engine client then fell back to whatever was cached.
+ * 2. Cached binary at ~/.supatype/cache/{component}/{version}/. Unpinned and offline, the newest
+ *    cached version, since `latest` cannot be looked up.
  * 3. Throws, so the caller should call download() first.
  *
  * Hard error if any meaningful `overrides` entry is set while the project is linked to cloud
@@ -263,9 +267,8 @@ export async function resolveBinary(
   }
 
   const overridePath = config.overrides?.[component === "postgres" ? "postgres_dir" : component]
-  const version = await resolveVersionFor(component, config)
 
-  if (version === VERSION_PIN_LOCAL && !overridePath) {
+  if (pinnedVersion(component, config) === VERSION_PIN_LOCAL && !overridePath) {
     const key = component === "postgres" ? "postgres_dir" : component
     throw new Error(
       `[versions] versions.${component} is "${VERSION_PIN_LOCAL}" but overrides.${key} is not set. ` +
@@ -310,11 +313,47 @@ export async function resolveBinary(
   }
 
   const platform = currentPlatform()
+  let version: string
+  try {
+    version = await resolveVersionFor(component, config)
+  } catch (err) {
+    // Only an unpinned project looks anything up, so this is `latest` being unreachable.
+    const cached = newestCachedVersion(component, platform)
+    if (cached !== undefined) return cachedBinaryPath(component, cached, platform)
+    const reason = err instanceof Error ? err.message : String(err)
+    const key = component === "postgres" ? "postgres_dir" : component
+    throw new Error(
+      `Could not look up the latest ${component} release (${reason}), and no ${component} binary is cached. ` +
+        `Connect to the internet and run \`supatype update\`, or pin versions.${component} to a cached ` +
+        `release, or set overrides.${key} to a local build.`,
+    )
+  }
   const binPath = cachedBinaryPath(component, version, platform)
 
   if (existsSync(binPath)) return binPath
 
   throw new Error(`${component} v${version} not found in cache. Run: supatype update`)
+}
+
+/** The highest version of `component` with a binary for `platform` in the cache, if any. */
+export function newestCachedVersion(component: Component, platform: PlatformId): string | undefined {
+  let versions: string[]
+  try {
+    versions = readdirSync(join(cacheRoot(), component))
+  } catch {
+    return undefined
+  }
+  const numeric = (v: string): number[] =>
+    v.replace(/^v/, "").split("-")[0]!.split(".").map((n) => Number.parseInt(n, 10) || 0)
+  const newestFirst = versions.sort((a, b) => {
+    const [x, y] = [numeric(a), numeric(b)]
+    for (let i = 0; i < Math.max(x.length, y.length); i += 1) {
+      const d = (y[i] ?? 0) - (x[i] ?? 0)
+      if (d !== 0) return d
+    }
+    return 0
+  })
+  return newestFirst.find((v) => existsSync(cachedBinaryPath(component, v, platform)))
 }
 
 // ---------------------------------------------------------------------------

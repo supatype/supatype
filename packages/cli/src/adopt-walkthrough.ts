@@ -11,7 +11,8 @@
  * SQL adoption would run, and asks twice before running it. Anywhere else it never adopts, because
  * agreeing to a push is not agreeing to take ownership of tables, and it prints the command instead.
  */
-import { EngineError } from "./engine-client.js"
+import { ENGINE_BUSY, EngineError } from "./engine-client.js"
+import { TargetApiError } from "./target-client.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain, warn } from "./ui/messages.js"
@@ -92,6 +93,22 @@ export async function offerAdoption(
   return adoptAfterPreview(steps, manual)
 }
 
+/**
+ * Whether `err` is the engine refusing because another push, adopt or rebaseline holds its lock:
+ * nothing was written, and trying again is the answer. From the binary, or a server's 409.
+ */
+export function isEngineBusy(err: unknown): boolean {
+  if (err instanceof EngineError) return err.reason === ENGINE_BUSY
+  if (err instanceof TargetApiError) {
+    return err.status === 409 && (err.code === ENGINE_BUSY || /another push, adopt or rebaseline is running/i.test(err.message))
+  }
+  return false
+}
+
+/** What the CLI says when adopt met a busy engine. */
+export const ENGINE_BUSY_MESSAGE =
+  "The database is busy: another push, adopt or rebaseline is running on it. Nothing was adopted; try again."
+
 async function adoptAfterPreview(steps: AdoptionSteps, manual: string): Promise<AdoptionOutcome> {
   const statements = await steps.preview()
   if (statements.length === 0) {
@@ -105,7 +122,16 @@ async function adoptAfterPreview(steps: AdoptionSteps, manual: string): Promise<
     plain(manual)
     return "declined"
   }
-  const stamped = await steps.apply()
+  let stamped: number
+  try {
+    stamped = await steps.apply()
+  } catch (err: unknown) {
+    if (!isEngineBusy(err)) throw err
+    // Nothing was written, so the push is still refused for the reason it was.
+    warn(ENGINE_BUSY_MESSAGE)
+    plain(manual)
+    return "declined"
+  }
   plain(`Adopted: ${stamped} object(s) stamped.`)
   return "adopted"
 }

@@ -45,6 +45,7 @@ import {
   postgresArchiveTag,
 } from "../binary-cache.js"
 import { ensureBinary } from "../ensure-binary.js"
+import { assertSupported, binaryCapabilities, OwnershipUnsupportedError } from "../engine-ownership-gate.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
@@ -124,6 +125,29 @@ async function assertNativeDevPortsFree(serverPort: number, postgrestPort: numbe
   }
 }
 
+/**
+ * `dev --overwrite-drift` only where the engine that will push can honour it: the compose
+ * schema-engine (or `overrides.engine`) for docker, the engine binary otherwise.
+ */
+async function requireDevEngineSupports(
+  cwd: string,
+  config: import("../project-config.js").SupatypeProjectConfig,
+  docker: boolean,
+): Promise<void> {
+  const need = [{ feature: "overwrite_drift", flag: "--overwrite-drift" }] as const
+  try {
+    if (docker) {
+      const { requireDockerFeatures } = await import("../dev-compose.js")
+      await requireDockerFeatures(cwd, config, need)
+    } else {
+      assertSupported(binaryCapabilities(await ensureBinary("engine", config)), need)
+    }
+  } catch (err: unknown) {
+    if (err instanceof OwnershipUnsupportedError) fatalError(err.message)
+    throw err
+  }
+}
+
 export function registerDev(program: Command): void {
   program
     .command("dev")
@@ -133,7 +157,18 @@ export function registerDev(program: Command): void {
     .option("--port <port>", "Port for supatype-server (overrides config)", String)
     .option("--reset-db", "Remove the local Postgres data volume before starting (asks first; storage is kept)")
     .option("--yes", "Skip the --reset-db confirmation")
-    .action(async (opts: { watch: boolean; stream?: boolean; port?: string; resetDb?: boolean; yes?: boolean }) => {
+    .option(
+      "--overwrite-drift",
+      "Every push of this session puts back policies, grants, labels and RLS changed outside Supatype",
+    )
+    .action(async (opts: {
+      watch: boolean
+      stream?: boolean
+      port?: string
+      resetDb?: boolean
+      yes?: boolean
+      overwriteDrift?: boolean
+    }) => {
       const cwd = process.cwd()
 
       // ── 1. Load project config (before TUI, fatal errors must hit real stderr) ──
@@ -164,6 +199,10 @@ export function registerDev(program: Command): void {
         await assertNativeDevPortsFree(Number(serverPort), Number(postgrestPort))
       }
 
+      // Before the session takes the terminal, so a refusal reaches it.
+      const overwriteDrift = opts.overwriteDrift === true
+      if (overwriteDrift) await requireDevEngineSupports(cwd, config, provider === "docker")
+
       beginDevSession(resolveDevUiMode(opts.stream === true))
       if (hasMeaningfulOverrides(config)) {
         console.warn("[supatype] Local binary overrides active:")
@@ -179,6 +218,7 @@ export function registerDev(program: Command): void {
           watch: opts.watch !== false,
           resetDb: opts.resetDb === true,
           yes: opts.yes === true,
+          overwriteDrift,
         })
         return
       }
@@ -357,7 +397,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       // Native Postgres builds don't include PostGIS, skip geo fields rather than failing.
       const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
-      await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config).catch(
+      await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
         (e: unknown) => console.error("[supatype] Initial schema push failed:", (e as Error).message),
       )
 
@@ -704,7 +744,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           debounceTimer = setTimeout(() => {
             debounceTimer = null
             console.log(`\n[supatype] Change detected in ${filename}, checking schema...`)
-            runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config).catch((e: unknown) =>
+            runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch((e: unknown) =>
               console.error("[supatype] Schema push failed:", (e as Error).message),
             )
           }, 300)
@@ -735,6 +775,8 @@ async function runSchemaPush(
   storagePath?: string,
   skipFieldKinds?: ReadonlySet<string>,
   config?: import("../project-config.js").SupatypeProjectConfig,
+  /** `dev --overwrite-drift`: put back access changed outside Supatype on every push. */
+  overwriteDrift = false,
 ): Promise<void> {
   // Build AST JSON from schema file.
   const { loadSchemaAst } = await import("../config.js")
@@ -780,6 +822,7 @@ async function runSchemaPush(
       database_url: dbURL,
       schema: pgSchema,
       force: true,
+      ...(overwriteDrift && { overwrite_drift: true }),
       ...(sources
         ? {
             schema_sources_gz_base64: sources.payload.dataBase64,
