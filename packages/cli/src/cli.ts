@@ -12,6 +12,7 @@ import { registerIntrospect } from "./commands/introspect.js"
 import { registerAdopt } from "./commands/adopt.js"
 import { registerGenerate } from "./commands/generate.js"
 import { registerMigrate } from "./commands/migrate.js"
+import { registerRename } from "./commands/rename.js"
 import { registerSeed } from "./commands/seed.js"
 import { registerKeys } from "./commands/keys.js"
 import { registerApp } from "./commands/app.js"
@@ -57,6 +58,7 @@ export async function run(): Promise<void> {
   registerAdopt(program)
   registerGenerate(program)
   registerMigrate(program)
+  registerRename(program)
   registerSeed(program)
   registerKeys(program)
   registerApp(program)

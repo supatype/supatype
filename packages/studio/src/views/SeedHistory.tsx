@@ -26,6 +26,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { safeParseJson } from "../lib/json.js"
 
 // --- Types ---
 
@@ -91,7 +92,7 @@ export function mapSeedRow(row: Record<string, unknown>): SeedRun {
  */
 function asCounts(value: unknown): Record<string, number> {
   const source: unknown =
-    typeof value === "string" ? safeParse(value) : value
+    typeof value === "string" ? safeParseJson(value) : value
   if (source === null || typeof source !== "object" || Array.isArray(source)) return {}
   const out: Record<string, number> = {}
   for (const [model, count] of Object.entries(source as Record<string, unknown>)) {
@@ -99,14 +100,6 @@ function asCounts(value: unknown): Record<string, number> {
     if (Number.isFinite(n)) out[model] = n
   }
   return out
-}
-
-function safeParse(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return null
-  }
 }
 
 /**

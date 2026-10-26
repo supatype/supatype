@@ -22,6 +22,7 @@ import type {
   Searchable,
   Slug,
   SmallInt,
+  SupatypeAuthUserId,
   TSVector,
   Timestamp,
   UUID,
@@ -34,8 +35,10 @@ import type {
 } from "@supatype/types"
 import type { avatars, postAttachments, postCovers } from "./buckets.js"
 
+// Keyed by the author's auth user id: the models owned through an author (`Owner<"author">`) are
+// owned by that user, which the engine can tell only from `SupatypeAuthUserId` (O1).
 export type author = Model<WithTimestamps<{
-  id: UUID
+  id: SupatypeAuthUserId
   email: Unique<Email>
   username: Unique<string>
   bio: Optional<RichText>

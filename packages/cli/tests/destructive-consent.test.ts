@@ -164,7 +164,7 @@ describe("the rename offer", () => {
     expect(result).toBe("renamed")
     expect(calls).toEqual([false, false])
     expect(writer.write).toHaveBeenCalledWith(candidate)
-    expect(questions).toEqual(["Was this a rename: member.name -> title? (writes the declaration)"])
+    expect(questions).toEqual(["Was member.name renamed to member.title? (recorded in supatype/renames.json)"])
   })
 
   it("on no falls through to the drop question, and writes nothing", async () => {
@@ -215,6 +215,35 @@ describe("the rename offer", () => {
     expect(writer.write).not.toHaveBeenCalled()
   })
 
+  it("asks about a table by its names", async () => {
+    const { push, writer } = declaringPush()
+    const questions: string[] = []
+    await pushConsentingToDestructive(push, policy, {
+      ask: async (question) => {
+        questions.push(question)
+        return true
+      },
+      interactive: () => true,
+      renameCandidates: async () => [{ kind: "table" as const, table: "member", from: "member", to: "members" }],
+      renameWriter: writer,
+    })
+    expect(questions).toEqual(["Was table member renamed to members? (recorded in supatype/renames.json)"])
+  })
+
+  it("without a terminal names the command that records each rename", async () => {
+    const { push, writer } = declaringPush()
+    const err = await pushConsentingToDestructive(push, policy, {
+      interactive: () => false,
+      renameCandidates: async () => [candidate, { kind: "table" as const, table: "team", from: "team", to: "teams" }],
+      renameWriter: writer,
+    }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DestructiveChangeRefused)
+    const message = (err as Error).message
+    expect(message).toContain("supatype rename member.name member.title")
+    expect(message).toContain("supatype rename team teams")
+    expect(writer.write).not.toHaveBeenCalled()
+  })
+
   it("does not offer again when the push after a declaration is still refused", async () => {
     const push = vi.fn(async (force: boolean) => {
       if (!force) throw refusal()
@@ -232,7 +261,7 @@ describe("the rename offer", () => {
     ).toBe("forced")
     expect(writer.write).toHaveBeenCalledOnce()
     expect(ask.mock.calls.map(([q]) => q)).toEqual([
-      "Was this a rename: member.name -> title? (writes the declaration)",
+      "Was member.name renamed to member.title? (recorded in supatype/renames.json)",
       "Apply it and lose that data?",
     ])
   })
