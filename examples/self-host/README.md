@@ -22,7 +22,9 @@ cp .env.example .env
 Set `POSTGRES_PASSWORD`, `AUTHENTICATOR_PASSWORD` and `JWT_SECRET` to values of
 your own. Leave `ANON_KEY` and `SERVICE_ROLE_KEY` blank: they are JWTs signed
 with `JWT_SECRET`, so `selfhost:up` mints them on first start and leaves any
-value you set alone.
+value you set alone. `SUPATYPE_CONTROL_PLANE_SECRET` is generated the same way:
+only the API server and the control plane receive it, and the control plane
+refuses any request that does not present it.
 
 Supatype image overrides in `.env` let you pin beta tags:
 

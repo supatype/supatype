@@ -183,3 +183,16 @@ describe("objects not checked for changes made by hand (F16, F29)", () => {
     expect(hasStrictIssues({ missing: [], staleManaged: [], unmanagedDrift: [], drifted: [UNCHECKED], blocking: true })).toBe(true)
   })
 })
+
+// IN-C 2: a key validated after commit, or an index built concurrently, that has not finished.
+describe("pending objects (added online, not finished yet)", () => {
+  it("print in their own section saying the next push finishes them, counted in the summary", () => {
+    const captured = lines()
+    const report = { ...empty, pending: [item("item_owner_id_fkey")], blocking: true } as DoctorReport
+    printReport(report)
+    const text = captured.join("\n")
+    expect(text).toMatch(/Pending .*the next push finishes it.* \(1\)/)
+    expect(text).toContain("Summary: 1 pending")
+    expect(text).not.toContain("No drift detected.")
+  })
+})

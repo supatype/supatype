@@ -1,8 +1,6 @@
 import { expect, test } from "@playwright/test"
-import { expectDefects } from "../lib/defects.js"
 import { byPerson, expectedEmployees, expectedPayslips } from "../lib/expect-rows.js"
 import { gql, nodes } from "../lib/http.js"
-import { currentTier } from "../lib/stack.js"
 import { CALLERS, PEOPLE, personOf, seed, tokenOf, type Caller } from "../lib/world.js"
 
 /**
@@ -97,10 +95,10 @@ for (const o of ORACLES) {
 
 // A nested collection over a table with a masked column (T1-N2, fixed by F66). service_role is
 // unmasked, so it is the control. Under tier 2 every caller, service_role included, reads the `api`
-// views, which tell pg_graphql their primary key and no foreign key, so no relation is offered.
+// views, whose comments give pg_graphql their foreign keys as well as their primary key, so the
+// relation is offered under the same name as in tier 1 (TRAIN-FIX-N1).
 for (const caller of ["a", "admin", "service_role"] as const) {
   test(`${caller} reads a nested relation (T1-N2)`, async () => {
-    expectDefects(currentTier() === 2 ? ["TRAIN-FIX-N1"] : [])
     const r = await gql(tokenOf(caller), "{ employeeCollection { edges { node { id payslipCollection { edges { node { dept } } } } } } }")
     expect(r.errors).toEqual([])
     const employees = nodes(r, "employeeCollection")

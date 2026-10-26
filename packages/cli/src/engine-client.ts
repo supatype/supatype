@@ -594,6 +594,13 @@ export function endpointToArgs(
     case "/admin":
       return ["admin", "--input", reqFile]
 
+    // The SQL a push would apply. Plain, it takes no lock an application waits on and records
+    // nothing; `--record` rehearses the push, under its locks, so the file records it too (IN-A).
+    case "/migrate": {
+      const record = body["record"] === true ? ["--record"] : []
+      return ["migrate", "--input", reqFile, "--schema", schema, ...force, ...record]
+    }
+
     default:
       if (endpoint === "/migrations" || endpoint.startsWith("/migrations")) {
         const action = (body["action"] as string | undefined) ?? "list"

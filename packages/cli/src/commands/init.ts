@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto"
 import { p, runClackFlow } from "../ui/clack.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
+import { CONTROL_PLANE_SECRET_ENV, generateControlPlaneSecret } from "../local-secrets.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
@@ -1237,6 +1238,10 @@ AUTHENTICATOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
 JWT_SECRET=${randomBytes(48).toString("base64url")}
 ANON_KEY=
 SERVICE_ROLE_KEY=`)
+
+  sections.push(`# Shared by the API server and the control plane only. The control plane refuses any
+# request without it, so code running in the functions worker cannot call it directly.
+${CONTROL_PLANE_SECRET_ENV}=${generateControlPlaneSecret()}`)
 
   sections.push(`# Site URL (used for email redirects)
 SITE_URL=http://localhost:3000`)

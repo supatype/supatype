@@ -12,6 +12,47 @@ export interface ConnectedClient {
   projectRef: string | null
 }
 
+/** A message that reaches a channel's other members rather than reading from the database. */
+export type ChannelAction = "broadcast" | "presence_track" | "presence_untrack"
+
+const ACTION_VERB: Record<ChannelAction, string> = {
+  broadcast: "broadcasting",
+  presence_track: "tracking presence",
+  presence_untrack: "untracking presence",
+}
+
+/**
+ * The verified claims `client` sends `action` to `channel` under, or why it may not send it.
+ *
+ * Two conditions. The client holds verified claims: any token signed with the project's secret,
+ * the anon key included, since that is what a signed-out SDK client connects with. And it is a
+ * member of the channel. Membership carries everything else: a subscription exists only once
+ * `subscribe` accepted it, so whatever subscribe enforces holds here as well.
+ *
+ * Both used to be skipped. A socket with no token could broadcast to, and announce presence on,
+ * any channel name without ever joining it.
+ */
+export function admitChannelAction(
+  client: ConnectedClient,
+  channel: string,
+  action: ChannelAction,
+): JwtClaims | string {
+  const verb = ACTION_VERB[action]
+  if (!client.claims) return `authenticate before ${verb}`
+  if (!client.subscriptions.has(channel)) return `subscribe to ${channel} before ${verb}`
+  return client.claims
+}
+
+/**
+ * The identity a client's presence is recorded under: its verified subject, never its payload.
+ *
+ * A token with no subject (the anon key) is "anonymous", which names nobody and so cannot be
+ * used to appear as somebody else.
+ */
+export function presenceKey(claims: JwtClaims): string {
+  return typeof claims.sub === "string" && claims.sub !== "" ? claims.sub : "anonymous"
+}
+
 /**
  * Manages connected clients and their channel subscriptions.
  */
@@ -52,13 +93,19 @@ export class ChannelManager {
     }
   }
 
-  /** Unsubscribe a client from a channel. */
-  unsubscribe(clientId: string, channel: string): void {
+  /**
+   * Unsubscribe a client from a channel, returning the presence it held there.
+   *
+   * Returned so the caller can tell the channel the member left. It used to be dropped here in
+   * silence, and the others kept showing a member who had gone.
+   */
+  unsubscribe(clientId: string, channel: string): PresenceEntry | undefined {
     const client = this.clients.get(clientId)
-    if (client) {
-      client.subscriptions.delete(channel)
-      client.presence.delete(channel)
-    }
+    if (!client) return undefined
+    const entry = client.presence.get(channel)
+    client.subscriptions.delete(channel)
+    client.presence.delete(channel)
+    return entry
   }
 
   /**
@@ -113,11 +160,20 @@ export class ChannelManager {
     return results
   }
 
-  /** Get all clients in a channel (for broadcast/presence). */
-  getChannelClients(channel: string): Array<{ clientId: string; client: ConnectedClient }> {
+  /**
+   * Get all clients in a channel (for broadcast/presence), within one project.
+   *
+   * A channel name is chosen by the client, so on a shared instance two projects can pick the
+   * same one. Scoped by project so one project's broadcast never reaches another's members.
+   */
+  getChannelClients(
+    channel: string,
+    projectRef: string | null,
+  ): Array<{ clientId: string; client: ConnectedClient }> {
     const results: Array<{ clientId: string; client: ConnectedClient }> = []
 
     for (const [clientId, client] of this.clients) {
+      if (client.projectRef !== projectRef) continue
       if (client.subscriptions.has(channel)) {
         results.push({ clientId, client })
       }
