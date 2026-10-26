@@ -65,10 +65,17 @@ async function type(value: string): Promise<void> {
   })
 }
 
+function buttonNamed(name: string): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")].find((b) => b.textContent === name)
+  if (button === undefined) throw new Error(`no button named ${name}`)
+  return button
+}
+
 /** The page queries sent so far, by the table they filter on ("" for none). */
 const asked = () => pending.map((p) => /ILIKE '%(.*?)%'/.exec(p.query)?.[1] ?? "")
 
-async function openScreen(): Promise<void> {
+/** Render the screen and answer its first page with `firstRow`. */
+async function openScreen(firstRow: Record<string, unknown> = table("first")): Promise<void> {
   await act(async () => {
     root.render(
       <MemoryRouter>
@@ -76,7 +83,7 @@ async function openScreen(): Promise<void> {
       </MemoryRouter>,
     )
   })
-  await act(async () => pending.shift()!.resolve([table("first")]))
+  await act(async () => pending.shift()!.resolve([firstRow]))
   await flush()
 }
 
@@ -89,6 +96,22 @@ describe("Schema objects against the ledger", () => {
     expect(asked()).toEqual([])
     await act(async () => vi.advanceTimersByTime(FILTER_DEBOUNCE_MS))
     expect(asked()).toEqual(["pos"])
+  })
+
+  it("on a later page, asks for the filtered first page in one go, never the unfiltered one", async () => {
+    await openScreen({ ...table("first"), total: 150 })
+    await act(async () => buttonNamed("Next").click())
+    await act(async () => pending.shift()!.resolve([{ ...table("second_page"), total: 150 }]))
+    await flush()
+    expect(container.textContent).toContain("Page 2 of 3")
+
+    await type("bulk07")
+    // While typing, nothing is asked: not page 0 of the old filter, which would flash on screen.
+    expect(pending.map((p) => p.query)).toEqual([])
+    await act(async () => vi.advanceTimersByTime(FILTER_DEBOUNCE_MS))
+    expect(pending).toHaveLength(1)
+    expect(pending[0]!.query).toContain("ILIKE '%bulk07%'")
+    expect(pending[0]!.query).toContain("OFFSET 0")
   })
 
   it("shows the answer to the latest filter, not an older one that arrives after it", async () => {

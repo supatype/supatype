@@ -149,6 +149,35 @@ export function Select({
   )
 }
 
+/* ─── Checkbox ─── */
+
+/**
+ * A checkbox with its label, the whole of which toggles it. Disabled reads as disabled: the label
+ * dims and the pointer stops promising a click.
+ */
+export function Checkbox({
+  label,
+  className,
+  disabled,
+  ...props
+}: {
+  label: React.ReactNode
+  className?: string
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "className" | "type">): React.ReactElement {
+  return (
+    <label
+      className={cn(
+        "inline-flex items-center gap-1.5 text-xs text-muted-foreground select-none",
+        disabled === true ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
+        className,
+      )}
+    >
+      <input type="checkbox" className="rounded" disabled={disabled} {...props} />
+      {label}
+    </label>
+  )
+}
+
 /* ─── Table primitives ─── */
 
 export function Th({

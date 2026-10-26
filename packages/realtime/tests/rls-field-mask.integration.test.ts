@@ -25,6 +25,8 @@ describe.skipIf(!databaseUrl)("RlsFilter field masking", () => {
     event: "INSERT",
     newRecord: { id: 1, title: "hello", salary: 100, author_id: "alice" },
     oldRecord: null,
+    exactColumns: {},
+    columnTypes: {},
     commitTimestamp: new Date().toISOString(),
     ...over,
   })
@@ -38,7 +40,10 @@ describe.skipIf(!databaseUrl)("RlsFilter field masking", () => {
     await admin.query(`
       DROP TABLE IF EXISTS rt_posts CASCADE;
       CREATE TABLE rt_posts (id int primary key, title text, salary numeric, author_id text);
+      ALTER TABLE rt_posts REPLICA IDENTITY FULL;
       INSERT INTO rt_posts VALUES (1, 'hello', 100, 'alice');
+      CREATE OR REPLACE FUNCTION can_read_rt_posts(rt_posts rt_posts)
+        RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT true FROM (SELECT ($1).*) AS rt_posts; $$;
       CREATE OR REPLACE FUNCTION can_read_rt_posts__salary(rt_posts rt_posts)
         RETURNS boolean LANGUAGE sql STABLE AS $$
           SELECT author_id = current_setting('request.jwt.claims', true)::jsonb->>'sub'
@@ -92,16 +97,17 @@ describe.skipIf(!databaseUrl)("RlsFilter field masking", () => {
     expect(visible?.oldRecord?.["salary"]).toBe(100) // was alice's
   })
 
-  // DELETE carries only the replica-identity columns, so there is no restricted value in
-  // the payload to leak, but the event must still be judged without a row to re-read.
-  it("handles a delete whose row no longer exists", async () => {
+  // Under REPLICA IDENTITY FULL a DELETE carries the whole old row, restricted columns
+  // included, and there is no row left to re-read: the old tuple is both judged and masked.
+  it("masks the old row of a delete whose row no longer exists", async () => {
     await admin.query("DELETE FROM rt_posts WHERE id = 1")
+    const old = { id: 1, title: "hello", salary: 100, author_id: "alice" }
+    const deleted = change({ event: "DELETE", newRecord: null, oldRecord: old })
     try {
-      const visible = await filter.visibleChange(
-        claimsFor("alice"),
-        change({ event: "DELETE", newRecord: null, oldRecord: { id: 1 } }),
-      )
-      expect(visible?.oldRecord).toEqual({ id: 1 })
+      const own = await filter.visibleChange(claimsFor("alice"), deleted)
+      expect(own?.oldRecord).toEqual(old)
+      const other = await filter.visibleChange(claimsFor("bob"), deleted)
+      expect(other?.oldRecord).toEqual({ ...old, salary: null })
     } finally {
       await admin.query("INSERT INTO rt_posts VALUES (1, 'hello', 100, 'alice')")
     }
@@ -125,14 +131,14 @@ describe.skipIf(!databaseUrl)("RlsFilter field masking", () => {
     await admin.query(
       `SECURITY LABEL FOR supatype ON COLUMN rt_posts.salary IS 'MASK READ public."no_such_predicate"'`,
     )
-    filter.invalidateFieldMasks()
+    filter.invalidateCatalogs()
     try {
       expect(await filter.visibleChange(claimsFor("alice"), change())).toBeNull()
     } finally {
       await admin.query(
         `SECURITY LABEL FOR supatype ON COLUMN rt_posts.salary IS 'MASK READ public."can_read_rt_posts__salary"'`,
       )
-      filter.invalidateFieldMasks()
+      filter.invalidateCatalogs()
     }
   })
 })

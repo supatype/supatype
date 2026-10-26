@@ -55,6 +55,17 @@ describe("useOwnedObjects()", () => {
     expect(result).toEqual({ owned: new Set(), error: null })
   })
 
+  it("owns nothing by the ledger, without an error, for a role that may not read _supatype", async () => {
+    // Studio's SQL role need not have USAGE on `_supatype`. The ledger is then as good as absent:
+    // the badges fall back to the stamps an older engine wrote, and no banner blames the screen.
+    const result = await read(
+      proxyAnswering(async () => {
+        throw new Error("ERROR: permission denied for schema _supatype")
+      }),
+    )
+    expect(result).toEqual({ owned: new Set(), error: null })
+  })
+
   it("reports any other failure rather than reading it as owning nothing", async () => {
     const result = await read(
       proxyAnswering(async () => {

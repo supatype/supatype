@@ -56,13 +56,26 @@ export function isMissingLedger(message: string): boolean {
   return /(?<!of )relation "_supatype\.managed_objects" does not exist|schema "_supatype" does not exist/.test(message)
 }
 
+/**
+ * Whether a failed read leaves this role with no ledger to go by: the ledger is missing, or it is
+ * behind a schema the role has no USAGE on. Studio's SQL role need not be able to read
+ * `_supatype`, and such a role is no worse off than one on a database with no ledger yet: it owns
+ * nothing by the ledger and falls back to the stamps. Any other permission is still an error.
+ */
+export function isUnreadableLedger(message: string): boolean {
+  return isMissingLedger(message) || /permission denied for schema _supatype(?![\w$])/.test(message)
+}
+
 /** The owned objects, keyed by `ownedKey`, and why they could not be read, if they could not. */
 export interface OwnedObjects {
   owned: ReadonlySet<string>
   error: string | null
 }
 
-/** The owned objects in `schema`. A missing ledger owns nothing; any other failure is reported. */
+/**
+ * The owned objects in `schema`. A ledger this role cannot read (`isUnreadableLedger`) owns
+ * nothing, without an error; any other failure is reported.
+ */
 export function useOwnedObjects(proxy: ProjectProxy, schema: string): OwnedObjects {
   const { data, error } = useApiQuery(
     () =>
@@ -75,7 +88,7 @@ export function useOwnedObjects(proxy: ProjectProxy, schema: string): OwnedObjec
       })),
     [proxy, schema],
   )
-  if (error !== null) return { owned: NONE, error: isMissingLedger(error) ? null : error }
+  if (error !== null) return { owned: NONE, error: isUnreadableLedger(error) ? null : error }
   // The query hook keeps its last answer while the next one loads, so after switching schema (or
   // project) that answer is the previous one's: it must not badge this schema's objects. Until the
   // answer for this one arrives, nothing is known to be owned.

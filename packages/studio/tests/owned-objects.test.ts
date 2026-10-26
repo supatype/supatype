@@ -9,6 +9,7 @@ import {
   INDEX_KINDS,
   isMissingLedger,
   isOwned,
+  isUnreadableLedger,
   ownedKey,
   ownedObjectsQuery,
 } from "../src/lib/owned-objects.js"
@@ -53,6 +54,20 @@ describe("ownedObjectsQuery()", () => {
     expect(sql).toContain("SELECT kind, parent, name")
     expect(sql).toContain("schema_name = 'o''brien'")
     expect(sql).toContain("status <> 'released'")
+  })
+})
+
+describe("isUnreadableLedger()", () => {
+  it("is a ledger this role cannot read: missing, or behind a schema it may not use", () => {
+    expect(isUnreadableLedger('relation "_supatype.managed_objects" does not exist')).toBe(true)
+    expect(isUnreadableLedger("ERROR: permission denied for schema _supatype")).toBe(true)
+  })
+
+  it("is not a permission on anything else, nor a ledger missing a column", () => {
+    expect(isUnreadableLedger("permission denied for schema billing")).toBe(false)
+    expect(isUnreadableLedger("permission denied for schema _supatype_extra")).toBe(false)
+    expect(isUnreadableLedger("permission denied for table managed_objects")).toBe(false)
+    expect(isUnreadableLedger('column "kind" does not exist')).toBe(false)
   })
 })
 
