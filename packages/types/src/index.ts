@@ -474,7 +474,46 @@ export type Public = Access<"Public">
 export type Private = Access<"Private">
 export type LoggedIn = Access<"LoggedIn">
 export type SupatypeAuthUser = Primitive<"SupatypeAuthUser", { readonly system: "supatype:user" }>
-export type SupatypeAuthUserId = Primitive<"SupatypeAuthUserId", string>
+/**
+ * What deleting a user does to the rows whose {@link SupatypeAuthUserId} field names them.
+ *
+ * - `"cascade"`: the rows are deleted with the user. Everything the user wrote goes, including
+ *   content other people rely on, such as their comments in someone else's thread.
+ * - `"restrict"`: the user cannot be deleted while they still own a row. Deleting them in Studio is
+ *   refused until their rows are deleted or handed to someone else.
+ * - `"setNull"`: the rows stay and the field becomes NULL, so only an `Optional` field takes it.
+ *   Under owner rules (`Owner<"user_id">`) a row with no owner matches nobody, so nobody but the
+ *   service role can edit or delete it afterwards.
+ */
+export type AuthUserOnDelete = "cascade" | "restrict" | "setNull"
+/** The options of {@link SupatypeAuthUserId}. */
+export interface AuthUserIdOptions {
+  /**
+   * Links the field to its user in `auth.users` with a foreign key, and says what deleting the user
+   * does to the row. Left out, the field holds a user id with no foreign key.
+   */
+  onDelete?: AuthUserOnDelete
+}
+/**
+ * A user's id from `auth.users`, for an owner column such as `Comment.user_id` or a profile's `id`.
+ *
+ * It has no foreign key by default: the column holds the id and nothing stops the user being
+ * deleted from under it, which is also what lets a project that brings its own auth, or keeps its
+ * schema apart from `auth`, use it. A field opts in to a key per field with `onDelete`
+ * ({@link AuthUserOnDelete}):
+ *
+ * ```typescript
+ * user_id: SupatypeAuthUserId<{ onDelete: "cascade" }>
+ * editor_id: Optional<SupatypeAuthUserId<{ onDelete: "setNull" }>>
+ * ```
+ *
+ * A push with the option needs `auth.users` to exist, and every row's id to name a user in it: it
+ * refuses otherwise, and says which rows to fix.
+ */
+export type SupatypeAuthUserId<O extends AuthUserIdOptions & OnlyKeysOf<O, AuthUserIdOptions> = {}> =
+  Primitive<"SupatypeAuthUserId", string> & FieldOptions<O>
+/** Every key of `T` that `TAllowed` does not have, typed `never`, so an options object takes no others. */
+type OnlyKeysOf<T, TAllowed> = { readonly [K in Exclude<keyof T, keyof TAllowed>]: never }
 type ModelFieldKeys<TModel> =
   TModel extends { readonly [SUPATYPE_MODEL]?: { readonly fields: infer TFields } }
     ? Extract<keyof TFields, string>

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto"
 import { dirname, isAbsolute, relative, resolve } from "node:path"
 import ts from "typescript"
 import { isJsonObject, isOneOf } from "@supatype/shared"
+import type { AuthUserOnDelete } from "@supatype/types"
 import { isIdentityDependent } from "./cache-identity-scope.js"
 import {
   applyImportRename,
@@ -1041,8 +1042,12 @@ function parseScalarType(
         return scalar("uuid", { kernel: options() })
       // Marked, because the engine cannot tell an auth user id from any other UUID: a model keyed
       // by one is a user's own, which an owner relation may point at (O1).
-      case "SupatypeAuthUserId":
-        return scalar("uuid", { kernel: options(), db: { authUserId: true } })
+      case "SupatypeAuthUserId": {
+        const onDelete = parseAuthUserOnDelete(typeNode.typeArguments?.[0], fieldName)
+        return scalar("uuid", {
+          db: { authUserId: true, ...(onDelete !== undefined && { authUserOnDelete: onDelete }) },
+        })
+      }
       case "RichText": {
         const defaultArg = typeNode.typeArguments?.[0]
         if (!defaultArg) return scalar("richText")
@@ -1704,6 +1709,35 @@ function parseScalarFieldOptions(
     }
   }
   return out
+}
+
+const isAuthUserOnDelete = isOneOf(["cascade", "restrict", "setNull"] as const satisfies readonly AuthUserOnDelete[])
+
+/**
+ * `SupatypeAuthUserId<{ onDelete }>`: what deleting the user does to the row, when the field opts
+ * in to a foreign key to `auth.users`. `onDelete` is the only option an auth user id takes.
+ */
+function parseAuthUserOnDelete(node: ts.TypeNode | undefined, fieldName: string): AuthUserOnDelete | undefined {
+  if (node === undefined) return undefined
+  if (!ts.isTypeLiteralNode(node)) {
+    throw new Error(
+      `Field "${fieldName}": the options of SupatypeAuthUserId<…> are an object type, such as { onDelete: "cascade" }.`,
+    )
+  }
+  let onDelete: AuthUserOnDelete | undefined
+  for (const member of node.members) {
+    if (!ts.isPropertySignature(member) || !member.name || !member.type) continue
+    const key = getPropertyName(member.name)
+    if (key !== "onDelete") {
+      throw new Error(`Field "${fieldName}": SupatypeAuthUserId<…> takes onDelete, not ${key ?? "that option"}.`)
+    }
+    const action = literalStringType(member.type)
+    if (!isAuthUserOnDelete(action)) {
+      throw new Error(`Field "${fieldName}": onDelete is "cascade", "restrict" or "setNull".`)
+    }
+    onDelete = action
+  }
+  return onDelete
 }
 
 function literalStringType(typeNode: ts.TypeNode | undefined): string | null {

@@ -19,19 +19,26 @@ const API_ROLES = ["anon", "authenticated", "service_role"] as const
 /** What the database lacks for this push. */
 export interface ByoGaps {
   missingRoles: string[]
-  /** The schema relates to `SupatypeAuthUser` and `auth.users` does not exist. */
+  /** The schema has a foreign key to `auth.users` and `auth.users` does not exist. */
   missingAuthUsers: boolean
 }
 
 type QueryFn = (sql: string, params?: unknown[]) => Promise<UnknownRow[]>
 
-/** True when a model relates to Supatype's own users, whose table is `auth.users`. */
+/**
+ * True when a field holds a foreign key to Supatype's own users, whose table is `auth.users`: a
+ * relation to `SupatypeAuthUser`, or a `SupatypeAuthUserId<{ onDelete }>`. A plain
+ * `SupatypeAuthUserId` holds the id with no key, and needs no table.
+ */
+function linksToAuthUsers(field: unknown): boolean {
+  if (!isJsonObject(field)) return false
+  if (field["kind"] === "relation") return field["target"] === "supatype:user"
+  return objectAt(field, "annotations", "db")?.["authUserOnDelete"] !== undefined
+}
+
+/** True when a model has a foreign key to Supatype's own users, whose table is `auth.users`. */
 export function astRelatesToAuthUsers(ast: unknown): boolean {
-  return astModels(ast).some((model) =>
-    Object.values(objectAt(model, "fields") ?? {}).some(
-      (field) => isJsonObject(field) && field["kind"] === "relation" && field["target"] === "supatype:user",
-    ),
-  )
+  return astModels(ast).some((model) => Object.values(objectAt(model, "fields") ?? {}).some(linksToAuthUsers))
 }
 
 /** The gaps, asked of the database through `q`. */
@@ -61,7 +68,7 @@ export function byoGapLines(gaps: ByoGaps): string[] {
   }
   if (gaps.missingAuthUsers) {
     lines.push(
-      "Missing table auth.users. The schema relates to SupatypeAuthUser, whose table it is.",
+      "Missing table auth.users. The schema links rows to their user there (RelatedTo<SupatypeAuthUser> or SupatypeAuthUserId<{ onDelete }>).",
       "Supatype's auth server creates it with its migrations the first time it starts against this database:",
       "start the server (supatype/server) with DATABASE_URL pointing here once, then push again.",
       "",
