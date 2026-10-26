@@ -1,5 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
+import { withPublishing } from "../model-versioning.js"
 import { schemaPathFromProject } from "../project-config.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget, targetSchemaAdopt, schemaPgSchema } from "../resolve-target.js"
@@ -39,7 +40,8 @@ export function registerAdopt(program: Command): void {
       const pgSchema = schemaPgSchema(cwd)
 
       const ast = await withSpinner("Loading schema", async () =>
-        loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
+        // As push sends it: the engine refuses a versioned schema that carries no publishing config.
+        withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
       )
 
       const linked = loadProjectLink(cwd)

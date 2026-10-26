@@ -34,8 +34,39 @@ export interface Operation {
   index?: { fields?: string[]; name?: string; unique?: boolean }
 }
 
+/**
+ * What the engine's reconcile decided about one object it owns (schema-engine `ledger::reconcile`).
+ * A kind that has moved onto the ledger is planned here rather than as an operation.
+ */
+export interface ReconcileAction {
+  action:
+    | "create"
+    | "adopt"
+    | "conflict"
+    | "recreate"
+    | "replace"
+    | "drift"
+    | "keep"
+    | "drop"
+    | "forget"
+    | "released"
+  key: { kind: string; schema: string; parent: string; name: string }
+  /**
+   * An action the parent statement already carries out (a constraint inline in `CREATE TABLE`, or
+   * recreated with its table). Sent on `create`, `recreate`, `replace` and `drift`.
+   */
+  inline?: boolean
+  reason?: "stamped" | "structure_matches" | "deparses_equal" | "owned_schema"
+  /** A `drift` on a policy, grant, label or RLS attribute: putting it back changes who sees what. */
+  security_relevant?: boolean
+  recorded_def?: string
+  live_def?: string
+}
+
 export interface DiffResult {
   operations: Operation[]
+  /** Absent from engines older than the ledger. */
+  reconcile?: ReconcileAction[]
   warnings?: string[]
   summary?: string
 }
