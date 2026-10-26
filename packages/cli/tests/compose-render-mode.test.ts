@@ -86,12 +86,18 @@ afterEach(() => {
 
 const lockPath = (): string => join(cwd, ".supatype", "dev-session.json")
 
-/** A dev session lock held by `pid`: by default this test's own process, which is alive. */
-function holdDevLock(pid: number = process.pid): void {
+/** This project's compose file, as `supatype dev` records it in its lock. */
+const ownComposePath = (): string => join(cwd, ".supatype", "self-host", "docker-compose.yml")
+
+/**
+ * A dev session lock held by `pid`: by default this test's own process, which is alive. The lock
+ * names this project's compose file unless `composePath` says another folder's.
+ */
+function holdDevLock(pid: number = process.pid, composePath: string = ownComposePath()): void {
   mkdirSync(join(cwd, ".supatype"), { recursive: true })
   writeFileSync(
     lockPath(),
-    JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: "x", kongPort: 55560, startedAt: "t", pid }),
+    JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath, kongPort: 55560, startedAt: "t", pid }),
   )
 }
 
@@ -140,7 +146,7 @@ describe("a dev session lock left by a dev that is gone (SHa)", () => {
 
   it("is ignored when it names no process at all, as a lock from before pids were recorded", () => {
     mkdirSync(join(cwd, ".supatype"), { recursive: true })
-    writeFileSync(lockPath(), JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: "x", kongPort: 1, startedAt: "t" }))
+    writeFileSync(lockPath(), JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: ownComposePath(), kongPort: 1, startedAt: "t" }))
 
     expect(composeRenderMode(cwd, "acme")).toBe("standalone")
     expect(existsSync(lockPath())).toBe(false)
@@ -150,6 +156,24 @@ describe("a dev session lock left by a dev that is gone (SHa)", () => {
     holdDevLock(process.pid)
     expect(composeRenderMode(cwd, "acme")).toBe("dev")
     expect(existsSync(lockPath())).toBe(true)
+  })
+})
+
+/**
+ * C4: a project folder copied while `supatype dev` ran carried the original's lock, with the live dev's
+ * pid, so the copy rendered dev on the original's database port. A lock counts only for the folder
+ * whose compose file it names; one from another folder is ignored, removed, and said so in one line.
+ */
+describe("a dev session lock copied from another project folder (C4)", () => {
+  it("is ignored and removed, though the dev that wrote it is still running", () => {
+    const info = vi.spyOn(console, "log")
+    holdDevLock(process.pid, join(tmpdir(), "the-original", ".supatype", "self-host", "docker-compose.yml"))
+
+    expect(composeRenderMode(cwd, "acme")).toBe("standalone")
+    expect(existsSync(lockPath())).toBe(false)
+    expect(info.mock.calls.flat().join(" ")).toContain(
+      'Ignoring .supatype/dev-session.json: it belongs to the dev stack "supatype-acme" of another folder',
+    )
   })
 })
 

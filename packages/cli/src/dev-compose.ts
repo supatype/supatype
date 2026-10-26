@@ -994,7 +994,6 @@ async function applyViaComposeEngine(
   stack: { paths: SelfHostComposePaths; composeProject: string },
   opts: ComposePushOptions,
 ): Promise<void> {
-  console.log("[supatype] Applying schema via compose schema-engine...")
   const { paths, composeProject } = stack
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const audit = opts.audit ?? (await composeAuditArgs(cwd, config))
@@ -1468,7 +1467,6 @@ export async function pushSchemaDocker(
   const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
   const pushBrand = { intro: "Push schema" }
 
-  console.log(`[supatype] provider docker, applying schema via compose (project ${project})...`)
   await startComposeDatabase(config, paths, cwd, project, pushBrand)
   if (!usesExternalDatabase(config)) privatizeTableDefaults(paths, cwd, project)
 

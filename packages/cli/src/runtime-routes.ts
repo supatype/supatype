@@ -43,6 +43,29 @@ function studioStripPath(opts: RuntimeRouteOptions): boolean {
 const SERVER_GATEWAY = "http://server:9999"
 
 /**
+ * The `/studio/` paths the server answers itself (int-authsrv `internal/gateway/routes.go`), each
+ * a longer prefix than Studio's `/studio/` so Kong sends it to the server, not to Studio's static
+ * files. Without `/studio/session` Studio got its own `index.html` back for the field-access
+ * lookup and failed open: no padlock on masked fields, no read-only inputs. `/studio/schema` is
+ * left out on purpose: Studio does not call it, and it is also a Studio page (a redirect).
+ */
+const STUDIO_SERVER_PATHS: ReadonlyArray<{ name: string; path: string }> = [
+  { name: "studio-auth", path: "/studio/auth/" },
+  { name: "studio-proxy", path: "/studio/proxy/" },
+  { name: "studio-session", path: "/studio/session" },
+]
+
+function studioServerRoutes(serviceName: (route: string) => string): RuntimeRoute[] {
+  return STUDIO_SERVER_PATHS.map(({ name, path }) => ({
+    name,
+    serviceName: serviceName(name),
+    serviceUrl: SERVER_GATEWAY,
+    paths: [path],
+    stripPath: false,
+  }))
+}
+
+/**
  * Kong routes when self-host uses supatype-server as the single API gateway.
  */
 function runtimeRouteSpecUnified(opts: RuntimeRouteOptions): RuntimeRoute[] {
@@ -121,20 +144,7 @@ function runtimeRouteSpecUnified(opts: RuntimeRouteOptions): RuntimeRoute[] {
       paths: ["/sql"],
       stripPath: false,
     },
-    {
-      name: "studio-auth",
-      serviceName: "supatype-server-studio-auth",
-      serviceUrl: SERVER_GATEWAY,
-      paths: ["/studio/auth/"],
-      stripPath: false,
-    },
-    {
-      name: "studio-proxy",
-      serviceName: "supatype-server-studio-proxy",
-      serviceUrl: SERVER_GATEWAY,
-      paths: ["/studio/proxy/"],
-      stripPath: false,
-    },
+    ...studioServerRoutes((name) => `supatype-server-${name}`),
     {
       name: "studio-exact",
       serviceName: "studio-exact",
@@ -218,20 +228,7 @@ function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
       stripPath: true,
       graphqlPostgrest: true,
     },
-    {
-      name: "studio-auth",
-      serviceName: "auth-v1",
-      serviceUrl: "http://server:9999",
-      paths: ["/studio/auth/"],
-      stripPath: false,
-    },
-    {
-      name: "studio-proxy",
-      serviceName: "auth-v1",
-      serviceUrl: "http://server:9999",
-      paths: ["/studio/proxy/"],
-      stripPath: false,
-    },
+    ...studioServerRoutes(() => "auth-v1"),
     {
       name: "studio-exact",
       serviceName: "studio-exact",
