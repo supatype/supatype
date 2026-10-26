@@ -4,7 +4,8 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve as resolvePath } from "node:path"
 
 export interface PgOptions {
@@ -51,25 +52,52 @@ export function pgSpawnEnv(
 // initdb
 // ---------------------------------------------------------------------------
 
+/** How every local and host connection to a native cluster authenticates. */
+export const NATIVE_AUTH_METHOD = "scram-sha-256"
+
 /**
- * Initialise a Postgres data directory.
+ * initdb's arguments: the superuser `postgres`, with the password in `pwfile`, and password
+ * authentication for every connection.
+ *
+ * This used to be `--auth trust`, which made the passwords the CLI generates decoration: any
+ * local process could connect as any role, the superuser included, with any password or none.
+ */
+export function initdbArgs(dataDir: string, pwfile: string): string[] {
+  return [
+    "-D", dataDir,
+    "--username", "postgres",
+    `--pwfile=${pwfile}`,
+    `--auth-local=${NATIVE_AUTH_METHOD}`,
+    `--auth-host=${NATIVE_AUTH_METHOD}`,
+  ]
+}
+
+/**
+ * Initialise a Postgres data directory, with `superuserPassword` for `postgres`.
  * Does nothing if the data directory already contains a PG_VERSION file.
  */
-export function initdb(opts: PgOptions): void {
+export function initdb(opts: PgOptions, superuserPassword: string): void {
   const pgVersionFile = join(opts.dataDir, "PG_VERSION")
   if (existsSync(pgVersionFile)) return // Already initialised.
 
   mkdirSync(opts.dataDir, { recursive: true })
 
-  const bin = pgBin(opts.pgBinDir, "initdb")
-  const result = spawnSync(bin, ["-D", opts.dataDir, "--username", "postgres", "--auth", "trust"], {
-    stdio: "inherit",
-    encoding: "utf8",
-    env: pgSpawnEnv(opts.pgBinDir),
-  })
-
-  if (result.status !== 0) {
-    throw new Error(`initdb failed (exit ${result.status})`)
+  // initdb reads the password from a file, never an argument another process could see. The
+  // file lives in a directory of its own, readable by this user only, for the length of the call.
+  const pwDir = mkdtempSync(join(tmpdir(), "supatype-initdb-"))
+  const pwfile = join(pwDir, "pw")
+  try {
+    writeFileSync(pwfile, `${superuserPassword}\n`, { mode: 0o600 })
+    const result = spawnSync(pgBin(opts.pgBinDir, "initdb"), initdbArgs(opts.dataDir, pwfile), {
+      stdio: "inherit",
+      encoding: "utf8",
+      env: pgSpawnEnv(opts.pgBinDir),
+    })
+    if (result.status !== 0) {
+      throw new Error(`initdb failed (exit ${result.status})`)
+    }
+  } finally {
+    rmSync(pwDir, { recursive: true, force: true })
   }
 }
 
@@ -100,7 +128,7 @@ export function nativeMaskLibraryPresent(pgBinDir: string | null | undefined): b
  *
  * Asked of the filesystem for the same reason as the mask: an archive
  * downloaded before pg_keyspace was bundled has a Postgres without it, and the
- * Windows archive has none at all — pgrx has no Windows target. Naming it in
+ * Windows archive has none at all, because pgrx has no Windows target. Naming it in
  * `shared_preload_libraries` anyway would stop the server starting with "could
  * not access file", which would turn a missing cache into no database.
  */
@@ -134,8 +162,8 @@ export const KEYSPACE_PORT_SPAN = 10
  * The first free port in [base, base + span), or null when they are all taken.
  *
  * Binding a port something else already holds would leave Postgres up and the
- * keyspace silently dead — the failure lands in the postmaster log and nowhere
- * a developer is looking — so the port is chosen before the server starts
+ * keyspace silently dead. The failure lands in the postmaster log and nowhere
+ * a developer is looking, so the port is chosen before the server starts
  * rather than fixed and hoped for.
  */
 export async function firstFreePort(base: number, span: number): Promise<number | null> {
@@ -154,7 +182,7 @@ export async function firstFreePort(base: number, span: number): Promise<number 
  *
  * Order in `shared_preload_libraries` is load-bearing: pg_keyspace first, then
  * supatype_mask, so the mask stays outermost. pg_keyspace checks this itself
- * and refuses to serve when the order is wrong — deliberately, since RESP
+ * and refuses to serve when the order is wrong, deliberately, since RESP
  * would otherwise hand back rows the mask never rewrote.
  *
  * The sizing is the measured dev profile: ~60 MiB of shared memory, against
@@ -190,7 +218,7 @@ export function start(opts: PgOptions): void {
   const logPath = opts.logPath ?? join(opts.dataDir, "postgres.log")
 
   // `supatype_mask` is a planner hook and pg_keyspace registers background
-  // workers and shared memory, so both have to be preloaded — `CREATE
+  // workers and shared memory, so both have to be preloaded: `CREATE
   // EXTENSION` alone does nothing for either. Only when the archive actually
   // carries them; see pgServerOptions.
   //
@@ -227,6 +255,18 @@ export function stop(opts: PgOptions): void {
   })
   // Ignore exit code: Postgres may already be stopped.
   void result
+}
+
+/** Ask the running server to re-read its configuration, pg_hba.conf included. */
+export function reload(opts: PgOptions): void {
+  const result = spawnSync(pgBin(opts.pgBinDir, "pg_ctl"), ["reload", "-D", opts.dataDir], {
+    stdio: "pipe",
+    encoding: "utf8",
+    env: pgSpawnEnv(opts.pgBinDir),
+  })
+  if (result.status !== 0) {
+    throw new Error(`pg_ctl reload failed (exit ${result.status}): ${(result.stderr ?? "").trim()}`)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +368,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Returns the full path to a Postgres binary, appending .exe on Windows. */
-function pgBin(binDir: string, name: string): string {
+export function pgBin(binDir: string, name: string): string {
   return join(binDir, process.platform === "win32" ? `${name}.exe` : name)
 }

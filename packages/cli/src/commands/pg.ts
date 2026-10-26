@@ -19,6 +19,8 @@ import {
   stop as pgStop,
   waitReady,
 } from "../postgres-ctl.js"
+import { pgClientEnv, requirePasswordAuth } from "../native-pg-auth.js"
+import { devPostgresPassword, ensureNativeSuperuserPassword } from "../local-secrets.js"
 
 export function registerPg(program: Command): void {
   const pg = program
@@ -31,9 +33,11 @@ export function registerPg(program: Command): void {
     .action(async () => {
       const config = loadConfig()
       const opts = await pgOpts(config)
-      initdb(opts)
+      const password = ensureNativeSuperuserPassword(process.cwd())
+      initdb(opts, password)
       pgStart(opts)
       await waitReady(opts, 10_000)
+      requirePasswordAuth(opts, password)
       info(`Postgres started on port ${opts.port} (data: ${opts.dataDir})`)
     })
 
@@ -72,7 +76,8 @@ export function registerPg(program: Command): void {
         info(`Data directory removed: ${pgOpts_.dataDir}`)
       }
       mkdirSync(pgOpts_.dataDir, { recursive: true })
-      initdb(pgOpts_)
+      const password = ensureNativeSuperuserPassword(process.cwd())
+      initdb(pgOpts_, password)
       pgStart(pgOpts_)
       await waitReady(pgOpts_, 10_000)
       info("Postgres reset and started.")
@@ -90,7 +95,7 @@ export function registerPg(program: Command): void {
       const result = spawnSync(
         psql,
         ["-h", "127.0.0.1", "-p", String(opts.port), "-U", "postgres", db],
-        { stdio: "inherit" },
+        { stdio: "inherit", env: pgClientEnv(opts.pgBinDir, devPostgresPassword(process.cwd())) },
       )
       process.exit(result.status ?? 0)
     })

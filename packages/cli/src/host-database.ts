@@ -17,7 +17,7 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { readComposeEnvInt, readEnvFile } from "./env-file.js"
-import { devDatabaseUrl } from "./local-secrets.js"
+import { devDatabaseUrl, devPostgresPassword } from "./local-secrets.js"
 import {
   externalDatabaseUrl,
   localDSN,
@@ -52,7 +52,9 @@ export function hostComposeDbUrl(
  * project with no `.env` got a user, database and port that do not exist.
  */
 function derivedDsn(root: string, config: SupatypeProjectConfig): string {
-  return resolveRuntimeProvider(config) === "docker" ? hostComposeDbUrl(root) : localDSN(config)
+  return resolveRuntimeProvider(config) === "docker"
+    ? hostComposeDbUrl(root)
+    : localDSN(config, devPostgresPassword(root))
 }
 
 /** One place a connection string could have come from. */

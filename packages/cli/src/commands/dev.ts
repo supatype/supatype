@@ -36,9 +36,9 @@ import { projectHasVersionedModels } from "../model-versioning.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
-  devAuthenticatorPassword,
+  ensureNativeAuthenticatorPassword,
   devJwtSecret,
-  devPostgresPassword,
+  ensureNativeSuperuserPassword,
   secretFingerprint,
 } from "../local-secrets.js"
 import {
@@ -86,8 +86,8 @@ import {
   stop as pgStop,
   waitReady as pgWaitReady,
   isPortInUse,
-  pgSpawnEnv,
 } from "../postgres-ctl.js"
+import { pgClientEnv, requirePasswordAuth } from "../native-pg-auth.js"
 /** Map `email.smtp` from supatype.config.ts into SUPATYPE_SMTP_* for the embedded auth service. */
 function authSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
   const s = email?.smtp
@@ -265,11 +265,12 @@ export function registerDev(program: Command): void {
       let postgrestDbURL: string
       let stopPostgres: () => void | Promise<void>
       const pgPort = NATIVE_PG_PORT
-      const pgPassword = devPostgresPassword(cwd)
+      // Checked by the cluster (native-pg-auth.ts): .env's, or generated and written there.
+      const pgPassword = ensureNativeSuperuserPassword(cwd)
       // Distinct from pgPassword even locally, so the split the other paths enforce is the
       // one developers see. Read from .env when present so it matches a stack the user has
-      // already provisioned.
-      const authenticatorPassword = devAuthenticatorPassword(cwd)
+      // already provisioned, generated otherwise.
+      const authenticatorPassword = ensureNativeAuthenticatorPassword(cwd)
       // pgBinDir is set on the native path and used to add DLL search path for
       // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).
       let pgBinDir: string | null = null
@@ -315,11 +316,14 @@ export function registerDev(program: Command): void {
         }
 
         console.log("[supatype] Initialising Postgres data directory...")
-        initdb(pgOpts)
+        initdb(pgOpts, pgPassword)
         console.log("[supatype] Starting Postgres...")
         pgStart(pgOpts)
         await pgWaitReady(pgOpts, 15_000)
         console.log("[supatype] Postgres is ready.")
+        if (requirePasswordAuth(pgOpts, pgPassword)) {
+          console.log("[supatype] This Postgres trusted every local connection; it now checks passwords.")
+        }
         dbURL = `postgres://postgres:${pgPassword}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         postgrestDbURL = `postgres://authenticator:${authenticatorPassword}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         stopPostgres = () => pgStop(pgOpts)
@@ -328,7 +332,7 @@ export function registerDev(program: Command): void {
         const psqlBin    = join(pgBinDir, process.platform === "win32" ? "psql.exe"    : "psql")
         const createdbBin = join(pgBinDir, process.platform === "win32" ? "createdb.exe" : "createdb")
         const pgConnArgs = ["-h", "127.0.0.1", "-p", String(pgPort), "-U", "postgres"]
-        const pgEnv = pgSpawnEnv(pgBinDir)
+        const pgEnv = pgClientEnv(pgBinDir, pgPassword)
         const createDbResult = spawnSync(
           createdbBin,
           [...pgConnArgs, projectName],
