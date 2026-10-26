@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { usePlatformFetch, usePlatform } from "../hooks/usePlatform.js"
-import { CloudUpsell } from "./CloudUpsell.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
@@ -352,6 +351,36 @@ function corsOpenBannerStorageKey(projectRef: string): string {
   return `${CORS_OPEN_BANNER_LS_PREFIX}:${projectRef}`
 }
 
+/**
+ * CORS on a self-hosted server. The server reads `SUPATYPE_CORS_ALLOW_ORIGINS` once when it
+ * starts and answers browsers from its own origin only when the list is unset; `supatype dev`
+ * allows every origin. Nothing exposes the running list to Studio yet, so this says how to set it
+ * rather than showing it, and never offers an editor whose saves nothing would read.
+ */
+function SelfHostCorsSettings(): React.ReactElement {
+  return (
+    <Card className="p-4">
+      <h3>CORS allowed origins</h3>
+      <div className="flex flex-col gap-3 max-w-[640px] mt-2 text-[0.85rem] text-muted-foreground leading-relaxed">
+        <p>
+          A self-hosted server lets browsers call your API from its own origin only. To allow a web
+          app served from another origin, list it in <code>SUPATYPE_CORS_ALLOW_ORIGINS</code> in the
+          project&apos;s <code>.env</code>, separated by commas, then restart the stack:
+        </p>
+        <CodeBlock>SUPATYPE_CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com</CodeBlock>
+        <p>
+          Studio cannot read the list the server is running with, so it is not shown here.{" "}
+          <code>supatype dev</code> allows every origin, whatever the list says.
+        </p>
+        <p>
+          Authentication and Row Level Security apply either way. Native apps (Kotlin, Swift,
+          URLSession, OkHttp, etc.) are not gated by CORS.
+        </p>
+      </div>
+    </Card>
+  )
+}
+
 function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
   const pf = usePlatformFetch()
   const { projectRef } = usePlatform()
@@ -486,18 +515,7 @@ function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
   }
 
   if (demoMode || !pf || !projectRef) {
-    return (
-      <CloudUpsell
-        title="CORS configuration"
-        description="Save allowed browser origins for your project API so production web apps and embedded UIs tighten cross-origin access. Changes sync to Kong and the Studio proxy."
-        features={[
-          "Persisted in project config, survives schema pushes",
-          "Wildcard or explicit HTTPS origins, JWT / RLS still apply",
-          "Native iOS/Android clients are not affected by CORS (browser-only policy)",
-          "Dismissable reminder when origins are unrestricted",
-        ]}
-      />
-    )
+    return <SelfHostCorsSettings />
   }
 
   return (

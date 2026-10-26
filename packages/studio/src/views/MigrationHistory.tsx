@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
+import { isMissingTable } from "../lib/database-error.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 import { useProjectProxy, type ProjectProxy } from "../hooks/useProjectProxy.js"
@@ -146,6 +147,9 @@ function mapMigrationRow(row: Record<string, unknown>): Migration {
   }
 }
 
+/** The migrations ledger, as Postgres names it in a missing-relation error. */
+const MIGRATIONS_TABLE = "_supatype.migrations"
+
 /** Whether this history has the audit columns: one written by an engine from before them has not. */
 const AUDIT_COLUMNS_SQL = `SELECT EXISTS (SELECT 1 FROM information_schema.columns
   WHERE table_schema = '_supatype' AND table_name = 'migrations' AND column_name = 'pushed_by') AS audited`
@@ -163,7 +167,7 @@ export function migrationsListSql(audited: boolean): string {
        (sql_up IS NOT NULL AND btrim(sql_up) <> '') AS has_sql,
        ${audit},
        schema_sources_manifest ->> 'pushedBy' AS manifest_pushed_by
- FROM _supatype.migrations ORDER BY id ASC`
+ FROM ${MIGRATIONS_TABLE} ORDER BY id ASC`
 }
 
 /** Candidates for display: DDL rows, initial baseline, not legacy admin_refresh noise. */
@@ -207,7 +211,7 @@ function useMigrationSql(
     setLoading(true)
     setError(null)
     void proxy
-      .sql(`SELECT sql_up FROM _supatype.migrations WHERE id = ${migrationId}`)
+      .sql(`SELECT sql_up FROM ${MIGRATIONS_TABLE} WHERE id = ${migrationId}`)
       .then((result) => {
         if (cancelled) return
         const row = result.rows[0]
@@ -597,7 +601,7 @@ export function linkedMigrationId(param: string | null): number | null {
 export function MigrationHistory(): React.ReactElement {
   const proxy = useProjectProxy()
 
-  const { data: migrationsData, loading, error, refetch } = useApiQuery(
+  const { data: migrationsData, loading, error, failure, refetch } = useApiQuery(
     async () => {
       const columns = await proxy.sql(AUDIT_COLUMNS_SQL)
       const audited = boolOrNull(columns.rows[0]?.["audited"]) === true
@@ -670,7 +674,7 @@ export function MigrationHistory(): React.ReactElement {
   }
 
   if (error) {
-    if (error.includes("does not exist")) {
+    if (failure !== null && isMissingTable(failure, MIGRATIONS_TABLE)) {
       return (
         <EmptyState
           title="No migrations yet"

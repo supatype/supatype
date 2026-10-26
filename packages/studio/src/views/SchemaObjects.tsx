@@ -319,6 +319,8 @@ function ObjectTable({ objects }: { objects: readonly ManagedObject[] }): React.
  */
 export interface LoadState {
   error: string | null
+  /** The SQLSTATE of `error`, when the proxy passed one on. */
+  errorCode?: string | null
   onRefresh: () => void
   loading?: boolean
 }
@@ -338,7 +340,7 @@ export interface SchemaObjectsViewProps {
 export function SchemaObjectsView({ result, query, onQuery, load }: SchemaObjectsViewProps): React.ReactElement {
   // The ledger is created by the first push of an engine that has it, so its absence means this
   // database has not had one yet rather than anything being broken.
-  const missing = load.error !== null && isMissingLedger(load.error)
+  const missing = load.error !== null && isMissingLedger({ message: load.error, code: load.errorCode ?? null })
   if (load.error !== null && !missing) {
     return <ErrorBanner message={load.error} onRetry={load.onRefresh} />
   }
@@ -379,14 +381,14 @@ export function SchemaObjectsView({ result, query, onQuery, load }: SchemaObject
 export function SchemaObjects(): React.ReactElement {
   const proxy = useProjectProxy()
   const [query, setQuery] = useState<ObjectQuery>({ filters: NO_FILTERS, page: 0 })
-  const { data, loading, error, refetch } = useApiQuery(() => fetchObjectPage(proxy, query), [proxy, query])
+  const { data, loading, error, failure, refetch } = useApiQuery(() => fetchObjectPage(proxy, query), [proxy, query])
 
   return (
     <SchemaObjectsView
       result={data}
       query={query}
       onQuery={setQuery}
-      load={{ error, onRefresh: refetch, loading }}
+      load={{ error, errorCode: failure?.code ?? null, onRefresh: refetch, loading }}
     />
   )
 }

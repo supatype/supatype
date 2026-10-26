@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "react"
+import { DatabaseError, sqlstateInMessage, sqlstateOf } from "../lib/database-error.js"
 import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
@@ -39,6 +40,29 @@ export interface ProjectProxy {
   schemas: () => Promise<string[]>
 }
 
+/** What the SQL proxy answers: rows on success; on failure a message, and the SQLSTATE if passed on. */
+type SqlResponseBody = Partial<SqlResult> & { error?: string; message?: string; code?: unknown }
+
+/**
+ * The rows of a SQL proxy answer, or the failure it reports as a `DatabaseError` carrying the
+ * SQLSTATE, so Studio can tell failures apart by code rather than by message. Cloud's proxy puts
+ * the message in `message` with a category in `error`; the server and engine put it in `error`,
+ * and the server ends it with `(SQLSTATE xxxxx)`, read when no `code` field says otherwise.
+ */
+export async function readSqlResponse(res: Response): Promise<SqlResult> {
+  const json = (await res.json()) as SqlResponseBody
+  if (!res.ok) {
+    const message = json.message ?? json.error ?? "SQL execution failed"
+    throw new DatabaseError(message, sqlstateOf(json) ?? sqlstateInMessage(message))
+  }
+  const rows = Array.isArray(json.rows) ? json.rows : []
+  return {
+    rows,
+    rowCount: json.rowCount ?? rows.length,
+    ...(json.schema !== undefined && { schema: json.schema }),
+  }
+}
+
 /**
  * Wraps raw fetch calls to the project proxy for SQL execution and schema
  * introspection. Schema routing is enforced server-side from the JWT role
@@ -69,15 +93,7 @@ export function useProjectProxy(): ProjectProxy {
         credentials: "include",
         body: JSON.stringify({ query, ...(schema !== undefined && { schema }) }),
       })
-      const json = (await res.json()) as SqlResult & { error?: string; message?: string }
-      if (!res.ok) throw new Error(json.message ?? json.error ?? "SQL execution failed")
-      const rowsRaw = json.rows
-      const rows = Array.isArray(rowsRaw) ? rowsRaw : []
-      return {
-        rows,
-        rowCount: json.rowCount ?? rows.length,
-        ...(json.schema !== undefined && { schema: json.schema }),
-      }
+      return readSqlResponse(res)
     },
     [client.url, sessionProxy],
   )

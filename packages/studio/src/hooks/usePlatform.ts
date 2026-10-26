@@ -16,13 +16,14 @@ export function usePlatform(): PlatformContext {
 
 /**
  * Returns a fetch wrapper for cloud control-plane routes, or null when not
- * in cloud mode. Views must handle null gracefully (e.g. show CloudUpsell).
+ * in cloud mode. Views must handle null gracefully: say what self-host does instead, never
+ * upsell a feature that Cloud does not run either.
  *
  * Usage:
  *   const pf = usePlatformFetch()
  *   const { projectRef } = usePlatform()
- *   if (!pf) return <CloudUpsell ... />
- *   const res = await pf(`projects/${projectRef}/realtime/stats`)
+ *   if (!pf) return <SelfHostCorsSettings />
+ *   const res = await pf(`projects/${projectRef}/config`)
  */
 export function usePlatformFetch(): ((url: string, init?: RequestInit) => Promise<Response>) | null {
   const { platformUrl, projectRef } = usePlatform()

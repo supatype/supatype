@@ -1,10 +1,24 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { sqlstateOf, type DatabaseFailure } from "../lib/database-error.js"
 
 export interface ApiQueryResult<T> {
   data: T | null
   loading: boolean
   error: string | null
+  /**
+   * The failure behind `error`, with its Postgres SQLSTATE when the fetcher threw one that carried
+   * it (a SQL call through the project proxy). Tell failures apart by its code, not by the wording
+   * of `error`.
+   */
+  failure: DatabaseFailure | null
   refetch: () => void
+}
+
+function failureOf(err: unknown): DatabaseFailure {
+  return {
+    message: err instanceof Error ? err.message : "An unexpected error occurred",
+    code: sqlstateOf(err),
+  }
 }
 
 /**
@@ -22,7 +36,7 @@ export function useApiQuery<T>(
 ): ApiQueryResult<T> {
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<DatabaseFailure | null>(null)
   const mountedRef = useRef(true)
   const latestRef = useRef(0)
   const fetcherRef = useRef(fetcher)
@@ -39,7 +53,7 @@ export function useApiQuery<T>(
     const request = ++latestRef.current
     const isLatest = (): boolean => mountedRef.current && latestRef.current === request
     setLoading(true)
-    setError(null)
+    setFailure(null)
     try {
       const result = await fetcherRef.current()
       if (isLatest()) {
@@ -47,7 +61,7 @@ export function useApiQuery<T>(
       }
     } catch (err) {
       if (isLatest()) {
-        setError(err instanceof Error ? err.message : "An unexpected error occurred")
+        setFailure(failureOf(err))
       }
     } finally {
       if (isLatest()) {
@@ -60,5 +74,5 @@ export function useApiQuery<T>(
     void execute()
   }, [execute])
 
-  return { data, loading, error, refetch: execute }
+  return { data, loading, error: failure?.message ?? null, failure, refetch: execute }
 }

@@ -50,7 +50,6 @@ import { LogsViewer } from "./views/LogsViewer.js"
 import { Settings } from "./views/Settings.js"
 import { ComingSoon } from "./views/ComingSoon.js"
 import { EdgeFunctions } from "./views/EdgeFunctions.js"
-import { RealtimeInspector } from "./views/RealtimeInspector.js"
 import { PluginsMarketplace } from "./views/PluginsMarketplace.js"
 
 // Database sub-pages
@@ -476,7 +475,9 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="edge-functions" element={<EdgeFunctions />} />
               <Route path="edge-functions/:functionSlug" element={<EdgeFunctions />} />
               <Route path="edge-functions/:functionSlug/:tab" element={<EdgeFunctions />} />
-              <Route path="realtime"       element={<RealtimeInspector />} />
+              {/* Not built on Cloud or self-host: Cloud's pages were UI over stub endpoints. Coming
+                  soon on both until the Inspector ships (Phase-08 Appendix A). */}
+              <Route path="realtime"       element={<ComingSoon title="Realtime Inspector" description="Active channels, connected clients, a live message stream and a broadcast tester, with realtime settings to follow. The Realtime Inspector is coming soon." />} />
               <Route path="plugins"        element={<PluginsMarketplace />} />
               <Route path="webhooks"       element={<ComingSoon title="Webhooks" description="Schema-driven webhooks that fire on record create/update/delete. Configure endpoints, retry policies, and delivery history. Coming in Phase 17." />} />
               <Route path="jobs"           element={<ComingSoon title="Scheduled Jobs" description="Cron-scheduled SQL jobs and edge function invocations. View execution history and trigger manually. Coming in Phase 18." />} />
@@ -535,12 +536,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="dev/migrations"     element={<Navigate to="/database/migrations" replace />} />
 
               {/* Extension routes */}
-              {extensions?.routes?.map((r) => {
-                // Cast required: studio uses @types/react@19, react-router-dom ships @types/react@18
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const el = r.element as any
-                return <Route key={r.path} path={r.path} element={el} />
-              })}
+              {extensions?.routes?.map((r) => <Route key={r.path} path={r.path} element={r.element} />)}
 
               {/* 404 */}
               <Route path="*" element={<PageError>Page not found</PageError>} />

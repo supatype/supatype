@@ -8,7 +8,8 @@ import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
 
 /**
- * Replication, Warehouse, Backups, SSO and AI Usage are not built anywhere, Cloud included.
+ * Replication, Warehouse, Backups, SSO, AI Usage and the Realtime Inspector and its settings are
+ * not built anywhere, Cloud included.
  *
  * Self-host used to mark them "Available on Supatype Cloud" with a Cloud badge, which told somebody
  * running their own stack that the hosted product had them and they were missing out. It did not.
@@ -52,6 +53,8 @@ const ENTRIES: Array<{ path: string; label: string; note: string }> = [
   { path: "/database/overview", label: "Backups", note: "Managed backups are coming soon" },
   { path: "/authentication/users", label: "SSO", note: "SSO is coming soon" },
   { path: "/ai/usage", label: "Usage", note: "AI usage tracking is coming soon" },
+  { path: "/realtime", label: "Inspector", note: "The Realtime Inspector is coming soon" },
+  { path: "/realtime", label: "Settings", note: "Realtime settings are coming soon" },
 ]
 
 describe.each([
@@ -65,7 +68,7 @@ describe.each([
     expect(tag).toContain(`title="${note}"`)
   })
 
-  it.each(["/database/overview", "/authentication/users", "/ai/usage"])(
+  it.each(["/database/overview", "/authentication/users", "/ai/usage", "/realtime"])(
     "makes no Cloud claim in %s",
     (path) => {
       const html = panel(path, platform)

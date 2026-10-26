@@ -72,6 +72,17 @@ describe("when the query fails", () => {
     expect(html).toContain("connection refused")
     expect(html).not.toContain("No seeds have run here")
   })
+
+  it("shows a missing column as the failure it is, not as a database that predates seeding", () => {
+    // An older ledger without a column the query reads: the table is there, so it is not empty.
+    const html = render({ error: 'column "content_hash" does not exist', errorCode: "42703" })
+    expect(html).toContain("content_hash")
+    expect(html).not.toContain("No seeds have run here")
+  })
+
+  it("goes by the SQLSTATE, whatever language the message is in", () => {
+    expect(render({ error: "FEHLER: Relation existiert nicht", errorCode: "42P01" })).toContain("No seeds have run here")
+  })
 })
 
 describe("while it is reading", () => {
