@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
+import { readComposeEnvInt } from "./env-file.js"
 import type { ComponentVersions } from "./components.js"
 
 // ---------------------------------------------------------------------------
@@ -113,13 +114,13 @@ export interface SupatypeProjectConfig {
      * "valkey"                = a Valkey sidecar container.
      *
      * pg_keyspace needs `shared_preload_libraries`, which is a property of the
-     * Postgres this stack starts — so it is only available when Supatype
+     * Postgres this stack starts, so it is only available when Supatype
      * provisions the database. With `database.external` the default resolves
      * to Valkey, because there is no container to configure; asking for
      * pg_keyspace explicitly there is rejected rather than ignored.
      *
      * Set "valkey" to keep the sidecar. Nothing about the cache's behaviour
-     * changes with the answer — both speak RESP and both hold the same keys.
+     * changes with the answer: both speak RESP and both hold the same keys.
      */
     provider?: "valkey" | "pg_keyspace"
     /**
@@ -127,14 +128,14 @@ export interface SupatypeProjectConfig {
      *
      * The keyspace is a cache: everything is ephemeral, living in shared
      * memory and not surviving a restart of the database. The exception is
-     * Kong's ACME certificates, which are always kept — you do not have to
+     * Kong's ACME certificates, which are always kept. You do not have to
      * name them, and re-issuing them on every restart would meet Let's
      * Encrypt's rate limits.
      *
      * List a prefix here only for something you are storing yourself that
      * must outlive a restart. Each durable write goes through the WAL, which
      * is the cost being avoided everywhere else. Each entry is a prefix of the
-     * key as stored — see `pg_keyspace.durability_overrides`.
+     * key as stored (see `pg_keyspace.durability_overrides`).
      */
     durablePrefixes?: string[]
   }
@@ -548,7 +549,7 @@ function validateCache(cfg: Record<string, unknown>, filename: string): void {
   const database = cfg["database"] as Record<string, unknown> | undefined
   if (provider === "pg_keyspace" && database?.["external"]) {
     throw new Error(
-      `${filename}: cache.provider = "pg_keyspace" needs the Postgres this stack starts — ` +
+      `${filename}: cache.provider = "pg_keyspace" needs the Postgres this stack starts: ` +
         `it is loaded with shared_preload_libraries, which is not something Supatype can set on ` +
         `a database.external one. Use cache.provider = "valkey", or drop database.external.`,
     )
@@ -565,7 +566,7 @@ function validateCache(cfg: Record<string, unknown>, filename: string): void {
     const bad = (prefixes as string[]).find((p) => p.includes(",") || p.includes("="))
     if (bad) {
       throw new Error(
-        `${filename}: cache.durablePrefixes entry ${JSON.stringify(bad)} cannot contain "," or "=" — ` +
+        `${filename}: cache.durablePrefixes entry ${JSON.stringify(bad)} cannot contain "," or "=": ` +
           `both are separators in pg_keyspace.durability_overrides`,
       )
     }
@@ -681,14 +682,19 @@ export function preferredFunctionsPathFromProject(cfg: SupatypeProjectConfig, cw
 /**
  * Derive the supatype-server base URL from the project config.
  * Returns undefined if the mode is "managed" (cloud controls the URL).
+ *
+ * A docker dev project answers on its own Kong port, as compose binds it. This used to return the
+ * default port 18473 for every docker project, which is another project's gateway on a machine
+ * running two (A3-N4, A4-N2); with no port recorded there is no address to give.
  */
-export function serverBaseUrl(cfg: SupatypeProjectConfig): string | undefined {
+export function serverBaseUrl(cfg: SupatypeProjectConfig, cwd: string = process.cwd()): string | undefined {
   const port = cfg.server.port ?? 54321
   switch (cfg.server.mode) {
     case "dev":
     case "standalone":
       if (cfg.server.mode === "dev" && resolveRuntimeProvider(cfg) === "docker") {
-        return `http://localhost:${COMPOSE_DEV_KONG_PORT}`
+        const kongPort = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT")
+        return kongPort === null ? undefined : `http://localhost:${kongPort}`
       }
       return cfg.server.domain
         ? `https://${cfg.server.domain}`

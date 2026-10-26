@@ -3,7 +3,7 @@
  */
 
 import { loadConfig, rethrowIfConfigBroken } from "./config.js"
-import { readEnvValue } from "./env-file.js"
+import { readComposeEnvInt, readEnvValue } from "./env-file.js"
 import { serverBaseUrl } from "./project-config.js"
 
 const API_URL_ENV_KEYS = [
@@ -24,8 +24,9 @@ export function resolveProjectApiUrl(cwd: string): string {
     }
   }
 
-  const kongPort = readEnvValue(cwd, "SUPATYPE_KONG_PORT", "").trim()
-  if (kongPort) {
+  // As compose binds it: an exported SUPATYPE_KONG_PORT first, then `.env`.
+  const kongPort = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT")
+  if (kongPort !== null) {
     return `http://localhost:${kongPort}`
   }
 

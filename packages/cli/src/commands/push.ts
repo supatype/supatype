@@ -17,8 +17,10 @@ import {
   hooksPathFromProject,
   resolveRuntimeProvider,
   schemaPathFromProject,
-  serverBaseUrl,
 } from "../project-config.js"
+import { isProjectDatabase, projectStackUrl } from "../local-stack.js"
+import { byoPreflight } from "../byo-preflight.js"
+import { devApiKeys } from "../dev-api-keys.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { assertEngineSupportsSchema } from "../engine-floor.js"
 import {
@@ -213,6 +215,7 @@ async function pushViaTarget(
 ): Promise<void> {
   // Before anything is read or asked: a server or engine that cannot honour the flag says so now.
   if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT])
+  if (!(await databaseIsReady(cwd, config, target, ast))) return
   const diff = await withSpinner("Diffing against database", () =>
     targetSchemaDiff(target, ast, { schema: pgSchema }),
   )
@@ -272,20 +275,7 @@ async function pushViaTarget(
   }
 
   if (target.mode === "direct" || target.mode === "local") {
-    await writeLocalAdminConfig(ast, config)
-    if (target.databaseUrl) {
-      await ensureFirstAdminUser(target.databaseUrl, { cwd })
-    }
-    await generateTypesLocal(ast, config)
-    await provisionLocalStorage(ast, config)
-    reportCacheSeeding(cwd, ast)
-
-    // Local Studio only: a cloud/self-host push must not advertise the local
-    // gateway URL from config, which may not even be running.
-    const baseUrl = (serverBaseUrl(config) ?? "").replace(/\/$/, "")
-    if (baseUrl) {
-      plain(`\nStudio: ${baseUrl}/studio/`)
-    }
+    await finishLocalPush(cwd, config, target, ast)
     return
   }
 
@@ -335,6 +325,46 @@ function applyToTarget(
     ),
     { yes: run.yes, retry: "supatype push" },
   )
+}
+
+/**
+ * After a push the engine ran here: the admin config, the first admin, the generated files, and,
+ * for the project's own running stack only, its storage buckets and Studio link.
+ *
+ * A push to some other database (`--connection`, or an external one) has no stack of this project
+ * behind it. It used to provision buckets and print a Studio link on the default gateway port,
+ * which is another project's on a machine running two (A3-N4, A4-N2).
+ */
+async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<void> {
+  await writeLocalAdminConfig(ast, config)
+  if (target.databaseUrl) {
+    await ensureFirstAdminUser(target.databaseUrl, { cwd })
+  }
+  await generateTypesLocal(ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
+  const stackUrl = projectStackUrl(cwd, config, target.databaseUrl)
+  if (stackUrl !== undefined) await provisionLocalStorage(ast, config, stackUrl)
+  reportCacheSeeding(cwd, ast)
+  if (stackUrl !== undefined) plain(`\nStudio: ${stackUrl}/studio/`)
+}
+
+/**
+ * For a database this project does not run, whether it has what the push needs, saying what is
+ * missing and how to add it when not (T2-N11). The project's own database always does.
+ */
+async function databaseIsReady(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  target: DeployTarget,
+  ast: unknown,
+): Promise<boolean> {
+  if (target.mode !== "direct" || target.databaseUrl === undefined) return true
+  if (isProjectDatabase(cwd, config, target.databaseUrl)) return true
+  const gaps = await byoPreflight(target.databaseUrl, ast)
+  if (gaps.length === 0) return true
+  plain("\nThis database is missing what Supatype needs. Nothing was applied.\n")
+  for (const line of gaps) plain(line)
+  process.exitCode = 1
+  return false
 }
 
 /**
@@ -405,7 +435,7 @@ function readGeneratedAdapter(hooksDir: string): { name: string; source: string 
   return adapterEntry(readFileSync(file, "utf8"))
 }
 
-async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): Promise<void> {
+async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, ownDatabase: boolean): Promise<void> {
   // Independent of `output`: a project with hooks needs its handler types whether or not it asked
   // for client types, and the module is written next to the functions that import it.
   const cwd = process.cwd()
@@ -425,8 +455,9 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): 
   // The server watches this file, so a changed hook takes effect without a restart.
   if (syncManifestHooks(cwd, ast)) info("Hook map written to .supatype/manifest.json")
   // The row cache is configured at postmaster start, so this is the one cache setting a push
-  // cannot make take effect on its own.
-  const rowCache = syncRowCacheEnv(cwd, ast)
+  // cannot make take effect on its own. Only for the project's own database: `.env` configures that
+  // container, and a push to any other database has no container to recreate (A2-N4).
+  const rowCache = ownDatabase ? syncRowCacheEnv(cwd, ast) : null
   if (rowCache !== null) {
     info(
       `Row cache switched ${rowCache} in .env. Recreate the database container for it to take ` +
@@ -446,18 +477,26 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): 
   for (const message of written) info(message)
 }
 
-async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig): Promise<void> {
-  const baseUrl = serverBaseUrl(config)
-  const serviceRoleKey =
-    process.env["SUPATYPE_SERVICE_ROLE_KEY"] ??
-    process.env["SERVICE_ROLE_KEY"] ??
-    (config.server.mode === "dev"
-      ? signJwt({ role: "service_role", iss: "supatype", iat: Math.floor(Date.now() / 1000) }, DEV_JWT_SECRET)
-      : undefined)
-  if (!baseUrl || !serviceRoleKey) return
+/** Create the schema's buckets on the project's own stack at `baseUrl`. */
+async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig, baseUrl: string): Promise<void> {
+  const serviceRoleKey = localServiceRoleKey(config)
+  if (!serviceRoleKey) return
   await ensureEngine()
   const parsedAst = await engineRequest<Pick<ExtractedSchemaAstV2, "storageBuckets">>("/parse", { ast })
   await provisionBucketsFromAst(parsedAst, `${baseUrl}/storage/v1`, serviceRoleKey)
+}
+
+/**
+ * The service-role key for the project's own stack: an explicit one, else the key that stack was
+ * configured with. A docker stack's comes from its `.env`, signed with the project's own secret;
+ * signing one with the published dev secret was refused by a stack with a secret of its own.
+ */
+function localServiceRoleKey(config: SupatypeProjectConfig): string | undefined {
+  const explicit = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? process.env["SERVICE_ROLE_KEY"]
+  if (explicit) return explicit
+  if (config.server.mode !== "dev") return undefined
+  if (resolveRuntimeProvider(config) === "docker") return devApiKeys(process.cwd()).serviceRoleKey
+  return signJwt({ role: "service_role", iss: "supatype", iat: Math.floor(Date.now() / 1000) }, DEV_JWT_SECRET)
 }
 
 async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig): Promise<void> {

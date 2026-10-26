@@ -4,15 +4,16 @@
  * The engine makes the same decision at push time by asking the database whether `supatype_mask` is
  * installed. The CLI has to answer earlier: it writes `PGRST_DB_SCHEMA` when it generates compose,
  * before any database necessarily exists. It can, because the extension needs
- * `shared_preload_libraries` and a compiled library on the host, so exactly one path ships it,
- * `supatype/postgres`. Everything else gets the view tier:
+ * `shared_preload_libraries` and a compiled library on the host, so it ships with
+ * `supatype/postgres` and with an image built from it; an image configured under another name is
+ * asked whether it carries the library. Everything else gets the view tier:
  *
  * | Config                                       | Ships the extension | Tier      |
  * | -------------------------------------------- | ------------------- | --------- |
  * | `database.provider: "docker"`                | yes                 | extension |
  * | `provider: native`                           | no                  | views     |
  * | `database.external`                          | no                  | views     |
- * | `provider: docker` + `database.image` override | no                | views     |
+ * | `provider: docker` + `database.image` override | asked of the image | either   |
  *
  * Deliberately **not** "is the database external": a native `supatype dev` has no extension either,
  * and treating it as tier 1 would point PostgREST at a schema whose tables the API roles no longer
@@ -23,6 +24,7 @@
  * explicitly; `supatype db check` reports the mismatch either way.
  */
 
+import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 // Statically imported: these packages are ESM, where `require` does not exist. The first attempt used
 // it for a lazy import and every command that generates compose would have thrown at runtime, caught
@@ -51,7 +53,34 @@ function postgresImage(config: SupatypeProjectConfig): string | undefined {
 /** True when the Postgres this project runs is one that carries `supatype_mask`. */
 export function imageShipsMaskExtension(config: SupatypeProjectConfig): boolean {
   const image = postgresImage(config)
-  return image !== undefined && /^supatype\/postgres(:|$)/.test(image)
+  if (image === undefined) return false
+  if (/^supatype\/postgres(:|$)/.test(image)) return true
+  return imageCarriesMaskLibrary(image) ?? false
+}
+
+/** One answer per image for the life of the process: each costs a container. */
+const maskLibraryIn = new Map<string, boolean>()
+
+/**
+ * Whether `image` carries the `supatype_mask` library, asked of the image itself, or undefined
+ * when it cannot be asked: not on this machine (it is not pulled just to ask), or no Docker.
+ *
+ * By name alone, a tag of `supatype/postgres` under another name read as having no extension, so
+ * the CLI pointed PostgREST at views while the engine, finding the extension, made none (A3-N1).
+ */
+function imageCarriesMaskLibrary(image: string): boolean | undefined {
+  const known = maskLibraryIn.get(image)
+  if (known !== undefined) return known
+  if (spawnSync("docker", ["image", "inspect", image], { stdio: "ignore" }).status !== 0) return undefined
+  const probe = spawnSync(
+    "docker",
+    ["run", "--rm", "--entrypoint", "sh", image, "-c", 'test -f "$(pg_config --pkglibdir)/supatype_mask.so"'],
+    { stdio: "ignore" },
+  )
+  // 0 found, 1 not found; anything else is Docker failing, which says nothing about the image.
+  if (probe.status !== 0 && probe.status !== 1) return undefined
+  maskLibraryIn.set(image, probe.status === 0)
+  return probe.status === 0
 }
 
 /**

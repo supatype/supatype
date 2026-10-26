@@ -2697,6 +2697,32 @@ function ownerText(node: ts.Node, fallback: ts.SourceFile): string {
   return node.getText(own ?? fallback)
 }
 
+/**
+ * The string an access rule's type argument spells, as in `Role<"editor">`.
+ *
+ * Read from the literal itself. Stripping quote characters from the source text instead turned
+ * `Role<"o'brien">` into the role `obrien`, a different role, so the intended one was denied with
+ * nothing said (E26).
+ */
+function ruleStringArg(arg: ts.TypeNode, rule: string, sourceFile: ts.SourceFile): string {
+  if (ts.isLiteralTypeNode(arg) && ts.isStringLiteral(arg.literal)) return arg.literal.text
+  throw new Error(
+    `\`${rule}<>\` takes a string literal, as in \`${rule}<"name">\`, but found \`${ownerText(arg, sourceFile)}\`.`,
+  )
+}
+
+/** A role name from `Role<>` or `BucketRole<>`, refused when it holds a quote character. */
+function roleNameArg(arg: ts.TypeNode, rule: string, sourceFile: ts.SourceFile): string {
+  const role = ruleStringArg(arg, rule, sourceFile)
+  if (/['"]/.test(role)) {
+    throw new Error(
+      `The role name "${role}" in \`${rule}<>\` contains a quote character. Postgres role names ` +
+        "used by Supatype access rules may not contain ' or \"; rename the role.",
+    )
+  }
+  return role
+}
+
 function parseAccessRule(
   typeNode: ts.TypeNode,
   sourceFile: ts.SourceFile,
@@ -2746,13 +2772,13 @@ function parseAccessRule(
       // Must match engine `AccessRule::Owner { field }` (see supatype-schema-engine parser/ast.rs).
       return {
         type: "owner",
-        field: keyArg ? ownerText(keyArg, sourceFile).replace(/['"]/g, "") : "user_id",
+        field: keyArg ? ruleStringArg(keyArg, "Owner", sourceFile) : "user_id",
       }
     }
     case "OwnerFrom": {
       const relationArg = typeNode.typeArguments?.[0]
       const relationField = relationArg
-        ? ownerText(relationArg, sourceFile).replace(/['"]/g, "")
+        ? ruleStringArg(relationArg, "OwnerFrom", sourceFile)
         : "owner"
       return { type: "owner", field: relationField }
     }
@@ -2761,7 +2787,7 @@ function parseAccessRule(
       const roleArg = typeNode.typeArguments?.[0]
       return {
         type: "role",
-        roles: [roleArg ? ownerText(roleArg, sourceFile).replace(/['"]/g, "") : "admin"],
+        roles: [roleArg ? roleNameArg(roleArg, ref, sourceFile) : "admin"],
       }
     }
     case "Any": {

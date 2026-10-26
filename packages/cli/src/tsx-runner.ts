@@ -4,20 +4,29 @@
  */
 
 import { spawnSync, type SpawnSyncOptions } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
-import { resolve, dirname } from "node:path"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { join, resolve, dirname } from "node:path"
 import { createRequire } from "node:module"
-import { fileURLToPath } from "node:url"
-import { writeFileSync, unlinkSync } from "node:fs"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { tmpdir } from "node:os"
 import { uniqueFileToken } from "./unique-file-token.js"
 import { isCompiledBinary } from "./cli-install-method.js"
 
 const _require = createRequire(import.meta.url)
 
-// The CLI's own source directory, workspace packages are
-// resolvable from here. Eval snippets are written here so ESM resolution finds them.
+/** The directory this module was loaded from: the CLI's `src` in development, `dist` installed. */
 const CLI_SRC_DIR = dirname(fileURLToPath(import.meta.url))
+
+/**
+ * A `file:` URL for one of the CLI's own modules, for a snippet to import.
+ *
+ * Snippets run from the user's temp directory, so a relative `./seed.js` would resolve there and
+ * find nothing. An absolute URL reaches the module wherever the CLI is installed, and the module's
+ * own imports resolve from its own location as they always did.
+ */
+export function cliModuleUrl(name: string): string {
+  return pathToFileURL(resolve(CLI_SRC_DIR, name)).href
+}
 
 /**
  * Resolve the absolute path to the tsx CLI entry point.
@@ -83,22 +92,20 @@ export function evalTsSnippet(
   snippet: string,
   opts: SpawnSyncOptions = {},
 ): RunResult {
-  // Always write the temp file into the CLI's source directory so that ESM
-  // resolution can find workspace packages from there.
-  // The subprocess CWD is kept as opts.cwd (the user's project dir) so that
-  // any relative paths in the snippet resolve correctly.
-  const tmpFile = resolve(CLI_SRC_DIR, evalTempFileName())
-  // This user's only, and never written through a name that already exists: a snippet can carry a
-  // project's config or connection string.
-  writeFileSync(tmpFile, snippet, { encoding: "utf8", mode: 0o600, flag: "wx" })
+  // In a directory of this call's own under the user's temp directory. It used to be written beside
+  // the CLI's source, which a global install owned by root does not let the user write to, so every
+  // `diff` failed with EACCES (A5-N4). The CLI's own modules are imported through `cliModuleUrl`.
+  // The subprocess CWD is kept as opts.cwd (the user's project dir) so that any relative paths in
+  // the snippet resolve correctly.
+  const dir = mkdtempSync(join(tmpdir(), "supatype-eval-"))
+  const tmpFile = join(dir, evalTempFileName())
   try {
+    // This user's only, and never written through a name that already exists: a snippet can carry
+    // a project's config or connection string. `mkdtemp` makes the directory 0700 as well.
+    writeFileSync(tmpFile, snippet, { encoding: "utf8", mode: 0o600, flag: "wx" })
     return runTsFile(tmpFile, opts)
   } finally {
-    try {
-      unlinkSync(tmpFile)
-    } catch {
-      // ignore cleanup errors
-    }
+    rmSync(dir, { recursive: true, force: true })
   }
 }
 
