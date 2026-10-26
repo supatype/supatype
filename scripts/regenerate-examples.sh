@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Regenerate the generated files of every example, and of the integration test project, with this
-# checkout's CLI.
+# Regenerate every example's generated files with this checkout's CLI.
+#
+# Not tests/integration: `generate` leaves a project's .supatype state behind, and the integration
+# job starts that project's stack from the same folder right after.
 #
 # Usage:
 #   bash scripts/regenerate-examples.sh      (or: pnpm generate:examples)
@@ -12,7 +14,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI="$ROOT/packages/cli/bin/supatype.js"
 
-for dir in "$ROOT"/examples/*/ "$ROOT"/tests/integration/; do
+for dir in "$ROOT"/examples/*/; do
   [[ -f "${dir}supatype.config.ts" ]] || continue
   echo "==> ${dir#"$ROOT/"}"
   (cd "$dir" && node "$CLI" generate)

@@ -108,7 +108,7 @@ jobs:
       - name: Generated types are up to date
         run: |
           bash scripts/regenerate-examples.sh
-          git diff --exit-code -- examples/ tests/integration/supatype/generated/ \
+          git diff --exit-code -- examples/ \
             || { echo "::error::Generated files are stale. Run 'pnpm generate:examples' and commit the result."; exit 1; }
         env:
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
