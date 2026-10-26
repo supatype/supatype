@@ -43,3 +43,14 @@ declare namespace Deno {
     handler: (req: Request) => Response | Promise<Response>,
   ): void
 }
+
+/**
+ * The slice of Node's `async_hooks` the worker uses. Deno provides the module at runtime; tsc has no
+ * `@types/node` here, and without this the import resolved to nothing and `store` was untyped.
+ */
+declare module "node:async_hooks" {
+  export class AsyncLocalStorage<T> {
+    getStore(): T | undefined
+    run<R>(store: T, callback: () => R): R
+  }
+}
