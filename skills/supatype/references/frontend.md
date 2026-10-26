@@ -280,16 +280,28 @@ const client = useSupatype<Database>() // escape hatch
 ## Auth UI components (`@supatype/react-auth`)
 
 ```tsx
-import { LoginForm, SignUpForm, OAuthButton } from "@supatype/react-auth"
+import { LoginForm, SignUpForm, OAuthButton, type AuthFormClassNames } from "@supatype/react-auth"
+
+// The app's own classes, defined once and given to both forms.
+const authClassNames: AuthFormClassNames = {
+  title: "form-title",
+  field: "field",
+  label: "field-label",
+  input: "input",
+  submit: "btn btn-primary",
+  error: "note note-error",
+}
 
 <LoginForm
-  className="auth-form"
+  className="form"
+  classNames={authClassNames}
   onSuccess={(session) => navigate("/")}
   onError={(err) => console.error(err.message)}
 />
 
 <SignUpForm
-  className="auth-form"
+  className="form"
+  classNames={authClassNames}
   metadata={{ display_name }}
   onSuccess={(session) => { if (session) navigate("/onboarding") }}
 />
@@ -297,7 +309,7 @@ import { LoginForm, SignUpForm, OAuthButton } from "@supatype/react-auth"
 <OAuthButton provider="github" redirectTo="/dashboard" />
 ```
 
-Form components apply no styles of their own: pass `className` and style descendants. `OAuthButton` has default styles only when no `className` is given.
+**The forms ship no stylesheet.** There is no CSS to import and nothing to add to Tailwind `content`. `className` styles only the `<form>`; `classNames` puts a class on each element inside it (`title`, `error`, `field`, `label`, `input`, `submit`, and `message` for `SignUpForm`'s "check your email" state). Render them without `classNames` in an app that only styles classes and they show browser defaults: labels inline beside narrow inputs and a grey button. Skip `classNames` only if the app styles bare `label`/`input`/`button` elements globally. `OAuthButton` has default styles only when no `className` is given.
 
 ## Gotcha: keep a single `@supatype/client` version
 

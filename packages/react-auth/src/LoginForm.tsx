@@ -1,6 +1,7 @@
 import React, { useState, type FormEvent } from "react"
 import type { Session, SupatypeError } from "@supatype/client"
 import { useAuth } from "@supatype/react"
+import { errorProps, type AuthFormClassNames } from "./classNames.js"
 
 export interface LoginFormLabels {
   title?: string | undefined
@@ -19,6 +20,8 @@ export interface LoginFormProps {
   className?: string | undefined
   /** Override display labels. */
   labels?: LoginFormLabels | undefined
+  /** Class names for the elements inside the form, so an app can style them with its own classes. */
+  classNames?: AuthFormClassNames | undefined
 }
 
 const DEFAULT_LABELS: Required<LoginFormLabels> = {
@@ -41,7 +44,7 @@ const DEFAULT_LABELS: Required<LoginFormLabels> = {
  * />
  * ```
  */
-export function LoginForm({ onSuccess, onError, className, labels }: LoginFormProps): React.ReactElement {
+export function LoginForm({ onSuccess, onError, className, classNames, labels }: LoginFormProps): React.ReactElement {
   const { signIn } = useAuth()
   const l = { ...DEFAULT_LABELS, ...labels }
 
@@ -70,17 +73,18 @@ export function LoginForm({ onSuccess, onError, className, labels }: LoginFormPr
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e) }} className={className} noValidate>
-      <h2>{l.title}</h2>
+      <h2 className={classNames?.title}>{l.title}</h2>
 
       {errorMessage !== null && (
-        <p role="alert" aria-live="polite" style={{ color: "red" }}>
+        <p role="alert" aria-live="polite" {...errorProps(classNames)}>
           {errorMessage}
         </p>
       )}
 
-      <div>
-        <label htmlFor="st-login-email">{l.email}</label>
+      <div className={classNames?.field}>
+        <label className={classNames?.label} htmlFor="st-login-email">{l.email}</label>
         <input
+          className={classNames?.input}
           id="st-login-email"
           type="email"
           autoComplete="email"
@@ -91,9 +95,10 @@ export function LoginForm({ onSuccess, onError, className, labels }: LoginFormPr
         />
       </div>
 
-      <div>
-        <label htmlFor="st-login-password">{l.password}</label>
+      <div className={classNames?.field}>
+        <label className={classNames?.label} htmlFor="st-login-password">{l.password}</label>
         <input
+          className={classNames?.input}
           id="st-login-password"
           type="password"
           autoComplete="current-password"
@@ -104,7 +109,7 @@ export function LoginForm({ onSuccess, onError, className, labels }: LoginFormPr
         />
       </div>
 
-      <button type="submit" disabled={loading}>
+      <button type="submit" className={classNames?.submit} disabled={loading}>
         {loading ? "Signing in…" : l.submit}
       </button>
     </form>
