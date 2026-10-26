@@ -56,6 +56,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # The CLI's signing tests sign and verify a release manifest with the real minisign. Under
+      # CI they fail rather than skip when it is missing, so this step is what keeps them running.
+      - name: Install minisign
+        run: sudo apt-get install -y -qq minisign
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -121,6 +126,28 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      # Same reason as in `check`: the signing tests fail under CI without minisign. Neither
+      # runner image ships it.
+      - name: Install minisign (macOS)
+        if: runner.os == 'macOS'
+        run: brew install minisign
+
+      # The upstream release, pinned by version and sha256. The zip's minisign signature was
+      # checked against the author's key (RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3)
+      # when the hash was recorded; the hash is what holds it to that file from then on.
+      - name: Install minisign (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479'
+          $zip = Join-Path $env:RUNNER_TEMP 'minisign-0.12-win64.zip'
+          Invoke-WebRequest -Uri 'https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip' -OutFile $zip
+          $actual = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "minisign-0.12-win64.zip has sha256 $actual, expected $expected" }
+          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP -Force
+          Join-Path $env:RUNNER_TEMP 'minisign-win64\x86_64' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

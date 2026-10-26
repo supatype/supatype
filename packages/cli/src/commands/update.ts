@@ -88,7 +88,9 @@ export function registerUpdate(program: Command): void {
         const latest = latestVersions[component]
         if (!latest) {
           if (component === "realtime") {
-            info(`Skipping ${component}: not published on CDN yet`)
+            // Realtime binaries publish with every stable supatype v* release, but releases from
+            // before that have none, and a prerelease never moves realtime/latest.json.
+            info(`Skipping ${component}: no realtime/latest.json on the CDN (realtime binaries ship with each stable supatype v* release)`)
             continue
           }
           error(`No latest version for ${component} on CDN`)
