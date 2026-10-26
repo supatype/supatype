@@ -131,6 +131,43 @@ export type User = Model<{
     expect(modelAccess(user)["delete"]).toEqual({ type: "owner", field: "id" })
   })
 
+  it("emits Owner on a UUID column as written, in row and field rules (A7-N3)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-owner-column-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Owner, LoggedIn } from "@supatype/types"
+
+export type Note = Model<{
+  id: UUID
+  owner_id: UUID
+  body: string
+  secret: string
+}, {
+  access: {
+    read: Owner<"owner_id">
+    create: LoggedIn
+    update: Owner<"owner_id">
+    delete: Owner<"owner_id">
+    fields: { secret: { read: Owner<"owner_id">; write: Owner<"owner_id"> } }
+  }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const note = ast?.models.find((m) => m.name === "Note")
+    const owner = { type: "owner", field: "owner_id" }
+    expect(modelAccess(note)["read"]).toEqual(owner)
+    expect(modelAccess(note)["update"]).toEqual(owner)
+    expect(modelAccess(note)["delete"]).toEqual(owner)
+    expect(modelAccess(note)["fields"]).toEqual({ secret: { read: owner, write: owner } })
+    expect(note?.fields["owner_id"]).toMatchObject({ kind: "uuid" })
+  })
+
   it("maps SupatypeAuthUser relations and OwnerFrom relation keys", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-types-auth-owner-"))
     dirs.push(dir)
