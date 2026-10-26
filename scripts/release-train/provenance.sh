@@ -96,8 +96,11 @@ check_ledgers() {
     return
   fi
   # Every observation counts, not only the last: rows are only ever added during a suite, and a
-  # database dropped before the final poll still had its pushes seen while it lived.
+  # database dropped before the final poll still had its pushes seen while it lived. Only ledger
+  # lines count: a `docker exec` into a database that is shutting down writes its own error (such
+  # as "OCI runtime exec failed") into the log, and that is not a push.
   awk -v want="$want" '
+    NF != 3 || $3 !~ /^versions=/ { next }
     { sub(/^versions=/, "", $3); n = split($3, vs, ",")
       for (i = 1; i <= n; i++) if (vs[i] != want) bad[$1 "/" $2 " " vs[i]] = 1 }
     END { for (k in bad) { split(k, p, " ")
