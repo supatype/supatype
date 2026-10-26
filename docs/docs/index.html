@@ -116,6 +116,11 @@
                 server you deploy to.
               </p>
               <p>
+                It stops with its stack when the process that started it exits, as it does on Ctrl+C: a
+                script that is killed, or a cancelled CI job, leaves nothing running. To leave a stack
+                running with nothing attached, use <code>supatype self-host compose up -d</code>.
+              </p>
+              <p>
                 The gateway serves REST at <code>/rest/v1/</code>, auth at <code>/auth/v1/</code>,
                 storage and realtime. With Docker it listens on <code>http://localhost:18473</code>
                 (init picks a free port per project and writes it to <code>.env</code>); with Native

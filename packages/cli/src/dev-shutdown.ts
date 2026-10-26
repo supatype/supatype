@@ -31,7 +31,10 @@ let parentWatch: ParentWatch | null = null
  */
 function watchForOrphaning(): void {
   parentWatch = watchParent(() => {
-    process.stderr.write("\n[supatype] The process that started `supatype dev` has exited.\n")
+    process.stderr.write(
+      "\n[supatype] The process that started `supatype dev` has exited, so dev is stopping its stack.\n" +
+        "[supatype] To leave a stack running with nothing attached, use `supatype self-host compose up -d`.\n",
+    )
     void runDevShutdown()
   })
   if (process.platform === "win32") {

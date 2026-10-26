@@ -119,12 +119,16 @@ describe("dev when the process that started it is killed", () => {
     // The starter stands in for a shell script. `detached` because a shell leaves its children
     // running when it dies; a plain Node child on Windows sits in its parent's job object and is
     // killed with it, before any shutdown work could run.
+    // dev's stderr goes to a file, so what it tells the user on the way out can be read back.
+    const stderrFile = join(dir, "dev-stderr")
     const starter = join(dir, "starter.mjs")
     writeFileSync(
       starter,
       [
         'import { spawn } from "node:child_process"',
-        `spawn(process.execPath, ["--import", "tsx", ${JSON.stringify(devTail)}], { stdio: "ignore", detached: true })`,
+        'import { openSync } from "node:fs"',
+        `const err = openSync(${JSON.stringify(stderrFile)}, "w")`,
+        `spawn(process.execPath, ["--import", "tsx", ${JSON.stringify(devTail)}], { stdio: ["ignore", "ignore", err], detached: true })`,
         "setInterval(() => undefined, 1000)",
         "",
       ].join("\n"),
@@ -141,6 +145,10 @@ describe("dev when the process that started it is killed", () => {
     if (!stopped && watch.pidAlive(devPid)) process.kill(devPid, "SIGKILL")
     expect(existsSync(marker), "the shutdown work ran").toBe(true)
     expect(watch.pidAlive(devPid), "dev exited").toBe(false)
+    // It says why it stopped, and how to leave a stack running with nothing attached.
+    const said = readFileSync(stderrFile, "utf8")
+    expect(said).toContain("The process that started `supatype dev` has exited")
+    expect(said).toContain("supatype self-host compose up -d")
   }, 60_000)
 })
 

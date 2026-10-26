@@ -42,6 +42,11 @@ npm run vite                               # terminal 2: if app.vite_dev_url is 
 regenerates the typed client each time; there is no separate `push` step locally. `push` is for
 another database: `supatype push --env <name>`, or a linked target.
 
+It also stops, and stops its stack the way Ctrl+C does, within a few seconds of the process that
+started it exiting: a script that was killed, a cancelled CI job, an agent's command that timed out.
+So start it in the foreground, or from a process that stays alive. To leave a stack running with
+nothing attached, use `supatype self-host compose up -d` instead.
+
 Install matching versions of CLI, client, and types from npm:
 
 ```bash
