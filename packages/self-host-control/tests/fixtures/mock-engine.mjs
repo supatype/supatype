@@ -59,6 +59,12 @@ if (cmd === "migrations" && args.includes("--name")) {
   console.error("2026-01-01T00:00:00Z  INFO supatype-engine starting")
   console.error("Error: 1 object(s) that decide who may read or write were changed outside Supatype: policy:posts.read (changed).")
   process.exit(1)
+} else if (process.env["MOCK_ENGINE_REFUSE"] === "drift_changed") {
+  const message =
+    "The drift changed after the preview, so nothing was rebaselined. Drifted since: policy:tag.tag_select. No longer drifted: none."
+  console.log(JSON.stringify({ status: "refused", reason: "drift_changed", unseen: ["policy:tag.tag_select"], gone: [], message }))
+  console.error(`Error: ${message}`)
+  process.exit(1)
 } else if (process.env["MOCK_ENGINE_REFUSE"] === "engine_busy") {
   console.error("2026-01-01T00:00:00Z  INFO supatype-engine starting")
   console.error("Error: another push, adopt or rebaseline is running on this database; try again. Nothing was applied.")

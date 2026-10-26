@@ -206,13 +206,21 @@ export function formatSecurityDrift(actions: ReconcileAction[]): string[] {
           : action.create_sql
     const live =
       action.action === "drift" ? action.live_def : action.action === "replace" ? action.drifted?.live_def : undefined
-    lines.push(...driftLines(`${kindLabel(action)} ${where(action)}`, recorded ?? "", action.action === "recreate" ? null : live ?? ""))
+    const unchecked = action.action === "replace" ? action.drifted?.unchecked : undefined
+    lines.push(
+      ...driftLines(`${kindLabel(action)} ${where(action)}`, recorded ?? "", action.action === "recreate" ? null : live ?? "", unchecked),
+    )
   }
   return lines
 }
 
-function driftLines(label: string, recorded: string, live: string | null): string[] {
-  const lines = [`  ${label}`, "    Supatype's:"]
+function driftLines(label: string, recorded: string, live: string | null, unchecked?: string): string[] {
+  const lines = [`  ${label}`]
+  // The engine could not compare it with what Supatype made, so it counts it as changed (F16).
+  if (unchecked !== undefined) {
+    lines.push(`    Not checked for changes made by hand (${unchecked}), so it is treated as changed.`)
+  }
+  lines.push("    Supatype's:")
   for (const line of recorded.split("\n")) lines.push(`      ${line}`)
   if (live === null) {
     lines.push("    Now: removed")
@@ -233,6 +241,8 @@ export interface DriftedObject {
   recorded: string
   /** What the database holds now; null when it was removed. */
   live?: string | null
+  /** Why it could not be compared with what Supatype made, when it could not: it is treated as changed. */
+  unchecked?: string
 }
 
 /**
@@ -247,6 +257,11 @@ export function securityDriftRefusal(output: string): DriftedObject[] | null {
 /** Each object a refusal names, with what Supatype recorded beside what the database holds now. */
 export function formatDriftedObjects(objects: readonly DriftedObject[]): string[] {
   return objects.flatMap((o) =>
-    driftLines(`${o.key.kind.replace(/_/g, " ")} ${o.key.parent ? `${o.key.parent}.${o.key.name}` : o.key.name}`, o.recorded, o.live ?? null),
+    driftLines(
+      `${o.key.kind.replace(/_/g, " ")} ${o.key.parent ? `${o.key.parent}.${o.key.name}` : o.key.name}`,
+      o.recorded,
+      o.live ?? null,
+      o.unchecked,
+    ),
   )
 }

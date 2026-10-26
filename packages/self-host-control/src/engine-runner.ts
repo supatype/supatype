@@ -146,7 +146,18 @@ export async function runEngineMigrationSources(
 export async function runEngineDoctor(
   databaseUrl: string,
   ast: unknown,
-  opts?: { noCache?: boolean; schema?: string; rebaseline?: boolean; acceptAccessDrift?: boolean },
+  opts?: {
+    noCache?: boolean
+    schema?: string
+    rebaseline?: boolean
+    acceptAccessDrift?: boolean
+    /**
+     * With `rebaseline`: the drifted objects its preview showed. The engine records only if the
+     * drift is still exactly these, and otherwise refuses with `drift_changed`. Never empty: no
+     * `--key` at all is "record whatever drift there is" to the binary.
+     */
+    keys?: string[]
+  },
 ): Promise<unknown> {
   const astPath = await writeTempJson(ast)
   try {
@@ -158,6 +169,7 @@ export async function runEngineDoctor(
       args.push("--rebaseline")
       // Rebaseline access drift too; the engine reads it only with --rebaseline.
       if (opts.acceptAccessDrift) args.push("--accept-access-drift")
+      for (const key of opts.keys ?? []) args.push("--key", key)
     }
     const out = await runEngine("doctor", args, { inputPath: astPath })
     return JSON.parse(out)
@@ -263,7 +275,7 @@ const ENGINE_BUSY_WORDING = /another push(?:,? (?:or )?(?:adopt|rebaseline|rollb
  */
 export function engineRefusal(
   err: unknown,
-): { reason: string; message: string; tables?: unknown; objects?: unknown } | undefined {
+): ({ reason: string; message: string } & Record<string, unknown>) | undefined {
   if (!(err instanceof EngineRunError)) return undefined
   // What anyhow prints after the log lines: `Error: <the refusal, possibly several lines>`.
   const at = err.stderr.indexOf("Error: ")
@@ -272,14 +284,12 @@ export function engineRefusal(
     const candidate = line.trim()
     if (!candidate.startsWith("{")) continue
     try {
-      const parsed = JSON.parse(candidate) as { status?: unknown; reason?: unknown; tables?: unknown; objects?: unknown }
-      if (parsed.status === "refused" && typeof parsed.reason === "string") {
-        return {
-          reason: parsed.reason,
-          message: message ?? err.message,
-          ...(parsed.tables !== undefined && { tables: parsed.tables }),
-          ...(parsed.objects !== undefined && { objects: parsed.objects }),
-        }
+      const parsed = JSON.parse(candidate) as Record<string, unknown>
+      // Whatever the refusal names (`tables`, `objects`, a rebaseline's `unseen` and `gone`) is
+      // passed on as the engine sent it, so a refusal added later needs no change here.
+      const { status, reason, message: _said, ...details } = parsed
+      if (status === "refused" && typeof reason === "string") {
+        return { ...details, reason, message: message ?? err.message }
       }
     } catch {
       /* not this line */

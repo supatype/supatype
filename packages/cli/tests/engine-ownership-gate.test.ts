@@ -261,4 +261,41 @@ describe("targetSchemaPush() against a server", () => {
     expect(body).toMatchObject({ rebaseline: true, accept_access_drift: true })
     expect(body).not.toHaveProperty("overwrite_drift")
   })
+
+  it("doctor --rebaseline sends the previewed keys, and is refused, never sent unkeyed, without rebaseline_keys (F29)", async () => {
+    const KEYS = ["policy:note.note_select", "check:posts.posts_title_bounds"]
+    const fetchMock = vi.fn(async (url: string, _init?: { body?: string }) =>
+      url.endsWith("/schema/capabilities")
+        ? reply(200, { data: { features: ALL } })
+        : reply(200, { data: { missing: [], staleManaged: [], unmanagedDrift: [] } }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const { forgetServerCapabilities, targetSchemaDoctor } = await import("../src/resolve-target.js")
+    // A server whose engine records whatever drift there is when it runs.
+    await expect(targetSchemaDoctor(selfHost(), {}, { rebaseline: true, keys: KEYS })).rejects.toThrow(
+      "this server does not support --rebaseline (recording only the drift the preview showed); update it",
+    )
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/schema/doctor"))).toBe(false)
+
+    forgetServerCapabilities()
+    fetchMock.mockImplementation(async (url: string) =>
+      url.endsWith("/schema/capabilities")
+        ? reply(200, { data: { features: [...ALL, "rebaseline_keys"] } })
+        : reply(200, { data: { missing: [], staleManaged: [], unmanagedDrift: [] } }),
+    )
+    await targetSchemaDoctor(selfHost(), {}, { rebaseline: true, keys: KEYS })
+    const sent = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/schema/doctor"))!
+    expect(JSON.parse(String(sent[1]?.body))).toMatchObject({ rebaseline: true, keys: KEYS })
+  })
+
+  it("a plain doctor sends no keys and asks for nothing", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: { body?: string }) =>
+      reply(200, { data: { missing: [], staleManaged: [], unmanagedDrift: [] } }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const { targetSchemaDoctor } = await import("../src/resolve-target.js")
+    await targetSchemaDoctor(selfHost(), {}, { keys: ["policy:note.note_select"] })
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(["http://cp.test/platform/v1/projects/app/schema/doctor"])
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).not.toHaveProperty("keys")
+  })
 })

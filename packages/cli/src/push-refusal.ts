@@ -31,6 +31,15 @@ const DESTRUCTIVE_WORDING = /(\d+) destructive operation\(s\) detected/i
 const SECURITY_DRIFT_WORDING = /decide who may read or write were changed outside Supatype/i
 
 /**
+ * The `reason` the engine gives a rebaseline it refused because the drift is no longer what its
+ * preview showed: something drifted since, or was put back (C04). Nothing was recorded.
+ */
+const DRIFT_CHANGED = "drift_changed"
+
+/** The engine's sentence for that refusal, for a server that passed on neither its code nor its lists. */
+const DRIFT_CHANGED_WORDING = /the drift changed after the preview/i
+
+/**
  * Docker could not pull an image the push runs in, so the engine never ran. Daemon wording, as
  * Docker and compose print it: the Docker Hub rate limit (its `toomanyrequests` code and the 429 a
  * resolve reports), a repository or tag that does not exist, and a registry it could not reach.
@@ -58,6 +67,8 @@ export type PushRefusal =
   | { kind: "security-drift"; objects: DriftedObject[] }
   | { kind: "engine-busy" }
   | { kind: "image-pull"; image: string | undefined; rateLimited: boolean; detail: string }
+  /** A rebaseline's drift moved after its preview: `unseen` is new since, `gone` was put back. */
+  | { kind: "drift-changed"; unseen: string[]; gone: string[] }
 
 export type PushRefusalKind = PushRefusal["kind"]
 
@@ -106,11 +117,13 @@ function refusalCodeOf(err: unknown): string | undefined {
 function byCode(code: string | undefined, line: JsonObject | undefined): PushRefusal | null {
   switch (code) {
     case UNMANAGED_MODEL_TABLES:
-      return { kind: "unmanaged-tables", tables: listOf<string>(line?.["tables"]).filter((t) => typeof t === "string") }
+      return { kind: "unmanaged-tables", tables: stringsOf(line?.["tables"]) }
     case SECURITY_DRIFT:
       return { kind: "security-drift", objects: listOf<DriftedObject>(line?.["objects"]) }
     case ENGINE_BUSY:
       return { kind: "engine-busy" }
+    case DRIFT_CHANGED:
+      return { kind: "drift-changed", unseen: stringsOf(line?.["unseen"]), gone: stringsOf(line?.["gone"]) }
     default:
       return null
   }
@@ -118,6 +131,10 @@ function byCode(code: string | undefined, line: JsonObject | undefined): PushRef
 
 function listOf<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+function stringsOf(value: unknown): string[] {
+  return listOf<unknown>(value).filter((v): v is string => typeof v === "string")
 }
 
 function byWording(output: string, busyWording: boolean): PushRefusal | null {
@@ -128,6 +145,7 @@ function byWording(output: string, busyWording: boolean): PushRefusal | null {
   const count = destructiveRefusal(output)
   if (count !== null) return { kind: "destructive", count }
   if (SECURITY_DRIFT_WORDING.test(output)) return { kind: "security-drift", objects: [] }
+  if (DRIFT_CHANGED_WORDING.test(output)) return { kind: "drift-changed", unseen: [], gone: [] }
   if (busyWording && ENGINE_BUSY_WORDING.test(output)) return { kind: "engine-busy" }
   return imagePull(output)
 }
@@ -180,6 +198,19 @@ export function explainRefusal(refusal: PushRefusal, context: RefusalContext): R
       }
     case "image-pull":
       return explainImagePull(refusal, retry)
+    case "drift-changed":
+      return explainDriftChanged(refusal, command)
+  }
+}
+
+function explainDriftChanged(refusal: Extract<PushRefusal, { kind: "drift-changed" }>, command: string): RefusalExplanation {
+  return {
+    headline: "The drift changed after the preview, so nothing was recorded.",
+    hints: [
+      ...(refusal.unseen.length > 0 ? [`New since the preview: ${refusal.unseen.join(", ")}`] : []),
+      ...(refusal.gone.length > 0 ? [`No longer drifted: ${refusal.gone.join(", ")}`] : []),
+      `Run \`${command}\` again to review the drift as it is now.`,
+    ],
   }
 }
 

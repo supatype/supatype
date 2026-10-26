@@ -343,3 +343,39 @@ describe("the compose push and --force", () => {
     expect(composeEnginePushArgs(null)).toContain("--non-interactive")
   })
 })
+
+describe("objects not checked for changes made by hand (F16, F29)", () => {
+  it("say so, and why, in a security-drift refusal", () => {
+    const output = JSON.stringify({
+      status: "refused",
+      reason: "security_drift",
+      objects: [
+        {
+          key: { kind: "policy", schema: "public", parent: "posts", name: "read" },
+          recorded: "USING (true)",
+          live: "USING (owner = auth.uid())",
+          unchecked: "the comparison timed out",
+        },
+      ],
+    })
+    expect(formatDriftedObjects(securityDriftRefusal(output)!)).toEqual([
+      "  policy posts.read",
+      "    Not checked for changes made by hand (the comparison timed out), so it is treated as changed.",
+      "    Supatype's:",
+      "      USING (true)",
+      "    Now:",
+      "      USING (owner = auth.uid())",
+    ])
+  })
+
+  it("say so on a replace in the diff's reconcile", () => {
+    const lines = formatSecurityDrift([
+      {
+        action: "replace",
+        key: { kind: "policy", schema: "public", parent: "posts", name: "read" },
+        drifted: { recorded_def: "USING (true)", live_def: "USING (false)", unchecked: "the comparison timed out" },
+      },
+    ])
+    expect(lines[1]).toBe("    Not checked for changes made by hand (the comparison timed out), so it is treated as changed.")
+  })
+})

@@ -158,3 +158,28 @@ describe("claimed objects (Supatype's own from an earlier engine, not recorded y
     expect(hasStrictIssues(claimed)).toBe(false)
   })
 })
+
+describe("objects not checked for changes made by hand (F16, F29)", () => {
+  const UNCHECKED = {
+    kind: "policy",
+    table: "note",
+    name: "note_select",
+    fields: [],
+    message:
+      "Policy note.note_select was not checked for changes made by hand (the comparison timed out): `supatype push` replaces it only after asking, since it decides who may read or write",
+  }
+
+  it("print the engine's reason under Drifted", () => {
+    const captured = lines()
+    printReport({ missing: [], staleManaged: [], unmanagedDrift: [], drifted: [UNCHECKED] })
+    const text = captured.join("\n")
+    expect(text).toContain("• note.note_select")
+    expect(text).toContain("not checked for changes made by hand (the comparison timed out)")
+    expect(text).toContain("1 drifted")
+  })
+
+  it("count as blocking in --strict, with or without the engine's own answer", () => {
+    expect(hasStrictIssues({ missing: [], staleManaged: [], unmanagedDrift: [], drifted: [UNCHECKED] })).toBe(true)
+    expect(hasStrictIssues({ missing: [], staleManaged: [], unmanagedDrift: [], drifted: [UNCHECKED], blocking: true })).toBe(true)
+  })
+})
