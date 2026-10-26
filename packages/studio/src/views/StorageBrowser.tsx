@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import type { SupatypeClient } from "@supatype/client"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
@@ -30,6 +31,19 @@ interface Bucket {
   allowed_mime_types: string[] | null
   created_at: string
   updated_at: string
+}
+
+/**
+ * A `list()` entry as the storage API sends it. Wider than `StorageObject`, which is what a file
+ * looks like: a folder arrives with `id` and `metadata` null and no timestamps.
+ */
+interface StorageListEntry {
+  id: string | null
+  name: string
+  owner?: string | null | undefined
+  created_at: string | null
+  updated_at: string | null
+  metadata?: Record<string, unknown> | null | undefined
 }
 
 interface UploadProgress {
@@ -76,14 +90,13 @@ function isPreviewable(type: string): boolean {
 }
 
 function normalizeStoragePublicUrl(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: any,
+  client: SupatypeClient,
   rawUrl: string,
 ): string {
   if (!rawUrl) return rawUrl
   try {
     const parsed = new URL(rawUrl)
-    const apiOrigin = typeof client?.url === "string" ? new URL(client.url).origin : null
+    const apiOrigin = new URL(client.url).origin
     if (apiOrigin && parsed.origin !== apiOrigin && parsed.pathname.startsWith("/storage/v1/")) {
       return `${apiOrigin}${parsed.pathname}${parsed.search}`
     }
@@ -112,15 +125,14 @@ function StorageImageThumbnail({
   pathPrefix: string[]
   fileName: string
   alt: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: any
+  client: SupatypeClient
   sizeClassName: string
 }): React.ReactElement {
   const filePath = useMemo(() => storageObjectPath(pathPrefix, fileName), [pathPrefix, fileName])
 
   const publicUrl = useMemo(() => {
     if (!bucketPublic) return null
-    const raw = client.storage.from(bucketName).getPublicUrl(filePath).data.publicUrl as string
+    const raw = client.storage.from(bucketName).getPublicUrl(filePath).data.publicUrl
     return normalizeStoragePublicUrl(client, raw)
   }, [bucketPublic, bucketName, filePath, client])
 
@@ -162,21 +174,24 @@ function StorageImageThumbnail({
   )
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapStorageFiles(data: any[]): StorageFile[] {
-  return (data ?? [])
-    .filter((item: any) => item.name !== ".emptyFolderPlaceholder")
-    .map((item: any) => ({
-      id: item.id ?? `folder-${item.name}`,
-      name: item.name as string,
-      size: (item.metadata?.size as number) ?? 0,
-      type: (item.metadata?.mimetype as string) ?? (item.id === null ? "folder" : "application/octet-stream"),
-      updated_at: (item.updated_at as string) ?? new Date().toISOString(),
-      created_at: (item.created_at as string) ?? new Date().toISOString(),
-      is_folder: item.id === null && item.metadata === null,
-      owner_id: (item.owner as string) ?? null,
-      public_url: null,
-    }))
+function mapStorageFiles(data: StorageListEntry[]): StorageFile[] {
+  return data
+    .filter((item) => item.name !== ".emptyFolderPlaceholder")
+    .map((item) => {
+      const size = item.metadata?.["size"]
+      const mimetype = item.metadata?.["mimetype"]
+      return {
+        id: item.id ?? `folder-${item.name}`,
+        name: item.name,
+        size: typeof size === "number" ? size : 0,
+        type: typeof mimetype === "string" ? mimetype : item.id === null ? "folder" : "application/octet-stream",
+        updated_at: item.updated_at ?? new Date().toISOString(),
+        created_at: item.created_at ?? new Date().toISOString(),
+        is_folder: item.id === null && item.metadata === null,
+        owner_id: item.owner ?? null,
+        public_url: null,
+      }
+    })
 }
 
 // ─── File Preview Panel ───────────────────────────────────────────────────────
@@ -189,8 +204,7 @@ function FilePreview({
 }: {
   file: StorageFile
   bucket: Bucket
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: any
+  client: SupatypeClient
   currentPath: string[]
 }): React.ReactElement {
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
@@ -211,7 +225,7 @@ function FilePreview({
     setSignedUrlError(null)
     const { data, error } = await client.storage.from(bucket.name).createSignedUrl(filePath, 3600)
     if (error) { setSignedUrlError(error.message); return }
-    setSignedUrl(data.signedUrl)
+    setSignedUrl(data?.signedUrl ?? null)
   }
 
   return (

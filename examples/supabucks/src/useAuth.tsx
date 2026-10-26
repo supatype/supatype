@@ -1,16 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
 import { supatype } from "./supatype"
+import type { User } from "@supatype/client"
 import { ensureCustomer, fetchActivity, type Activity, type Customer } from "./api"
-
-interface SessionUser {
-  id: string
-  email?: string
-  user_metadata?: Record<string, unknown>
-}
+import { customerName } from "./customerName"
 
 interface AuthState {
   ready: boolean
-  user: SessionUser | null
+  user: User | null
   customer: Customer | null
   activity: Activity[]
   signIn(email: string, password: string): Promise<string | null>
@@ -28,25 +24,19 @@ export function useAuth(): AuthState {
   return ctx
 }
 
-function displayName(u: SessionUser): string {
-  const meta = u.user_metadata?.["name"]
-  if (typeof meta === "string" && meta.trim()) return meta.trim()
-  return u.email?.split("@")[0] ?? "Member"
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
-  const [user, setUser] = useState<SessionUser | null>(null)
+  const [user, setUser] = useState<User | null>(null)
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [activity, setActivity] = useState<Activity[]>([])
 
-  const load = useCallback(async (u: SessionUser | null) => {
+  const load = useCallback(async (u: User | null) => {
     if (!u) {
       setCustomer(null)
       setActivity([])
       return
     }
-    const c = await ensureCustomer(u.id, displayName(u))
+    const c = await ensureCustomer(u.id, customerName(u))
     setCustomer(c)
     setActivity(await fetchActivity(u.id))
   }, [])
@@ -65,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (refreshed.data.session) session = refreshed.data.session
       }
       if (!active) return
-      const u = ((session?.user as SessionUser | undefined) ?? null)
+      const u = session?.user ?? null
       setUser(u)
       await load(u)
       setReady(true)
@@ -78,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string): Promise<string | null> => {
     const { data, error } = await supatype.auth.signInWithPassword({ email, password })
     if (error) return error.message
-    const u = (data.user as SessionUser | null) ?? null
+    const u = data.user
     setUser(u)
     await load(u)
     return null
@@ -87,7 +77,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = async (name: string, email: string, password: string): Promise<string | null> => {
     const { data, error } = await supatype.auth.signUp({ email, password, options: { data: { name } } })
     if (error) return error.message
-    const u = (data.user as SessionUser | null) ?? null
+    // No session means the project wants the email confirmed before the first sign-in.
+    if (data.session === null) return "Check your email to confirm your account, then sign in."
+    const u = data.user
     setUser(u)
     await load(u)
     return null

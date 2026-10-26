@@ -19,7 +19,7 @@
 import { spawnSync } from "node:child_process"
 import { createHmac, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
-import type { AddressInfo } from "node:net"
+import { connect, type AddressInfo } from "node:net"
 import type { Server } from "node:http"
 import { join } from "node:path"
 import pg from "pg"
@@ -30,6 +30,8 @@ const FIXTURES = join(import.meta.dirname, "fixtures")
 
 /** Objects the mocked S3 holds, keyed `bucket/key`. */
 const stored = new Map<string, Buffer>()
+/** The Content-Type each object was stored with, keyed like `stored`; text/plain when unset. */
+const storedTypes = new Map<string, string>()
 let failPutFor: string | null = null
 /** Runs after a put has stored its bytes, so a test can act mid-upload or fail it then. */
 let afterPut: ((bucket: string, key: string) => Promise<void>) | null = null
@@ -45,15 +47,17 @@ vi.mock("../src/s3.js", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/s3.js")>()
   return {
     ...real,
-    putObject: async (bucket: string, key: string, body: Buffer) => {
+    putObject: async (bucket: string, key: string, body: Buffer, contentType: string) => {
       if (failPutFor !== null && keyIsFor(key, failPutFor)) throw new Error("S3 is down")
       stored.set(`${bucket}/${key}`, body)
+      storedTypes.set(`${bucket}/${key}`, contentType)
       await afterPut?.(bucket, key)
     },
     getObject: async (bucket: string, key: string) => {
       const body = stored.get(`${bucket}/${key}`)
       if (!body) throw Object.assign(new Error("missing"), { name: "NoSuchKey" })
-      return { body, contentType: "text/plain", contentLength: body.length }
+      const contentType = storedTypes.get(`${bucket}/${key}`) ?? "text/plain"
+      return { body, contentType, contentLength: body.length }
     },
     deleteObjects: async (bucket: string, keys: string[]) => {
       if (failNextDelete) {
@@ -544,5 +548,93 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
       await admin.query("GRANT INSERT ON storage.objects TO authenticated")
     }
     expect(await row("avatars", name)).toBeUndefined()
+  })
+})
+
+// ─── Reading back what was stored, from manual testing ──────────────────────
+
+async function uploadAs(token: string, bucket: string, name: string, body: Uint8Array, contentType: string): Promise<Response> {
+  return fetch(`${base}/object/${bucket}/${name}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": contentType },
+    body,
+  })
+}
+
+/**
+ * Send a POST whose head declares `declared` bytes, send `sent` of them, then half-close the socket.
+ * Resolves with the response's status line, or "" when none arrives.
+ */
+async function truncatedUpload(token: string, bucket: string, name: string, declared: number, sent: number): Promise<string> {
+  const { port, hostname } = new URL(base)
+  const socket = connect(Number(port), hostname)
+  await new Promise<void>((resolve) => socket.once("connect", () => resolve()))
+  socket.write(
+    `POST /object/${bucket}/${name} HTTP/1.1\r\nHost: ${hostname}\r\nAuthorization: Bearer ${token}\r\n` +
+      `Content-Type: image/jpeg\r\nContent-Length: ${declared}\r\n\r\n`,
+  )
+  socket.write(Buffer.alloc(sent, 1))
+  socket.end()
+  const reply = await new Promise<string>((resolve) => {
+    const timer = setTimeout(() => resolve(""), 3000)
+    socket.once("data", (chunk: Buffer) => {
+      clearTimeout(timer)
+      resolve(chunk.toString("latin1").split("\r\n")[0] ?? "")
+    })
+    socket.once("close", () => {
+      clearTimeout(timer)
+      resolve("")
+    })
+  })
+  socket.destroy()
+  return reply
+}
+
+describe.skipIf(!dockerAvailable)("serving what was stored", () => {
+  it("answers 400, not 500, when asked to transform an empty image", async () => {
+    // A 0-byte avatar.jpg picked in a browser is stored as image/jpeg, because that is all the
+    // upload says about it. Its transform reached sharp and answered 500 "Input Buffer is empty".
+    const x = user()
+    const name = `empty-${randomUUID()}.jpg`
+    expect((await uploadAs(x.token, "avatars", name, new Uint8Array(0), "image/jpeg")).status).toBe(200)
+
+    const transformed = await fetch(`${base}/object/public/avatars/${name}?width=160&height=160&format=webp`)
+    expect(transformed.status).toBe(400)
+    expect(await transformed.json()).toEqual({ error: "The source image is invalid or unsupported for rendering" })
+
+    const original = await fetch(`${base}/object/public/avatars/${name}`)
+    expect(original.status).toBe(200)
+    expect((await original.arrayBuffer()).byteLength).toBe(0)
+  })
+
+  it("answers 400 when asked to transform bytes that are not an image", async () => {
+    const x = user()
+    const name = `fake-${randomUUID()}.jpg`
+    await uploadAs(x.token, "avatars", name, new TextEncoder().encode("not a jpeg at all"), "image/jpeg")
+    const res = await fetch(`${base}/object/public/avatars/${name}?width=32`)
+    expect(res.status).toBe(400)
+  })
+
+  it("refuses, and stores nothing, when the body ends before its declared Content-Length", async () => {
+    const x = user()
+    const name = `short-${randomUUID()}.jpg`
+    expect(await truncatedUpload(x.token, "avatars", name, 4096, 10)).toBe("HTTP/1.1 400 Bad Request")
+    expect(await row("avatars", name)).toBeUndefined()
+    expect(keysOf("avatars", name)).toEqual([])
+  })
+
+  it("serves an authenticated download at /object/<bucket>/<path>, as Supabase does", async () => {
+    // Supabase registers GET /object/:bucket/* beside /object/authenticated/:bucket/*, and clients
+    // written against it use both. The bare one answered 404 here.
+    const x = user()
+    const name = unique("bare")
+    await upload(x.token, "vault", name, "mine")
+    const res = await fetch(`${base}/object/vault/${name}`, { headers: { authorization: `Bearer ${x.token}` } })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe("mine")
+
+    const stranger = await fetch(`${base}/object/vault/${name}`, { headers: { authorization: `Bearer ${user().token}` } })
+    expect(stranger.status).not.toBe(200)
+    expect((await fetch(`${base}/object/vault/${name}`)).status).toBe(401)
   })
 })

@@ -11,8 +11,8 @@ type Uploaded = { path: string; original: string; transformed: string }
  *
  * This used to be a tab called "Media" whose entire content was a file input and two images
  * captioned "as uploaded" and "160×160 webp, transformed on read". The storage path it exercises
- * is worth keeping — nothing else in this repository uploads at runtime, so before it the whole
- * path was typechecked and never run — but an attendee has no reason to visit a screen called
+ * is worth keeping: nothing else in this repository uploads at runtime, so before it the whole
+ * path was typechecked and never run. But an attendee has no reason to visit a screen called
  * Media. Changing a profile picture is a reason.
  *
  * The transform is the half worth watching. `getPublicUrl` with no options returns the bytes that
@@ -27,6 +27,15 @@ export function AccountScreen({ email }: { email: string }): React.ReactElement 
   async function onPick(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0]
     if (!file) return
+
+    // A 0-byte file is a valid upload as far as storage is concerned, and would be stored as one:
+    // an empty `image/jpeg` that renders as a broken image and cannot be transformed. It is never a
+    // profile picture, so say so here instead of storing it.
+    if (file.size === 0) {
+      setError(`${file.name} is empty (0 bytes). Choose another picture.`)
+      event.target.value = ""
+      return
+    }
 
     setBusy(true)
     setError(null)

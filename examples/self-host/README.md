@@ -115,7 +115,7 @@ supatype admin create-user --email admin@example.com --password 'your-secure-pas
 
 Configure allowed roles in `supatype.config.ts` via `admin.roles` (default: `admin`, `supatype_admin`). Do not expose `/studio/` on the public internet without TLS and authentication.
 
-Local docker dev (`supatype dev` with compose) sets `STUDIO_OPEN_DEV=1` on the server for frictionless iteration only, production compose does not.
+Studio asks for this sign-in in local docker dev (`supatype dev`) too. There is no unauthenticated Studio mode: the server ignores `STUDIO_OPEN_DEV`, which older CLIs wrote into the dev compose file, and logs a warning when it is set.
 
 If Studio is not loading:
 

@@ -23,6 +23,9 @@ export default defineConfig({
   },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
+  // issue-ticket checks the caller's own token, then writes the ticket with the service role, so
+  // it is the one public function here that is granted it. ping does not need it.
+  functions: { serviceRole: ["issue-ticket"] },
   schema: { path: "schema/index.ts", pg_schema: "public" },
   output: {
     types: "supatype/generated/database.ts",

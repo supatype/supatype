@@ -211,6 +211,23 @@ export default defineConfig({
   provider sends users back to a path that answers 404.
 - `supatype dev` warns when an enabled provider's secret is set nowhere.
 
+## Email confirmation in dev
+
+`auth.email.enableConfirmations: true` in `supatype.config.ts` makes a new email sign-up confirm
+its address before it can sign in. Before, `supatype dev` wrote `SUPATYPE_MAILER_AUTOCONFIRM=true`
+into `.env` on every start, so a dev stack could not send a confirmation email at all.
+
+- **Nothing changes unless you set it.** Unset, dev still auto-confirms and the self-host compose
+  file still falls back to `true`.
+- **`.env` now marks the value** with `# supatype:managed` when `supatype dev` writes it. The `true`
+  earlier CLIs left there unmarked is treated as theirs and replaced; any other value you wrote
+  yourself is kept and wins over the config.
+- **The client no longer signs in a sign-up that is waiting for confirmation.** `signUp` returns
+  `{ user, session: null }` and stores nothing, as supabase-js does. It used to store an empty
+  session (`accessToken: ""`, user id `""`) that looked signed in and survived a reload. The Vue,
+  Svelte and Solid `signUp` now return `{ data: { session, user }, error }` like React's, so an app
+  can tell the two apart; code that reads only `error` is unaffected.
+
 ## Framework bindings and realtime status
 
 - **Vue, Svelte and Solid:** a subscription's status now follows the socket. When signing in or out
@@ -220,6 +237,33 @@ export default defineConfig({
   components watching the same table no longer share one.
 - `@supatype/client/bindings` is a new subpath the framework bindings use internally. It is not a
   public API; do not import it from application code.
+
+## Rendering rich text
+
+`RichText` in `@supatype/react` and `renderRichText` in `@supatype/common/richtext` now render
+what the Lexical editor saves. Before, they expected a node shape no editor writes: bold, italic
+and code were lost (Lexical stores formatting as a bit number), numbered and check lists came out
+as bullets, quotes, line breaks and autolinks vanished, and handing them the saved editor state
+(`{ root }`), which is what a `RichText` column holds, rendered nothing.
+
+- **Every node the editor saves is rendered:** paragraphs, headings `h1` to `h6`, quotes, bullet,
+  numbered (with `start`) and check lists, nested lists, links and autolinks, line breaks, tabs,
+  code blocks and horizontal rules, with alignment, indent and direction. Every text format bit
+  is rendered: bold, italic, strikethrough, underline, code, subscript, superscript, highlight,
+  and the lowercase, uppercase and capitalize transforms. Inline `style` strings on text are not.
+- **`content` takes the column value as it is:** the editor state, its root node, or a list of
+  nodes. Drop any code that dug out `.root` or cast the value to fit; `content={post.body.en}`
+  works.
+- **Links are checked.** A link is only rendered for `http`, `https`, `mailto`, `tel` and `sms`
+  URLs or relative ones; anything else (`javascript:`, `data:`, `vbscript:`) renders its text
+  without a link. `target="_blank"` always gets `rel="noopener noreferrer"`.
+- **`RichText` builds React elements** instead of setting `dangerouslySetInnerHTML`. The props are
+  unchanged.
+- **`RichTextNode` is now Lexical's serialized node** (`SerializedLexicalNode` from
+  `@supatype/types/lexical`). The old hand-written union and the node types only it had
+  (`blockquote`, `callout`, `code-tabs`, `cta`, `embed`, `image`, a `list` with
+  `listType: "ordered" | "unordered"`, text `format` as an object) are gone: no editor saves
+  them. A node type the renderer does not know renders its text rather than nothing.
 
 ## Extensions move to the extensions schema
 
@@ -391,6 +435,12 @@ members and invitations are migrated; scripts that send `role: "member"` must se
   hides the Database screens' create, drop and policy controls from other roles; viewers still read
   the Database views, policies and migration history through a read-only metadata catalogue.
 - **Sessions** in the Users view are listed and revoked through the auth admin API.
+- **`STUDIO_OPEN_DEV` is gone.** Earlier CLIs wrote it into the dev compose file, and with it the
+  server's Studio proxy answered unauthenticated requests as the service role. The CLI no longer
+  writes it, and the server ignores it and logs a warning if it is still set. Studio in dev is
+  unchanged: it asks for an admin sign-in, as it always did. If you have no admin yet, create one
+  with `supatype admin create-user`. Scripts that called `/studio/proxy` without a session must
+  sign in, or call the API with the service role key directly.
 
 ## The SQL editor's connection
 

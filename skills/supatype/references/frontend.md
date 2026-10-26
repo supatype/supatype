@@ -216,7 +216,7 @@ Supatype ships first-party bindings. Prefer them over wiring the raw client by h
 | Package | What it gives you |
 |---------|-------------------|
 | `@supatype/react` | Provider + hooks: `SupatypeProvider`, `useSupatype`, `useAuth`, `useQuery`, `useMutation`, `useSubscription`, `useFunction`, `useLivePreview`, `RichText` |
-| `@supatype/react-auth` | Prebuilt, accessible auth UI: `LoginForm`, `SignUpForm`, `OAuthButton` |
+| `@supatype/react-auth` | Prebuilt, accessible auth UI: `LoginForm`, `SignUpForm`, `ForgotPasswordForm`, `UpdatePasswordForm`, `MagicLinkForm`, `OAuthButton` |
 | `@supatype/vue` | Composables: `useAuth`, `useQuery`, `useMutation`, `useSubscription` |
 | `@supatype/solid` | Primitives: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
 | `@supatype/svelte` | Stores: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
@@ -280,9 +280,12 @@ const client = useSupatype<Database>() // escape hatch
 ## Auth UI components (`@supatype/react-auth`)
 
 ```tsx
-import { LoginForm, SignUpForm, OAuthButton, type AuthFormClassNames } from "@supatype/react-auth"
+import {
+  LoginForm, SignUpForm, ForgotPasswordForm, UpdatePasswordForm, MagicLinkForm, OAuthButton,
+  usePasswordRecovery, type AuthFormClassNames,
+} from "@supatype/react-auth"
 
-// The app's own classes, defined once and given to both forms.
+// The app's own classes, defined once and given to every form.
 const authClassNames: AuthFormClassNames = {
   title: "form-title",
   field: "field",
@@ -307,9 +310,29 @@ const authClassNames: AuthFormClassNames = {
 />
 
 <OAuthButton provider="github" redirectTo="/dashboard" />
+
+// Emails a reset link (POST /recover); then "Check your email for the password reset link."
+<ForgotPasswordForm className="form" classNames={authClassNames} redirectTo={window.location.origin} />
+
+// Emails a sign-in link (signInWithOtp, POST /otp); then "Check your email for the magic link."
+<MagicLinkForm className="form" classNames={authClassNames} redirectTo={window.location.origin} />
+
+// The reset link's landing: sets the new password (updateUser, PUT /user) on the session it carried.
+{recovery.active && <UpdatePasswordForm className="form" classNames={authClassNames} onSuccess={recovery.finish} />}
 ```
 
-**The forms ship no stylesheet.** There is no CSS to import and nothing to add to Tailwind `content`. `className` styles only the `<form>`; `classNames` puts a class on each element inside it (`title`, `error`, `field`, `label`, `input`, `submit`, and `message` for `SignUpForm`'s "check your email" state). Render them without `classNames` in an app that only styles classes and they show browser defaults: labels inline beside narrow inputs and a grey button. Skip `classNames` only if the app styles bare `label`/`input`/`button` elements globally. `OAuthButton` has default styles only when no `className` is given.
+**The forms ship no stylesheet.** There is no CSS to import and nothing to add to Tailwind `content`. `className` styles only the `<form>`; `classNames` puts a class on each element inside it (`title`, `error`, `field`, `label`, `input`, `submit`, and `message` for the line a form shows in its place when done: `SignUpForm` awaiting confirmation, `ForgotPasswordForm` and `MagicLinkForm` once the email is sent, `UpdatePasswordForm` once the password is set). Render them without `classNames` in an app that only styles classes and they show browser defaults: labels inline beside narrow inputs and a grey button. Skip `classNames` only if the app styles bare `label`/`input`/`button` elements globally. `OAuthButton` has default styles only when no `className` is given.
+
+**Don't write an OAuth callback handler.** The client finishes the sign-in from the redirect URL on start (`auth: { detectSessionInUrl }`, default `true`, as in supabase-js), cleans the URL and emits `SIGNED_IN`, so `useAuth()` shows the user. A refusal the server sends back is `useAuth().error` (with `provider`), and `OAuthButton`'s `onError` receives it, as it does a provider the project has not enabled.
+
+**Password reset is two screens.** `ForgotPasswordForm` sends the link; the link lands signed in, and the client emits `PASSWORD_RECOVERY` after `SIGNED_IN`. `usePasswordRecovery()` turns it into state: show `UpdatePasswordForm` instead of the app while it is active, or the user lands inside the app with the password they forgot. `redirectTo` on either email form is honoured when it is on the site URL's host (or the auth server's redirect allow list); otherwise the link lands on the site URL. Each email form's `onSuccess` gets the address; `UpdatePasswordForm`'s gets the updated user.
+
+```tsx
+import { usePasswordRecovery, UpdatePasswordForm } from "@supatype/react-auth"
+
+const recovery = usePasswordRecovery() // beside useAuth(), from the first render
+if (recovery.active) return <UpdatePasswordForm onSuccess={recovery.finish} />
+```
 
 ## Gotcha: keep a single `@supatype/client` version
 

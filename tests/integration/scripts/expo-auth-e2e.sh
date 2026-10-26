@@ -38,6 +38,8 @@ source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/example-keys.sh"
 source "$SCRIPT_DIR/lib/e2e-project.sh"
 source "$SCRIPT_DIR/lib/expo-export.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
+source "$SCRIPT_DIR/lib/oauth-stub.sh"
 
 e2e_project_use "$EXAMPLE_DIR" expo-auth
 MAILPIT_NAME="$(e2e_scoped supatype-expo-auth-mailpit)"
@@ -70,34 +72,20 @@ fi
 fail() { echo "  FAIL $*" >&2; exit 1; }
 
 # Set a key in the example's .env, which `supatype dev` and the auth server both read.
-set_env_key() {
-  local key="$1" value="$2"
-  if grep -q "^${key}=" "$EXAMPLE_DIR/.env"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$EXAMPLE_DIR/.env"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$EXAMPLE_DIR/.env"
-  fi
-}
+set_env_key() { env_file_set "$EXAMPLE_DIR/.env" "$1" "$2"; }
 
 echo "==> The README's setup: .env from the example, then keys"
 [[ "$ENV_EXISTED" == "yes" ]] || cp "$EXAMPLE_DIR/.env.example" "$EXAMPLE_DIR/.env"
 mint_keys "$EXAMPLE_DIR" "$CLI_BIN"
 STUB_EMAIL="octo-${RANDOM}${RANDOM}@example.com"
-STUB_URL="http://host.docker.internal:${STUB_PORT}"
 set_env_key SUPATYPE_KONG_PORT "$KONG_PORT"
 set_env_key PUBLIC_SUPATYPE_URL "$BASE_URL"
 set_env_key API_EXTERNAL_URL "$BASE_URL"
 set_env_key SITE_URL "$APP_URL"
 set_env_key EXPO_PUBLIC_SUPATYPE_URL "$BASE_URL"
 set_env_key EXPO_PUBLIC_SUPATYPE_ANON_KEY "$ANON_KEY"
-# The auth server loads the project's .env at boot, which is where a provider is configured. The
-# stub stands in for GitHub Enterprise: the server sends the browser to <url>/login/oauth/authorize
-# and calls <url>/login/oauth/access_token and <url>/api/v3/user itself.
-set_env_key SUPATYPE_EXTERNAL_GITHUB_ENABLED true
-set_env_key SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID expo-e2e-client
-set_env_key SUPATYPE_EXTERNAL_GITHUB_SECRET expo-e2e-secret
-set_env_key SUPATYPE_EXTERNAL_GITHUB_URL "$STUB_URL"
-set_env_key SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI "$BASE_URL/auth/v1/callback"
+# The auth server loads the project's .env at boot, which is where a provider is configured.
+oauth_stub_point_github "$EXAMPLE_DIR/.env" "$STUB_PORT" "$BASE_URL"
 
 echo "==> SMTP catcher"
 docker rm -f "$MAILPIT_NAME" >/dev/null 2>&1 || true
@@ -108,10 +96,8 @@ cp "$CONFIG" "$CONFIG.e2e-bak"
 node "$SCRIPT_DIR/point-email-at-smtp.mjs" "$CONFIG" "$MAILPIT_SMTP"
 
 echo "==> OAuth stub provider"
-OAUTH_STUB_PORT="$STUB_PORT" OAUTH_STUB_EMAIL="$STUB_EMAIL" node "$E2E_DIR/expo-auth/oauth-stub.mjs" &
-BG_PIDS+=("$!")
-stub_ready() { http_ok "http://127.0.0.1:${STUB_PORT}/calls"; }
-wait_until 30 "the OAuth stub" stub_ready || fail "the OAuth stub never answered"
+oauth_stub_start "$ROOT_DIR" "$STUB_PORT" "$STUB_EMAIL" || fail "the OAuth stub never answered"
+BG_PIDS+=("$OAUTH_STUB_PID")
 
 echo "==> Building the app for web"
 # EXPO_PUBLIC_* are inlined at build time, so this follows the .env written above. The Metro cache

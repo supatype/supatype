@@ -48,6 +48,9 @@ export function OAuthButton({
   const [loading, setLoading] = useState(false)
   const providerName = capitalize(provider)
   const isDisabled = disabled === true || loading
+  // What the button shows is what a screen reader announces: text children win over the default.
+  const labelText = label ?? `Sign in with ${providerName}`
+  const accessibilityLabel = typeof children === "string" ? children : labelText
 
   async function handlePress(): Promise<void> {
     setLoading(true)
@@ -80,7 +83,7 @@ export function OAuthButton({
     <Pressable
       testID={`st-oauth-${provider}`}
       accessibilityRole="button"
-      accessibilityLabel={label ?? `Sign in with ${providerName}`}
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: isDisabled }}
       disabled={isDisabled}
       onPress={() => {
@@ -89,8 +92,7 @@ export function OAuthButton({
       style={[styles.secondaryButton, isDisabled ? styles.buttonDisabled : null, style]}
     >
       <Text style={styles.secondaryButtonText}>
-        {children ??
-          (loading ? `Connecting to ${providerName}…` : (label ?? `Sign in with ${providerName}`))}
+        {children ?? (loading ? `Connecting to ${providerName}…` : labelText)}
       </Text>
     </Pressable>
   )

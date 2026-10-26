@@ -14,3 +14,4 @@ export type {
   TableSubscribeOptions,
   TableSubscription,
 } from "./table-subscription.js"
+export { startOAuthRedirect } from "./auth-redirect.js"

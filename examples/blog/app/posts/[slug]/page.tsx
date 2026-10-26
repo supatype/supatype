@@ -1,6 +1,7 @@
 import React from "react"
 import { createClient } from "@/lib/supatype-server"
 import { RichText } from "@supatype/react"
+import { postBodyIn } from "@/lib/rich-text"
 import { CommentsSection } from "./comments"
 import type { TableRow } from "@supatype/client"
 type Post = TableRow<"post">
@@ -34,7 +35,8 @@ export default async function PostPage({ params }: Props): Promise<React.ReactEl
           })}
         </p>
       )}
-      <RichText content={post.body as any} className="richtext" />
+      {/* English is the language posts are written in; see post-form.tsx. */}
+      <RichText content={postBodyIn(post.body, "en")} className="richtext" />
       <CommentsSection postId={post.id} />
     </article>
   )

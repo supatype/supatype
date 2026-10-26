@@ -43,11 +43,15 @@ interface Scenario {
   open?: RawUser
   /** Whether the auth server refuses the confirmation PUT. */
   refuseConfirm?: boolean
+  /** Whether the auth server refuses the invitation, as it does for an address already registered. */
+  refuseInvite?: boolean
 }
 
 let root: Root | null = null
 let container: HTMLElement
 let calls: Call[] = []
+/** The referrer policy each request was sent with, in the order of `calls`. */
+let referrerPolicies: Array<RequestInit["referrerPolicy"]> = []
 /** What the auth server holds for PENDING's confirmation, so a refetch sees the PUT's effect. */
 let pendingConfirmedAt: string | null = null
 
@@ -61,6 +65,10 @@ function answer(url: string, method: string, s: Scenario): Response {
   }
   if (url.endsWith("/auth/v1/settings")) return Response.json({ mailer_autoconfirm: s.autoconfirm })
   if (url.endsWith("/auth/v1/admin/sessions")) return Response.json({ sessions: [] })
+  if (url.endsWith("/auth/v1/invite") && method === "POST") {
+    if (s.refuseInvite === true) return Response.json({ msg: "A user with this email address has already been registered" }, { status: 422 })
+    return Response.json({ ...PENDING, id: "55555555-5555-5555-5555-555555555555", email: "invited@example.com" })
+  }
   if (url.endsWith("/auth/v1/admin/users") && method === "POST") return Response.json({ ...PENDING, id: "44444444-4444-4444-4444-444444444444" })
   if (url.includes(`/auth/v1/admin/users/${PENDING.id}`) && method === "PUT") {
     if (s.refuseConfirm === true) return Response.json({ msg: "User not allowed" }, { status: 403 })
@@ -75,10 +83,12 @@ function answer(url: string, method: string, s: Scenario): Response {
 function stubFetch(s: Scenario): void {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   calls = []
+  referrerPolicies = []
   pendingConfirmedAt = null
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET"
     calls.push({ url, method, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined })
+    referrerPolicies.push(init?.referrerPolicy)
     return answer(url, method, s)
   })
 }
@@ -225,5 +235,42 @@ describe("impersonating a user", () => {
     await renderUsers({ autoconfirm: false, manageUsers: true, open: CONFIRMED })
     expect(panel().textContent).toContain("Edit User")
     expect(button(panel(), "Impersonate")).toBeUndefined()
+  })
+})
+
+// EM2: "Invite User" promised an invitation email but created the user through the admin users
+// API, which sends nothing, so the invited person had no way to sign in. It now goes through the
+// auth server's invite endpoint, which creates the user and mails them the invitation link.
+describe("inviting a user", () => {
+  async function invite(s: Scenario): Promise<void> {
+    await renderUsers(s)
+    await act(async () => button(container, "Invite User")?.click())
+    await settle()
+    const [email] = Array.from(panel().querySelectorAll<HTMLInputElement>("input[data-ui=input]"))
+    await act(async () => type(email!, "invited@example.com"))
+    await act(async () => button(panel(), "Send Invite")?.click())
+    await settle()
+  }
+
+  it("asks the auth server to send the invitation, and creates no user directly", async () => {
+    await invite({ autoconfirm: false, manageUsers: true })
+    expect(calls).toContainEqual({ url: `${PROXY}/auth/v1/invite`, method: "POST", body: { email: "invited@example.com" } })
+    expect(calls.find((c) => c.method === "POST" && c.url.endsWith("/auth/v1/admin/users"))).toBeUndefined()
+    expect(button(panel(), "Send Invite"), "the form closes once the invitation is sent").toBeUndefined()
+  })
+
+  // The auth server takes a request's Referer as the emailed link's redirect when it names none, so
+  // the invitation landed the invitee on this Studio page ("Access denied") instead of the app.
+  it("sends no Referer, so the invitation link lands on the project's site URL", async () => {
+    await invite({ autoconfirm: false, manageUsers: true })
+    const at = calls.findIndex((c) => c.method === "POST" && c.url.endsWith("/auth/v1/invite"))
+    expect(at).toBeGreaterThanOrEqual(0)
+    expect(referrerPolicies[at]).toBe("no-referrer")
+  })
+
+  it("shows the auth server's refusal and keeps the form open", async () => {
+    await invite({ autoconfirm: false, manageUsers: true, refuseInvite: true })
+    expect(panel().textContent).toContain("A user with this email address has already been registered")
+    expect(button(panel(), "Send Invite")).toBeDefined()
   })
 })

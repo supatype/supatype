@@ -35,6 +35,7 @@ import { endDevSession, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
+import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
@@ -121,6 +122,7 @@ import {
 import { spawnComposeEngine } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
+import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
@@ -359,7 +361,8 @@ export function upsertDevComposeEnv(
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
-    SUPATYPE_MAILER_AUTOCONFIRM: "true",
+    // From auth.email.enableConfirmations, unless the developer set their own in .env.
+    ...devMailerAutoconfirmUpdate(cwd, config),
     ...composeMailerEnv(config),
     ...imagePins,
   }
@@ -395,7 +398,7 @@ export function upsertDevComposeEnv(
   const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
   upsertEnvFile(cwd, updates, {
     removeManaged: removeImageKeys,
-    managed: managedImageKeys,
+    managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
     // A local image left in `.env` after the project stopped asking for one would keep pointing
     // compose at a stale build, and it carries no marker for `removeManaged` to act on.
     remove: [
@@ -1534,17 +1537,21 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     studioProc: StudioProc
     appProc: AppProc
     schemaWatcher: import("node:fs").FSWatcher | null
+    functionsWatcher: { close: () => void } | null
     debounceTimer: ReturnType<typeof setTimeout> | null
   } = {
     studioProc: null,
     appProc: null,
     schemaWatcher: null,
+    functionsWatcher: null,
     debounceTimer: null,
   }
 
   registerDevShutdown(async () => {
     shutdownState.schemaWatcher?.close()
     shutdownState.schemaWatcher = null
+    shutdownState.functionsWatcher?.close()
+    shutdownState.functionsWatcher = null
     if (shutdownState.debounceTimer) {
       clearTimeout(shutdownState.debounceTimer)
       shutdownState.debounceTimer = null
@@ -1763,6 +1770,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
           .catch(reportDevPushFailure)
       }, 300)
     })
+    // The worker imports its handlers once; without this an edited function kept its old code.
+    const worker = { composePath: paths.composePath, cwd, project }
+    shutdownState.functionsWatcher = watchFunctionSources(cwd, () => restartComposeFunctionsWorker(worker))
   }
 
   // Until Ctrl+C or a signal: the shutdown hook takes the stack down and exits.

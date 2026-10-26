@@ -20,7 +20,11 @@ export interface AuthFormClassNames {
   input?: string | undefined
   /** The submit `<button>`. */
   submit?: string | undefined
-  /** The confirmation message `SignUpForm` shows when email confirmation is required. */
+  /**
+   * The line a form shows in its place when done: `SignUpForm` awaiting confirmation,
+   * `ForgotPasswordForm` and `MagicLinkForm` once the email is sent, `UpdatePasswordForm` once the
+   * password is set.
+   */
   message?: string | undefined
 }
 

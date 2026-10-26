@@ -58,6 +58,23 @@ function notOneRow(): SupatypeError {
   return { message: "Cannot coerce the result to a single JSON object", code: PostgrestErrorCodes.NOT_FOUND }
 }
 
+/**
+ * The error a refused request answered with, for a read and a write alike.
+ *
+ * One function for both because they drifted: the write path dropped `field`, and a field
+ * validator only ever runs on a write, so the column it named never reached the caller.
+ */
+function refusal(err: Record<string, unknown>, status: number): SupatypeError {
+  return {
+    message: String(err["message"] ?? err["hint"] ?? "Request failed"),
+    status,
+    ...(err["code"] !== undefined && { code: String(err["code"]) }),
+    // A field validator's refusal names the column it refused. Kept whole rather than folded into
+    // the message, so a form can mark the input.
+    ...(typeof err["field"] === "string" && { field: err["field"] }),
+  }
+}
+
 function withMeta<T>(
   result: QueryResult<T>,
   meta: { cacheStatus?: CacheStatus; maskedFields?: MaskedField[] | undefined },
@@ -343,18 +360,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
         })
       }
       return withMeta<TRow[]>(
-        {
-          data: null,
-          error: {
-            message: String(err["message"] ?? err["hint"] ?? "Request failed"),
-            status: res.status,
-            ...(err["code"] !== undefined && { code: String(err["code"]) }),
-            // A field validator's refusal names the column it refused. Kept whole rather than
-            // folded into the message, so a form can mark the input.
-            ...(typeof err["field"] === "string" && { field: err["field"] }),
-          },
-          count: null,
-        },
+        { data: null, error: refusal(err, res.status), count: null },
         { cacheStatus, maskedFields },
       )
     }
@@ -518,15 +524,7 @@ export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<
           code: typeof err["code"] === "string" ? err["code"] : null,
         })
       }
-      return {
-        data: null,
-        error: {
-          message: String(err["message"] ?? err["hint"] ?? "Request failed"),
-          status: res.status,
-          ...(err["code"] !== undefined && { code: String(err["code"]) }),
-        },
-        count: null,
-      }
+      return { data: null, error: refusal(err, res.status), count: null }
     }
 
     if (res.status === 204) {

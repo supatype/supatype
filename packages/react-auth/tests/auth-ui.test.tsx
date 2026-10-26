@@ -1,11 +1,11 @@
 import React from "react"
 import { describe, it, expect, vi } from "vitest"
 import { create, type ReactTestInstance } from "react-test-renderer"
-import { LoginForm, OAuthButton, SignUpForm, type AuthFormClassNames } from "../src/index.js"
+import { LoginForm, SignUpForm, type AuthFormClassNames } from "../src/index.js"
 import { DEFAULT_ERROR_STYLE, errorProps } from "../src/classNames.js"
 
 vi.mock("@supatype/react", () => ({
-  useAuth: () => ({ signIn: vi.fn(), signUp: vi.fn(), signInWithOAuth: vi.fn() }),
+  useAuth: () => ({ error: null, signIn: vi.fn(), signUp: vi.fn(), signInWithOAuth: vi.fn() }),
 }))
 
 const classNames: AuthFormClassNames = {
@@ -47,12 +47,5 @@ describe("errorProps", () => {
 
   it("falls back to a red message when the app sets no class", () => {
     expect(errorProps(undefined)).toEqual({ style: DEFAULT_ERROR_STYLE })
-  })
-})
-
-describe("OAuthButton", () => {
-  it("spells a provider the way the provider does", () => {
-    const root = create(<OAuthButton provider="github" />).root
-    expect(root.findByType("button").props["aria-label"]).toBe("Sign in with GitHub")
   })
 })

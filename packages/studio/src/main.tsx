@@ -1,17 +1,16 @@
 /// <reference types="vite/client" />
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import { StudioCore } from "./StudioCore.js"
 import { createClient, type SupatypeClient } from "@supatype/client"
 import { mockConfig } from "./fixtures/mockConfig.js"
-import { StudioConfigError, type StudioConfigErrorKind } from "./components/StudioConfigError.js"
+import { StudioConfigError } from "./components/StudioConfigError.js"
 import { StudioAccessGate } from "./components/StudioAccessGate.js"
 import type { AdminConfig } from "./config.js"
 import "./globals.css"
-import { normalizeAdminConfig } from "./lib/normalize-admin-config.js"
-import { studioAuthHeaders } from "./lib/studio-auth-headers.js"
-import { studioGatewayHeaders } from "./lib/studio-gateway-headers.js"
+import { fetchStudioConfig } from "./lib/studio-config-fetch.js"
+import { ConfigRefreshOnNavigate, useStudioConfig, type StudioConfigState } from "./hooks/useStudioConfig.js"
 
 /** Match Vite `base` / `import.meta.env.BASE_URL` so Router history URLs include the subpath when hosted under a prefix. */
 function studioBasename(): string | undefined {
@@ -78,75 +77,9 @@ interface StudioShellProps {
 }
 
 function StudioShell({ client, apiBaseUrl, demoMode, onEnterDemo }: StudioShellProps): React.ReactElement {
-  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading")
-  const [config, setConfig] = useState<AdminConfig | null>(null)
-  const [errorKind, setErrorKind] = useState<StudioConfigErrorKind>("unknown")
-  const [errorDetail, setErrorDetail] = useState<string | undefined>()
-  const [fetchGeneration, setFetchGeneration] = useState(0)
-
-  useEffect(() => {
-    if (demoMode) {
-      setConfig(mockConfig)
-      setLoadState("ready")
-      return
-    }
-
-    setLoadState("loading")
-    setErrorDetail(undefined)
-
-    let cancelled = false
-    const base = apiBaseUrl.replace(/\/$/, "")
-
-    void (async () => {
-      try {
-        const res = await fetch(`${base}/studio-config`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...studioGatewayHeaders(),
-            ...studioAuthHeaders(client),
-          },
-          body: "{}",
-          credentials: "omit",
-        })
-        const text = await res.text()
-        if (cancelled) return
-        if (res.ok) {
-          setConfig(normalizeAdminConfig(JSON.parse(text)))
-          setLoadState("ready")
-          return
-        }
-        if (res.status === 404) {
-          setErrorKind("not_pushed")
-          setLoadState("error")
-          return
-        }
-        // A refused session, not a broken deployment. This used to fall through to "unknown",
-        // whose heading is "Could not load Studio config" — which reads as a fault in the stack
-        // and sends people to look at their schema, their engine and their containers. The config
-        // API is answering perfectly well; it is this browser's token that is no longer valid, and
-        // a server restart is enough to get here.
-        if (res.status === 401 || res.status === 403) {
-          setErrorKind("signed_out")
-          setErrorDetail(`HTTP_${res.status}`)
-          setLoadState("error")
-          return
-        }
-        setErrorKind("unknown")
-        setErrorDetail(`HTTP_${res.status}`)
-        setLoadState("error")
-      } catch (e: unknown) {
-        if (cancelled) return
-        setErrorKind("network")
-        setErrorDetail(e instanceof Error ? e.message : String(e))
-        setLoadState("error")
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [apiBaseUrl, client, demoMode, fetchGeneration])
+  const load = useCallback(() => fetchStudioConfig(apiBaseUrl, client), [apiBaseUrl, client])
+  const live = useStudioConfig(demoMode ? null : load)
+  const state: StudioConfigState = demoMode ? { phase: "ready", config: mockConfig } : live.state
 
   const onTryDemo = (_demo: AdminConfig) => {
     try {
@@ -163,13 +96,10 @@ function StudioShell({ client, apiBaseUrl, demoMode, onEnterDemo }: StudioShellP
     } catch {
       /* ignore */
     }
-    setConfig(null)
-    setLoadState("loading")
-    setErrorDetail(undefined)
-    setFetchGeneration((g) => g + 1)
+    live.retry()
   }
 
-  if (loadState === "loading") {
+  if (state.phase === "loading") {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
         <div className="text-muted-foreground text-sm">Loading Studio…</div>
@@ -177,25 +107,12 @@ function StudioShell({ client, apiBaseUrl, demoMode, onEnterDemo }: StudioShellP
     )
   }
 
-  if (loadState === "error") {
+  if (state.phase === "error") {
     return (
       <StudioConfigError
-        kind={errorKind}
+        kind={state.kind}
         baseUrl={apiBaseUrl}
-        {...(errorDetail !== undefined ? { message: errorDetail } : {})}
-        onRetry={onRetry}
-        onTryDemo={onTryDemo}
-        demoConfig={mockConfig}
-      />
-    )
-  }
-
-  if (!config) {
-    return (
-      <StudioConfigError
-        kind="unknown"
-        baseUrl={apiBaseUrl}
-        message="Config is empty."
+        {...(state.detail !== undefined ? { message: state.detail } : {})}
         onRetry={onRetry}
         onTryDemo={onTryDemo}
         demoConfig={mockConfig}
@@ -206,7 +123,9 @@ function StudioShell({ client, apiBaseUrl, demoMode, onEnterDemo }: StudioShellP
   const basename = studioBasename()
   return (
     <BrowserRouter {...(basename !== undefined ? { basename } : {})}>
-      <StudioCore config={config} client={client} demoMode={demoMode} />
+      {/* A schema pushed while Studio is open shows up on the next click, not the next reload. */}
+      <ConfigRefreshOnNavigate refresh={live.refresh} />
+      <StudioCore config={state.config} client={client} demoMode={demoMode} />
     </BrowserRouter>
   )
 }

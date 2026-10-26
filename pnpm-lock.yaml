@@ -434,6 +434,9 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@24.12.0)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2)
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@24.12.0)(jiti@1.21.7)(jsdom@30.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2)
 
   examples/validation:
     dependencies:
@@ -530,10 +533,19 @@ importers:
       '@supatype/client':
         specifier: workspace:*
         version: link:../client
+      '@supatype/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.19.13
       typescript:
         specifier: ^5
         version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@22.19.13)(jiti@1.21.7)(jsdom@30.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2)
 
   packages/plugin-color-picker:
     dependencies:
@@ -6113,10 +6125,6 @@ packages:
     resolution: {integrity: sha512-JU3teHTNjmE2VCGFzuY8EXzCDVwEqB2a8fsIvwaStHhAWJEeVd1o1QD80CU6+ZdEXXSLbSsuLwJjkCBWqRQUVA==}
     engines: {node: '>=8.6'}
 
-  picomatch@4.0.3:
-    resolution: {integrity: sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q==}
-    engines: {node: '>=12'}
-
   picomatch@4.0.5:
     resolution: {integrity: sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A==}
     engines: {node: '>=12'}
@@ -11245,6 +11253,14 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.0.3
 
+  '@vitest/mocker@4.0.18(vite@6.4.1(@types/node@22.19.13)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2))':
+    dependencies:
+      '@vitest/spy': 4.0.18
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 6.4.1(@types/node@22.19.13)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2)
+
   '@vitest/mocker@4.0.18(vite@6.4.1(@types/node@24.12.0)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
       '@vitest/spy': 4.0.18
@@ -12585,10 +12601,6 @@ snapshots:
     transitivePeerDependencies:
       - encoding
 
-  fdir@6.5.0(picomatch@4.0.3):
-    optionalDependencies:
-      picomatch: 4.0.3
-
   fdir@6.5.0(picomatch@4.0.5):
     optionalDependencies:
       picomatch: 4.0.5
@@ -13821,8 +13833,6 @@ snapshots:
 
   picomatch@2.3.1: {}
 
-  picomatch@4.0.3: {}
-
   picomatch@4.0.5: {}
 
   pify@2.3.0: {}
@@ -14794,8 +14804,8 @@ snapshots:
 
   tinyglobby@0.2.15:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.3)
-      picomatch: 4.0.3
+      fdir: 6.5.0(picomatch@4.0.5)
+      picomatch: 4.0.5
 
   tinyrainbow@3.0.3: {}
 
@@ -15010,7 +15020,7 @@ snapshots:
   vitest@4.0.18(@types/node@22.19.13)(jiti@1.21.7)(jsdom@30.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2):
     dependencies:
       '@vitest/expect': 4.0.18
-      '@vitest/mocker': 4.0.18(vite@6.4.1(@types/node@24.12.0)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2))
+      '@vitest/mocker': 4.0.18(vite@6.4.1(@types/node@22.19.13)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2))
       '@vitest/pretty-format': 4.0.18
       '@vitest/runner': 4.0.18
       '@vitest/snapshot': 4.0.18

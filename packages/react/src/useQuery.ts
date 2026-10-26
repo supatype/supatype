@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { AnyDatabase, AugmentedDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
+import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
@@ -84,14 +84,12 @@ export function useQuery<
     }
     setLoading(true)
 
-    // `any` here and below is pre-existing: the generated row types do not survive the dynamic
-    // table name, and narrowing them is a separate piece of work from this one.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const source: any = client.from(table)
+    // Through the untyped client: the generated row types do not survive a table name known only
+    // at run time, so the rows are typed as `TRow` once they arrive.
+    const source = (client as AnyClient).from(table)
     // A draft read is the same request against a different schema, so it branches here rather than
     // duplicating every filter below.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let query: any = (options?.draft === true ? source.draft() : source).select(
+    let query = (options?.draft === true ? source.draft() : source).select(
       options?.select ?? "*",
     )
 

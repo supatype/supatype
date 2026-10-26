@@ -90,6 +90,9 @@ route("POST", "/object/:bucket/**", objectRoutes.upload, { requireAuth: true })
 route("GET", "/object/public/:bucket/**", objectRoutes.downloadPublic)
 route("GET", "/object/authenticated/:bucket/**", objectRoutes.downloadAuthenticated, { requireAuth: true })
 route("GET", "/object/sign/:bucket/**", objectRoutes.downloadSigned)
+// Supabase serves an authenticated download at the bare path too. It goes after the `public`,
+// `authenticated` and `sign` routes so that they keep matching first.
+route("GET", "/object/:bucket/**", objectRoutes.downloadAuthenticated, { requireAuth: true })
 route("DELETE", "/object/:bucket", objectRoutes.removeObjects, { requireAuth: true })
 
 // ─── Server ─────────────────────────────────────────────────────────────────────

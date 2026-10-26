@@ -74,6 +74,7 @@ import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
+import { nativeMailerAutoconfirmEnv } from "../mailer-autoconfirm.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
 import { nativeDevRolesSql, nativePostgrestSchemaEnv, nativeServerCoreEnv } from "../native-dev-env.js"
 import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
@@ -180,7 +181,7 @@ export function registerDev(program: Command): void {
   program
     .command("dev")
     .description("Start local Postgres, apply schema, and run supatype-server")
-    .option("--no-watch", "Start services but do not watch for schema changes")
+    .option("--no-watch", "Start services but do not watch for schema changes, or (Docker) for function changes")
     .option("--stream", "Print interleaved logs instead of the interactive TUI")
     .option("--port <port>", "Port for supatype-server (overrides config)", String)
     .option("--reset-db", "Remove the local Postgres data volume before starting (asks first; storage is kept)")
@@ -543,7 +544,6 @@ export function registerDev(program: Command): void {
         SUPATYPE_API_HOST: "localhost",
         SUPATYPE_SITE_URL: `http://localhost:${serverPort}`,
         SUPATYPE_MAILER_MAILER_PROVIDER: authMailerProvider,
-        SUPATYPE_MAILER_AUTOCONFIRM: "true",
         SUPATYPE_LOG_LEVEL: "info",
         SUPATYPE_DISABLE_SIGNUP: "false",
         ...(config.email?.resend_api_key !== undefined && config.email.resend_api_key !== ""
@@ -579,6 +579,8 @@ export function registerDev(program: Command): void {
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
         ...loadDotEnv(cwd),
+        // After .env: auth.email.enableConfirmations, unless the developer set their own value.
+        ...nativeMailerAutoconfirmEnv(cwd, config),
       }
 
       const serverProc = new ProcessManager(serverBin, [], {
