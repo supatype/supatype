@@ -5,6 +5,7 @@
   "scripts": {
     "vite": "vite",
     "seed": "tsx seed.ts",
+    "test": "tsx --test conformance/row-type.test.ts",
     "test:integration": "bash scripts/integration-test.sh",
     "test:integration:docker": "SUPATYPE_PROVIDER=docker bash scripts/integration-test.sh",
     "test:integration:docker:quick": "SUPATYPE_PROVIDER=docker bash scripts/integration-test.sh --skip-build --skip-docker-build",
