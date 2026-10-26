@@ -185,10 +185,24 @@ export class RealtimeClient {
     this.cycleConnection(token)
   }
 
-  /** Abandon the current socket and immediately open a replacement, keeping every channel. */
+  /**
+   * Abandon the current socket and immediately open a replacement, keeping every channel.
+   *
+   * Every channel's join went with the old socket, so each one says it is subscribing again until
+   * the replacement acknowledges it. Without this a channel kept reading SUBSCRIBED through the
+   * swap, while it had no join anywhere and a change committed in the gap could not arrive.
+   */
   private cycleConnection(token: string | undefined): void {
     this.abandonSocket("reauthenticating")
+    this.notifyChannels("SUBSCRIBING")
     this.ensureConnection(token)
+  }
+
+  /** Tell every channel's status callback the same thing. */
+  private notifyChannels(status: ChannelStatus): void {
+    for (const state of this.channels.values()) {
+      state.statusCallback?.(status)
+    }
   }
 
   /**
@@ -327,9 +341,13 @@ export class RealtimeClient {
    * disconnect from scheduling its own reconnect: the close handler is detached first. It also
    * cancels a connect still waiting on its token, which would otherwise install a socket after the
    * caller asked for none.
+   *
+   * A channel still registered is told CLOSED: its join went with the socket and nothing will
+   * reconnect it, so the SUBSCRIBED it last reported is no longer true.
    */
   disconnect(): void {
     this.abandonSocket("client disconnect")
+    this.notifyChannels("CLOSED")
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────
@@ -444,18 +462,14 @@ export class RealtimeClient {
 
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      for (const state of this.channels.values()) {
-        state.statusCallback?.("TIMED_OUT")
-      }
+      this.notifyChannels("TIMED_OUT")
       return
     }
 
     const delay = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts)
     this.reconnectAttempts++
 
-    for (const state of this.channels.values()) {
-      state.statusCallback?.("SUBSCRIBING")
-    }
+    this.notifyChannels("SUBSCRIBING")
 
     this.reconnectTimer = setTimeout(() => {
       this.ensureConnection()
