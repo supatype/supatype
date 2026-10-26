@@ -9,7 +9,7 @@ never called still counts here: proving an example *runs* is what the live-stack
 | Package | Exports | Imported by an example | Note |
 |---|---:|---:|---|
 | `@supatype/types` | 130 | 58 | 72 not imported |
-| `@supatype/client` | 23 | 5 | 18 not imported |
+| `@supatype/client` | 25 | 5 | 20 not imported |
 | `@supatype/react` | 12 | 9 | 3 not imported |
 | `@supatype/react-auth` | 9 | 8 | 1 not imported |
 | `@supatype/react-native` | 2 | 2 | covered by examples/expo-auth, which imports a subset |
@@ -27,7 +27,7 @@ either deserves an example or deserves saying why not.
 
 **`@supatype/types`**: `AccessRuleFor`, `After`, `Ago`, `All`, `Asset`, `AuthRole`, `AuthUid`, `AuthUserOnDelete`, `AutoIncrement`, `Before`, `BigInt`, `BucketAccessMode`, `BucketRule`, `BucketStorageAccess`, `ButtonTarget`, `ButtonValue`, `Bytea`, `Claim`, `Code`, `Computed`, `DateTime`, `Default`, `EditorReadOnly`, `ExactInterval`, `Exists`, `FieldValidation`, `Float`, `FromNow`, `Generated`, `Geo`, `Gt`, `HasOne`, `IPAddress`, `Identity`, `IdentityMode`, `In`, `IndexMethod`, `IsNull`, `Like`, `LocalizedModel`, `Lt`, `MacAddress`, `ManyToMany`, `ModelHook`, `ModelIndex`, `Money`, `Neq`, `Not`, `OffsetBase`, `OnDelete`, `OnUpdate`, `OwnerKey`, `OwnerOf`, `PrimaryKey`, `Private`, `Publishable`, `RelationTarget`, `Rows`, `ServerDefault`, `SmallInt`, `SoftDelete`, `StartOf`, `TSQuery`, `TSVector`, `TimeInterval`, `TimeUnit`, `Timestamps`, `TruncUnit`, `Values`, `VectorDistance`, `WithPublishable`, `WithSoftDelete`
 
-**`@supatype/client`**: `RemovedObject`, `SelectRow`, `Session`, `StorageFolder`, `StorageObject`, `StorageReference`, `SupatypeBuckets`, `SupatypeFunctions`, `SupatypeModels`, `TableRelationship`, `TableSubscription`, `TableUpdate`, `fieldKindsAreRegistered`, `forgetRegisteredDraftModels`, `forgetRegisteredFieldKinds`, `onIdentityChange`, `registerDraftModels`, `registerFieldKinds`
+**`@supatype/client`**: `RemovedObject`, `SelectRow`, `Session`, `StorageFolder`, `StorageObject`, `StorageReference`, `SupatypeBuckets`, `SupatypeFunctions`, `SupatypeModels`, `TableRelationship`, `TableSubscription`, `TableUpdate`, `createGraphqlRunner`, `fieldKindsAreRegistered`, `forgetRegisteredDraftModels`, `forgetRegisteredFieldKinds`, `onIdentityChange`, `readGraphqlSchema`, `registerDraftModels`, `registerFieldKinds`
 
 **`@supatype/react`**: `MutationOperation`, `StudioOrigins`, `SupatypeContext`
 
