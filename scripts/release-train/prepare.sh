@@ -38,7 +38,7 @@ train_quiet "pnpm install" pnpm --dir "$TRAIN_SUPATYPE_DIR" install --frozen-loc
 train_quiet "pnpm build" pnpm --dir "$TRAIN_SUPATYPE_DIR" build
 bash "$SCRIPT_DIR/overlay.sh" "$HARNESS" "$TRAIN_SUPATYPE_DIR"
 
-latest="$(curl -fsS https://releases.supatype.com/engine/latest.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')"
+latest="$(curl -fsS --retry 6 --retry-all-errors --retry-delay 10 https://releases.supatype.com/engine/latest.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')"
 [[ -n "$latest" ]] || train_die "could not read the CDN's latest engine version"
 arch="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
 cache="$HOME/.supatype/cache/engine/$latest"
