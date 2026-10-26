@@ -172,6 +172,17 @@ name under `type`, its fields under `data`, read the way the same fields read on
 renderer switches on `entry.type` and reads `entry.data`. Fields inside a block are not columns, so
 no trigger normalises them: write rich text as Lexical state, not a plain string.
 
+Rows stored before 0.7.0 may hold the old flat shape, `{ "type": "hero", "heading": "Hi" }`.
+Moving the fields under `data` is not enough: a `Localized` field must become a locale map in the
+project's `defaultLocale` (`{ "en": "Hi" }`), and a `RichText` field must become Lexical state (a
+plain string as one paragraph, `{ "root": { "type": "root", "children": [{ "type": "paragraph",
+... }] } }`); a `Localized<RichText>` field is both. `meta` stays beside `type`. On a model with
+`versions`, every row of `<table>_versions` holds a copy in `data` and needs the same move, with the
+snapshot table's triggers off for that `UPDATE` (its guard trigger silently keeps `data` as it
+was). Run the migration as the database superuser before anyone saves those records in Studio,
+which shows a flat entry's fields empty. The tested SQL is in the repo's `UPGRADING.md`, "Moving
+rows saved in the old shape".
+
 ## Indexes, PostGIS and pgvector
 
 `Indexed<T>` is a single-field B-tree. Anything else goes in the model's `indexes`:
