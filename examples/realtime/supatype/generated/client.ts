@@ -8,7 +8,7 @@
 // import is the whole setup. Importing `@supatype/client` directly gets a client that knows
 // nothing about this project.
 
-import { registerFieldKinds } from "@supatype/client"
+import { registerDraftModels, registerFieldKinds } from "@supatype/client"
 
 declare module "@supatype/client" {
   interface SupatypeModels {
@@ -39,6 +39,14 @@ declare module "@supatype/client" {
 // Columns holding values a JSON parser would round: bigInt, decimal and money. Registered at
 // import time, so reading one returns what the database holds rather than the nearest double.
 registerFieldKinds({
+  "version": 1,
+  "tables": {}
+})
+
+// Models that keep drafts. An insert into one goes through `supatype.create_record`, or
+// `supatype.create_records` for several rows, which create each record as its first draft: a plain
+// insert asking for the row back is refused by a read rule that hides unpublished records.
+registerDraftModels({
   "version": 1,
   "tables": {}
 })

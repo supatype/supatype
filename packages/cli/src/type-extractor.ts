@@ -189,8 +189,17 @@ export interface SchemaSourceGraph {
   files: SchemaSourceFile[]
 }
 
-export function collectSchemaSourcePaths(entryAbsPath: string, projectRoot: string): SchemaSourceGraph {
+/**
+ * The project root as a real path, so it compares with the real paths of the files under it. A
+ * root reached through a symlink (macOS `/var` is `/private/var`) otherwise puts every file "outside".
+ */
+function realProjectRoot(projectRoot: string): string {
   const root = resolve(projectRoot)
+  return existsSync(root) ? realpathSync(root) : root
+}
+
+export function collectSchemaSourcePaths(entryAbsPath: string, projectRoot: string): SchemaSourceGraph {
+  const root = realProjectRoot(projectRoot)
   const entryReal = realpathSync(entryAbsPath)
   const entryPoint = relative(root, entryReal).replace(/\\/g, "/")
   if (entryPoint.startsWith("..")) {

@@ -388,4 +388,3 @@ export type Database = {
     }
   }
 }
-

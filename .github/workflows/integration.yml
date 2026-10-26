@@ -39,7 +39,7 @@ jobs:
     env:
       SUPATYPE_PROVIDER: docker
       SUPATYPE_POSTGRES_IMAGE: supatype/postgres:latest
-      SUPATYPE_ENGINE_IMAGE: supatype/schema-engine:latest
+      # SUPATYPE_ENGINE_IMAGE is the pinned engine, set by the "Use the pinned engine" step.
       SUPATYPE_SERVER_IMAGE: supatype/server:latest
       SUPATYPE_REALTIME_IMAGE: supatype/realtime:ci-dev
       SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci-dev
@@ -85,6 +85,14 @@ jobs:
 
       - name: Build TypeScript packages
         run: pnpm build
+
+      # The engine this checkout is built against (scripts/engine-pin.sh), not :latest. Type
+      # generation and the push run in it, and the control plane integration-test.sh builds copies
+      # its licence and notices out of it, which :latest (the last release) predates.
+      - name: Use the pinned engine
+        uses: ./.github/actions/pinned-engine
+        with:
+          github-token: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
 
       - name: Prefetch engine/server/postgres/deno binaries
         run: node tests/integration/scripts/ci-prefetch-binaries.mjs
@@ -575,6 +583,13 @@ jobs:
         run: |
           docker build             -t supatype/functions-worker:ci             -f packages/functions-worker/Dockerfile             packages/functions-worker
 
+      # The constraint names asserted below are the pinned engine's (scripts/engine-pin.sh).
+      # :latest, the last release, names them `<table>_check_<n>`.
+      - name: Use the pinned engine
+        uses: ./.github/actions/pinned-engine
+        with:
+          github-token: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+
       - name: Run the validation e2e
         run: bash tests/integration/scripts/validation-e2e.sh
         env:
@@ -1007,6 +1022,13 @@ jobs:
 
       - name: Build TypeScript packages
         run: pnpm build
+
+      # The row types asserted below are the pinned engine's (scripts/engine-pin.sh). :latest, the
+      # last release, types a JSON<T> column as Json rather than T.
+      - name: Use the pinned engine
+        uses: ./.github/actions/pinned-engine
+        with:
+          github-token: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
 
       - name: Every field kind, against a real database
         run: bash tests/integration/scripts/field-conformance.sh
