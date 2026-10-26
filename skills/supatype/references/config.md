@@ -73,6 +73,7 @@ export default { server: { mode: "dev" } }
 | `build` | Framework build integration for `supatype deploy` (`framework`, `buildCommand`, `outputDirectory`, `env`) |
 | `versions.*` | Optional pin for engine, server, postgres, deno. **Omit for Docker `:latest`** |
 | `connection` | Override database URL (else `DATABASE_URL` env) |
+| `auth.providers` | OAuth providers (`github`, `google`, ...): `clientId`, `secret: env("NAME")`, optional `redirectUri`, `url`. See [OAuth providers](#oauth-providers) |
 
 ## .env essentials
 
@@ -151,6 +152,57 @@ export default {
 ```
 
 Committed `supatype.config.ts` stays `app.mode: "static"` for production.
+
+## OAuth providers
+
+Configure sign-in providers in the config; `supatype dev` and `supatype self-host compose` turn them
+into the `SUPATYPE_EXTERNAL_<PROVIDER>_*` variables the auth server reads:
+
+```typescript
+import { defineConfig, env } from "@supatype/cli"
+
+export default defineConfig({
+  // ...
+  auth: {
+    providers: {
+      github: { clientId: "Iv1.0123456789abcdef", secret: env("GITHUB_SECRET") },
+      google: { clientId: env("GOOGLE_CLIENT_ID"), secret: env("GOOGLE_SECRET") },
+    },
+  },
+})
+```
+
+```bash
+# .env
+GITHUB_SECRET=...
+GOOGLE_CLIENT_ID=...
+GOOGLE_SECRET=...
+```
+
+- **Callback URL to register with the provider:** `<public API URL>/auth/v1/callback`, e.g.
+  `http://localhost:18473/auth/v1/callback` in docker dev (the Kong port from `.env`), or
+  `https://<server.domain>/auth/v1/callback` in production. That is the default `redirectUri`; set
+  `redirectUri` only when the public URL differs.
+- **Secrets are `env("NAME")` only.** A literal `secret` is rejected: the config is committed, and the
+  compose file names the variable instead of holding the value. `env("NAME")` is the same `env(NAME)`
+  reference Supabase's `config.toml` uses.
+- **Fields:** `enabled` (default `true`), `clientId`, `secret`, `redirectUri`, `url` (self-hosted
+  providers: GitHub Enterprise, GitLab, Keycloak, WorkOS), `skipNonceCheck`, `emailOptional`.
+- **Provider names** are the ones `signInWithOAuth({ provider })` takes: `apple`, `azure`,
+  `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`,
+  `keycloak`, `linkedin`, `linkedin_oidc`, `notion`, `slack`, `slack_oidc`, `snapchat`, `spotify`,
+  `twitch`, `twitter`, `vercel_marketplace`, `workos`, `x`, `zoom`. Anything else is rejected.
+- **Precedence:** a `SUPATYPE_EXTERNAL_<PROVIDER>_*` value already in `.env` wins over the config, so
+  a project configured through `.env` alone keeps working. `supatype dev` and
+  `supatype self-host compose render`/`up` warn when an enabled provider's secret is set nowhere.
+- **Configured only through `.env`:** nothing is rendered for a provider the config does not list,
+  so it gets no default redirect. Set `SUPATYPE_EXTERNAL_<PROVIDER>_REDIRECT_URI` yourself, to
+  `<public API URL>/auth/v1/callback` (for example
+  `SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18473/auth/v1/callback`); without it the
+  server refuses the provider. Listing the provider under `auth.providers` is the recommended route,
+  since it supplies that default.
+- `supatype.local.config.ts` merges per provider, so it can swap in a development OAuth app's
+  `clientId` without restating the rest.
 
 ## Switching to native dev
 

@@ -449,35 +449,12 @@ export async function download(
     return destPath
   }
 
-  const checksumsUrl = `${CDN_BASE}${checksumsDirPath(component, version)}`
-  const minisigUrl = `${checksumsUrl}.minisig`
-
   console.log(`[supatype] Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
 
   const tmpPath = destPath + ".tmp"
+  let manifest: string
   try {
-    // ── Fetch checksums + optional minisig (retried on transient failures) ───
-    const match = await withRetry(() =>
-      fetchChecksums(checksumsUrl, minisigUrl, archiveNameCandidates(component, version, platform)),
-    )
-
-    // The directory from the path template, the filename from the manifest: a release published under
-    // a legacy name is fetched under that name rather than one the CLI assumed.
-    const cdnDir = CDN_PATHS[component](version, platform).replace(/\/[^/]+$/, "")
-    const binaryUrl = `${CDN_BASE}${cdnDir}/${match.filename}`
-
-    // ── Stream-download binary with progress (retried on transient failures) ─
-    await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
-
-    // ── Verify SHA256 ────────────────────────────────────────────────────────
-    await verifyChecksum(tmpPath, match.checksum, component)
-
-    writeFileSync(destPath, readFileSync(tmpPath))
-
-    assertArtifactFormat(component, destPath, platform)
-    if (process.platform !== "win32" && EXECUTABLE_COMPONENTS.has(component)) {
-      await chmod(destPath, 0o755)
-    }
+    manifest = await fetchVerifiedArtifact(component, version, platform, destPath, tmpPath)
   } catch (err) {
     // Never leave a partial binary or an empty version directory behind: a stale
     // empty dir makes the next resolve look fine while silently lacking a binary.
@@ -493,13 +470,89 @@ export async function download(
     }
   }
 
+  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version, platform), dir)
   return destPath
 }
 
 /**
- * Fetch checksums.sha256, optionally verify its minisign signature, and
- * return the expected SHA256 for `binaryFilename`.
+ * The release directory on the CDN: from the path template, so a file is fetched under the name the
+ * manifest gives it, and a release published under a legacy name is found under that name.
  */
+function releaseDirUrl(component: Component, version: string, platform: PlatformId): string {
+  return `${CDN_BASE}${CDN_PATHS[component](version, platform).replace(/\/[^/]+$/, "")}`
+}
+
+/**
+ * Fetch the signed manifest, then the artifact it names, verify both and install the artifact at
+ * `destPath`. Returns the manifest, which lists the release's other files too.
+ *
+ * The manifest fetch and the download are retried on transient failures; a manifest without this
+ * artifact is not, since asking again will not add it.
+ */
+async function fetchVerifiedArtifact(
+  component: Component,
+  version: string,
+  platform: PlatformId,
+  destPath: string,
+  tmpPath: string,
+): Promise<string> {
+  const checksumsUrl = `${CDN_BASE}${checksumsDirPath(component, version)}`
+  const manifest = await withRetry(() => fetchVerifiedChecksums(checksumsUrl, `${checksumsUrl}.minisig`))
+  const match = extractChecksum(manifest, archiveNameCandidates(component, version, platform))
+
+  const binaryUrl = `${releaseDirUrl(component, version, platform)}/${match.filename}`
+  await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
+  await verifyChecksum(tmpPath, match.checksum, component)
+
+  writeFileSync(destPath, readFileSync(tmpPath))
+  assertArtifactFormat(component, destPath, platform)
+  if (process.platform !== "win32" && EXECUTABLE_COMPONENTS.has(component)) {
+    await chmod(destPath, 0o755)
+  }
+  return manifest
+}
+
+/** The engine's licence file, as its release publishes it and as it is kept beside the binary. */
+const ENGINE_LICENSE_FILE = "LICENSE"
+
+/**
+ * Save the engine's LICENSE beside the binary just downloaded, and say once what it is.
+ *
+ * The engine is BUSL-1.1 and its release publishes the licence in the same signed manifest as the
+ * binaries, so it is checked the same way. Never fatal: a release from before the licence was
+ * published has none, and the engine it ships is still the engine asked for. That case warns
+ * instead, and so does a licence that fails its checksum, which is not saved.
+ */
+async function saveEngineLicense(manifest: string, releaseUrl: string, dir: string): Promise<void> {
+  const target = join(dir, ENGINE_LICENSE_FILE)
+  const problem = await fetchEngineLicense(manifest, releaseUrl, target)
+  if (problem !== undefined) {
+    console.warn(`[supatype] The engine's ${ENGINE_LICENSE_FILE} was not saved: ${problem}. The engine is licensed under BUSL-1.1.`)
+    return
+  }
+  console.log(`[supatype] Supatype engine is licensed under BUSL-1.1; see ${target}`)
+}
+
+/** Download and verify the LICENSE into `target`; the reason it could not be, or undefined. */
+async function fetchEngineLicense(manifest: string, releaseUrl: string, target: string): Promise<string | undefined> {
+  let expected: string
+  try {
+    expected = extractChecksum(manifest, ENGINE_LICENSE_FILE).checksum
+  } catch {
+    return "this release does not publish one"
+  }
+  try {
+    const resp = await fetch(`${releaseUrl}/${ENGINE_LICENSE_FILE}`)
+    if (!resp.ok) return `HTTP ${resp.status} from ${releaseUrl}/${ENGINE_LICENSE_FILE}`
+    const body = Buffer.from(await resp.arrayBuffer())
+    if (createHash("sha256").update(body).digest("hex") !== expected) return "it does not match the signed checksum"
+    writeFileSync(target, body)
+    return undefined
+  } catch (err) {
+    return (err as Error).message
+  }
+}
+
 /**
  * Fetch a checksums manifest and verify its minisign signature, returning the entry for one of
  * `binaryFilenames`.
@@ -513,6 +566,14 @@ export async function fetchChecksums(
   minisigUrl: string,
   binaryFilenames: string | string[],
 ): Promise<ChecksumMatch> {
+  return extractChecksum(await fetchVerifiedChecksums(checksumsUrl, minisigUrl), binaryFilenames)
+}
+
+/**
+ * The checksums manifest, its signature verified, as text. One release's manifest covers every file
+ * in it, the engine's LICENSE included, so a caller that needs two entries fetches it once.
+ */
+async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string): Promise<string> {
   const csResp = await fetch(checksumsUrl)
   if (!csResp.ok) {
     throw new Error(`Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}`)
@@ -529,7 +590,7 @@ export async function fetchChecksums(
         "[supatype] \u26a0  SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1: no minisign public " +
           "key configured; verifying SHA256 only (authenticity NOT checked).",
       )
-      return extractChecksum(checksumsText, binaryFilenames)
+      return checksumsText
     }
     throw new Error(
       "No minisign public key configured, so cannot verify release authenticity.\n" +
@@ -550,7 +611,7 @@ export async function fetchChecksums(
   const sigText = await sigResp.text()
   verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, pubKey)
 
-  return extractChecksum(checksumsText, binaryFilenames)
+  return checksumsText
 }
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,15 @@ interface CloudConfig {
   orgId?: string | undefined
 }
 
+/** A custom domain as the Cloud API returns it (`formatDomain` in its domains route). */
+interface CloudDomain {
+  id: string
+  domain: string
+  status: string
+  cnameTarget: string
+  sslExpiresAt: string | null
+}
+
 /** @deprecated Prefer loadProjectLink */
 export function loadCloudConfig(cwd: string): CloudConfig | null {
   migrateLegacyLinkFiles(cwd)
@@ -217,21 +226,19 @@ export function registerCloud(program: Command): void {
         process.exit(1)
       }
 
-      const domains = await cloudFetch<Array<{
-        domain: string; status: string; cnameTarget: string; sslExpiresAt: string | null
-      }>>(config, "GET", `/projects/${config.projectSlug}/domains`)
+      const domains = await cloudFetch<CloudDomain[]>(config, "GET", `/projects/${config.projectSlug}/domains`)
 
       if (domains.length === 0) {
         info("No custom domains configured.")
         return
       }
 
-      plain("\n  Domain                          Status               CNAME Target")
-      plain("  " + "─".repeat(80))
+      // The id leads: `domains verify` and `domains remove` take it, as the API's routes do, and
+      // this is the only place a person can read it.
+      plain(`\n  ${"ID".padEnd(38)}${"Domain".padEnd(34)}${"Status".padEnd(21)}CNAME Target`)
+      plain("  " + "─".repeat(118))
       for (const d of domains) {
-        plain(
-          `  ${d.domain.padEnd(34)}${d.status.padEnd(21)}${d.cnameTarget}`,
-        )
+        plain(`  ${d.id.padEnd(38)}${d.domain.padEnd(34)}${d.status.padEnd(21)}${d.cnameTarget}`)
       }
       plain()
     })
@@ -246,19 +253,19 @@ export function registerCloud(program: Command): void {
         process.exit(1)
       }
 
-      const result = await cloudFetch<{ domain: string; cnameTarget: string; instructions: string }>(
+      const result = await cloudFetch<CloudDomain & { instructions: string }>(
         config, "POST", `/projects/${config.projectSlug}/domains`,
         { domain },
       )
 
       info(`Domain added: ${result.domain}`)
       plain(`\n${result.instructions}`)
-      info(`After adding the CNAME record, verify with: supatype domains verify ${domain}`)
+      info(`After adding the CNAME record, verify with: supatype domains verify ${result.id}`)
     })
 
   domainsCmd
     .command("remove <domainId>")
-    .description("Remove a custom domain")
+    .description("Remove a custom domain (its ID from `supatype domains list`)")
     .action(async (domainId: string) => {
       const config = getCloudConfigOrExit()
       if (!config.projectSlug) {
@@ -272,7 +279,7 @@ export function registerCloud(program: Command): void {
 
   domainsCmd
     .command("verify <domainId>")
-    .description("Verify CNAME and provision SSL for a domain")
+    .description("Verify CNAME and provision SSL for a domain (its ID from `supatype domains list`)")
     .action(async (domainId: string) => {
       const config = getCloudConfigOrExit()
       if (!config.projectSlug) {

@@ -1,6 +1,20 @@
 import type { DiffResult, Operation, ReconcileAction } from "./engine-client.js"
 import { findJsonLine } from "./engine-json-line.js"
 
+/** The engine's own advice to rerun it with its `--force` flag, with the "(destructive)" it may carry. */
+const ENGINE_FORCE_ADVICE = /\s*Use --force to proceed(?:\s*\([^)]*\))?\.?/gi
+
+/**
+ * An engine sentence without its advice to pass `--force`.
+ *
+ * That flag is the engine binary's. No CLI command takes it: consent is `push --yes`, or a yes in a
+ * terminal, and the CLI says so itself. Passed through, the engine's line told a person to use a
+ * flag that `supatype push` rejects.
+ */
+export function withoutEngineForceAdvice(text: string): string {
+  return text.replace(ENGINE_FORCE_ADVICE, "")
+}
+
 type Risk = NonNullable<Operation["risk"]>
 
 /** One thing a push will do, from either side of the engine's plan. */
@@ -67,7 +81,7 @@ export function formatReconcileAction(action: ReconcileAction): PlannedChange | 
  */
 export function plannedChanges(diff: Pick<DiffResult, "operations" | "reconcile">): PlannedChange[] {
   const changes: PlannedChange[] = (diff.operations ?? []).map((op) => ({
-    label: op.warning ?? formatOperation(op),
+    label: op.warning !== undefined ? withoutEngineForceAdvice(op.warning) : formatOperation(op),
     risk: op.risk ?? "safe",
   }))
   for (const action of diff.reconcile ?? []) {
@@ -128,7 +142,7 @@ export function printDiffWarnings(diff: Pick<DiffResult, "warnings">): void {
   if (warnings.length === 0) return
   console.log(`\n${warnings.length} warning(s):\n`)
   for (const w of warnings) {
-    console.log(`  [!] ${w}`)
+    console.log(`  [!] ${withoutEngineForceAdvice(w)}`)
   }
   console.log()
 }

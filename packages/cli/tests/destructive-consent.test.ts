@@ -95,6 +95,16 @@ describe("pushConsentingToDestructive()", () => {
     expect(push).toHaveBeenCalledOnce()
   })
 
+  it("does not pass on the engine's advice to use --force, a flag push does not have", async () => {
+    const push = vi.fn(async () => {
+      throw refusal()
+    })
+    const err = await pushConsentingToDestructive(push, policy, { interactive: () => false }).catch((e: unknown) => e)
+    const message = (err as Error).message
+    expect(message).not.toContain("--force")
+    expect(message).toContain("1 destructive operation(s) detected.")
+  })
+
   it("forces with --yes, which is consent given up front", async () => {
     const push = vi.fn(async (force: boolean) => {
       if (!force) throw refusal()

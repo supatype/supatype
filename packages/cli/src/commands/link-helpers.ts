@@ -37,6 +37,9 @@ async function probeSelfHostLink(apiUrl: string, projectRef: string, token: stri
   })
 }
 
+/** The environments `POST /projects/:slug/environments` accepts. */
+const CREATABLE_CLOUD_ENVIRONMENTS = ["staging", "preview"] as const
+
 export function registerEnvs(program: Command): void {
   const envs = program.command("envs").description("Manage linked deployment environments")
 
@@ -88,7 +91,16 @@ export function registerEnvs(program: Command): void {
         error("Missing cloud credentials in link.json")
         process.exit(1)
       }
-      const bodyName = name === "staging" || name === "preview" ? name : "staging"
+      // Cloud creates these two and nothing else (production exists from the start). Any other name
+      // used to be sent as "staging", so `envs create qa` made staging and reported it as made.
+      const bodyName = CREATABLE_CLOUD_ENVIRONMENTS.find((known) => known === name)
+      if (bodyName === undefined) {
+        error(
+          `Supatype Cloud cannot create an environment named "${name}". ` +
+            `Use one of: ${CREATABLE_CLOUD_ENVIRONMENTS.join(", ")} (production exists already).`,
+        )
+        process.exit(1)
+      }
       await targetFetch(link.cloudApiUrl, "/api/v1", {
         method: "POST",
         path: `/projects/${link.projectRef}/environments`,
