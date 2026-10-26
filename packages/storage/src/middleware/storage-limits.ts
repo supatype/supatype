@@ -155,3 +155,27 @@ export async function validateStorageQuota(
 
   return null
 }
+
+/** The empty object Studio (and Supabase's dashboard) writes to hold a new folder open. */
+export const FOLDER_PLACEHOLDER = ".emptyFolderPlaceholder"
+
+/**
+ * An empty object named as a folder's placeholder. It holds no file, so a bucket's file types do
+ * not apply to it: a bucket limited to images refused it, and with it every new folder. Only an
+ * empty one, as Supabase does, so the name cannot carry content of a type the bucket refuses.
+ */
+export function isFolderPlaceholder(objectPath: string, bodyLength: number): boolean {
+  if (bodyLength !== 0) return false
+  return objectPath === FOLDER_PLACEHOLDER || objectPath.endsWith(`/${FOLDER_PLACEHOLDER}`)
+}
+
+/** Why the bucket and the project refuse this upload, by type, size and quota; null when they accept it. */
+export async function uploadRefusal(
+  bucket: BucketRow,
+  upload: { objectPath: string; contentType: string; bodyLength: number },
+): Promise<{ status: number; body: Record<string, unknown> } | null> {
+  const typeError = isFolderPlaceholder(upload.objectPath, upload.bodyLength)
+    ? null
+    : validateContentType(bucket, upload.contentType)
+  return typeError ?? validateFileSize(bucket, upload.bodyLength) ?? await validateStorageQuota(upload.bodyLength)
+}
