@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react"
-import { Box, Text, useInput, useStdout } from "ink"
+import React, { useEffect, useRef, useState } from "react"
+import { Box, Text, measureElement, useInput, useStdout, type DOMElement } from "ink"
 import type { DevLogBus } from "../../dev-log-bus.js"
 import { stripAnsi } from "../../dev-log-filter.js"
 import { logoRowCount } from "../../dev-logo.js"
@@ -75,6 +75,21 @@ function scrollHint(scrollFromBottom: number, total: number, visible: number): s
   return `${scrollFromBottom} lines up from latest`
 }
 
+/**
+ * Rows the open prompt panel takes, measured once it has rendered. The dashboard has a fixed
+ * height, so the log gives up exactly this many rows. A fixed guess squeezed any taller prompt,
+ * and its lines were drawn over one another.
+ */
+function useMeasuredPromptRows(open: boolean): [React.RefObject<DOMElement>, number] {
+  const ref = useRef<DOMElement>(null)
+  const [rows, setRows] = useState(0)
+  useEffect(() => {
+    const measured = open && ref.current ? measureElement(ref.current).height : 0
+    if (measured !== rows) setRows(measured)
+  })
+  return [ref, rows]
+}
+
 interface DevDashboardProps {
   bus: DevLogBus
 }
@@ -97,11 +112,11 @@ export function DevDashboard({ bus }: DevDashboardProps): React.ReactElement {
   }, [bus])
 
   const promptOpen = activePrompt !== null
+  const [promptRef, promptRows] = useMeasuredPromptRows(promptOpen)
   const focusedId = bus.getFocusedTaskId()
   const taskIds = bus.getTaskOrder()
   const readyPanel = bus.getReadyPanel()
   const logoRows = logoRowCount() + 1 // figlet + tagline
-  const promptRows = promptOpen ? 6 : 0
   const fullReadyRows = readyPanel ? bus.readyPanelRowCount(false) : 0
   const availableForPanel =
     rows - logoRows - CHROME_ABOVE_LOG - CHROME_BELOW_LOG - MIN_LOG_ROWS - promptRows
@@ -210,13 +225,15 @@ export function DevDashboard({ bus }: DevDashboardProps): React.ReactElement {
       </Text>
 
       {promptOpen && activePrompt ? (
-        <PromptPanel>
-          <ActiveFlowPromptView
-            prompt={devPromptToFlowPrompt(activePrompt)}
-            onSubmit={(value) => resolveDevPrompt(value)}
-            onCancel={() => resolveDevPrompt(CLACK_CANCEL)}
-          />
-        </PromptPanel>
+        <Box ref={promptRef} flexDirection="column" flexShrink={0}>
+          <PromptPanel>
+            <ActiveFlowPromptView
+              prompt={devPromptToFlowPrompt(activePrompt)}
+              onSubmit={(value) => resolveDevPrompt(value)}
+              onCancel={() => resolveDevPrompt(CLACK_CANCEL)}
+            />
+          </PromptPanel>
+        </Box>
       ) : null}
     </Box>
   )

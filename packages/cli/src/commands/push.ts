@@ -27,7 +27,7 @@ import {
   modelsWithUnresolvablePreview,
   unresolvablePreviewMessage,
 } from "../preview-config-check.js"
-import { pinnedVersion } from "../binary-cache.js"
+import { hasEngineOverride, pinnedVersion } from "../binary-cache.js"
 import {
   formatSecurityDrift,
   isRisky,
@@ -148,33 +148,38 @@ async function pushWherever(
   await pushViaTarget(cwd, config, target, ast, pgSchema, run)
 }
 
+/** What applies a docker project's push: the stack's schema-engine container, or `overrides.engine`. */
+export type DockerPushEngine = "compose" | "host"
+
+/**
+ * The one line a docker push prints while it applies, naming the engine that applies it. A forced
+ * attempt is the retry after the engine refused a destructive change or a table rewrite and
+ * consent was given, so it says that rather than printing the first attempt's line a second time.
+ */
+export function dockerApplyMessage(force: boolean, engine: DockerPushEngine): string {
+  const via = engine === "host" ? "local engine (overrides.engine)" : "Docker Compose"
+  return force
+    ? `Applying schema via ${via}, with the destructive changes and rewrites now allowed`
+    : `Applying schema via ${via}`
+}
+
 /**
  * `supatype push` on a docker project with no local control plane. No diff is read first on this
  * path, so the engine's refusals are where drift, unmanaged tables and lost data show up, and each
  * is asked about here. The push used to be forced, so a change that dropped a column applied with
  * no question asked; now it needs a yes in a terminal, or `--yes`.
  */
-/**
- * The line a docker push prints while it applies. A forced attempt is the retry after the engine
- * refused a destructive change or a table rewrite and consent was given, so it says that rather
- * than printing the first attempt's line a second time.
- */
-export function dockerApplyMessage(force: boolean): string {
-  return force
-    ? "Applying schema via Docker Compose, with the destructive changes and rewrites now allowed"
-    : "Applying schema via Docker Compose"
-}
-
 async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushRun): Promise<void> {
   const { composeAuditArgs, dockerDiff, dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } =
     await import("../dev-compose.js")
   const audit = await composeAuditArgs(cwd, config)
   const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT_NEED])
   if (run.overwriteDrift) await gate()
+  const engine: DockerPushEngine = hasEngineOverride(config) ? "host" : "compose"
   const applying = (overwriteDrift: boolean) =>
     pushConsentingToDestructive(
       (force) =>
-        withSpinner(dockerApplyMessage(force), () =>
+        withSpinner(dockerApplyMessage(force, engine), () =>
           pushSchemaDocker(cwd, config, { overwriteDrift, force, audit }),
         ),
       { yes: run.yes, apply: "supatype push --yes" },

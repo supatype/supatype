@@ -22,6 +22,16 @@ export function printPushWarnings(
   printDiffWarnings({ warnings: (result.warnings ?? []).filter((w) => !shown.has(w)) })
 }
 
+/**
+ * Say that a push applied: one line with the operation count when the engine gave one, then what
+ * it warned about. Every engine dev applies through (the compose container, `overrides.engine` and
+ * native dev's binary) reports here, so none of them drops the count the others print.
+ */
+export function reportAppliedPush(result: EnginePushResult): void {
+  console.log(`[supatype] ${formatEnginePushMessage(result)}`)
+  printPushWarnings(result)
+}
+
 export interface EnginePushResult {
   status?: string
   operations?: number

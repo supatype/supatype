@@ -23,6 +23,28 @@ const proxy = {
 
 vi.mock("../src/hooks/useProjectProxy.js", () => ({ useProjectProxy: () => proxy }))
 
+/** The caller the server reported: a developer, who holds schema view, unless a test says otherwise. */
+const DEVELOPER = { role: "developer", permissions: { read: true, write: true, schemaView: true }, settled: true }
+const access = vi.hoisted(() => ({
+  current: { role: null, permissions: {}, settled: false } as {
+    role: string | null
+    permissions: Record<string, boolean>
+    settled: boolean
+  },
+}))
+
+vi.mock("../src/hooks/useStudioCapability.js", () => ({
+  useStudioCapability: () => ({
+    userId: null,
+    mode: "studio",
+    canElevate: false,
+    canManageMembers: false,
+    seesDrafts: false,
+    identityLink: null,
+    ...access.current,
+  }),
+}))
+
 import { SchemaPushNotice } from "../src/components/SchemaPushNotice.js"
 import { PENDING_PUSH_IDLE_POLL_MS, PENDING_PUSH_POLL_MS } from "../src/hooks/usePendingSchemaPush.js"
 
@@ -57,6 +79,8 @@ beforeEach(() => {
   root = createRoot(container)
   status.row = null
   status.fails = false
+  access.current = DEVELOPER
+  proxy.metadata.mockClear()
 })
 
 afterEach(() => {
@@ -202,5 +226,45 @@ describe("nothing is shown", () => {
     status.fails = true
     await render()
     expect(container.textContent).toBe("/models")
+  })
+})
+
+describe("who is asked", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** Render, let the idle timer fire twice and the tab come back, and count the status requests. */
+  async function requestsOverAMinute(): Promise<number> {
+    vi.useFakeTimers()
+    await render()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PENDING_PUSH_IDLE_POLL_MS * 2)
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+    return proxy.metadata.mock.calls.length
+  }
+
+  it("never asks for a role the server refuses the catalogue to", async () => {
+    // An editor holds no schema view, so every request was a 403, on each page and each half minute.
+    access.current = { role: "editor", permissions: { read: true, write: true, schemaView: false }, settled: true }
+    status.row = REFUSED
+    expect(await requestsOverAMinute()).toBe(0)
+    expect(container.textContent).toBe("/models")
+  })
+
+  it("does not ask before the server has said who the caller is", async () => {
+    access.current = { role: null, permissions: {}, settled: false }
+    expect(await requestsOverAMinute()).toBe(0)
+  })
+
+  it("asks for a viewer, who holds schema view", async () => {
+    access.current = { role: "viewer", permissions: { read: true, schemaView: true }, settled: true }
+    expect(await requestsOverAMinute()).toBeGreaterThan(0)
+  })
+
+  it("asks when the server answered without saying, as every other gate does", async () => {
+    access.current = { role: null, permissions: {}, settled: true }
+    expect(await requestsOverAMinute()).toBeGreaterThan(0)
   })
 })

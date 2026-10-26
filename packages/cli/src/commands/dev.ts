@@ -10,7 +10,7 @@
  * Deno is not provisioned by the CLI on those paths.
  */
 
-import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
+import { reportAppliedPush } from "../engine-push-output.js"
 import { errorMessage } from "../error-message.js"
 import type { DiffResult } from "../engine-client.js"
 import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
@@ -827,7 +827,7 @@ async function pushNativeSchema(
       DEV_DESTRUCTIVE_POLICY,
       deps,
     )
-    printPushWarnings(result)
+    reportAppliedPush(result)
   }
   await devPushConsentingToDrift(once, target.overwriteDrift, {
     beforeOverwrite: () => requireEngineFeatures([OVERWRITE_DRIFT_NEED]),
@@ -874,7 +874,8 @@ async function buildNativeAst(
   return { ast: filtered, adapted }
 }
 
-async function runSchemaPush(
+/** One push of native dev (provider `native`): the schema on disk, then what describes it. Exported for tests. */
+export async function runSchemaPush(
   cwd: string,
   engineBin: string,
   schemaPath: string,
@@ -906,7 +907,6 @@ async function runSchemaPush(
   const ast = await applyNativeSchema(cwd, { ast: read, rebuild }, { dbURL, pgSchema: pgSchemaName, overwriteDrift })
   writeFileSync(astPath, JSON.stringify(ast))
   await writeNativeSchemaArtifacts({ cwd, engineBin, astPath, manifestPath, adminConfigPath, storagePath }, ast, config)
-  console.log("[supatype] Schema applied.")
 }
 
 /** The schema on disk as native dev pushes it, saying which fields were stood in for by JSONB. */

@@ -29,8 +29,14 @@ const SECURITY_DRIFT_REFUSAL = [
   "Error: 1 object(s) that decide who may read or write were changed outside Supatype; pass --overwrite-drift to put Supatype's definitions back.",
 ].join("\n")
 
-/** What each engine does with the next push: apply it, or refuse it with `refusal`. */
-const engine = vi.hoisted(() => ({ refuseUnforced: false, refuseAll: false, pushes: 0, refusal: "" }))
+/** What each engine does with the next push: apply it, answering `applied`, or refuse it with `refusal`. */
+const engine = vi.hoisted(() => ({
+  refuseUnforced: false,
+  refuseAll: false,
+  pushes: 0,
+  refusal: "",
+  applied: { status: "applied" } as Record<string, unknown>,
+}))
 
 /** The schema the next push reads, so a test can change it and put it back. */
 const schema = vi.hoisted((): { ast: { version: number; models: string[] } } => ({ ast: { version: 2, models: [] } }))
@@ -51,7 +57,7 @@ vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({
     const refused = engine.refuseAll || (engine.refuseUnforced && !args.includes("--force"))
     return refused
       ? { status: 1, stdout: "", stderr: engine.refusal, pid: 0, output: [], signal: null }
-      : { status: 0, stdout: "", stderr: "", pid: 0, output: [], signal: null }
+      : { status: 0, stdout: JSON.stringify(engine.applied), stderr: "", pid: 0, output: [], signal: null }
   },
 }))
 
@@ -164,6 +170,7 @@ beforeEach(() => {
   engine.refuseAll = false
   engine.pushes = 0
   engine.refusal = REFUSAL
+  engine.applied = { status: "applied" }
   schema.ast = { version: 2, models: [] }
   engineRequest.mockReset()
   engineRequest.mockImplementation(async (endpoint) =>
@@ -174,7 +181,7 @@ beforeEach(() => {
     engine.pushes += 1
     const refused = engine.refuseAll || (engine.refuseUnforced && body["force"] !== true)
     if (refused) throw new Error(engine.refusal)
-    return { status: "applied" }
+    return engine.applied
   })
   vi.spyOn(console, "log").mockImplementation(() => undefined)
   vi.spyOn(console, "warn").mockImplementation(() => undefined)
@@ -224,7 +231,16 @@ describe.each([
     const { pushYes } = await loadPush(over)
     await pushYes()
     const printed = vi.mocked(console.log).mock.calls.flat().join(" ")
-    expect(printed).not.toMatch(/applying schema via compose/i)
+    expect(printed).not.toMatch(/applying schema/i)
+  })
+
+  it("says how many operations the push applied, when the engine says", async () => {
+    engine.applied = { status: "applied", operations: 1 }
+    const { devPush } = await loadPush(over)
+    await devPush()
+    const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0]))
+    expect(printed).toContain("[supatype] Applied 1 operation(s).")
+    expect(printed).not.toContain("[supatype] Schema applied.")
   })
 
   it("pushes again when a refused change is put back, so the engine can clear the refusal", async () => {
