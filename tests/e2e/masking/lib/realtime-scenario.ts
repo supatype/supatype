@@ -67,7 +67,8 @@ async function driveEmployees(): Promise<{ bPayslip: string; nullPayslip: string
   await change(`update public.payslip set amount = 8100 where ref = ${q(ref)}`)
   await change(`delete from public.payslip where ref = ${q(ref)}`)
   // The same delete of a row with NULL columns. Under REPLICA IDENTITY FULL wal2json leaves a NULL
-  // column out of the old row instead of sending it as null (TEST-1-N2).
+  // column out of the old row instead of sending it as null, and realtime once read that as an
+  // incomplete row and withheld the event (TEST-1-N2).
   const nullRef = await change(`insert into public.payslip (dept, employee_id) values ('eng', ${q(id("b"))}) returning ref`)
   await change(`delete from public.payslip where ref = ${q(nullRef)}`)
   return { bPayslip: ref, nullPayslip: nullRef }

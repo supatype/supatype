@@ -11,7 +11,7 @@ import { rowReadPredicateName } from "./predicate-names.js"
  * share and delivered strangers' rows whole.
  */
 export interface TableShape {
-  /** Every live column, in table order. A DELETE's old tuple is complete only if it has them all. */
+  /** Every live column, in table order. */
   columns: string[]
   /** The primary key columns, in key order. Empty when the table has none. */
   primaryKey: string[]
@@ -22,12 +22,21 @@ export interface TableShape {
    * exactly the signature the engine emits, so a same-named function elsewhere is never picked up.
    */
   readPredicate: PredicateRef | null
+  /**
+   * Whether the table's replica identity is FULL (`relreplident = 'f'`), so the WAL carries the
+   * whole old row of an UPDATE or DELETE. See `withWholeOldRow` in `rls.ts` for why the record
+   * alone cannot tell.
+   */
+  replicaIdentityFull: boolean
 }
 
+/** One row per live column, each also carrying the table's replica identity. */
 const COLUMNS_SQL = `
   SELECT a.attname AS name,
-         array_position(i.indkey::int2[], a.attnum) AS pk_position
+         array_position(i.indkey::int2[], a.attnum) AS pk_position,
+         c.relreplident = 'f' AS replica_full
     FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
     LEFT JOIN pg_index i
       ON i.indrelid = a.attrelid AND i.indisprimary AND a.attnum = ANY (i.indkey)
    WHERE a.attrelid = to_regclass(format('%I.%I', $1::text, $2::text))
@@ -41,6 +50,12 @@ const READ_PREDICATE_SQL = `
    WHERE p.oid = to_regprocedure(
            format('%I.%I(%I.%I)', $1::text, $3::text, $1::text, $2::text))
      AND p.prorettype = 'boolean'::regtype`
+
+interface ColumnRow {
+  name: string
+  pk_position: number | null
+  replica_full: boolean
+}
 
 /** The key columns in key order, from rows that carry each column's position in the key. */
 export function primaryKeyOf(rows: ReadonlyArray<{ name: string; pk_position: number | null }>): string[] {
@@ -76,7 +91,7 @@ export class TableCatalog {
 
   private async load(schema: string, table: string): Promise<TableShape> {
     const [columns, predicate] = await Promise.all([
-      this.pool.query<{ name: string; pk_position: number | null }>(COLUMNS_SQL, [schema, table]),
+      this.pool.query<ColumnRow>(COLUMNS_SQL, [schema, table]),
       this.pool.query<{ name: string }>(READ_PREDICATE_SQL, [schema, table, rowReadPredicateName(table)]),
     ])
     const predicateName = predicate.rows[0]?.name
@@ -84,6 +99,7 @@ export class TableCatalog {
       columns: columns.rows.map((row) => row.name),
       primaryKey: primaryKeyOf(columns.rows),
       readPredicate: predicateName === undefined ? null : { schema, name: predicateName },
+      replicaIdentityFull: columns.rows[0]?.replica_full === true,
     }
   }
 }

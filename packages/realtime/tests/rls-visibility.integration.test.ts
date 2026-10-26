@@ -3,6 +3,7 @@ import pg from "pg"
 import { RlsFilter } from "../src/rls.js"
 import type { JwtClaims } from "../src/auth.js"
 import type { WalChange } from "../src/types.js"
+import { ownedTable, PREAMBLE, readPredicate, unreadableColumn } from "./fixtures/owned-table.js"
 
 /**
  * Row visibility against a real database (H3: M06 and P03).
@@ -17,35 +18,8 @@ import type { WalChange } from "../src/types.js"
  */
 const databaseUrl = process.env["DATABASE_URL"]
 
-const OWNER_RULE = `owner = current_setting('request.jwt.claims', true)::jsonb->>'sub'`
-
-/** A table with the owner-only policy the engine generates for `read: Owner<"owner">`. */
-function ownedTable(name: string, columns: string, extra = ""): string {
-  return `
-    DROP TABLE IF EXISTS ${name} CASCADE;
-    CREATE TABLE ${name} (${columns});
-    ALTER TABLE ${name} ENABLE ROW LEVEL SECURITY;
-    CREATE POLICY ${name}_read ON ${name} FOR SELECT TO authenticated USING (${OWNER_RULE});
-    GRANT SELECT ON ${name} TO authenticated;
-    ${extra}`
-}
-
-/** The row predicate the engine emits for the same rule. */
-function readPredicate(table: string): string {
-  return `
-    CREATE OR REPLACE FUNCTION public.can_read_${table}(${table} public.${table})
-      RETURNS boolean LANGUAGE sql STABLE AS $$
-        SELECT ${OWNER_RULE} FROM (SELECT ($1).*) AS ${table};
-      $$;`
-}
-
 const SETUP = `
-  CREATE EXTENSION IF NOT EXISTS supatype_mask;
-  DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-      CREATE ROLE authenticated;
-    END IF;
-  END $$;
+  ${PREAMBLE}
   ${ownedTable("rt_ticket", "category text, code text PRIMARY KEY, owner text, label text")}
   INSERT INTO rt_ticket VALUES ('shared', 'T-mine', 'alice', 'own'), ('shared', 'T-theirs', 'bob', 'stranger');
   ${ownedTable("rt_pair", "a int, b int, owner text, PRIMARY KEY (a, b)")}
@@ -54,9 +28,7 @@ const SETUP = `
   INSERT INTO rt_nokey VALUES ('x', 'alice');
   ${ownedTable("rt_note", "id text PRIMARY KEY, owner text, body text, secret text", "ALTER TABLE rt_note REPLICA IDENTITY FULL;")}
   ${readPredicate("rt_note")}
-  CREATE OR REPLACE FUNCTION public.can_read_rt_note__secret(rt_note public.rt_note)
-    RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT false FROM (SELECT ($1).*) AS rt_note; $$;
-  SECURITY LABEL FOR supatype ON COLUMN rt_note.secret IS 'MASK READ public."can_read_rt_note__secret"';
+  ${unreadableColumn("rt_note", "secret")}
   ${ownedTable("rt_plain", "id text PRIMARY KEY, owner text")}
   ${readPredicate("rt_plain")}
   ${ownedTable("rt_nopred", "id text PRIMARY KEY, owner text", "ALTER TABLE rt_nopred REPLICA IDENTITY FULL;")}
