@@ -2,9 +2,11 @@ import pg from "pg"
 import type { JwtClaims } from "./auth.js"
 import type { WalChange } from "./types.js"
 import {
+  CatalogMismatch,
   FieldMaskCatalog,
   maskRecord,
   quotePredicateRef,
+  type MaskingTier,
   type PredicateRef,
   type ReadMasks,
 } from "./field-mask.js"
@@ -35,6 +37,7 @@ const failed = (reason: string): Refusal => ({ severity: "failed", reason })
 
 /** What a table's changes are judged with, read before the subscriber's transaction opens. */
 interface TableRules {
+  tier: MaskingTier
   masks: ReadMasks
   shape: TableShape
 }
@@ -59,8 +62,8 @@ export class RlsFilter {
     this.pool.on("error", (err) => {
       console.error("[realtime] rls pool error:", err)
     })
-    this.fieldMasks = new FieldMaskCatalog(this.pool)
     this.tables = new TableCatalog(this.pool)
+    this.fieldMasks = new FieldMaskCatalog(this.pool, this.tables)
   }
 
   /** Drop the cached field rules and table shapes, called when a schema push completes. */
@@ -113,7 +116,9 @@ export class RlsFilter {
     // Unauthenticated clients can't see anything in secure mode
     if (!claims) return denied("unauthenticated subscriber")
 
-    // Service role bypasses RLS, and is the role `supatype_mask` exempts too
+    // Service role bypasses RLS and is the role `supatype_mask` exempts, so tier 1's REST serves it
+    // every column too. Tier 2's views are being brought to the same exemption (F63), so this
+    // holds for both tiers.
     if (claims.role === "service_role") return { send: change }
 
     const rules = await this.rulesFor(change)
@@ -127,10 +132,14 @@ export class RlsFilter {
    */
   private async rulesFor(change: WalChange): Promise<TableRules | Refusal> {
     try {
-      const masks = await this.fieldMasks.readMasks(change.schema, change.table)
-      const shape = await this.tables.shape(change.schema, change.table)
-      return { masks, shape }
+      const [tier, masks, shape] = await Promise.all([
+        this.fieldMasks.tier(),
+        this.fieldMasks.readMasks(change.schema, change.table),
+        this.tables.shape(change.schema, change.table),
+      ])
+      return { tier, masks, shape }
     } catch (err) {
+      if (err instanceof CatalogMismatch) return failed(err.message)
       return failed(`table catalog could not be read (SQLSTATE ${sqlState(err)})`)
     }
   }
@@ -152,10 +161,7 @@ export class RlsFilter {
     }
     try {
       await this.beginAs(client, claims)
-      const refusal =
-        change.event === "DELETE"
-          ? await this.deleteRefusal(client, change, rules.shape)
-          : await this.recordRefusal(client, change, rules.shape)
+      const refusal = await this.visibilityRefusal(client, change, rules)
       const verdict: Verdict = refusal ?? {
         send: rules.masks.size === 0 ? change : await this.applyMasks(client, change, rules.masks),
       }
@@ -178,13 +184,24 @@ export class RlsFilter {
     await client.query(`SELECT set_config('role', $1, true)`, [claims.role ?? "authenticated"])
   }
 
+  /** Why the subscriber may not see the row at all, or null when they may. */
+  private visibilityRefusal(
+    client: pg.PoolClient,
+    change: WalChange,
+    rules: TableRules,
+  ): Promise<Refusal | null> {
+    if (change.event === "DELETE") return this.deleteRefusal(client, change, rules.shape)
+    if (rules.tier === "views") return this.walRecordRefusal(client, change, rules.shape)
+    return this.recordRefusal(client, change, rules.shape)
+  }
+
   /**
-   * Row visibility for INSERT and UPDATE: re-select the row by its primary key under the
-   * subscriber's role.
+   * Row visibility for INSERT and UPDATE under tier 1: re-select the row by its primary key
+   * under the subscriber's role.
    *
-   * Still a re-read rather than a generated `can_read_<table>` call, because the stored
-   * policies are authoritative and may include hand-written ones no generated function
-   * knows about.
+   * A re-read rather than a generated `can_read_<table>` call, because the stored policies are
+   * authoritative and may include hand-written ones no generated function knows about. Tier 2
+   * cannot do this (see {@link walRecordRefusal}).
    *
    * The key comes from the catalog, every column of it. It used to be guessed as `id` or else
    * the first column, and on a table keyed by anything else the re-select matched any visible
@@ -210,6 +227,27 @@ export class RlsFilter {
   }
 
   /**
+   * Row visibility for INSERT and UPDATE under tier 2: the engine-generated `can_read_<table>`
+   * applied to the WAL record, as the subscriber, exactly as a DELETE is judged.
+   *
+   * Tier 2 gives the API roles nothing on the model tables (they read the `api` views), so the
+   * tier-1 re-select fails for every subscriber and every event used to be dropped. Re-reading
+   * through the view instead would be racy (the row may have changed since the event) and blind
+   * to DELETE. Hand-written policies are not consulted, which matches tier 2's views: they run
+   * as their owner, so a hand-written policy does not apply through them either.
+   *
+   * A column the record lacks (an unchanged TOASTed value) reaches the predicate as NULL.
+   */
+  private async walRecordRefusal(
+    client: pg.PoolClient,
+    change: WalChange,
+    shape: TableShape,
+  ): Promise<Refusal | null> {
+    if (!change.newRecord) return failed("change carries no row")
+    return this.rowPredicateRefusal(client, change, shape, change.newRecord, "row not visible to subscriber")
+  }
+
+  /**
    * DELETE visibility: could the subscriber have seen the row that was deleted?
    *
    * The row is gone, so it cannot be re-selected. It is judged instead by the engine-generated
@@ -228,12 +266,23 @@ export class RlsFilter {
   ): Promise<Refusal | null> {
     const old = change.oldRecord
     if (!old) return failed("delete carries no old row")
-    if (!shape.readPredicate) return failed(`no ${change.table} read predicate (can_read_${change.table})`)
-    if (shape.columns.some((column) => !(column in old))) {
+    if (shape.readPredicate && shape.columns.some((column) => !(column in old))) {
       return failed("old row incomplete: the table needs REPLICA IDENTITY FULL")
     }
-    const visible = await this.predicateHolds(client, change, shape.readPredicate, old)
-    return visible ? null : denied("deleted row was not visible to subscriber")
+    return this.rowPredicateRefusal(client, change, shape, old, "deleted row was not visible to subscriber")
+  }
+
+  /** Judge `record` with the table's generated row predicate; a table without one fails closed. */
+  private async rowPredicateRefusal(
+    client: pg.PoolClient,
+    change: WalChange,
+    shape: TableShape,
+    record: Record<string, unknown>,
+    notVisible: string,
+  ): Promise<Refusal | null> {
+    if (!shape.readPredicate) return failed(`no ${change.table} read predicate (can_read_${change.table})`)
+    const visible = await this.predicateHolds(client, change, shape.readPredicate, record)
+    return visible ? null : denied(notVisible)
   }
 
   private async predicateHolds(
