@@ -762,7 +762,7 @@ async function invoke(
 
     // Try to pretty-print JSON
     try {
-      const json = JSON.parse(responseBody)
+      const json: unknown = JSON.parse(responseBody)
       plain(JSON.stringify(json, null, 2))
     } catch {
       plain(responseBody)

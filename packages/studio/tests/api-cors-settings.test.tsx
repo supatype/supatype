@@ -41,7 +41,8 @@ async function render(permissions: Record<string, boolean>, answer: (call: Call)
   calls = []
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     if (url.endsWith("/studio/auth/verify")) return Response.json({ sub: "u1", role: "admin", permissions })
-    const call = { url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined }
+    const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined
+    const call = { url, method: init?.method ?? "GET", body }
     calls.push(call)
     return Response.json(answer(call))
   })

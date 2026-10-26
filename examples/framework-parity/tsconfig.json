@@ -12,11 +12,13 @@
     "skipLibCheck": true,
     "noEmit": true,
     "types": [
-      "node"
+      "node",
+      "vite/client"
     ]
   },
   "include": [
     "schema",
+    "src/client.ts",
     "supatype.config.ts",
     "supatype/generated",
     "vite.*.config.ts",

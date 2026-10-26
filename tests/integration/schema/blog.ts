@@ -35,7 +35,7 @@ import type {
 } from "@supatype/types"
 import type { avatars, postAttachments, postCovers } from "./buckets.js"
 
-// Keyed by the author's auth user id: the models owned through an author (`Owner<"author">`) are
+// Keyed by the author's auth user id: the models owned through an author (`Owner<"author_id">`) are
 // owned by that user, which the engine can tell only from `SupatypeAuthUserId` (O1).
 export type author = Model<WithTimestamps<{
   id: SupatypeAuthUserId
@@ -68,7 +68,7 @@ export type userProfile = Model<WithSoftDelete<WithTimestamps<{
   access: {
     read: Public
     create: LoggedIn
-    update: Owner<"author">
+    update: Owner<"author_id">
     delete: Role<"service_role">
   }
 }>
@@ -94,7 +94,7 @@ export type tag = Model<{
   id: UUID
   name: Unique<string>
   color: Optional<Color>
-  posts: ManyToMany<post, { inverse: "tags" }>
+  posts: ManyToMany<post>
 }, {
   access: {
     read: Public
@@ -112,7 +112,7 @@ export type post = Model<WithPublishable<WithTimestamps<{
   body: Optional<RichText>
   author: RelatedTo<author, { onDelete: "cascade" }>
   category: Optional<RelatedTo<category, { onDelete: "setNull" }>>
-  tags: ManyToMany<tag, { inverse: "posts" }>
+  tags: ManyToMany<tag>
   coverImage: Optional<ImageAsset<postCovers>>
   attachment: Optional<FileAsset<postAttachments>>
   viewCount: Default<Int, 0>
@@ -134,8 +134,8 @@ export type post = Model<WithPublishable<WithTimestamps<{
   access: {
     read: Public
     create: LoggedIn
-    update: Owner<"author">
-    delete: Owner<"author">
+    update: Owner<"author_id">
+    delete: Owner<"author_id">
   }
 }>
 
@@ -150,7 +150,7 @@ export type comment = Model<WithSoftDelete<WithTimestamps<{
   access: {
     read: Public
     create: LoggedIn
-    update: Owner<"author">
-    delete: Owner<"author">
+    update: Owner<"author_id">
+    delete: Owner<"author_id">
   }
 }>

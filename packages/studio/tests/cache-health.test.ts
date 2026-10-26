@@ -25,7 +25,7 @@ function status(over: Partial<RowCacheStatus> = {}): RowCacheStatus {
     slot_lost: false,
     beat_age_ms: 40,
     registrations: 3,
-    registrations_loaded: 3,
+    registrations_loaded: true,
     entries: 120,
     hits_total: 900,
     misses_total: 100,
@@ -62,7 +62,7 @@ describe("a hit rate from cumulative counters", () => {
 
   it("does not report a rate across a restart", () => {
     // The segment starts again from zero, so the delta goes negative. That is a new counter, not
-    // a bad read, and there is no rate spanning the boundary — 0% there would be an invented
+    // a bad read, and there is no rate spanning the boundary: 0% there would be an invented
     // outage at exactly the moment someone is looking.
     const prev = { hits: 9_000, misses: 1_000, at: 0 }
     expect(hitRateOver(prev, { hits: 12, misses: 3, at: 10_000 }).pct).toBeNull()

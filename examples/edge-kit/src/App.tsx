@@ -89,7 +89,7 @@ const scenarios: Scenario[] = [
         headers: { apikey: anonKeyValue, "Content-Type": "application/json" },
         body: "{}",
       })
-      const body = await res.json().catch(() => ({}))
+      const body: unknown = await res.json().catch(() => ({}))
       return { status: res.status, body }
     },
   },
@@ -152,7 +152,7 @@ const scenarios: Scenario[] = [
         },
         body: webhookBody,
       })
-      const body = await res.json().catch(() => ({}))
+      const body: unknown = await res.json().catch(() => ({}))
       return { status: res.status, signature, body }
     },
   },

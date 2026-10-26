@@ -3,6 +3,7 @@ import pg from "pg"
 import jwt from "jsonwebtoken"
 import { RealtimeServer } from "../src/server.js"
 import { PREAMBLE } from "./fixtures/owned-table.js"
+import { nextText } from "./fixtures/stream.js"
 import {
   SECRET,
   connect,
@@ -85,9 +86,9 @@ async function openStream(
   void (async () => {
     try {
       for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        raw += decoder.decode(value, { stream: true })
+        const text = await nextText(reader, decoder)
+        if (text === null) break
+        raw += text
       }
     } catch {
       // Aborted by close().

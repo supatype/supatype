@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tsconfig.test.json",
+    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tests/tsconfig.json",
     "test": "vitest run",
     "clean": "rm -rf dist *.tsbuildinfo"
   },

@@ -72,17 +72,20 @@ declare namespace Deno {
     handler: (req: Request) => Response | Promise<Response>,
   ): void
 }
+
+/**
+ * The slice of Node's async_hooks the functions router uses. Deno provides the module at runtime;
+ * this tsconfig loads no Node types, so without it the import resolves to nothing.
+ */
+declare module "node:async_hooks" {
+  export class AsyncLocalStorage<T> {
+    getStore(): T | undefined
+    run<R>(store: T, callback: () => R): R
+  }
+}
 `
 }
 
-/** `functions/tsconfig.json`: owns function files so the app config can exclude them. */
-/**
- * The context type, as a module a function can import.
- *
- * Not an ambient declaration. `functions/deno.d.ts` is read by tsserver and by the tsconfig in this
- * directory, but `deno check` builds its own type graph and does not look at either, so a function
- * naming an ambient type fails the check the runtime itself would run. An import works in both.
- */
 /**
  * The `_shared/README.md` both scaffolds write.
  *
@@ -100,6 +103,13 @@ export function sharedFunctionsReadmeSource(): string {
   )
 }
 
+/**
+ * The context type, as a module a function can import.
+ *
+ * Not an ambient declaration. `functions/deno.d.ts` is read by tsserver and by the tsconfig in this
+ * directory, but `deno check` builds its own type graph and does not look at either, so a function
+ * naming an ambient type fails the check the runtime itself would run. An import works in both.
+ */
 export function functionsContextModuleSource(): string {
   return `/**
  * What a function is told about the call it is serving.
@@ -144,6 +154,7 @@ export interface FunctionContext {
 `
 }
 
+/** `functions/tsconfig.json`: owns function files so the app config can exclude them. */
 export function functionsTsConfigSource(): string {
   return `{
   "compilerOptions": {

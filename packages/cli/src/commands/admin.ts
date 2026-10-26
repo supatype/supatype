@@ -55,7 +55,7 @@ export function authJwtAud(cwd: string): string {
   return readEnvValue(cwd, "SUPATYPE_JWT_AUD", "authenticated")
 }
 
-type DbQuery = (sql: string, params?: unknown[]) => Promise<QueryResult>
+type DbQuery = (sql: string, params?: unknown[]) => Promise<QueryResult<Record<string, unknown>>>
 type AuthConfirmedColumn = "email_confirmed_at" | "confirmed_at"
 
 /** Prefer the migrated column when present; fall back to postgres init `confirmed_at`. */
@@ -496,7 +496,7 @@ async function createAdminUser(
 ): Promise<{ id: string; email: string }> {
   const query: DbQuery =
     typeof (db as Pool).query === "function"
-      ? (sql, params) => (db as Pool).query(sql, params)
+      ? (sql, params) => (db as Pool).query<Record<string, unknown>>(sql, params)
       : (db as DbQuery)
 
   const normalized = email.toLowerCase()
@@ -714,7 +714,7 @@ async function composeExecQuery(
   compose: ComposeStack,
   sql: string,
   params: unknown[] = [],
-): Promise<QueryResult> {
+): Promise<QueryResult<Record<string, unknown>>> {
   if (params.length === 0) {
     const text = runComposePsql(cwd, compose, ["-tAc", sql])
     if (sql.trim().toUpperCase().startsWith("SELECT")) {
@@ -757,7 +757,7 @@ function queryResult(
   command: "SELECT" | "INSERT",
   rows: Record<string, unknown>[],
   rowCount: number,
-): QueryResult {
+): QueryResult<Record<string, unknown>> {
   return { rows, rowCount, command, oid: 0, fields: [] }
 }
 

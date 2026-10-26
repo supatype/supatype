@@ -70,9 +70,9 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
   })
 
   it("decodes changes as a non-superuser, and creates no publication", async () => {
-    const isSuper: boolean = (
-      await admin.query(`SELECT rolsuper FROM pg_roles WHERE rolname = $1`, [ROLE])
-    ).rows[0].rolsuper
+    const isSuper = (
+      await admin.query<{ rolsuper: boolean }>(`SELECT rolsuper FROM pg_roles WHERE rolname = $1`, [ROLE])
+    ).rows[0]?.rolsuper
     expect(isSuper, "the probe role must not be a superuser, or this proves nothing").toBe(false)
 
     const changes: WalChange[] = []
@@ -84,16 +84,16 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
     listener.onChange((c) => changes.push(c))
 
     const publicationsBefore: string[] = (
-      await admin.query(`SELECT pubname FROM pg_publication ORDER BY pubname`)
-    ).rows.map((r: { pubname: string }) => r.pubname)
+      await admin.query<{ pubname: string }>(`SELECT pubname FROM pg_publication ORDER BY pubname`)
+    ).rows.map((r) => r.pubname)
 
     // The assertion that matters: this used to need superuser and now must not.
     await listener.start()
 
     try {
-      const slots = await admin.query(`SELECT plugin FROM pg_replication_slots WHERE slot_name = $1`, [SLOT])
+      const slots = await admin.query<{ plugin: string }>(`SELECT plugin FROM pg_replication_slots WHERE slot_name = $1`, [SLOT])
       expect(slots.rows.length, "the non-superuser role should have created the slot").toBe(1)
-      expect(slots.rows[0].plugin).toBe("wal2json")
+      expect(slots.rows[0]?.plugin).toBe("wal2json")
 
       // No *new* publication: the thing that required superuser must not have been recreated.
       // Compared as a set rather than by name: the image ships one already, and `PUBLICATION_NAME`

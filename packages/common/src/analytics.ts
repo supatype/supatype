@@ -1,3 +1,4 @@
+import type { PostHog } from "posthog-js"
 import { config } from "./config.js"
 
 interface AnalyticsClient {
@@ -9,7 +10,7 @@ interface AnalyticsClient {
 }
 
 class PostHogAnalytics implements AnalyticsClient {
-  private posthog: { capture: Function; identify: Function; opt_in_capturing: Function; opt_out_capturing: Function } | null = null
+  private posthog: PostHog | null = null
   private initialized = false
 
   private async init(): Promise<void> {
@@ -25,7 +26,7 @@ class PostHogAnalytics implements AnalyticsClient {
         persistence: "localStorage+cookie",
         respect_dnt: true,
       })
-      this.posthog = ph.default as unknown as typeof this.posthog
+      this.posthog = ph.default
     } catch {
       // PostHog not available: analytics disabled
     }

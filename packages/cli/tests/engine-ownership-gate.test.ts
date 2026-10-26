@@ -228,7 +228,8 @@ describe("targetSchemaPush() against a server", () => {
     const { targetSchemaPush } = await import("../src/resolve-target.js")
     await targetSchemaPush(selfHost(), NUMBERED, { cwd: process.cwd() })
     const push = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/schema/push"))!
-    expect(JSON.parse(String(push[1]?.body)).ast).toEqual(NUMBERED)
+    const sent: unknown = JSON.parse(String(push[1]?.body))
+    expect(sent).toHaveProperty("ast", NUMBERED)
   })
 
   it("does not ask for capabilities when no ownership flag is sent", async () => {

@@ -3,6 +3,7 @@ import type { SupatypeClient } from "@supatype/client"
 import type { DashboardView, DashboardBlock, Tier } from "../config.js"
 import { DASHBOARD_VIEW_LIMITS } from "../config.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
+import { readJsonObject } from "../lib/json.js"
 
 // Uses PostgREST multi-schema support: Accept-Profile / Content-Profile: supatype
 // Requires PostgREST config: db-schemas = "public, supatype"
@@ -26,7 +27,7 @@ async function pgFetch<T>(
       headers: { ...postgrestHeaders(client), ...(init?.headers as Record<string, string> | undefined) },
     })
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as Record<string, unknown>
+      const body = await readJsonObject(res)
       return { data: null, error: String(body["message"] ?? res.statusText) }
     }
     if (res.status === 204) return { data: null, error: null }

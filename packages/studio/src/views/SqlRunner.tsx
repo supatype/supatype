@@ -366,7 +366,7 @@ function SqlEditorView(): React.ReactElement {
         const planRow = rows[0] as Record<string, unknown> | undefined
         if (planRow && "QUERY PLAN" in planRow) {
           const raw = planRow["QUERY PLAN"]
-          const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+          const parsed: unknown = typeof raw === "string" ? JSON.parse(raw) : raw
           explainPlan = Array.isArray(parsed) ? (parsed[0] as { Plan: ExplainNode }).Plan : parsed as ExplainNode
         }
       }

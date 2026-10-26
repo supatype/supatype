@@ -213,7 +213,7 @@ export class SeedCollector {
       return { $numeric: value } satisfies NumericValue
     }
 
-    if (Array.isArray(value)) return value.map((item) => this.encodeLoose(item))
+    if (isSeedArray(value)) return value.map((item) => this.encodeLoose(item))
     return value
   }
 
@@ -251,7 +251,7 @@ export class SeedCollector {
     if (isPassThrough(value)) return value
     if (value instanceof Date) return value.toISOString()
     if (typeof value === "bigint") return (value as bigint).toString()
-    if (Array.isArray(value)) return value.map((item) => this.encodeLoose(item))
+    if (isSeedArray(value)) return value.map((item) => this.encodeLoose(item))
     return value
   }
 }
@@ -266,6 +266,14 @@ function toRows(value: unknown): SeedData[] | undefined {
   if (Array.isArray(value)) return value as SeedData[]
   if (value !== null && typeof value === "object") return [value as SeedData]
   return undefined
+}
+
+/**
+ * `Array.isArray` narrows a readonly array type to `any[]`, which would let anything through as a
+ * seed value. This narrows to what the union actually holds.
+ */
+function isSeedArray(value: SeedValue): value is readonly SeedValue[] {
+  return Array.isArray(value)
 }
 
 /**

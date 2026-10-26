@@ -90,7 +90,7 @@ export function parseComposePs(stdout: string): ComposeService[] {
   if (trimmed.startsWith("[")) {
     try {
       const parsed: unknown = JSON.parse(trimmed)
-      if (Array.isArray(parsed)) rows.push(...parsed)
+      if (Array.isArray(parsed)) rows.push(...(parsed as unknown[]))
     } catch {
       return []
     }

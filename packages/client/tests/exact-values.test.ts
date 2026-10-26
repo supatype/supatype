@@ -23,7 +23,8 @@ describe("quoteExactNumbers", () => {
   it("keeps a bigint past 2^53 that JSON.parse would round", () => {
     const body = '[{"views":9007199254740993}]'
     // The failure this exists to prevent, stated as an assertion.
-    expect(JSON.parse(body)[0].views).toBe(9007199254740992)
+    const lossy: unknown = JSON.parse(body)
+    expect(lossy).toEqual([{ views: 9007199254740992 }])
 
     const parsed = JSON.parse(quoteExactNumbers(body, fields)) as [{ views: string }]
     expect(parsed[0].views).toBe("9007199254740993")

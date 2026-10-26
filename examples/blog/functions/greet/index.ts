@@ -11,7 +11,7 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
 
   // Example: read request body for POST requests
   if (method === "POST") {
-    const body = await req.json()
+    const body: unknown = await req.json()
     return new Response(JSON.stringify({ message: "Hello from greet!", received: body, url }), {
       status: 200,
       headers: { "Content-Type": "application/json" },

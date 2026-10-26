@@ -41,7 +41,9 @@ async function post(path: string, body: unknown, headers: Record<string, string>
 
 /** The payload half of a JWT, which is where the assurance level lives. */
 function claims(jwt: string): Record<string, unknown> {
-  return JSON.parse(Buffer.from(jwt.split(".")[1], "base64").toString("utf8"))
+  const payload: unknown = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64").toString("utf8"))
+  if (typeof payload !== "object" || payload === null) throw new Error("JWT payload is not an object")
+  return payload as Record<string, unknown>
 }
 
 /** RFC 6238 TOTP, so the code offered is one the server will compute too. */
@@ -232,7 +234,7 @@ async function passwordReset(): Promise<void> {
 
   const withOld = await login(email, oldPassword)
   if (withOld.status >= 400) ok(`the old password no longer works (${withOld.status})`)
-  else bad(`the old password still works (${withOld.status}) — the reset did not take`)
+  else bad(`the old password still works (${withOld.status}): the reset did not take`)
 }
 
 /** A GET with whatever credential the caller is testing. */

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The same screen in Vue, Svelte and Solid, against one schema — so the diff between them is the parity documentation",
+  "description": "The same screen in Vue, Svelte and Solid, against one schema, so the diff between them is the parity documentation",
   "scripts": {
     "dev": "supatype dev",
     "dev:vue": "vite --config vite.vue.config.ts",
@@ -19,7 +19,7 @@
     "push": "supatype push --yes",
     "keys": "supatype keys --write",
     "generate": "supatype generate",
-    "typecheck": "tsc -p tsconfig.json --noEmit && vue-tsc -p tsconfig.vue.json --noEmit && svelte-check --tsconfig tsconfig.svelte.json && tsc -p tsconfig.solid.json --noEmit && tsc -p functions/tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && vue-tsc -p src/vue/tsconfig.json --noEmit && svelte-check --tsconfig src/svelte/tsconfig.json && tsc -p src/solid/tsconfig.json --noEmit && tsc -p functions/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",

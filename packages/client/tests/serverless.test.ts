@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest"
 import { detectServerlessEnvironment, warnIfServerlessDirectConnection } from "../src/fetch-with-retry.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ describe("detectServerlessEnvironment", () => {
 
 describe("warnIfServerlessDirectConnection", () => {
   let restoreEnv: (() => void) | undefined
-  let warnSpy: ReturnType<typeof vi.spyOn>
+  let warnSpy: MockInstance<typeof console.warn>
 
   beforeEach(() => {
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})

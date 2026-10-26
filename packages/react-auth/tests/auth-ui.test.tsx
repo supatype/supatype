@@ -1,8 +1,9 @@
 import React from "react"
 import { describe, it, expect, vi } from "vitest"
-import { create, type ReactTestInstance } from "react-test-renderer"
+import { create } from "react-test-renderer"
 import { LoginForm, SignUpForm, type AuthFormClassNames } from "../src/index.js"
 import { DEFAULT_ERROR_STYLE, errorProps } from "../src/classNames.js"
+import { classesOf } from "./helpers.js"
 
 vi.mock("@supatype/react", () => ({
   useAuth: () => ({ error: null, signIn: vi.fn(), signUp: vi.fn(), signInWithOAuth: vi.fn() }),
@@ -14,10 +15,6 @@ const classNames: AuthFormClassNames = {
   label: "t-label",
   input: "t-input",
   submit: "t-submit",
-}
-
-function classesOf(root: ReactTestInstance, type: string): Array<string | undefined> {
-  return root.findAllByType(type).map((node) => node.props["className"] as string | undefined)
 }
 
 describe.each([

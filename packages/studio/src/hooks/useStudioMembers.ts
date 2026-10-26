@@ -3,6 +3,7 @@ import { membershipBase } from "../lib/membership-url.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
+import { readJsonObject } from "../lib/json.js"
 
 /** Who may use Studio for this project, and with what capability set. */
 export interface StudioMember {
@@ -69,7 +70,7 @@ export function useStudioMembers(): UseStudioMembersReturn {
           ...init?.headers,
         },
       })
-      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      const json = await readJsonObject(res)
       if (!res.ok) {
         throw new Error(
           (json["message"] as string | undefined) ??

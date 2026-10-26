@@ -18,7 +18,7 @@ export type rt_item = Model<{
   id: UUID
   owner: RelatedTo<member, { required: true; onDelete: "cascade" }>
   label: string
-}, { access: { read: Owner<"owner">; create: Role<"service_role">; update: Role<"service_role">; delete: Role<"service_role"> } }>
+}, { access: { read: Owner<"owner_id">; create: Role<"service_role">; update: Role<"service_role">; delete: Role<"service_role"> } }>
 
 /** M06 B: the key is not `id`, and the first column is a value many rows share. */
 export type rt_ticket = Model<{
@@ -26,7 +26,7 @@ export type rt_ticket = Model<{
   code: PrimaryKey<UUID>
   owner: RelatedTo<member, { required: true; onDelete: "cascade" }>
   label: string
-}, { access: { read: Owner<"owner">; create: Role<"service_role">; update: Role<"service_role">; delete: Role<"service_role"> } }>
+}, { access: { read: Owner<"owner_id">; create: Role<"service_role">; update: Role<"service_role">; delete: Role<"service_role"> } }>
 
 /** P03: one note per user, keyed by the user's own id. */
 export type note = Model<{
@@ -39,4 +39,4 @@ export type rt_score = Model<{
   id: UUID
   owner: RelatedTo<member, { required: true; onDelete: "cascade" }>
   points: number
-}, { access: { read: Owner<"owner">; create: Role<"service_role">; update: Role<"service_role">; delete: Role<"service_role"> } }>
+}, { access: { read: Owner<"owner_id">; create: Role<"service_role">; update: Role<"service_role">; delete: Role<"service_role"> } }>

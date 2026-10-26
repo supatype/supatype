@@ -8,6 +8,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { declaredTables, projectTtlCeiling } from "../lib/cache-declaration.js"
 import type { DeclaredCache } from "../lib/cache-declaration.js"
+import { bodyMessage, readJsonObject } from "../lib/json.js"
 
 const HTTP_METHODS = ["GET", "POST", "PATCH", "DELETE"] as const
 
@@ -83,8 +84,8 @@ export function RestApiSettings(): React.ReactElement {
         }),
       })
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error((body as { message?: string }).message ?? `${res.status} ${res.statusText}`)
+        const body = await readJsonObject(res)
+        throw new Error(bodyMessage(body) ?? `${res.status} ${res.statusText}`)
       }
       setCommitted({ schema, maxRows, cacheMaxTTL })
       setSavedOk(true)
@@ -175,7 +176,7 @@ export function RestApiSettings(): React.ReactElement {
                   The project-wide number is capped at the *highest* per-table cap the schema
                   declares, because the lowest would let one model with a five-second cap drag
                   every other table down with it. Each table is held to its own cap on the read
-                  path, where the table being served is known — so this ceiling is the loosest of
+                  path, where the table being served is known, so this ceiling is the loosest of
                   them and not the effective TTL of anything in particular.
                 */}
                 {ttlCeiling !== null && (

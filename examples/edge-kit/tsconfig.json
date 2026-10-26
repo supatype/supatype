@@ -11,6 +11,6 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts", "supatype/generated"],
+  "include": ["src", "schema", "supatype.config.ts", "vite.config.ts", "supatype/generated"],
   "exclude": ["node_modules", "functions", "dist"]
 }

@@ -5,6 +5,7 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { FieldWidget } from "./FieldWidget.js"
 import { Slideover } from "../components/Slideover.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
+import { readJsonObject } from "../lib/json.js"
 import type { WidgetProps } from "./FieldWidget.js"
 import type { SupatypeClient } from "@supatype/client"
 import {
@@ -64,7 +65,7 @@ async function postgrestQuery(
   try {
     const res = await fetch(url.toString(), { headers, credentials: "include" })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({})) as Record<string, unknown>
+      const err = await readJsonObject(res)
       return { data: [], error: { message: String(err["message"] ?? `HTTP ${res.status}`) } }
     }
     return { data: await res.json() as Record<string, unknown>[], error: null }

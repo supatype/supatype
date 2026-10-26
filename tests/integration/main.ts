@@ -43,7 +43,10 @@ if (!anonKey) {
 
     for (const post of data) {
       const li = document.createElement("li")
-      li.innerHTML = `<h2>${escapeHtml(post.title)}</h2><p>${escapeHtml(post.excerpt ?? "")}</p>`
+      // This client carries no schema, so a row's columns arrive as `unknown`.
+      const title = typeof post.title === "string" ? post.title : ""
+      const excerpt = typeof post.excerpt === "string" ? post.excerpt : ""
+      li.innerHTML = `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(excerpt)}</p>`
       postsEl.appendChild(li)
     }
   }

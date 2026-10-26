@@ -16,19 +16,20 @@
     "build": "tsc -b",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tests/tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "jsonwebtoken": "^9.0.0",
     "pg": "^8.13.0",
-    "ws": "^8.18.0",
-    "jsonwebtoken": "^9.0.0"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@supatype/types": "workspace:*",
+    "@types/jsonwebtoken": "^9",
     "@types/node": "^22",
     "@types/pg": "^8",
     "@types/ws": "^8",
-    "@types/jsonwebtoken": "^9",
     "tsx": "^4",
     "typescript": "^5",
     "vitest": "^4.0.18"
