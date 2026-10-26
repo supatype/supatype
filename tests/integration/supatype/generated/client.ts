@@ -2,7 +2,7 @@
 //
 // Import the client from here rather than from `@supatype/client`:
 //
-//     import { createClient } from "./supatype/client"
+//     import { createClient } from "./supatype/generated/client"
 //
 // This file carries your schema's types and the columns that need exact handling, so one
 // import is the whole setup. Importing `@supatype/client` directly gets a client that knows
@@ -199,6 +199,7 @@ declare module "@supatype/client" {
         embedding?: number[] | null
         metadata?: { seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string } | null
       }
+      Drafts: true
       Relationships: [
         {
           columns: ["author_id"]
@@ -568,28 +569,28 @@ declare module "@supatype/client" {
     }
     post_tag: {
       Row: {
-        tag_id: string
         post_id: string
+        tag_id: string
       }
       Insert: {
-        tag_id: string
         post_id: string
+        tag_id: string
       }
       Update: {
-        tag_id?: string
         post_id?: string
+        tag_id?: string
       }
       Relationships: [
-        {
-          columns: ["tag_id"]
-          isOneToOne: false
-          referencedRelation: "tag"
-          referencedColumns: ["id"]
-        },
         {
           columns: ["post_id"]
           isOneToOne: false
           referencedRelation: "post"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["tag_id"]
+          isOneToOne: false
+          referencedRelation: "tag"
           referencedColumns: ["id"]
         },
       ]

@@ -107,13 +107,9 @@ jobs:
       # all of them without needing to know which commits what.
       - name: Generated types are up to date
         run: |
-          for dir in examples/*/; do
-            [ -f "$dir/supatype.config.ts" ] || continue
-            echo "==> $dir"
-            (cd "$dir" && node ../../packages/cli/bin/supatype.js generate)
-          done
-          git diff --exit-code -- examples/ \
-            || { echo "::error::Generated types are stale. Run 'supatype generate' in the example above and commit the result."; exit 1; }
+          bash scripts/regenerate-examples.sh
+          git diff --exit-code -- examples/ tests/integration/supatype/generated/ \
+            || { echo "::error::Generated files are stale. Run 'pnpm generate:examples' and commit the result."; exit 1; }
         env:
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 

@@ -189,6 +189,7 @@ declare module "@supatype/client" {
         embedding?: number[] | null
         metadata?: { seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string } | null
       }
+      Drafts: true
       Relationships: [
         {
           columns: ["author_id"]
@@ -558,28 +559,28 @@ declare module "@supatype/client" {
     }
     post_tag: {
       Row: {
-        tag_id: string
         post_id: string
+        tag_id: string
       }
       Insert: {
-        tag_id: string
         post_id: string
+        tag_id: string
       }
       Update: {
-        tag_id?: string
         post_id?: string
+        tag_id?: string
       }
       Relationships: [
-        {
-          columns: ["tag_id"]
-          isOneToOne: false
-          referencedRelation: "tag"
-          referencedColumns: ["id"]
-        },
         {
           columns: ["post_id"]
           isOneToOne: false
           referencedRelation: "post"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["tag_id"]
+          isOneToOne: false
+          referencedRelation: "tag"
           referencedColumns: ["id"]
         },
       ]

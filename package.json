@@ -16,7 +16,8 @@
     "test:engine": "cargo test --workspace",
     "clean": "turbo run clean && cargo clean",
     "skills:install": "bash scripts/skills-install.sh",
-    "coverage:examples": "node scripts/check-example-coverage.mjs --write"
+    "coverage:examples": "node scripts/check-example-coverage.mjs --write",
+    "generate:examples": "bash scripts/regenerate-examples.sh"
   },
   "devDependencies": {
     "@types/node": "^22",
