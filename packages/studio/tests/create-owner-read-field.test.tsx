@@ -30,7 +30,11 @@ const AUTHOR = testModel({
   listColumns: ["name"],
 })
 // What /studio/session answers an editor for this schema (studiobootstrap.resolveField).
-const FIELDS = { author: { email: { read: "row", write: "row", create: "row" } } }
+const OWNER_READ = { author: { email: { read: "row", write: "row", create: "row" } } }
+// What it answers a Studio editor when `email` is masked from them outright (`read: Role<"admin">`):
+// every field is creatable in Studio mode, and existing records keep the padlock.
+const MASKED = { author: { email: { read: "deny", write: "deny", create: "allow" } } }
+let FIELDS: Record<string, unknown> = OWNER_READ
 const OTHERS = { id: "a1", user_id: "u-owner", name: "Owner", email: null }
 const NOT_OWNER = { id: "a1", can_read_author__email: false, can_write_author__email: false }
 
@@ -124,6 +128,31 @@ describe("an editor creating a record whose required column only the owner may r
   })
 
   it("still shows the padlock, and leaves the column out of a save, on a record they do not own", async () => {
+    await open("a1")
+    expect(input("email")).toBeNull()
+    const email = container.querySelector("label[for=field-email]")?.parentElement
+    expect(email?.querySelector("[aria-label='Hidden by a field access rule']")).not.toBeNull()
+    await save()
+    expect(patches).toHaveLength(1)
+    expect(Object.keys(patches[0] ?? {})).not.toContain("email")
+  })
+})
+
+describe("a Studio editor creating a record with a field masked from them", () => {
+  beforeEach(() => { FIELDS = MASKED })
+  afterEach(() => { FIELDS = OWNER_READ })
+
+  it("asks for the masked field on the create form and sends it", async () => {
+    await open()
+    expect(input("email")?.readOnly).toBe(false)
+    await type("user_id", "u-other")
+    await type("name", "Made for someone else")
+    await type("email", "other@fresh-cms.test")
+    await save()
+    expect(inserts).toEqual([{ user_id: "u-other", name: "Made for someone else", email: "other@fresh-cms.test" }])
+  })
+
+  it("keeps the padlock on an existing record, and leaves the field out of a save", async () => {
     await open("a1")
     expect(input("email")).toBeNull()
     const email = container.querySelector("label[for=field-email]")?.parentElement

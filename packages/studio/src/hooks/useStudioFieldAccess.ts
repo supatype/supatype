@@ -22,6 +22,9 @@ export interface FieldAccess {
   /**
    * The INSERT path. The database judges the write rule against the row being stored, so a rule
    * that reads the row is `row` here too: the form asks for the value and the database decides.
+   * In Studio mode a writer gets `allow` for every field, a masked one included: a new record shows
+   * them only what they typed, so the database takes the value, while `read` and `write` keep the
+   * padlock on records that exist.
    */
   create: FieldVerdict
 }
