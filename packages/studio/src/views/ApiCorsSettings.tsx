@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { Badge, Button, Card, Input } from "../components/ui.js"
+import { Badge, Button, Card, ConfirmButton, Input, type DestructiveQuestion } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useCorsOrigins, type CorsOrigins } from "../hooks/useCorsOrigins.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
@@ -24,6 +24,22 @@ function sourceOf(origin: string, data: CorsOrigins): OriginSource {
 /** Origins the server allows whatever is saved, so nothing here offers to remove them. */
 function isFixed(origin: string, data: CorsOrigins): boolean {
   return data.platform.includes(origin) || origin === data.siteOrigin
+}
+
+/** A reset throws the saved list away, and the default may allow fewer origins than it did. */
+const RESET_QUESTION: DestructiveQuestion = {
+  title: "Reset allowed origins to the default?",
+  detail: <p>The list saved here is deleted and the default takes over at once. A browser app on an origin only the saved list allowed is refused from then on.</p>,
+  answer: "Reset origins",
+}
+
+/** Removing an origin refuses it at once, so a browser app served from it stops reaching the API. */
+function removeQuestion(origin: string): DestructiveQuestion {
+  return {
+    title: `Stop allowing ${origin}?`,
+    detail: <p>Browsers on this origin are refused as soon as the list is saved, so an app served from it stops reaching the API.</p>,
+    answer: "Remove origin",
+  }
 }
 
 /** The list this page saves: what is in force, less what the server allows anyway. */
@@ -90,7 +106,7 @@ function OriginsCard({ data, canEdit, cors }: {
           </p>
         </div>
         {canEdit && data.source === "saved" ? (
-          <Button size="xs" onClick={() => void cors.reset()}>Reset to default</Button>
+          <ConfirmButton size="xs" ask={RESET_QUESTION} act={() => void cors.reset()}>Reset to default</ConfirmButton>
         ) : null}
       </div>
       {data.origins.length === 0 ? (
@@ -123,7 +139,7 @@ function OriginRow({ origin, source, onRemove }: {
         <Badge variant={source === "platform" ? "indigo" : source === "saved" ? "blue" : "outline"}>{SOURCE_LABEL[source]}</Badge>
       </div>
       {onRemove && source !== "platform" && source !== "site" ? (
-        <Button size="xs" variant="ghost" onClick={() => onRemove(origin)}>Remove</Button>
+        <ConfirmButton size="xs" variant="ghost" ask={removeQuestion(origin)} act={() => onRemove(origin)}>Remove</ConfirmButton>
       ) : null}
     </div>
   )

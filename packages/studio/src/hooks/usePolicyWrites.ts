@@ -8,7 +8,10 @@ export interface PolicyWrites {
   run: (write: () => Promise<unknown>) => Promise<void>
   /** Switches RLS on an auth or storage table through `/studio-admin/rls`. */
   toggleRls: (schema: StudioAdminSchema, table: string, enable: boolean) => Promise<void>
-  /** Drops a policy on an auth or storage table through `/studio-admin/policies`, once confirmed. */
+  /**
+   * Drops a policy on an auth or storage table through `/studio-admin/policies`, at once: the view's
+   * Drop button is what asks first, in Studio's own dialog.
+   */
   dropPolicy: (schema: StudioAdminSchema, table: string, name: string) => Promise<void>
 }
 
@@ -39,10 +42,10 @@ export function usePolicyWrites(onChange: () => void): PolicyWrites {
     [proxy, run],
   )
 
-  const dropPolicy = useCallback(async (schema: StudioAdminSchema, table: string, name: string): Promise<void> => {
-    if (!window.confirm(`Drop policy ${name} on ${schema}.${table}?`)) return
-    await run(() => proxy.studioPolicy({ schema, table, op: "drop", name }))
-  }, [proxy, run])
+  const dropPolicy = useCallback(
+    (schema: StudioAdminSchema, table: string, name: string) => run(() => proxy.studioPolicy({ schema, table, op: "drop", name })),
+    [proxy, run],
+  )
 
   return { writeError, run, toggleRls, dropPolicy }
 }

@@ -43,6 +43,7 @@ export function StoragePoliciesView(): React.ReactElement {
   const actionsFor = (table: string): PolicyTableActions => ({
     toggleRls: (enable) => { void writes.toggleRls("storage", table, enable) },
     drop: (name) => { void writes.dropPolicy("storage", table, name) },
+    dropsAt: { schema: "storage", table },
   })
   const empty = bucket ? `No RLS policies matched bucket '${bucket}'.` : "No RLS policies found on storage tables."
   return (

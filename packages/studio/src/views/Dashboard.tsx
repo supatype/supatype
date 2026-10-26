@@ -14,6 +14,7 @@ import { Link } from "react-router-dom"
 import { useLocale } from "../hooks/useLocale.js"
 import { recordLabel } from "../lib/localized-field.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { ConfirmButton } from "../components/ui.js"
 import { authUserListPath, userListTotal } from "../lib/auth-user-search.js"
 import { firstModelWithCreatedAt, hasCreatedAt } from "../lib/model-created-at.js"
 
@@ -118,12 +119,15 @@ export function Dashboard(): React.ReactElement {
             </button>
           )}
           {activeView && views.length > 1 && (
-            <button
-              className="text-xs text-muted-foreground hover:text-destructive transition-colors"
-              onClick={() => void deleteView(activeView.id)}
+            <ConfirmButton
+              size="xs"
+              variant="ghost"
+              className="hover:text-destructive"
+              ask={{ title: `Delete the ${activeView.name} view?`, detail: <p>The saved layout is deleted. This cannot be undone.</p>, answer: "Delete view" }}
+              act={() => void deleteView(activeView.id)}
             >
               Delete
-            </button>
+            </ConfirmButton>
           )}
         </div>
 

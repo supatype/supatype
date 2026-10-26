@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { useStudioClient } from "../../StudioCore.js"
-import { Badge, Button, Card, Input, Textarea } from "../../components/ui.js"
+import { Badge, Button, Card, ConfirmButton, Input, Textarea, type DestructiveQuestion } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useEmailTemplate, type EmailTemplateState } from "../../hooks/useEmailTemplate.js"
 
@@ -87,6 +87,13 @@ function Editor({ state, variables }: { state: EmailTemplateState; variables: st
   )
 }
 
+/** A reset deletes the saved edit, which nothing keeps a copy of. */
+const RESET_QUESTION: DestructiveQuestion = {
+  title: "Reset this template to the default?",
+  detail: <p>The saved edit is deleted, and every email of this kind uses the configured or built-in template from now on.</p>,
+  answer: "Reset template",
+}
+
 /** Save, and, while a saved edit is in force, say so and offer to go back to the default. */
 function Actions({ state }: { state: EmailTemplateState }): React.ReactElement {
   const { savedAt } = state.template
@@ -98,9 +105,9 @@ function Actions({ state }: { state: EmailTemplateState }): React.ReactElement {
       {savedAt !== null && (
         <>
           <Badge variant="green">Saved edit in force since {new Date(savedAt).toLocaleString()}</Badge>
-          <Button disabled={state.busy} onClick={() => void state.reset()}>
+          <ConfirmButton disabled={state.busy} ask={RESET_QUESTION} act={() => void state.reset()}>
             Reset to default
-          </Button>
+          </ConfirmButton>
         </>
       )}
     </div>

@@ -1,3 +1,5 @@
+import { UUID_PATTERN } from "./uuid.js"
+
 /**
  * Searching users through the auth admin API, a page at a time, so no part of Studio searches only
  * the first N users in the browser.
@@ -8,8 +10,8 @@
  * does not search IDs, so an ID is looked up by its own endpoint instead.
  */
 
-/** A user ID as the search box receives it, already lower cased by `userSearchTerm`. */
-export const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+/** A user ID as the search box receives it: a UUID, the one pattern Studio knows them by. */
+export const USER_ID_PATTERN = UUID_PATTERN
 
 /**
  * The Users list's role, status and provider choices, "all" for none. The server applies them to

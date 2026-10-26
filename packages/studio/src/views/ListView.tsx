@@ -16,6 +16,8 @@ import { Badge, Button, DestructiveAnswers, Dialog } from "../components/ui.js"
 import type { SupatypeClient } from "@supatype/client"
 import { anyFieldContains, searchColumns } from "../lib/postgrest-search.js"
 import { formatFieldValue } from "../lib/field-display.js"
+import { isUuid } from "../lib/uuid.js"
+import { UuidCell } from "../components/UuidCell.js"
 import {
   fetchRecordStates,
   publishableLocales,
@@ -381,8 +383,14 @@ function CellRenderer({
   // A duration or a point, in the same words its edit widget uses.
   const readable = formatFieldValue(field, resolved)
   if (readable !== null) return <span className="st-cell-text">{readable}</span>
+  // A key or a relation: its tail, with the whole id a hover or a copy away.
+  if (isUuid(resolved)) return <span className="st-cell-text"><UuidCell value={resolved} /></span>
+  return widgetCell(field.widget, resolved)
+}
 
-  switch (field.widget) {
+/** A value that is neither empty nor formatted for its field, as its widget shows it in a list. */
+function widgetCell(widget: FieldConfig["widget"], resolved: unknown): React.ReactElement {
+  switch (widget) {
     case "boolean":
       return <span className={`st-cell-bool st-cell-bool--${resolved ? "true" : "false"}`}>{resolved ? "Yes" : "No"}</span>
     case "image":

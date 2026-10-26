@@ -6,8 +6,19 @@ import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
 import type { StorageListEntry } from "@supatype/client"
 import { storagePublicUrl } from "../lib/storage-ref.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { ConfirmButton } from "../components/ui.js"
 
 type ViewMode = "grid" | "list"
+
+/** Delete on a file, in the grid or the list: the object is removed from the bucket, so it asks first. */
+function DeleteFileButton({ path, onDelete }: { path: string; onDelete: () => void }): React.ReactElement {
+  const ask = {
+    title: `Delete ${path.split("/").pop() ?? path}?`,
+    detail: <p>The file is removed from the bucket for good, and any link to it stops working.</p>,
+    answer: "Delete file",
+  }
+  return <ConfirmButton size="xs" variant="destructive" ask={ask} act={onDelete}>Delete</ConfirmButton>
+}
 
 type MediaFile = StorageListEntry & {
   publicUrl?: string
@@ -189,13 +200,7 @@ export function MediaLibrary(): React.ReactElement {
               <div className="st-media-name" title={file.name}>
                 {file.name.split("/").pop()}
               </div>
-              <button
-                type="button"
-                className="st-btn st-btn-sm st-btn-danger"
-                onClick={() => { void handleDelete(file.name) }}
-              >
-                Delete
-              </button>
+              <DeleteFileButton path={file.name} onDelete={() => { void handleDelete(file.name) }} />
             </div>
           ))}
         </div>
@@ -216,13 +221,7 @@ export function MediaLibrary(): React.ReactElement {
                 <td>{String(file.metadata?.["mimetype"] ?? "-")}</td>
                 <td>{file.updated_at ? new Date(file.updated_at).toLocaleDateString() : "-"}</td>
                 <td>
-                  <button
-                    type="button"
-                    className="st-btn st-btn-sm st-btn-danger"
-                    onClick={() => { void handleDelete(file.name) }}
-                  >
-                    Delete
-                  </button>
+                  <DeleteFileButton path={file.name} onDelete={() => { void handleDelete(file.name) }} />
                 </td>
               </tr>
             ))}

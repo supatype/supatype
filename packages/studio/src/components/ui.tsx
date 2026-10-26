@@ -198,6 +198,45 @@ export function DestructiveAnswers({ label, act, onClose }: { label: string; act
   )
 }
 
+/** What a {@link ConfirmButton} asks before it acts. */
+export interface DestructiveQuestion {
+  /** The question, naming what it acts on: `Drop policy owner_read on auth.users?` */
+  title: string
+  /** What answering yes does, and what it cannot undo. */
+  detail: React.ReactNode
+  /** The answer that acts, naming the act: `Drop policy`. */
+  answer: string
+}
+
+/**
+ * A button whose act cannot be taken back, so the click asks first. The act runs only on the
+ * destructive answer; Cancel leaves everything as it was. Takes every {@link Button} prop but
+ * `onClick`, which is the act's to own.
+ */
+export function ConfirmButton({
+  ask,
+  act,
+  children,
+  ...props
+}: {
+  ask: DestructiveQuestion
+  act: () => void
+  children: React.ReactNode
+} & Omit<React.ComponentProps<typeof Button>, "onClick" | "children">): React.ReactElement {
+  const [asking, setAsking] = React.useState(false)
+  const close = (): void => { setAsking(false) }
+  return (
+    <>
+      <Button {...props} onClick={() => { setAsking(true) }}>{children}</Button>
+      {asking ? (
+        <Dialog role="alertdialog" title={ask.title} actions={<DestructiveAnswers label={ask.answer} act={act} onClose={close} />}>
+          {ask.detail}
+        </Dialog>
+      ) : null}
+    </>
+  )
+}
+
 /* ─── Input ─── */
 
 /**

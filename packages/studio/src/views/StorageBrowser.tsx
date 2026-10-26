@@ -13,6 +13,7 @@ import { browserSignedUrl, resolveStorageObjectPath, storagePublicUrl } from "..
 import { Button, Card, DestructiveAnswers, Dialog, Input, Select, Th, Td } from "../components/ui.js"
 import { deleteSelection } from "../lib/storage-delete.js"
 import { IconFile, IconFileText, IconFilm, IconFolder, IconImage, IconMusic } from "../components/icons.js"
+import { UuidCell } from "../components/UuidCell.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -847,7 +848,7 @@ export function StorageBrowser(): React.ReactElement {
                       </Td>
                       <Td className="text-xs text-muted-foreground">{formatBytes(f.size)}</Td>
                       <Td className="text-xs text-muted-foreground">{f.is_folder ? "-" : f.type}</Td>
-                      <Td className="text-xs text-muted-foreground">{f.owner_id ?? "-"}</Td>
+                      <Td className="text-xs text-muted-foreground">{f.owner_id ? <UuidCell value={f.owner_id} /> : "-"}</Td>
                       <Td className="text-xs text-muted-foreground">{new Date(f.updated_at).toLocaleDateString()}</Td>
                       <Td>
                         {!f.is_folder ? (

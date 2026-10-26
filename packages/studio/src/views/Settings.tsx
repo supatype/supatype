@@ -6,7 +6,7 @@ import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { cn } from "../lib/utils.js"
 import { type Guard, isBoolean, isJsonObject, isNumber, isShape, isString, optional, readJson, readJsonObject } from "../lib/json.js"
-import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, CodeBlock, ConfirmButton, Input, Select, Th, Td, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ConnectionStringPanel } from "../components/database/ConnectionStringPanel.js"
 import { ApiCorsSettings } from "./ApiCorsSettings.js"
@@ -618,6 +618,13 @@ function credentialError(body: Record<string, unknown>, fallback: string): strin
   return typeof error === "string" ? error : fallback
 }
 
+/** A rotation replaces the password at once, so everything still using the old one is refused. */
+const ROTATE_QUESTION: DestructiveQuestion = {
+  title: "Rotate the database password?",
+  detail: <p>A new password replaces the current one at once. Any app or tool still connecting with the old password is refused until it is given the new one.</p>,
+  answer: "Rotate password",
+}
+
 function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClient> }): React.ReactElement {
   const proxy = useProjectProxy()
   // Through the metadata catalogue (RQ3b), so a viewer sees the settings too.
@@ -739,9 +746,9 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
           >
             View Password
           </Button>
-          <Button size="xs" onClick={() => void handleRotate()} disabled={credActionLoading}>
+          <ConfirmButton size="xs" ask={ROTATE_QUESTION} act={() => void handleRotate()} disabled={credActionLoading}>
             Rotate Password
-          </Button>
+          </ConfirmButton>
         </div>
         {revealedPassword ? (
           <CodeBlock className="text-xs">{revealedPassword}</CodeBlock>

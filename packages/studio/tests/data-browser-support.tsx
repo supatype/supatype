@@ -49,17 +49,21 @@ export interface BrowserOptions {
   columns?: Record<string, unknown>[]
   /** The answer to every insert, in place of a 201: a PostgREST error body and its status. */
   insertRefusal?: { status: number; body: Record<string, unknown> }
+  /** The rows of `message`; thirty numbered messages by default. */
+  rows?: Array<Record<string, unknown>>
 }
 
-function restAnswer(init: RequestInit | undefined, inserts: unknown[], refusal: BrowserOptions["insertRefusal"]): Response {
+function restAnswer(init: RequestInit | undefined, inserts: unknown[], options: BrowserOptions): Response {
   const headers = new Headers(init?.headers)
+  const refusal = options.insertRefusal
   if (init?.method === "POST") {
     inserts.push(JSON.parse(String(init.body)))
     return refusal === undefined ? Response.json([], { status: 201 }) : Response.json(refusal.body, { status: refusal.status })
   }
+  const rows = options.rows ?? ROWS
   const [from = 0, to = 0] = (headers.get("Range") ?? "0-24").split("-").map(Number)
-  const page = ROWS.slice(from, to + 1)
-  const total = (headers.get("Prefer") ?? "").includes("count=") ? String(ROWS.length) : "*"
+  const page = rows.slice(from, to + 1)
+  const total = (headers.get("Prefer") ?? "").includes("count=") ? String(rows.length) : "*"
   return Response.json(page, { headers: { "Content-Range": `${from}-${from + page.length - 1}/${total}` } })
 }
 
@@ -74,7 +78,7 @@ function stubProject(options: BrowserOptions, inserts: unknown[], reads: URL[]):
     if (url.pathname.endsWith("/metadata/introspect")) return Response.json({ rows: columns, rowCount: columns.length })
     if (url.pathname.includes("/rest/v1/")) {
       if (init?.method === undefined || init.method === "GET") reads.push(url)
-      return restAnswer(init, inserts, options.insertRefusal)
+      return restAnswer(init, inserts, options)
     }
     return Response.json({ rows: [], rowCount: 0 })
   })

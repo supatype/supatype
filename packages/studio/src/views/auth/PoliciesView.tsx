@@ -4,9 +4,10 @@ import { usePolicyWrites } from "../../hooks/usePolicyWrites.js"
 import { PolicyCreatePanel, type PolicyTarget } from "../../components/database/PolicyCreatePanel.js"
 import { ManualPolicyWarning, PolicyTableList, type PolicyTableActions } from "../../components/database/PolicyTable.js"
 import { usePolicyCatalogue, type PolicyCatalogue } from "../../hooks/usePolicyCatalogue.js"
+import { SqlDraftDialog, useSqlDraft } from "../../components/database/SqlDraftDialog.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
-import { Button, Dialog, Select, Textarea } from "../../components/ui.js"
+import { Button, Select } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 
 /** Match server-side identifier rules so schema hints stay safe in SQL text. */
@@ -24,45 +25,6 @@ function policyTemplate(schema: string): string {
   USING (true)
   WITH CHECK (true);`
 }
-
-/** The SQL a write on a schema outside `/studio-admin` runs, shown for the user to edit and run. */
-function useSqlDraft(schemaSql: string, onRan: () => void) {
-  const proxy = useProjectProxy()
-  const [text, setText] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const close = (): void => { setText(null); setError(null) }
-  const run = async (): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    try {
-      await proxy.sql(text ?? "", schemaSql)
-      close()
-      onRan()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return { text, setText, error, busy, close, run }
-}
-
-type SqlDraft = ReturnType<typeof useSqlDraft>
-
-function SqlDraftDialog({ draft }: { draft: SqlDraft }): React.ReactElement | null {
-  if (draft.text === null) return null
-  return (
-    <Dialog
-      title="SQL"
-      actions={<><Button onClick={draft.close}>Cancel</Button><Button variant="primary" disabled={draft.busy} onClick={() => { void draft.run() }}>{draft.busy ? "Running…" : "Run SQL"}</Button></>}
-    >
-      <Textarea aria-label="SQL" className="min-h-[140px] resize-y" value={draft.text} onChange={(e) => { draft.setText(e.target.value) }} />
-      {draft.error ? <p className="text-xs text-destructive">{draft.error}</p> : null}
-    </Dialog>
-  )
-}
-
 
 /** Every table the view has seen in this schema, with or without a policy yet. */
 function knownTables(catalogue: PolicyCatalogue): string[] {
@@ -89,6 +51,7 @@ function usePolicyEditing(schemaSql: string, catalogue: PolicyCatalogue) {
       if (adminSchema) void writes.dropPolicy(adminSchema, table, name)
       else draft.setText(`DROP POLICY ${name} ON ${schemaSql}.${table};`)
     },
+    dropsAt: adminSchema ? { schema: adminSchema, table } : null,
   })
   const create = (): void => {
     if (adminSchema) setCreateTarget({ schema: adminSchema, tables: knownTables(catalogue) })
