@@ -397,14 +397,15 @@ export class AuthClient {
 
   /**
    * True only when the server's `/settings` list the provider as off. A provider they do not list
-   * (a `custom:` one) or settings that cannot be read leave the decision to `/authorize`.
+   * (a `custom:` one) or settings that cannot be read leave the decision to `/authorize`. Looked up
+   * in lower case, as `/authorize` resolves it, so `GitHub` is refused exactly when `github` is.
    */
   private async providerDisabled(provider: string): Promise<boolean> {
     try {
       const res = await this.send(`${this.url}/settings`, { headers: this.baseHeaders })
       if (!res.ok) return false
       const body = await res.json() as { external?: Record<string, unknown> | undefined }
-      return body.external?.[provider] === false
+      return body.external?.[provider.toLowerCase()] === false
     } catch {
       return false
     }

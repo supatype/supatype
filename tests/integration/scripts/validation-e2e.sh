@@ -98,6 +98,23 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
+env_value() { grep -E "^$1=" .env | tail -1 | cut -d= -f2-; }
+
+# A query against the project's database, through the container: nothing publishes Postgres's port.
+db_query() {
+  local container
+  container="$(docker ps -q --filter "label=com.docker.compose.project=$E2E_COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=db" | head -1)"
+  docker exec -e PGPASSWORD="$(env_value POSTGRES_PASSWORD)" "$container" \
+    psql -U "$(env_value POSTGRES_USER)" -d "$(env_value POSTGRES_DB)" -X -tAc "$1"
+}
+
+# What PostgREST's 23514 body says when the named CHECK refuses the row: the whole name, quoted, so
+# `product_name_bounds` cannot pass for `product_name_bounds_2` or for another rule on the column.
+refused_by() {
+  printf 'violates check constraint \\"%s\\"' "$1"
+}
+
 # Asserts the status *and* that the body names the rule, so a request refused for an unrelated
 # reason (a 401, a 409 on the unique slug) does not read as the bound working.
 expect() {
@@ -114,7 +131,7 @@ expect() {
     failures=$((failures + 1))
     return
   fi
-  if [[ -n "$needle" ]] && ! grep -q "$needle" /tmp/ve2e.json; then
+  if [[ -n "$needle" ]] && ! grep -qF -- "$needle" /tmp/ve2e.json; then
     printf '  FAIL %-46s %s expected, but body did not mention %s\n' "$label" "$want" "$needle"
     head -c 200 /tmp/ve2e.json; echo
     failures=$((failures + 1))
@@ -126,27 +143,53 @@ expect() {
 echo "==> Mechanism 1: bounds on a field"
 expect 201 "a row inside every bound" \
   '{"name":"E2E Alpha","status":"draft","rating":3}'
+# Postgres checks a row's CHECK constraints in name order, so a two-letter name meets the field bound
+# `product_name_bounds` before the model rule `product_name_min_length` that says the same thing.
+# The field bound is what this asserts; the model rule's presence is asserted from the catalogue below.
 expect 400 "MinLength<3> on name" \
-  '{"name":"ab","status":"draft"}' 'product_check_'
+  '{"name":"ab","status":"draft"}' "$(refused_by product_name_bounds)"
 expect 400 "Between<Int,1,5> on rating" \
-  '{"name":"E2E Beta","status":"draft","rating":9}' 'product_rating_bounds'
+  '{"name":"E2E Beta","status":"draft","rating":9}' "$(refused_by product_rating_bounds)"
 expect 400 "MaxItems<8> on tags" \
-  '{"name":"E2E Gamma","status":"draft","tags":["1","2","3","4","5","6","7","8","9"]}' 'product_tags_bounds'
+  '{"name":"E2E Gamma","status":"draft","tags":["1","2","3","4","5","6","7","8","9"]}' \
+  "$(refused_by product_tags_bounds)"
 
 echo "==> The localized bound, which a scalar expression cannot express"
 expect 400 "MaxLength<60> breached in fr only" \
   '{"name":"E2E Delta","status":"draft","headline":{"en":"short","fr":"beaucoup trop long pour tenir dans la limite de soixante caracteres imposee"}}' \
-  'product_headline_bounds'
+  "$(refused_by product_headline_bounds)"
 expect 201 "same field, both locales inside the bound" \
   '{"name":"E2E Epsilon","status":"draft","headline":{"en":"short","fr":"court"}}'
 
 echo "==> Mechanism 2: constraints on the model"
+# Each rule is named for what it checks, so the refusal tells the writer which rule it broke.
 expect 400 "published requires a sku" \
-  '{"name":"E2E Zeta","status":"published"}' 'product_check_'
+  '{"name":"E2E Zeta","status":"published"}' "$(refused_by product_status_eq_or_sku_not_null)"
 expect 400 "Matches on sku" \
-  '{"name":"E2E Eta","status":"draft","sku":"nope"}' 'product_check_'
+  '{"name":"E2E Eta","status":"draft","sku":"nope"}' "$(refused_by product_sku_format)"
 expect 400 "Lte<availableFrom, availableUntil>" \
-  '{"name":"E2E Theta","status":"draft","availableFrom":"2027-01-01","availableUntil":"2026-01-01"}' 'product_check_'
+  '{"name":"E2E Theta","status":"draft","availableFrom":"2027-01-01","availableUntil":"2026-01-01"}' \
+  "$(refused_by product_availableFrom_lte_availableUntil)"
+# 21 one-minute items: inside the validator's 120-minute cap, so only the item count can refuse it.
+twenty_one_items="$(printf '{"label":"step","minutes":1},%.0s' $(seq 1 21))"
+expect 400 "Lte<ItemCount<setupItems>, 20>" \
+  "{\"name\":\"E2E Lambda\",\"status\":\"draft\",\"setupItems\":[${twenty_one_items%,}]}" \
+  "$(refused_by product_setupItems_max_items)"
+
+# Every model rule, by its exact name. `product_name_min_length` cannot be reached by a request (see
+# above), so the catalogue is the only place its name can be checked. Field bounds end in `_bounds`
+# and a field type's own check (the status enum, the slug pattern) in `_check`; the rest are the
+# model's rules.
+model_rules="$(db_query "SELECT string_agg(conname, ',' ORDER BY conname COLLATE \"C\") FROM pg_constraint
+  WHERE conrelid = 'public.product'::regclass AND contype = 'c' AND conname !~ '_(bounds|check)\$'")"
+want_rules="product_availableFrom_lte_availableUntil,product_name_min_length,product_setupItems_max_items,product_sku_format,product_status_eq_or_sku_not_null"
+if [[ "$model_rules" == "$want_rules" ]]; then
+  printf '  ok   %-46s %s\n' "every model rule under its own name" "5"
+else
+  printf '  FAIL %-46s\n       want %s\n       got  %s\n' "every model rule under its own name" \
+    "$want_rules" "$model_rules"
+  failures=$((failures + 1))
+fi
 
 echo "==> Mechanism 3: the validator, which the database cannot express"
 expect 201 "75 minutes, under the cap" \

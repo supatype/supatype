@@ -182,6 +182,16 @@ describe("signInWithOAuth checks the provider is enabled", () => {
     expect(store.get(PROVIDER_KEY)).toBe("github")
   })
 
+  it("matches the provider as the server does, whatever its case", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(settings({ github: false, google: true })))
+
+    const off = await new AuthClient(AUTH_URL, HEADERS).signInWithOAuth({ provider: "GitHub" })
+    expect(off.error?.code).toBe("provider_disabled")
+
+    const on = await new AuthClient(AUTH_URL, HEADERS).signInWithOAuth({ provider: "Google" })
+    expect(on.error).toBeNull()
+  })
+
   it("lets the server decide when the settings cannot be read or do not list the provider", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")))
     const offline = await new AuthClient(AUTH_URL, HEADERS).signInWithOAuth({ provider: "github" })

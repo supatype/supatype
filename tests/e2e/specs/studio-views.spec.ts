@@ -257,17 +257,32 @@ test.describe("Studio views", () => {
     expect(failures, "requests that failed inviting a user").toEqual([])
   })
 
+  // Read-only for the same reason as the configuration page: each provider's state is what the auth
+  // server reports, and the row says where it is set, because Studio has no way to change it.
   test("auth: providers lists each one with its enabled state", async ({ page }) => {
     const failures = watchFailures(page)
+    const settings = page.waitForResponse((r) => new URL(r.url()).pathname === "/studio/proxy/auth/v1/settings")
     await page.goto("/studio/authentication/providers", { waitUntil: "networkidle" })
+    const response = await settings
+    expect(response.status(), "GET /studio/proxy/auth/v1/settings").toBe(200)
+    const { external } = (await response.json()) as { external: Record<string, boolean> }
+
+    // Sign-in methods the server reports beside the OAuth providers, which the page leaves out.
+    const providers = Object.keys(external).filter((name) => !["email", "phone", "anonymous_users"].includes(name))
+    expect(providers, "OAuth providers the auth server reports").toEqual(expect.arrayContaining(["github", "google"]))
 
     const main = page.locator("main, [role='main']").first()
-    for (const provider of ["Github", "Google", "Gitlab", "Discord"]) {
-      await expect(main).toContainText(new RegExp(provider, "i"))
+    await expect(main.getByRole("columnheader", { name: "Set by" })).toBeVisible()
+    for (const name of providers) {
+      const row = main.getByRole("row", { name: new RegExp(`^${name}\\b`) })
+      await expect(row).toContainText(external[name] ? "Enabled" : "Disabled")
+      await expect(row).toContainText(`auth.providers.${name}`)
+      await expect(row).toContainText(`SUPATYPE_EXTERNAL_${name.toUpperCase()}_ENABLED`)
     }
-    // Each row offers the action for its current state, which only renders once
-    // the current configuration has been read.
-    await expect(main.getByRole("button", { name: /^enable$/i }).first()).toBeVisible()
+
+    // A button here could only change the page's own state, which is what this page used to do.
+    await expect(main.getByRole("button", { name: /enable|disable|configure|save/i })).toHaveCount(0)
+    await expect(main.locator("input, textarea, select")).toHaveCount(0)
 
     expect(failures, "requests that failed on the providers view").toEqual([])
   })
