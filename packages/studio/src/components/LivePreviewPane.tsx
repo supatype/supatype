@@ -1,4 +1,5 @@
-import React, { useRef, useEffect } from "react"
+import React, { useRef, useEffect, useMemo } from "react"
+import { livePreviewMessage, originOf } from "@supatype/client/bindings"
 import type { ModelConfig } from "../config.js"
 
 interface LivePreviewPaneProps {
@@ -19,6 +20,30 @@ interface LivePreviewPaneProps {
   awaitingFirstSave: boolean
 }
 
+/**
+ * Send the form's values to the framed preview page on every change.
+ *
+ * Addressed to the preview page's origin, not "*": the values are unsaved, and whatever else the
+ * frame might hold by the time a message is sent (a redirect, a navigation) must not receive them.
+ */
+function usePostPreview(
+  iframeRef: React.RefObject<HTMLIFrameElement | null>,
+  previewUrl: string,
+  modelName: string,
+  values: Record<string, unknown>,
+): void {
+  // Null when rendered on a server: there is no frame to post to and no origin to resolve against.
+  const targetOrigin = useMemo(
+    () => (typeof window === "undefined" ? null : originOf(previewUrl, window.location.href)),
+    [previewUrl],
+  )
+  useEffect(() => {
+    const target = iframeRef.current?.contentWindow
+    if (!target || targetOrigin === null) return
+    target.postMessage(livePreviewMessage(modelName, values), targetOrigin)
+  }, [iframeRef, values, modelName, targetOrigin])
+}
+
 export function LivePreviewPane({
   previewUrl,
   values,
@@ -26,22 +51,7 @@ export function LivePreviewPane({
   awaitingFirstSave,
 }: LivePreviewPaneProps): React.ReactElement {
   const iframeRef = useRef<HTMLIFrameElement>(null)
-
-
-  // PostMessage sync: send form data to the iframe on every change
-  useEffect(() => {
-    const iframe = iframeRef.current
-    if (!iframe?.contentWindow) return
-
-    iframe.contentWindow.postMessage(
-      {
-        type: "supatype:live-preview",
-        model: model.name,
-        data: values,
-      },
-      "*",
-    )
-  }, [values, model.name])
+  usePostPreview(iframeRef, previewUrl, model.name, values)
 
   if (awaitingFirstSave) {
     // No "Open in new tab" either: it would lead to the same page saying the same thing.

@@ -15,7 +15,7 @@
 
 import { inject, type InjectionKey, type Plugin } from "vue"
 import type { AugmentedDatabase, AnyClient, SupatypeClient, AnyDatabase } from "@supatype/client"
-import { isClientFor } from "./caller-types.js"
+import { isClientFor } from "@supatype/client/bindings"
 
 /** Typed at `AnyClient`, narrowed on read. See `AnyClient` for why it is neither generic nor `any`. */
 export const SUPATYPE_KEY: InjectionKey<AnyClient> = Symbol("supatype")

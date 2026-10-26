@@ -24,7 +24,7 @@ import type { Server } from "node:http"
 import { join } from "node:path"
 import pg from "pg"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
-import { isArrayOf, isShape, isString, type Guard } from "../src/json.js"
+import { isArrayOf, isJsonObject, isShape, isString, type Guard } from "../src/json.js"
 
 /** A response's JSON body, failing the test when the guard refuses it. */
 async function bodyOf<T>(res: Response, guard: Guard<T>): Promise<T> {
@@ -344,6 +344,34 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
 
     expect(await list(y.token, "vault")).not.toContain(name)
     expect(await list(x.token, "vault")).toContain(name)
+  })
+
+  // The list and remove answers, field for field: what a client can rely on whatever created the table.
+  // A list used to be `SELECT *`, so it carried whatever columns the table happened to have (the
+  // internal `version`, and `path_tokens` when the service had created the table) and its fields
+  // changed with whoever had created it.
+  it("lists each object with exactly its named fields", async () => {
+    const x = user()
+    const name = unique("shape")
+    await upload(x.token, "avatars", name, "four")
+    const res = await fetch(`${base}/object/list/avatars`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${x.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ prefix: name }),
+    })
+    const [entry] = await bodyOf(res, isArrayOf(isJsonObject))
+    expect(Object.keys(entry ?? {}).sort()).toEqual([
+      "bucket_id", "created_at", "id", "last_accessed_at", "metadata", "mimetype", "name", "owner", "size", "updated_at",
+    ])
+    expect(entry).toMatchObject({ bucket_id: "avatars", name, owner: x.id, size: 4, mimetype: "text/plain" })
+  })
+
+  it("answers a remove with each removed object's name and bucket", async () => {
+    const x = user()
+    const name = unique("removed")
+    await upload(x.token, "avatars", name, "x")
+    const res = await remove(x.token, "avatars", [name])
+    expect(await res.json()).toEqual([{ name, bucket_id: "avatars" }])
   })
 
   // Refused before the handler reads them. A body that was not JSON used to be a 500.

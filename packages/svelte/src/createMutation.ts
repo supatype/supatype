@@ -1,7 +1,7 @@
 import { writable, type Readable } from "svelte/store"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
-import { runMutation, type MutationOperation } from "./mutation-request.js"
+import { runMutation, type MutationOperation } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 

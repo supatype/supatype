@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react"
 import type { AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isCallerValue } from "./caller-types.js"
+import { isCallerValue } from "@supatype/client/bindings"
 
 export interface FunctionCallOptions {
   /** HTTP method. Default: POST */

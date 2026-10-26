@@ -390,12 +390,17 @@ export async function listObjects(ctx: RequestContext): Promise<void> {
   )
   if (rows === undefined) return
 
-  sendJson(ctx.res, 200, rows.map(({ metadata, ...row }) => ({
-    ...row,
-    size: (metadata as Record<string, unknown> | null)?.["size"] ?? null,
-    mimetype: (metadata as Record<string, unknown> | null)?.["mimetype"] ?? null,
-    metadata,
-  })))
+  sendJson(ctx.res, 200, rows.map(listedObject))
+}
+
+/**
+ * One list entry, as `StorageObject` in @supatype/client declares it: the row, with the size and
+ * content type its metadata records lifted out, or null where the metadata does not hold them.
+ */
+function listedObject(row: db.ListedObjectRow): db.ListedObjectRow & { size: number | null; mimetype: string | null } {
+  const size = row.metadata?.["size"]
+  const mimetype = row.metadata?.["mimetype"]
+  return { ...row, size: isNumber(size) ? size : null, mimetype: isString(mimetype) ? mimetype : null }
 }
 
 // ─── Shared: serve an object with optional transforms ───────────────────────────
