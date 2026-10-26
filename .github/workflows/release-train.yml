@@ -157,10 +157,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The control plane copies its engine out of the engine image, so they build together.
+          # The control plane copies its engine out of the engine image, and the cloud image installs
+          # the engine binary from a local release of the same build (build.sh, build_cloud), so all
+          # three build together.
           - component: engine
-            builds: engine control-plane
-            repos: supatype-schema-engine supatype
+            builds: engine control-plane cloud
+            repos: supatype-schema-engine supatype supatype-cloud
           - component: server
             builds: server
             repos: supatype-auth
@@ -170,9 +172,6 @@ jobs:
           - component: monorepo
             builds: studio storage realtime functions-worker
             repos: supatype
-          - component: cloud
-            builds: cloud
-            repos: supatype-cloud supatype-schema-engine
     steps:
       - uses: actions/checkout@v4
         with:

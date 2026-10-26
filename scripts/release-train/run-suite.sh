@@ -42,8 +42,12 @@ command="$(suite_command "$SUITE")" || { echo "unknown suite: $SUITE" >&2; exit 
 started=$SECONDS
 train_log "suite $SUITE: $command"
 start_provenance "$DIR"
-(cd "$TRAIN_SUPATYPE_DIR" && bash -c "$command") >"$DIR/output.log" 2>&1
+# Bounded: a suite whose test process never exits (integration-test.sh's realtime tests hung for
+# 40 minutes after a failed DELETE assertion) would otherwise hold the whole train.
+limit="${TRAIN_SUITE_TIMEOUT:-2700}"
+(cd "$TRAIN_SUPATYPE_DIR" && timeout --kill-after=60 "$limit" bash -c "$command") >"$DIR/output.log" 2>&1
 status=$?
+[[ "$status" -ne 124 && "$status" -ne 137 ]] || reasons+=("did not finish within ${limit}s")
 stop_provenance "$DIR"
 elapsed=$((SECONDS - started))
 

@@ -26,9 +26,13 @@ cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 cleanup
 
-out="$(SUPATYPE_CLI="node packages/cli/bin/supatype.js" SUPATYPE_ENGINE="${TRAIN_ENGINE_BIN:?}" \
-  bash "$MAKE_DB" "$CONTAINER" "$PORT")"
+# An absolute CLI path: make-db.sh runs the push from a temporary project directory. Its output is
+# printed whether it succeeds or not, since on failure it carries the push's own error.
+status=0
+out="$(SUPATYPE_CLI="node $PWD/packages/cli/bin/supatype.js" SUPATYPE_ENGINE="${TRAIN_ENGINE_BIN:?}" \
+  bash "$MAKE_DB" "$CONTAINER" "$PORT" 2>&1)" || status=$?
 echo "$out"
+[[ "$status" -eq 0 ]] || { echo "ERROR: make-db.sh failed (exit $status)" >&2; exit 1; }
 url="$(sed -n 's/^TIER2_DATABASE_URL=//p' <<<"$out")"
 [[ -n "$url" ]] || { echo "ERROR: make-db.sh printed no TIER2_DATABASE_URL" >&2; exit 1; }
 

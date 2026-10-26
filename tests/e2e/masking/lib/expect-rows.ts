@@ -51,5 +51,3 @@ export function expectedPayslips(caller: Caller): Record<Person, Record<string, 
   return Object.fromEntries(PERSONS.map((p) => [p, expectedPayslip(caller, p)])) as Record<Person, Record<string, unknown>>
 }
 
-/** Callers whose reads depend on the admin role, which T1-N1 disables on a fresh tier-1 stack. */
-export const needsAdminRole = (caller: Caller): boolean => caller === "admin"
