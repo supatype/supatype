@@ -10,7 +10,6 @@
  * Deno is not provisioned by the CLI on those paths.
  */
 
-import { nativeKeyspaceWanted } from "../cache-provider.js"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import type { DiffResult } from "../engine-client.js"
 import type { DestructiveConsentDeps } from "../destructive-consent.js"
@@ -77,13 +76,10 @@ import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
 import { nativeDevRolesSql, nativePostgrestSchemaEnv, nativeServerCoreEnv } from "../native-dev-env.js"
-import { ensureValkeySidecar, probeTcp, stopValkeySidecar } from "../valkey-sidecar.js"
+import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
+import { nativeKeyspaceAddr as nativeKeyspaceAddrFor, nativeKeyspacePort } from "../native-keyspace.js"
 import {
-  firstFreePort,
   initdb,
-  KEYSPACE_PORT_BASE,
-  KEYSPACE_PORT_SPAN,
-  nativeKeyspaceLibraryPresent,
   start as pgStart,
   stop as pgStop,
   waitReady as pgWaitReady,
@@ -314,22 +310,7 @@ export function registerDev(program: Command): void {
         // fixed because 6379 is the first thing a developer's own Redis or a
         // leftover sidecar takes, and a keyspace that cannot bind its port
         // fails inside the postmaster log where nobody is looking.
-        //
-        // `cache.provider: "valkey"` is honoured here too, and this is the only place it could
-        // be: the native path asks the archive what it carries rather than the config what it
-        // wants, so a project that deliberately kept the sidecar would otherwise find Postgres
-        // serving RESP anyway and the sidecar never started.
-        const wantsPgKeyspace = nativeKeyspaceWanted(config)
-        keyspacePort =
-          wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir)
-            ? await firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN)
-            : null
-        if (wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir) && keyspacePort === null) {
-          console.warn(
-            `[supatype] ⚠  No free port in ${KEYSPACE_PORT_BASE}-${KEYSPACE_PORT_BASE + KEYSPACE_PORT_SPAN - 1} ` +
-              "for the Postgres keyspace, starting without it.",
-          )
-        }
+        keyspacePort = await nativeKeyspacePort(config, pgBinDir)
 
         const pgOpts = {
           pgBinDir,
@@ -504,21 +485,8 @@ export function registerDev(program: Command): void {
               ? "ses"
               : "smtp"
 
-      // Postgres serves RESP itself when the archive had pg_keyspace and the
-      // port came up. The probe is not ceremony: shared memory limits, a
-      // preload ordering mistake or a port taken between the check and the
-      // start all leave a Postgres that is running and a keyspace that is not,
-      // and the difference is a cache that silently never hits.
-      const nativeKeyspaceAddr =
-        keyspacePort !== null && (await probeTcp("127.0.0.1", keyspacePort))
-          ? `127.0.0.1:${keyspacePort}`
-          : null
-      if (keyspacePort !== null && nativeKeyspaceAddr === null) {
-        console.warn(
-          `[supatype] ⚠  Postgres has pg_keyspace but is not serving RESP on :${keyspacePort}. ` +
-            "See logs/postgres.log. Falling back to the Valkey sidecar.",
-        )
-      }
+      // Postgres serves RESP itself when the archive had pg_keyspace and the port came up.
+      const nativeKeyspaceAddr = await nativeKeyspaceAddrFor(keyspacePort)
       if (nativeKeyspaceAddr) {
         console.log(`[supatype] Keyspace served by Postgres (${nativeKeyspaceAddr}).`)
       }

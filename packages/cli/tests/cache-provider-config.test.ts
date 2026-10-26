@@ -104,12 +104,22 @@ describe("which provider a project actually runs", () => {
     expect(cacheProvider(project({ versions: { postgres: "17.2" }, cache: { provider: "valkey" } }))).toBe("valkey")
   })
 
-  it("leaves native dev on the rule it had: any pin keeps Valkey unless pg_keyspace is named", () => {
+  it("lets native dev want the keyspace whether or not Postgres is pinned", () => {
+    // NV1: native sets pg_keyspace up itself and asks the archive whether it carries the library,
+    // so a pin is not what decides. native-keyspace.test.ts covers the archive and RESP fallbacks.
     expect(nativeKeyspaceWanted(project({}))).toBe(true)
-    expect(nativeKeyspaceWanted(project({ versions: { postgres: "17.2" } }))).toBe(false)
-    expect(nativeKeyspaceWanted(project({ versions: { postgres: "17.2" }, cache: { provider: "pg_keyspace" } }))).toBe(true)
+    expect(nativeKeyspaceWanted(project({ versions: { postgres: "17.2" } }))).toBe(true)
+    expect(nativeKeyspaceWanted(project({ versions: { postgres: "17.2.8" } }))).toBe(true)
+  })
+
+  it("keeps an explicit provider and an external database deciding for native dev", () => {
+    const pinned = { versions: { postgres: "17.2" } }
+    expect(nativeKeyspaceWanted(project({ ...pinned, cache: { provider: "pg_keyspace" } }))).toBe(true)
+    expect(nativeKeyspaceWanted(project({ ...pinned, cache: { provider: "valkey" } }))).toBe(false)
     expect(nativeKeyspaceWanted(project({ cache: { provider: "valkey" } }))).toBe(false)
-    expect(nativeKeyspaceWanted(project({ database: { external: { url: "postgres://u:p@h:5432/d" } } }))).toBe(false)
+    const external = { database: { external: { url: "postgres://u:p@h:5432/d" } } }
+    expect(nativeKeyspaceWanted(project(external))).toBe(false)
+    expect(nativeKeyspaceWanted(project({ ...pinned, ...external }))).toBe(false)
   })
 
   it("is unaffected by a pin on anything else", () => {

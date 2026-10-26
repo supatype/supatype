@@ -9,12 +9,14 @@ import {
   nativeMaskLibraryPresent,
   pgServerOptions,
 } from "../src/postgres-ctl.js"
+import { nativeKeyspaceAddr, nativeKeyspacePort, type NativeKeyspaceChecks } from "../src/native-keyspace.js"
+import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 /**
  * Native `supatype dev` starts one Postgres, and what that Postgres can do
  * depends on which libraries the downloaded archive happens to carry. An
  * archive from before pg_keyspace was bundled, and the Windows archive that
- * cannot carry it at all, are both ordinary states — and naming a library that
+ * cannot carry it at all, are both ordinary states, and naming a library that
  * is not there stops the server starting, which turns a missing cache into no
  * database.
  */
@@ -93,7 +95,7 @@ describe("the options pg_ctl hands the server", () => {
     expect(o).toContain("-c pg_keyspace.database=acme")
   })
 
-  // No port means the caller decided against RESP — an archive that has the
+  // No port means the caller decided against RESP. An archive that has the
   // library is not a reason to serve on a port nobody chose.
   it("serves no keyspace without a port, even with the library present", () => {
     const o = pgServerOptions(opts(install(["pg_keyspace.so", "supatype_mask.so"])))
@@ -126,5 +128,55 @@ describe("choosing the keyspace port", () => {
     } finally {
       await new Promise<void>((done) => held.close(() => done()))
     }
+  })
+})
+
+describe("whether native dev serves the keyspace from Postgres", () => {
+  const project = (over: Record<string, unknown>) =>
+    ({
+      project: { name: "acme" },
+      database: { provider: "native" },
+      server: { mode: "dev" },
+      app: { mode: "none" },
+      ...over,
+    }) as unknown as SupatypeProjectConfig
+  const pinned = { versions: { postgres: "17.2" } }
+  // The real filesystem check against a fake archive; only the port is stubbed.
+  const checks: NativeKeyspaceChecks = {
+    libraryPresent: nativeKeyspaceLibraryPresent,
+    freePort: () => Promise.resolve(6379),
+  }
+  const withLibrary = () => install(["pg_keyspace.so"])
+  const withoutLibrary = () => install(["supatype_mask.so"])
+
+  it("serves it for a pinned project whose archive carries the library", async () => {
+    await expect(nativeKeyspacePort(project(pinned), withLibrary(), checks)).resolves.toBe(6379)
+  })
+
+  it("falls back to Valkey for a pinned project whose archive lacks the library", async () => {
+    await expect(nativeKeyspacePort(project(pinned), withoutLibrary(), checks)).resolves.toBeNull()
+  })
+
+  it("honours an explicit provider over what the archive carries", async () => {
+    const valkey = project({ ...pinned, cache: { provider: "valkey" } })
+    await expect(nativeKeyspacePort(valkey, withLibrary(), checks)).resolves.toBeNull()
+    const keyspace = project({ ...pinned, cache: { provider: "pg_keyspace" } })
+    await expect(nativeKeyspacePort(keyspace, withLibrary(), checks)).resolves.toBe(6379)
+  })
+
+  it("keeps Valkey for an external database even when the archive carries the library", async () => {
+    const external = project({ ...pinned, database: { external: { url: "postgres://u:p@h:5432/d" } } })
+    await expect(nativeKeyspacePort(external, withLibrary(), checks)).resolves.toBeNull()
+  })
+
+  it("falls back to Valkey when no port is free", async () => {
+    const noPort: NativeKeyspaceChecks = { ...checks, freePort: () => Promise.resolve(null) }
+    await expect(nativeKeyspacePort(project(pinned), withLibrary(), noPort)).resolves.toBeNull()
+  })
+
+  it("uses the keyspace only once its RESP listener answers", async () => {
+    await expect(nativeKeyspaceAddr(6379, () => Promise.resolve(true))).resolves.toBe("127.0.0.1:6379")
+    await expect(nativeKeyspaceAddr(6379, () => Promise.resolve(false))).resolves.toBeNull()
+    await expect(nativeKeyspaceAddr(null, () => Promise.resolve(true))).resolves.toBeNull()
   })
 })
