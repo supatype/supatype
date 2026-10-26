@@ -36,6 +36,11 @@ SKIP_PATTERN='SKIPPED, NOT PASSED|^SKIP:|^[[:space:]]*skip[[:space:]]|[0-9]+ ski
 
 export_train_images
 export SUPATYPE_STRICT=1 MASKING_CLI="$TRAIN_SUPATYPE_DIR/packages/cli/bin/supatype.js"
+# A compose project of the suite's own (tests/integration/scripts/lib/e2e-project.sh). The runner's
+# daemon is the train's alone, so nothing else collides there; a name per suite means a stack one
+# suite leaves behind cannot become the next suite's, and the train runs the path that keeps two
+# local runs apart.
+export SUPATYPE_E2E_PROJECT="train-$SUITE"
 
 reasons=()
 command="$(suite_command "$SUITE")" || { echo "unknown suite: $SUITE" >&2; exit 2; }

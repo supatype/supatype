@@ -20,6 +20,10 @@
 #
 # Usage:
 #   bash tests/integration/scripts/data-plane-e2e.sh
+#
+# Beside another run, from another checkout: SUPATYPE_E2E_PROJECT names this run's compose project
+# and SMTP catcher, and SUPATYPE_KONG_PORT, MAILPIT_HTTP_PORT and MAILPIT_SMTP_PORT move its ports.
+# See lib/e2e-project.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,18 +43,23 @@ STORAGE_IMAGE="${SUPATYPE_STORAGE_IMAGE:-supatype/storage:ci-dev}"
 REALTIME_IMAGE="${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/e2e-project.sh"
+
+e2e_project_use "$INTEGRATION_DIR" supatype-integration
+MAILPIT_NAME="$(e2e_scoped supatype-authflows-mailpit)"
 
 DEV_PID=""
 cleanup() {
   echo ""
   echo "==> teardown"
   if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
-  docker compose -p supatype-supatype-integration down -v --remove-orphans >/dev/null 2>&1 || true
-  docker rm -f supatype-authflows-mailpit >/dev/null 2>&1 || true
+  e2e_project_down
+  docker rm -f "$MAILPIT_NAME" >/dev/null 2>&1 || true
   # Restore the config this script edits so a failure does not leave it changed.
   if [[ -f "$INTEGRATION_DIR/supatype.config.ts.authflows-bak" ]]; then
     mv -f "$INTEGRATION_DIR/supatype.config.ts.authflows-bak" "$INTEGRATION_DIR/supatype.config.ts"
   fi
+  e2e_project_release
 }
 trap cleanup EXIT INT TERM
 
@@ -95,8 +104,8 @@ build_unless_given "${SUPATYPE_STORAGE_IMAGE:-}" "$STORAGE_IMAGE" "$ROOT_DIR/pac
 build_unless_given "${SUPATYPE_REALTIME_IMAGE:-}" "$REALTIME_IMAGE" -f "$ROOT_DIR/packages/realtime/Dockerfile" "$ROOT_DIR"
 
 echo "==> SMTP catcher"
-docker rm -f supatype-authflows-mailpit >/dev/null 2>&1 || true
-docker run -d --name supatype-authflows-mailpit \
+docker rm -f "$MAILPIT_NAME" >/dev/null 2>&1 || true
+docker run -d --name "$MAILPIT_NAME" \
   -p "${MAILPIT_SMTP}:1025" -p "${MAILPIT_HTTP}:8025" \
   axllent/mailpit:latest >/dev/null
 mailpit_ready() { http_ok "http://127.0.0.1:${MAILPIT_HTTP}/api/v1/info"; }

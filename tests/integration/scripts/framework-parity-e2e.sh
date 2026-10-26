@@ -10,6 +10,10 @@
 #
 # Usage:
 #   bash tests/integration/scripts/framework-parity-e2e.sh
+#
+# Beside another run, from another checkout: SUPATYPE_E2E_PROJECT names this run's compose project,
+# SUPATYPE_KONG_PORT moves the gateway and PARITY_PREVIEW_BASE_PORT the three previews. See
+# lib/e2e-project.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +30,11 @@ FRAMEWORKS=(vue svelte solid)
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/example-keys.sh"
+source "$SCRIPT_DIR/lib/e2e-project.sh"
+
+e2e_project_use "$EXAMPLE_DIR" framework-parity
+# Exported so `supatype dev` binds the port this script waits on, rather than the next free one.
+export SUPATYPE_KONG_PORT="$KONG_PORT"
 
 DEV_PID=""
 PREVIEW_PIDS=()
@@ -37,8 +46,9 @@ cleanup() {
   echo "==> teardown"
   for pid in "${PREVIEW_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
   if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
-  (cd "$EXAMPLE_DIR" && docker compose -p supatype-framework-parity down -v --remove-orphans) >/dev/null 2>&1 || true
+  e2e_project_down
   if [[ "$ENV_EXISTED" == "no" ]]; then rm -f "$EXAMPLE_DIR/.env"; fi
+  e2e_project_release
 }
 trap cleanup EXIT INT TERM
 
@@ -72,11 +82,21 @@ if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
 fi
 
 echo "==> Serving each build with vite preview"
+# A preview already answering on one of these ports is another run's, and the checks below would
+# pass against it: it forwards to whichever gateway it was started for, and serves that run's build.
+for i in "${!FRAMEWORKS[@]}"; do
+  port="$(preview_port "$i")"
+  [[ "$(http_status "http://127.0.0.1:$port/")" == "000" ]] \
+    || fail "port $port already answers; set PARITY_PREVIEW_BASE_PORT to three free ports"
+done
 for i in "${!FRAMEWORKS[@]}"; do
   fw="${FRAMEWORKS[$i]}"
   port="$(preview_port "$i")"
-  (cd "$EXAMPLE_DIR" && VITE_SUPATYPE_URL="$BASE_URL" npx vite preview --config "vite.$fw.config.ts" \
-    --host 127.0.0.1 --port "$port" --strictPort) >/dev/null 2>&1 &
+  # Vite itself, exec'd, so the PID the teardown kills is the server. Through npx it was npx's,
+  # and killing that left Vite holding the port after the run: the next run on these ports then
+  # passed its checks against this run's build and gateway.
+  (cd "$EXAMPLE_DIR" && VITE_SUPATYPE_URL="$BASE_URL" exec node node_modules/vite/bin/vite.js preview \
+    --config "vite.$fw.config.ts" --host 127.0.0.1 --port "$port" --strictPort) >/dev/null 2>&1 &
   PREVIEW_PIDS+=("$!")
   export "PARITY_$(tr "[:lower:]" "[:upper:]" <<<"$fw")_URL=http://127.0.0.1:$port/"
 done

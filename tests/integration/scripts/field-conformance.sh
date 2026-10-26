@@ -12,7 +12,8 @@
 #   bash tests/integration/scripts/field-conformance.sh
 #
 # Set SUPATYPE_KONG_PORT to move it off 18473 when something else is already there, and
-# SUPATYPE_E2E_KEEP=1 to leave the stack up and query it after a failure.
+# SUPATYPE_E2E_KEEP=1 to leave the stack up and query it after a failure. Beside another run, set
+# SUPATYPE_E2E_PROJECT too: it names the project, so this run removes only what that name started.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,7 +29,8 @@ PROJECT_DIR="${CONFORMANCE_PROJECT_DIR:-${TMPDIR:-/tmp}/supatype-conformance-$$}
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 KONG_PORT="${SUPATYPE_KONG_PORT:-18473}"
 BASE_URL="http://127.0.0.1:${KONG_PORT}"
-COMPOSE_PROJECT="supatype-conformance"
+PROJECT_NAME="${SUPATYPE_E2E_PROJECT:-conformance}"
+COMPOSE_PROJECT="supatype-${PROJECT_NAME}"
 
 DEV_PID=""
 
@@ -57,15 +59,18 @@ echo "==> Removing anything left by a previous run"
 # only applies one on first init, so a database volume that outlived the last run rejects the new
 # credentials with "password authentication failed" and `dev` resets and retries until it times
 # out. A harness that depends on its own teardown having succeeded is not one you can trust.
-docker rm -f $(docker ps -aq --filter "name=${COMPOSE_PROJECT}-" 2>/dev/null) >/dev/null 2>&1 || true
-docker volume rm -f $(docker volume ls -q --filter "name=${COMPOSE_PROJECT}" 2>/dev/null) >/dev/null 2>&1 || true
+#
+# Exactly this project's: Docker's name filter matches a substring, so `supatype-conformance` also
+# removed the containers and volumes of a run named `supatype-conformance-2` beside it.
+docker rm -f $(docker ps -aq --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" 2>/dev/null) >/dev/null 2>&1 || true
+docker volume rm -f $(docker volume ls -q 2>/dev/null | grep -E "^${COMPOSE_PROJECT}_") >/dev/null 2>&1 || true
 
 echo "==> Scaffolding a project of its own"
 # Its own project, not the shared integration fixture: this pushes a table, drops columns from it
 # and pushes again, so sharing a database would make every other suite depend on the order this ran.
 rm -rf "$PROJECT_DIR"
 mkdir -p "$PROJECT_DIR"
-(cd "$PROJECT_DIR" && node "$CLI_BIN" init conformance --defaults --no-install --no-admin >/dev/null)
+(cd "$PROJECT_DIR" && node "$CLI_BIN" init "$PROJECT_NAME" --defaults --no-install --no-admin >/dev/null)
 
 # Optionally run against a locally built engine rather than the released one.
 #
@@ -82,10 +87,10 @@ export default defineConfig({
 LOCAL
 fi
 # `init <name>` nests; flatten so the project root is where the script expects it.
-if [[ -d "$PROJECT_DIR/conformance" ]]; then
+if [[ -d "$PROJECT_DIR/$PROJECT_NAME" ]]; then
   shopt -s dotglob
-  mv "$PROJECT_DIR/conformance"/* "$PROJECT_DIR/"
-  rmdir "$PROJECT_DIR/conformance"
+  mv "$PROJECT_DIR/$PROJECT_NAME"/* "$PROJECT_DIR/"
+  rmdir "$PROJECT_DIR/$PROJECT_NAME"
   shopt -u dotglob
 fi
 

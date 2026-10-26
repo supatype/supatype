@@ -11,6 +11,10 @@
 #
 # Usage:
 #   bash tests/integration/scripts/expo-auth-e2e.sh
+#
+# Beside another run, from another checkout: SUPATYPE_E2E_PROJECT names this run's compose project
+# and SMTP catcher, and SUPATYPE_KONG_PORT, EXPO_E2E_WEB_PORT, MAILPIT_HTTP_PORT, MAILPIT_SMTP_PORT
+# and OAUTH_STUB_PORT move its ports. See lib/e2e-project.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,7 +29,6 @@ WEB_PORT="${EXPO_E2E_WEB_PORT:-8089}"
 MAILPIT_HTTP="${MAILPIT_HTTP_PORT:-18026}"
 MAILPIT_SMTP="${MAILPIT_SMTP_PORT:-11026}"
 STUB_PORT="${OAUTH_STUB_PORT:-18998}"
-MAILPIT_NAME="supatype-expo-auth-mailpit"
 # The app is served from a loopback IP: the auth server accepts a redirect to one without an
 # allow-list entry, as it accepts the app's own deep link once the README's allow-list step is done.
 APP_URL="http://127.0.0.1:${WEB_PORT}"
@@ -33,6 +36,13 @@ CONFIG="$EXAMPLE_DIR/supatype.config.ts"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/example-keys.sh"
+source "$SCRIPT_DIR/lib/e2e-project.sh"
+source "$SCRIPT_DIR/lib/expo-export.sh"
+
+e2e_project_use "$EXAMPLE_DIR" expo-auth
+MAILPIT_NAME="$(e2e_scoped supatype-expo-auth-mailpit)"
+# Exported so `supatype dev` binds the port this script waits on, rather than the next free one.
+export SUPATYPE_KONG_PORT="$KONG_PORT"
 
 DEV_PID=""
 BG_PIDS=()
@@ -44,10 +54,11 @@ cleanup() {
   echo "==> teardown"
   for pid in "${BG_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
   if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
-  (cd "$EXAMPLE_DIR" && docker compose -p supatype-expo-auth down -v --remove-orphans) >/dev/null 2>&1 || true
+  e2e_project_down
   docker rm -f "$MAILPIT_NAME" >/dev/null 2>&1 || true
   if [[ -f "$CONFIG.e2e-bak" ]]; then mv -f "$CONFIG.e2e-bak" "$CONFIG"; fi
   if [[ "$ENV_EXISTED" == "no" ]]; then rm -f "$EXAMPLE_DIR/.env"; fi
+  e2e_project_release
 }
 trap cleanup EXIT INT TERM
 
@@ -103,8 +114,9 @@ stub_ready() { http_ok "http://127.0.0.1:${STUB_PORT}/calls"; }
 wait_until 30 "the OAuth stub" stub_ready || fail "the OAuth stub never answered"
 
 echo "==> Building the app for web"
-# EXPO_PUBLIC_* are inlined at build time, so this follows the .env written above.
-(cd "$EXAMPLE_DIR" && CI=1 npx expo export --platform web --output-dir dist >/dev/null)
+# EXPO_PUBLIC_* are inlined at build time, so this follows the .env written above. The Metro cache
+# is this export's own: a shared one serves another run's URL (lib/expo-export.sh).
+expo_web_export "$EXAMPLE_DIR" dist
 [[ -f "$EXAMPLE_DIR/dist/index.html" ]] || fail "expo export produced no dist/index.html"
 node "$E2E_DIR/expo-auth/spa-server.mjs" "$EXAMPLE_DIR/dist" "$WEB_PORT" &
 BG_PIDS+=("$!")

@@ -17,6 +17,7 @@ INTEGRATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$INTEGRATION_DIR/../.." && pwd)"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/e2e-project.sh"
 
 # Git Bash rewrites any argument that looks like a Unix path before the process sees it, so
 # `-dir=/data` reaches the container as `C:/Program Files/Git/data`, which then splits on the space
@@ -32,8 +33,9 @@ host_path() {
   if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
 }
 
+# Beside another run: STORAGE_S3_PORT moves the port, SUPATYPE_E2E_PROJECT suffixes the container.
 S3_PORT="${STORAGE_S3_PORT:-18333}"
-CONTAINER="supatype-storage-backend-test"
+CONTAINER="$(e2e_scoped supatype-storage-backend-test)"
 ACCESS_KEY="supatype"
 SECRET_KEY="supatype-secret"
 MAX_WAIT="${STORAGE_BACKEND_MAX_WAIT:-90}"

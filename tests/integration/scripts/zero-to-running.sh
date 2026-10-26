@@ -12,6 +12,9 @@
 #   SUPATYPE_ZTR_VERSION   CLI version when SUPATYPE_ZTR_INSTALL=cdn (default: latest)
 #   SUPATYPE_ZTR_WORK_ROOT Parent dir for the temp project (default: mktemp -d)
 #   SUPATYPE_ZTR_MAX_WAIT  Health poll timeout seconds (default: 300)
+#   SUPATYPE_ZTR_PROJECT   Project name, so compose project supatype-<name> (default:
+#                          SUPATYPE_E2E_PROJECT, then ztr-smoke); set it to run beside another run
+#   SUPATYPE_KONG_PORT     Gateway port (default: the one init picks)
 #   SUPATYPE_RELEASE_PUBLIC_KEY  Required for init binary prefetch (CDN engine)
 #   SUPATYPE_*_IMAGE       Optional Docker Hub pins (default :latest)
 #
@@ -26,59 +29,63 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 source "$SCRIPT_DIR/lib/http-wait.sh"
 
-PROJECT_NAME="${SUPATYPE_ZTR_PROJECT:-ztr-smoke}"
+PROJECT_NAME="${SUPATYPE_ZTR_PROJECT:-${SUPATYPE_E2E_PROJECT:-ztr-smoke}}"
 MAX_WAIT="${SUPATYPE_ZTR_MAX_WAIT:-300}"
 INSTALL_MODE="${SUPATYPE_ZTR_INSTALL:-workspace}"
 WORK_PARENT="${SUPATYPE_ZTR_WORK_ROOT:-}"
 CREATED_WORK_ROOT=""
+PROJECT_DIR=""
+CLI_SHIM_DIR=""
 
 SUPATYPE_PID=""
 FAILED=0
 
+# `dev` stops its containers on the way out and keeps the volumes, as it should for a project
+# someone works in. This project is thrown away, and a database volume that outlives it is reused
+# by the next run under the same name, which then refuses that run's new password.
+remove_stack() {
+  local compose_file="$PROJECT_DIR/.supatype/self-host/docker-compose.yml"
+  [[ -n "$SUPATYPE_PID" && -f "$compose_file" ]] || return 0
+  docker compose -p "supatype-${PROJECT_NAME}" -f "$compose_file" --project-directory "$PROJECT_DIR" \
+    down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
 cleanup() {
   echo ""
   echo "==> zero-to-running teardown"
-  if [[ -n "$SUPATYPE_PID" ]]; then
-    kill "$SUPATYPE_PID" 2>/dev/null || true
-    for _ in $(seq 1 20); do
-      if ! kill -0 "$SUPATYPE_PID" 2>/dev/null; then
-        break
-      fi
-      sleep 1
-    done
-    if kill -0 "$SUPATYPE_PID" 2>/dev/null; then
-      echo "  Force-killing hung supatype dev (pid $SUPATYPE_PID)..."
-      kill -9 "$SUPATYPE_PID" 2>/dev/null || true
-    fi
-    wait "$SUPATYPE_PID" 2>/dev/null || true
+  stop_pid_bounded "$SUPATYPE_PID"
+  if [[ "$FAILED" == "1" && "${SUPATYPE_ZTR_KEEP_ON_FAILURE:-}" == "1" ]]; then
+    echo "  Keeping work dir for debugging: $CREATED_WORK_ROOT"
+  else
+    remove_stack
+    if [[ -n "$CREATED_WORK_ROOT" && -d "$CREATED_WORK_ROOT" ]]; then rm -rf "$CREATED_WORK_ROOT"; fi
   fi
-  if [[ -n "$CREATED_WORK_ROOT" && -d "$CREATED_WORK_ROOT" ]]; then
-    if [[ "$FAILED" == "1" && "${SUPATYPE_ZTR_KEEP_ON_FAILURE:-}" == "1" ]]; then
-      echo "  Keeping work dir for debugging: $CREATED_WORK_ROOT"
-    else
-      rm -rf "$CREATED_WORK_ROOT"
-    fi
-  fi
+  if [[ -n "$CLI_SHIM_DIR" ]]; then rm -rf "$CLI_SHIM_DIR"; fi
   echo "  Done."
 }
 trap cleanup EXIT INT TERM
 
+# The workspace CLI behind a `supatype` of this run's own. It used to be written to
+# ~/.supatype/bin, which replaced the developer's installed CLI with this checkout's, and let two
+# runs from two checkouts each run the other's build.
 install_cli_workspace() {
   if [[ ! -f "$CLI_BIN" ]]; then
     echo "ERROR: CLI not found at $CLI_BIN, run 'pnpm build' first" >&2
     exit 1
   fi
-  mkdir -p "$HOME/.supatype/bin"
-  cat >"$HOME/.supatype/bin/supatype" <<EOF
+  CLI_SHIM_DIR="$(mktemp -d)"
+  cat >"$CLI_SHIM_DIR/supatype" <<SHIM
 #!/usr/bin/env bash
 exec node "$CLI_BIN" "\$@"
-EOF
-  chmod +x "$HOME/.supatype/bin/supatype"
+SHIM
+  chmod +x "$CLI_SHIM_DIR/supatype"
+  export PATH="$CLI_SHIM_DIR:$PATH"
 }
 
 install_cli_cdn() {
   SUPATYPE_VERSION="${SUPATYPE_ZTR_VERSION:-latest}" \
     bash "$ROOT_DIR/scripts/install.sh"
+  export PATH="$HOME/.supatype/bin:$PATH"
 }
 
 setup_cli() {
@@ -90,7 +97,6 @@ setup_cli() {
       exit 1
       ;;
   esac
-  export PATH="$HOME/.supatype/bin:$PATH"
 }
 
 pull_hub_image() {
@@ -116,17 +122,16 @@ prefetch_hub_images() {
   pull_hub_image "control-plane" "${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:latest}"
 }
 
+# The gateway as the CLI binds it: an exported SUPATYPE_KONG_PORT first, then the one init wrote to
+# .env. The other way round, an exported port was bound by the stack and never polled.
 resolve_base_url() {
   local project_dir="$1"
   local env_file="$project_dir/.env"
-  local kport=""
-  if [[ -f "$env_file" ]]; then
+  local kport="${SUPATYPE_KONG_PORT:-}"
+  if [[ -z "$kport" && -f "$env_file" ]]; then
     kport="$(grep '^SUPATYPE_KONG_PORT=' "$env_file" | cut -d= -f2- || true)"
   fi
-  if [[ -z "$kport" ]]; then
-    kport="${SUPATYPE_KONG_PORT:-18473}"
-  fi
-  echo "http://localhost:${kport}"
+  echo "http://localhost:${kport:-18473}"
 }
 
 ztr_health_ready() { http_ok "$ZTR_HEALTH_URL"; }
@@ -154,16 +159,8 @@ dump_failure_logs() {
   "${compose[@]}" logs --tail 40 db 2>&1 || true
 }
 
-main() {
-  local start_ts
-  start_ts="$(date +%s)"
-
-  echo "==> zero to running (install=$INSTALL_MODE)"
-  setup_cli
-  supatype --version
-
-  prefetch_hub_images
-
+# Scaffolds the project under $WORK_PARENT with `init` and sets PROJECT_DIR.
+init_project() {
   if [[ -z "$WORK_PARENT" ]]; then
     WORK_PARENT="$(mktemp -d)"
   else
@@ -175,28 +172,40 @@ main() {
   cd "$WORK_PARENT"
   supatype init "$PROJECT_NAME" -y --no-admin
 
-  local project_dir="$WORK_PARENT/$PROJECT_NAME"
-  if [[ ! -f "$project_dir/supatype.config.ts" ]]; then
-    echo "ERROR: init did not create $project_dir/supatype.config.ts" >&2
+  PROJECT_DIR="$WORK_PARENT/$PROJECT_NAME"
+  if [[ ! -f "$PROJECT_DIR/supatype.config.ts" ]]; then
+    echo "ERROR: init did not create $PROJECT_DIR/supatype.config.ts" >&2
     exit 1
   fi
-  if ! grep -q 'provider: "docker"' "$project_dir/supatype.config.ts"; then
+  if ! grep -q 'provider: "docker"' "$PROJECT_DIR/supatype.config.ts"; then
     echo "ERROR: expected provider: \"docker\" in supatype.config.ts" >&2
-    grep provider "$project_dir/supatype.config.ts" || true
+    grep provider "$PROJECT_DIR/supatype.config.ts" || true
     exit 1
   fi
   echo "  Verified docker provider in supatype.config.ts"
+}
+
+main() {
+  local start_ts
+  start_ts="$(date +%s)"
+
+  echo "==> zero to running (install=$INSTALL_MODE)"
+  setup_cli
+  supatype --version
+
+  prefetch_hub_images
+  init_project
 
   echo "==> supatype dev --stream"
-  cd "$project_dir"
+  cd "$PROJECT_DIR"
   supatype dev --stream --no-watch &
   SUPATYPE_PID=$!
 
   local base_url
-  base_url="$(resolve_base_url "$project_dir")"
+  base_url="$(resolve_base_url "$PROJECT_DIR")"
   if ! wait_for_health "$base_url"; then
     FAILED=1
-    dump_failure_logs "$project_dir"
+    dump_failure_logs "$PROJECT_DIR"
     exit 1
   fi
 

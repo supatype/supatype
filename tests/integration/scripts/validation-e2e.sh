@@ -8,6 +8,10 @@
 #
 # So this asserts on refusals, not on generated text. A bound that is silently absent shows up here
 # as a request that should have failed and did not, which no amount of string matching can catch.
+#
+# Beside another run, from another checkout: SUPATYPE_E2E_PROJECT names this run's compose project,
+# and SUPATYPE_KONG_PORT, SUPATYPE_SERVER_PORT and SUPATYPE_SEAWEEDFS_PORT move its ports. See
+# lib/e2e-project.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,10 +29,15 @@ PASSWORD="e2e-password-12345"
 
 failures=0
 
+source "$SCRIPT_DIR/lib/e2e-project.sh"
+e2e_project_use "$EXAMPLE_DIR" validation
+# Exported so compose binds the port this script waits on, whatever an old .env says.
+export SUPATYPE_KONG_PORT="$KONG_PORT"
+
 cleanup() {
-  if [[ -d "$EXAMPLE_DIR/.supatype/self-host" ]]; then
-    (cd "$EXAMPLE_DIR" && node "$CLI_BIN" self-host compose down) >/dev/null 2>&1 || true
-  fi
+  # By project name, with the volumes, which `self-host compose down` keeps (see compose-smoke.sh).
+  e2e_project_down
+  e2e_project_release
 }
 trap cleanup EXIT INT TERM
 
@@ -56,7 +65,7 @@ for i in $(seq 1 "$MAX_WAIT"); do
   fi
   if [[ "$i" -eq "$MAX_WAIT" ]]; then
     echo "    ERROR: stack did not become ready within ${MAX_WAIT}s"
-    docker compose -p supatype-validation ps || true
+    docker compose -p "$E2E_COMPOSE_PROJECT" ps || true
     exit 1
   fi
   sleep 1
