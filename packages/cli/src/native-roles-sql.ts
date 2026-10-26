@@ -10,6 +10,28 @@
 export const AUTHENTICATOR_PASSWORD_ENV = "SUPATYPE_AUTHENTICATOR_PASSWORD"
 
 /**
+ * Take `anon` and `authenticated` out of the default privileges on tables in `public`, for every
+ * role that has some (CL-N2). A table made by hand was otherwise readable by anyone with the anon
+ * key, as it no longer is on Cloud (CL1). A model table's grants are the engine's, written from the
+ * schema's access rules, so nothing a schema declares depends on these defaults. Idempotent, and
+ * run as a superuser, which may alter another role's defaults.
+ */
+export const PRIVATE_TABLE_DEFAULTS_SQL = `DO $$
+DECLARE owner_role text;
+BEGIN
+  FOR owner_role IN
+    SELECT DISTINCT pg_get_userbyid(defaclrole) FROM pg_default_acl
+    WHERE defaclnamespace = 'public'::regnamespace AND defaclobjtype = 'r'
+  LOOP
+    EXECUTE format(
+      'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated',
+      owner_role
+    );
+  END LOOP;
+END $$;
+`
+
+/**
  * The script. `withMask` adds the `supatype_mask` extension, for a Postgres build that bundles it.
  *
  * `authenticator` is created outside the `DO` block because psql does not substitute its
@@ -32,15 +54,11 @@ SELECT format('CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD %L', :'authent
 GRANT anon, authenticated, service_role TO postgres;
 GRANT anon, authenticated, service_role TO authenticator;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
--- Table-level privileges (RLS restricts rows; roles still need table access)
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+-- Tables are service_role's by default. anon and authenticated get a model table's grants from
+-- the engine, as the schema's access rules say, and nothing on a table made by hand (CL-N2).
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
--- Default privileges so tables created by the engine push inherit these grants
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticated, service_role;
-`
+${PRIVATE_TABLE_DEFAULTS_SQL}`
 }

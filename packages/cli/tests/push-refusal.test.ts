@@ -16,7 +16,8 @@ vi.mock("../src/ui/messages.js", async (importOriginal) => ({
   info: (line: string) => lines.push(`info: ${line}`),
 }))
 
-const { EngineError, ENGINE_BUSY, engineBusyMessage } = await import("../src/engine-client.js")
+const { EngineError, engineBusyMessage } = await import("../src/engine-client.js")
+const { ENGINE_BUSY } = await import("@supatype/shared")
 const { TargetApiError } = await import("../src/target-client.js")
 const { isEngineBusy } = await import("../src/adopt-walkthrough.js")
 const { exitInitialPushFailed, pushInitialSchema } = await import("../src/dev-initial-push.js")

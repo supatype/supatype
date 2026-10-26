@@ -31,15 +31,13 @@ import {
   resolveCloudRefreshToken,
 } from "./cloud-credentials.js"
 import { TargetApiError, targetFetch, type TargetFetchOptions } from "./target-client.js"
+import { CAPABILITIES_TTL_MS, capabilitiesCache, rememberCapabilities, type CapabilitiesCache } from "@supatype/shared"
 import {
   adoptNeeds,
   assertSupported,
   engineCapabilities,
   identityColumnsNeed,
   parseCapabilities,
-  CAPABILITIES_TTL_MS,
-  capabilitiesCache,
-  rememberCapabilities,
   REBASELINE_KEYS_NEED,
   type Capabilities,
   type FeatureNeed,
@@ -280,7 +278,7 @@ function runsEngineHere(target: DeployTarget): boolean {
 }
 
 /** Nothing about a server says when it changed, so its answer is trusted for a while. */
-const serverCapabilitiesCache = capabilitiesCache(CAPABILITIES_TTL_MS)
+const serverCapabilitiesCache: CapabilitiesCache<Capabilities> = capabilitiesCache(CAPABILITIES_TTL_MS)
 
 /** Forget every server's answer, as if none had been asked (tests). */
 export function forgetServerCapabilities(): void {

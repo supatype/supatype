@@ -12,7 +12,8 @@
  * server answers 409 with the same `reason` and what it names. By wording second, for an engine or
  * a server from before the code, and for what is not the engine's at all (Docker's own errors).
  */
-import { ENGINE_BUSY, ENGINE_BUSY_WORDING, EngineError } from "./engine-client.js"
+import { ENGINE_BUSY, ENGINE_BUSY_WORDING } from "@supatype/shared"
+import { EngineError } from "./engine-client.js"
 import { TargetApiError } from "./target-client.js"
 import { formatDriftedObjects, SECURITY_DRIFT, type DriftedObject } from "./diff-output.js"
 import { findJsonLine, type JsonObject } from "./engine-json-line.js"
@@ -266,10 +267,23 @@ function explainImagePull(refusal: Extract<PushRefusal, { kind: "image-pull" }>,
 }
 
 /**
+ * A dev push a person was asked about and said no to (put access changed outside Supatype back):
+ * nothing was applied, the database is as it was, and dev carries on watching. Its message is what
+ * dev says about it.
+ */
+export class DevPushDeclined extends Error {
+  override readonly name = "DevPushDeclined"
+}
+
+/**
  * A dev hot reload's push failed: say what refused it and what to do, in place of the raw output.
  * dev keeps running and watching either way; saving the schema pushes again.
  */
 export function reportDevPushFailure(err: unknown): void {
+  if (err instanceof DevPushDeclined) {
+    console.warn(`[supatype] ${err.message}`)
+    return
+  }
   const refusal = classifyPushRefusal(err)
   if (refusal === null || refusal.kind === "destructive") {
     // A destructive refusal was already shown and asked about (`pushConsentingToDestructive`).

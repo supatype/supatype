@@ -13,6 +13,7 @@
 import { keyspaceInPostgres } from "../cache-provider.js"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import type { DiffResult } from "../engine-client.js"
+import type { DestructiveConsentDeps } from "../destructive-consent.js"
 import { reportDevPushFailure } from "../push-refusal.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
@@ -29,7 +30,7 @@ import {
   schemaPathFromProject,
   type SupatypeProjectConfig,
 } from "../project-config.js"
-import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
+import { discoverFunctionsOrExit, writeDevFunctionsRouter } from "../functions-router-gen.js"
 import { fieldMaskingTierFromProject } from "../field-masking-tier.js"
 import { projectHasVersionedModels } from "../model-versioning.js"
 import { signJwt } from "../jwt.js"
@@ -52,7 +53,9 @@ import {
   assertSupported,
   binaryCapabilities,
   EngineProbeFailed,
+  OVERWRITE_DRIFT_NEED,
   OwnershipUnsupportedError,
+  requireEngineFeatures,
 } from "../engine-ownership-gate.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
@@ -143,7 +146,7 @@ async function requireDevEngineSupports(
   config: import("../project-config.js").SupatypeProjectConfig,
   docker: boolean,
 ): Promise<void> {
-  const need = [{ feature: "overwrite_drift", flag: "--overwrite-drift" }] as const
+  const need = [OVERWRITE_DRIFT_NEED]
   try {
     if (docker) {
       const { requireDockerFeatures } = await import("../dev-compose.js")
@@ -396,7 +399,7 @@ export function registerDev(program: Command): void {
       /** Always set when a functions dir exists so Studio admin API can list functions; Deno runtime is separate. */
       const denoFunctionsDir = hasFunctionsDir ? functionsDir : ""
       const functionRoutes = hasFunctionsDir && functionsDir !== undefined
-        ? discoverTsFunctionsInDir(functionsDir)
+        ? discoverFunctionsOrExit(functionsDir)
         : []
       const denoServeScriptAbs = hasFunctionsDir && functionsDir !== undefined
         ? (writeDevFunctionsRouter(cwd, functionsDir, functionRoutes) ?? "")
@@ -762,22 +765,24 @@ interface NativeSchema {
 }
 
 /**
- * One push of a native dev session. Never forced: a change that would drop data is asked about in
- * a terminal and refused anywhere else, and the caller logs the refusal while dev keeps watching.
+ * One push of a native dev session. Never forced: a change that would drop data, or one that would
+ * put back access changed outside Supatype, is asked about in a terminal as `push` asks it and
+ * refused anywhere else, and the caller logs the refusal (or the no) while dev keeps watching.
  *
  * The schema is built again only after a rename confirmed at the prompt was recorded in the journal,
- * which the next attempt has to carry. Returns the engine's answer and the schema that applied.
+ * which the next attempt has to carry. Returns the schema that applied.
  */
 async function pushNativeSchema(
   cwd: string,
   schema: NativeSchema,
   target: NativePushTarget,
-): Promise<{ result: EnginePushResult; ast: ExtractedSchemaAstV2 }> {
+): Promise<{ ast: ExtractedSchemaAstV2 }> {
   const { ensureEngine, enginePush, engineRequest } = await import("../engine-client.js")
   const { writeSchemaSourcePushArtifacts } = await import("../schema-sources.js")
   const { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } = await import(
     "../destructive-consent.js"
   )
+  const { devPushConsentingToDrift } = await import("../drift-consent.js")
   await ensureEngine()
   const sources = writeSchemaSourcePushArtifacts(cwd)
   let ast = schema.ast
@@ -786,34 +791,49 @@ async function pushNativeSchema(
     if (stale) [ast, stale] = [await schema.rebuild(), false]
     return { ast, database_url: target.dbURL, schema: target.pgSchema }
   }
-  const deps = consentDepsFromDiff(cwd, async () => engineRequest<DiffResult>("/diff", await request()))
-  const journal = deps.renameWriter
-  const result = await pushConsentingToDestructive(
-    async (force) =>
-      enginePush<EnginePushResult>(cwd, {
-        ...(await request()),
-        force,
-        ...(target.overwriteDrift && { overwrite_drift: true }),
-        ...(sources && {
-          schema_sources_gz_base64: sources.payload.dataBase64,
-          schema_sources_manifest: sources.payload.manifest,
+  const diff = async () => engineRequest<DiffResult>("/diff", await request())
+  const deps = rebuildingAfterRename(consentDepsFromDiff(cwd, diff), () => {
+    stale = true
+  })
+  const once = async (overwrite: boolean): Promise<void> => {
+    const result = await pushConsentingToDestructive(
+      async (force) =>
+        enginePush<EnginePushResult>(cwd, {
+          ...(await request()),
+          force,
+          ...(overwrite && { overwrite_drift: true }),
+          ...(sources && {
+            schema_sources_gz_base64: sources.payload.dataBase64,
+            schema_sources_manifest: sources.payload.manifest,
+          }),
         }),
-      }),
-    DEV_DESTRUCTIVE_POLICY,
-    {
-      ...deps,
-      ...(journal && {
-        renameWriter: {
-          write: async (candidate) => {
-            stale = true
-            await journal.write(candidate)
-          },
-        },
-      }),
+      DEV_DESTRUCTIVE_POLICY,
+      deps,
+    )
+    printPushWarnings(result)
+  }
+  await devPushConsentingToDrift(once, target.overwriteDrift, {
+    beforeOverwrite: () => requireEngineFeatures([OVERWRITE_DRIFT_NEED]),
+  })
+  return { ast }
+}
+
+/**
+ * `deps` with a rename journal writer that also calls `recorded`, so the attempt after a confirmed
+ * rename builds the schema again and carries the journal entry it wrote.
+ */
+function rebuildingAfterRename(deps: DestructiveConsentDeps, recorded: () => void): DestructiveConsentDeps {
+  const journal = deps.renameWriter
+  if (journal === undefined) return deps
+  return {
+    ...deps,
+    renameWriter: {
+      write: async (candidate) => {
+        recorded()
+        await journal.write(candidate)
+      },
     },
-  )
-  printPushWarnings(result)
-  return { result, ast }
+  }
 }
 
 /**

@@ -123,7 +123,7 @@ DOCKERFILE
 build_control_plane() {
   require_repo supatype
   docker image inspect "$(train_image engine)" >/dev/null 2>&1 || train_die "build engine before control-plane"
-  build_image control-plane "$SRC/supatype/packages/self-host-control" \
+  build_image control-plane "$SRC/supatype" \
     -f "$SRC/supatype/packages/self-host-control/Dockerfile" \
     --build-arg "ENGINE_IMAGE=$(train_image engine)"
 }

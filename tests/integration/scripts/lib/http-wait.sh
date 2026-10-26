@@ -45,6 +45,15 @@ http_header() {
         }'
 }
 
+# dev_started <project dir> - true once `supatype dev` in that project has finished starting. It
+# writes its session lock (.supatype/dev-session.json) only after the stack is up and Kong has been
+# reloaded after every `docker compose up` it ran, the services pinned in .env recreated included.
+# The gateway answers well before that, and a request in flight through Kong during a reload can be
+# dropped, so a suite that starts dev waits for this as well as for the gateway.
+dev_started() {
+  [[ -f "$1/.supatype/dev-session.json" ]]
+}
+
 # wait_until <seconds> <label> <predicate> - polls the predicate once a second until it
 # succeeds. Returns 0 with the real elapsed time reported, or 1 once the deadline passes.
 # <predicate> is the name of a shell function; it decides what "ready" means, so a caller

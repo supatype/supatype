@@ -17,6 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+source "$SCRIPT_DIR/lib/http-wait.sh"
 CONFORMANCE_DIR="$ROOT_DIR/tests/integration/conformance"
 # Scaffolded outside the repo, and unique per run.
 #
@@ -114,8 +115,10 @@ DEV_LOG="$PROJECT_DIR/conformance-dev.log"
 DEV_PID=$!
 
 echo "==> Waiting for the API (up to 300s)"
+# Once dev has finished starting (`dev_started`), not merely once the gateway first answers: dev
+# reloads Kong after each `docker compose up`, and a request in flight then is dropped.
 for _ in $(seq 1 150); do
-  if curl -fsS -o /dev/null "$BASE_URL/auth/v1/health" 2>/dev/null; then break; fi
+  if dev_started "$PROJECT_DIR" && curl -fsS -o /dev/null "$BASE_URL/auth/v1/health" 2>/dev/null; then break; fi
   sleep 2
 done
 curl -fsS -o /dev/null "$BASE_URL/auth/v1/health" || { echo "ERROR: the stack never became ready" >&2; exit 1; }
@@ -138,8 +141,8 @@ echo "  REST answering with HTTP ${REST_CODE:-000}"
 
 # A settle, and an honest one: `dev` prints "Services running" while the checks are already
 # querying, so Kong is still being configured when the first write lands and the socket resets
-# mid-request. A fixed pause is a mitigation, not a fix. The fix is a readiness signal that means
-# "the gateway has finished", which `dev` does not currently expose.
+# mid-request. A fixed pause is a mitigation, not a fix; the wait above now also waits for dev's
+# session lock, written once dev has finished with Kong, and this pause stays as a margin.
 sleep 10
 
 # A value from the project's generated .env.

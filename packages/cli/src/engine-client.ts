@@ -19,6 +19,7 @@ import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary
 import { ensureBinary } from "./ensure-binary.js"
 import { findJsonLine } from "./engine-json-line.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
+import { ENGINE_BUSY, ENGINE_BUSY_WORDING, engineBusySentence } from "@supatype/shared"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -386,16 +387,6 @@ function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>)
   }
 }
 
-/** The `reason` the engine gives a refusal over its lock (another push, adopt, rebaseline or rollback). */
-export const ENGINE_BUSY = "engine_busy"
-
-/**
- * The engine's sentence for that refusal, for an engine or a server that does not name it. The list
- * of writers grew when rollback took the lock ("another push, adopt or rebaseline", then "another
- * push, adopt, rebaseline or rollback"), so any such list that starts with a push matches.
- */
-export const ENGINE_BUSY_WORDING = /another push(?:,? (?:or )?(?:adopt|rebaseline|rollback))* is running[^\n]*/i
-
 /**
  * The engine's sentence when it refused because another writer holds its lock,
  * or undefined for any other failure. From a JSON refusal on stdout when the engine prints one,
@@ -411,9 +402,8 @@ export function engineBusyMessage(stdout: string, stderr: string): string | unde
 }
 
 function busySentence(stderr: string): string {
-  const found = ENGINE_BUSY_WORDING.exec(stderr)?.[0]?.trim()
   const sentence =
-    found ?? "another push, adopt, rebaseline or rollback is running on this database; try again. Nothing was applied."
+    engineBusySentence(stderr) ?? "another push, adopt, rebaseline or rollback is running on this database; try again. Nothing was applied."
   return sentence.charAt(0).toUpperCase() + sentence.slice(1)
 }
 

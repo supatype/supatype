@@ -108,7 +108,8 @@ describe("supatype adopt", () => {
   })
 
   it("says busy, try again when another writer holds the engine's lock", async () => {
-    const { EngineError, ENGINE_BUSY } = await import("../src/engine-client.js")
+    const { EngineError } = await import("../src/engine-client.js")
+    const { ENGINE_BUSY } = await import("@supatype/shared")
     targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
       if (!opts.yes) return PREVIEW
       throw new EngineError("Another push, adopt or rebaseline is running on this database; try again.", "/adopt", 1, "", ENGINE_BUSY)
