@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process"
 import { gzipSync } from "node:zlib"
 import { loadConfig } from "../config.js"
 import { connectionString } from "../project-config.js"
+import { splitPassword } from "../host-database.js"
 import { fillMissingKeys } from "./keys.js"
 import { resolveBinary } from "../binary-cache.js"
 import { generateUnits } from "../systemd.js"
@@ -377,9 +378,12 @@ export function registerSelfHost(program: Command): void {
 
       info(`Backing up database to ${outFile}...`)
       try {
-        // Avoid shell interpolation of user-supplied values.
-        const pgDump = spawnSync("pg_dump", [conn], {
+        // Avoid shell interpolation of user-supplied values. The password goes in the
+        // environment, not on pg_dump's command line, where the process list would show it.
+        const { dsn, password } = splitPassword(conn)
+        const pgDump = spawnSync("pg_dump", [dsn], {
           stdio: ["ignore", "pipe", "pipe"],
+          env: password === undefined ? process.env : { ...process.env, PGPASSWORD: password },
         })
         if (pgDump.status !== 0) {
           const stderr = pgDump.stderr?.toString("utf8") ?? ""

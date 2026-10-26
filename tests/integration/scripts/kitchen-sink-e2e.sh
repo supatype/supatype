@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The kitchen sink, against a running stack: what it claims to cover, covered.
 #
-# Two halves. `verify.ts` asserts the things a browser cannot distinguish — a socket that delivers
+# Two halves. `verify.ts` asserts the things a browser cannot distinguish: a socket that delivers
 # from one that merely opens, an access rule that filters from a query that matched nothing, a
 # transform that re-encodes from a CDN echoing the original. Then the app-mode walk asserts the
 # other half of the example's premise: `app` is a single setting, the two front ends take turns,
@@ -15,10 +15,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 EXAMPLE_DIR="$ROOT_DIR/examples/kitchen-sink"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
-KONG_PORT="${SUPATYPE_KONG_PORT:-18473}"
-# IPv4 explicitly: `localhost` resolves to ::1 first on some hosts, where Docker's IPv6 forwarder
-# may accept and then reset.
-BASE_URL="${KITCHEN_SINK_E2E_URL:-http://127.0.0.1:${KONG_PORT}}"
 MAX_WAIT="${KITCHEN_SINK_E2E_MAX_WAIT:-300}"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
@@ -27,6 +23,23 @@ source "$SCRIPT_DIR/lib/example-keys.sh"
 DEV_PID=""
 ENV_EXISTED="no"
 [[ -f "$EXAMPLE_DIR/.env" ]] && ENV_EXISTED="yes"
+
+# Start where the README starts: `cp .env.example .env`. Without this the stack ran on the CLI's
+# fallbacks (database `supatype`, password `postgres`), which is the one configuration in which a
+# path that hardcodes those values cannot fail. The `auth.users` grant did exactly that, so Studio's
+# relation preview was broken for every project that followed the README, and this job was green.
+if [[ "$ENV_EXISTED" == "no" ]]; then
+  cp "$EXAMPLE_DIR/.env.example" "$EXAMPLE_DIR/.env"
+fi
+
+# The example pins its gateway port in .env so its URLs are true; follow it rather than assuming.
+# `|| true`: without the key (or the file) grep exits 1, and under `set -euo pipefail` the script
+# would stop here without a word instead of falling back to the default port.
+KONG_PORT="${SUPATYPE_KONG_PORT:-$(grep -m1 '^SUPATYPE_KONG_PORT=' "$EXAMPLE_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)}"
+KONG_PORT="${KONG_PORT:-18473}"
+# IPv4 explicitly: `localhost` resolves to ::1 first on some hosts, where Docker's IPv6 forwarder
+# may accept and then reset.
+BASE_URL="${KITCHEN_SINK_E2E_URL:-http://127.0.0.1:${KONG_PORT}}"
 
 cleanup() {
   echo ""
@@ -137,7 +150,7 @@ status="$(http_status "$BASE_URL/ticket")"
 echo "  ok   the SPA is served, and a path with no file falls back to it"
 
 # `proxy` is deliberately not in this walk yet. It needs `next dev` running beside the stack and a
-# `host.docker.internal` that resolves on a Linux runner — the same pair that gates blog-e2e. Adding
+# `host.docker.internal` that resolves on a Linux runner, the same pair that gates blog-e2e. Adding
 # it here before that is settled would make this job fail for a reason that has nothing to do with
 # the example. The mode itself is exercised by `pnpm mode:marketing` locally.
 echo ""

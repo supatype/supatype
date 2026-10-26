@@ -252,12 +252,24 @@ export async function engineRequest<T = unknown>(
     result = spawnSync(bin, args, {
       encoding: "utf8",
       cwd: process.cwd(),
+      env: engineEnv(body),
     })
   } finally {
     try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
 
   return readEngineResult<T>(endpoint, result)
+}
+
+/**
+ * The engine's environment. The database URL carries the password, so it goes to the engine as
+ * `DATABASE_URL`, which every subcommand that connects reads, rather than `--database-url`, where
+ * any local user could read it from the process list. A request without one sets it empty, as
+ * `--database-url ""` did, so the engine never falls back to a URL from the caller's shell.
+ */
+function engineEnv(body: Record<string, unknown>): NodeJS.ProcessEnv {
+  const url = body["database_url"]
+  return { ...process.env, DATABASE_URL: typeof url === "string" ? url : "" }
 }
 
 /** Turn the engine's exit status and stdout into the request's answer, or throw its error. */
@@ -417,7 +429,6 @@ export function endpointToArgs(
   files: RequestFiles,
 ): string[] {
   const { reqFile } = files
-  const dbUrl = (body["database_url"] as string | undefined) ?? ""
   const schema = (body["schema"] as string | undefined) ?? "public"
   const force = body["force"] ? ["--force"] : []
   // Plan 3.5: put back access changed outside Supatype. The CLI sets it only after a person said
@@ -426,7 +437,7 @@ export function endpointToArgs(
 
   switch (endpoint) {
     case "/diff":
-      return ["diff", "--input", reqFile, "--database-url", dbUrl, "--schema", schema]
+      return ["diff", "--input", reqFile, "--schema", schema]
 
     case "/push": {
       const sourceArgs: string[] = []
@@ -436,8 +447,6 @@ export function endpointToArgs(
         "push",
         "--input",
         reqFile,
-        "--database-url",
-        dbUrl,
         "--schema",
         schema,
         ...force,
@@ -450,7 +459,7 @@ export function endpointToArgs(
     }
 
     case "/rollback":
-      return ["rollback", "--database-url", dbUrl, "--schema", schema]
+      return ["rollback", "--schema", schema]
 
     case "/parse":
       return ["parse", "--input", reqFile]
@@ -465,7 +474,7 @@ export function endpointToArgs(
       // `--status` reads the ledger and needs no schema, so it does not take `--input`:
       // passing one would make the command fail on a project whose schema has moved on.
       if (body["status"] === true) {
-        return ["seed", "--database-url", dbUrl, "--status"]
+        return ["seed", "--status"]
       }
       const documents = (files.irPaths ?? []).flatMap((path) => ["--ir", path])
       const environment =
@@ -475,8 +484,6 @@ export function endpointToArgs(
         "--input",
         reqFile,
         ...documents,
-        "--database-url",
-        dbUrl,
         "--schema",
         schema,
         ...environment,
@@ -486,7 +493,7 @@ export function endpointToArgs(
     }
 
     case "/introspect":
-      return ["introspect", "--database-url", dbUrl, "--schema", schema]
+      return ["introspect", "--schema", schema]
 
     case "/doctor": {
       const strict = body["strict"] ? ["--strict"] : []
@@ -499,8 +506,6 @@ export function endpointToArgs(
         "doctor",
         "--input",
         reqFile,
-        "--database-url",
-        dbUrl,
         "--schema",
         schema,
         ...strict,
@@ -516,7 +521,7 @@ export function endpointToArgs(
       // HTTP is "adopt none", is `--adopt-none` here.
       if (Array.isArray(body["keys"]) && keys.length === 0) keys.push("--adopt-none")
       const objects = [...repeated(body["release"], "--release"), ...repeated(body["reclaim"], "--reclaim"), ...keys]
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...objects]
+      return ["adopt", "--input", reqFile, "--schema", schema, ...yes, ...objects]
     }
 
     case "/admin":
@@ -526,13 +531,13 @@ export function endpointToArgs(
       if (endpoint === "/migrations" || endpoint.startsWith("/migrations")) {
         const action = (body["action"] as string | undefined) ?? "list"
         if (action === "rollback") {
-          return ["rollback", "--database-url", dbUrl, "--schema", schema]
+          return ["rollback", "--schema", schema]
         }
         const name = body["name"] as string | undefined
         if (name) {
-          return ["migrations", "--database-url", dbUrl, "--name", name]
+          return ["migrations", "--name", name]
         }
-        return ["migrations", "--database-url", dbUrl]
+        return ["migrations"]
       }
       return [endpoint.replace(/^\//, ""), "--input", reqFile]
   }

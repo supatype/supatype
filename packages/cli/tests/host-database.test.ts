@@ -100,13 +100,14 @@ describe("where the connection string comes from", () => {
     expect(resolved.source).toBe("the project's own local database")
   })
 
+  // The user is the bundled image's own: it runs as supatype_admin whatever POSTGRES_USER says.
   it("reads the published port and credentials the stack was created with", () => {
     writeFileSync(
       join(cwd, ".env"),
       "SUPATYPE_DEV_DB_PORT=55555\nPOSTGRES_USER=owner\nPOSTGRES_PASSWORD=pw\nPOSTGRES_DB=app\n",
     )
     const resolved = resolveHostDatabaseUrl(cwd, config(), { allowDerived: true })
-    expect(resolved.dsn).toBe("postgresql://owner:pw@127.0.0.1:55555/app?sslmode=disable")
+    expect(resolved.dsn).toBe("postgresql://supatype_admin:pw@127.0.0.1:55555/app?sslmode=disable")
   })
 
   it("derives the native layout for a native project", () => {

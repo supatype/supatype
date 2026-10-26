@@ -265,8 +265,8 @@ describe("endpointToArgs() for /push", () => {
   const body = { database_url: "postgres://x", force: true }
 
   it("passes --overwrite-drift only when consent was given", () => {
-    expect(endpointToArgs("/push", body, "req.json")).not.toContain("--overwrite-drift")
-    expect(endpointToArgs("/push", { ...body, overwrite_drift: true }, "req.json")).toContain(
+    expect(endpointToArgs("/push", body, { reqFile: "req.json" })).not.toContain("--overwrite-drift")
+    expect(endpointToArgs("/push", { ...body, overwrite_drift: true }, { reqFile: "req.json" })).toContain(
       "--overwrite-drift",
     )
   })
@@ -274,20 +274,20 @@ describe("endpointToArgs() for /push", () => {
   it("is never interactive, forced or not: the binary's stdin is a pipe nobody writes to", () => {
     // Unforced, the binary asked "Continue and apply these changes?" on that pipe, read nothing,
     // and failed with "Aborted" instead of the refusal the CLI asks the person about.
-    expect(endpointToArgs("/push", { database_url: "postgres://x" }, "req.json")).toContain("--non-interactive")
-    expect(endpointToArgs("/push", { database_url: "postgres://x" }, "req.json")).not.toContain("--force")
-    expect(endpointToArgs("/push", body, "req.json")).toEqual(expect.arrayContaining(["--force", "--non-interactive"]))
+    expect(endpointToArgs("/push", { database_url: "postgres://x" }, { reqFile: "req.json" })).toContain("--non-interactive")
+    expect(endpointToArgs("/push", { database_url: "postgres://x" }, { reqFile: "req.json" })).not.toContain("--force")
+    expect(endpointToArgs("/push", body, { reqFile: "req.json" })).toEqual(expect.arrayContaining(["--force", "--non-interactive"]))
   })
 })
 
 describe("--overwrite-drift on every push path", () => {
   it("reaches the compose schema-engine only when asked", async () => {
     const { composeEnginePushArgs } = await import("../src/dev-compose.js")
-    expect(composeEnginePushArgs("postgres://db", null)).not.toContain("--overwrite-drift")
-    expect(composeEnginePushArgs("postgres://db", null, { overwriteDrift: false })).not.toContain(
+    expect(composeEnginePushArgs(null)).not.toContain("--overwrite-drift")
+    expect(composeEnginePushArgs(null, { overwriteDrift: false })).not.toContain(
       "--overwrite-drift",
     )
-    const args = composeEnginePushArgs("postgres://db", null, { overwriteDrift: true })
+    const args = composeEnginePushArgs(null, { overwriteDrift: true })
     expect(args.slice(0, 1)).toEqual(["push"])
     expect(args).toContain("--overwrite-drift")
   })
@@ -336,10 +336,10 @@ describe("--overwrite-drift on every push path", () => {
 describe("the compose push and --force", () => {
   it("never forces unless the push was told to, so the engine refuses a change that drops data", async () => {
     const { composeEnginePushArgs } = await import("../src/dev-compose.js")
-    expect(composeEnginePushArgs("postgres://db", null)).not.toContain("--force")
-    expect(composeEnginePushArgs("postgres://db", null, { force: false })).not.toContain("--force")
-    expect(composeEnginePushArgs("postgres://db", null, { force: true })).toContain("--force")
+    expect(composeEnginePushArgs(null)).not.toContain("--force")
+    expect(composeEnginePushArgs(null, { force: false })).not.toContain("--force")
+    expect(composeEnginePushArgs(null, { force: true })).toContain("--force")
     // The engine in a container has no terminal to ask on, whichever way the push goes.
-    expect(composeEnginePushArgs("postgres://db", null)).toContain("--non-interactive")
+    expect(composeEnginePushArgs(null)).toContain("--non-interactive")
   })
 })
