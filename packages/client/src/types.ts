@@ -139,6 +139,12 @@ export interface SupatypeError {
    * you.
    */
   field?: string | undefined
+  /**
+   * What the server suggests doing instead, when it said. PostgREST passes a Postgres `HINT`
+   * through, and the gateway adds one to an insert into a drafts model that is refused for asking
+   * for its row back, naming `supatype.create_record`.
+   */
+  hint?: string | undefined
 }
 
 /**
@@ -355,6 +361,13 @@ export interface AuthStorage {
  * Changing it means changing all three, the same as `api` for the field-masking views.
  */
 export const DRAFT_SCHEMA = "draft"
+
+/**
+ * The schema holding the generated publishing functions: `create_record`, `create_draft`, `publish`
+ * and the rest. PostgREST resolves `/rpc/<name>` against the default profile, so every call to one
+ * names this schema with `Content-Profile`.
+ */
+export const PUBLISHING_SCHEMA = "supatype"
 
 export interface SelectQueryOptions {
   count?: "exact" | "planned" | "estimated" | undefined

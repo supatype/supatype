@@ -195,6 +195,16 @@ Access rules in `schema/index.ts` enforce what each role can do.
   and `rpc`/`graphql`/`functions.invoke` are sent once unless the call passes `idempotent: true`.
   A transport failure comes back as `error.code` `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`,
   `NETWORK_DNS_FAILURE`, `NETWORK_ERROR` or `RATE_LIMITED`.
+- **Creating on a drafts model** (`versions` with drafts). Import `createClient` from the generated
+  `supatype/client.ts`: it tells the client which models keep drafts, and `insert` of one record
+  (also through `useMutation` / `createMutation`) then goes through `supatype.create_record` and
+  returns the row read back from the draft view. A plain `POST` asking for the row back is refused
+  with `42501` when the read rule hides unpublished records (`Lte<"published_at", Now>`), because
+  Postgres checks the returned row against it before anything makes it visible to its author; the
+  gateway's refusal carries a `hint` naming `create_record`, and `error.hint` holds it. Several rows
+  in one `insert`, and every `upsert`, stay plain writes: create those records one at a time. Passing
+  `published_at` publishes the record at once, on purpose (localized fields still wait for
+  `publish`).
 - **GraphQL** (`supatype.graphql`) runs as the caller, under the same access rules as REST.
 - **Realtime status.** Signing in or out swaps the socket; every channel reports `SUBSCRIBING`
   until the new socket rejoins, then `SUBSCRIBED`. Each `from(table).subscribe()` gets its own
@@ -254,7 +264,7 @@ All hooks and `@supatype/react-auth` components must render inside this provider
 ### Hooks
 
 ```tsx
-import { useAuth, useQuery, useMutation, useSubscription, useSupatype } from "@supatype/react"
+import { useAuth, useLivePreview, useQuery, useMutation, useSubscription, useSupatype } from "@supatype/react"
 
 const { user, session, loading, signUp, signIn, signInWithOAuth, signInWithOtp, signOut } = useAuth()
 
@@ -275,6 +285,15 @@ useSubscription<Post>("feed", {
 })
 
 const client = useSupatype<Database>() // escape hatch
+
+// Unsaved Studio keystrokes, applied only from the framing Studio window at a trusted origin.
+// Defaults to the provider client's URL (self-hosted Studio is /studio/ on it). On Cloud, Studio is
+// on the platform origin, so name it.
+const { data: post, isPreview } = useLivePreview({
+  initialData: serverPost,
+  model: "post",
+  studioOrigin: "https://studio.supatype.com",
+})
 ```
 
 ## Auth UI components (`@supatype/react-auth`)
