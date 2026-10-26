@@ -9,8 +9,9 @@
  * only thing a reset changed was that there was no longer anything to refuse.
  *
  * So a failure is classified before anything else happens. A database that is not reachable yet is
- * retried, and the retry never removes anything. Everything else is the engine's answer, and `dev`
- * stops with it. Resetting the database is `supatype dev --reset-db`, which is asked for, confirmed,
+ * retried, and the retry never removes anything. An image Docker could not pull means the engine
+ * never ran, and `dev` stops saying so. Everything else is the engine's answer, and `dev` stops
+ * with it. Resetting the database is `supatype dev --reset-db`, which is asked for, confirmed,
  * and removes only Postgres's volume.
  */
 import { unmanagedTables } from "./adopt-walkthrough.js"
@@ -18,7 +19,7 @@ import { fatalError } from "./ui/fatal.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 
 /** What one failed push means for the next step. */
-export type PushFailureKind = "transient" | "unmanaged-tables" | "engine"
+export type PushFailureKind = "transient" | "unmanaged-tables" | "image-pull" | "engine"
 
 /**
  * How the initial push ended.
@@ -60,11 +61,45 @@ const TRANSIENT_PATTERNS: readonly RegExp[] = [
   /timeout expired|timed out/i,
 ]
 
+/**
+ * Output that means Docker could not pull an image the push runs in, so the engine never ran.
+ *
+ * The push is `docker compose run schema-engine`, and a pull it cannot complete fails it like any
+ * other error. Reported as "the engine refused the schema push", that sent people to fix a schema
+ * the engine had never seen, when the cause was a rate limit, a network or a missing tag. Daemon
+ * wording, as Docker and compose print it: the Docker Hub rate limit (both its `toomanyrequests`
+ * code and the 429 a resolve reports), a repository or tag that does not exist, and a registry the
+ * daemon could not reach.
+ */
+const IMAGE_PULL_PATTERNS: readonly RegExp[] = [
+  /\btoomanyrequests\b/i,
+  /pull rate limit/i,
+  /pull access denied/i,
+  /manifest unknown/i,
+  /no matching manifest/i,
+  /failed to resolve reference/i,
+  /error pulling image/i,
+  /Error response from daemon: Get "?https?:\/\/[^\s"]+\/v2\//,
+]
+
+/** True when the push failed on pulling an image rather than in the engine. */
+function isImagePullFailure(message: string): boolean {
+  return IMAGE_PULL_PATTERNS.some((pattern) => pattern.test(message))
+}
+
+/** True when the pull failed on Docker Hub's rate limit, which `docker login` raises. */
+function isRateLimited(message: string): boolean {
+  return /\btoomanyrequests\b|pull rate limit|\b429\b/i.test(message)
+}
+
 function classifyPushFailure(message: string): PushFailureKind {
   // Checked first: the refusal is long prose, and it must not be retried because a word in it
   // happens to look like a connection error. Read from the engine's JSON reason, with its wording
   // only as the fallback for an engine that predates the JSON.
   if (unmanagedTables(message) !== null) return "unmanaged-tables"
+  // Before the transient check: a registry that refused a connection is not Postgres starting up,
+  // and starting Postgres again would not pull the image.
+  if (isImagePullFailure(message)) return "image-pull"
   if (TRANSIENT_PATTERNS.some((pattern) => pattern.test(message))) return "transient"
   return "engine"
 }
@@ -121,6 +156,20 @@ export function exitInitialPushFailed(failure: InitialPushFailure, brand?: Docke
       [
         failure.message,
         "Run `supatype adopt` to bring those tables under management, then run `supatype dev` again.",
+        DATABASE_KEPT,
+      ],
+      opts,
+    )
+  }
+  if (failure.reason === "image-pull") {
+    fatalError(
+      "Docker could not pull an image the schema push runs in. Nothing was applied.",
+      [
+        failure.message,
+        "The engine never ran, so this is not a problem with your schema.",
+        isRateLimited(failure.message)
+          ? "Docker Hub's pull rate limit was reached. Run `docker login` to raise it, or wait, then run `supatype dev` again."
+          : "Check your network and that the image exists, then run `supatype dev` again.",
         DATABASE_KEPT,
       ],
       opts,
