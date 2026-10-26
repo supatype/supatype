@@ -21,9 +21,13 @@ export default defineConfig({
   // `deno` stays because release-pins.test.ts checks it against the Deno the CLI
   // ships, and `postgres` because that image is published.
   versions: {
-    postgres: "17.2",
+    postgres: "17.2.10",
     deno: "2.2.0",
   },
+  // Named because a `versions.postgres` pin makes the CLI fall back to Valkey: it
+  // cannot tell whether a pinned image serves the keyspace. This release's image
+  // does, so the cache and Kong's certificates live in Postgres, as they do by default.
+  cache: { provider: "pg_keyspace" },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },
