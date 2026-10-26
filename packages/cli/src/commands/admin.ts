@@ -209,25 +209,7 @@ export function registerAdmin(program: Command): void {
         const pool = new pg.Pool({ connectionString: connection, max: 2 })
 
         try {
-          // Studio roles live in `_supatype.studio_members`, not in
-          // `app_metadata`: that key is the developer's namespace for their own
-          // app roles, and writing Studio access there means assigning an app
-          // role could hand out admin UI access by accident.
-          await ensureStudioMembersTable(rowsQuery(pool))
-          const rows = await queryRows(
-            pool,
-            `WITH target AS (
-               SELECT id, email FROM auth.users WHERE email = $2
-             ), upsert AS (
-               INSERT INTO _supatype.studio_members (user_id, role)
-               SELECT id, $1 FROM target
-               ON CONFLICT (user_id) DO UPDATE
-                 SET role = EXCLUDED.role, updated_at = now()
-               RETURNING user_id
-             )
-             SELECT id, email FROM target`,
-            [opts.role, opts.email.toLowerCase()],
-          )
+          const rows = await setStudioRole(rowsQuery(pool), opts.email, opts.role)
 
           if (rows.length === 0) {
             error(`No user found with email "${opts.email}".`)
@@ -574,19 +556,64 @@ async function insertAuthUser(query: DbQuery, email: string, aud: string, passwo
  * user created without a membership row cannot reach Studio at all, and
  * reporting success would leave no clue why.
  */
-async function recordStudioMembership(
+export async function recordStudioMembership(
   query: DbQuery,
   userId: string,
   role: string,
 ): Promise<void> {
   await ensureStudioMembersTable(query)
   await query(
-    `INSERT INTO _supatype.studio_members (user_id, role)
-     VALUES ($1, $2)
+    `WITH ${CLI_MARK}
+     INSERT INTO _supatype.studio_members (user_id, role)
+     SELECT $1::uuid, $2::text FROM cli_mark
      ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()`,
     [userId, role],
   )
 }
+
+/**
+ * Give the user with `email` the Studio role `role`, returning their `id` and
+ * `email`, or no row when there is no such user.
+ *
+ * Studio roles live in `_supatype.studio_members`, not in `app_metadata`: that
+ * key is the developer's namespace for their own app roles, and writing Studio
+ * access there means assigning an app role could hand out admin UI access by
+ * accident.
+ */
+export async function setStudioRole(query: DbQuery, email: string, role: string): Promise<UnknownRow[]> {
+  await ensureStudioMembersTable(query)
+  const result = await query(
+    `WITH ${CLI_MARK}, target AS (
+       SELECT id, email FROM auth.users WHERE email = $2
+     ), upsert AS (
+       INSERT INTO _supatype.studio_members (user_id, role)
+       SELECT target.id, $1 FROM target CROSS JOIN cli_mark
+       ON CONFLICT (user_id) DO UPDATE
+         SET role = EXCLUDED.role, updated_at = now()
+       RETURNING user_id
+     )
+     SELECT id, email FROM target`,
+    [role, email.toLowerCase()],
+  )
+  return result.rows
+}
+
+/**
+ * The source the CLI marks its membership writes with. The engine's audit
+ * trigger records the transaction's `supatype.membership_api` setting as the
+ * change's source, and Studio trusts `cli`, so an admin made or changed here is
+ * not flagged as changed outside Studio, while a raw `UPDATE` still is.
+ */
+export const CLI_MEMBERSHIP_SOURCE = "cli"
+
+/**
+ * The CTE a membership write reads its rows through, so the mark is set in the
+ * statement that writes, before the trigger fires at its end. Transaction-local:
+ * each of these statements is its own transaction, and the mark ends with it.
+ */
+const CLI_MARK = `cli_mark AS (
+       SELECT set_config('supatype.membership_api', '${CLI_MEMBERSHIP_SOURCE}', true) AS source
+     )`
 
 async function ensureAuthUsersTable(pool: Pool): Promise<void> {
   await pool.query(`
