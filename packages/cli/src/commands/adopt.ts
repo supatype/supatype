@@ -39,6 +39,21 @@ interface AdoptOptions {
   release?: string[]
   reclaim?: string[]
   key?: string[]
+  adoptNone?: boolean
+}
+
+/**
+ * The conflicts this run may adopt, as the `keys` the engine takes: `--key`'s, none for
+ * `--adopt-none` or for a run that names objects to release or reclaim, and undefined (every
+ * conflict) otherwise. `--release X --yes` used to adopt every conflict there was besides (C01).
+ */
+export function adoptableKeys(opts: Pick<AdoptOptions, "key" | "adoptNone" | "release" | "reclaim">): string[] | undefined {
+  if (opts.adoptNone === true && opts.key !== undefined) {
+    throw new Error("--adopt-none and --key contradict each other: --key names the conflicts to adopt.")
+  }
+  if (opts.key !== undefined) return opts.key
+  const namesOthers = (opts.release ?? []).length > 0 || (opts.reclaim ?? []).length > 0
+  return opts.adoptNone === true || namesOthers ? [] : undefined
 }
 
 /** What a preview says adopt will do, one line per object: handed over, taken back, handed back. */
@@ -69,6 +84,10 @@ export function registerAdopt(program: Command): void {
       "Adopt only these conflicts, named as doctor names them (kind:table.name, or kind:name for a table); " +
         "if one is no longer a conflict nothing is written",
     )
+    .option(
+      "--adopt-none",
+      "Adopt no conflict; what --release and --reclaim do on their own, unless --key names some",
+    )
     .option("--yes", "Adopt without asking")
   addRetiredNoCacheOption(command).action(adopt)
 }
@@ -81,9 +100,11 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     // As push sends it: the engine refuses a versioned schema that carries no publishing config.
     withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
   )
+  // Only the objects named change: no conflict is adopted unless --key names it, or nothing is named.
+  const named = adoptableKeys(opts)
   const target = await schemaCommandTarget(cwd, config, opts)
   // Before the preview: the server or engine that adopts must take every flag given.
-  await requireTargetFeatures(target, adoptNeeds({ release: opts.release, reclaim: opts.reclaim, keys: opts.key }))
+  await requireTargetFeatures(target, adoptNeeds({ release: opts.release, reclaim: opts.reclaim, keys: named }))
   const run = (yes: boolean, keys?: string[]): Promise<AdoptOutcome> =>
     targetSchemaAdopt(target, ast, {
       schema: pgSchema(config),
@@ -114,30 +135,31 @@ async function adopt(opts: AdoptOptions): Promise<void> {
         say: { info, warn, plain },
       },
     )
-  // `--yes` already agreed, so one engine call does it and its outcome says what it took: with
-  // `--key` only those objects, and without, every conflict found as it runs.
+  // `--yes` already agreed, so one engine call does it and its outcome says what it took: only the
+  // named objects, or with nothing named, every conflict found as it runs.
   if (opts.yes) {
-    const outcome = await applying(() => run(true, opts.key))
+    const outcome = await applying(() => run(true, named))
     if (outcome === undefined) return
     for (const line of previewLines(outcome)) plain(`  ${line}`)
     report(outcome)
     await declare(outcome)
     return
   }
-  const preview = keyedOnly(await run(false), opts.key)
+  const preview = keyedOnly(await run(false), named)
   // A column added outside Supatype is not a conflict, so the engine's preview does not list it:
-  // say here what adopting each keyed one does, including the field the schema will gain.
+  // say here what adopting each keyed one does, including the field the schema will gain. Only for
+  // keys a person named with --key: `named` is also [] for a run that adopts nothing.
   const columnLines =
     opts.key === undefined
       ? []
       : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd, identityColumns }, { introspect })
-  if (!show([...previewLines(preview), ...columnLines], opts.key !== undefined)) return
-  // `--key` names what to adopt. Otherwise what was just shown is what is agreed to: applying names
-  // those conflicts, and the engine writes nothing if the database has changed since. An engine
-  // from before the ledger names none.
-  const keys = opts.key ?? previewedKeys(preview)
+  if (!show([...previewLines(preview), ...columnLines], named !== undefined)) return
+  // The named objects are what is adopted. Otherwise what was just shown is what is agreed to:
+  // applying names those conflicts, and the engine writes nothing if the database has changed
+  // since. An engine from before the ledger names none.
+  const keys = named ?? previewedKeys(preview)
   // Before anyone is asked: applying sends what was shown, which the target must honour.
-  if (opts.key === undefined && keys !== undefined) await requireTargetFeatures(target, [adoptKeysNeed(keys)])
+  if (named === undefined && keys !== undefined) await requireTargetFeatures(target, [adoptKeysNeed(keys)])
   const consent = await askConsent("Go ahead?", false)
   if (consent === "needs-yes") {
     // Not a decline: a pipeline that forgot --yes adopted nothing, and must not pass as if it had.

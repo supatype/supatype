@@ -19,12 +19,18 @@ export interface TargetFetchOptions {
 export class TargetApiError extends Error {
   readonly status: number
   readonly code?: string
+  /**
+   * The server's whole error body. A refusal names what it is about there (the drifted objects,
+   * the unmanaged tables), as the engine binary does on its stdout.
+   */
+  readonly details?: Readonly<Record<string, unknown>>
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, details?: Readonly<Record<string, unknown>>) {
     super(message)
     this.name = "TargetApiError"
     this.status = status
     if (code !== undefined) this.code = code
+    if (details !== undefined) this.details = details
   }
 }
 
@@ -120,7 +126,7 @@ export async function targetFetch<T>(
         result.json.code,
       )
     }
-    throw new TargetApiError(message, result.status, result.json.code)
+    throw new TargetApiError(message, result.status, result.json.code, result.json)
   }
 
   return (result.json.data !== undefined ? result.json.data : result.json) as T

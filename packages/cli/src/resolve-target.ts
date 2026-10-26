@@ -34,6 +34,9 @@ import {
   engineCapabilities,
   identityColumnsNeed,
   parseCapabilities,
+  CAPABILITIES_TTL_MS,
+  capabilitiesCache,
+  rememberCapabilities,
   type Capabilities,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
@@ -259,34 +262,60 @@ function runsEngineHere(target: DeployTarget): boolean {
   return target.mode === "direct" || (target.mode === "local" && !target.token)
 }
 
-const capabilitiesOf = new WeakMap<DeployTarget, Capabilities>()
+/** Nothing about a server says when it changed, so its answer is trusted for a while. */
+const serverCapabilitiesCache = capabilitiesCache(CAPABILITIES_TTL_MS)
+
+/** Forget every server's answer, as if none had been asked (tests). */
+export function forgetServerCapabilities(): void {
+  serverCapabilitiesCache.answers.clear()
+}
 
 /**
  * What `target` supports: the engine binary's own answer when it runs here, otherwise the control
- * plane's `GET <schema base>/capabilities`. A control plane without the route (404) is from before
- * it, and supports no ownership feature: it would drop the fields, not forward them.
+ * plane's `GET <schema base>/capabilities`. Only an answer is remembered, for a while; a request
+ * that failed is made again next time.
  */
 export async function targetCapabilities(target: DeployTarget): Promise<Capabilities> {
-  const known = capabilitiesOf.get(target)
-  if (known !== undefined) return known
-  let caps: Capabilities
-  if (runsEngineHere(target)) {
-    caps = await engineCapabilities()
-  } else {
-    let answer: unknown
-    try {
-      answer = await targetFetch<unknown>(
-        target.apiBaseUrl,
-        target.apiPrefix,
-        apiFetchOpts(target, "GET", projectPath(target, "/schema/capabilities")),
-      )
-    } catch (err: unknown) {
-      if (!(err instanceof TargetApiError && err.status === 404)) throw err
-    }
-    caps = { features: parseCapabilities(answer) ?? new Set(), source: "server" }
+  if (runsEngineHere(target)) return engineCapabilities()
+  const key = [target.apiBaseUrl, target.apiPrefix, target.projectRef, target.environment].join("\0")
+  return rememberCapabilities(serverCapabilitiesCache, key, () => serverCapabilities(target))
+}
+
+/**
+ * Ask the control plane. A route it does not have (404) is a server from before the check, which
+ * supports no ownership feature: it would drop the fields, not forward them. A project it does not
+ * know is not that, and saying "update it" sent people to update a server that was fine (A6-N2).
+ */
+async function serverCapabilities(target: DeployTarget): Promise<Capabilities> {
+  let answer: unknown
+  try {
+    answer = await targetFetch<unknown>(
+      target.apiBaseUrl,
+      target.apiPrefix,
+      apiFetchOpts(target, "GET", projectPath(target, "/schema/capabilities")),
+    )
+  } catch (err: unknown) {
+    if (!(err instanceof TargetApiError)) throw err
+    if (isUnknownProject(err)) throw new Error(unknownProjectMessage(target, err))
+    if (err.status !== 404) throw err
   }
-  capabilitiesOf.set(target, caps)
-  return caps
+  return { features: parseCapabilities(answer) ?? new Set(), source: "server" }
+}
+
+/**
+ * The server's answer for a project it has no record of: the cloud's 404 "Project not found", or a
+ * self-hosted control plane's "Unknown project ref". Both say `not_found` for a missing route as
+ * well, so the wording is what tells them apart.
+ */
+function isUnknownProject(err: TargetApiError): boolean {
+  return /project not found|unknown project ref/i.test(err.message)
+}
+
+function unknownProjectMessage(target: DeployTarget, err: TargetApiError): string {
+  return (
+    `The server has no project "${target.projectRef}" (${err.message}). ` +
+    "Check the project this directory is linked to (.supatype/link.json): it must be the project's ref."
+  )
 }
 
 /**

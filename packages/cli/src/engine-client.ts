@@ -15,6 +15,7 @@ import { join } from "node:path"
 import { loadConfig } from "./config.js"
 import { currentPlatform, cachePath } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
+import { findJsonLine } from "./engine-json-line.js"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -312,35 +313,34 @@ function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>)
   }
 }
 
-/** The `reason` the engine gives a refusal over its lock (another push, adopt or rebaseline). */
+/** The `reason` the engine gives a refusal over its lock (another push, adopt, rebaseline or rollback). */
 export const ENGINE_BUSY = "engine_busy"
 
-const ENGINE_BUSY_WORDING = /another push, adopt or rebaseline is running[^\n]*/i
+/**
+ * The engine's sentence for that refusal, for an engine or a server that does not name it. The list
+ * of writers grew when rollback took the lock ("another push, adopt or rebaseline", then "another
+ * push, adopt, rebaseline or rollback"), so any such list that starts with a push matches.
+ */
+export const ENGINE_BUSY_WORDING = /another push(?:,? (?:or )?(?:adopt|rebaseline|rollback))* is running[^\n]*/i
 
 /**
- * The engine's sentence when it refused because another push, adopt or rebaseline holds its lock,
+ * The engine's sentence when it refused because another writer holds its lock,
  * or undefined for any other failure. From a JSON refusal on stdout when the engine prints one,
  * else its error line on stderr. Exported for its tests.
  */
 export function engineBusyMessage(stdout: string, stderr: string): string | undefined {
-  for (const line of stdout.split(/\r?\n/)) {
-    const candidate = line.trim()
-    if (!candidate.startsWith("{")) continue
-    try {
-      const parsed = JSON.parse(candidate) as { reason?: unknown; message?: unknown; error?: unknown }
-      if (parsed.reason !== ENGINE_BUSY) continue
-      const said = typeof parsed.message === "string" ? parsed.message : parsed.error
-      return typeof said === "string" && said.trim() !== "" ? said.trim() : busySentence(stderr)
-    } catch {
-      /* not this line */
-    }
+  const refusal = findJsonLine(stdout, (value) => value["reason"] === ENGINE_BUSY)
+  if (refusal !== undefined) {
+    const said = typeof refusal["message"] === "string" ? refusal["message"] : refusal["error"]
+    return typeof said === "string" && said.trim() !== "" ? said.trim() : busySentence(stderr)
   }
   return ENGINE_BUSY_WORDING.test(stderr) ? busySentence(stderr) : undefined
 }
 
 function busySentence(stderr: string): string {
   const found = ENGINE_BUSY_WORDING.exec(stderr)?.[0]?.trim()
-  const sentence = found ?? "another push, adopt or rebaseline is running on this database; try again. Nothing was applied."
+  const sentence =
+    found ?? "another push, adopt, rebaseline or rollback is running on this database; try again. Nothing was applied."
   return sentence.charAt(0).toUpperCase() + sentence.slice(1)
 }
 

@@ -209,24 +209,39 @@ export async function runEngineAdoptWithAst(
   }
 }
 
-let capabilities: Promise<{ features: string[] }> | undefined
+/** How long the engine's answer is trusted before it is asked again (an engine swapped underneath). */
+const CAPABILITIES_TTL_MS = 5 * 60_000
+
+let capabilities: { features: string[]; at: number } | undefined
 
 /**
- * What the engine this control plane runs supports (`supatype-engine capabilities`), asked once. An
- * engine from before the subcommand supports none of the features it lists, so it answers with
- * none rather than failing: the CLI then refuses the flag instead of sending it to be dropped.
+ * What the engine this control plane runs supports (`supatype-engine capabilities`). An engine from
+ * before the subcommand exits non-zero and supports none of the features it lists, so it answers
+ * with none: the CLI then refuses the flag instead of sending it to be dropped.
+ *
+ * Only an answer is remembered, and only for `CAPABILITIES_TTL_MS`. An engine that could not be run
+ * at all (a missing binary) rejects, and is asked again next time rather than being remembered as
+ * supporting nothing for the life of the process.
  */
-export function runEngineCapabilities(): Promise<{ features: string[] }> {
-  capabilities ??= runEngine("capabilities", [])
-    .then((out) => {
-      const parsed = JSON.parse(out.slice(Math.max(out.indexOf("{"), 0))) as { features?: unknown }
-      const features = Array.isArray(parsed.features)
-        ? parsed.features.filter((f): f is string => typeof f === "string")
-        : []
-      return { features }
-    })
-    .catch(() => ({ features: [] }))
-  return capabilities
+export async function runEngineCapabilities(): Promise<{ features: string[] }> {
+  if (capabilities !== undefined && Date.now() - capabilities.at <= CAPABILITIES_TTL_MS) {
+    return { features: capabilities.features }
+  }
+  // Remembered once it has answered: a rejection never reaches the cache.
+  const { features } = await runEngine("capabilities", []).then(parseFeatures, (err: unknown) => {
+    if (err instanceof EngineRunError) return { features: [] }
+    throw err
+  })
+  capabilities = { features, at: Date.now() }
+  return { features }
+}
+
+function parseFeatures(out: string): { features: string[] } {
+  const parsed = JSON.parse(out.slice(Math.max(out.indexOf("{"), 0))) as { features?: unknown }
+  const features = Array.isArray(parsed.features)
+    ? parsed.features.filter((f): f is string => typeof f === "string")
+    : []
+  return { features }
 }
 
 /** Forget the engine's answer (tests, or an engine swapped under a running control plane). */
@@ -234,8 +249,13 @@ export function resetEngineCapabilities(): void {
   capabilities = undefined
 }
 
-/** The wording the engine gives a refusal over its lock, from before it named it on stdout. */
-const ENGINE_BUSY_WORDING = /another push, adopt or rebaseline is running/i
+/**
+ * The wording the engine gives a refusal over its lock, from before it named it on stdout. The list
+ * of writers grew when rollback took the lock ("another push, adopt or rebaseline", then "another
+ * push, adopt, rebaseline or rollback"), so any such list that starts with a push matches. The CLI
+ * reads it the same way (`ENGINE_BUSY_WORDING` in its engine client).
+ */
+const ENGINE_BUSY_WORDING = /another push(?:,? (?:or )?(?:adopt|rebaseline|rollback))* is running/i
 
 /**
  * A refusal the caller can act on, as the engine's own HTTP server answers it (409 with `reason`),
