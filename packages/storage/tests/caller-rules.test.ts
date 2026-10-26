@@ -228,6 +228,31 @@ function unique(prefix: string): string {
   return `${prefix}-${randomUUID()}.txt`
 }
 
+/** The list-entry contract: one real entry, and the fields that may be null instead. */
+const LIST_ENTRY = (() => {
+  const raw: unknown = JSON.parse(readFileSync(join(FIXTURES, "list-entry.json"), "utf8"))
+  const guard = isShape({ entry: isJsonObject, nullable: isArrayOf(isString) })
+  if (!guard(raw)) throw new Error("fixtures/list-entry.json is not { entry, nullable }")
+  return raw
+})()
+
+/** A JSON value's kind: what the contract pins for each field, values aside. */
+function kindOf(value: unknown): string {
+  if (value === null) return "null"
+  if (Array.isArray(value)) return "array"
+  return typeof value
+}
+
+/** How `entry` differs from the contract: a field added or missing, or of another kind. */
+function contractMismatches(entry: Record<string, unknown>): string[] {
+  const keys = new Set([...Object.keys(entry), ...Object.keys(LIST_ENTRY.entry)])
+  return [...keys].filter((key) => {
+    const got = kindOf(entry[key])
+    if (!(key in entry) || !(key in LIST_ENTRY.entry)) return true
+    return got !== kindOf(LIST_ENTRY.entry[key]) && !(got === "null" && LIST_ENTRY.nullable.includes(key))
+  })
+}
+
 // ─── Rules ────────────────────────────────────────────────────────────────────
 
 describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
@@ -349,8 +374,9 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
   // The list and remove answers, field for field: what a client can rely on whatever created the table.
   // A list used to be `SELECT *`, so it carried whatever columns the table happened to have (the
   // internal `version`, and `path_tokens` when the service had created the table) and its fields
-  // changed with whoever had created it.
-  it("lists each object with exactly its named fields", async () => {
+  // changed with whoever had created it. fixtures/list-entry.json is the contract every storage
+  // server is held to; supatype-server's local objstore checks a copy of the same file.
+  it("lists each object with exactly the fields of the list-entry contract", async () => {
     const x = user()
     const name = unique("shape")
     await upload(x.token, "avatars", name, "four")
@@ -360,9 +386,7 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
       body: JSON.stringify({ prefix: name }),
     })
     const [entry] = await bodyOf(res, isArrayOf(isJsonObject))
-    expect(Object.keys(entry ?? {}).sort()).toEqual([
-      "bucket_id", "created_at", "id", "last_accessed_at", "metadata", "mimetype", "name", "owner", "size", "updated_at",
-    ])
+    expect(contractMismatches(entry ?? {})).toEqual([])
     expect(entry).toMatchObject({ bucket_id: "avatars", name, owner: x.id, size: 4, mimetype: "text/plain" })
   })
 

@@ -1,0 +1,16 @@
+{
+  "description": "One object as the storage service's list route answers it, captured from a real response (caller-rules.test.ts). The contract for every storage server: the Node service checks its answers against this file, @supatype/client builds its fixture from it, and supatype-server's local objstore keeps a byte-identical copy at internal/objstore/testdata/node-list-entry.json. `nullable` names the fields that may be null instead of the kind shown.",
+  "entry": {
+    "id": "c385ffde-42b3-45e5-8981-863515e0dbf6",
+    "bucket_id": "avatars",
+    "name": "shape-f9619cfd-f645-4f8d-bb42-3ed73bb0a36d.txt",
+    "owner": "7ea80d5c-e81e-48e7-8f27-2c2218ac42ac",
+    "metadata": { "size": 4, "mimetype": "text/plain" },
+    "created_at": "2026-10-18T07:52:09.909Z",
+    "updated_at": "2026-10-18T07:52:09.909Z",
+    "last_accessed_at": "2026-10-18T07:52:09.909Z",
+    "size": 4,
+    "mimetype": "text/plain"
+  },
+  "nullable": ["owner", "metadata", "size", "mimetype"]
+}

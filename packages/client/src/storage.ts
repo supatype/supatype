@@ -4,23 +4,40 @@ import { plainFetch, type RequestTransport } from "./fetch-with-retry.js"
 import {
   isArrayOf,
   isBoolean,
+  isJsonObject,
   isNumber,
   isShape,
   isString,
   nullable,
   readJson,
   readJsonObject,
+  type Guard,
 } from "./json.js"
 
+/**
+ * An object as `list()` answers it, field for field (packages/storage/src/routes/objects.ts,
+ * `listedObject`). A null is sent as null, never left out.
+ */
 export interface StorageObject {
   id: string
-  name: string
   bucket_id: string
-  owner?: string | undefined
+  name: string
+  /** The uploader's user id; null for an object stored without one, such as by the service role. */
+  owner: string | null
+  metadata: Record<string, unknown> | null
   created_at: string
   updated_at: string
   last_accessed_at: string
-  metadata?: Record<string, unknown> | undefined
+  /** The object's size in bytes, from its metadata; null when the metadata records none. */
+  size: number | null
+  /** The content type it was stored with, from its metadata; null when the metadata records none. */
+  mimetype: string | null
+}
+
+/** What `remove()` answers for each object it removed: one the caller may not delete is absent. */
+export interface RemovedObject {
+  name: string
+  bucket_id: string
 }
 
 export interface TransformOptions {
@@ -86,19 +103,24 @@ async function readBuckets(res: Response): Promise<StorageBucketMeta[]> {
   }))
 }
 
-/**
- * The boundary between the service's object rows and `StorageObject`.
- *
- * What is checked is what every answer shares: a list of objects, each with a string `name`. The
- * rest is not checked because the service does not send it as declared: `remove` answers with only
- * `name` and `bucket_id`, and `list` sends a missing `owner` or `metadata` as null rather than
- * leaving it out (packages/storage/src/routes/objects.ts).
- */
-function isStorageObjects(value: unknown): value is StorageObject[] {
-  return isNamedObjects(value)
-}
+/** The boundary between a `list` answer and `StorageObject`: every declared field, checked. */
+const isStorageObjects: Guard<StorageObject[]> = isArrayOf(
+  isShape({
+    id: isString,
+    bucket_id: isString,
+    name: isString,
+    owner: nullable(isString),
+    metadata: nullable(isJsonObject),
+    created_at: isString,
+    updated_at: isString,
+    last_accessed_at: isString,
+    size: nullable(isNumber),
+    mimetype: nullable(isString),
+  }),
+)
 
-const isNamedObjects = isArrayOf(isShape({ name: isString }))
+/** The boundary between a `remove` answer and `RemovedObject`. */
+const isRemovedObjects: Guard<RemovedObject[]> = isArrayOf(isShape({ name: isString, bucket_id: isString }))
 
 /** A refusal's reason: the body's `message`, else its `error`, else `fallback`. */
 async function storageRefusal(res: Response, fallback: string): Promise<string> {
@@ -296,7 +318,7 @@ export class BucketClient {
     return { data: results, error: null }
   }
 
-  async remove(paths: string[]): Promise<{ data: StorageObject[] | null; error: SupatypeError | null }> {
+  async remove(paths: string[]): Promise<{ data: RemovedObject[] | null; error: SupatypeError | null }> {
     const res = await this.send(`${this.url}/object/${this.bucket}`, {
       method: "DELETE",
       headers: { ...(await this.headers()), "Content-Type": "application/json" },
@@ -305,7 +327,7 @@ export class BucketClient {
     if (!res.ok) {
       return { data: null, error: { message: await storageRefusal(res, "Delete failed"), status: res.status } }
     }
-    return { data: await readJson(res, isStorageObjects), error: null }
+    return { data: await readJson(res, isRemovedObjects), error: null }
   }
 
   async list(
