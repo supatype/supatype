@@ -59,6 +59,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Drafts: true
       Relationships: []
     }
     speaker: {
@@ -98,6 +99,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Drafts: true
       Relationships: []
     }
     room: {
@@ -176,6 +178,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Drafts: true
       Relationships: [
         {
           columns: ["speaker_id"]

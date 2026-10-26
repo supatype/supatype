@@ -206,6 +206,16 @@ Access rules in `schema/index.ts` enforce what each role can do.
   `error.hint` holds it. `upsert` stays a plain write, since neither function can say what a
   conflict does. Passing `published_at` publishes the record at once, on purpose (localized fields
   still wait for `publish`).
+- **Editing on a drafts model.** With the generated client, `update(values).eq(...)` saves a new
+  draft of each record the filters match, through `supatype.save_drafts` (all or none in one call,
+  each merged onto the record's newest version as Studio saves one), and returns the drafts read
+  from the draft view. The live rows do not change until a version is published:
+  `update(values, { publish: true })` saves and publishes in the same call, and the history records
+  the version that went live (`useMutation`'s `mutate(values, { filter, publish: true })` too). The
+  option is typed only on drafts models. Without the generated client, or through raw PostgREST or
+  GraphQL, a direct update of a drafts model's table by `anon` or `authenticated` is refused with
+  `42501` ("posts has drafts: save a draft with supatype.create_draft or the client's update, then
+  publish"); the service role and Studio's editors still write the live row.
 - **GraphQL** (`supatype.graphql`) runs as the caller, under the same access rules as REST.
 - **GraphQL relations use the schema's field names** (from 0.7.0, written on each push): a
   `belongsTo` field is the to-one field under its declared name, and the far model's `hasMany` or

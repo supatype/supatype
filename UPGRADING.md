@@ -614,6 +614,13 @@ masking. Use a least-privilege role, never the admin URL. See
   without exactly one row answers `PGRST116` on reads and writes alike. Code that compared
   against the old constants should use the client's error code constants.
 - **`headers` may be a function**, called for each request.
+- **An update of a model with drafts saves a draft.** `update()` on a `versions: { drafts: true }`
+  model, through the generated client, saves a new draft of each matched record and leaves the live
+  rows alone until a version is published; pass `{ publish: true }` to publish in the same call. The
+  database now refuses a direct `UPDATE` of such a table by `anon` and `authenticated` (a raw
+  `PATCH` or a GraphQL update mutation) with `42501`, naming drafts and `publish`. Code that edited
+  a drafts model expecting the change to go live at once should pass `{ publish: true }`, or write
+  as the service role.
 
 ## GraphQL relation fields use your schema's names
 
