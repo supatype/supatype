@@ -54,7 +54,7 @@ export function hostComposeDbUrl(
 function derivedDsn(root: string, config: SupatypeProjectConfig): string {
   return resolveRuntimeProvider(config) === "docker"
     ? hostComposeDbUrl(root)
-    : localDSN(config, devPostgresPassword(root))
+    : localDSN(config, devPostgresPassword(root), root)
 }
 
 /** One place a connection string could have come from. */

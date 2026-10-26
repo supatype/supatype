@@ -163,20 +163,24 @@ export function readEnvFile(cwd: string): Record<string, string> {
   return out
 }
 
-export function readEnvValue(cwd: string, key: string, fallback: string): string {
+/**
+ * `.env`'s text, or null when there is none, without the byte order mark Windows tools write.
+ * Left in, it hid the first key from the `^KEY=` matches below.
+ */
+function envText(cwd: string): string | null {
   const envPath = join(cwd, ".env")
-  if (existsSync(envPath)) {
-    const m = readFileSync(envPath, "utf8").match(new RegExp(`^${key}=(.+)$`, "m"))
-    if (m?.[1]) return m[1].trim()
-  }
-  return fallback
+  return existsSync(envPath) ? readFileSync(envPath, "utf8").replace(/^\uFEFF/, "") : null
+}
+
+export function readEnvValue(cwd: string, key: string, fallback: string): string {
+  const m = envText(cwd)?.match(new RegExp(`^${key}=(.+)$`, "m"))
+  return m?.[1] ? m[1].trim() : fallback
 }
 
 /** Whether `.env` carries a non-empty value for `key`. Distinguishes absent from defaulted. */
 export function hasEnvValue(cwd: string, key: string): boolean {
-  const envPath = join(cwd, ".env")
-  if (!existsSync(envPath)) return false
-  return new RegExp(`^${key}=(.+)$`, "m").test(readFileSync(envPath, "utf8"))
+  const text = envText(cwd)
+  return text !== null && new RegExp(`^${key}=(.+)$`, "m").test(text)
 }
 
 export function readEnvInt(cwd: string, key: string): number | null {

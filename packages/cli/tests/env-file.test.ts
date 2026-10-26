@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { MANAGED_MARKER, readEnvFile, upsertEnvFile } from "../src/env-file.js"
+import { hasEnvValue, MANAGED_MARKER, readEnvFile, readEnvInt, readEnvValue, upsertEnvFile } from "../src/env-file.js"
 
 /**
  * `.env` is a file operators edit by hand, and the CLI rewrites it on every compose run.
@@ -117,5 +117,22 @@ JWT_SECRET=abc
     upsertEnvFile(dir, { REAL: "2" })
     expect(read()).toContain("# FOO=bar")
     expect(readEnvFile(dir)).toEqual({ REAL: "2" })
+  })
+})
+
+describe("a .env saved with a byte order mark", () => {
+  // Windows tools write one: PowerShell 5's `Set-Content -Encoding utf8`, Notepad's "UTF-8 with
+  // BOM". The single-key readers matched `^KEY=` against the raw text, so the first key in such a
+  // file was invisible to them while readEnvFile, which trims each line, still saw it. A native
+  // project with SUPATYPE_DEV_DB_PORT first silently started Postgres on another port.
+  beforeEach(() => {
+    writeFileSync(join(dir, ".env"), "\uFEFFSUPATYPE_DEV_DB_PORT=55660\r\nOTHER=1\r\n")
+  })
+
+  it("still yields its first key to every reader", () => {
+    expect(readEnvFile(dir)["SUPATYPE_DEV_DB_PORT"]).toBe("55660")
+    expect(readEnvValue(dir, "SUPATYPE_DEV_DB_PORT", "")).toBe("55660")
+    expect(hasEnvValue(dir, "SUPATYPE_DEV_DB_PORT")).toBe(true)
+    expect(readEnvInt(dir, "SUPATYPE_DEV_DB_PORT")).toBe(55660)
   })
 })
