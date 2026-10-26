@@ -395,6 +395,11 @@ function createCheckerContext(sourceFiles: ts.SourceFile[]): CheckerContext {
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.Latest,
     skipLibCheck: true,
+    // Without it `null` is erased from every union, and `JSON<{ a: string | null }>` would be
+    // written out as `{ a: string }`.
+    strictNullChecks: true,
+    // ES only: a schema has no use for the DOM, and loading it is most of the program's cost.
+    lib: ["lib.es2022.d.ts"],
     baseUrl: process.cwd(),
     paths: {
       "@supatype/types": ["__supatype_checker_stubs__.ts"],
@@ -411,7 +416,9 @@ function createCheckerContext(sourceFiles: ts.SourceFile[]): CheckerContext {
       }
       return undefined
     },
-    getDefaultLibFileName: (opts) => ts.getDefaultLibFileName(opts ?? options),
+    // The full path: a bare file name resolves nowhere, the program then has no lib at all, and
+    // `Array` is an unknown name, so `Item[]` reads as `{}`.
+    getDefaultLibFileName: (opts) => ts.getDefaultLibFilePath(opts ?? options),
     writeFile: () => {},
     getCurrentDirectory: () => process.cwd(),
     getCanonicalFileName: (f) => f,

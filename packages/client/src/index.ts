@@ -21,7 +21,9 @@ import type {
   SupatypeError,
   RpcOptions,
   SelectQueryOptions,
+  TableDef,
 } from "./types.js"
+import type { SelectRow } from "./select-types.js"
 import { DRAFT_SCHEMA } from "./types.js"
 
 export type {
@@ -55,6 +57,7 @@ export {
   PKCE_METHOD_S256,
 } from "./pkce.js"
 export { DRAFT_SCHEMA } from "./types.js"
+export type { SelectRow, SelectError, TableRelationship } from "./select-types.js"
 
 /**
  * A client whose database type the holder does not know.
@@ -104,13 +107,15 @@ export { PreviewLinkError } from "./preview.js"
 
 // ─── Table client ─────────────────────────────────────────────────────────────
 
-interface TableDef {
-  Row: Record<string, unknown>
-  Insert: Record<string, unknown>
-  Update: Record<string, unknown>
-}
-
-class TableClient<TDef extends TableDef> {
+/**
+ * One table, typed by its definition and by every table beside it: an embedded select is resolved
+ * against the other tables' rows and the relationships between them.
+ */
+class TableClient<
+  TDef extends TableDef,
+  TTables extends Record<string, TableDef> = Record<string, TableDef>,
+  TName extends string = string,
+> {
   private readonly baseUrl: string
   private readonly table: string
   private readonly path: string
@@ -172,7 +177,24 @@ class TableClient<TDef extends TableDef> {
     return this
   }
 
-  select<TResult = TDef["Row"]>(
+  /**
+   * Read rows, typed from the select string.
+   *
+   * `select("id, author:authors(name)")` resolves to `{ id: string; author: { name: string } | null }`
+   * from the generated schema: columns, aliases and embedded relations are read from the string, so
+   * the joined shape is not declared a second time by hand. See `select-types.ts` for the grammar.
+   * A string only known at run time types as the whole row.
+   */
+  select<TColumns extends string = "*">(
+    columns?: TColumns | undefined,
+    options?: SelectQueryOptions | undefined,
+  ): QueryBuilder<SelectRow<TTables, TName, TColumns>>
+  /** Read rows typed as `TResult`, for a shape the select string cannot describe. */
+  select<TResult>(
+    columns?: string | undefined,
+    options?: SelectQueryOptions | undefined,
+  ): QueryBuilder<TResult>
+  select<TResult>(
     columns?: string | undefined,
     options?: SelectQueryOptions | undefined,
   ): QueryBuilder<TResult> {
@@ -454,7 +476,7 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabas
   serviceRoleKey: string | undefined
   from<TTable extends keyof TDatabase["public"]["Tables"] & string>(
     table: TTable,
-  ): TableClient<TDatabase["public"]["Tables"][TTable]>
+  ): TableClient<TDatabase["public"]["Tables"][TTable], TDatabase["public"]["Tables"], TTable>
   global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow>
   auth: AuthClient
   storage: StorageClient
@@ -617,8 +639,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   })
 
   // One place that wires a table to this client's headers, cache, auth refresh and fetch.
-  const tableClient = <TDef extends TableDef>(table: string): TableClient<TDef> =>
-    new TableClient<TDef>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized, doFetch)
+  const tableClient = <
+    TDef extends TableDef,
+    TTables extends Record<string, TableDef> = Record<string, TableDef>,
+    TName extends string = string,
+  >(table: string): TableClient<TDef, TTables, TName> =>
+    new TableClient<TDef, TTables, TName>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized, doFetch)
 
   return {
     url: config.url,
@@ -626,9 +652,9 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
 
     from<TTable extends keyof TDatabase["public"]["Tables"] & string>(
       table: TTable,
-    ): TableClient<TDatabase["public"]["Tables"][TTable]> {
+    ): TableClient<TDatabase["public"]["Tables"][TTable], TDatabase["public"]["Tables"], TTable> {
       type TDef = TDatabase["public"]["Tables"][TTable]
-      return tableClient<TDef>(table)
+      return tableClient<TDef, TDatabase["public"]["Tables"], TTable>(table)
     },
 
     global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow> {
@@ -636,7 +662,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       type TDef = { Row: TRow; Insert: TRow; Update: Partial<TRow> }
       return {
         async get(): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = tableClient<TDef>(tableName)
+          const tc = tableClient<TDef, Record<string, TDef>>(tableName)
           const result = await tc.select().limit(1).maybeSingle()
           return { data: result.data ?? null, error: result.error }
         },

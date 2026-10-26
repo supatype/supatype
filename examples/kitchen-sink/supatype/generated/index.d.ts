@@ -42,6 +42,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: []
     }
     speaker: {
       Row: {
@@ -50,7 +51,7 @@ declare module "@supatype/client" {
         slug: string
         bio: { [locale: string]: RichText } | null
         headshot: StorageReference | null
-        links: Record<string, unknown> | null
+        links: { label: string; href: string }[] | null
         email: string | null
         published_at: string | null
         created_at: string
@@ -62,7 +63,7 @@ declare module "@supatype/client" {
         slug?: string
         bio?: { [locale: string]: RichText | string } | null
         headshot?: StorageReference | null
-        links?: Record<string, unknown> | null
+        links?: { label: string; href: string }[] | null
         email?: string | null
         published_at?: string | null
         created_at?: string
@@ -74,12 +75,13 @@ declare module "@supatype/client" {
         slug?: string
         bio?: { [locale: string]: RichText | string } | null
         headshot?: StorageReference | null
-        links?: Record<string, unknown> | null
+        links?: { label: string; href: string }[] | null
         email?: string | null
         published_at?: string | null
         created_at?: string
         updated_at?: string
       }
+      Relationships: []
     }
     room: {
       Row: {
@@ -106,6 +108,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: []
     }
     talk: {
       Row: {
@@ -156,6 +159,20 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: [
+        {
+          columns: ["speaker_id"]
+          isOneToOne: false
+          referencedRelation: "speaker"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["room_id"]
+          isOneToOne: false
+          referencedRelation: "room"
+          referencedColumns: ["id"]
+        },
+      ]
     }
     sponsor: {
       Row: {
@@ -197,6 +214,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: []
     }
     attendee: {
       Row: {
@@ -220,6 +238,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: []
     }
     ticket: {
       Row: {
@@ -255,6 +274,20 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: [
+        {
+          columns: ["auth_user_id"]
+          isOneToOne: false
+          referencedRelation: "supatype:user"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["attendee_id"]
+          isOneToOne: false
+          referencedRelation: "attendee"
+          referencedColumns: ["id"]
+        },
+      ]
     }
     chat_message: {
       Row: {
@@ -281,6 +314,14 @@ declare module "@supatype/client" {
         authorName?: string | null
         created_at?: string
       }
+      Relationships: [
+        {
+          columns: ["auth_user_id"]
+          isOneToOne: false
+          referencedRelation: "supatype:user"
+          referencedColumns: ["id"]
+        },
+      ]
     }
     _global_site_settings: {
       Row: {
@@ -310,6 +351,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: []
     }
   }
 }

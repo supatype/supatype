@@ -18,6 +18,7 @@ declare module "@supatype/client" {
         body?: string
         created_at?: string
       }
+      Relationships: []
     }
   }
 }

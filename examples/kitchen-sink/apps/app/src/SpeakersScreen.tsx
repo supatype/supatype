@@ -86,9 +86,8 @@ export function SpeakersScreen(): React.ReactElement {
 function SpeakerCard({ speaker }: { speaker: Speaker }): React.ReactElement {
   const bio = localized(speaker.bio, "en")
   const asset = speaker.headshot as { url?: string } | null
-  const links = Array.isArray(speaker.links)
-    ? (speaker.links as Array<{ label?: string; href?: string }>)
-    : []
+  // Typed from the schema's `JSON<{ label: string; href: string }[]>`, so no cast and no guessing.
+  const links = speaker.links ?? []
 
   return (
     <Card>
@@ -112,8 +111,8 @@ function SpeakerCard({ speaker }: { speaker: Speaker }): React.ReactElement {
         {links.length > 0 && (
           <Row gap={12} wrap>
             {links.map((link) => (
-              <a key={link.href ?? link.label} className="ks-small" href={link.href ?? "#"}>
-                {link.label ?? link.href}
+              <a key={link.href} className="ks-small" href={link.href}>
+                {link.label}
               </a>
             ))}
           </Row>

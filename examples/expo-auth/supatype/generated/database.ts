@@ -57,7 +57,14 @@ export type Database = {
           authorName?: string | null
           created_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["auth_user_id"]
+            isOneToOne: false
+            referencedRelation: "supatype:user"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

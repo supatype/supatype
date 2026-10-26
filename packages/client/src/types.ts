@@ -1,3 +1,5 @@
+import type { TableRelationship } from "./select-types.js"
+
 // ─── Auth types ───────────────────────────────────────────────────────────────
 
 export interface UserIdentity {
@@ -227,6 +229,11 @@ export interface TableDef {
    */
   Insert: Record<string, unknown>
   Update: Record<string, unknown>
+  /**
+   * The foreign keys this table holds, which an embedded select is resolved through. Generated for
+   * every table; a hand-written definition without them can still select its own columns.
+   */
+  Relationships?: readonly TableRelationship[] | undefined
 }
 
 /**
