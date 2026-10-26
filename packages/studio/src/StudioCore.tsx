@@ -102,6 +102,9 @@ interface StudioNavProps {
   mobileNav: MobileNav
 }
 
+/** The phone-width primary menu's id, which the header's burger names as the menu it controls. */
+const PRIMARY_MENU_ID = "studio-primary-menu"
+
 /**
  * Tiers 1 and 2: the primary icon sidebar and the section's own panel.
  *
@@ -118,7 +121,7 @@ function StudioNav({ config, extensions, mobileNav }: StudioNavProps): React.Rea
       {mobileNav.open === "primary" && (
         <>
           <div className="fixed inset-0 bg-black/40 z-40 md:hidden" onClick={mobileNav.close} aria-hidden="true" />
-          <Sidebar {...sidebarProps} drawer className="fixed top-14 left-0 h-[calc(100vh-56px)] z-50 md:hidden" />
+          <Sidebar {...sidebarProps} drawer id={PRIMARY_MENU_ID} className="fixed top-14 left-0 h-[calc(100vh-56px)] z-50 md:hidden" />
         </>
       )}
       <SecondaryPanel open={mobileNav.open === "section"} onClose={mobileNav.close} />
@@ -174,7 +177,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         leftItems={extensions?.topBarLeftItems}
         extraItems={extensions?.topBarItems}
         demoMode={demoMode}
-        onToggleSidebar={() => mobileNav.toggle("primary")}
+        sidebar={{ open: mobileNav.open === "primary", onToggle: () => mobileNav.toggle("primary"), controls: PRIMARY_MENU_ID }}
       />
       <div className="flex flex-1 overflow-hidden">
         <StudioNav config={configCtx} extensions={extensions} mobileNav={mobileNav} />

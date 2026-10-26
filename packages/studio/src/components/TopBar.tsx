@@ -23,7 +23,16 @@ interface TopBarProps {
   extraItems?: React.ComponentType[] | undefined
   /** Sample-data mode (self-host): shows a badge. */
   demoMode?: boolean | undefined
-  onToggleSidebar: () => void
+  /** The phone-width primary menu the burger opens and closes. */
+  sidebar: SidebarToggle
+}
+
+/** What the burger needs to drive the primary menu and say so to assistive technology. */
+export interface SidebarToggle {
+  open: boolean
+  onToggle: () => void
+  /** The id of the menu the burger opens, for `aria-controls`. */
+  controls: string
 }
 
 function BranchPill(): React.ReactElement {
@@ -155,27 +164,33 @@ function HeaderLinks({ onConnect }: { onConnect: () => void }): React.ReactEleme
   )
 }
 
-export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSidebar }: TopBarProps): React.ReactElement {
-  const { pathname } = useLocation()
-  const [connectOpen, setConnectOpen] = useState(false)
-  const onDashboard = pathname === "/"
-
+/**
+ * The burger that opens the phone-width primary menu. It says whether that menu is open and
+ * names it, so a screen reader hears the state change that a sighted user sees.
+ */
+function SidebarBurger({ sidebar }: { sidebar: SidebarToggle }): React.ReactElement {
   return (
-    <header className="z-50 flex h-14 shrink-0 items-center gap-2 sm:gap-3 border-b border-border bg-background px-3 sm:px-4">
-      <div className="flex shrink-0 items-center gap-2">
-        <SupatypeIcon size={22} className="h-[22px] w-[25px]" />
-        <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="md:hidden" aria-label="Toggle sidebar">
-          <HamburgerIcon />
-        </Button>
-      </div>
-      <HeaderContext leftItems={leftItems} />
-      {demoMode && (
-        <Badge variant="outline" className="shrink-0 border-primary/40 text-primary">
-          Demo
-        </Badge>
-      )}
-      {/* Centre: jump-to search (hidden on dashboard where it lives inline). Below `md` it is a
-          button opening a full-width sheet: inline, it was squeezed too narrow to read. */}
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={sidebar.onToggle}
+      className="md:hidden"
+      aria-label="Toggle sidebar"
+      aria-expanded={sidebar.open}
+      aria-controls={sidebar.controls}
+    >
+      <HamburgerIcon />
+    </Button>
+  )
+}
+
+/**
+ * The centre jump-to search, hidden on the dashboard where it lives inline. Below `md` it is a
+ * button opening a full-width sheet: inline, it was squeezed too narrow to read.
+ */
+function HeaderSearch({ onDashboard }: { onDashboard: boolean }): React.ReactElement {
+  return (
+    <>
       <div className="flex-1 flex items-center justify-center md:px-4">
         {!onDashboard && (
           <div className="hidden md:block w-full max-w-md">
@@ -184,6 +199,27 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
         )}
       </div>
       {!onDashboard && <JumpToSearchSheet className="md:hidden" />}
+    </>
+  )
+}
+
+export function TopBar({ config, leftItems, extraItems, demoMode, sidebar }: TopBarProps): React.ReactElement {
+  const { pathname } = useLocation()
+  const [connectOpen, setConnectOpen] = useState(false)
+
+  return (
+    <header className="z-50 flex h-14 shrink-0 items-center gap-2 sm:gap-3 border-b border-border bg-background px-3 sm:px-4">
+      <div className="flex shrink-0 items-center gap-2">
+        <SupatypeIcon size={22} className="h-[22px] w-[25px]" />
+        <SidebarBurger sidebar={sidebar} />
+      </div>
+      <HeaderContext leftItems={leftItems} />
+      {demoMode && (
+        <Badge variant="outline" className="shrink-0 border-primary/40 text-primary">
+          Demo
+        </Badge>
+      )}
+      <HeaderSearch onDashboard={pathname === "/"} />
       {extraItems?.map((Item, i) => <Item key={i} />)}
       {config != null && isContentRoute(pathname) && <LocaleSwitcher />}
       <HeaderLinks onConnect={() => setConnectOpen(true)} />

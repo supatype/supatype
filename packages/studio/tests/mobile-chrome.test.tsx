@@ -113,6 +113,19 @@ describe("the phone-width menus", () => {
     }
   })
 
+  it("the burger says whether its menu is open, and names the menu it opens", async () => {
+    await studioAt("/")
+    const burger = byLabel("Toggle sidebar")!
+    expect(burger.getAttribute("aria-expanded")).toBe("false")
+    await click("Toggle sidebar")
+    expect(burger.getAttribute("aria-expanded")).toBe("true")
+    const controls = burger.getAttribute("aria-controls")
+    expect(controls).not.toBeNull()
+    expect(document.getElementById(controls ?? "")).toBe(primaryDrawer())
+    await click("Toggle sidebar")
+    expect(burger.getAttribute("aria-expanded")).toBe("false")
+  })
+
   it("the docked rail stays icons only until hovered", async () => {
     await studioAt("/")
     const rail = document.querySelector<HTMLElement>('[aria-label="Studio navigation"]')!
