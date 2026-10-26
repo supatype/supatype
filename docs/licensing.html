@@ -76,13 +76,15 @@
             <div>
               <ul>
                 <li>The client SDKs, framework bindings and plugins are <strong>MIT</strong>. The CLI, Studio and the services (storage, realtime, functions worker) are <strong>Apache 2.0</strong>. Use them for anything.</li>
-                <li>The schema engine is <strong>source-available under the Business Source License 1.1</strong> (SPDX <code>BUSL-1.1</code>). You can read it, change it, redistribute it and run it in production.</li>
+                <li>The schema engine is <strong>source-available under the Business Source License 1.1</strong> (SPDX <code>BUSL-1.1</code>), and its source is at <a href="https://github.com/supatype/schema-engine">github.com/supatype/schema-engine</a>. You can read it, change it, redistribute it and run it in production.</li>
                 <li>The one thing you cannot do without a commercial licence: offer Supatype or the engine to others as a hosted or managed service, paid or free, or sell a product whose primary value is the engine.</li>
                 <li>Each engine version becomes <strong>Apache 2.0</strong> on its Change Date, four years after that version's release.</li>
               </ul>
               <p>
                 The engine's licence, with its Additional Use Grant, is in the <code>LICENSE</code> file
-                that ships with every engine release, beside the binary on
+                at the root of the
+                <a href="https://github.com/supatype/schema-engine">engine's repository</a> and
+                ships with every engine release, beside the binary on
                 <code>releases.supatype.com</code> and at <code>/LICENSE</code> in the
                 <code>supatype/schema-engine</code> image. <code>supatype-engine licence</code> prints
                 the exact terms for the version you have.
@@ -164,7 +166,8 @@
               <ul>
                 <li><strong>Each version has its own Change Date</strong>, set when it is released, to the release date plus four years. It is written in that version's <code>LICENSE</code>.</li>
                 <li><strong>On the Change Date</strong> that version, and only that version, becomes available under the Apache License 2.0. Later versions keep their own dates.</li>
-                <li><strong>Earlier versions</strong> (0.1.5 to 0.6.0) were distributed as binaries without a licence. They are made available under the same BSL 1.1 terms, with the same Additional Use Grant and the same Change Date as 0.7.0.</li>
+                <li><strong>Commits between releases</strong> on the engine's <code>main</code> branch are part of the next release and take its Change Date.</li>
+                <li><strong>All earlier versions and commits</strong> are made available under the same BSL 1.1 terms, with the same Additional Use Grant and the same Change Date as 0.7.0. That includes 0.1.5 to 0.6.0, which were distributed as binaries without a licence, and commits from before the engine's repository had a <code>LICENSE</code> file.</li>
               </ul>
             </div>
           </div>
