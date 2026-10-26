@@ -12,6 +12,11 @@ export interface StudioMember {
   role: string
   /** A grant held by a Supatype Cloud account rather than a project user. */
   platformAccount: boolean
+  /**
+   * The grant's latest change was made in the database directly, not through Studio: a developer
+   * with database access promoting someone, say. Recorded by a trigger on the membership table.
+   */
+  changedOutsideStudio: boolean
   createdAt: string
   updatedAt: string
 }
@@ -122,13 +127,15 @@ export function useStudioMembers(): UseStudioMembersReturn {
   return { members, roles, loading, error, roleFor, setRole, revoke, refresh }
 }
 
-function readMembers(body: unknown): StudioMember[] {
+/** The membership list as either host answers it. Exported for tests. */
+export function readMembers(body: unknown): StudioMember[] {
   const rows = pickArray(body, "members")
   return rows.map((row) => ({
     userId: String(row["userId"] ?? row["id"] ?? ""),
     email: String(row["email"] ?? ""),
     role: String(row["role"] ?? ""),
     platformAccount: row["platformAccount"] === true,
+    changedOutsideStudio: row["changedOutsideStudio"] === true,
     createdAt: String(row["createdAt"] ?? ""),
     updatedAt: String(row["updatedAt"] ?? ""),
   }))

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { actingModeOf, type ActingMode } from "../lib/acting-mode.js"
 import { isBoolean, isJsonObject, isRecordOf } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
@@ -11,10 +12,12 @@ export interface StudioCapability {
   /** Their Studio role, or null before the check resolves. */
   role: string | null
   /**
-   * Whose identity data requests act as. `elevated` means the server is using the
-   * service role, so RLS does not apply and the reader is seeing everything.
+   * Whose identity data requests act as. `studio` means the Studio role decides: the app's row
+   * rules do not apply, its field rules do. `elevated` means the server is using the service role,
+   * so no rule applies and the reader is seeing everything. `self` is the app's rules, as the app
+   * applies them to this user.
    */
-  mode: "self" | "elevated"
+  mode: ActingMode
   /** Whether this role may switch modes at all. */
   canElevate: boolean
   canManageMembers: boolean
@@ -22,8 +25,8 @@ export interface StudioCapability {
    * Whether this caller sees other people's unpublished work.
    *
    * From the server, not inferred here, and it needs its own field because row level security
-   * cannot supply it: Studio's data plane goes through the proxy with the service role, which
-   * bypasses policies. The draft-visibility setting compiles into those policies, so it binds the
+   * cannot supply it: Studio's data plane goes through the proxy as Studio or as the service role,
+   * and either skips the app's row policies. The draft-visibility setting compiles into those policies, so it binds the
    * API and would not bind the UI. The server answers from the same stored setting, so one source
    * of truth reaches both.
    *
@@ -67,7 +70,8 @@ function capabilityFrom(json: Record<string, unknown>): StudioCapability {
   return {
     userId: typeof sub === "string" ? sub : null,
     role: typeof role === "string" ? role : null,
-    mode: mode === "elevated" ? "elevated" : "self",
+    // A mode this build does not know reads as acting as yourself, the one that claims least.
+    mode: actingModeOf(mode) ?? "self",
     canElevate: canElevate === true,
     canManageMembers: permissions["manageMembers"] === true,
     seesDrafts: seesDrafts === true,

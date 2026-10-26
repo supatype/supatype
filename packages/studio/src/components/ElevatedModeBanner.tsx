@@ -64,53 +64,77 @@ function reloadStudio(): void {
   window.location.reload()
 }
 
+const SWITCH_LABELS: Record<ActingMode, string> = {
+  self: "Act as myself",
+  studio: "Edit as Studio",
+  elevated: "Use elevated access",
+}
+
 /**
- * The control that switches an owner or admin between elevated access and acting as themselves
- * (RX4). The choice is remembered and sent on every request (`acting-mode.ts`); the server decides
- * whether it may be had.
+ * The control that switches a Studio user between acting as Studio, acting as themselves and, for
+ * a role that may, elevated access (RX4). The choice is remembered and sent on every request
+ * (`acting-mode.ts`); the server decides whether it may be had. Studio is the default, so choosing
+ * it forgets the choice.
  */
 function ActingModeSwitch({ to, onSwitched }: { to: ActingMode; onSwitched: () => void }): React.ReactElement {
   const client = useAdminClient()
   const choose = (): void => {
-    chooseActingMode(client.url, to)
+    chooseActingMode(client.url, to === "studio" ? null : to)
     onSwitched()
   }
   return (
-    <Button size="sm" variant="secondary" className="ml-auto shrink-0" onClick={choose}>
-      {to === "self" ? "Act as myself" : "Use elevated access"}
+    <Button size="sm" variant="secondary" className="shrink-0" onClick={choose}>
+      {SWITCH_LABELS[to]}
     </Button>
+  )
+}
+
+/** The switches to every mode but `current` this user may have, at the end of a notice. */
+function ModeSwitches({ current, canElevate, onSwitched }: {
+  current: ActingMode
+  canElevate: boolean
+  onSwitched: () => void
+}): React.ReactElement {
+  const modes: ActingMode[] = canElevate ? ["studio", "self", "elevated"] : ["studio", "self"]
+  return (
+    <span className="ml-auto flex gap-2">
+      {modes.filter((mode) => mode !== current).map((mode) => (
+        <ActingModeSwitch key={mode} to={mode} onSwitched={onSwitched} />
+      ))}
+    </span>
   )
 }
 
 /**
  * Says which identity Studio's requests act as, while project rows are on screen.
  *
- * Elevated access is legitimate, administering a project means seeing rows your
- * own policies would hide, but it must never be silent. Without this, an admin
- * cannot tell whether an empty table means "no rows" or "no rows *you* can see",
- * and cannot tell that what they are looking at is more than their application
- * would ever return. A role that may elevate can switch from here, either way; a
- * role that cannot is always itself, and is told nothing it cannot change.
+ * Acting as Studio, the Studio role decides what may be done with rows and the app's field rules
+ * still apply. Elevated access is legitimate, administering a project means seeing rows your own
+ * policies would hide, but it must never be silent. Acting as yourself shows the app's own rules.
+ * Every role that reads content may switch between Studio and themselves; a role that may elevate
+ * may switch to elevated access too.
  *
- * The mode comes from the server's own answer, not from the role name: the client
- * has no business deciding what privilege it holds.
+ * The mode comes from the server's own answer, not from the role name: the client has no business
+ * deciding what privilege it holds.
  */
 export function ElevatedModeBanner({ onSwitched = reloadStudio }: { onSwitched?: () => void } = {}): React.ReactElement | null {
-  const { mode, role, canElevate } = useStudioCapability()
+  const { mode, role, canElevate, permissions } = useStudioCapability()
   const { active } = useContext(ElevatedNoticeContext)
-
   if (!active) return null
-  if (mode !== "elevated") return canElevate ? <SelfModeNotice onSwitched={onSwitched} /> : null
+  // Nothing to say before the server has answered, or to a role that reads no content.
+  if (role === null || (permissions["read"] !== true && !canElevate)) return null
 
+  const switches = <ModeSwitches current={mode} canElevate={canElevate} onSwitched={onSwitched} />
+  if (mode === "studio") return <StudioModeNotice role={role}>{switches}</StudioModeNotice>
+  if (mode === "self") return <SelfModeNotice>{switches}</SelfModeNotice>
   return (
     <ElevatedNotice>
       <span>
         <strong className="font-medium">Elevated access</strong>: Row Level Security
-        does not apply to what you are seeing
-        {role !== null ? <> (Studio role: {role})</> : null}. Every change you make
+        does not apply to what you are seeing (Studio role: {role}). Every change you make
         here is recorded.
       </span>
-      {canElevate ? <ActingModeSwitch to="self" onSwitched={onSwitched} /> : null}
+      {switches}
     </ElevatedNotice>
   )
 }
@@ -128,15 +152,38 @@ export function ElevatedNotice({ children }: { children: React.ReactNode }): Rea
   )
 }
 
-/** An owner or admin who switched to acting as themselves: what they see, and the way back. */
-function SelfModeNotice({ onSwitched }: { onSwitched: () => void }): React.ReactElement {
+/** The quiet strip for a mode that applies rules: what they are, and the switches. */
+function ModeNotice({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
     <div role="status" className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md text-xs border border-border bg-muted text-muted-foreground">
+      {children}
+    </div>
+  )
+}
+
+/** Acting as Studio, the default: the Studio role decides, field rules still apply. */
+function StudioModeNotice({ role, children }: { role: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <ModeNotice>
+      <span>
+        <strong className="font-medium text-foreground">Editing as Studio</strong>: your Studio role
+        ({role}) decides what you can do here. This project&apos;s row rules do not apply; its field
+        rules do, so masked fields stay masked. Every change you make is recorded.
+      </span>
+      {children}
+    </ModeNotice>
+  )
+}
+
+/** Acting as yourself: what the app's own rules show this user, and the way back. */
+function SelfModeNotice({ children }: { children: React.ReactNode }): React.ReactElement {
+  return (
+    <ModeNotice>
       <span>
         <strong className="font-medium text-foreground">Acting as yourself</strong>: this project&apos;s
         access rules apply to what you are seeing, as your app applies them to you.
       </span>
-      <ActingModeSwitch to="elevated" onSwitched={onSwitched} />
-    </div>
+      {children}
+    </ModeNotice>
   )
 }

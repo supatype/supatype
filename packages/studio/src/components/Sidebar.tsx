@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from "react-router-dom"
 import type { AdminConfig } from "../config.js"
 import type { SidebarSection } from "../types.js"
 import { cn } from "../lib/utils.js"
+import { offers, userAdministrationOffered, type OfferedCapability } from "../lib/capability-offers.js"
 import { Icon, IconChevronRight, IconSettings } from "./icons.js"
 
 // ─── Nav definition ───────────────────────────────────────────────────────────
@@ -54,9 +55,11 @@ const SECONDARY_NAV_ENTRIES: NavEntry[] = [
  * Only what the server has refused is hidden: before the capability resolves, and on a deployment
  * that does not report it, everything stays, and the destination says what it can.
  */
-export function hiddenNavItems(capability: { role: string | null; permissions: Record<string, boolean> }): ReadonlySet<string> {
+export function hiddenNavItems(capability: OfferedCapability): ReadonlySet<string> {
   const hidden = new Set<string>()
-  if (capability.role !== null && capability.permissions["realtimeInspect"] !== true) hidden.add("realtime")
+  if (!offers(capability, "realtimeInspect")) hidden.add("realtime")
+  // The project's users are administered by admins and developers; editors and viewers work with content.
+  if (!userAdministrationOffered(capability)) hidden.add("auth")
   return hidden
 }
 

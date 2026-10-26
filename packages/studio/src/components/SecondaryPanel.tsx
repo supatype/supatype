@@ -14,6 +14,7 @@ import { IconList } from "./icons.js"
 import { useInspectorAvailability, type InspectorAvailability } from "../hooks/useInspectorAvailability.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
+import { bucketManagementOffered } from "../lib/capability-offers.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -460,7 +461,7 @@ export function SecondaryPanel({
         <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground/80">
           {section.title}
         </h2>
-        {sectionId === "storage" ? (
+        {sectionId === "storage" && bucketManagementOffered(capability) ? (
           <Button size="xs" onClick={openCreateBucketFromSecondaryNav}>New</Button>
         ) : null}
       </div>
