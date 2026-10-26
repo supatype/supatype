@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
-import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { useStudioMembers } from "../hooks/useStudioMembers.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
@@ -58,6 +57,20 @@ interface AuthSession {
   user_agent: string
   created_at: string
   updated_at: string
+}
+
+/** One session as the auth admin API's GET /admin/sessions answers it. */
+interface AuthSessionResponse {
+  id: string
+  user_id: string
+  ip: string | null
+  user_agent: string | null
+  created_at: string
+  updated_at: string
+}
+
+function mapAuthSession(s: AuthSessionResponse): AuthSession {
+  return { ...s, ip: s.ip ?? "", user_agent: s.user_agent ?? "" }
 }
 
 const availableRoles = ["authenticated"]
@@ -479,7 +492,6 @@ export function AuthManagement(): React.ReactElement {
   useShowsProjectRows()
 
   const client = useStudioClient()
-  const proxy = useProjectProxy()
   const studioMembers = useStudioMembers()
   const studioAccess = useStudioCapability()
   // Empty unless the viewer may manage members at all, so the control is absent rather than
@@ -511,25 +523,14 @@ export function AuthManagement(): React.ReactElement {
     [authAdminFetch],
   )
 
+  // Through the auth admin API, like the rest of user administration, rather than the SQL editor's
+  // route, which is for different roles and cannot touch the tables the auth service owns.
   const { data: sessionsData, refetch: refetchSessions } = useApiQuery(
     async () => {
-      const result = await proxy.sql(
-        `SELECT id, user_id, ip::text, user_agent, created_at, updated_at
-         FROM auth.sessions
-         WHERE not_after IS NULL OR not_after > now()
-         ORDER BY updated_at DESC`,
-        "auth",
-      )
-      return result.rows.map((r): AuthSession => ({
-        id: String(r["id"] ?? ""),
-        user_id: String(r["user_id"] ?? ""),
-        ip: String(r["ip"] ?? ""),
-        user_agent: String(r["user_agent"] ?? ""),
-        created_at: String(r["created_at"] ?? ""),
-        updated_at: String(r["updated_at"] ?? ""),
-      }))
+      const json = await authAdminFetch("/sessions")
+      return (json.sessions as AuthSessionResponse[]).map(mapAuthSession)
     },
-    [proxy],
+    [authAdminFetch],
   )
 
   const users = usersData ?? []
@@ -661,12 +662,9 @@ export function AuthManagement(): React.ReactElement {
   }, [authAdminFetch, refetch])
 
   const handleRevokeSession = useCallback(async (sessionId: string) => {
-    await proxy.sql(
-      `DELETE FROM auth.sessions WHERE id = '${sessionId.replace(/'/g, "''")}'`,
-      "auth",
-    )
+    await authAdminFetch(`/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
     refetchSessions()
-  }, [proxy, refetchSessions])
+  }, [authAdminFetch, refetchSessions])
 
   const handleImpersonate = useCallback((_userId: string) => {
     // Impersonation placeholder: shown in detail view
