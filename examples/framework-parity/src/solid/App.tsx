@@ -33,15 +33,17 @@ export function App() {
   }
 
   async function addTask(): Promise<void> {
-    if (title().trim() === "") return
-    await mutate({ title: title().trim(), done: false })
+    const owner = user()?.id
+    if (title().trim() === "" || owner === undefined) return
+    // Owned by whoever added it, as in the other two apps.
+    await mutate({ title: title().trim(), done: false, auth_user_id: owner })
     setTitle("")
     await refetch()
   }
 
   return (
     <main class="shell">
-      <h1>Parity — Solid</h1>
+      <h1>Parity: Solid</h1>
 
       <Show when={!authLoading()} fallback={<p class="muted">Loading session…</p>}>
         <Show

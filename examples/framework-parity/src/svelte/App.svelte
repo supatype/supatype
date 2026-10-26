@@ -36,15 +36,17 @@
   }
 
   async function addTask(): Promise<void> {
-    if (title.trim() === "") return
-    await mutate({ title: title.trim(), done: false })
+    const owner = $user?.id
+    if (title.trim() === "" || owner === undefined) return
+    // Owned by whoever added it, as in the other two apps.
+    await mutate({ title: title.trim(), done: false, auth_user_id: owner })
     title = ""
     await refetch()
   }
 </script>
 
 <main class="shell">
-  <h1>Parity — Svelte</h1>
+  <h1>Parity: Svelte</h1>
 
   {#if $authLoading}
     <p class="muted">Loading session…</p>

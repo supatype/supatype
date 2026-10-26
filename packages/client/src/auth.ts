@@ -268,6 +268,17 @@ export class AuthClient {
     return this._parseAuthResponse(res)
   }
 
+  /**
+   * An auth endpoint, carrying the caller's redirect as `redirect_to` in the query string. The
+   * server reads it from there (or a header) and never from a JSON body, so a redirect sent in the
+   * body is dropped in silence and the email links to SITE_URL instead.
+   */
+  private endpoint(path: string, redirectTo: string | undefined): URL {
+    const url = new URL(`${this.url}${path}`)
+    if (redirectTo !== undefined) url.searchParams.set("redirect_to", redirectTo)
+    return url
+  }
+
   async signInWithOAuth(opts: {
     provider: string
     options?: {
@@ -280,11 +291,8 @@ export class AuthClient {
     data: { url: string; provider: string }
     error: SupatypeError | null
   }> {
-    const url = new URL(`${this.url}/authorize`)
+    const url = this.endpoint("/authorize", opts.options?.redirectTo)
     url.searchParams.set("provider", opts.provider)
-    if (opts.options?.redirectTo !== undefined) {
-      url.searchParams.set("redirect_to", opts.options.redirectTo)
-    }
     if (opts.options?.scopes !== undefined) {
       url.searchParams.set("scopes", opts.options.scopes)
     }
@@ -447,7 +455,7 @@ export class AuthClient {
         body["channel"] = opts.options.channel
       }
     }
-    const res = await fetch(`${this.url}/otp`, {
+    const res = await fetch(this.endpoint("/otp", opts.options?.emailRedirectTo).toString(), {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -551,14 +559,10 @@ export class AuthClient {
     email: string,
     options?: { redirectTo?: string | undefined } | undefined,
   ): Promise<{ data: Record<string, never>; error: SupatypeError | null }> {
-    const body: Record<string, unknown> = { email }
-    if (options?.redirectTo !== undefined) {
-      body["redirect_to"] = options.redirectTo
-    }
-    const res = await fetch(`${this.url}/recover`, {
+    const res = await fetch(this.endpoint("/recover", options?.redirectTo).toString(), {
       method: "POST",
       headers: this.baseHeaders,
-      body: JSON.stringify(body),
+      body: JSON.stringify({ email }),
     })
     if (res.ok) return { data: {}, error: null }
     const err = await res.json().catch(() => ({})) as Record<string, unknown>

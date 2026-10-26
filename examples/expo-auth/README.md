@@ -65,6 +65,14 @@ Manual UI:
 
 Bundle check: `pnpm exec expo export --platform web --output-dir dist-smoke`
 
+The screens are automated too: `bash tests/integration/scripts/expo-auth-e2e.sh` (from the monorepo
+root) runs the web build in a browser through sign-up, sign-in, magic link, password reset and
+GitHub OAuth with PKCE, against a stub provider and an SMTP catcher. On web, the OAuth popup lands
+back on this app, which hands the URL to the window that opened it (`src/authRedirect.ts`), and a
+password-recovery link opens the new-password form before anything else. Google's server half
+cannot run against a stub (the auth server pins Google's issuer), so only the request the app
+makes for it is asserted.
+
 ## Notes
 
 - Scheme: `supatype-expo-auth` (`app.json`).

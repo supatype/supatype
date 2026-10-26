@@ -49,6 +49,8 @@ pnpm dev
 3. `pnpm typecheck`: both app and `functions/` projects pass.
 4. With the stack up: **ping**, **env-check**, **echo**, **auth 401 / anon reject / user OK**, **write-note**, **webhook** all behave as labeled on the buttons.
 
+Step 4 is automated: `bash tests/integration/scripts/edge-kit-e2e.sh` (from the monorepo root) starts the stack and calls every function through the gateway, anonymous and signed in, including the service-role gate and a forged webhook signature.
+
 ## Notes
 
 - Worker `SUPATYPE_URL` is **`http://kong:8000`** in Compose (server-side calls). Public links use `SITE_URL` / `API_EXTERNAL_URL`.
