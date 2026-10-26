@@ -2,7 +2,7 @@
 //
 // Import the client from here rather than from `@supatype/client`:
 //
-//     import { createClient } from "./supatype/client"
+//     import { createClient } from "./supatype/generated/client"
 //
 // This file carries your schema's types and the columns that need exact handling, so one
 // import is the whole setup. Importing `@supatype/client` directly gets a client that knows
