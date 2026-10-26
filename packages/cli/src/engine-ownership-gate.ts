@@ -57,9 +57,14 @@ export function adoptKeysNeed(keys: readonly string[]): FeatureNeed {
 }
 
 /** What an adopt request needs from the engine, from the fields it is about to send. */
-export function adoptNeeds(opts: { keys?: readonly string[] | undefined; release?: readonly string[] | undefined }): FeatureNeed[] {
+export function adoptNeeds(opts: {
+  keys?: readonly string[] | undefined
+  release?: readonly string[] | undefined
+  reclaim?: readonly string[] | undefined
+}): FeatureNeed[] {
   const needs: FeatureNeed[] = []
   if ((opts.release ?? []).length > 0) needs.push({ feature: "release", flag: "--release" })
+  if ((opts.reclaim ?? []).length > 0) needs.push({ feature: "reclaim", flag: "--reclaim" })
   if (opts.keys !== undefined) needs.push(adoptKeysNeed(opts.keys))
   return needs
 }

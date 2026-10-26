@@ -534,10 +534,10 @@ export async function targetSchemaIntrospect(
 }
 
 /**
- * `adopt` on a target: hand the objects a push refuses to Supatype, and take back the ones named in
- * `release` (`kind:table.name`, as doctor names them). A preview unless `yes`; with `keys` (the
- * conflicts a preview showed, named the same way) only those are adopted, and nothing is written if
- * one of them is no longer a conflict.
+ * `adopt` on a target: hand the objects a push refuses to Supatype, take back the ones named in
+ * `release`, and hand back the released ones named in `reclaim` (`kind:table.name`, as doctor names
+ * them). A preview unless `yes`; with `keys` (the conflicts a preview showed, named the same way)
+ * only those are adopted, and nothing is written if one of them is no longer a conflict.
  *
  * An empty `keys` adopts nothing: the engine binary is told so with `--adopt-none` (see
  * `endpointToArgs`), and its server reads `keys: []` the same way.
@@ -545,19 +545,21 @@ export async function targetSchemaIntrospect(
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
-  opts?: { release?: string[]; keys?: string[]; schema?: string; yes?: boolean },
+  opts?: { release?: string[]; reclaim?: string[]; keys?: string[]; schema?: string; yes?: boolean },
 ): Promise<AdoptOutcome> {
   const release = opts?.release ?? []
+  const reclaim = opts?.reclaim ?? []
   const body = {
     ast,
     schema: opts?.schema ?? "public",
     yes: opts?.yes ?? false,
     ...(release.length > 0 && { release }),
+    ...(reclaim.length > 0 && { reclaim }),
     ...(opts?.keys !== undefined && { keys: opts.keys }),
   }
   // A server that dropped `keys` would adopt every conflict, and one that dropped `release` would
   // adopt instead of release: refused before sending, never degraded.
-  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release }), ...identityColumnsNeed(ast)])
+  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release, reclaim }), ...identityColumnsNeed(ast)])
   if (runsEngineHere(target)) {
     await ensureEngine()
     return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })

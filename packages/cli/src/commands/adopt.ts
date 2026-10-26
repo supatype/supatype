@@ -37,19 +37,21 @@ interface AdoptOptions {
   yes?: boolean
   cache?: boolean
   release?: string[]
+  reclaim?: string[]
   key?: string[]
 }
 
-/** What a preview says adopt will do, one line per object: handed over, then taken back. */
+/** What a preview says adopt will do, one line per object: handed over, taken back, handed back. */
 export function previewLines(outcome: AdoptOutcome): string[] {
-  return [...adoptionLines(outcome), ...(outcome.release ?? []).map((item) => item.message)]
+  const named = [...(outcome.release ?? []), ...(outcome.reclaim ?? [])]
+  return [...adoptionLines(outcome), ...named.map((item) => item.message)]
 }
 
 export function registerAdopt(program: Command): void {
   const command = program
     .command("adopt")
     .description(
-      "Hand Supatype the objects a push refuses because their names are taken, or take objects back with --release",
+      "Hand Supatype the objects a push refuses because their names are taken; take objects back with --release, and hand them back with --reclaim",
     )
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
@@ -57,6 +59,10 @@ export function registerAdopt(program: Command): void {
     .option(
       "--release <object...>",
       "Leave an object alone on every push, named as doctor names it: kind:table.name, or kind:name for a table",
+    )
+    .option(
+      "--reclaim <object...>",
+      "Hand a released object back to Supatype, named the same way: the next push makes it match the schema",
     )
     .option(
       "--key <object...>",
@@ -77,12 +83,13 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   )
   const target = await schemaCommandTarget(cwd, config, opts)
   // Before the preview: the server or engine that adopts must take every flag given.
-  await requireTargetFeatures(target, adoptNeeds({ release: opts.release, keys: opts.key }))
+  await requireTargetFeatures(target, adoptNeeds({ release: opts.release, reclaim: opts.reclaim, keys: opts.key }))
   const run = (yes: boolean, keys?: string[]): Promise<AdoptOutcome> =>
     targetSchemaAdopt(target, ast, {
       schema: pgSchema(config),
       yes,
       ...(opts.release !== undefined && { release: opts.release }),
+      ...(opts.reclaim !== undefined && { reclaim: opts.reclaim }),
       ...(keys !== undefined && { keys }),
     })
   const entryPath = resolve(cwd, schemaPathFromProject(config, cwd))
@@ -179,7 +186,10 @@ function show(lines: readonly string[], keyed: boolean): boolean {
 }
 
 function report(outcome: AdoptOutcome): void {
-  info(`Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}.`)
+  info(
+    `Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}, ` +
+      `reclaimed ${outcome.reclaim?.length ?? 0}.`,
+  )
 }
 
 /** The preview with only the conflicts `keys` names, when it names any. */

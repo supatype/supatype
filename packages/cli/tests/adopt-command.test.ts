@@ -119,6 +119,12 @@ describe("supatype adopt", () => {
     expect(stderr.mock.calls.flat().join(" ")).toContain("try again")
   })
 
+  it("checks the target supports --reclaim before sending it", async () => {
+    await adopt("--yes", "--reclaim", "table:widget")
+    expect(asked()).toContain("reclaim")
+    expect(asked()).not.toContain("release")
+  })
+
   it("names no keys on --yes alone: it adopts every conflict there is, and says what it took", async () => {
     const stdout = vi.mocked(console.log)
     await adopt("--yes")
