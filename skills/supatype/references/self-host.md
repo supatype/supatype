@@ -84,12 +84,38 @@ Use `restart <service>` rather than a hand-typed `docker compose` command. The g
 `.supatype/self-host/docker-compose.yml` names the project's folders by absolute path, and every
 `self-host compose` command renders it again, so a project that moved is picked up there.
 
+**A stack keeps its mode.** Every command that renders the compose file (`push`, `diff`, `adopt`,
+`update`, every `self-host compose` command) uses one rule: dev while `supatype dev` runs for the
+project, otherwise the mode the running server is in, otherwise standalone. So `supatype push` on a
+production stack leaves it standalone and leaves `.env` alone, and `self-host compose restart` on a
+`supatype dev` stack keeps it dev.
+
 **REST answers 503 until the first push.** A fresh stack returns `503` with `PGRST002` on every
 `/rest/v1/` request: PostgREST will not serve until the schemas it exposes exist, and `supatype
 push` creates them. This is expected, not a fault; run `supatype push` after `compose up -d`.
 PostgREST then notices on its next retry, which can be up to about 30 s later, so `push` against
 the compose stack waits (at most 40 s) until REST stops answering 503, printing one line while it
 waits and saying so if it gives up. `supatype dev` is unaffected: it pushes before PostgREST starts.
+
+## Allowed browser origins (CORS)
+
+Outside dev mode the gateway answers CORS for every service behind it, with one rule:
+
+- **Default:** the origin of `SITE_URL`, then `api.corsOrigins` from `supatype.config.ts`, then
+  `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env`.
+- **Saved in Studio:** the Settings page's CORS tab. Owners and admins can add and remove origins
+  there. The list is stored in the project's database (`auth.cors_origins`), so it survives a
+  restart, and every replica reads it within ten seconds. It replaces the default until someone
+  presses Reset. The site URL stays allowed whatever is saved.
+- **Everything else is refused:** a preflight from another origin gets `403`, and other responses
+  carry no CORS headers.
+- **`*`** allows every origin, and only when someone writes it in one of those places.
+
+Dev mode reflects every origin, whatever the list says.
+
+```ts
+api: { corsOrigins: ["https://admin.example.com", "http://localhost:5173"] },
+```
 
 ## Custom domain + automatic HTTPS
 

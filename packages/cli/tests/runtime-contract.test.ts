@@ -124,7 +124,7 @@ describe("runtime contract", () => {
     // SUPATYPE_CORS_ALLOW_ORIGINS lists others. Studio tells self-host operators to set it in
     // .env, which does nothing unless the compose passes it through.
     const server = serviceBlock(renderSelfHostCompose({ ...baseConfig, server: { mode: "standalone" } }), "server")
-    expect(server).toContain("SUPATYPE_CORS_ALLOW_ORIGINS: ${SUPATYPE_CORS_ALLOW_ORIGINS:-}")
+    expect(server).toContain('SUPATYPE_CORS_ALLOW_ORIGINS: "${SUPATYPE_CORS_ALLOW_ORIGINS:-}"')
   })
 
   it("self-host compose exposes the managed schema over REST, not a hardcoded public", () => {

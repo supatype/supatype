@@ -20,6 +20,8 @@ export interface DevSessionLock {
   composePath: string
   kongPort: number
   startedAt: string
+  /** The `supatype dev` process holding the session. Absent in a lock written before it was kept. */
+  pid?: number
 }
 
 export function devSessionLockPath(cwd: string): string {
@@ -38,10 +40,36 @@ export function readDevSessionLock(cwd: string): DevSessionLock | null {
   }
 }
 
-export function writeDevSessionLock(cwd: string, lock: Omit<DevSessionLock, "version">): void {
+/** True when a process is alive under `pid`. EPERM means it exists and belongs to someone else. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+/**
+ * The lock, only while the `supatype dev` that wrote it is still running.
+ *
+ * A dev killed without its exit hooks (a closed terminal on Windows, `kill -9`) leaves its lock
+ * behind, and a lock alone made every later compose render dev, so a production stack rendered by
+ * `push` or `self-host compose up` came up with open CORS and an open Studio (SHa). A lock whose
+ * process is gone, or that names none, is removed and read as no session at all.
+ */
+export function liveDevSessionLock(cwd: string): DevSessionLock | null {
+  const lock = readDevSessionLock(cwd)
+  if (lock === null) return null
+  if (lock.pid !== undefined && processAlive(lock.pid)) return lock
+  clearDevSessionLock(cwd)
+  return null
+}
+
+export function writeDevSessionLock(cwd: string, lock: Omit<DevSessionLock, "version" | "pid">): void {
   const dir = join(cwd, ".supatype")
   mkdirSync(dir, { recursive: true })
-  const payload: DevSessionLock = { version: LOCK_VERSION, ...lock }
+  const payload: DevSessionLock = { version: LOCK_VERSION, ...lock, pid: process.pid }
   writeFileSync(devSessionLockPath(cwd), `${JSON.stringify(payload, null, 2)}\n`, "utf8")
 }
 

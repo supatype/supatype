@@ -74,6 +74,7 @@ export default { server: { mode: "dev" } }
 | `versions.*` | Optional pin for engine, server, postgres, deno. **Omit for Docker `:latest`** |
 | `connection` | Override database URL (else `DATABASE_URL` env) |
 | `auth.providers` | OAuth providers (`github`, `google`, ...): `clientId`, `secret: env("NAME")`, optional `redirectUri`, `url`. See [OAuth providers](#oauth-providers) |
+| `api.corsOrigins` | Browser origins allowed to call the API besides `SITE_URL`, e.g. `["https://admin.example.com"]`. `"*"` allows every origin and is never a default. `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` adds to it; a list saved in Studio (Settings, CORS tab) replaces both until reset (the site URL is always allowed). Dev mode allows every origin |
 
 ## .env essentials
 

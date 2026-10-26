@@ -1,13 +1,13 @@
 import React, { useState, useCallback, useEffect } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
-import { usePlatformFetch, usePlatform } from "../hooks/usePlatform.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
+import { ApiCorsSettings } from "./ApiCorsSettings.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,12 +25,6 @@ interface EnvVar {
   value: string
   sensitive: boolean
   source: "env" | "config" | "override"
-}
-
-interface CorsOrigin {
-  id: string
-  origin: string
-  created_at: string
 }
 
 interface AuthProviderConfig {
@@ -345,246 +339,23 @@ function EnvSettings(): React.ReactElement {
 
 // ─── CORS Origins Tab ─────────────────────────────────────────────────────────
 
-const CORS_OPEN_BANNER_LS_PREFIX = "supatype-studio:cors-open-banner-dismissed"
-
-function corsOpenBannerStorageKey(projectRef: string): string {
-  return `${CORS_OPEN_BANNER_LS_PREFIX}:${projectRef}`
-}
-
 /**
- * CORS on a self-hosted server. The server reads `SUPATYPE_CORS_ALLOW_ORIGINS` once when it
- * starts and answers browsers from its own origin only when the list is unset; `supatype dev`
- * allows every origin. Nothing exposes the running list to Studio yet, so this says how to set it
- * rather than showing it, and never offers an editor whose saves nothing would read.
+ * The CORS tab is the allowed-origins page: what the project's gateway enforces, read and changed
+ * through `/admin/cors-origins` on self-host and the control plane's project route on Cloud, so
+ * both hosts show one setting from one source. The demo build has no gateway to ask, so it only
+ * says where the list comes from.
  */
-function SelfHostCorsSettings(): React.ReactElement {
+function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
+  if (!demoMode) return <ApiCorsSettings />
   return (
     <Card className="p-4">
       <h3>CORS allowed origins</h3>
-      <div className="flex flex-col gap-3 max-w-[640px] mt-2 text-[0.85rem] text-muted-foreground leading-relaxed">
-        <p>
-          A self-hosted server lets browsers call your API from its own origin only. To allow a web
-          app served from another origin, list it in <code>SUPATYPE_CORS_ALLOW_ORIGINS</code> in the
-          project&apos;s <code>.env</code>, separated by commas, then restart the stack:
-        </p>
-        <CodeBlock>SUPATYPE_CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com</CodeBlock>
-        <p>
-          Studio cannot read the list the server is running with, so it is not shown here.{" "}
-          <code>supatype dev</code> allows every origin, whatever the list says.
-        </p>
-        <p>
-          Authentication and Row Level Security apply either way. Native apps (Kotlin, Swift,
-          URLSession, OkHttp, etc.) are not gated by CORS.
-        </p>
-      </div>
+      <p className="mt-2 max-w-[640px] text-[0.85rem] text-muted-foreground leading-relaxed">
+        A deployed project allows browsers from its site URL and from the origins in{" "}
+        <code>api.corsOrigins</code> or <code>SUPATYPE_CORS_ALLOW_ORIGINS</code> in <code>.env</code>.
+        Owners and admins can change the list here; <code>supatype dev</code> allows every origin.
+      </p>
     </Card>
-  )
-}
-
-function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
-  const pf = usePlatformFetch()
-  const { projectRef } = usePlatform()
-  const [origins, setOrigins] = useState<CorsOrigin[]>([])
-  const [newOrigin, setNewOrigin] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle")
-  /** Raw value from GET config, undefined cors key means platform permissive default */
-  const [serverAllowedSnapshot, setServerAllowedSnapshot] = useState<string[] | undefined>(undefined)
-  const [configReady, setConfigReady] = useState(false)
-  const [bannerDismissed, setBannerDismissed] = useState(false)
-
-  const refKey = typeof projectRef === "string" && projectRef.length > 0 ? projectRef : ""
-
-  useEffect(() => {
-    if (!refKey || typeof window === "undefined") return
-    try {
-      setBannerDismissed(localStorage.getItem(corsOpenBannerStorageKey(refKey)) === "1")
-    } catch {
-      setBannerDismissed(false)
-    }
-  }, [refKey])
-
-  const loadConfig = useCallback(async () => {
-    if (!pf || !projectRef) return
-    setLoading(true)
-    setLoadError(null)
-    setConfigReady(false)
-    try {
-      const res = await pf(`projects/${projectRef}/config`)
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`)
-      }
-      const json = (await res.json()) as { data?: Record<string, unknown> }
-      const data = json.data ?? {}
-      const corsVal = data["cors"] as { allowedOrigins?: unknown } | undefined
-      const raw = corsVal?.allowedOrigins
-      const allowedList =
-        raw === undefined ? undefined : Array.isArray(raw) && raw.every((x) => typeof x === "string")
-          ? (raw as string[])
-          : []
-
-      setServerAllowedSnapshot(allowedList)
-
-      const list =
-        allowedList ??
-        ([] as string[]) // permissive unset: show empty editable list locally
-      setOrigins(
-        list.map((origin, idx) => ({
-          id: `c-${origin}-${idx}`,
-          origin,
-          created_at: new Date().toISOString(),
-        })),
-      )
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Failed to load CORS configuration")
-    } finally {
-      setLoading(false)
-      setConfigReady(true)
-    }
-  }, [pf, projectRef])
-
-  useEffect(() => {
-    void loadConfig()
-  }, [loadConfig])
-
-  const permissiveUnset = serverAllowedSnapshot === undefined
-  const savedListHasStar =
-    Array.isArray(serverAllowedSnapshot) && serverAllowedSnapshot.includes("*")
-  const showOpenBanner =
-    configReady &&
-    !bannerDismissed &&
-    (permissiveUnset || savedListHasStar)
-
-  const dismissBanner = useCallback(() => {
-    setBannerDismissed(true)
-    if (refKey && typeof window !== "undefined") {
-      try {
-        localStorage.setItem(corsOpenBannerStorageKey(refKey), "1")
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [refKey])
-
-  const handleAdd = () => {
-    const trimmed = newOrigin.trim()
-    if (!trimmed) return
-    try {
-      if (trimmed !== "*") new URL(trimmed) // validate URL format
-    } catch {
-      setError("Invalid origin URL. Must be a valid URL (e.g. https://my-app.com) or *")
-      return
-    }
-    if (origins.some((o) => o.origin === trimmed)) {
-      setError("This origin already exists")
-      return
-    }
-    setOrigins((prev) => [...prev, { id: `c-${Date.now()}`, origin: trimmed, created_at: new Date().toISOString() }])
-    setNewOrigin("")
-    setError(null)
-  }
-
-  const handleRemove = (id: string) => {
-    setOrigins((prev) => prev.filter((o) => o.id !== id))
-  }
-
-  const handleSave = async () => {
-    if (!pf || !projectRef) return
-    setSaveState("saving")
-    setError(null)
-    try {
-      const allowedOrigins = origins.map((o) => o.origin)
-      const res = await pf(`projects/${projectRef}/config`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cors: { allowedOrigins } }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { message?: string }
-        throw new Error(body.message ?? `Save failed (${res.status})`)
-      }
-      await loadConfig()
-      setSaveState("saved")
-      setTimeout(() => { setSaveState("idle") }, 2000)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed")
-      setSaveState("idle")
-    }
-  }
-
-  if (demoMode || !pf || !projectRef) {
-    return <SelfHostCorsSettings />
-  }
-
-  return (
-    <div className="space-y-4">
-      {showOpenBanner ? (
-        <div className="rounded-md border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-sm text-foreground">
-          <div className="font-medium text-amber-300 mb-2">Browsers may call your API from any web origin</div>
-          <p className="text-muted-foreground text-[0.85rem] leading-relaxed mb-2">
-            {permissiveUnset && !savedListHasStar
-              ? "No explicit allow-list is saved yet, the platform uses a permissive default so front-end builds are not silently blocked."
-              : "Your allow-list includes *, every website can initiate cross-origin browser requests to your project URLs."}
-            {" "}Authentication (JWT/session) and Row Level Security still apply, this setting does not bypass them.
-            {" "}Native apps (Kotlin, Swift, URLSession, OkHttp, etc.) are not gated by CORS.
-          </p>
-          <p className="text-muted-foreground text-[0.85rem] leading-relaxed mb-3">
-            Add specific HTTPS origins below to restrict which sites can run browser-side JavaScript against your API host.
-          </p>
-          <Button size="xs" onClick={dismissBanner}>Dismiss</Button>
-        </div>
-      ) : null}
-
-      <Card className="p-4">
-        <h3>CORS allowed origins</h3>
-        <p className="text-[0.8rem] text-muted-foreground mb-4">
-          Only applies to browsers. Use * only when you fully understand exposure. Leave empty and save only if you intentionally want strict lock-down (explicit empty list, browser requests with Origin may fail).
-        </p>
-
-        {loadError ? <p className="text-red-400 text-xs mb-3">{loadError}</p> : null}
-        {loading ? <p className="text-muted-foreground text-xs mb-3">Loading…</p> : null}
-
-        <div className="flex gap-2 mb-4">
-          <Input
-            className="flex-1"
-            value={newOrigin}
-            onChange={(e) => { setNewOrigin(e.target.value); setError(null) }}
-            placeholder="https://my-app.com"
-            disabled={loading}
-            onKeyDown={(e) => { if (e.key === "Enter") handleAdd() }}
-          />
-          <Button variant="primary" onClick={handleAdd} disabled={loading}>Add origin</Button>
-          <Button
-            variant="primary"
-            onClick={() => void handleSave()}
-            disabled={loading || saveState === "saving"}
-          >
-            {saveState === "saving" ? "Saving…" : "Save"}
-          </Button>
-        </div>
-        {saveState === "saved" ? <p className="text-green-400 text-xs mb-3">Saved</p> : null}
-        {error ? <p className="text-red-400 text-xs mb-3">{error}</p> : null}
-
-        <div className="flex flex-col gap-2">
-          {origins.map((o) => (
-            <div key={o.id} className="flex items-center justify-between px-3 py-2 border border-border rounded-md">
-              <div>
-                <code className="text-sm text-primary">{o.origin}</code>
-              </div>
-              <Button size="xs" variant="destructive" onClick={() => handleRemove(o.id)}>Remove</Button>
-            </div>
-          ))}
-          {origins.length === 0 ? (
-            <EmptyState
-              title="No explicit origins in this editor"
-              description="Saving with an empty list stores an explicit lock-down policy. Omitting origins in config is permissive until you save a list."
-            />
-          ) : null}
-        </div>
-      </Card>
-    </div>
   )
 }
 
