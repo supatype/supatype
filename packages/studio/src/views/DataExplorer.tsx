@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from "react"
+import React, { useState, useCallback, useContext, useEffect, useMemo } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
@@ -10,6 +10,10 @@ import { isJsonObject } from "../lib/json.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { browseTotal, countModeFor, totalLabel } from "../lib/browse-paging.js"
+import { listOrder, tableKeyColumns, withOrder, type ListOrder } from "../lib/list-order.js"
+import { AdminConfigContext } from "../hooks/useAdminConfig.js"
+import { useListFreshness } from "../hooks/useListFreshness.js"
+import { RefreshControls } from "../components/RefreshControls.js"
 import type { QueryBuilder } from "@supatype/client"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -40,10 +44,7 @@ interface ColumnFilter {
 
 type FilterOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "like" | "ilike" | "is_null" | "is_not_null" | "in"
 
-interface SortSpec {
-  column: string
-  ascending: boolean
-}
+type SortSpec = ListOrder
 
 interface BulkAction {
   type: "delete"
@@ -508,14 +509,21 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   // Fetch rows from server with sorting, filtering, and pagination. The count comes back with the
   // page, exact or estimated by the table's size: see `browse-paging.ts`.
   const countMode = countModeFor(currentTable?.row_count ?? -1)
+  // The model this table belongs to, for the order its list starts in. None for a table no model
+  // describes, which starts in key order.
+  const defaultSort = useContext(AdminConfigContext)?.models.find((m) => m.tableName === selectedTable)?.defaultSort
+  // Joined, so the table list reloading after a write does not count as a new key and refetch.
+  const keyNames = tableKeyColumns(currentTable?.columns ?? []).join(",")
+  const tableKnown = currentTable !== undefined
   const fetchRows = useCallback(async () => {
-    if (!selectedTable) return
+    // Not before the table's columns are known: the order ends on its key, which they name.
+    if (!selectedTable || !tableKnown) return
     setLoading(true)
     setRowsError(null)
     try {
       const from = page * pageSize
       let query = withFilters(client.from(selectedTable).select("*", { count: countMode }), filters)
-      for (const s of sorts) query = query.order(s.column, { ascending: s.ascending })
+      query = withOrder(query, listOrder(sorts, defaultSort, keyNames.split(",")))
       const { data, error, count } = await query.range(from, from + pageSize - 1)
       if (error) {
         setRowsError(error.message)
@@ -535,11 +543,13 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
     } finally {
       setLoading(false)
     }
-  }, [client, selectedTable, page, pageSize, sorts, filters, countMode])
+  }, [client, selectedTable, tableKnown, page, pageSize, sorts, filters, countMode, defaultSort, keyNames])
 
-  useEffect(() => {
-    void fetchRows()
-  }, [fetchRows])
+  // Held while a cell is being edited or a row typed in: a refetch would replace the rows under it.
+  const freshness = useListFreshness(fetchRows, {
+    viewKey: `data.${selectedTable}`,
+    paused: editingCell !== null || showNewRecord,
+  })
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
@@ -621,7 +631,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
       setRowsError(error.message)
     } else {
       setSelectedIds(new Set())
-      void fetchRows()
+      freshness.refresh()
       refetchTables()
     }
     setShowDeleteConfirm(false)
@@ -636,7 +646,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
     if (error) {
       setRowsError(error.message)
     } else {
-      void fetchRows()
+      freshness.refresh()
       refetchTables()
     }
   }
@@ -650,7 +660,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
       setRowsError(error.message)
     } else {
       setShowNewRecord(false)
-      void fetchRows()
+      freshness.refresh()
       refetchTables()
     }
   }
@@ -667,6 +677,8 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   const handleSelectTable = (tableName: string) => {
     setSelectedTable(tableName)
     setPage(0)
+    // Cleared so the spinner shows: the old table's rows under the new table's columns would not.
+    setRows([])
     setSorts([])
     setFilters([])
     setSelectedIds(new Set())
@@ -675,13 +687,14 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
     setShowNewRecord(false)
   }
 
-  // Sort indicator
+  // Sort indicator: the columns the rows are in order of, whether the user chose them or the model did.
+  const shownSorts = sorts.length > 0 || defaultSort === undefined ? sorts : [defaultSort]
   const getSortIndicator = (col: string): string => {
-    const sort = sorts.find((s) => s.column === col)
+    const sort = shownSorts.find((s) => s.column === col)
     if (!sort) return ""
-    const idx = sorts.indexOf(sort)
+    const idx = shownSorts.indexOf(sort)
     const arrow = sort.ascending ? "\u2191" : "\u2193"
-    return sorts.length > 1 ? `${arrow}${idx + 1}` : arrow
+    return shownSorts.length > 1 ? `${arrow}${idx + 1}` : arrow
   }
 
   if (tablesLoading) {
@@ -758,6 +771,8 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
           </Button>
 
           <div className="flex-1" />
+
+          <RefreshControls freshness={freshness} busy={loading} />
 
           <Button
             size="sm"
@@ -839,12 +854,13 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
         {/* Row-level errors */}
         {rowsError ? (
           <div className="mb-3">
-            <ErrorBanner message={rowsError} onRetry={fetchRows} />
+            <ErrorBanner message={rowsError} onRetry={freshness.refresh} />
           </div>
         ) : null}
 
-        {/* Data display */}
-        {loading ? (
+        {/* Data display. The spinner only while there is nothing to show: a refresh keeps the rows
+            on screen until the new ones arrive, rather than blanking the table every few seconds. */}
+        {loading && rows.length === 0 ? (
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
           </div>

@@ -158,6 +158,26 @@ function modelRules(mo: Record<string, unknown>): Pick<ModelConfig, "constraints
   }
 }
 
+const isEngineSort = isShape({ field: isString, direction: isOneOf(["asc", "desc"] as const) })
+
+/**
+ * A model's key and the order its list starts in.
+ *
+ * The engine sends every key column as `primaryKey`; an engine from before that sends none, and
+ * its models are all keyed on `id`. A bare string is read as a one-column key. `defaultSort` was
+ * sent all along and dropped here, so lists had no order until a header was clicked.
+ */
+function modelOrder(mo: Record<string, unknown>): Pick<ModelConfig, "primaryKey" | "primaryKeyColumns" | "defaultSort"> {
+  const key = mo["primaryKey"]
+  const columns = isStringArray(key) ? key : isString(key) ? [key] : undefined
+  const sort = mo["defaultSort"]
+  return {
+    primaryKey: columns?.[0] ?? "id",
+    ...(columns !== undefined && { primaryKeyColumns: columns }),
+    ...(isEngineSort(sort) && { defaultSort: { column: sort.field, ascending: sort.direction === "asc" } }),
+  }
+}
+
 function normalizeModel(mo: Record<string, unknown>): ModelConfig {
   const name = String(mo["name"] ?? "")
   const tableName = String(mo["tableName"] ?? name)
@@ -169,7 +189,7 @@ function normalizeModel(mo: Record<string, unknown>): ModelConfig {
     ...modelLabels(mo, name),
     tableName,
     apiPath: `/rest/v1/${tableName}`,
-    primaryKey: String(mo["primaryKey"] ?? "id"),
+    ...modelOrder(mo),
     fields,
     listColumns: isStringArray(listColumns) ? listColumns : [],
     // A model may say which columns to search, or the columns may say it themselves with
