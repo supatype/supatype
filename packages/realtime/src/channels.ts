@@ -336,10 +336,16 @@ export class ChannelManager {
     return entry
   }
 
-  /** Get all presence entries for a channel. */
-  getPresence(channel: string): PresenceEntry[] {
+  /**
+   * Every presence entry tracked on `channel`, within one project.
+   *
+   * Scoped the way `getChannelClients` is: two projects on a shared instance can pick the same
+   * channel name, and one project's members must never appear in the other's lobby.
+   */
+  getPresence(channel: string, projectRef: string | null): PresenceEntry[] {
     const entries: PresenceEntry[] = []
     for (const client of this.clients.values()) {
+      if (client.projectRef !== projectRef) continue
       const entry = client.presence.get(channel)
       if (entry) entries.push(entry)
     }

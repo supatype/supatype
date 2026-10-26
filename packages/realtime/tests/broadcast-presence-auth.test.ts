@@ -150,6 +150,31 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
 
     expect(leave.type === "presence" && leave.leaves).toEqual([{ user_id: "member-g" }])
   })
+
+  it("sends a newcomer the members already here, right after its join is accepted", async () => {
+    const channel = "room-state"
+    const first = await open(userToken("first-h"))
+    await subscribe(first, channel)
+    first.send({ type: "presence_track", channel, payload: { status: "here" } })
+    await first.next((m) => m.type === "presence")
+
+    const newcomer = await open(userToken("newcomer-h"))
+    await subscribe(newcomer, channel)
+    const state = await newcomer.next((m) => m.type === "presence")
+
+    expect(state).toEqual({ type: "presence", channel, joins: [{ user_id: "first-h", status: "here" }], leaves: [] })
+    const accepted = newcomer.frames.findIndex(isSystem("ok", `subscribed to ${channel}`))
+    expect(newcomer.frames.indexOf(state)).toBeGreaterThan(accepted)
+  })
+
+  it("sends no presence to a newcomer when nobody is tracked on the channel", async () => {
+    const channel = "room-empty"
+    const newcomer = await open(userToken("newcomer-i"))
+    await subscribe(newcomer, channel)
+
+    await settle(newcomer)
+    expect(relayed(newcomer)).toEqual([])
+  })
 })
 
 describe("channel members on a shared instance", () => {
@@ -165,5 +190,18 @@ describe("channel members on a shared instance", () => {
 
     expect(channels.getChannelClients("lobby", "project-a").map((c) => c.clientId)).toEqual([a])
     expect(channels.getChannelClients("lobby", "project-b").map((c) => c.clientId)).toEqual([b])
+  })
+
+  it("report presence within the asking project only", () => {
+    const channels = new ChannelManager()
+    const ws: ClientSocket = { readyState: 1, send: () => {} }
+    const claims = { sub: "u", role: "authenticated" }
+    const a = channels.addClient(ws, claims, "project-a")
+    const b = channels.addClient(ws, claims, "project-b")
+    channels.trackPresence(a, "lobby", { user_id: "in-a" })
+    channels.trackPresence(b, "lobby", { user_id: "in-b" })
+
+    expect(channels.getPresence("lobby", "project-a")).toEqual([{ user_id: "in-a" }])
+    expect(channels.getPresence("lobby", "project-b")).toEqual([{ user_id: "in-b" }])
   })
 })
