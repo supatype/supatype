@@ -19,6 +19,7 @@ import {
   ElevatedNoticeProvider,
 } from "./components/ElevatedModeBanner.js"
 import { LinkAccountPrompt } from "./components/LinkAccountPrompt.js"
+import { SchemaPushNotice } from "./components/SchemaPushNotice.js"
 
 // Re-export for dev tool views that import useStudioClient
 export const useStudioClient = useAdminClient
@@ -185,6 +186,10 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
                 Renders only while a view showing project rows is mounted, see
                 `useShowsProjectRows`. */}
             <ElevatedModeBanner />
+            {/* Unlike the notices beside it, mounted for every view: a refused or failed schema
+                push is a claim about the whole project's schema, true on every screen while it
+                shows, and it clears itself once a push applies. */}
+            <SchemaPushNotice />
             {/* On Cloud, a member with no linked project login is refused project rows;
                 this says why where they would be, and links the login. */}
             <LinkAccountPrompt />
