@@ -1011,10 +1011,24 @@ export type SpreadOptionalModelFields<TFields extends Record<string, unknown>> =
           : never]?: UnwrapModelFieldType<TFields[K]>
       }
 
+/** The Postgres index methods a model index may use. `btree` when omitted. */
+export type IndexMethod = "btree" | "gin" | "gist" | "hnsw" | "brin"
+
+/**
+ * How an `hnsw` index on a `Vector` field measures nearness: pgvector's operator classes
+ * `vector_cosine_ops`, `vector_l2_ops` and `vector_ip_ops`. `cosine` when omitted. A query ordered
+ * by another distance does not use the index.
+ */
+export type VectorDistance = "cosine" | "l2" | "innerProduct"
+
 export type ModelIndex = {
   name?: string
   fields: readonly string[]
   unique?: true
+  /** `gist` for `Geo` and `GeoPoint` fields, `hnsw` for `Vector` fields. */
+  using?: IndexMethod
+  /** For an `hnsw` index only. */
+  distance?: VectorDistance
 }
 
 export type ModelMeta<TFields extends Record<string, unknown>> = {

@@ -14,7 +14,9 @@ what, if anything, you need to do.
    older realtime image would then put the whole old row in DELETE events. The order is:
    `supatype update`, `supatype self-host compose up -d`, then `supatype push`.
 3. **Push once.** The first push from 0.7.0 records the objects 0.6.0 made as Supatype's, with
-   no prompts. `supatype doctor` lists them as `claimed` until then. If someone edited a policy or
+   no prompts of its own, and asks once to move pgvector and `unaccent` out of `public` (see
+   [Extensions](#extensions-move-to-the-extensions-schema)). `supatype doctor` lists the objects
+   0.6.0 made as `claimed` until then. If someone edited a policy or
    RLS setting by hand under 0.6.0, the push stops with `security_drift` instead of overwriting
    it; review the difference interactively, or pass `--overwrite-drift` to put Supatype's
    definitions back.
@@ -211,6 +213,79 @@ export default defineConfig({
   components watching the same table no longer share one.
 - `@supatype/client/bindings` is a new subpath the framework bindings use internally. It is not a
   public API; do not import it from application code.
+
+## Extensions move to the extensions schema
+
+A push now creates the extensions a schema needs (`postgis` for `Geo` and `GeoPoint`, `vector` for
+`Vector<N>`, `unaccent` for slugs, `pgcrypto`) in the `extensions` schema, as Supabase does, instead
+of `public`. In `public`, PostGIS and pgvector added about 940 functions, about 330 of which the API
+served as `/rest/v1/rpc/*` endpoints and listed in a 328 KB OpenAPI document. PostgREST 14 lists
+those functions with a query that is slow while the catalog statistics are older than the
+extension, so `GET /rest/v1/` timed out for 30 to 60 seconds after the push that created them.
+
+What you get:
+
+- `Geo`, `GeoPoint` and `Vector` columns read, write and filter through REST and GraphQL as
+  before. PostgREST resolves their types and operators through its extra search path, which is
+  `public,extensions` (or `api,extensions` with field masking in views) on every tier.
+- The extensions' own functions are no longer API endpoints: `/rest/v1/rpc/st_distance` answers
+  404. To call one from the API, write a SQL function of your own in `public` that calls it, and
+  call that with `rpc()`.
+- A model index can name its method: `{ fields: ["location"], using: "gist" }` for a `Geo` or
+  `GeoPoint` field, `{ fields: ["embedding"], using: "hnsw" }` for a `Vector` field. An `hnsw`
+  index uses cosine distance (`vector_cosine_ops`); add `distance: "l2"` or
+  `distance: "innerProduct"` for the other two. A query ordered by a different distance than its
+  index's does not use the index. `hnsw` indexes used to fail to push, because pgvector needs the
+  operator class named.
+
+**Existing projects.** The first push after you upgrade moves `vector`, `unaccent` and `pgcrypto`
+out of `public` with `ALTER EXTENSION ... SET SCHEMA extensions`. Columns, indexes and rows are not
+touched: a column records its type by OID, not by name. The move is listed in the plan as a
+cautious change, so `supatype push` asks before applying it (`--yes` agrees up front) and
+`supatype dev` applies it as it applies other cautious changes. It is recorded in the migration
+history, and `supatype rollback` moves the extensions back. SQL of your own that qualifies one of
+their objects with `public.` (`public.vector`, `public.unaccent(...)`) has to drop the prefix or use
+`extensions.`, and a database role with its own `search_path` needs `extensions` on it.
+
+**PostGIS stays where it is.** `ALTER EXTENSION postgis SET SCHEMA` is not supported, so a push
+leaves PostGIS in `public`, says so in a warning on each push, and everything keeps working. To
+move it, reload the PostGIS columns. This drops and re-adds every `geography` and `geometry`
+column, so do it in a maintenance window with writes stopped, after a backup
+(`supatype self-host backup`, or `pg_dump`). Run the SQL as the database's admin role
+(`supatype_admin` on `supatype/postgres`):
+
+1. List the columns to keep:
+
+   ```sql
+   SELECT table_schema, table_name, column_name
+     FROM information_schema.columns
+    WHERE udt_name IN ('geography', 'geometry');
+   ```
+
+2. Copy each one aside with its table's primary key, as text (the hex form reads back exactly),
+   then replace the extension. Repeat the `CREATE TABLE` for every column the query listed. The
+   `DROP` also takes the columns' indexes, any view or policy that uses them and the
+   `spatial_ref_sys` table; copy any rows you added to `spatial_ref_sys` yourself, and drop
+   `postgis_topology` or `postgis_raster` first if you installed them.
+
+   ```sql
+   CREATE SCHEMA postgis_move;
+   CREATE TABLE postgis_move.places AS SELECT id, point::text AS point FROM public.places;
+   DROP EXTENSION postgis CASCADE;
+   CREATE EXTENSION postgis WITH SCHEMA extensions;
+   ```
+
+3. Push. The push adds the columns and their indexes back, empty: `supatype push`.
+
+4. Put the values back, and drop the copies:
+
+   ```sql
+   UPDATE public.places AS t SET point = m.point::extensions.geography
+     FROM postgis_move.places AS m WHERE t.id = m.id;
+   DROP SCHEMA postgis_move CASCADE;
+   ```
+
+5. Push again. It reports the schema up to date, and the warning about PostGIS is gone.
 
 ## Functions and the database
 
