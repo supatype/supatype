@@ -40,7 +40,8 @@ test("creating a post leaves a first draft", async ({ page }) => {
   await body.click()
   await body.fill("Body written by the create-draft check.")
 
-  await page.getByRole("button", { name: /^save$/i }).click()
+  // A model with drafts saves through "Save draft"; the plain "Save" belongs to models without them.
+  await page.getByRole("button", { name: /^save draft$/i }).click()
 
   // The form navigates to the record once the row exists, which is the signal that the save
   // finished rather than that the button was pressed.
