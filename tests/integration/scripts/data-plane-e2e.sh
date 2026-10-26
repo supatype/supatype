@@ -74,12 +74,25 @@ fi
 echo "==> Building storage and realtime from this checkout"
 # The two Dockerfiles do not take the same context. Storage copies a `dist/` that `pnpm build`
 # produced, from its own directory; realtime builds from source with the workspace root as context.
-if [[ ! -d "$ROOT_DIR/packages/storage/dist" ]]; then
+#
+# An image the caller names and already has is used as it is. The release train hands over the
+# images it built from the candidate commits; rebuilding under the same tag here replaced them, so
+# this suite tested a build of its own while the train reported the train's.
+build_unless_given() {
+  local given="$1" tag="$2"
+  shift 2
+  if [[ -n "$given" ]] && docker image inspect "$tag" >/dev/null 2>&1; then
+    echo "  using $tag as given"
+    return 0
+  fi
+  docker build -q -t "$tag" "$@" >/dev/null
+}
+if [[ -z "${SUPATYPE_STORAGE_IMAGE:-}" && ! -d "$ROOT_DIR/packages/storage/dist" ]]; then
   echo "ERROR: packages/storage/dist is missing, run 'pnpm build' first"
   exit 1
 fi
-docker build -q -t "$STORAGE_IMAGE" "$ROOT_DIR/packages/storage" >/dev/null
-docker build -q -t "$REALTIME_IMAGE" -f "$ROOT_DIR/packages/realtime/Dockerfile" "$ROOT_DIR" >/dev/null
+build_unless_given "${SUPATYPE_STORAGE_IMAGE:-}" "$STORAGE_IMAGE" "$ROOT_DIR/packages/storage"
+build_unless_given "${SUPATYPE_REALTIME_IMAGE:-}" "$REALTIME_IMAGE" -f "$ROOT_DIR/packages/realtime/Dockerfile" "$ROOT_DIR"
 
 echo "==> SMTP catcher"
 docker rm -f supatype-authflows-mailpit >/dev/null 2>&1 || true

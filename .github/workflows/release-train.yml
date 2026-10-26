@@ -1,0 +1,324 @@
+# The release train (Pre-Launch-Fix-Plan section 10 item 2; X04, C17).
+#
+# Builds every artifact from one commit per repository, tags it `:train`, and runs every e2e and
+# regression suite against exactly those builds:
+#   engine binary and image  supatype-schema-engine
+#   server image             supatype-auth
+#   postgres image           supatype-postgres
+#   Studio, storage, realtime, functions-worker and control-plane images, and the CLI   supatype
+#   cloud control-plane image, with its engine built from the same engine commit         supatype-cloud
+#
+# Nothing a suite runs may come from a registry in place of a build: run-suite.sh fails a suite
+# that started a published Supatype image, or whose pushes were made by an engine without the
+# rollback ledger (the interim engine marker until F24 gives candidates their own version).
+#
+# A skipped suite is a failed suite. Suites report skips in their output, and run-suite.sh fails
+# them; and the final `train` job fails unless every suite job succeeded, so a suite job skipped
+# because a build failed fails the train too.
+#
+# Callable from the release workflows, which gate on it:
+#   jobs:
+#     train:
+#       uses: supatype/supatype/.github/workflows/release-train.yml@main
+#       with:
+#         schema_engine_sha: ${{ github.sha }}     # the caller's own repository at the tag
+#       secrets: inherit
+#
+# Secrets (all optional; what each is for):
+#   PRIVATE_REPO_TOKEN   read access to the five repositories. supatype-schema-engine is private,
+#                        so without it the engine checkout fails. Same name cloud's image workflow uses.
+#   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN   pull base images as the account, not anonymously.
+#   MINISIGN_PUBLIC_KEY  the release key, for any component binary a suite downloads. Without it
+#                        the key committed in scripts/install.sh is used.
+name: Release train
+
+on:
+  workflow_dispatch:
+    inputs:
+      schema_engine_sha:
+        description: supatype-schema-engine commit (default branch head when empty)
+        required: false
+        type: string
+      supatype_sha:
+        description: supatype commit (this run's commit when empty)
+        required: false
+        type: string
+      supatype_auth_sha:
+        description: supatype-auth commit (default branch head when empty)
+        required: false
+        type: string
+      supatype_cloud_sha:
+        description: supatype-cloud commit (default branch head when empty)
+        required: false
+        type: string
+      supatype_postgres_sha:
+        description: supatype-postgres commit (default branch head when empty)
+        required: false
+        type: string
+      harness_ref:
+        description: supatype commit holding the train scripts (this run's commit when empty)
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      schema_engine_sha: { required: false, type: string, default: "" }
+      supatype_sha: { required: false, type: string, default: "" }
+      supatype_auth_sha: { required: false, type: string, default: "" }
+      supatype_cloud_sha: { required: false, type: string, default: "" }
+      supatype_postgres_sha: { required: false, type: string, default: "" }
+      harness_ref: { required: false, type: string, default: "" }
+    secrets:
+      PRIVATE_REPO_TOKEN: { required: false }
+      DOCKERHUB_USERNAME: { required: false }
+      DOCKERHUB_TOKEN: { required: false }
+      MINISIGN_PUBLIC_KEY: { required: false }
+
+permissions:
+  contents: read
+
+env:
+  TRAIN_TAG: train
+  OWNER: ${{ github.repository_owner }}
+
+jobs:
+  # Every SHA is fixed here, once, so the builds and the suites cannot see different commits.
+  resolve:
+    name: resolve the candidate commits
+    runs-on: ubuntu-24.04
+    outputs:
+      schema_engine: ${{ steps.sha.outputs.schema_engine }}
+      supatype: ${{ steps.sha.outputs.supatype }}
+      supatype_auth: ${{ steps.sha.outputs.supatype_auth }}
+      supatype_cloud: ${{ steps.sha.outputs.supatype_cloud }}
+      supatype_postgres: ${{ steps.sha.outputs.supatype_postgres }}
+      harness: ${{ steps.sha.outputs.harness }}
+      suites: ${{ steps.suites.outputs.suites }}
+    steps:
+      - name: Resolve each repository's commit
+        id: sha
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+          IN_ENGINE: ${{ inputs.schema_engine_sha }}
+          IN_SUPATYPE: ${{ inputs.supatype_sha }}
+          IN_AUTH: ${{ inputs.supatype_auth_sha }}
+          IN_CLOUD: ${{ inputs.supatype_cloud_sha }}
+          IN_POSTGRES: ${{ inputs.supatype_postgres_sha }}
+          RUN_SHA: ${{ github.sha }}
+          RUN_REPO: ${{ github.repository }}
+          IN_HARNESS: ${{ inputs.harness_ref }}
+        run: |
+          set -euo pipefail
+          # A short SHA or a branch name is expanded to the full commit, so the summary and every
+          # job name exactly one commit.
+          full() {
+            local repo="$1" ref="$2"
+            if [ -z "$ref" ]; then ref="$(gh api "repos/$OWNER/$repo" --jq .default_branch)"; fi
+            gh api "repos/$OWNER/$repo/commits/$ref" --jq .sha
+          }
+          supatype_default=""
+          if [ "$RUN_REPO" = "$OWNER/supatype" ]; then supatype_default="$RUN_SHA"; fi
+          {
+            echo "schema_engine=$(full supatype-schema-engine "$IN_ENGINE")"
+            echo "supatype=$(full supatype "${IN_SUPATYPE:-$supatype_default}")"
+            echo "supatype_auth=$(full supatype-auth "$IN_AUTH")"
+            echo "supatype_cloud=$(full supatype-cloud "$IN_CLOUD")"
+            echo "supatype_postgres=$(full supatype-postgres "$IN_POSTGRES")"
+            # The scripts that run the train: this commit when the train runs in supatype itself,
+            # otherwise supatype at harness_ref (its default branch when empty).
+            if [ -n "$IN_HARNESS" ]; then echo "harness=$(full supatype "$IN_HARNESS")";
+            elif [ "$RUN_REPO" = "$OWNER/supatype" ]; then echo "harness=$RUN_SHA";
+            else echo "harness=$(full supatype "")"; fi
+          } | tee -a "$GITHUB_OUTPUT"
+          {
+            echo "### Release train commits"
+            sed 's/^/- /' "$GITHUB_OUTPUT"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/supatype
+          ref: ${{ steps.sha.outputs.harness }}
+          path: harness
+
+      # One list of suites, in scripts/release-train/suites.sh, for CI and the local script alike.
+      - name: List the suites
+        id: suites
+        run: |
+          set -euo pipefail
+          source harness/scripts/release-train/suites.sh
+          echo "suites=$(printf '%s\n' "${TRAIN_SUITES[@]}" | jq -R . | jq -sc .)" >>"$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.component }}
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The control plane copies its engine out of the engine image, so they build together.
+          - component: engine
+            builds: engine control-plane
+            repos: supatype-schema-engine supatype
+          - component: server
+            builds: server
+            repos: supatype-auth
+          - component: postgres
+            builds: postgres
+            repos: supatype-postgres
+          - component: monorepo
+            builds: studio storage realtime functions-worker
+            repos: supatype
+          - component: cloud
+            builds: cloud
+            repos: supatype-cloud supatype-schema-engine
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/supatype
+          ref: ${{ needs.resolve.outputs.harness }}
+          path: harness
+
+      - name: Check out the candidate commits
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+          REPOS: ${{ matrix.repos }}
+          SHA_supatype_schema_engine: ${{ needs.resolve.outputs.schema_engine }}
+          SHA_supatype: ${{ needs.resolve.outputs.supatype }}
+          SHA_supatype_auth: ${{ needs.resolve.outputs.supatype_auth }}
+          SHA_supatype_cloud: ${{ needs.resolve.outputs.supatype_cloud }}
+          SHA_supatype_postgres: ${{ needs.resolve.outputs.supatype_postgres }}
+        run: |
+          read -ra wanted <<<"$REPOS"
+          bash harness/scripts/release-train/checkout.sh src "${wanted[@]}"
+
+      - name: Build
+        run: bash harness/scripts/release-train/build.sh --src src ${{ matrix.builds }}
+
+      - name: Save the images
+        env:
+          BUILDS: ${{ matrix.builds }}
+        run: |
+          set -euo pipefail
+          source harness/scripts/release-train/lib.sh
+          images=()
+          for c in $BUILDS; do images+=("$(train_image "$c")"); done
+          mkdir -p out
+          docker save "${images[@]}" | zstd -T0 -3 -o "out/images-${{ matrix.component }}.tar.zst"
+          if [ -f src/.train-out/supatype-engine-linux-amd64 ]; then cp src/.train-out/supatype-engine-linux-amd64 out/; fi
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: train-${{ matrix.component }}
+          path: out/
+          retention-days: 2
+          if-no-files-found: error
+
+  suite:
+    name: suite ${{ matrix.suite }}
+    needs: [resolve, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.resolve.outputs.suites) }}
+    env:
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/supatype
+          ref: ${{ needs.resolve.outputs.harness }}
+          path: harness
+
+      - name: Check out the candidate commits
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+          SHA_supatype_schema_engine: ${{ needs.resolve.outputs.schema_engine }}
+          SHA_supatype: ${{ needs.resolve.outputs.supatype }}
+        run: bash harness/scripts/release-train/checkout.sh src supatype supatype-schema-engine
+
+      # Pulls of base images (kong, postgrest, rust) through mirror.gcr.io, as the integration jobs
+      # do. Restarts the daemon, so it comes before any image is loaded.
+      - name: Use the Docker Hub mirror
+        run: if [ -f src/supatype/scripts/ci-docker-mirror.sh ]; then bash src/supatype/scripts/ci-docker-mirror.sh; fi
+
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: if [ -f src/supatype/scripts/ci-dockerhub-login.sh ]; then bash src/supatype/scripts/ci-dockerhub-login.sh; fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: train-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Load the train's images
+        run: |
+          set -euo pipefail
+          for f in artifacts/images-*.tar.zst; do zstd -dc "$f" | docker load; done
+          chmod +x artifacts/supatype-engine-linux-amd64
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: src/supatype/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Prepare the candidate CLI and the engine it resolves
+        env:
+          TRAIN_SUPATYPE_DIR: ${{ github.workspace }}/src/supatype
+          TRAIN_ENGINE_BIN: ${{ github.workspace }}/artifacts/supatype-engine-linux-amd64
+          TRAIN_HARNESS_DIR: ${{ github.workspace }}/harness
+          TRAIN_INSTALL_BROWSER: ${{ (matrix.suite == 'studio-ui' || matrix.suite == 'kitchen-sink') && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPATYPE_RELEASE_PUBLIC_KEY:-}" ]; then
+            echo "SUPATYPE_RELEASE_PUBLIC_KEY=$(grep -o 'RW[A-Za-z0-9+/=]\{40,\}' src/supatype/scripts/install.sh | head -1)" >>"$GITHUB_ENV"
+          fi
+          bash harness/scripts/release-train/prepare.sh
+
+      - name: Run ${{ matrix.suite }}
+        env:
+          TRAIN_SUPATYPE_DIR: ${{ github.workspace }}/src/supatype
+          TRAIN_ENGINE_DIR: ${{ github.workspace }}/src/supatype-schema-engine
+          TRAIN_ENGINE_BIN: ${{ github.workspace }}/artifacts/supatype-engine-linux-amd64
+          TRAIN_HARNESS_DIR: ${{ github.workspace }}/harness
+        run: bash harness/scripts/release-train/run-suite.sh "${{ matrix.suite }}" results
+
+      - name: Upload the suite's results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: train-results-${{ matrix.suite }}
+          path: results/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # The one status a release gates on. `always()` so that a suite job skipped because a build
+  # failed is read here as the failure it is, not passed over.
+  train:
+    name: release train
+    needs: [resolve, build, suite]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every build and every suite succeeded
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+          BUILD: ${{ needs.build.result }}
+          SUITE: ${{ needs.suite.result }}
+        run: |
+          echo "resolve=$RESOLVE build=$BUILD suite=$SUITE"
+          if [ "$RESOLVE" != success ] || [ "$BUILD" != success ] || [ "$SUITE" != success ]; then
+            echo "::error::The release train is not green: resolve=$RESOLVE build=$BUILD suite=$SUITE. A skipped job counts as a failure."
+            exit 1
+          fi

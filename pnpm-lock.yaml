@@ -1011,6 +1011,15 @@ importers:
       '@playwright/test':
         specifier: ^1.49.0
         version: 1.62.1
+      '@supatype/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@supatype/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@supatype/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@types/node':
         specifier: ^22
         version: 22.19.13
