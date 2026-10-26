@@ -82,7 +82,7 @@ const STORAGE_PROVIDER_OPTIONS: {
 ]
 
 /** Wizard result = scaffold options plus runtime actions (install / keys). */
-interface WizardResult extends ScaffoldOptions {
+export interface WizardResult extends ScaffoldOptions {
   packageManager: PackageManager
   install: boolean
   generateKeys: boolean
@@ -501,13 +501,13 @@ async function collectWizardAnswers(
 async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?: string }> {
   const createAdmin = ensureNotCancelled(
     await p.confirm({
-      message: "Create an admin user for /admin?",
+      message: "Create an admin user for Studio (/studio/)?",
       initialValue: true,
     }),
   )
   if (!createAdmin) return {}
 
-  p.note("First sign-in at /admin, created automatically on supatype dev or push.")
+  p.note("First sign-in to Studio at /studio/, created automatically on supatype dev or push.")
 
   const adminEmail = ensureNotCancelled(
     await p.text({
@@ -882,7 +882,9 @@ function tsConfigTemplate(opts: ScaffoldOptions): string {
   lines.push(`  },`)
   lines.push(`  server: {`)
   lines.push(`    mode: "${serverMode}",`)
-  lines.push(`    port: 54321,`)
+  // The native server listens on server.port. A docker project's API is on the gateway port in
+  // .env (SUPATYPE_KONG_PORT), so writing 54321 there only named a port nothing listened on.
+  if (opts.provider === "native") lines.push(`    port: 54321,`)
   if (serverMode === "standalone") {
     lines.push(`    domain: "${opts.domain ?? ""}",  // e.g. "api.example.com" for ACME TLS`)
     if (opts.tlsEmail) {
@@ -1268,18 +1270,29 @@ VITE_SUPATYPE_ANON_KEY=`,
 
   if (opts.adminEmail && opts.adminPassword) {
     sections.push(
-      `# First admin for /admin, consumed on first supatype dev or push (password removed after use)
+      `# First Studio admin (/studio/), consumed on first supatype dev or push (password removed after use)
 SUPATYPE_ADMIN_EMAIL=${opts.adminEmail}
 SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
     )
   }
 
-  sections.push(
-    `# Self-host compose uses the same DATABASE_URL when Postgres is published on localhost:5432`,
-  )
+  sections.push(SELF_HOST_PORTS_ENV_SECTION)
 
   return sections.join("\n\n") + "\n"
 }
+
+/**
+ * The host ports `supatype self-host compose` publishes, with their defaults. Commented out so the
+ * defaults apply; the first anyone heard of these used to be a clash on 5432.
+ */
+const SELF_HOST_PORTS_ENV_SECTION = `# Self-host stack ports (supatype self-host compose). Kong, at SUPATYPE_KONG_PORT, is the way in.
+# Postgres, the API server and SeaweedFS bind 127.0.0.1 only. To reach them from other machines,
+# set SUPATYPE_PUBLISH_ADDRESS=0.0.0.0 (put a firewall in front of the server first).
+# A self-host push points DATABASE_URL at SUPATYPE_DB_PORT.
+# SUPATYPE_PUBLISH_ADDRESS=127.0.0.1
+# SUPATYPE_DB_PORT=5432
+# SUPATYPE_SERVER_PORT=9999
+# SUPATYPE_SEAWEEDFS_PORT=8333`
 
 function emailEnvSection(email: ScaffoldOptions["email"], projectName: string): string {
   switch (email) {
@@ -1398,7 +1411,6 @@ export default async function seed(ctx: SeedContext) {
 
 function helloFunctionTemplate(): string {
   return `// hello: Supatype Edge Function
-// Docs: https://supatype.com/docs/edge-functions
 
 import type { FunctionContext } from "../_shared/context.ts"
 
@@ -1512,7 +1524,7 @@ export function initFirstSteps(args: InitStepsArgs): string[] {
 }
 
 /** The secrets, frontend and production blocks printed after the first steps. */
-function printProductionSteps(result: WizardResult): void {
+export function printProductionSteps(result: WizardResult): void {
   // Shown once, at creation. These are generated per project rather than shipped as
   // constants, so this is the moment to say they exist and where they live, nothing prints
   // them again, and the JWT secret is only echoed as a fingerprint from here on.
@@ -1524,13 +1536,8 @@ function printProductionSteps(result: WizardResult): void {
     "Keep .env out of version control, and use different values in production.",
   ])
 
-  if (result.app.mode === "none") {
-    nextSteps("Static frontend (self-host):", [
-      "supatype app add --static ./public",
-      "npm run build         # write files into public/",
-      "supatype self-host compose up -d",
-    ])
-  }
+  // No frontend block: someone who chose "No app" was told how to serve a static one. `supatype app
+  // add` is there when they want one.
 
   if (result.productionTarget === "cloud") {
     nextSteps("Deploy to Supatype Cloud:", [

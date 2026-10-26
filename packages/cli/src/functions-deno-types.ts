@@ -222,11 +222,11 @@ export function ensureFunctionsDenoTypes(
 
   if (rootExclude === "manual") {
     hints.push(
-      `Add "functions" to the root tsconfig.json "exclude" array so the app checker skips ${fnRel}/.`,
+      `Add "${fnRel}" to the root tsconfig.json "exclude" array so the app checker skips it.`,
     )
   } else if (rootExclude === "missing") {
     hints.push(
-      `If you add a root tsconfig.json, exclude "${fnRel}" (or "functions") so app typecheck stays separate.`,
+      `If you add a root tsconfig.json, exclude "${fnRel}" so app typecheck stays separate.`,
     )
   }
 

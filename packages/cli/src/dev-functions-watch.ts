@@ -27,31 +27,52 @@ const SOURCE_FILE = /\.(ts|tsx|js|mjs|json)$/
 /** Windows fires several events per save; one restart covers them all. */
 const DEBOUNCE_MS = 300
 
-/** Watch the project's functions/ and hooks/ and call `restart` once per burst of saves. */
+/**
+ * Watch the project's functions/ and hooks/ and call `restart` once per burst of saves.
+ *
+ * The project root is watched too, for either directory appearing. Only the ones that existed when
+ * dev started used to be watched, so in a project with no functions/ yet, `supatype functions new`
+ * made a directory nothing watched: the new function was not served, and editing it changed nothing.
+ */
 export function watchFunctionSources(
   cwd: string,
   restart: () => void,
   watch: WatchFn = fsWatch,
 ): { close: () => void } {
   let timer: ReturnType<typeof setTimeout> | null = null
-  const onChange = (_event: string, filename: string | null) => {
-    if (filename === null || !SOURCE_FILE.test(filename)) return
+  const scheduleRestart = () => {
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => {
       timer = null
       restart()
     }, DEBOUNCE_MS)
   }
-  const watchers = WORKER_SOURCE_DIRS.map((dir) => join(cwd, dir))
-    .filter((dir) => existsSync(dir))
-    .map((dir) => watch(dir, { recursive: true }, onChange))
+  const onChange = (_event: string, filename: string | null) => {
+    if (filename !== null && SOURCE_FILE.test(filename)) scheduleRestart()
+  }
+  const watchers = new Map<string, { close: () => void }>()
+  const watchSourceDir = (dir: string): boolean => {
+    const path = join(cwd, dir)
+    if (watchers.has(dir) || !existsSync(path)) return false
+    watchers.set(dir, watch(path, { recursive: true }, onChange))
+    return true
+  }
+  for (const dir of WORKER_SOURCE_DIRS) watchSourceDir(dir)
+  const root = watch(cwd, { recursive: false }, (_event, filename) => {
+    if (isWorkerSourceDir(filename) && watchSourceDir(filename)) scheduleRestart()
+  })
   return {
     close: () => {
       if (timer) clearTimeout(timer)
       timer = null
-      for (const watcher of watchers) watcher.close()
+      root.close()
+      for (const watcher of watchers.values()) watcher.close()
     },
   }
+}
+
+function isWorkerSourceDir(name: string | null): name is (typeof WORKER_SOURCE_DIRS)[number] {
+  return WORKER_SOURCE_DIRS.some((dir) => dir === name)
 }
 
 /** Where a dev session's compose stack is, so its worker can be restarted. */

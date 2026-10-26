@@ -2,6 +2,9 @@
  * Pinned service URLs + dev keys for the Ink dashboard.
  */
 
+import { existsSync } from "node:fs"
+import { join } from "node:path"
+import { detectPackageManager } from "./app/framework.js"
 import { appendStackOutput, getActiveDevSession } from "./dev-session.js"
 
 export interface DevServiceLink {
@@ -77,4 +80,14 @@ export function publishDevReady(panel: DevReadyPanel): void {
     return
   }
   console.log(formatStreamBlock(panel))
+}
+
+/**
+ * The ready panel's demo data line, in the project's own package manager. It said `pnpm seed`
+ * whatever the project used, which in an npm project is a command that does not exist.
+ */
+export function demoDataHint(cwd: string): string | undefined {
+  if (!existsSync(join(cwd, "seed.ts"))) return undefined
+  const pm = detectPackageManager(cwd)
+  return `Demo data: ${pm === "npm" ? "npm run seed" : `${pm} seed`}`
 }

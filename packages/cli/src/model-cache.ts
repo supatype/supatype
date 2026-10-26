@@ -90,7 +90,9 @@ export function declaresRowCache(ast: unknown): boolean {
  * would be whatever the last render guessed.
  *
  * Returns the new state when it changed, and null when it did not. A change needs the database
- * container recreated, which the caller is the one that can say.
+ * container recreated, which the caller is the one that can say. Writing "off" into a `.env` that
+ * had never set either switch is not a change: nothing was on, and reporting it told a new project
+ * its row cache had been switched off.
  */
 export function syncRowCacheEnv(cwd: string, ast: unknown): "on" | "off" | null {
   const want = declaresRowCache(ast)
@@ -104,5 +106,13 @@ export function syncRowCacheEnv(cwd: string, ast: unknown): "on" | "off" | null 
     [ROWCACHE_DECODE_ENV]: value,
     [ROWCACHE_READTHROUGH_ENV]: value,
   })
+  if (!want && current !== "1" && currentThrough !== "1") return null
   return want ? "on" : "off"
+}
+
+/** What a row cache change means, for someone who has never heard of pg_keyspace. */
+export function rowCacheChangeNote(state: "on" | "off"): string {
+  return state === "on"
+    ? "Row cache turned on in .env: a model declares cache: { rows: true }, so Postgres keeps those rows in memory for reads."
+    : "Row cache turned off in .env: no model declares cache: { rows: true } any more."
 }

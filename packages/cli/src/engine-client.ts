@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative, sep } from "node:path"
 import { spawnComposeEngine, type ComposeEngineTarget } from "./compose-engine-run.js"
+import { errorMessage } from "./error-message.js"
 import type { Capabilities } from "./engine-ownership-gate.js"
 import { hasProjectConfig, loadConfig } from "./config.js"
 import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary-cache.js"
@@ -213,13 +214,26 @@ export async function ensureEngine(): Promise<void> {
 
 /** Check if the engine can be invoked. Returns true/false. */
 export async function engineHealth(): Promise<boolean> {
+  return (await engineVersionCheck()).ok
+}
+
+/** What running the host engine binary's `--version` found: the binary and its answer, or why not. */
+export type EngineVersionCheck =
+  | { ok: true; bin: string; version: string }
+  | { ok: false; bin: string | undefined; reason: string }
+
+/** Run the host engine binary's `--version`, which is the whole of what `engine status` can check. */
+export async function engineVersionCheck(): Promise<EngineVersionCheck> {
+  let bin: string
   try {
-    const bin = await getEngineBin()
-    const result = spawnSync(bin, ["--version"], { encoding: "utf8" })
-    return result.status === 0
-  } catch {
-    return false
+    bin = await getEngineBin()
+  } catch (err) {
+    return { ok: false, bin: undefined, reason: errorMessage(err) }
   }
+  const result = spawnSync(bin, ["--version"], { encoding: "utf8" })
+  if (result.status === 0) return { ok: true, bin, version: result.stdout.trim() }
+  const reason = result.error?.message ?? (result.stderr.trim() || `exit ${String(result.status)}`)
+  return { ok: false, bin, reason }
 }
 
 /**

@@ -16,7 +16,8 @@
  * assumption: "Self-host compose uses the same DATABASE_URL when Postgres is published on
  * localhost:5432."
  *
- * `SUPATYPE_DB_PORT` is the source of truth, because it is what compose binds. The URL follows it.
+ * The variable compose binds for the stack's layout is the source of truth: `SUPATYPE_DB_PORT` for
+ * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it.
  */
 import { readEnvFile, upsertEnvFile } from "./env-file.js"
 
@@ -24,17 +25,16 @@ import { readEnvFile, upsertEnvFile } from "./env-file.js"
 export const DB_PORT_ENV = "SUPATYPE_DB_PORT"
 
 /**
- * The `.env` key that moves it for a dev-local stack, and which takes precedence.
+ * The `.env` key that moves it for a dev-local stack.
  *
- * Two variables, two deployment shapes: an ordinary self-host stack publishes Postgres at
- * `SUPATYPE_DB_PORT`, and a project with `overrides.engine` publishes it at
- * `SUPATYPE_DEV_DB_PORT` so the host-side engine binary can reach it. Its presence is what marks
- * the second shape, so it wins where both are set.
+ * Two variables, two layouts: a self-host stack publishes Postgres at `SUPATYPE_DB_PORT`, and a
+ * `supatype dev` stack publishes it at `SUPATYPE_DEV_DB_PORT` on loopback. Which one applies is the
+ * layout of the stack being worked on ({@link composeDbPublish}), never which variables are present.
  *
- * Learned the hard way. The first cut of this file read only `SUPATYPE_DB_PORT`, so on a project
- * with `SUPATYPE_DEV_DB_PORT=54330` it rewrote a correct `DATABASE_URL` to 5432, where nothing was
- * listening. It fixed the bug it was written for and reintroduced it through the other door, which
- * is the exact failure this file exists to prevent.
+ * Learned the hard way, twice. The first cut of this file read only `SUPATYPE_DB_PORT`, so on a dev
+ * project with `SUPATYPE_DEV_DB_PORT=54330` it rewrote a correct `DATABASE_URL` to 5432. The second
+ * let `SUPATYPE_DEV_DB_PORT` win whenever it was present, so a self-host push in a project that had
+ * once run dev rewrote the self-host URL to the dev port.
  */
 export const DEV_DB_PORT_ENV = "SUPATYPE_DEV_DB_PORT"
 
@@ -48,6 +48,17 @@ export const DB_PUBLIC_HOST_ENV = "SUPATYPE_DB_PUBLIC_HOST"
 /** What compose binds when neither variable is set, and what `init` writes into the URL. */
 export const DEFAULT_DB_PORT = 5432
 
+/**
+ * The `.env` key naming the address a self-host stack publishes Postgres, the API server and
+ * SeaweedFS on. Unset, they bind 127.0.0.1: the database is reached from the host, the other two
+ * through Kong, and publishing them on every interface exposed all three on any server with no
+ * firewall in front of it. `0.0.0.0` exposes them on every interface.
+ */
+export const PUBLISH_ADDRESS_ENV = "SUPATYPE_PUBLISH_ADDRESS"
+
+/** The host side prefix of a self-host port mapping, as compose interpolates it. */
+export const SELF_HOST_BIND = "${SUPATYPE_PUBLISH_ADDRESS:-127.0.0.1}:"
+
 /** Where a dev stack publishes Postgres when `SUPATYPE_DEV_DB_PORT` is not set. */
 export const COMPOSE_DEV_DB_PORT = 54329
 
@@ -57,8 +68,8 @@ export interface ComposeDbPublish {
   envKey: typeof DEV_DB_PORT_ENV | typeof DB_PORT_ENV
   /** The port compose binds when that variable is not set. */
   defaultPort: number
-  /** Prefix of the host side of the mapping: loopback only in dev, every interface otherwise. */
-  bindAddress: "127.0.0.1:" | ""
+  /** Prefix of the host side of the mapping: loopback in dev, {@link SELF_HOST_BIND} otherwise. */
+  bindAddress: "127.0.0.1:" | typeof SELF_HOST_BIND
 }
 
 /**
@@ -70,34 +81,38 @@ export interface ComposeDbPublish {
 export function composeDbPublish(devLocal: boolean): ComposeDbPublish {
   return devLocal
     ? { envKey: DEV_DB_PORT_ENV, defaultPort: COMPOSE_DEV_DB_PORT, bindAddress: "127.0.0.1:" }
-    : { envKey: DB_PORT_ENV, defaultPort: DEFAULT_DB_PORT, bindAddress: "" }
+    : { envKey: DB_PORT_ENV, defaultPort: DEFAULT_DB_PORT, bindAddress: SELF_HOST_BIND }
 }
 
 /** Hosts whose port is ours to correct. Anything else is somebody else's database. */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
 
-/** The port Postgres is published on for this project, from `.env`. */
-export function publishedDbPort(env: Record<string, string>): number {
-  // Dev-local first: its presence is what says this project publishes for a host-side engine.
-  for (const key of [DEV_DB_PORT_ENV, DB_PORT_ENV]) {
-    const raw = (env[key] ?? "").trim()
-    if (raw === "") continue
-    const port = Number(raw)
-    // A non-numeric or out-of-range value is the operator's to fix, and compose reports it far
-    // better than we can. Falling through keeps this from inventing a port nothing listens on.
-    if (Number.isInteger(port) && port > 0 && port < 65536) return port
-  }
-  return DEFAULT_DB_PORT
+/** The port Postgres is published on for this project in one layout, from `.env`. */
+export function publishedDbPort(env: Record<string, string>, devLocal: boolean): number {
+  const { envKey, defaultPort } = composeDbPublish(devLocal)
+  const raw = (env[envKey] ?? "").trim()
+  const port = Number(raw)
+  // A non-numeric or out-of-range value is the operator's to fix, and compose reports it far
+  // better than we can. Falling back keeps this from inventing a port nothing listens on.
+  return raw !== "" && Number.isInteger(port) && port > 0 && port < 65536 ? port : defaultPort
 }
 
 /** What changed, for the caller to report. */
 export interface DbPortSync {
   from: string
   to: string
+  /** The variable the new port was read from, which is what the report must name. */
+  envKey: ComposeDbPublish["envKey"]
 }
 
 /**
- * Rewrite `DATABASE_URL`'s port to match `SUPATYPE_DB_PORT`, and report it.
+ * Rewrite `DATABASE_URL`'s port to match the port the stack's layout publishes Postgres on, and
+ * report it.
+ *
+ * `devLocal` is the layout of the stack the caller is working with, never a guess from which
+ * variables happen to be in `.env`: a project that once ran `supatype dev` keeps
+ * `SUPATYPE_DEV_DB_PORT` there, and preferring it on a self-host push repointed every host-side
+ * command (seed, admin) at the dev database.
  *
  * Returns null when there is nothing to do, which is the common case.
  *
@@ -105,27 +120,35 @@ export interface DbPortSync {
  * Postgres elsewhere has a port that is nothing to do with our compose mapping, and rewriting it
  * would repoint the whole project at a database that does not exist.
  */
-export function syncDatabaseUrlPort(cwd: string): DbPortSync | null {
+export function syncDatabaseUrlPort(cwd: string, devLocal: boolean): DbPortSync | null {
   const env = readEnvFile(cwd)
-  const raw = (env["DATABASE_URL"] ?? "").trim()
-  if (raw === "") return null
+  const url = localDatabaseUrl(env["DATABASE_URL"])
+  if (url === null) return null
 
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    // Malformed, so not ours to rewrite: a partial edit here would turn a typo into a URL that
-    // parses and points somewhere wrong, which is harder to spot than the typo.
-    return null
-  }
-
-  if (!LOCAL_HOSTS.has(url.hostname)) return null
-
-  const wanted = String(publishedDbPort(env))
+  const wanted = String(publishedDbPort(env, devLocal))
   const current = url.port === "" ? String(DEFAULT_DB_PORT) : url.port
   if (current === wanted) return null
 
   url.port = wanted
   upsertEnvFile(cwd, { DATABASE_URL: url.toString() })
-  return { from: current, to: wanted }
+  return { from: current, to: wanted, envKey: composeDbPublish(devLocal).envKey }
+}
+
+/** True when `url` is a connection string to a database on this machine. */
+export function isLocalDatabaseUrl(url: string): boolean {
+  return localDatabaseUrl(url) !== null
+}
+
+/** `DATABASE_URL` parsed, when it names this machine; null when it is unset, malformed or remote. */
+function localDatabaseUrl(value: string | undefined): URL | null {
+  const raw = (value ?? "").trim()
+  if (raw === "") return null
+  try {
+    const url = new URL(raw)
+    return LOCAL_HOSTS.has(url.hostname) ? url : null
+  } catch {
+    // Malformed, so not ours to rewrite: a partial edit here would turn a typo into a URL that
+    // parses and points somewhere wrong, which is harder to spot than the typo.
+    return null
+  }
 }

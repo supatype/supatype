@@ -73,11 +73,12 @@ describe("dev's functions watch", () => {
 
   it("watches no directory the project does not have, and closes what it watched", () => {
     const watcher = watchFunctionSources(project, vi.fn(), fakeWatch)
-    expect([...listeners.keys()]).toEqual([join(project, "functions")])
+    // The root itself is watched (not recursively) for functions/ or hooks/ appearing later.
+    expect([...listeners.keys()].sort()).toEqual([project, join(project, "functions")].sort())
     save("functions", "x.ts")
     watcher.close()
     vi.advanceTimersByTime(500)
-    expect(closed).toEqual([join(project, "functions")])
+    expect([...closed].sort()).toEqual([project, join(project, "functions")].sort())
   })
 
   it("drops a pending restart when dev shuts down", () => {

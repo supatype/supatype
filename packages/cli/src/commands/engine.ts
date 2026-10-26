@@ -1,10 +1,10 @@
 /**
  * Engine management commands:
- *   supatype engine status: check if the engine container is reachable
+ *   supatype engine status: run the host engine binary's `--version` and say what it answered
  */
 
 import type { Command } from "commander"
-import { engineHealth } from "../engine-client.js"
+import { engineVersionCheck } from "../engine-client.js"
 import { error, info } from "../ui/messages.js"
 
 export function registerEngine(program: Command): void {
@@ -12,20 +12,23 @@ export function registerEngine(program: Command): void {
     .command("engine")
     .description("Manage the Supatype schema engine")
 
+  // The engine is a binary the CLI runs, not a service. This used to print "Checking engine at
+  // http://localhost:7500" and "reachable and healthy" while all it did was run `--version`.
   engine
     .command("status")
-    .description("Check if the schema engine container is reachable")
+    .description("Run the host engine binary's --version and show which binary answered")
     .action(async () => {
-      const url = process.env["SUPATYPE_ENGINE_URL"] ?? "http://localhost:7500"
-      info(`Checking engine at ${url}...`)
-
-      const healthy = await engineHealth()
-      if (healthy) {
-        info("Engine is reachable and healthy.")
-      } else {
-        error("Engine is not reachable.")
-        error("Make sure the engine container is running (supatype dev or docker compose up).")
-        process.exitCode = 1
+      const check = await engineVersionCheck()
+      if (check.ok) {
+        info(`Engine binary: ${check.bin}`)
+        info(`${check.bin} --version answered: ${check.version}`)
+        return
       }
+      error(
+        check.bin === undefined
+          ? `No engine binary could be found or downloaded: ${check.reason}`
+          : `${check.bin} --version failed: ${check.reason}`,
+      )
+      process.exitCode = 1
     })
 }

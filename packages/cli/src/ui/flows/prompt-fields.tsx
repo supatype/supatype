@@ -92,8 +92,24 @@ interface TextPromptProps {
   onCancel: () => void
 }
 
+type TextPromptSpec = Extract<ActiveFlowPrompt, { kind: "text" }>
+
+/**
+ * How a text prompt starts: empty, with its default as the placeholder. The default used to be the
+ * input's text, so typing appended to it: a port prompt showing 18478 took `8700` as `184788700`.
+ */
+export function textPromptStart(spec: TextPromptSpec): { value: string; placeholder: string | undefined } {
+  return { value: "", placeholder: spec.defaultValue || spec.placeholder }
+}
+
+/** The answer to a text prompt: what was typed, or its default when nothing was. */
+export function textPromptAnswer(submitted: string, spec: TextPromptSpec): string {
+  return submitted.trim() === "" ? (spec.defaultValue ?? submitted) : submitted
+}
+
 export function TextPrompt({ spec, onSubmit, onCancel }: TextPromptProps): React.ReactElement {
-  const [value, setValue] = useState(spec.defaultValue ?? "")
+  const start = textPromptStart(spec)
+  const [value, setValue] = useState(start.value)
   const [error, setError] = useState<string | undefined>()
 
   useInput((_input, key) => {
@@ -109,15 +125,16 @@ export function TextPrompt({ spec, onSubmit, onCancel }: TextPromptProps): React
         <Text color={theme.brand}>› </Text>
         <TextInput
           value={value}
-          {...(spec.placeholder !== undefined ? { placeholder: spec.placeholder } : {})}
+          {...(start.placeholder !== undefined ? { placeholder: start.placeholder } : {})}
           onChange={setValue}
           onSubmit={(submitted) => {
-            const err = spec.validate?.(submitted)
+            const answer = textPromptAnswer(submitted, spec)
+            const err = spec.validate?.(answer)
             if (err) {
               setError(err)
               return
             }
-            onSubmit(submitted)
+            onSubmit(answer)
           }}
         />
       </Box>

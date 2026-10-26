@@ -2,7 +2,7 @@
  * `supatype dev` when `provider: docker`, full self-host Compose stack (Kong gateway).
  */
 
-import { projectOutputPaths, writeAstDerivedOutputs } from "./type-generation.js"
+import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -25,7 +25,7 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
-import { syncRowCacheEnv } from "./model-cache.js"
+import { rowCacheChangeNote, syncRowCacheEnv } from "./model-cache.js"
 import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { devApiKeys } from "./dev-api-keys.js"
 import { astRelatesToAuthUsers } from "./byo-preflight.js"
@@ -39,7 +39,7 @@ import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
-import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
+import { syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
@@ -99,7 +99,7 @@ import { restoreSystemRelationTargets } from "./restore-system-relation-targets.
 import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
-import { publishDevReady } from "./dev-ready-panel.js"
+import { demoDataHint, publishDevReady } from "./dev-ready-panel.js"
 import { pushInitialSchema, settleInitialPush, type InitialPushOutcome, type InitialPushSteps } from "./dev-initial-push.js"
 import { offerAdoption, targetAdoptionSteps, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
@@ -716,19 +716,10 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // rather than needing a second `supatype dev`.
   const rowCache = syncRowCacheEnv(cwd, ast)
   if (rowCache !== null) {
-    console.log(`[supatype] Row cache switched ${rowCache} in .env (pg_keyspace Mode B).`)
+    console.log(`[supatype] ${rowCacheChangeNote(rowCache)}`)
   }
 
-  // SUPATYPE_DB_PORT moves what compose binds; DATABASE_URL is what seeds and psql use. Nothing
-  // reconciled them, so a project moved off 5432 to avoid a clash came up perfectly and then
-  // failed on `npm run seed` with ECONNREFUSED against a port nothing was listening on.
-  const dbPort = syncDatabaseUrlPort(cwd)
-  if (dbPort !== null) {
-    console.log(
-      `[supatype] DATABASE_URL port ${dbPort.from} -> ${dbPort.to} in .env, ` +
-        `to match ${DB_PORT_ENV}.`,
-    )
-  }
+  syncDatabaseUrlToStack(cwd, config)
 
   // The declaration is a ceiling and the allowlist is what is actually on, and only `push` ever
   // seeded the allowlist. So a stack brought up with `supatype dev` alone had every model's
@@ -736,6 +727,23 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // and the only way to find out why was to open Studio and tick a box the schema had already
   // justified.
   for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
+}
+
+/**
+ * Point `DATABASE_URL` at the port the stack being worked on publishes Postgres on.
+ *
+ * The port variable moves what compose binds; DATABASE_URL is what seeds and psql use. Nothing
+ * reconciled them, so a project moved off 5432 to avoid a clash came up perfectly and then failed
+ * on `npm run seed` with ECONNREFUSED against a port nothing was listening on. The layout is the
+ * stack's own (dev while a dev session holds it, otherwise self-host), so a self-host push in a
+ * project that once ran dev keeps the self-host port, and the message names the variable it read.
+ */
+function syncDatabaseUrlToStack(cwd: string, config: SupatypeProjectConfig): void {
+  const dbPort = syncDatabaseUrlPort(cwd, composeRenderMode(cwd, config.project.name) === "dev")
+  if (dbPort === null) return
+  console.log(
+    `[supatype] DATABASE_URL port ${dbPort.from} -> ${dbPort.to} in .env, to match ${dbPort.envKey}.`,
+  )
 }
 
 /**
@@ -804,6 +812,7 @@ async function writeEngineArtifacts(
   }
 
   writeDevAstOutputs(cwd, ast, config, "")
+  await writeDevSeedBuilder(cwd, config, ast, engine)
 
   try {
     const admin = withAdminRoles(await engineRequest("/admin", { ast }, isAnyAnswer, engine), config)
@@ -844,6 +853,25 @@ function writeDevAstOutputs(cwd: string, ast: unknown, config: SupatypeProjectCo
     }
   } catch (err) {
     console.warn(`[supatype] Generated output failed: ${errorMessage(err)}`)
+  }
+}
+
+/**
+ * The seed builder, from the same engine as the types. Only `generate` wrote it, though the config
+ * says dev and push regenerate every output, so after dev's first push it still described the
+ * starter models and a seed for anything added since did not typecheck.
+ */
+async function writeDevSeedBuilder(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  ast: unknown,
+  engine: ComposeEngine | undefined,
+): Promise<void> {
+  try {
+    const message = await writeSeedBuilder({ cwd, ast, engine, ...projectOutputPaths(config.output) })
+    if (message !== undefined) console.log(`[supatype] ${message}`)
+  } catch (err) {
+    console.warn(`[supatype] Seed builder generation failed: ${errorMessage(err)}`)
   }
 }
 
@@ -1786,9 +1814,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   links.push({ label: "Studio", url: studioUrlAt(`http://localhost:${kongPort}`) })
 
   const hints: string[] = []
-  if (existsSync(join(cwd, "seed.ts"))) {
-    hints.push("Demo data: pnpm seed")
-  }
+  const demoData = demoDataHint(cwd)
+  if (demoData !== undefined) hints.push(demoData)
 
   publishDevReady({
     title: `Services running (Docker · ${project})`,
