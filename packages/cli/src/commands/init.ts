@@ -1394,7 +1394,11 @@ export default async function seed(ctx: SeedContext) {
   ctx.log("seeding ${projectName}")
 
   // \`upsert\` is the one to reach for. Seeds get re-run, and naming the row by a key it already
-  // has is what makes that safe, without an id pasted in from somewhere.
+  // has is what makes that safe, without an id pasted in from somewhere. Rows nested in it
+  // (\`create\`, \`createMany\`) are added only when the parent has no child with the same values,
+  // so a re-run adds nothing and an edited child is added beside the old one rather than
+  // replacing it. Values the database works out, fields left out and \`$default\` are not
+  // compared, and a child that matches is left as it is.
   //
   // ctx.db.profile.upsert({
   //   where: { id: "00000000-0000-4000-8000-000000000001" },
