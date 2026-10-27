@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **records:** a record path whose id names no record shows "not found" in place of an edit form.
+  `/models/post/access` read `access` as a record id and opened an empty form under Postgres's
+  `invalid input syntax for type uuid: "access"`; a well-formed id with no row behind it opened the
+  same empty form. Both are now a not-found page, built on a shared `PageError` primitive.
+* **validation:** count messages agree with their number: "at least 1 item", "1 character or
+  fewer", rather than "at least 1 items". Covers the Rules tab, the form's own bound checks and the
+  database's too-long refusal.
+* **connect:** the Next.js server-client snippets write the session cookie in `setAll`, which
+  `@supatype/ssr` now calls when it refreshes a session. The App Router one had an empty `setAll`
+  that claimed middleware handled it; the Pages Router one wrote the value unencoded and dropped
+  `Max-Age` and `SameSite`.
+
 ## 0.7.0
 
 Highlights: the Realtime Inspector; a Schema objects view; reads through a metadata catalogue; the

@@ -137,3 +137,33 @@ describe("a refusal worded under `error`", () => {
     expect(error?.message).toBe(REFUSED)
   })
 })
+
+describe("a functions worker refusal", () => {
+  // The worker answers its own failures as `{ error: <code>, message }`; the code is under `error`.
+  const client = (): ReturnType<typeof createClient> =>
+    createClient({ url: "http://api.test", anonKey: "anon", auth: { persistSession: false } })
+
+  it("carries the worker's code for a function that does not exist", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ error: "not_found", message: 'Function "nope" not found' }, 404))
+    const { error } = await client().functions.invoke("nope")
+    expect(error).toMatchObject({ code: "not_found", message: 'Function "nope" not found', status: 404 })
+  })
+
+  it("carries the worker's code for a handler that threw", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ error: "function_error", message: "boom" }, 500))
+    const { error } = await client().functions.invoke("fn")
+    expect(error).toMatchObject({ code: "function_error", message: "boom", status: 500 })
+  })
+
+  it("prefers a handler's own `code` over `error`", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ code: "out_of_stock", error: "conflict", message: "gone" }, 409))
+    const { error } = await client().functions.invoke("fn")
+    expect(error?.code).toBe("out_of_stock")
+  })
+
+  it("leaves the code unset when `error` is not a string", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ error: { detail: "x" }, message: "bad" }, 400))
+    const { error } = await client().functions.invoke("fn")
+    expect(error).not.toHaveProperty("code")
+  })
+})

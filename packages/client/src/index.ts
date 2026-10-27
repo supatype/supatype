@@ -392,6 +392,15 @@ function isDeclaredReturn<T>(value: unknown): value is T {
 }
 
 /**
+ * The machine-readable code on an edge function's error body. A handler may send its own `code`;
+ * the functions worker answers its own failures (`not_found`, `function_error`) under `error`.
+ */
+function functionErrorCode(body: Record<string, unknown>): string | undefined {
+  const code = body["code"] ?? body["error"]
+  return typeof code === "string" ? code : undefined
+}
+
+/**
  * Helper type: extract function names from a database type.
  * Falls back to `string` when Functions is not defined.
  */
@@ -529,12 +538,13 @@ class FunctionsClient {
 
       if (!res.ok) {
         const body = await readJsonObject(res)
+        const code = functionErrorCode(body)
         return {
           data: null,
           error: {
             message: typeof body["message"] === "string" ? body["message"] : `Function returned ${res.status}`,
             status: res.status,
-            ...(typeof body["code"] === "string" ? { code: body["code"] } : {}),
+            ...(code !== undefined && { code }),
           },
         }
       }

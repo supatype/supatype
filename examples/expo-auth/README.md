@@ -18,21 +18,27 @@ Full **Supatype project** + Expo app that exercises native auth:
 
 ## Setup
 
-Running this outside the repo? See [Running an example](../README.md#running-an-example).
-
 From the monorepo root:
 
 ```bash
 pnpm install
-pnpm build                       # the CLI and the libraries run from their dist/
+pnpm --filter @supatype/client build
+pnpm --filter @supatype/react build
+pnpm --filter @supatype/react-native build
+pnpm --filter @supatype/react-native-auth build
+pnpm --filter @supatype/cli build
 
 cd examples/expo-auth
 cp .env.example .env
-pnpm exec supatype keys --write  # mints JWTs + EXPO_PUBLIC_* in .env
-pnpm exec supatype push --yes    # migrate schema + regenerate types
-pnpm exec supatype dev           # terminal 1, Compose stack, Kong :18473
+pnpm exec supatype keys          # mints JWTs + EXPO_PUBLIC_* in .env
+pnpm exec supatype dev           # terminal 1, Compose stack, Kong :18473; pushes the schema
 pnpm start                       # terminal 2, Expo
 ```
+
+There is no separate push step: `supatype dev` pushes the schema and regenerates the types when it
+starts and on every save, and on its first start it writes the database passwords and the
+database port into `.env`. `supatype push` works once `dev` has run; before that `.env` has no
+`AUTHENTICATOR_PASSWORD` or `SUPATYPE_SQL_EDITOR_PASSWORD` and the push refuses.
 
 Open in Expo Go. On a physical device, set `EXPO_PUBLIC_SUPATYPE_URL` to your LAN IP
 (e.g. `http://10.x.x.x:18473`) after `supatype dev` (or edit `.env` and restart Metro).

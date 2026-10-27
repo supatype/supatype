@@ -11,6 +11,7 @@ never called still counts here: proving an example *runs* is what the live-stack
 | `@supatype/types` | 131 | 58 | 73 not imported |
 | `@supatype/client` | 25 | 5 | 20 not imported |
 | `@supatype/react` | 12 | 9 | 3 not imported |
+| `@supatype/ssr` | 1 | 0 | 1 not imported |
 | `@supatype/react-auth` | 9 | 8 | 1 not imported |
 | `@supatype/react-native` | 2 | 2 | covered by examples/expo-auth, which imports a subset |
 | `@supatype/react-native-auth` | 10 | 7 | covered by examples/expo-auth, which imports a subset |
@@ -30,6 +31,8 @@ either deserves an example or deserves saying why not.
 **`@supatype/client`**: `RemovedObject`, `SelectRow`, `Session`, `StorageFolder`, `StorageObject`, `StorageReference`, `SupatypeBuckets`, `SupatypeFunctions`, `SupatypeModels`, `TableRelationship`, `TableSubscription`, `TableUpdate`, `createGraphqlRunner`, `fieldKindsAreRegistered`, `forgetRegisteredDraftModels`, `forgetRegisteredFieldKinds`, `onIdentityChange`, `readGraphqlSchema`, `registerDraftModels`, `registerFieldKinds`
 
 **`@supatype/react`**: `MutationOperation`, `StudioOrigins`, `SupatypeContext`
+
+**`@supatype/ssr`**: `CookieToSet`
 
 **`@supatype/react-auth`**: `PasswordRecovery`
 
