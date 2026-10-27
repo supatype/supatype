@@ -69,10 +69,11 @@ repo_of() {
   esac
 }
 
-# A component's image at <tag>.
+# A component's image at <tag>. The read returns on failure explicitly: bash clears set -e inside a
+# command substitution, and every caller reads this through one.
 image_ref() {
   local image
-  image="$(pins get "$1" image)"
+  image="$(pins get "$1" image)" || return
   printf '%s:%s\n' "$image" "$2"
 }
 
@@ -84,9 +85,10 @@ image_tag() { if [[ "$1" == postgres ]]; then printf '%s\n' "${2#v}"; else git_t
 # twice, once as the tag object and once peeled (`^{}`) to its commit; only the commit is wanted,
 # so the peeled line replaces the other.
 release_tags() {
-  local repo="$1" auth=() listing
+  local repo="$1" auth=() basic listing
   if [[ -n "${GH_TOKEN:-}" ]]; then
-    auth=(-c "http.extraheader=Authorization: Basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)")
+    basic="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')" || die "cannot encode GH_TOKEN"
+    auth=(-c "http.extraheader=Authorization: Basic $basic")
   fi
   listing="$(GIT_TERMINAL_PROMPT=0 git "${auth[@]}" ls-remote --tags "$GIT_BASE/$repo.git" 'v*')" \
     || die "cannot list the tags of $OWNER/$repo (set GH_TOKEN while it is private)"
@@ -148,7 +150,7 @@ cmd_set() {
 
 # Verifies one pin and prints `<component>=<commit>`.
 check_one() {
-  local component="$1" release_only="$2" repo tag sha named
+  local component="$1" release_only="$2" repo tag sha named ref
   repo="$(repo_of "$component")"
   tag="$(pins get "$component" tag)"
   sha="$(pins get "$component" commit)"
@@ -158,7 +160,8 @@ check_one() {
   named="$(commit_of "$repo" "$(git_tag "$tag")")"
   [[ -n "$named" ]] || die "$component: $OWNER/$repo has no tag $(git_tag "$tag")"
   [[ "$named" == "$sha" ]] || die "$component: $(git_tag "$tag") names $named, not the pinned $sha"
-  verify_image "$(image_ref "$component" "$tag")" "$sha"
+  ref="$(image_ref "$component" "$tag")"
+  verify_image "$ref" "$sha"
   verify_cdn "$component" "$tag"
   printf '%s=%s\n' "$component" "$sha"
 }
@@ -201,16 +204,20 @@ source_image() {
 }
 
 cmd_engine_image() {
-  local release_only=0 sha tag repo
+  local release_only=0 sha tag repo engine_repo named
   [[ "${1:-}" == "--release-only" ]] && release_only=1
   sha="$(pins get engine commit)"
   tag="$(pins get engine tag)"
   repo="${ENGINE_IMAGE_REPO:-$(pins get engine image)}"
-  if [[ "$(commit_of "$(repo_of engine)" "$(git_tag "$tag")")" == "$sha" ]]; then
+  engine_repo="$(repo_of engine)"
+  # Assigned on its own line: inside the test below, a failed tag listing would read as "no release
+  # names this commit" and carry on to the wrong error or a source build.
+  named="$(commit_of "$engine_repo" "$(git_tag "$tag")")"
+  if [[ "$named" == "$sha" ]]; then
     note "engine ${sha:0:12} is $tag"
     released_image "$repo" "$tag" "$sha"
   elif [[ "$release_only" == 1 ]]; then
-    die "the pinned engine commit ${sha:0:12} is not a release: $(git_tag "$tag") in $OWNER/$(repo_of engine) does not name it. Release the engine first, then run 'bash scripts/pin.sh set engine v<version>' and commit the result"
+    die "the pinned engine commit ${sha:0:12} is not a release: $(git_tag "$tag") in $OWNER/$engine_repo does not name it. Release the engine first, then run 'bash scripts/pin.sh set engine v<version>' and commit the result"
   else
     note "engine ${sha:0:12} has no release tag, building it from source"
     source_image "$sha"

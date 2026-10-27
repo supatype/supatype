@@ -177,8 +177,17 @@ jobs:
   # an npm publish cannot be undone. Doing the reversible half first, and only reaching the
   # irreversible half once the binaries have been compiled, signed and executed on real
   # hardware, is the closest this can get to an atomic release.
+  #
+  # It also waits for every image the CLI runs at its own version (supatype/{storage,realtime,
+  # functions-worker,studio,control-plane}:<version>, packages/cli/src/generated/release-images.ts).
+  # The CDN publish moves cli/latest.json, and a CLI that reaches users before its images are on
+  # Docker Hub, or after one of them failed to build, fails every `supatype dev` with "manifest
+  # unknown". The same holds for the realtime binaries a release CLI downloads at its own version
+  # (the realtime job below), so it waits for those too. npm and Homebrew name every one of these
+  # jobs again, so the guarantee does not rest on this one line. A rerun keeps its skips: each
+  # image push is idempotent, and the CDN and npm steps skip what is already published.
   cli:
-    needs: prepare
+    needs: [prepare, realtime, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
     uses: ./.github/workflows/cli-release.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
@@ -195,8 +204,10 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
     secrets: inherit
 
+  # npm ships @supatype/cli, which runs the images below and the realtime binaries at its own
+  # version, so it waits for them.
   npm:
-    needs: [prepare, cli, realtime]
+    needs: [prepare, cli, realtime, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -478,9 +489,11 @@ jobs:
   # The tap has one formula and `brew upgrade` moves every user to it, so a prerelease (any
   # version with a '-') must not replace it. verify-homebrew-install needs this job and has no
   # always(), so it is skipped with it.
+  #
+  # Like npm, it waits for the images and realtime binaries the CLI runs at its own version.
   homebrew-formula:
     name: Homebrew formula
-    needs: [prepare, cli]
+    needs: [prepare, cli, realtime, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
     runs-on: ubuntu-24.04
     if: vars.HOMEBREW_TAP_REPO != '' && !contains(needs.prepare.outputs.version, '-')
     env:
