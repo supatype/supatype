@@ -244,12 +244,19 @@ jobs:
             vue
             cli
           )
+          # npm refuses to publish a version twice, so a rerun after a partial publish would stop
+          # at the first package already out and block the GitHub release. Skip those instead.
           for pkg in "${PACKAGES[@]}"; do
+            if [ -n "$(npm view "@supatype/${pkg}@${VERSION}" version 2>/dev/null)" ]; then
+              echo "::warning::@supatype/${pkg}@${VERSION} is already on npm. Skipping it."
+              continue
+            fi
             echo "::group::Publish @supatype/${pkg}"
             pnpm --filter "@supatype/${pkg}" publish --access public --no-git-checks --tag "$NPM_PUBLISH_TAG"
             echo "::endgroup::"
           done
         env:
+          VERSION: ${{ needs.prepare.outputs.version }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # A prerelease (any version with a '-') never takes `latest`, which is what a bare
           # `npm install @supatype/cli` resolves. Alphas and betas keep their own dist-tags;

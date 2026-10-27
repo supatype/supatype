@@ -172,9 +172,11 @@ jobs:
 
           # An immutable prefix is never rewritten: a client may already hold a binary and a
           # manifest from it, and replacing either is how the postgres checksum skew happened.
+          # A rerun of the release keeps what is published and carries on, so the jobs after
+          # this one (npm, the GitHub release) can still finish the version.
           if aws s3 ls "${BASE}/checksums.sha256.minisig" --endpoint-url "${EP}" >/dev/null 2>&1; then
-            echo "::error::realtime/v${VERSION}/ is already published. Release a new version instead."
-            exit 1
+            echo "::warning::realtime/v${VERSION}/ is already published. Keeping it and uploading nothing."
+            exit 0
           fi
 
           # Binaries first, then the manifest that names them, then its signature.
