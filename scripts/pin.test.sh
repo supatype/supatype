@@ -224,5 +224,28 @@ if out="$(pin engine-image --release-only 2>&1)"; then fail "accepted: $out"
 elif [[ "$out" != *"is not a release"* ]]; then fail "wrong reason: $out"
 else ok; fi
 
+# A tag listing that fails (an expired GH_TOKEN, an unreachable GitHub) has to stop engine-image
+# with that cause. Read inside a test, its failure was discarded and the empty result taken to mean
+# "no release names this commit", which reported the wrong problem or started a source build.
+start "engine-image --release-only stops on a tag listing that fails"
+if out="$(PIN_GIT_BASE="$WORK/unreachable" pin engine-image --release-only 2>&1)"; then fail "accepted: $out"
+elif [[ "$out" != *"cannot list the tags"* ]]; then fail "wrong reason: $out"
+elif [[ "$out" == *"is not a release"* ]]; then fail "carried on past the failed listing: $out"
+else ok; fi
+
+start "engine-image stops on a tag listing that fails, rather than building from source"
+if out="$(PIN_GIT_BASE="$WORK/unreachable" ENGINE_SRC="$WORK/engine-src-$CASE_N" pin engine-image 2>&1)"; then fail "accepted: $out"
+elif [[ "$out" != *"cannot list the tags"* ]]; then fail "wrong reason: $out"
+elif [[ "$out" == *"building it from source"* ]]; then fail "started a source build: $out"
+else ok; fi
+
+# An unreadable images.json has to be reported as that, not as an image with an empty name.
+start "set stops on an unreadable images.json"
+printf 'not json\n' >"$ROOT/release/images.json"
+if out="$(pin set server v1.1.0 2>&1)"; then fail "accepted: $out"
+elif [[ "$out" != *"cannot read"* ]]; then fail "wrong reason: $out"
+elif [[ "$out" == *"is not published"* ]]; then fail "carried on with an empty image name: $out"
+else ok; fi
+
 printf '\n%d passed, %d failed\n' "$passed" "$failed"
 [[ $failed == 0 ]]
