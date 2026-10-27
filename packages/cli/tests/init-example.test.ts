@@ -5,6 +5,7 @@ import { gzipSync } from "node:zlib"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   exampleNames,
+  exampleTarget,
   exampleTarballUrl,
   initFromExample,
   rewriteWorkspaceDependencies,
@@ -83,6 +84,37 @@ describe("selecting an example", () => {
   it("refuses a path that climbs out of the example", () => {
     const evil = fixtureTarball("supatype-0.7.0", [{ path: "examples/blog/../../escape.txt", content: "x" }])
     expect(() => selectExample(readTarGz(evil), "blog")).toThrow(/outside the example/)
+  })
+
+  // An archive names its own paths, and on Windows `\` is a separator to join(), so a name only
+  // checked for POSIX `../` could still land outside the target.
+  it.each([
+    ["backslash parent segments", "..\\..\\escape.txt"],
+    ["a backslash anywhere", "src\\index.ts"],
+    ["a NUL", "README\0.md"],
+    ["a drive letter", "C:/escape.txt"],
+    ["a drive letter in a later segment", "src/C:escape.txt"],
+    ["an absolute path", "/etc/escape.txt"],
+  ])("refuses a name with %s", (_label, name) => {
+    const entries = [
+      { path: "supatype-0.7.0/examples/blog/README.md", kind: "file" as const, data: Buffer.from("# Blog\n") },
+      { path: `supatype-0.7.0/examples/blog/${name}`, kind: "file" as const, data: Buffer.from("x") },
+    ]
+    expect(() => selectExample(entries, "blog")).toThrow(/outside the example/)
+  })
+})
+
+describe("an example file's target", () => {
+  it("is the file under the directory", () => {
+    const dir = target()
+    expect(exampleTarget(dir, "apps/web/package.json")).toBe(join(dir, "apps", "web", "package.json"))
+  })
+
+  it("refuses a path that resolves outside the directory, whatever let it through", () => {
+    const dir = target()
+    expect(() => exampleTarget(dir, "../escape.txt")).toThrow(/outside/)
+    expect(() => exampleTarget(dir, "a/../../escape.txt")).toThrow(/outside/)
+    expect(() => exampleTarget(dir, ".")).toThrow(/outside/)
   })
 })
 

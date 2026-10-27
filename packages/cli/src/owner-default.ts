@@ -43,3 +43,28 @@ export function fieldsWithCallerDefaults(model: {
   })
   return Object.fromEntries(entries)
 }
+
+/**
+ * `fields` with the random uuid default taken off each auth user id the `create` rule makes the
+ * caller's. Every uuid primary key without a default of its own is given `gen_random_uuid()`; on
+ * these it would name no user and keep the engine's caller default from applying. Under any other
+ * rule nothing else fills the column, so the key keeps it.
+ */
+export function withoutRandomDefaultOnCallerIds<F extends Record<string, unknown>>(
+  fields: Record<string, F>,
+  access: Record<string, unknown>,
+): Record<string, F> {
+  const owners = new Set(ownersInRule(access["create"]))
+  if (owners.size === 0) return fields
+  const entries = Object.entries(fields).map(([name, meta]) => {
+    if (!owners.has(name) || !isAuthUserId(meta) || !isRandomUuidDefault(meta["default"])) return [name, meta] as const
+    const withoutDefault = { ...meta }
+    delete withoutDefault["default"]
+    return [name, withoutDefault] as const
+  })
+  return Object.fromEntries(entries)
+}
+
+function isRandomUuidDefault(value: unknown): boolean {
+  return isJsonObject(value) && value["kind"] === "genRandomUuid"
+}

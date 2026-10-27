@@ -32,6 +32,7 @@ import {
   type ParsedField,
 } from "./schema-ast-v2.js"
 import { jsonTypeArgText } from "./json-type-text.js"
+import { withoutRandomDefaultOnCallerIds } from "./owner-default.js"
 import { compileBounds, measureFormFor, type DeclaredBounds } from "./field-bounds.js"
 
 export type { ExtractedSchemaAstV2 as ExtractedSchemaAst, ExtractedStorageBucketAst } from "./schema-ast-v2.js"
@@ -138,7 +139,7 @@ export function extractSchemaAstFromTypes(
       models.push(
         emitModel(
           stmt.name.text,
-          fields,
+          withoutRandomDefaultOnCallerIds(fields, access),
           options,
           tableName,
           access,
@@ -799,14 +800,9 @@ function parseFieldType(
     }
   }
 
-  // An auth user id key names an existing user, so a random uuid would be wrong; left without a
-  // default, the engine defaults it to the caller under a `create: Owner<…>` rule.
-  if (
-    parsed.kernel.primaryKey === true &&
-    parsed.kind === "uuid" &&
-    parsed.kernel.default === undefined &&
-    parsed.db.authUserId !== true
-  ) {
+  // An auth user id key the create rule makes the caller's loses this again in
+  // withoutRandomDefaultOnCallerIds, once the model's access is known.
+  if (parsed.kernel.primaryKey === true && parsed.kind === "uuid" && parsed.kernel.default === undefined) {
     parsed = {
       ...parsed,
       kernel: { ...parsed.kernel, default: { kind: "genRandomUuid" } },

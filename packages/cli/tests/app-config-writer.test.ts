@@ -107,3 +107,32 @@ describe("the app config writer and comments", () => {
     expect(configOf(dir)).toContain('    mode: "proxy",\n    // the docs site\n    vite: { port: 5173 },\n')
   })
 })
+
+// Appending a block after the root's last entry has to find the comma that separates it, not one
+// inside a comment beside it: taking `// a, b`'s comma left the config unparseable.
+describe("the app config writer after a trailing comment", () => {
+  const NO_APP = INIT_CONFIG.replace('  app: {\n    mode: "none",\n  },\n', "")
+  const APP = '  app: {\n    mode: "proxy",\n    upstream: "http://localhost:3000",\n  },\n'
+
+  function appendedAfter(lastEntry: string): string {
+    const dir = project(NO_APP.replace('  email: { provider: "console" },\n', `${lastEntry}\n`))
+    updateAppConfigInProject(dir, { mode: "proxy", upstream: "http://localhost:3000" })
+    return configOf(dir)
+  }
+
+  it.each([
+    ["a line comment with a comma, no separator", '  email: { provider: "console" } // console, for now'],
+    ["a line comment with a comma, after the separator", '  email: { provider: "console" }, // console, for now'],
+    ["a block comment with a comma before the separator", '  email: { provider: "console" } /* console, for now */,'],
+    ["a block comment with a comma, no separator", '  email: { provider: "console" } /* console, for now */'],
+  ])("puts the block after the last entry and %s", (_label, lastEntry) => {
+    const text = appendedAfter(lastEntry)
+    expect(text).toContain("console, for now")
+    expect(text).toContain(`\n${APP}})`)
+  })
+
+  it("keeps the comment on the entry it was written beside", () => {
+    const text = appendedAfter('  email: { provider: "console" } // console, for now')
+    expect(text).toContain('  email: { provider: "console" }, // console, for now\n' + APP)
+  })
+})

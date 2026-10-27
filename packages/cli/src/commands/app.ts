@@ -101,13 +101,14 @@ function removeApp(cwd: string): void {
 /**
  * How the changed routing reaches the running stack. A dev project (`server.mode: "dev"`, the merged
  * config `supatype dev` reads) is served by `supatype dev`, which keeps the old app until it
- * restarts; a self-hosted one is re-rendered and brought up through compose.
+ * restarts; a self-hosted one is brought up through compose, whose `up` renders the compose file
+ * from the config first.
  */
 function applySteps(cwd: string): string[] {
   if (projectServerMode(cwd) === "dev") {
     return ["Restart `supatype dev`: a running dev stack keeps serving the old app until it restarts."]
   }
-  return ["supatype self-host compose render", "supatype self-host compose up -d"]
+  return ["supatype self-host compose up -d"]
 }
 
 /** The project's server mode, or undefined when the config cannot be read (the write above still stands). */
