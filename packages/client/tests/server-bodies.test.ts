@@ -161,6 +161,12 @@ describe("a functions worker refusal", () => {
     expect(error?.code).toBe("out_of_stock")
   })
 
+  it("reads a handler's lone `error` string as the message, not the code", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ error: "Email already taken" }, 400))
+    const { error } = await client().functions.invoke("fn")
+    expect(error).toEqual({ message: "Email already taken", status: 400 })
+  })
+
   it("leaves the code unset when `error` is not a string", async () => {
     vi.stubGlobal("fetch", fetchReturning({ error: { detail: "x" }, message: "bad" }, 400))
     const { error } = await client().functions.invoke("fn")
