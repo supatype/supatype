@@ -8,7 +8,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs"
-import { dirname, join, posix } from "node:path"
+import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path"
 import { isJsonObject, parseJsonObject } from "@supatype/shared"
 import { readTarGz, type TarEntry } from "./tar-reader.js"
 
@@ -60,13 +60,30 @@ export function selectExample(entries: readonly TarEntry[], name: string): Examp
     .map((entry) => ({ path: insideExample(repoPath(entry).slice(root.length), name), data: entry.data }))
 }
 
-/** A path that stays inside the example folder, or a refusal: an archive names its own paths. */
+/**
+ * A path that stays inside the example folder, or a refusal: an archive names its own paths. A
+ * backslash is a separator to Windows, so `..\..\x` would climb out there however POSIX reads it;
+ * a NUL, a drive letter in any segment or an absolute path has no place in an example either.
+ */
 function insideExample(path: string, name: string): string {
   const normal = posix.normalize(path)
-  if (normal.startsWith("../") || normal === ".." || posix.isAbsolute(normal) || /^[A-Za-z]:/.test(normal)) {
-    throw new Error(`The archive's example "${name}" has a file outside the example: ${path}`)
-  }
+  const unsafe =
+    /[\\\0]/.test(path) ||
+    posix.isAbsolute(normal) ||
+    normal.split("/").some((segment) => segment === ".." || /^[A-Za-z]:/.test(segment))
+  if (unsafe) throw new Error(`The archive's example "${name}" has a file outside the example: ${JSON.stringify(path)}`)
   return normal
+}
+
+/** Where an example file is written: under `dir` once resolved on this platform, or a refusal. */
+export function exampleTarget(dir: string, path: string): string {
+  const root = resolve(dir)
+  const target = resolve(root, ...path.split("/"))
+  const rel = relative(root, target)
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`The example's file ${JSON.stringify(path)} resolves outside ${dir}.`)
+  }
+  return target
 }
 
 /** `package.json` text with every `workspace:` dependency pinned to `^<version>`. */
@@ -92,7 +109,7 @@ export async function initFromExample(options: InitFromExampleOptions): Promise<
   }
   const files = selectExample(readTarGz(await options.download(exampleTarballUrl(version))), example)
   for (const file of files) {
-    const target = join(dir, ...file.path.split("/"))
+    const target = exampleTarget(dir, file.path)
     mkdirSync(dirname(target), { recursive: true })
     const isPackageJson = posix.basename(file.path) === "package.json"
     writeFileSync(target, isPackageJson ? rewriteWorkspaceDependencies(file.data.toString("utf8"), version) : file.data)

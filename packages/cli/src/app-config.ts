@@ -5,6 +5,7 @@ import {
   Project,
   QuoteKind,
   SyntaxKind,
+  ts,
   type ObjectLiteralElementLike,
   type ObjectLiteralExpression,
   type SourceFile,
@@ -143,15 +144,21 @@ function lineIndent(text: string, pos: number): string {
   return /^[ \t]*/.exec(text.slice(lineStart, pos))?.[0] ?? ""
 }
 
-/** `text` with `key: value,` as the root object's last entry, adding the comma the entry before may lack. */
+/**
+ * `text` with `key: value,` as the root object's last entry, adding the comma the entry before may
+ * lack. The separator is the parser's comma token, so a comma inside a comment beside the entry is
+ * never taken for it, and the new entry goes after any comment on the separator's line, which stays
+ * with the entry it was written beside.
+ */
 function withAppendedProperty(text: string, root: ObjectLiteralExpression, key: string, value: string): string {
   const entry = `\n${indentationOf(text, root)}${key}: ${value},`
   const last = root.getProperties().at(-1)
   if (last === undefined) return splice(text, root.getStart() + 1, root.getStart() + 1, `${entry}\n`)
-  const comma = text.slice(last.getEnd(), root.getEnd() - 1).indexOf(",")
-  if (comma === -1) return splice(text, last.getEnd(), last.getEnd(), `,${entry}`)
-  const at = last.getEnd() + comma + 1
-  return splice(text, at, at, entry)
+  const comma = last.getNextSiblingIfKind(SyntaxKind.CommaToken)
+  const separatorEnd = comma?.getEnd() ?? last.getEnd()
+  const at = ts.getTrailingCommentRanges(text, separatorEnd)?.at(-1)?.end ?? separatorEnd
+  const appended = splice(text, at, at, entry)
+  return comma === undefined ? splice(appended, last.getEnd(), last.getEnd(), ",") : appended
 }
 
 function getRootConfigObject(sourceFile: SourceFile): ObjectLiteralExpression {

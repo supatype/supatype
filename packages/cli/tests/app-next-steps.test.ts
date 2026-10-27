@@ -47,9 +47,11 @@ describe("the next step after app add and app remove", () => {
   it.each([
     ["add", "--upstream", "http://localhost:5173"],
     ["remove"],
-  ])("tells a self-host project to re-render compose (app %s)", (...args) => {
+  ])("tells a self-host project to bring compose up, which renders it (app %s)", (...args) => {
     const out = run(project("standalone"), ["app", ...args])
-    expect(out).toContain("supatype self-host compose render")
+    expect(out).toContain("supatype self-host compose up -d")
+    // `compose up` writes the compose file itself, so a separate render step is noise.
+    expect(out).not.toContain("compose render")
     expect(out).not.toContain("supatype dev")
   })
 })

@@ -17,7 +17,9 @@
 
 * **init:** `supatype init <dir> --example <name>` starts from `examples/<name>` of the release
   matching the CLI (`v<version>` on GitHub), with every `workspace:` dependency pinned to
-  `^<version>`. An unknown name is refused with the list of examples in that release.
+  `^<version>`. An unknown name is refused with the list of examples in that release, and so is an
+  archive naming a file with `..`, a backslash, a NUL, a drive letter or an absolute path, or one that
+  resolves outside the directory.
 * **seed:** `authUser: { connect: { id } }` on a relation to the auth user (`RelatedTo<SupatypeAuthUser>`)
   writes the relation's key column. It failed with "`supatype:user` is not a model in this schema".
   The generated `...Create` type still offers the key column (`auth_user_id`) rather than `authUser`;
@@ -52,10 +54,11 @@
 
 ### Bug Fixes
 
-* **schema:** an `id: SupatypeAuthUserId` primary key no longer gets a `gen_random_uuid()` default.
-  A random id names no user, and the default kept the engine from defaulting the column to the
-  caller, so an insert leaving `id` out under `create: Owner<"id">` was refused. The generated
-  `Insert` type makes it optional under that rule and required otherwise.
+* **schema:** an `id: SupatypeAuthUserId` primary key under `create: Owner<"id">` (also inside `Any`
+  or `All`) no longer gets a `gen_random_uuid()` default. A random id names no user, and the default
+  kept the engine from defaulting the column to the caller, so an insert leaving `id` out was
+  refused. Under any other create rule the key keeps its random default, as nothing else fills it.
+  The generated `Insert` type leaves `id` optional either way, since the database fills it.
 * **self-host:** `self-host native backup`, `serve`, `reload`, `status`, `logs` and `install-service`
   run their own action with their own options. They were declared as executable subcommands, so
   their options and actions landed on `self-host native` and `self-host`.
@@ -71,9 +74,11 @@
   or `y/N`. `init --mode standalone` leads its next steps with the self-host steps, then local
   development.
 * **app:** `supatype app add` and `app remove` rewrite `supatype.config.ts` at its own indentation and
-  keep it valid TypeScript (they wrote `mode: "proxy",,` against init's config), and the same for the
-  `server` block `supatype add domain` writes. In a dev project they say to restart `supatype dev`, which
-  keeps serving the old app until it restarts, rather than to re-render compose.
+  keep it valid TypeScript (they wrote `mode: "proxy",,` against init's config, and a comma in a
+  comment after the last entry was taken for its separator), and the same for the `server` block
+  `supatype add domain` writes. In a dev project they say to restart `supatype dev`, which keeps
+  serving the old app until it restarts; in a self-hosted one, to run `self-host compose up -d`, which
+  renders the compose file itself.
 * **dev:** "Create an admin user now?" is asked once per project. A "no" is kept in
   `.supatype/admin-prompt.json`, so later starts neither ask nor wait; a run that is not interactive
   was never asked.
