@@ -11,6 +11,7 @@ import { LocaleContext, useLocaleState } from "./hooks/useLocale.js"
 import { CloudUrlContext } from "./hooks/useCloudUrl.js"
 import { PlatformCtx } from "./hooks/usePlatform.js"
 import { Sidebar, getPageBreadcrumbs, hiddenNavItems } from "./components/Sidebar.js"
+import { PageError } from "./components/ui.js"
 import { useStudioCapability } from "./hooks/useStudioCapability.js"
 import { SecondaryPanel, SectionPanelToggle, hasSectionNav } from "./components/SecondaryPanel.js"
 import { TertiaryNav } from "./components/TertiaryNav.js"
@@ -602,8 +603,4 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
   }
 
   return content
-}
-
-function PageError({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <div className="p-3 text-destructive-text bg-destructive/10 rounded-md text-sm">{children}</div>
 }

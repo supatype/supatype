@@ -3,8 +3,8 @@ import { defineConfig } from "@supatype/cli"
 /**
  * Expo auth example: full Supatype project (schema + local docker stack).
  *
- * Workflow: `supatype keys` → `supatype push` → `supatype dev` → `pnpm start`
- * API gateway: Kong on SUPATYPE_KONG_PORT (default 18473).
+ * Workflow: `supatype keys` → `supatype dev` (pushes the schema) → `pnpm start`
+ * API gateway: Kong on SUPATYPE_KONG_PORT (default 18473). No `server.port`: only native dev reads it.
  *
  * Machine-local binary paths: copy `supatype.local.config.ts.example` →
  * `supatype.local.config.ts` (gitignored).
@@ -12,7 +12,7 @@ import { defineConfig } from "@supatype/cli"
 export default defineConfig({
   project: { name: "expo-auth" },
   database: { provider: "docker" },
-  server: { mode: "dev", port: 54410 },
+  server: { mode: "dev" },
   app: { mode: "none" },
   email: { provider: "console" },
   // Omit versions so compose uses :latest (local images: server/postgres/etc.).

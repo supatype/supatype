@@ -951,6 +951,11 @@ export function PageHeader({ title, scope, action }: { title: string; scope?: Re
   )
 }
 
+/** In place of a screen that cannot be shown: a model, global or record that is not there. */
+export function PageError({ children }: { children: React.ReactNode }): React.ReactElement {
+  return <div className="p-3 text-destructive-text bg-destructive/10 rounded-md text-sm">{children}</div>
+}
+
 /* ─── Code block ─── */
 
 export function CodeBlock({
