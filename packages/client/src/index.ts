@@ -392,12 +392,20 @@ function isDeclaredReturn<T>(value: unknown): value is T {
 }
 
 /**
- * The machine-readable code on an edge function's error body. A handler may send its own `code`;
- * the functions worker answers its own failures (`not_found`, `function_error`) under `error`.
+ * The message and machine-readable code on an edge function's error body. A handler may send its
+ * own `code`. The functions worker answers its own failures as `{ error: <code>, message }`, so
+ * `error` is a code when a `message` is beside it. On its own, `error` is a handler's sentence
+ * (`{ error: "Email already taken" }`) and is the message.
  */
-function functionErrorCode(body: Record<string, unknown>): string | undefined {
-  const code = body["code"] ?? body["error"]
-  return typeof code === "string" ? code : undefined
+function functionError(body: Record<string, unknown>, status: number): SupatypeError {
+  const message = typeof body["message"] === "string" ? body["message"] : undefined
+  const error = typeof body["error"] === "string" ? body["error"] : undefined
+  const code = typeof body["code"] === "string" ? body["code"] : message !== undefined ? error : undefined
+  return {
+    message: message ?? error ?? `Function returned ${status}`,
+    status,
+    ...(code !== undefined && { code }),
+  }
 }
 
 /**
@@ -537,16 +545,7 @@ class FunctionsClient {
       )
 
       if (!res.ok) {
-        const body = await readJsonObject(res)
-        const code = functionErrorCode(body)
-        return {
-          data: null,
-          error: {
-            message: typeof body["message"] === "string" ? body["message"] : `Function returned ${res.status}`,
-            status: res.status,
-            ...(code !== undefined && { code }),
-          },
-        }
+        return { data: null, error: functionError(await readJsonObject(res), res.status) }
       }
 
       const contentType = res.headers.get("content-type") ?? ""
