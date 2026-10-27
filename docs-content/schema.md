@@ -36,9 +36,24 @@ export type Post = Model<{
 
 The table name is the type name in snake case: `Post` becomes `post`, `BlogPost` becomes `blog_post`. Set `tableName` in the second argument to choose another.
 
-An `id: UUID` field becomes the primary key, and the database fills it in.
+An `id: UUID` field becomes the primary key, and the database fills it in. A model with no `id` field and no `PrimaryKey<>` gets one anyway: an `id UUID` primary key filled by `gen_random_uuid()`. Wrap another field in `PrimaryKey<>` to key the model by it instead.
 
-The second argument also takes `label` and `labelPlural` (names in Studio), `indexes`, `versions` and `singleton: true` (one row, such as site settings).
+The second argument also takes these options:
+
+| Option | Does |
+| --- | --- |
+| `label`, `labelPlural` | Names the model in Studio |
+| `indexes` | Adds indexes, see below |
+| `versions` | Keeps drafts and history, see [below](#drafts) |
+| `singleton: true` | Keeps one row, such as site settings. The table is `_global_` plus the snake case name, unless you set `tableName` |
+| `constraints` | Checks the database runs on every write, in the access rule language, such as `Lte<"starts_at", "ends_at">`. They cannot name the caller or the clock |
+| `searchable` | The fields the search box in Studio's list looks in |
+| `timestamps`, `softDelete` | Adds `created_at` and `updated_at` columns, or a `deleted_at` column. Left out, they follow the fields the model declares |
+| `autoLocalize: true` | Makes copy fields localized by default. Wrap one in `NotLocalized<>` to opt out |
+| `hooks`, `validate` | Runs an edge function before or after an API write, or to check one field. They do not run for direct SQL or seeds |
+| `cache` | Says how reads of the model may be cached |
+
+An index is `{ fields: ["a", "b"] }`, with `unique: true` and `name` if you need them. `using` picks the method: `"btree"` (the default), `"gin"`, `"gist"`, `"hnsw"` or `"brin"`. An `"hnsw"` index is for `Vector` fields only. Its `distance` is `"cosine"` (the default), `"l2"` or `"innerProduct"`. A `distance` on any other index is refused.
 
 `supatype dev` applies each save. `supatype push` applies the schema to another database. `supatype diff` shows the change without applying it.
 
@@ -53,16 +68,31 @@ Every field is required (`NOT NULL`) unless you wrap it in `Optional<>`. Use `Op
 | `Int`, `SmallInt`, `BigInt`, `Decimal<10, 2>`, `Money` | exact numbers |
 | `boolean` | true or false |
 | `Timestamp`, `DateTime`, `DateOnly` | a time with zone, or a date |
-| `UUID`, `Email`, `URL`, `Color`, `PhoneNumber` | text with a known format |
-| `"news" \| "guide"` | an enum of those values |
+| `UUID` | a Postgres `uuid` |
+| `Email`, `URL`, `Color`, `PhoneNumber`, `Markdown` | text. The database checks the format of `Email` and `URL` |
+| `"news" \| "guide"` | text limited to those values by a check |
 | `string[]` | an array |
 | `JSON<T>` | JSONB, typed as `T` in the client |
+| `Code`, `Currency`, `Duration`, `Button` | JSONB with a typed shape, such as `{ amount, code }` for `Currency` |
 | `Vector<1536>` | a pgvector embedding with that many dimensions |
+| `GeoPoint`, `Geo` | a PostGIS `geography` point |
+| `IPAddress`, `CIDR`, `MacAddress`, `Bytea`, `XML`, `TSVector`, `TSQuery` | the matching Postgres type: `inet`, `cidr`, `macaddr`, `bytea`, `xml`, `tsvector`, `tsquery` |
 | `RichText`, `Blocks<T>`, `Slug<"title">` | content fields, see [below](#content) |
 | `ImageAsset<Bucket>`, `FileAsset` | a file in a storage bucket |
 | `SupatypeAuthUserId` | the id of a sign-in user, see [below](#owners) |
 
-Wrap a field to add more: `Unique<T>`, `Indexed<T>`, `Default<T, value>`, `MaxLength<T, n>`, `Between<T, min, max>`.
+Wrap a field to add more:
+
+| Wrap | Does |
+| --- | --- |
+| `Unique<T>`, `Indexed<T>` | Adds a unique constraint, or an index |
+| `Default<T, value>` | Sets the column's default |
+| `ServerDefault<T>` | Says the database fills the column, by a trigger or default. Inserts may leave it out |
+| `MinLength<T, n>`, `MaxLength<T, n>` | Bounds the length of text |
+| `MinItems<T, n>`, `MaxItems<T, n>` | Bounds how many items an array, JSON array or `Blocks` field holds |
+| `Between<T, min, max>` | Bounds a number or a date |
+| `Searchable<T>` | Adds the field to the search box in Studio's list |
+| `Localized<T>` | Stores one value per locale, such as `{ "en": "Hello", "de": "Hallo" }` |
 
 Three wrappers shape a field in Studio. `EditorReadOnly<T>` is shown but not editable there, and the API can still write it. `Computed<T>` is filled by the database and read-only in Studio. `ComputedFrom<string, "title">` is prefilled from the fields it names on a new record, until the editor changes it.
 
@@ -72,11 +102,30 @@ Wrap the fields in `WithTimestamps<{ ... }>` to add `created_at` and `updated_at
 
 With the Native provider, `supatype dev` stores `Vector<>` and `Geo` fields as JSONB, because its Postgres has no pgvector or PostGIS. Use Docker to work with them locally.
 
+<h2 id="generated">Identity and generated columns</h2>
+
+An integer field can be an identity column. `Int<{ identity: "always" }>`, or `Identity<number>`, is `GENERATED ALWAYS AS IDENTITY`. An insert cannot give it a value. `BigInt<{ identity: "by-default" }>`, or `Identity<bigint, "by-default">`, takes a value when an insert gives one.
+
+`AutoIncrement<number>` is `Identity<number, "by-default">`. Before 0.7.0 it was a `SERIAL`. A serial column pushed then is left as it is.
+
+`Generated<T, "sql">` is a stored generated column, such as `Generated<string, "lower(name)">`. Most types also take it as an option: `Float<{ generated: "price * quantity" }>`.
+
+```ts title="schema/index.ts"
+export type LineItem = Model<{
+  id: PrimaryKey<Int<{ identity: "always" }>>
+  price: Float
+  quantity: Int
+  total: Generated<Float, "price * quantity">
+}>
+```
+
+A column cannot be both. Neither takes a `Default<>`. The generated client leaves generated columns and `"always"` identities out of inserts and updates. A `"by-default"` identity is optional on insert. Removing either is destructive, so the push asks first or needs `--yes`.
+
 <h2 id="relations">Relations</h2>
 
 `RelatedTo<Model>` adds a foreign key column named after the field plus `_id`. The field `author` becomes the column `author_id`. The column can be null unless you pass `{ required: true }`.
 
-`onDelete` takes `"cascade"`, `"setNull"`, `"restrict"` or `"noAction"`. It defaults to `"restrict"`: deleting an author with posts is refused.
+`onDelete` takes `"cascade"`, `"setNull"`, `"restrict"` or `"noAction"`. It defaults to `"restrict"`: deleting an author with posts is refused. `onUpdate` takes the same values and defaults to `"cascade"`.
 
 `HasMany<Model>` and `HasOne<Model>` are the other side of a `RelatedTo`. They add no column. They let the client and seeds reach the related rows.
 
@@ -151,13 +200,19 @@ An operation with no rule is denied. A model with no `access` at all is not reac
 | `Public` | Everyone, signed in or not |
 | `LoggedIn` | Any signed-in user |
 | `Private` | Nobody through the API |
-| `Owner<"author_id">` | The user whose id is in that column. Use `"id"`, a `SupatypeAuthUserId` field, or a relation's `_id` column |
+| `Owner<"author_id">` | The user whose id is in that column. Use `"id"`, a `SupatypeAuthUserId` field, or a relation's `_id` column. `Owner<Post, "author_id">` also names the model, so the editor checks the field |
 | `OwnerFrom<"post">` | The owner of the related row, one relation deep |
 | `Role<"admin">` | A user whose `app_metadata.role` is `admin` |
 | `Any<[A, B]>`, `All<[A, B]>`, `Not<A>` | Either rule, both rules, or the opposite |
 | `Eq`, `Neq`, `Gt`, `Gte`, `Lt`, `Lte`, `Like` | A comparison, such as `Lte<"published_at", Now>` |
+| `In<"site_id", Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>>` | The column's value is in the set: rows of another table, `Values<["draft", "review"]>`, or a claim holding an array |
+| `Exists<Rows<...>>` | The set is not empty, whatever the row holds |
 
 In a comparison, a plain string names a column. Wrap a constant in `Literal<>`. `Now`, `AuthUid` and `Claim<"app_metadata.plan">` are also available. `IsNull<"col">` and `NotNull<"col">` test for null.
+
+A time can be relative to now. `Ago<30, "days">` and `FromNow<7, "days">` take one amount and one unit. `StartOf<"day">` is the start of the day, week, month or year. `After<Now, { days: 30 }>` and `Before<StartOf<"day">, { hours: 9 }>` add or take away several units at once. So `Gte<"created_at", Ago<30, "days">>` passes rows from the last 30 days.
+
+Since 0.7.0 a push refuses an owner rule that could never match. An `Owner` on a relation must reach, through one relation at most, a model keyed by a `SupatypeAuthUserId` or one with its own `Owner` rule. On a plain `UUID` field it still works, with a warning.
 
 `Role<>` reads the user's `app_metadata.role`, which only the auth admin API can set. It is not the Studio role.
 
@@ -203,21 +258,21 @@ By default there is no foreign key to the user. Deleting a user leaves their row
 | `"restrict"` | Deleting the user is refused while they own rows |
 | `"setNull"` | The column is set to null. The field must be `Optional<>` |
 
-The push that adds the key refuses if existing rows name a user that does not exist. Its message says how many rows and how to remove them.
+The push that adds the key refuses if existing rows name a user that does not exist. Its message says how many rows and how to remove them. It also refuses if the database has no `auth.users` table, which Supatype's auth server creates. Start the auth server against the database once, or remove `onDelete` so the field holds an id with no foreign key.
 
 <h2 id="drafts">Drafts and versions</h2>
 
-`versions: { drafts: true }` keeps drafts and a history of each record. `keep` sets how many versions to keep (default 20).
+`versions: { drafts: true }` keeps drafts and a history of each record. `versions: true` is short for the same. `keep` sets how many versions to keep (default 20).
 
 The model's own table holds the published record. That is what `read` rules and the public API see. Drafts and old versions live in `post_versions`.
 
 Publishing copies a draft into the live table. It also sets `published_at` if it is empty. The `update` rule decides who may publish.
 
-A direct API write to the live row is refused. Save a draft with the client's `update`, then publish. See [Client](/docs/client.html#drafts).
+A direct API update of the live row is refused with error `42501`. Save a draft with the client's `update`, then publish, or pass `{ publish: true }` to do both. See [Client](/docs/client.html#drafts).
 
 `versions: { drafts: false }` keeps history only. Writes go straight to the live row.
 
-Who sees drafts in Studio is set by `publishing.draft_visibility` in `supatype.config.ts`. The default is admin, developer and editor.
+The `read` rule does not decide who sees a draft. The record's creator sees it. So do the Studio roles in `publishing.draft_visibility` in `supatype.config.ts` (default admin, developer and editor), and anyone with a signed preview link.
 
 <h2 id="content">Slugs, rich text and blocks</h2>
 
@@ -233,6 +288,10 @@ export type ProseBlock = Block<"prose", { body: RichText }>
 ```
 
 Each entry is stored as `{ "type": "hero", "data": { "heading": "Hi" } }`. A renderer switches on `type` and reads `data`. Rich text inside a block is not converted from a string, so write the full document there.
+
+A third argument, `{ label, icon }`, sets how Studio shows the block, such as `Block<"hero", { heading: string }, { label: "Hero banner" }>`. Both are optional.
+
+Before 0.7.0 a block's fields sat beside `type`. `supatype push` moves entries stored that way under `data`, and `supatype diff` shows how many are pending. Push before anyone opens those records in Studio. See [Upgrading](/docs/#upgrading).
 
 <h2 id="buckets">Storage buckets</h2>
 
@@ -255,14 +314,14 @@ A rule you leave out is refused for everyone but the service role, and the push 
 
 A push never guesses a rename. Renaming a field in the schema looks like a drop and an add.
 
-In a terminal, `supatype push` asks "Was X renamed to Y?". Answer yes and it records the rename. Without a terminal it stops and prints the command to run.
+In a terminal, `supatype push` and `supatype dev` ask, for example "Was post.title renamed to post.headline? (recorded in supatype/renames.json)". Answer yes and it records the rename. Without a terminal the push stops and prints the `supatype rename` command to run.
 
 ```sh
 $ supatype rename post.title post.headline   # a column
 $ supatype rename post article               # a table
 ```
 
-Renames are recorded in `supatype/renames.json`. Commit it. Every push replays it, so each database gets the same rename. `supatype rename --prune` removes entries the target database has already applied.
+Renames are recorded in `supatype/renames.json`. Commit it. Every push replays it, so each database gets the same rename. `supatype rename --prune` removes entries the target database has already applied. Point it at a database with `--connection`, `--env` or `--direct`, as for a push.
 
 :::caution[Careful]
 `supatype push --yes` does not ask about renames. An unrecorded rename is then pushed as a drop and an add, and the column's data is lost. Record renames first.
@@ -274,8 +333,12 @@ Renames are recorded in `supatype/renames.json`. Commit it. Every push replays i
 | --- | --- |
 | A change can lose data, such as a drop | Answer yes in a terminal, or pass `--yes` in CI |
 | A table the schema names exists but Supatype did not create it | `supatype adopt`, or give the model another `tableName`. The push offers to adopt in a terminal |
-| Policies, grants or row level security were changed by hand | `--overwrite-drift` puts Supatype's back. To keep the hand edits, run `supatype doctor --rebaseline --accept-access-drift` |
+| A change rewrites or scans a table of more than 100,000 rows, which locks it while it runs | Answer yes in a terminal, or pass `--yes` |
+| Policies, grants, labels or row level security were changed outside Supatype | `--overwrite-drift` puts Supatype's back. To keep the hand edits, run `supatype doctor --rebaseline --accept-access-drift` |
 | A versioned model has field rules | Remove one of the two |
 | An `onDelete` key would point at missing users | Delete or fix those rows |
+| An `onDelete` key needs `auth.users` and the database has none | Start the auth server against the database once, or remove `onDelete` |
+| The schema has identity or generated columns and the engine is older than 0.7.0 | Run `supatype update` |
+| A `JSON` field changed to `Blocks` holds values that are not objects | Change or remove those values, then push again |
 
 `--yes` does not override hand-edited access rules. Only `--overwrite-drift` does. Objects that Supatype did not create are never dropped or taken over.

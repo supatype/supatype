@@ -2,19 +2,19 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://www.supatype.com/</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/schema.html</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/client.html</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/frameworks.html</loc>
@@ -38,7 +38,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/seeding.html</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/studio.html</loc>
@@ -46,11 +46,11 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/studio-roles.html</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/deploy-vm-github-actions.html</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/from-supabase.html</loc>
@@ -86,7 +86,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/licensing.html</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/privacy.html</loc>
@@ -98,10 +98,10 @@
   </url>
   <url>
     <loc>https://www.supatype.com/llms.txt</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/llms-full.txt</loc>
-    <lastmod>2026-10-29</lastmod>
+    <lastmod>2026-10-30</lastmod>
   </url>
 </urlset>

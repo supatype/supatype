@@ -131,8 +131,24 @@
   access: { read: <span class="t">Public</span>; create: <span class="t">LoggedIn</span>; update: <span class="t">LoggedIn</span>; delete: <span class="t">LoggedIn</span> }
 }&gt;</pre></div>
     <p>The table name is the type name in snake case: <code>Post</code> becomes <code>post</code>, <code>BlogPost</code> becomes <code>blog_post</code>. Set <code>tableName</code> in the second argument to choose another.</p>
-    <p>An <code>id: UUID</code> field becomes the primary key, and the database fills it in.</p>
-    <p>The second argument also takes <code>label</code> and <code>labelPlural</code> (names in Studio), <code>indexes</code>, <code>versions</code> and <code>singleton: true</code> (one row, such as site settings).</p>
+    <p>An <code>id: UUID</code> field becomes the primary key, and the database fills it in. A model with no <code>id</code> field and no <code>PrimaryKey&lt;&gt;</code> gets one anyway: an <code>id UUID</code> primary key filled by <code>gen_random_uuid()</code>. Wrap another field in <code>PrimaryKey&lt;&gt;</code> to key the model by it instead.</p>
+    <p>The second argument also takes these options:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Option</th><th scope="col">Does</th></tr></thead>
+      <tbody>
+        <tr><td><code>label</code>, <code>labelPlural</code></td><td>Names the model in Studio</td></tr>
+        <tr><td><code>indexes</code></td><td>Adds indexes, see below</td></tr>
+        <tr><td><code>versions</code></td><td>Keeps drafts and history, see <a href="#drafts">below</a></td></tr>
+        <tr><td><code>singleton: true</code></td><td>Keeps one row, such as site settings. The table is <code>_global_</code> plus the snake case name, unless you set <code>tableName</code></td></tr>
+        <tr><td><code>constraints</code></td><td>Checks the database runs on every write, in the access rule language, such as <code>Lte&lt;"starts_at", "ends_at"&gt;</code>. They cannot name the caller or the clock</td></tr>
+        <tr><td><code>searchable</code></td><td>The fields the search box in Studio's list looks in</td></tr>
+        <tr><td><code>timestamps</code>, <code>softDelete</code></td><td>Adds <code>created_at</code> and <code>updated_at</code> columns, or a <code>deleted_at</code> column. Left out, they follow the fields the model declares</td></tr>
+        <tr><td><code>autoLocalize: true</code></td><td>Makes copy fields localized by default. Wrap one in <code>NotLocalized&lt;&gt;</code> to opt out</td></tr>
+        <tr><td><code>hooks</code>, <code>validate</code></td><td>Runs an edge function before or after an API write, or to check one field. They do not run for direct SQL or seeds</td></tr>
+        <tr><td><code>cache</code></td><td>Says how reads of the model may be cached</td></tr>
+      </tbody>
+    </table></div>
+    <p>An index is <code>{ fields: ["a", "b"] }</code>, with <code>unique: true</code> and <code>name</code> if you need them. <code>using</code> picks the method: <code>"btree"</code> (the default), <code>"gin"</code>, <code>"gist"</code>, <code>"hnsw"</code> or <code>"brin"</code>. An <code>"hnsw"</code> index is for <code>Vector</code> fields only. Its <code>distance</code> is <code>"cosine"</code> (the default), <code>"l2"</code> or <code>"innerProduct"</code>. A <code>distance</code> on any other index is refused.</p>
     <p><code>supatype dev</code> applies each save. <code>supatype push</code> applies the schema to another database. <code>supatype diff</code> shows the change without applying it.</p>
 
     <h2 id="fields">Field types</h2>
@@ -145,25 +161,55 @@
         <tr><td><code>Int</code>, <code>SmallInt</code>, <code>BigInt</code>, <code>Decimal&lt;10, 2&gt;</code>, <code>Money</code></td><td>exact numbers</td></tr>
         <tr><td><code>boolean</code></td><td>true or false</td></tr>
         <tr><td><code>Timestamp</code>, <code>DateTime</code>, <code>DateOnly</code></td><td>a time with zone, or a date</td></tr>
-        <tr><td><code>UUID</code>, <code>Email</code>, <code>URL</code>, <code>Color</code>, <code>PhoneNumber</code></td><td>text with a known format</td></tr>
-        <tr><td><code>"news" | "guide"</code></td><td>an enum of those values</td></tr>
+        <tr><td><code>UUID</code></td><td>a Postgres <code>uuid</code></td></tr>
+        <tr><td><code>Email</code>, <code>URL</code>, <code>Color</code>, <code>PhoneNumber</code>, <code>Markdown</code></td><td>text. The database checks the format of <code>Email</code> and <code>URL</code></td></tr>
+        <tr><td><code>"news" | "guide"</code></td><td>text limited to those values by a check</td></tr>
         <tr><td><code>string[]</code></td><td>an array</td></tr>
         <tr><td><code>JSON&lt;T&gt;</code></td><td>JSONB, typed as <code>T</code> in the client</td></tr>
+        <tr><td><code>Code</code>, <code>Currency</code>, <code>Duration</code>, <code>Button</code></td><td>JSONB with a typed shape, such as <code>{ amount, code }</code> for <code>Currency</code></td></tr>
         <tr><td><code>Vector&lt;1536&gt;</code></td><td>a pgvector embedding with that many dimensions</td></tr>
+        <tr><td><code>GeoPoint</code>, <code>Geo</code></td><td>a PostGIS <code>geography</code> point</td></tr>
+        <tr><td><code>IPAddress</code>, <code>CIDR</code>, <code>MacAddress</code>, <code>Bytea</code>, <code>XML</code>, <code>TSVector</code>, <code>TSQuery</code></td><td>the matching Postgres type: <code>inet</code>, <code>cidr</code>, <code>macaddr</code>, <code>bytea</code>, <code>xml</code>, <code>tsvector</code>, <code>tsquery</code></td></tr>
         <tr><td><code>RichText</code>, <code>Blocks&lt;T&gt;</code>, <code>Slug&lt;"title"&gt;</code></td><td>content fields, see <a href="#content">below</a></td></tr>
         <tr><td><code>ImageAsset&lt;Bucket&gt;</code>, <code>FileAsset</code></td><td>a file in a storage bucket</td></tr>
         <tr><td><code>SupatypeAuthUserId</code></td><td>the id of a sign-in user, see <a href="#owners">below</a></td></tr>
       </tbody>
     </table></div>
-    <p>Wrap a field to add more: <code>Unique&lt;T&gt;</code>, <code>Indexed&lt;T&gt;</code>, <code>Default&lt;T, value&gt;</code>, <code>MaxLength&lt;T, n&gt;</code>, <code>Between&lt;T, min, max&gt;</code>.</p>
+    <p>Wrap a field to add more:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Wrap</th><th scope="col">Does</th></tr></thead>
+      <tbody>
+        <tr><td><code>Unique&lt;T&gt;</code>, <code>Indexed&lt;T&gt;</code></td><td>Adds a unique constraint, or an index</td></tr>
+        <tr><td><code>Default&lt;T, value&gt;</code></td><td>Sets the column's default</td></tr>
+        <tr><td><code>ServerDefault&lt;T&gt;</code></td><td>Says the database fills the column, by a trigger or default. Inserts may leave it out</td></tr>
+        <tr><td><code>MinLength&lt;T, n&gt;</code>, <code>MaxLength&lt;T, n&gt;</code></td><td>Bounds the length of text</td></tr>
+        <tr><td><code>MinItems&lt;T, n&gt;</code>, <code>MaxItems&lt;T, n&gt;</code></td><td>Bounds how many items an array, JSON array or <code>Blocks</code> field holds</td></tr>
+        <tr><td><code>Between&lt;T, min, max&gt;</code></td><td>Bounds a number or a date</td></tr>
+        <tr><td><code>Searchable&lt;T&gt;</code></td><td>Adds the field to the search box in Studio's list</td></tr>
+        <tr><td><code>Localized&lt;T&gt;</code></td><td>Stores one value per locale, such as <code>{ "en": "Hello", "de": "Hallo" }</code></td></tr>
+      </tbody>
+    </table></div>
     <p>Three wrappers shape a field in Studio. <code>EditorReadOnly&lt;T&gt;</code> is shown but not editable there, and the API can still write it. <code>Computed&lt;T&gt;</code> is filled by the database and read-only in Studio. <code>ComputedFrom&lt;string, "title"&gt;</code> is prefilled from the fields it names on a new record, until the editor changes it.</p>
     <p>For translated content, declare the locales once, such as <code>export type Locales = LocaleConfig&lt;["en", "fr"], "en"&gt;</code>, and wrap a field in <code>Localized&lt;T&gt;</code>. It is stored as JSONB keyed by locale: <code>{ "en": "Hello", "fr": "Bonjour" }</code>. <code>LocalizedModel&lt;&gt;</code> localizes a model's text fields for you, and <code>NotLocalized&lt;T&gt;</code> opts one back out. There is no locale setting in <code>supatype.config.ts</code>.</p>
     <p>Wrap the fields in <code>WithTimestamps&lt;{ ... }&gt;</code> to add <code>created_at</code> and <code>updated_at</code>, which the database fills in.</p>
     <p>With the Native provider, <code>supatype dev</code> stores <code>Vector&lt;&gt;</code> and <code>Geo</code> fields as JSONB, because its Postgres has no pgvector or PostGIS. Use Docker to work with them locally.</p>
 
+    <h2 id="generated">Identity and generated columns</h2>
+    <p>An integer field can be an identity column. <code>Int&lt;{ identity: "always" }&gt;</code>, or <code>Identity&lt;number&gt;</code>, is <code>GENERATED ALWAYS AS IDENTITY</code>. An insert cannot give it a value. <code>BigInt&lt;{ identity: "by-default" }&gt;</code>, or <code>Identity&lt;bigint, "by-default"&gt;</code>, takes a value when an insert gives one.</p>
+    <p><code>AutoIncrement&lt;number&gt;</code> is <code>Identity&lt;number, "by-default"&gt;</code>. Before 0.7.0 it was a <code>SERIAL</code>. A serial column pushed then is left as it is.</p>
+    <p><code>Generated&lt;T, "sql"&gt;</code> is a stored generated column, such as <code>Generated&lt;string, "lower(name)"&gt;</code>. Most types also take it as an option: <code>Float&lt;{ generated: "price * quantity" }&gt;</code>.</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export</span> <span class="k">type</span> <span class="t">LineItem</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">PrimaryKey</span>&lt;<span class="t">Int</span>&lt;{ identity: <span class="s">"always"</span> }&gt;&gt;
+  price: <span class="t">Float</span>
+  quantity: <span class="t">Int</span>
+  total: <span class="t">Generated</span>&lt;<span class="t">Float</span>, <span class="s">"price * quantity"</span>&gt;
+}&gt;</pre></div>
+    <p>A column cannot be both. Neither takes a <code>Default&lt;&gt;</code>. The generated client leaves generated columns and <code>"always"</code> identities out of inserts and updates. A <code>"by-default"</code> identity is optional on insert. Removing either is destructive, so the push asks first or needs <code>--yes</code>.</p>
+
     <h2 id="relations">Relations</h2>
     <p><code>RelatedTo&lt;Model&gt;</code> adds a foreign key column named after the field plus <code>_id</code>. The field <code>author</code> becomes the column <code>author_id</code>. The column can be null unless you pass <code>{ required: true }</code>.</p>
-    <p><code>onDelete</code> takes <code>"cascade"</code>, <code>"setNull"</code>, <code>"restrict"</code> or <code>"noAction"</code>. It defaults to <code>"restrict"</code>: deleting an author with posts is refused.</p>
+    <p><code>onDelete</code> takes <code>"cascade"</code>, <code>"setNull"</code>, <code>"restrict"</code> or <code>"noAction"</code>. It defaults to <code>"restrict"</code>: deleting an author with posts is refused. <code>onUpdate</code> takes the same values and defaults to <code>"cascade"</code>.</p>
     <p><code>HasMany&lt;Model&gt;</code> and <code>HasOne&lt;Model&gt;</code> are the other side of a <code>RelatedTo</code>. They add no column. They let the client and seeds reach the related rows.</p>
     <p><code>ManyToMany&lt;Model&gt;</code> makes one junction table for the pair, whichever side declares it. It is named from both tables in alphabetical order, so posts and tags share <code>post_tag</code>. Pass <code>{ through: "name" }</code> to choose the name.</p>
     <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
@@ -231,14 +277,18 @@
         <tr><td><code>Public</code></td><td>Everyone, signed in or not</td></tr>
         <tr><td><code>LoggedIn</code></td><td>Any signed-in user</td></tr>
         <tr><td><code>Private</code></td><td>Nobody through the API</td></tr>
-        <tr><td><code>Owner&lt;"author_id"&gt;</code></td><td>The user whose id is in that column. Use <code>"id"</code>, a <code>SupatypeAuthUserId</code> field, or a relation's <code>_id</code> column</td></tr>
+        <tr><td><code>Owner&lt;"author_id"&gt;</code></td><td>The user whose id is in that column. Use <code>"id"</code>, a <code>SupatypeAuthUserId</code> field, or a relation's <code>_id</code> column. <code>Owner&lt;Post, "author_id"&gt;</code> also names the model, so the editor checks the field</td></tr>
         <tr><td><code>OwnerFrom&lt;"post"&gt;</code></td><td>The owner of the related row, one relation deep</td></tr>
         <tr><td><code>Role&lt;"admin"&gt;</code></td><td>A user whose <code>app_metadata.role</code> is <code>admin</code></td></tr>
         <tr><td><code>Any&lt;[A, B]&gt;</code>, <code>All&lt;[A, B]&gt;</code>, <code>Not&lt;A&gt;</code></td><td>Either rule, both rules, or the opposite</td></tr>
         <tr><td><code>Eq</code>, <code>Neq</code>, <code>Gt</code>, <code>Gte</code>, <code>Lt</code>, <code>Lte</code>, <code>Like</code></td><td>A comparison, such as <code>Lte&lt;"published_at", Now&gt;</code></td></tr>
+        <tr><td><code>In&lt;"site_id", Rows&lt;"user_sites", "site_id", Eq&lt;"user_id", AuthUid&gt;&gt;&gt;</code></td><td>The column's value is in the set: rows of another table, <code>Values&lt;["draft", "review"]&gt;</code>, or a claim holding an array</td></tr>
+        <tr><td><code>Exists&lt;Rows&lt;...&gt;&gt;</code></td><td>The set is not empty, whatever the row holds</td></tr>
       </tbody>
     </table></div>
     <p>In a comparison, a plain string names a column. Wrap a constant in <code>Literal&lt;&gt;</code>. <code>Now</code>, <code>AuthUid</code> and <code>Claim&lt;"app_metadata.plan"&gt;</code> are also available. <code>IsNull&lt;"col"&gt;</code> and <code>NotNull&lt;"col"&gt;</code> test for null.</p>
+    <p>A time can be relative to now. <code>Ago&lt;30, "days"&gt;</code> and <code>FromNow&lt;7, "days"&gt;</code> take one amount and one unit. <code>StartOf&lt;"day"&gt;</code> is the start of the day, week, month or year. <code>After&lt;Now, { days: 30 }&gt;</code> and <code>Before&lt;StartOf&lt;"day"&gt;, { hours: 9 }&gt;</code> add or take away several units at once. So <code>Gte&lt;"created_at", Ago&lt;30, "days"&gt;&gt;</code> passes rows from the last 30 days.</p>
+    <p>Since 0.7.0 a push refuses an owner rule that could never match. An <code>Owner</code> on a relation must reach, through one relation at most, a model keyed by a <code>SupatypeAuthUserId</code> or one with its own <code>Owner</code> rule. On a plain <code>UUID</code> field it still works, with a warning.</p>
     <p><code>Role&lt;&gt;</code> reads the user's <code>app_metadata.role</code>, which only the auth admin API can set. It is not the Studio role.</p>
 
     <h2 id="field-rules">Field rules and masking</h2>
@@ -276,15 +326,15 @@
         <tr><td><code>"setNull"</code></td><td>The column is set to null. The field must be <code>Optional&lt;&gt;</code></td></tr>
       </tbody>
     </table></div>
-    <p>The push that adds the key refuses if existing rows name a user that does not exist. Its message says how many rows and how to remove them.</p>
+    <p>The push that adds the key refuses if existing rows name a user that does not exist. Its message says how many rows and how to remove them. It also refuses if the database has no <code>auth.users</code> table, which Supatype's auth server creates. Start the auth server against the database once, or remove <code>onDelete</code> so the field holds an id with no foreign key.</p>
 
     <h2 id="drafts">Drafts and versions</h2>
-    <p><code>versions: { drafts: true }</code> keeps drafts and a history of each record. <code>keep</code> sets how many versions to keep (default 20).</p>
+    <p><code>versions: { drafts: true }</code> keeps drafts and a history of each record. <code>versions: true</code> is short for the same. <code>keep</code> sets how many versions to keep (default 20).</p>
     <p>The model's own table holds the published record. That is what <code>read</code> rules and the public API see. Drafts and old versions live in <code>post_versions</code>.</p>
     <p>Publishing copies a draft into the live table. It also sets <code>published_at</code> if it is empty. The <code>update</code> rule decides who may publish.</p>
-    <p>A direct API write to the live row is refused. Save a draft with the client's <code>update</code>, then publish. See <a href="/docs/client.html#drafts">Client</a>.</p>
+    <p>A direct API update of the live row is refused with error <code>42501</code>. Save a draft with the client's <code>update</code>, then publish, or pass <code>{ publish: true }</code> to do both. See <a href="/docs/client.html#drafts">Client</a>.</p>
     <p><code>versions: { drafts: false }</code> keeps history only. Writes go straight to the live row.</p>
-    <p>Who sees drafts in Studio is set by <code>publishing.draft_visibility</code> in <code>supatype.config.ts</code>. The default is admin, developer and editor.</p>
+    <p>The <code>read</code> rule does not decide who sees a draft. The record's creator sees it. So do the Studio roles in <code>publishing.draft_visibility</code> in <code>supatype.config.ts</code> (default admin, developer and editor), and anyone with a signed preview link.</p>
 
     <h2 id="content">Slugs, rich text and blocks</h2>
     <p><code>Slug&lt;"title"&gt;</code> fills itself from <code>title</code> when you leave it empty. While it still holds the generated value, it follows the title when the title changes. Set it yourself to keep a URL fixed. Add <code>Unique&lt;&gt;</code> if it must be unique.</p>
@@ -294,6 +344,8 @@
 <pre><span class="k">export</span> <span class="k">type</span> <span class="t">HeroBlock</span> = <span class="t">Block</span>&lt;<span class="s">"hero"</span>, { heading: string; image: <span class="t">Optional</span>&lt;<span class="t">ImageAsset</span>&lt;<span class="t">Covers</span>&gt;&gt; }&gt;
 <span class="k">export</span> <span class="k">type</span> <span class="t">ProseBlock</span> = <span class="t">Block</span>&lt;<span class="s">"prose"</span>, { body: <span class="t">RichText</span> }&gt;</pre></div>
     <p>Each entry is stored as <code>{ "type": "hero", "data": { "heading": "Hi" } }</code>. A renderer switches on <code>type</code> and reads <code>data</code>. Rich text inside a block is not converted from a string, so write the full document there.</p>
+    <p>A third argument, <code>{ label, icon }</code>, sets how Studio shows the block, such as <code>Block&lt;"hero", { heading: string }, { label: "Hero banner" }&gt;</code>. Both are optional.</p>
+    <p>Before 0.7.0 a block's fields sat beside <code>type</code>. <code>supatype push</code> moves entries stored that way under <code>data</code>, and <code>supatype diff</code> shows how many are pending. Push before anyone opens those records in Studio. See <a href="/docs/#upgrading">Upgrading</a>.</p>
 
     <h2 id="buckets">Storage buckets</h2>
     <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
@@ -309,11 +361,11 @@
 
     <h2 id="renames">Renames</h2>
     <p>A push never guesses a rename. Renaming a field in the schema looks like a drop and an add.</p>
-    <p>In a terminal, <code>supatype push</code> asks "Was X renamed to Y?". Answer yes and it records the rename. Without a terminal it stops and prints the command to run.</p>
+    <p>In a terminal, <code>supatype push</code> and <code>supatype dev</code> ask, for example "Was post.title renamed to post.headline? (recorded in supatype/renames.json)". Answer yes and it records the rename. Without a terminal the push stops and prints the <code>supatype rename</code> command to run.</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> supatype rename post.title post.headline  <span class="c"> # a column</span>
 <span class="pr">$</span> supatype rename post article              <span class="c"> # a table</span></pre></div>
-    <p>Renames are recorded in <code>supatype/renames.json</code>. Commit it. Every push replays it, so each database gets the same rename. <code>supatype rename --prune</code> removes entries the target database has already applied.</p>
+    <p>Renames are recorded in <code>supatype/renames.json</code>. Commit it. Every push replays it, so each database gets the same rename. <code>supatype rename --prune</code> removes entries the target database has already applied. Point it at a database with <code>--connection</code>, <code>--env</code> or <code>--direct</code>, as for a push.</p>
     <div class="callout warn">
       <span class="callout-label">CAREFUL</span>
       <p><code>supatype push --yes</code> does not ask about renames. An unrecorded rename is then pushed as a drop and an add, and the column's data is lost. Record renames first.</p>
@@ -325,9 +377,13 @@
       <tbody>
         <tr><td>A change can lose data, such as a drop</td><td>Answer yes in a terminal, or pass <code>--yes</code> in CI</td></tr>
         <tr><td>A table the schema names exists but Supatype did not create it</td><td><code>supatype adopt</code>, or give the model another <code>tableName</code>. The push offers to adopt in a terminal</td></tr>
-        <tr><td>Policies, grants or row level security were changed by hand</td><td><code>--overwrite-drift</code> puts Supatype's back. To keep the hand edits, run <code>supatype doctor --rebaseline --accept-access-drift</code></td></tr>
+        <tr><td>A change rewrites or scans a table of more than 100,000 rows, which locks it while it runs</td><td>Answer yes in a terminal, or pass <code>--yes</code></td></tr>
+        <tr><td>Policies, grants, labels or row level security were changed outside Supatype</td><td><code>--overwrite-drift</code> puts Supatype's back. To keep the hand edits, run <code>supatype doctor --rebaseline --accept-access-drift</code></td></tr>
         <tr><td>A versioned model has field rules</td><td>Remove one of the two</td></tr>
         <tr><td>An <code>onDelete</code> key would point at missing users</td><td>Delete or fix those rows</td></tr>
+        <tr><td>An <code>onDelete</code> key needs <code>auth.users</code> and the database has none</td><td>Start the auth server against the database once, or remove <code>onDelete</code></td></tr>
+        <tr><td>The schema has identity or generated columns and the engine is older than 0.7.0</td><td>Run <code>supatype update</code></td></tr>
+        <tr><td>A <code>JSON</code> field changed to <code>Blocks</code> holds values that are not objects</td><td>Change or remove those values, then push again</td></tr>
       </tbody>
     </table></div>
     <p><code>--yes</code> does not override hand-edited access rules. Only <code>--overwrite-drift</code> does. Objects that Supatype did not create are never dropped or taken over.</p>
@@ -342,6 +398,7 @@
     <span class="label">ON THIS PAGE</span>
     <a href="#models">Models</a>
     <a href="#fields">Field types</a>
+    <a href="#generated">Identity and generated</a>
     <a href="#relations">Relations</a>
     <a href="#access">Access rules</a>
     <a href="#field-rules">Field rules</a>
@@ -357,7 +414,7 @@
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

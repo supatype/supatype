@@ -9,7 +9,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "supatype:keys": "supatype keys",
+    "supatype:keys": "supatype keys --write",
     "supatype:push": "supatype push --yes",
     "supatype:dev": "supatype dev",
     "supatype:generate": "supatype generate",

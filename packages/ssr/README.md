@@ -74,7 +74,7 @@ interface CookieAdapter {
 
 ### Cookie prefix
 
-Auth tokens are stored under `st-<project-ref>-auth-token` by default. If you've configured a custom prefix, pass it via `cookiePrefix`:
+Auth tokens are stored under `st-auth-token` by default (`<prefix>-auth-token`). A cookie named `<prefix>-*-auth-token` is also read. If you use a custom prefix, pass it via `cookiePrefix`:
 
 ```ts
 createServerClient(url, anonKey, {
@@ -86,7 +86,7 @@ createServerClient(url, anonKey, {
 ## How it works
 
 1. Reads all cookies via the adapter's `getAll()`
-2. Finds the auth token cookie matching `<prefix>-*-auth-token`
+2. Finds the auth token cookie `<prefix>-auth-token`, or one matching `<prefix>-*-auth-token`
 3. Parses the JSON session value and checks the JWT `exp` claim, expired tokens are discarded
 4. Passes the session as `initialSession` to `createClient`, so all subsequent requests carry the user's JWT automatically
 5. Signature verification is handled server-side by the gateway when the token is forwarded

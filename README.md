@@ -18,11 +18,20 @@ User guides: [docs](https://www.supatype.com/docs/) · [local dev](https://www.s
 
 ## Quick start
 
+You need Node.js 22 or later, and Docker for the default local stack.
+
 ```bash
 npm install -g @supatype/cli
 mkdir my-app && cd my-app
 supatype init
 supatype dev
+```
+
+On Linux and macOS you can also install the CLI with the install script or Homebrew. On Windows, use npm.
+
+```bash
+curl -fsSL https://supatype.com/install.sh | bash
+brew install supatype/tap/supatype
 ```
 
 `supatype dev` applies your schema, then watches it: save a change to `schema/index.ts` and it
@@ -44,7 +53,7 @@ Upgrading from 0.6.0? Read [UPGRADING.md](UPGRADING.md) first.
 | Mode | Command | Postgres | Everything else |
 |------|---------|----------|-----------------|
 | **Dev** | `supatype dev` | **Docker** (`provider: "docker"`, what `init` writes) or native (`provider: "native"`) | **Docker Compose** with the self-host images, or native **engine** + **supatype-server** binaries |
-| **Self-host** | `supatype self-host compose up` | Docker (`supatype/postgres:17-latest`) | **Docker Compose**, images default to **`:latest`** on Docker Hub |
+| **Self-host** | `supatype self-host compose up` | Docker (`supatype/postgres:latest`, or the image `versions.postgres` pins) | **Docker Compose**, images default to **`:latest`** on Docker Hub |
 | **Cloud** | `supatype login`, `supatype link`, `supatype deploy` | Managed | Supatype Cloud (early access) |
 
 ---
@@ -94,7 +103,7 @@ Turborepo + pnpm workspaces. All packages are ESM.
 pnpm install
 pnpm dev:local    # CLI against the tests/integration fixture
 pnpm build
-pnpm turbo run typecheck
+pnpm typecheck
 pnpm --filter @supatype/cli test
 ```
 
@@ -117,6 +126,8 @@ Licensing is per package, and each package directory has its own `LICENSE` file:
 
 - **MIT:** the libraries you install in your app: `client`, `types`, the framework bindings (`react`, `react-native`, `vue`, `svelte`, `solid`), `ssr`, the auth UI packages, the plugin packages, `ui` and `common`.
 - **Apache 2.0:** the CLI and services (`cli`, `studio`, `storage`, `realtime`, `functions-worker`, `self-host-control`) and the rest of this repository ([LICENSE](LICENSE)).
+
+The API server and the Postgres image live in their own repositories: [supatype/server](https://github.com/supatype/server) is MIT, and [supatype/postgres](https://github.com/supatype/postgres) is under the PostgreSQL License.
 
 The schema engine the CLI downloads is not in this repository: its source is at
 [github.com/supatype/schema-engine](https://github.com/supatype/schema-engine). It is

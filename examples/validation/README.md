@@ -17,10 +17,16 @@ matters is a `CHECK`, not a function. Use a validator for what a `CHECK` genuine
 
 ## Run it
 
+Running this outside the repo? See [Running an example](../README.md#running-an-example).
+
+From the monorepo root:
+
 ```bash
 pnpm install
-pnpm keys              # writes ANON_KEY / SERVICE_ROLE_KEY into .env
-pnpm dev
+pnpm build             # the CLI and the libraries run from their dist/
+
+cd examples/validation
+pnpm dev               # Postgres, the schema, the stack; writes .env and the keys
 ```
 
 Studio is at `http://127.0.0.1:18473/studio/`. Open **Product → Rules** to see every bound,
@@ -30,7 +36,7 @@ the schema file, so it shows what the database is actually enforcing.
 Create an admin user first:
 
 ```bash
-npx supatype admin create-user --email you@example.com --password <password> --role admin
+pnpm exec supatype admin create-user --email you@example.com --password <password> --role admin
 ```
 
 If `localhost` misbehaves, use `127.0.0.1`. Docker Desktop sometimes leaves a broken IPv6 forwarder
@@ -41,6 +47,7 @@ on the gateway port, and Chrome resolves `localhost` to `::1` first.
 Every one of these is refused, and the error tells you which rule bit:
 
 ```bash
+set -a; . ./.env; set +a   # ANON_KEY and the rest of .env, from this directory
 API=http://127.0.0.1:18473/rest/v1/product
 # sign in first; `create` is LoggedIn, not Public
 TOKEN=$(curl -s -X POST "http://127.0.0.1:18473/auth/v1/token?grant_type=password" \

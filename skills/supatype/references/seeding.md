@@ -112,9 +112,11 @@ seed runs.
 ### Rows that need an auth user
 
 A seed cannot create auth users. It writes your models, and `auth.users` is not one of them. A
-field typed `SupatypeAuthUserId` (an owner column such as `comment.user_id`) holds a foreign key to
-`auth.users`, so a seed row can only name a user who already exists; a made-up id is refused with
-`constraint ..._user_id_fkey was violated`.
+field typed `SupatypeAuthUserId` (an owner column such as `comment.user_id`) has a foreign key to
+`auth.users` only when it declares `onDelete`, for example
+`SupatypeAuthUserId<{ onDelete: "cascade" }>`. With the key, a seed row can only name a user who
+already exists, and a made-up id is refused with `constraint ..._user_id_fkey was violated`.
+Without it, the column takes any id, so a made-up one is stored and matches no user.
 
 1. Create the users first: sign them up through the auth API (`client.auth.signUp(...)`, which is
    `POST /auth/v1/signup`), or run `supatype admin create-user --email ... --role viewer`, which

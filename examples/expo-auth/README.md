@@ -18,19 +18,17 @@ Full **Supatype project** + Expo app that exercises native auth:
 
 ## Setup
 
+Running this outside the repo? See [Running an example](../README.md#running-an-example).
+
 From the monorepo root:
 
 ```bash
 pnpm install
-pnpm --filter @supatype/client build
-pnpm --filter @supatype/react build
-pnpm --filter @supatype/react-native build
-pnpm --filter @supatype/react-native-auth build
-pnpm --filter @supatype/cli build
+pnpm build                       # the CLI and the libraries run from their dist/
 
 cd examples/expo-auth
 cp .env.example .env
-pnpm exec supatype keys          # mints JWTs + EXPO_PUBLIC_* in .env
+pnpm exec supatype keys --write  # mints JWTs + EXPO_PUBLIC_* in .env
 pnpm exec supatype push --yes    # migrate schema + regenerate types
 pnpm exec supatype dev           # terminal 1, Compose stack, Kong :18473
 pnpm start                       # terminal 2, Expo

@@ -72,7 +72,6 @@ path keeps the schema's rules.
 ```bash
 supatype app add --static ./public   # or configure app.mode in config
 npm run build                        # write assets to static_dir
-supatype self-host compose render
 supatype self-host compose up -d
 supatype self-host compose status
 supatype deploy                      # uploads to control-plane when linked
@@ -81,8 +80,7 @@ supatype deploy                      # uploads to control-plane when linked
 ## Production compose workflow
 
 ```bash
-supatype self-host compose render    # write docker-compose.yml (includes control-plane)
-supatype self-host compose up -d     # start production stack
+supatype self-host compose up -d     # render docker-compose.yml and start the production stack
 supatype self-host compose down      # stop
 supatype self-host compose status    # health check
 supatype self-host compose restart server   # recreate one service after a .env change
@@ -123,10 +121,10 @@ Outside dev mode the gateway answers CORS for every service behind it, with one 
 
 - **Default:** the origin of `SITE_URL`, then `api.corsOrigins` from `supatype.config.ts`, then
   `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env`.
-- **Saved in Studio:** the Settings page's CORS tab. Owners and admins can add and remove origins
-  there. The list is stored in the project's database (`auth.cors_origins`), so it survives a
-  restart, and every replica reads it within ten seconds. It replaces the default until someone
-  presses Reset. The site URL stays allowed whatever is saved.
+- **Saved in Studio:** the Settings page's CORS tab. Owners, admins and developers can add and
+  remove origins there. The list is stored in the project's database (`auth.cors_origins`), so it
+  survives a restart, and every replica reads it within ten seconds. It replaces the default until
+  someone presses Reset. The site URL stays allowed whatever is saved.
 - **Everything else is refused:** a preflight from another origin gets `403`, and other responses
   carry no CORS headers.
 - **`*`** allows every origin, and only when someone writes it in one of those places.
@@ -141,8 +139,8 @@ Entries must be `scheme://host[:port]` (http or https) or `*`; anything else sto
 loading with `api.corsOrigins must be an array of origins (scheme://host[:port]) or "*"`. Before
 this, a standalone server with no `SUPATYPE_CORS_ALLOW_ORIGINS` allowed every origin, so add any
 production web app's origin before upgrading. On Cloud, `api.corsOrigins` is not deployed: the
-project's own URL and Cloud Studio are always allowed, and owners and admins edit the rest in
-Studio's CORS tab.
+project's own URL and Cloud Studio are always allowed, and owners, admins and developers edit
+the rest in Studio's CORS tab.
 
 ## Studio roles
 
@@ -166,17 +164,18 @@ supatype admin list-users
 | Role | May |
 |---|---|
 | `admin` | everything: members, auth users, keys, domains, CORS list, elevated access |
-| `developer` | read and write rows, schema screens, push, deploy, SQL editor and Database write controls, Realtime Inspector, logs |
+| `developer` | everything an admin may do except grant Studio roles |
 | `editor` | read and write rows; Data Explorer works, schema screens do not |
 | `viewer` | read rows, schema screens and logs; changes nothing |
 
 - **SQL editor** (and creating or dropping tables, views, functions, triggers, types, policies,
-  extensions, RLS switches): owner, admin, developer. It runs as the project's owning role, so RLS
-  does not apply; every query is recorded.
-- **Acting mode:** owners and admins act **elevated** (service role key, no RLS) by default and can
-  switch to **self** in Studio ("Act as myself" / "Use elevated access"). Studio sends
-  `X-Supatype-Acting-Mode: self|elevated`; asking for `elevated` without the permission is `403`,
-  never a silent downgrade. Everyone else always acts as themselves, under RLS and field masks.
+  extensions, RLS switches): owner, admin, developer. It signs in as `supatype_sql_editor`, a
+  non-superuser member of the database owner, so RLS does not apply; every query is recorded.
+- **Acting mode:** admins and developers (and owners on Cloud) act **elevated** (service role, no
+  RLS) by default, and every such request is recorded. Editors and viewers act in **Studio mode**:
+  the app's row rules are skipped, and field rules still apply, so masked columns stay masked. To
+  see what the app's own rules allow, send a request built in Studio (API "Try it", GraphQL, a
+  function's Invoke) as yourself. Asking for elevated access without the permission gets `403`.
 - Viewers read the Database screens, policies, migration and seed history through a read-only
   metadata catalogue, not the SQL editor. Sessions on the Users screen are listed and revoked
   through the auth admin API (`/admin/sessions`).
@@ -318,9 +317,13 @@ and row cache. Budget for it alongside `shared_buffers` on a small host.
 loaded through `shared_preload_libraries`, which is not something Supatype can
 set on a Postgres it does not start.
 
-## Standalone mode (native TLS)
+## Standalone mode
 
-`mode = "standalone"` also drives the native (non-Compose) path, which serves ACME TLS directly from the host `supatype-server` binary. `supatype init --mode standalone` scaffolds this. Uses host binaries, not Docker Compose.
+`server.mode = "standalone"` is what `supatype init` writes when you choose a self-hosted
+production target (`--mode standalone` does the same for older scripts). The scaffold uses the
+Docker provider, and the stack runs under `supatype self-host compose`, where Kong serves TLS.
+Running a standalone server natively, from host binaries, is not a supported self-host route in
+0.7.0.
 
 ## Package.json scripts (typical)
 
@@ -329,14 +332,9 @@ set on a Postgres it does not start.
   "scripts": {
     "dev": "supatype dev",
     "push": "supatype push",
-    "selfhost:render": "supatype self-host compose render",
     "selfhost:up": "supatype self-host compose up -d",
     "selfhost:down": "supatype self-host compose down",
     "selfhost:status": "supatype self-host compose status"
   }
 }
 ```
-
-## Maintainer example
-
-See the `examples/self-host/` directory in the Supatype repository (https://github.com/supatype/supatype) for a compose-first fixture with proxy app mode.

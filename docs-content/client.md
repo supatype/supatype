@@ -28,7 +28,7 @@ export const supatype = createClient({
 })
 ```
 
-Every page in these docs imports the client from this one file. `supatype init` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. Read them rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys --write` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. Read them rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 
@@ -51,11 +51,15 @@ The session is saved and restored by default. Pass `auth: { persistSession: fals
 
 | File | Holds |
 | --- | --- |
-| `supatype/generated/client.ts` | The `createClient` to import |
+| `supatype/generated/client.ts` | The `createClient` to import, the table types, the columns that keep exact values and the models that keep drafts. It also re-exports `@supatype/client` |
 | `supatype/generated/index.d.ts` | Row, insert and update types for each table |
 | `types/database.ts` | The `Database` type, for code that wants the raw shapes |
 
 Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `createClient` with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: `createClient<MyDatabase>({ ... })`.
+
+Exact numbers keep every digit when you import from the generated `client.ts`. A `BigInt` column reads as a `bigint`. `Decimal` and `Money` columns read as strings.
+
+A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.
 
 <h2 id="read">Read rows</h2>
 
@@ -83,6 +87,13 @@ const { data: post } = await supatype.from("post").select("*").eq("slug", "hello
 console.log(post?.title)
 ```
 
+`count` is `null` unless you ask for it:
+
+```ts
+const { count } = await supatype.from("post").select("id", { count: "exact" }).eq("kind", "news")
+console.log(count)
+```
+
 <h2 id="filters">Filters</h2>
 
 | Filter | Matches |
@@ -92,6 +103,7 @@ console.log(post?.title)
 | `like`, `ilike` | a pattern, `ilike` ignores case |
 | `in` | any of a list |
 | `is` | `null`, `true` or `false` |
+| `contains`, `containedBy` | an array, range or jsonb column that holds the value, or is held by it |
 | `not`, `or`, `match` | negation, either filter, several equalities |
 
 ```ts
@@ -115,9 +127,11 @@ await supatype.from("comment").update({ body: "Edited" }).eq("id", commentId)
 await supatype.from("comment").delete().eq("id", commentId)
 ```
 
-A write returns no rows unless you add `.select()`. `upsert` inserts or updates by primary key.
+A write returns no rows unless you add `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
 
-A `RichText` field takes a plain string on write. Owner columns with an `Owner<>` create rule can be left out: they default to the caller.
+A `RichText` field takes a plain string on write.
+
+Some owner columns can be left out. A `SupatypeAuthUserId` field that the `create` rule names in `Owner<>`, and that has no default of its own, defaults to the caller. A relation's key, such as `author_id`, is not filled in, so send it.
 
 <h2 id="drafts">Drafts and publishing</h2>
 
@@ -166,6 +180,8 @@ await supatype.auth.signOut()
 
 Once signed in, every request carries the user's token, so access rules see them. `onAuthStateChange` calls back at once with the current state, then on each change.
 
+When the project asks new users to confirm their email, `signUp` returns `session: null` and does not sign the user in. They sign in once they have confirmed.
+
 `getUser()` fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on `supatype.auth` too.
 
 <h2 id="storage">Storage</h2>
@@ -185,6 +201,13 @@ console.log(publicUrl, signed?.signedUrl)
 ```
 
 `getPublicUrl` works for public buckets. `createSignedUrl` gives a link that expires after the number of seconds you pass. `download`, `list` and `remove` are on the bucket too.
+
+An `ImageAsset` or `FileAsset` column holds `{ bucket, path }`, not a URL. `publicUrl` builds the URL from it, and returns `null` for an empty column:
+
+```ts
+const { data: post } = await supatype.from("post").select("title, cover").eq("slug", "hello-world").maybeSingle()
+const coverUrl = supatype.storage.publicUrl(post?.cover)
+```
 
 The bucket's access rules from the schema decide who may upload, overwrite and delete.
 
@@ -208,7 +231,13 @@ if (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)
 ```
 
-The call goes to `/functions/v1/hello` with the user's token. A JSON response is parsed. Function names and bodies are not typed. `invoke` also takes `method` (default `POST`), `headers` and `idempotent`.
+The call goes to `/functions/v1/hello` with the user's token. A JSON response is parsed. Function names and bodies are not typed. `invoke` also takes `method` (default `POST`), `headers` and `idempotent`. Only a `GET` is retried on a transient failure, because a `POST` may already have run. Pass `idempotent: true` when running the function twice is harmless.
+
+```ts
+await supatype.functions.invoke("stats", { method: "GET", headers: { "x-region": "eu" } })
+```
+
+Inside a function, `ctx.url` is the API's internal address, for calls the function makes. `ctx.publicUrl` is the public address, for links you give to people.
 
 `supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`.
 
@@ -218,12 +247,17 @@ The call goes to `/functions/v1/hello` with the user's token. A JSON response is
 import type { TableRow } from "../supatype/generated/client"
 
 type Post = TableRow<"post">
-type PostPage = { postCollection: { edges: { node: Pick<Post, "title" | "body"> }[] } }
+type Author = TableRow<"author">
+type PostPage = {
+  postCollection: { edges: { node: Pick<Post, "title" | "body"> & { author: Pick<Author, "name"> } }[] }
+}
 
 const { data, error } = await supatype.graphql<PostPage>(`{
-  postCollection(first: 10) { edges { node { title body } } }
+  postCollection(first: 10) { edges { node { title body author { name } } } }
 }`)
-const firstParagraph = data?.postCollection.edges[0]?.node.body.root.children?.[0]
+if (error) throw new Error(error.message)
+const first = data?.postCollection.edges[0]?.node
+console.log(first?.author.name, first?.body.root.children?.[0])
 ```
 
 The query goes to `/graphql/v1` as the signed-in user, under the same access rules as REST. Pass variables as the second argument, and `{ idempotent: true }` as the third to retry a read on a transient failure.
@@ -232,7 +266,13 @@ Rich text, blocks and json fields come back as objects and arrays, not strings. 
 
 The type argument names the answer's shape and is not checked at runtime. Build it from the generated `TableRow` types so `body` is typed as the rich text document it now is. Variables you send are not encoded: a json argument still takes a string.
 
-Using another GraphQL client? `readGraphqlSchema` reads the `data` of an introspection answer to `GRAPHQL_SCHEMA_QUERY`, and `decodeGraphqlJsonFields(query, data, schema)` decodes an answer the same way.
+Relation fields use your schema's names. The side that holds the key takes the relation field's name, so `author` above. The other side takes its `HasMany` or `HasOne` field's name, so an author's posts are `posts`. A list is still a connection, read through `edges { node }`. REST embeds are named as before.
+
+:::note[Changed in 0.7.0]
+GraphQL used to name relations after the tables they join, such as `postCollection` for an author's posts. The next `supatype push` writes the schema's names, and a query that still uses an old name fails with `Unknown field`. A few ambiguous relations keep pg_graphql's own name.
+:::
+
+Using another GraphQL client? `readGraphqlSchema` reads the `data` of an introspection answer to `GRAPHQL_SCHEMA_QUERY`, and `decodeGraphqlJsonFields(query, data, schema)` decodes an answer the same way. Read the schema again when it returns `schemaIsStale: true`.
 
 <h2 id="errors">Errors</h2>
 
@@ -243,7 +283,7 @@ Queries, `rpc`, `functions.invoke`, auth and most storage calls return `{ data, 
 An insert an access rule refuses returns code `42501`. An update or delete that the rules hide matches no rows and returns no error. `single()` with no row returns `PGRST116`.
 
 :::caution[Network failures]
-A network failure on a query, `rpc` or function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Most auth and storage calls throw instead, so wrap them in `try` when the network may fail. Three return the failure as `error` like a query: `storage.listBuckets`, `storage.createBucket` and `auth.refreshSession`. `auth.signOut` ignores a network failure and clears the session on this device anyway.
+A network failure on a query, `rpc`, `graphql` or a function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Most auth and storage calls throw instead, so wrap them in `try` when the network may fail. Three return the failure as `error` like a query: `storage.listBuckets`, `storage.createBucket` and `auth.refreshSession`. `auth.signOut` ignores a network failure and clears the session on this device anyway.
 :::
 
 <h2 id="timeouts-and-retries">Timeouts and retries</h2>

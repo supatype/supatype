@@ -4,7 +4,7 @@
 
 Supatype is a type-first backend platform on real Postgres 17. The TypeScript schema is the single source of truth; SQL, policies, APIs, the typed client and admin UI are generated from it rather than kept in step by hand. `supatype dev` runs the full stack locally (Docker Compose by default), applies schema changes as you save and regenerates the typed client. Production can self-host with Docker Compose (`supatype self-host compose up`) or use Supatype Cloud (EU-hosted, coming soon: join the waiting list at https://www.supatype.com/#cloud).
 
-Licensing: client SDKs, framework bindings and plugins are MIT; the CLI, Studio and services are Apache 2.0; the schema engine is source-available under the Business Source License 1.1 (production use allowed except offering a competing hosted service or product; each version becomes Apache 2.0 four years after release).
+Licensing: client SDKs, framework bindings and plugins are MIT; the CLI, Studio and the services in the main repository are Apache 2.0; the API server (`supatype/server`) is MIT; the Postgres image (`supatype/postgres`) is under the PostgreSQL License; the schema engine is source-available under the Business Source License 1.1 (production use allowed except offering a competing hosted service or product; each version becomes Apache 2.0 four years after release).
 
 Primary audience: TypeScript developers on Postgres who want end-to-end type safety without stitching a backend, a separate CMS and hand-written migrations together.
 
@@ -37,7 +37,7 @@ Contact: GitHub and Discord, linked from the site. Licensing questions: licensin
 - [Self-hosting](https://www.supatype.com/docs/#self-host): Docker Compose on a server you own
 - [Upgrading](https://www.supatype.com/docs/#upgrading): Updating images and binaries, then pushing the schema
 - [Running in production](https://www.supatype.com/docs/#production): Status, logs, backups with pg_dump, and rolling back a push
-- [Upgrade notes for 0.7.0](https://github.com/supatype/supatype/blob/main/UPGRADING.md): Ownership checks, declared renames, identity columns, realtime DELETE rules, lock waits, licence
+- [Upgrade notes for 0.7.0](https://github.com/supatype/supatype/blob/main/UPGRADING.md): Ownership checks, declared renames, identity columns, blocks under `data`, realtime DELETE rules, lock waits, CORS, licence
 - [VM deploy with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html): Self-host deploy path using GitHub Actions onto a VM
 - [Coming from Supabase](https://www.supatype.com/from-supabase.html): How Supabase tables, RLS, supabase-js, storage, auth, realtime and functions map to Supatype, and adopting existing tables
 - [Coming from Prisma](https://www.supatype.com/from-prisma.html): How schema.prisma, prisma migrate and Prisma Client map to Supatype types, push and the typed client
@@ -54,8 +54,8 @@ Contact: GitHub and Discord, linked from the site. Licensing questions: licensin
 
 ## Platform capabilities
 
-- [Migrations](https://www.supatype.com/#how-it-works): The Rust schema engine diffs types against the live database, classifies each change as safe, cautious or destructive, applies it in one transaction with a recorded rollback, and never guesses a rename (renames are declared with `supatype rename`)
-- [Access rules](https://www.supatype.com/#how-it-works): `Public`, `LoggedIn`, `Owner<>`, `OwnerFrom<>`, `Role<>` on models and fields compile to Postgres row-level security
+- [Migrations](https://www.supatype.com/#how-it-works): The Rust schema engine diffs types against the live database, classifies each change as safe, cautious or destructive, and applies it in one transaction with a recorded rollback. It never guesses a rename (renames are declared with `supatype rename`)
+- [Access rules](https://www.supatype.com/#how-it-works): `Public`, `LoggedIn`, `Owner<>`, `OwnerFrom<>`, `Role<>` on models compile to Postgres row-level security; field rules mask or refuse single columns
 - [Studio](https://www.supatype.com/#how-it-works): Schema-generated admin and CMS: lists, forms, rich text, blocks, media library, drafts, versions, live preview. Four roles on self-host (admin, developer, editor, viewer; Cloud adds owner and billing); the SQL editor is for admins and developers, and owners on Cloud
 - [Storage](https://www.supatype.com/#how-it-works): `Bucket<>` types with accept lists, size limits and access rules; image transforms; time-limited signed URLs
 - [Realtime](https://www.supatype.com/#how-it-works): Change subscriptions, presence and broadcast; each event, deletes included, reaches only subscribers allowed to read that row

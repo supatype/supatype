@@ -118,11 +118,12 @@
 
     <h2 id="summary">In one minute</h2>
     <div class="cards three">
-      <div><span class="label">MIT</span><strong>SDKs</strong><p>The client SDKs, framework bindings and plugins. Use them for anything.</p></div>
-      <div><span class="label">APACHE 2.0</span><strong>CLI and services</strong><p>The CLI, Studio and the services (storage, realtime, functions worker). Use them for anything.</p></div>
+      <div><span class="label">MIT</span><strong>SDKs and server</strong><p>The client SDKs, framework bindings and plugins, and the API server (<code>supatype/server</code>). Use them for anything.</p></div>
+      <div><span class="label">APACHE 2.0</span><strong>CLI and services</strong><p>The CLI, Studio and the services in this repository (storage, realtime, functions worker). Use them for anything.</p></div>
       <div><span class="label">BSL 1.1</span><strong>Schema engine</strong><p>Source-available under the Business Source License 1.1 (SPDX <code>BUSL-1.1</code>), and its source is at <a href="https://github.com/supatype/schema-engine">github.com/supatype/schema-engine</a>. You can read it, change it, redistribute it and run it in production.</p></div>
     </div>
     <ul>
+      <li>The Postgres image (<code>supatype/postgres</code>) is under the <strong>PostgreSQL License</strong>. Use it for anything.</li>
       <li>The one thing you cannot do without a commercial licence: offer Supatype or the engine to others as a hosted or managed service, paid or free, or sell a product whose primary value is the engine.</li>
       <li>Each engine version becomes <strong>Apache 2.0</strong> on its Change Date, four years after that version's release.</li>
     </ul>
@@ -145,8 +146,8 @@
 
     <h2 id="no">Can I? Not without a commercial licence</h2>
     <ul>
-      <li><strong>Run a hosted Supatype, or a Supatype-compatible backend, for others.</strong> Paid or free. The licence calls this a Competing Service: a hosted or managed database, backend or schema management service where third parties define, migrate or manage their own schemas, or build their own applications.</li>
-      <li><strong>Sell a product whose primary value is the engine.</strong> For example, a schema migration or database change management tool built on it, or a backend platform that includes it. The licence calls this a Competing Product.</li>
+      <li><strong>Give others the engine's functionality as a hosted or managed service.</strong> Paid or free, to anyone other than your employees and contractors, in whole or in substantial part. The licence calls this a Competing Service. It includes offering Supatype or the engine as a hosted or managed database, backend or schema management service on which others define, migrate or manage database schemas they control, or build and run their own applications.</li>
+      <li><strong>Sell a product whose primary value is the engine.</strong> Sold, licensed or otherwise provided for a fee, including through paid support or subscriptions. For example, a schema management, schema migration or database change management tool built on it, or a backend platform that includes or requires it. The licence calls this a Competing Product.</li>
     </ul>
     <p>If your product is not competing when you first make it generally available, it does not become competing later because Supatype ships a new version or a new product.</p>
     <div class="callout warn">
@@ -182,6 +183,8 @@
       <tbody>
         <tr><td><code>client</code>, <code>types</code>, <code>react</code>, <code>react-native</code>, <code>vue</code>, <code>svelte</code>, <code>solid</code>, <code>ssr</code>, the auth UI packages, the plugin packages, <code>ui</code>, <code>common</code></td><td>MIT</td></tr>
         <tr><td>CLI, Studio, storage, realtime, functions worker, self-host control plane, and the rest of the <code>supatype/supatype</code> repository</td><td>Apache 2.0</td></tr>
+        <tr><td>API server (<a href="https://github.com/supatype/server"><code>supatype/server</code></a>)</td><td>MIT</td></tr>
+        <tr><td>Postgres image (<a href="https://github.com/supatype/postgres"><code>supatype/postgres</code></a>)</td><td>PostgreSQL License</td></tr>
         <tr><td>Schema engine (<code>supatype-engine</code>, image <code>supatype/schema-engine</code>)</td><td>BSL 1.1, Apache 2.0 on each version's Change Date</td></tr>
       </tbody>
     </table></div>
@@ -219,7 +222,7 @@
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

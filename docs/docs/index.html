@@ -123,6 +123,10 @@
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> npm install -g @supatype/cli</pre></div>
     <p>The CLI needs Node.js 22 or later. For a machine without Node, the <a href="/docs/cli.html#usage">CLI</a> page has a standalone binary. The first run downloads the binaries it needs into <code>~/.supatype/cache/</code>.</p>
+    <p>On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> curl -fsSL https://supatype.com/install.sh | bash
+<span class="pr">$</span> brew install supatype/tap/supatype</pre></div>
 
     <div class="step"><span class="step-num">2</span><h3>Create a project</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
@@ -215,23 +219,22 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
 
     <div class="step"><span class="step-num">3</span><h3>Start Compose</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="pr">$</span> supatype self-host compose render
-<span class="pr">$</span> supatype self-host compose up -d
+<pre><span class="pr">$</span> supatype self-host compose up -d
 <span class="pr">$</span> supatype push</pre></div>
-    <p>The gateway listens on <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;</code>, the port in <code>SUPATYPE_KONG_PORT</code> in <code>.env</code> (18473 when it is unset), with Studio at <code>/studio/</code>. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.</p>
+    <p><code>compose up</code> writes the compose file itself, so there is no separate render step. The gateway listens on <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;</code>, the port in <code>SUPATYPE_KONG_PORT</code> in <code>.env</code> (18473 when it is unset), with Studio at <code>/studio/</code>. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.</p>
     <div class="callout">
       <span class="callout-label">REST BEFORE THE FIRST PUSH</span>
       <p>Until the first <code>supatype push</code>, every REST request answers <code>503</code> with <code>PGRST002</code>: PostgREST will not serve until the schemas it exposes exist, and the push creates them. After a push PostgREST can take up to about 30 seconds to notice, so <code>push</code> waits (at most 40 seconds) until REST answers, printing one line while it does.</p>
     </div>
     <div class="callout">
       <span class="callout-label">ALLOWED ORIGINS</span>
-      <p>Browsers may call the API from the origin of <code>SITE_URL</code> and from the origins in <code>api.corsOrigins</code> (<code>supatype.config.ts</code>) or <code>SUPATYPE_CORS_ALLOW_ORIGINS</code> (<code>.env</code>). Any other origin is refused. Owners and admins can change the list in Studio, on the Settings page's CORS tab: a saved list is kept in the database and replaces the default until it is reset. The site URL stays allowed whatever is saved. <code>*</code> allows every origin, and only when you write it.</p>
+      <p>Browsers may call the API from the origin of <code>SITE_URL</code> and from the origins in <code>api.corsOrigins</code> (<code>supatype.config.ts</code>) or <code>SUPATYPE_CORS_ALLOW_ORIGINS</code> (<code>.env</code>). Any other origin is refused. Owners, admins and developers can change the list in Studio, on the Settings page's CORS tab: a saved list is kept in the database and replaces the default until it is reset. The site URL stays allowed whatever is saved. <code>*</code> allows every origin, and only when you write it.</p>
     </div>
     <div class="callout">
       <span class="callout-label">PORTS</span>
       <p>Only the gateway is published on every interface, at <code>SUPATYPE_KONG_PORT</code>, or on ports 80 and 443 once HTTPS is on. Postgres (<code>SUPATYPE_DB_PORT</code>, default 5432), the API server (<code>SUPATYPE_SERVER_PORT</code>, default 9999) and SeaweedFS (<code>SUPATYPE_SEAWEEDFS_PORT</code>, default 8333) bind <code>127.0.0.1</code>, so they are reachable from the server itself and nowhere else. To reach them from other machines, set <code>SUPATYPE_PUBLISH_ADDRESS=0.0.0.0</code> (or one interface's address) in <code>.env</code> and run <code>supatype self-host compose up -d</code>. Put a firewall in front first. <code>supatype init</code> lists these variables, commented out, in <code>.env</code>.</p>
     </div>
-    <p>Images come from Docker Hub at <code>:latest</code>: <code>supatype/postgres:17-latest</code>, <code>supatype/server</code> (which includes realtime), <code>supatype/storage</code>, <code>supatype/studio</code>, <code>supatype/schema-engine</code>, <code>supatype/functions-worker</code> and <code>supatype/control-plane</code>. Pin versions with <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> if you need to.</p>
+    <p>Images come from Docker Hub at <code>:latest</code>: <code>supatype/postgres</code>, <code>supatype/server</code>, <code>supatype/realtime</code>, <code>supatype/storage</code>, <code>supatype/studio</code>, <code>supatype/schema-engine</code>, <code>supatype/functions-worker</code> and <code>supatype/control-plane</code>. The stack also runs <code>postgrest/postgrest</code>, <code>kong</code> and SeaweedFS, and Valkey when the cache does not run inside Postgres. Pin versions with <code>SUPATYPE_*_IMAGE</code> in <code>.env</code>, or with <code>versions</code> in <code>supatype.config.ts</code>.</p>
     <p>To run on a Postgres you already have, such as RDS or Cloud SQL, set <code>database: { external: { url: process.env.DATABASE_URL! } }</code> in <code>supatype.config.ts</code>. The stack then starts no <code>db</code> service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in <code>supatype/postgres</code>. Realtime needs <code>wal_level = logical</code>, a free replication slot, the <code>wal2json</code> plugin and a role with <code>REPLICATION</code>. <code>supatype db check --connection "$DATABASE_URL"</code> reports what a database lacks, and <code>--emit</code> prints the SQL that fixes what it can.</p>
     <p>Every function is handed two addresses. <code>ctx.url</code> is for calling the API from inside the function. Under Docker it is <code>http://kong:8000</code>, which no browser can open. <code>ctx.publicUrl</code> is the project's public address, <code>API_EXTERNAL_URL</code> in <code>.env</code>, for links you give to people.</p>
     <p>Functions get no database connection by default. Setting <code>SUPATYPE_FUNCTIONS_DB_URL</code> in <code>.env</code> hands every function that URL as <code>ctx.dbUrl</code>: a raw Postgres connection as whichever role it names, which bypasses row rules and field masking. Point it at a least-privilege role granted only what your functions need, never the admin URL, for example <code>postgresql://functions_reader:&lt;password&gt;@db:5432/my-app</code>.</p>
@@ -271,8 +274,8 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
       <thead><tr><th scope="col">Change</th><th scope="col">Local</th><th scope="col">Self-hosted</th></tr></thead>
       <tbody>
         <tr><td>Schema</td><td><code>supatype push</code></td><td><code>supatype push</code></td></tr>
-        <tr><td>Frontend</td><td>Nothing with the dev proxy. Otherwise <code>npm run build</code></td><td><code>npm run build</code>, then <code>compose render</code> and <code>compose up -d</code></td></tr>
-        <tr><td><code>supatype.config.ts</code></td><td>Restart <code>supatype dev</code></td><td><code>compose render</code> and <code>compose up -d</code></td></tr>
+        <tr><td>Frontend</td><td>Nothing with the dev proxy. Otherwise <code>npm run build</code></td><td><code>npm run build</code>, then <code>compose up -d</code></td></tr>
+        <tr><td><code>supatype.config.ts</code></td><td>Restart <code>supatype dev</code></td><td><code>compose up -d</code></td></tr>
         <tr><td><code>.env</code></td><td>Restart <code>supatype dev</code></td><td><code>compose up -d</code>, or <code>compose restart &lt;service&gt;</code> for one service</td></tr>
       </tbody>
     </table></div>
@@ -288,7 +291,6 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
 <span class="pr">$</span> npm install           <span class="c"># if package.json changed</span>
 <span class="pr">$</span> supatype push         <span class="c"># schema migrations</span>
 <span class="pr">$</span> npm run build         <span class="c"># static files into public/ or dist/</span>
-<span class="pr">$</span> supatype self-host compose render
 <span class="pr">$</span> supatype self-host compose up -d</pre></div>
     <div class="callout">
       <span class="callout-label">NOTE</span>
@@ -296,11 +298,13 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
     </div>
 
     <h2 id="upgrading">Upgrading Supatype</h2>
-    <p>Moving to newer Supatype components is separate from deploying your own changes, and it takes two commands, not one.</p>
+    <p>Moving to newer Supatype components is separate from deploying your own changes. It takes four commands.</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="pr">$</span> supatype update      <span class="c"># pull new images and binaries</span>
-<span class="pr">$</span> supatype self-host compose up -d   <span class="c"># run the new images</span>
-<span class="pr">$</span> supatype push        <span class="c"># apply the schema those components expect</span></pre></div>
+<pre><span class="pr">$</span> npm install -g @supatype/cli@latest   <span class="c"># or supatype self-update</span>
+<span class="pr">$</span> supatype update                       <span class="c"># pull the new images</span>
+<span class="pr">$</span> supatype self-host compose up -d      <span class="c"># run them</span>
+<span class="pr">$</span> supatype push                         <span class="c"># apply the schema they expect</span></pre></div>
+    <p><code>supatype update</code> never updates the CLI itself, so update it first. Under Docker, <code>update</code> renders the compose file and pulls the images. It does not restart anything, which is why <code>compose up -d</code> follows.</p>
     <p>The push is the step that is easy to miss. Grants, policies, functions and buckets are generated from your schema and only reach the database through <code>push</code>, so new images on an older database can refuse rules until it runs. The upgrade is finished after the push, not before.</p>
     <div class="callout warn">
       <span class="callout-label">403S AFTER AN UPGRADE</span>
@@ -308,7 +312,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
     </div>
     <div class="callout">
       <span class="callout-label">0.7.0</span>
-      <p>Upgrading from 0.6.0? Deploy the new realtime image before the first push, and upgrade the CLI with the engine. The <a href="https://github.com/supatype/supatype/blob/main/UPGRADING.md">upgrade notes</a> cover ownership checks, declared renames, identity columns and the rest.</p>
+      <p>Upgrading from 0.6.0? Deploy the new realtime image before the first push, and upgrade the CLI with the engine. The <a href="https://github.com/supatype/supatype/blob/main/UPGRADING.md">upgrade notes</a> cover ownership checks, declared renames, identity columns and the rest. CORS changed too: outside dev, only the origin of <code>SITE_URL</code> and the origins you list are allowed. If your app is served from another origin, add it to <code>api.corsOrigins</code> before you upgrade.</p>
     </div>
 
     <h2 id="production">Running in production</h2>
@@ -362,7 +366,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

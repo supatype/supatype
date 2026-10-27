@@ -11,7 +11,7 @@ export default defineConfig({
   project: { name: "my-project" },
   provider: "docker",
   database: { provider: "docker" },
-  server: { mode: "dev", port: 54321 },
+  server: { mode: "dev" },
   app: { mode: "none" },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
@@ -19,11 +19,15 @@ export default defineConfig({
 })
 ```
 
+With `provider: "native"`, init also writes `server.port: 54321`, the port the native server
+listens on. A Docker project's API is on the gateway port, `SUPATYPE_KONG_PORT` in `.env`.
+
 **Docker images:** omit `versions` so compose defaults to `:latest` (`supatype/server:latest`, `supatype/schema-engine:latest`, etc.). Pin `versions.*` only when you need a specific release.
 
-## Self-host scaffold (`supatype init --mode standalone`)
+## Self-host scaffold
 
-End-user layout from `supatype init --mode standalone` (maintainer compose fixture: **`examples/self-host/`**):
+What `supatype init` writes when you choose a self-hosted production target (`--mode standalone`
+does the same for older scripts):
 
 ```typescript
 export default defineConfig({
@@ -32,7 +36,6 @@ export default defineConfig({
   database: { provider: "docker" },
   server: {
     mode: "standalone",
-    port: 54321,
     domain: "demo.supatype.com",
     tls: { email: "you@example.com", provider: "kong" },
   },
@@ -89,8 +92,8 @@ AUTHENTICATOR_PASSWORD= # generated: PostgREST's own login, deliberately not the
 SUPATYPE_SQL_EDITOR_PASSWORD= # generated: Studio SQL editor's login, not a superuser
 JWT_SECRET=             # generated: signs ANON_KEY / SERVICE_ROLE_KEY; at least 32 characters
 SUPATYPE_CONTROL_PLANE_SECRET= # generated: only the server and the control plane get it
-ANON_KEY=           # from: supatype keys
-SERVICE_ROLE_KEY=   # from: supatype keys; also the token for the self-host /platform/v1 API
+ANON_KEY=           # from: supatype keys --write
+SERVICE_ROLE_KEY=   # from: supatype keys --write; also the token for the self-host /platform/v1 API
 SITE_URL=http://localhost:18473
 # Optional, off by default: a raw database URL handed to every function as ctx.dbUrl. It bypasses
 # row rules and field masking, so use a least-privilege role, never the admin URL (self-host.md).
@@ -114,18 +117,26 @@ Do **not** set `SUPATYPE_*_IMAGE` env vars unless overriding: pinned image tags 
 |------|---------|
 | `.supatype/link.json` | Unified link state: cloud or self-host targets, tokens, environments map |
 | `.supatype/environment.json` | Written by `supatype dev`: local Kong URL, DB URL, project ref |
-| `.supatype/branch.json` | Phase 22 hook for ephemeral branch targets (not active in v1) |
 
 Add `.supatype/` to `.gitignore` (done by `supatype init`; use `supatype link --fix-gitignore` if missing). Never commit `link.json`, because it contains tokens.
 
-`supatype.config.ts` supports optional multi-env defaults:
+`supatype.config.ts` can name the environment a command targets when `--env` is left out:
 
 ```typescript
 environments: {
   default: "production",
-  branchDefaults: { "feature/foo": "staging" },
 },
 ```
+
+Or pick it by git branch, with `branchDefaults` in place of `default`:
+
+```typescript
+environments: {
+  branchDefaults: { main: "production", "feature/foo": "staging" },
+},
+```
+
+`default` wins: with it set, `branchDefaults` is never read.
 
 For Docker dev, `supatype dev` may rewrite `DATABASE_URL` to the host-published compose Postgres port when using a local engine override.
 

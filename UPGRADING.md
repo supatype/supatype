@@ -8,11 +8,19 @@ what, if anything, you need to do.
 
 1. **Upgrade the CLI and the engine together.** 0.7.0 needs both: the CLI marks auth user ids in
    the schema it sends, and the engine refuses some owner rules without that mark (see
-   [Ownership rules](#ownership-rules-are-checked)). `supatype update` fetches matching versions.
+   [Ownership rules](#ownership-rules-are-checked)). Update the CLI first
+   (`npm install -g @supatype/cli@latest`, or `supatype self-update`), then run `supatype update`
+   for the engine and images. `supatype update` does not update the CLI.
 2. **On self-host, deploy the new realtime image with the engine, or before it.** The first 0.7.0
    push turns on `REPLICA IDENTITY FULL` for every model table (see [Realtime](#realtime)). An
    older realtime image would then put the whole old row in DELETE events. The order is:
-   `supatype update`, `supatype self-host compose up -d`, then `supatype push`.
+
+   ```bash
+   npm install -g @supatype/cli@latest   # or supatype self-update
+   supatype update
+   supatype self-host compose up -d
+   supatype push
+   ```
 3. **Push once.** The first push from 0.7.0 records the objects 0.6.0 made as Supatype's, with
    no prompts of its own, and asks once to move pgvector and `unaccent` out of `public` (see
    [Extensions](#extensions-move-to-the-extensions-schema)). `supatype doctor` lists the objects
@@ -90,7 +98,7 @@ plus add is a drop and an add, and needs your consent like any other destructive
 Each migration row now records `pushed_by`, `pushed_via` (`cli`, `studio`, `cloud` or
 `self-host`), `pushed_from` (a CI run URL or the host name), whether the identity was verified,
 and the renames it applied. The CLI sends your git `Name <email>` (unverified); self-host and
-Cloud record the authenticated identity. `supatype migrate list` and Studio's migration history
+Cloud record the authenticated identity. `supatype migrations list` and Studio's migration history
 show them. The columns are added to `_supatype.migrations` on the first push.
 
 ## Pushes wait less and lock less
@@ -527,8 +535,10 @@ their objects with `public.` (`public.vector`, `public.unaccent(...)`) has to dr
 **PostGIS stays where it is.** `ALTER EXTENSION postgis SET SCHEMA` is not supported, so a push
 leaves PostGIS in `public`, says so in a warning on each push, and everything keeps working. To
 move it, reload the PostGIS columns. This drops and re-adds every `geography` and `geometry`
-column, so do it in a maintenance window with writes stopped, after a backup
-(`supatype self-host backup`, or `pg_dump`). Run the SQL as the database's admin role
+column, so do it in a maintenance window with writes stopped, after a backup. On self-host,
+`docker exec <db container> pg_dump -U supatype_admin -d <database> -Fc > backup.dump`
+(`docker ps` shows the container name; the database is `POSTGRES_DB`). Elsewhere, run `pg_dump`
+against your connection string. Run the SQL as the database's admin role
 (`supatype_admin` on `supatype/postgres`):
 
 1. List the columns to keep:
@@ -631,7 +641,7 @@ relation as the schema does:
 
 - **The reverse side** (the far model's `hasMany` or `hasOne`) takes that field's name:
   `talkCollection` becomes `talks`. A collection is still a connection (`edges { node }`).
-- **The forward side** (the model holding the key) takes the `belongsTo` field's name, exactly
+- **The forward side** (the model holding the key) takes the `RelatedTo` field's name, exactly
   as declared. A field declared `authorId` is now `authorId` in GraphQL too, rather than the
   name pg_graphql made up from the table or the key column.
 
@@ -667,8 +677,8 @@ query {
 }
 ```
 
-A forward field changes wherever pg_graphql's own name was not the `belongsTo` name. For a
-`Post` declaring `authorId: BelongsTo<User>`, select the author by the declared name:
+A forward field changes wherever pg_graphql's own name was not the `RelatedTo` name. For a
+`Post` declaring `authorId: RelatedTo<User>`, select the author by the declared name:
 
 ```graphql
 query { postCollection { edges { node { title authorId { name } } } } }
@@ -705,25 +715,27 @@ members and invitations are migrated; scripts that send `role: "member"` must se
 |---|---|
 | owner | Everything, including the organisation itself |
 | admin | Everything in the project: members, keys, domains, settings, elevated access |
-| developer | Read and write content, view the schema, push, deploy, use the SQL editor, inspect realtime, read logs |
+| developer | Everything an admin may do except grant Studio roles, change organisation settings or delete the project |
 | editor | Read and write content |
 | billing | Billing and usage only (Cloud) |
 | viewer | Read content and the schema, and read logs; changes nothing |
 
 - **Organisation roles apply to every project** in the organisation. A per-project role can only
   narrow what the organisation role gives, never widen it, and an owner is never narrowed.
-- **Acting as yourself or elevated.** Owners and admins act elevated (as the service role) by
-  default, visibly and audited, and can switch to act as themselves from the notice Studio shows;
-  every other role always acts as itself, so the project's row and field rules apply to what it
-  sees and changes.
+- **Whose identity Studio acts as.** Owners, admins and developers act elevated by default.
+  Editors and viewers act in Studio mode: the app's row rules are skipped, and field rules still
+  apply, so masked columns stay masked. See
+  [Full access and Studio mode](https://www.supatype.com/docs/studio-roles.html#modes), and
+  [Send as](https://www.supatype.com/docs/studio-roles.html#send-as) to see data as an app user would.
 - **Linking your Cloud login to a project user.** On Cloud, a member acting as themselves acts as
   their linked project user. Studio asks a member with no link to sign in once with their login
   for the project; that sign-in is the proof, and the link is stored. A member with no link is
   refused project data rather than shown everything.
 - **The SQL editor and Database write controls are for owners, admins and developers.** The SQL
-  editor runs as the project's owning role, so row level security does not apply to it. Studio
-  hides the Database screens' create, drop and policy controls from other roles; viewers still read
-  the Database views, policies and migration history through a read-only metadata catalogue.
+  editor signs in as `supatype_sql_editor`, a non-superuser member of the database owner, so row
+  level security does not apply to it. Studio hides the Database screens' create, drop and policy
+  controls from other roles; viewers still read the Database views, policies and migration history
+  through a read-only metadata catalogue.
 - **Sessions** in the Users view are listed and revoked through the auth admin API.
 - **`STUDIO_OPEN_DEV` is gone.** Earlier CLIs wrote it into the dev compose file, and with it the
   server's Studio proxy answered unauthenticated requests as the service role. The CLI no longer
@@ -734,7 +746,17 @@ members and invitations are migrated; scripts that send `role: "member"` must se
 
 ## The SQL editor's connection
 
-This section is being finalised; it will describe how the SQL editor connects to the database.
+Studio's SQL editor no longer runs as a superuser. It signs in as `supatype_sql_editor` with the
+password in `SUPATYPE_SQL_EDITOR_PASSWORD` (see
+[what each role can do](https://www.supatype.com/docs/studio-roles.html#matrix)).
+
+- `supatype init` generates the password, and `supatype dev` writes one to `.env` when it is
+  missing.
+- The self-host compose file requires it. Without it, `supatype self-host compose up` stops before
+  any container starts. Add `SUPATYPE_SQL_EDITOR_PASSWORD` to `.env` before you run it, made with
+  `openssl rand -hex 24`. 0.7.0 does not encode these passwords (this one, `AUTHENTICATOR_PASSWORD`
+  and `POSTGRES_PASSWORD`) when it puts them in connection URLs, so a character such as `/` would
+  break the URL.
 
 ## Allowed origins (CORS)
 
@@ -743,7 +765,7 @@ origin on a production server unless you set a list.
 
 - **Allowed by default:** the origin of `SITE_URL`, plus the origins in `api.corsOrigins` in
   `supatype.config.ts` and in `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env`.
-- **Studio's Settings > CORS page** lets owners and admins save a list, kept in the database, which
+- **Studio's Settings > CORS page** lets owners, admins and developers save a list, kept in the database, which
   replaces the default until it is reset. The site URL stays allowed whatever is saved.
 - **`*`** allows every origin, and only when you write it. Any other origin's preflight is refused
   with `403`.
@@ -790,6 +812,16 @@ upgrade a production server.
   a pin no longer decides the cache either: pg_keyspace is used whenever the downloaded Postgres
   archive carries the library and its RESP port answers, and the Valkey sidecar otherwise (an
   explicit `cache.provider` and `database.external` still decide as before).
+- **The bundled database runs as `supatype_admin`.** `supatype dev` and
+  `supatype self-host compose up` now refuse to start when `POSTGRES_USER` (in the shell or `.env`)
+  names any other user, such as `postgres`. Set `POSTGRES_USER=supatype_admin` in `.env`, and the
+  same user in `DATABASE_URL`. If the data volume was created as the old user, create the role
+  first (connected as the old user:
+  `CREATE ROLE supatype_admin WITH SUPERUSER LOGIN PASSWORD '<POSTGRES_PASSWORD>'`), or start from
+  an empty database with `supatype dev --reset-db`. An external database
+  (`database.external.url`) is not checked.
+- **Refusing a drift restore now exits 1.** Answering no used to exit 0, so a script could not
+  tell it from a successful push.
 - **`--project-name` or `SUPATYPE_PROJECT_NAME`** renames the project for one run (its compose
   project, database and state directory follow) without changing any file.
 - **`supatype self-host compose restart <service>`** recreates one service with the current config

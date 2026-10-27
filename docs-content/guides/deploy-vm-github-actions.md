@@ -61,7 +61,6 @@ This writes `server.mode`, `server.domain` and `server.tls` to `supatype.config.
 
 ```sh
 $ supatype dev
-$ supatype push
 ```
 
 Optionally proxy to Vite from a gitignored `supatype.local.config.ts` while production stays `static`. See [Deploy changes](/docs/#deploy-changes).
@@ -106,6 +105,7 @@ AUTHENTICATOR_PASSWORD=CHANGE_ME
 SUPATYPE_SQL_EDITOR_PASSWORD=CHANGE_ME
 SUPATYPE_CONTROL_PLANE_SECRET=CHANGE_ME
 JWT_SECRET=CHANGE_ME            # at least 32 characters
+# Leave both keys blank. compose up mints them from JWT_SECRET.
 ANON_KEY=
 SERVICE_ROLE_KEY=
 API_EXTERNAL_URL=https://example.com
@@ -119,13 +119,13 @@ Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SER
 ```sh title="vm"
 $ cd /opt/my-blog
 $ npm install
-$ supatype self-host compose render
 $ supatype self-host compose up -d
 $ supatype push
 $ npm run build
-$ supatype self-host compose render
 $ supatype self-host compose up -d
 ```
+
+`compose up` writes the compose file itself, so there is no separate render step.
 
 Before this, point an A record for `example.com` at the VM and open ports 80 and 443 in its firewall. Then open `https://example.com`, with Studio at `/studio/`. Without a domain in `supatype.config.ts`, the gateway is on `http://YOUR_VM_IP:18473` instead. Backups, logs and rollbacks are covered in [Running in production](/docs/#production).
 
@@ -175,7 +175,6 @@ jobs:
             npm ci
             supatype push
             npm run build
-            supatype self-host compose render
             supatype self-host compose up -d
 ```
 
@@ -183,6 +182,10 @@ On every push to `main` the VM pulls the latest code, applies schema migrations,
 
 :::note
 `supatype push` reads `DATABASE_URL` from the VM's `.env`, which points at the Compose Postgres on `localhost:5432`. If you would rather not install the CLI globally on the VM, use `npx @supatype/cli` in the script.
+:::
+
+:::note[Changes that need a yes]
+The push in CI has no terminal to ask in. A change that needs your consent, such as a drop, an undeclared rename or a large table rewrite, fails the job, and the log prints the command to run. Record renames with `supatype rename` and commit `supatype/renames.json`. After a Supatype upgrade, run the first push by hand over SSH.
 :::
 
 <h2 id="verify">Verify the pipeline</h2>
@@ -202,8 +205,8 @@ Watch the run under **Actions** on GitHub. When it succeeds, load your gateway U
 | Symptom | Check |
 | --- | --- |
 | SSH fails | The firewall allows port 22, and `VM_SSH_KEY` matches the VM's `authorized_keys`. |
-| `supatype push` fails | Compose is up, and `DATABASE_URL` points at `localhost:5432`. |
-| Site unchanged | `npm run build` writes to the directory in `app.static_dir`, then re-run `compose render` and `up -d`. |
+| `supatype push` fails | Compose is up, and `DATABASE_URL` points at `localhost:5432`. If it refused a change that needs your consent, see [The workflow](#workflow). |
+| Site unchanged | `npm run build` writes to the directory in `app.static_dir`, then re-run `supatype self-host compose up -d`. |
 
 :::note[Rather not run it yourself?]
 Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](/#cloud), or [book a call](/#contact) about self-hosting with support.

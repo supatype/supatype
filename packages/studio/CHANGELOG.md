@@ -9,7 +9,7 @@ elevated/self switch; a CORS origins page; who pushed each migration; Cloud memb
 ### Features
 
 * **settings:** the CORS tab shows the browser origins the project's gateway allows,
-  and where each comes from (site URL, config, the platform, or saved here). Owners and admins can
+  and where each comes from (site URL, config, the platform, or saved here). Owners, admins and developers can
   add and remove origins, which saves the list in the project's database in place of the default,
   and reset it. Dev mode is called out, since it allows every origin anyway.
 

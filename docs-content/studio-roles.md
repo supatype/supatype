@@ -54,11 +54,11 @@ The server checks every Studio request against this table.
 | Give and remove Studio roles | Yes | No | No | No |
 
 :::caution[SQL editor]
-The SQL editor runs as the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.
+The SQL editor signs in as `supatype_sql_editor`. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.
 :::
 
 :::note[Bucket rules]
-A bucket's access rules page is part of "see the access rules". Viewers see it read-only. Editors cannot open it today. A change in progress shows it to editors read-only too. Only admins and developers can change the rules.
+A bucket's access rules page is part of "see the access rules". Viewers and editors see it read-only. Only admins and developers can change the rules.
 :::
 
 <h2 id="modes">Full access and Studio mode</h2>
@@ -109,7 +109,7 @@ Deleting a row in the Data browser deletes it for good. It does not make a draft
 
 <h2 id="grant">Giving someone a role</h2>
 
-In Studio, open Authentication &gt; Users. The Studio access column shows each user's role. An admin can change it there, or choose No access. Other roles see it read-only. Your own row cannot be changed.
+In Studio, open Authentication &gt; Users. The Studio access column shows each user's role. An admin can change it there, or choose No access. Developers see it read-only. Editors and viewers have no Authentication page. Your own row cannot be changed.
 
 Create User has a Studio access choice too. Only admins see it.
 
