@@ -12,6 +12,11 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, homedir: () => (fakeHome.length > 0 ? fakeHome : actual.homedir()) }
 })
 
+// These releases are unsigned, so the CLI must hold no release key. Clearing the environment
+// variable is not enough: the npm publish job builds the real key into the CLI before it runs the
+// tests, and the CLI falls back to that key, so the download then demands a signature.
+vi.mock("../src/release-public-key.js", () => ({ releasePublicKey: () => "" }))
+
 import { cachePath, currentPlatform, download, type PlatformId } from "../src/binary-cache.js"
 
 /**
@@ -60,7 +65,6 @@ beforeEach(() => {
   fakeHome = join(tmpdir(), `supatype-engine-license-${process.pid}-${Date.now()}`)
   mkdirSync(fakeHome, { recursive: true })
   vi.stubEnv("SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS", "1")
-  vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", "")
   logs = []
   warnings = []
   vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void logs.push(args.join(" ")))
