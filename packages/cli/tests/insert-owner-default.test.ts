@@ -62,7 +62,11 @@ describe("Insert type of an owner auth user id", () => {
 // default of its own the engine defaults it to the caller, so an insert can leave `id` out. Under
 // any other create rule nothing defaults it to the caller, so it keeps the random default every
 // uuid key gets, and a NOT NULL key is never left with no default at all.
-function profileSchema(access: string, imports = "Model, Owner, Public, SupatypeAuthUserId"): string {
+function profileSchema(
+  access: string,
+  imports = "Model, Owner, Public, SupatypeAuthUserId",
+  idType = "SupatypeAuthUserId",
+): string {
   const dir = mkdtempSync(join(tmpdir(), "supatype-owner-default-"))
   dirs.push(dir)
   const schemaPath = join(dir, "schema.ts")
@@ -70,7 +74,7 @@ function profileSchema(access: string, imports = "Model, Owner, Public, Supatype
     `import type { ${imports} } from "@supatype/types"`,
     "",
     "export type Profile = Model<{",
-    "  id: SupatypeAuthUserId",
+    `  id: ${idType}`,
     "  name: string",
     `}, { access: { read: Public${access} } }>`,
     "",
@@ -106,6 +110,15 @@ describe("an auth user id primary key", () => {
 
   it("keeps the random uuid default with no create rule", () => {
     expect(profileId(profileSchema(""))?.["default"]).toEqual({ kind: "genRandomUuid" })
+  })
+
+  it("keeps a default the schema writes, whatever the create rule", () => {
+    const nil = "00000000-0000-0000-0000-000000000000"
+    const imports = "Model, Default, Owner, Public, SupatypeAuthUserId"
+    const idType = `Default<SupatypeAuthUserId, "${nil}">`
+    const written = { kind: "value", value: nil }
+    expect(profileId(profileSchema(', create: Owner<"id">', imports, idType))?.["default"]).toEqual(written)
+    expect(profileId(profileSchema("", imports, idType))?.["default"]).toEqual(written)
   })
 
   it("is optional on insert when the create rule is Owner<\"id\">", () => {

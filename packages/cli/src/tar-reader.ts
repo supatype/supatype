@@ -5,6 +5,9 @@
  * header with the commit, pax `path` records for long names) and GNU long names. Written here
  * rather than shelling out to `tar`, which on Windows is often Git Bash's and refuses drive-letter
  * paths, and rather than adding a dependency for a few dozen lines.
+ *
+ * An archive names its own paths, so an entry whose name could land outside wherever it is written
+ * refuses the whole archive here, before any consumer sees it ({@link safeEntryName}).
  */
 
 import { gunzipSync } from "node:zlib"
@@ -46,11 +49,25 @@ function readTar(tar: Buffer): TarEntry[] {
     else if (type === "L") nextPath = cString(data)
     else if (type !== "g") {
       const kind = type === "5" ? "directory" : type === "0" || type === "\0" ? "file" : undefined
-      if (kind !== undefined) entries.push({ path: nextPath ?? headerPath(header), kind, data })
+      if (kind !== undefined) entries.push({ path: safeEntryName(nextPath ?? headerPath(header)), kind, data })
       nextPath = undefined
     }
   }
   return entries
+}
+
+/**
+ * `name`, or a refusal when it has a NUL, a backslash, an absolute start, a drive letter in any
+ * segment or a `..` segment. A backslash is a separator to Windows, so `..\..\x` climbs out there
+ * however POSIX reads it, and `C:x` is relative to that drive's own working directory.
+ */
+function safeEntryName(name: string): string {
+  const unsafe =
+    /[\\\0]/.test(name) ||
+    name.startsWith("/") ||
+    name.split("/").some((segment) => segment === ".." || /^[A-Za-z]:/.test(segment))
+  if (unsafe) throw new Error(`The tarball has an unsafe entry name: ${JSON.stringify(name)}.`)
+  return name
 }
 
 /** A ustar name, with its prefix field when it has one. */
