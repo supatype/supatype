@@ -170,27 +170,44 @@ jobs:
           fi
 
   # ── Build, test, and publish npm packages ───────────────────────────────────
-  # The standalone CLI, from the same tag and the same version as everything else.
-  #
-  # This runs before npm publishes, deliberately. Publishing to the CDN is additive and every
-  # path is immutable, so a bad attempt is superseded by the next version and costs nothing;
-  # an npm publish cannot be undone. Doing the reversible half first, and only reaching the
-  # irreversible half once the binaries have been compiled, signed and executed on real
-  # hardware, is the closest this can get to an atomic release.
-  #
-  # It also waits for every image the CLI runs at its own version (supatype/{storage,realtime,
-  # functions-worker,studio,control-plane}:<version>, packages/cli/src/generated/release-images.ts).
-  # The CDN publish moves cli/latest.json, and a CLI that reaches users before its images are on
-  # Docker Hub, or after one of them failed to build, fails every `supatype dev` with "manifest
-  # unknown". The same holds for the realtime binaries a release CLI downloads at its own version
-  # (the realtime job below), so it waits for those too. npm and Homebrew name every one of these
-  # jobs again, so the guarantee does not rest on this one line. A rerun keeps its skips: each
-  # image push is idempotent, and the CDN and npm steps skip what is already published.
+  # The standalone CLI, from the same tag and the same version as everything else. Compiled,
+  # signed and run on real hardware here, alongside the image builds, and published by cli-publish
+  # below once everything it runs is out.
   cli:
-    needs: [prepare, realtime, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
+    needs: prepare
     uses: ./.github/workflows/cli-release.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
+      publish: false
+    secrets: inherit
+
+  # Everything a release CLI runs at its own version: the images
+  # (supatype/{storage,realtime,functions-worker,studio,control-plane}:<version>,
+  # packages/cli/src/generated/release-images.ts) and the realtime binaries it downloads. A CLI
+  # that reaches users before these are published, or after one of them failed, fails every
+  # `supatype dev` with "manifest unknown". This is the one list of them: every job that puts the
+  # CLI in front of users (cli-publish, npm, homebrew-formula) needs this job, and so does
+  # github-release. A rerun keeps its skips: each image push is idempotent, and the CDN and npm
+  # steps skip what is already published.
+  artifacts-published:
+    name: every image and binary the CLI runs is published
+    needs: [realtime, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "realtime binaries and all five images are published"
+
+  # The CDN publish of the binaries the cli job built and ran. It moves cli/latest.json, which
+  # install.sh and `supatype self-update` resolve, so it waits for artifacts-published.
+  #
+  # It runs before npm publishes, deliberately. Publishing to the CDN is additive and every path is
+  # immutable, so a bad attempt is superseded by the next version and costs nothing; an npm publish
+  # cannot be undone. Doing the reversible half first is the closest this can get to an atomic
+  # release.
+  cli-publish:
+    needs: [cli, artifacts-published]
+    uses: ./.github/workflows/cli-publish.yml
+    with:
+      version: ${{ needs.cli.outputs.version }}
     secrets: inherit
 
   # The standalone realtime binaries `supatype dev` runs natively, from the same tag and version
@@ -204,10 +221,10 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
     secrets: inherit
 
-  # npm ships @supatype/cli, which runs the images below and the realtime binaries at its own
-  # version, so it waits for them.
+  # npm ships @supatype/cli, which runs the images and the realtime binaries at its own version,
+  # so it waits for artifacts-published, and for the CDN publish (cli-publish).
   npm:
-    needs: [prepare, cli, realtime, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
+    needs: [prepare, cli-publish, artifacts-published]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -462,7 +479,7 @@ jobs:
 
   # ── GitHub Release ──────────────────────────────────────────────────────────
   github-release:
-    needs: [prepare, npm, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
+    needs: [prepare, npm, artifacts-published]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -490,10 +507,11 @@ jobs:
   # version with a '-') must not replace it. verify-homebrew-install needs this job and has no
   # always(), so it is skipped with it.
   #
-  # Like npm, it waits for the images and realtime binaries the CLI runs at its own version.
+  # Like npm, it waits for the images and realtime binaries the CLI runs at its own version, and
+  # for the CDN publish it reads the manifest from.
   homebrew-formula:
     name: Homebrew formula
-    needs: [prepare, cli, realtime, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
+    needs: [prepare, cli-publish, artifacts-published]
     runs-on: ubuntu-24.04
     if: vars.HOMEBREW_TAP_REPO != '' && !contains(needs.prepare.outputs.version, '-')
     env:

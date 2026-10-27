@@ -239,7 +239,9 @@ elif [[ "$out" != *"cannot list the tags"* ]]; then fail "wrong reason: $out"
 elif [[ "$out" == *"building it from source"* ]]; then fail "started a source build: $out"
 else ok; fi
 
-# An unreadable images.json has to be reported as that, not as an image with an empty name.
+# An unreadable images.json has to be reported as that, not as an image with an empty name. The
+# first read here is image_ref's, inside a command substitution, so this case fails if pin.sh loses
+# shopt -s inherit_errexit.
 start "set stops on an unreadable images.json"
 printf 'not json\n' >"$ROOT/release/images.json"
 if out="$(pin set server v1.1.0 2>&1)"; then fail "accepted: $out"
