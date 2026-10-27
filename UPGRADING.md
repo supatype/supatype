@@ -822,6 +822,15 @@ upgrade a production server.
   (`database.external.url`) is not checked.
 - **Refusing a drift restore now exits 1.** Answering no used to exit 0, so a script could not
   tell it from a successful push.
+- **Every image is the one the CLI release was tested with, never `:latest`.** Studio, storage,
+  realtime, functions-worker and the control plane run at the CLI's own version, and the engine,
+  server and Postgres at the releases pinned for that CLI, so a stack no longer drifts as Docker
+  Hub moves, and an old local `:latest` is never what runs. Native `supatype dev` downloads the
+  same engine, server and Postgres versions. Upgrading the CLI moves them: install it, then run
+  `supatype update` (or `supatype self-host compose up -d`) to pull the new tags. To run another
+  image, set its `SUPATYPE_*_IMAGE` in `.env` (for example
+  `SUPATYPE_SERVER_IMAGE=supatype/server:v2.3.0`), or pin `versions.engine`, `versions.server` or
+  `versions.postgres` in `supatype.config.ts`; both win over the release's pins.
 - **`--project-name` or `SUPATYPE_PROJECT_NAME`** renames the project for one run (its compose
   project, database and state directory follow) without changing any file.
 - **`supatype self-host compose restart <service>`** recreates one service with the current config

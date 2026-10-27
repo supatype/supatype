@@ -78,6 +78,11 @@ jobs:
       - name: Workflow shell steps parse
         run: python3 scripts/lint-workflow-shell.py
 
+      # The release gate and the pin bump both run scripts/pin.sh, and neither runs until a tag or
+      # a schedule does, so its behaviour is checked here, against local repositories and stubs.
+      - name: Release image pin script
+        run: bash scripts/pin.test.sh
+
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
@@ -269,8 +274,9 @@ jobs:
         run: pnpm --filter "@supatype/self-host-control..." build
 
       # The engine the control plane copies, with its licence and notices, is the pinned one
-      # (scripts/engine-pin.sh): the release image when .github/schema-engine-commit is an engine
-      # release, otherwise a build of the pinned commit. Not :latest, which can predate both files.
+      # (`scripts/pin.sh engine-image`): the release image when the engine pin in release/images.json
+      # is an engine release, otherwise a build of the pinned commit. Not :latest, which can predate
+      # both files.
       - name: Resolve the pinned engine image
         id: engine
         env:
@@ -278,7 +284,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
         run: |
           set -euo pipefail
-          image="$(bash scripts/engine-pin.sh image)"
+          image="$(bash scripts/pin.sh engine-image)"
           echo "image=$image" >>"$GITHUB_OUTPUT"
 
       - name: Build docker image, control-plane

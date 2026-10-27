@@ -41,6 +41,7 @@ import { basename, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "./link.js"
 import { releasePublicKey } from "./release-public-key.js"
+import { defaultComponentVersion } from "./release-images.js"
 import {
   isDownloadInProgress,
   releaseDownloadLock,
@@ -977,14 +978,19 @@ export function pinnedVersion(component: Component, config: SupatypeProjectConfi
   return trimmed === "" ? undefined : trimmed
 }
 
-/** Pinned version from config, or latest from CDN when unset. */
+/**
+ * Pinned version from config; else the version this CLI release was tested with (the engine, server
+ * and Postgres it pins, and a release's own realtime); else, for Deno and a non-release realtime,
+ * the CDN's latest. The engine used to come from the CDN's latest too, so a host binary moved under
+ * an unchanged CLI and disagreed with the engine image the compose push ran.
+ */
 export async function resolveVersionFor(
   component: Component,
   config: SupatypeProjectConfig,
 ): Promise<string> {
   const pinned = pinnedVersion(component, config)
   if (pinned) return pinned
-  return fetchLatestVersion(component)
+  return defaultComponentVersion(component) ?? fetchLatestVersion(component)
 }
 
 /** @deprecated Prefer {@link pinnedVersion} or {@link resolveVersionFor}. */
@@ -1090,7 +1096,7 @@ export async function downloadAll(
   const latest = await fetchAllLatestVersions()
 
   for (const component of components) {
-    const version = versions?.[component] ?? latest[component]
+    const version = versions?.[component] ?? defaultComponentVersion(component) ?? latest[component]
     if (!version || version === VERSION_PIN_LOCAL) continue
     try {
       await download(component, version, platform)

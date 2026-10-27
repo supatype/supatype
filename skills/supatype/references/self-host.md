@@ -95,6 +95,14 @@ compose project (`name: supatype-<project.name>`), so a hand-run
 `docker compose -f .supatype/self-host/docker-compose.yml --env-file .env ...` reaches the same
 stack. Every `self-host compose` command renders it again, so a project that moved is picked up there.
 
+**Images are the ones the CLI release was tested with, never `:latest`.** Studio, storage,
+realtime, functions-worker and the control plane run at the CLI's own version; the engine, server
+and Postgres run the releases pinned for that CLI. A newer CLI moves them: upgrade the CLI, then
+`supatype update` (or `self-host compose up -d`) pulls the new tags. To run another image, set its
+`SUPATYPE_*_IMAGE` in `.env` (for example `SUPATYPE_SERVER_IMAGE=supatype/server:v2.3.0`) or pin
+`versions.engine`, `versions.server` or `versions.postgres` in config; both win over the release's
+pins.
+
 **`compose up` checks `JWT_SECRET`.** Shorter than 32 characters stops it with
 `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` (PostgREST 14 would
 otherwise restart in a loop). Fix: `openssl rand -base64 48` into `.env` as `JWT_SECRET`, then
@@ -262,7 +270,7 @@ and with TLS on Kong cannot store its certificate. So the image decides:
 
 | `versions.postgres` / `database.image` | Image run | Default cache |
 |---|---|---|
-| unset | `supatype/postgres:latest` | pg_keyspace |
+| unset | the release this CLI pins | pg_keyspace |
 | `"17"`, `"17.2"`, `"17-latest"` | `supatype/postgres:17-latest` | pg_keyspace |
 | `"17.2.9"` or later, published | that exact tag | pg_keyspace |
 | `"17.2.8"` or earlier, published | that exact tag | Valkey |

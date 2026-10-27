@@ -8,6 +8,7 @@ import { composeDockerImageEnv, composeHostPath, composePullNeedsIgnoreFailures,
 import { updateAppConfigInProject, updateServerConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
+import { RELEASE_IMAGES } from "../src/release-images.js"
 import { CONTROL_PLANE_SECRET_ENV, seedMissingLocalSecrets } from "../src/local-secrets.js"
 import { isArrayOf, isJsonObject, isShape, isString } from "@supatype/shared"
 import { parseJsonAs } from "./support/json.js"
@@ -164,7 +165,7 @@ describe("runtime contract", () => {
     const compose = renderSelfHostCompose(baseConfig)
     expect(compose).toContain("\n  schema-engine:\n")
     expect(compose).toContain('profiles: ["tools"]')
-    expect(compose).toContain("supatype/schema-engine:latest")
+    expect(compose).toContain(RELEASE_IMAGES.engine)
   })
 
   // PostgREST must connect as `authenticator`, never as POSTGRES_USER. POSTGRES_USER is
@@ -706,9 +707,9 @@ export default defineConfig({
       const compose = readFileSync(out.composePath, "utf8")
       // baseConfig pins postgres "17.2", which runs the major's latest.
       expect(compose).toContain("${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:17-latest}")
-      expect(compose).toContain("${SUPATYPE_SERVER_IMAGE:-${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}")
-      expect(compose).toContain("${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}")
-      expect(compose).toContain("${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}")
+      expect(compose).toContain(`\${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-${RELEASE_IMAGES.server}}}`)
+      expect(compose).toContain(`\${SUPATYPE_STORAGE_IMAGE:-${RELEASE_IMAGES.storage}}`)
+      expect(compose).toContain(`\${SUPATYPE_STUDIO_IMAGE:-${RELEASE_IMAGES.studio}}`)
       // SeaweedFS is the object store, and the only one: MinIO's community edition is archived and
       // its image was withdrawn, so a stack that still named it could not start at all.
       expect(compose).toContain("  seaweedfs:")

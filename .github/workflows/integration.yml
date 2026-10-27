@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       schema_engine_sha:
-        description: schema-engine commit for the ownership job (the pin in .github/schema-engine-commit when empty)
+        description: schema-engine commit for the ownership job (the engine pin in release/images.json when empty)
         required: false
         type: string
 
@@ -28,8 +28,8 @@ env:
 
 jobs:
   # Exercises `supatype dev` (Docker compose) + @supatype/client.
-  # Sibling images (postgres/engine/server) come from Docker Hub; realtime +
-  # control-plane are built from this monorepo.
+  # Sibling images (postgres/engine/server) come from Docker Hub at the tags release/images.json
+  # pins; realtime + control-plane are built from this monorepo.
   # macOS native is disabled until native Postgres ships contrib extensions (pgcrypto).
   dev-integration:
     name: supatype dev (docker)
@@ -38,9 +38,9 @@ jobs:
     timeout-minutes: 30
     env:
       SUPATYPE_PROVIDER: docker
-      SUPATYPE_POSTGRES_IMAGE: supatype/postgres:latest
       # SUPATYPE_ENGINE_IMAGE is the pinned engine, set by the "Use the pinned engine" step.
-      SUPATYPE_SERVER_IMAGE: supatype/server:latest
+      # SUPATYPE_POSTGRES_IMAGE and SUPATYPE_SERVER_IMAGE are left unset, so integration-test.sh
+      # runs the pinned ones (`scripts/pin.sh image`), the images a release of this commit ships.
       SUPATYPE_REALTIME_IMAGE: supatype/realtime:ci-dev
       SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci-dev
       # Built from this checkout, below, rather than pulled. The published tag broke on a
@@ -86,7 +86,7 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
-      # The engine this checkout is built against (scripts/engine-pin.sh), not :latest. Type
+      # The engine this checkout is built against (scripts/pin.sh), not :latest. Type
       # generation and the push run in it, and the control plane integration-test.sh builds copies
       # its licence and notices out of it, which :latest (the last release) predates.
       - name: Use the pinned engine
@@ -173,15 +173,16 @@ jobs:
         run: pnpm build
 
       # The engine the control plane copies, with its licence and notices, is the pinned one
-      # (scripts/engine-pin.sh): the release image when .github/schema-engine-commit is an engine
-      # release, otherwise a build of the pinned commit. Not :latest, which can predate both files.
+      # (`scripts/pin.sh engine-image`): the release image when the engine pin in release/images.json
+      # is an engine release, otherwise a build of the pinned commit. Not :latest, which can predate
+      # both files.
       - name: Build control-plane image for compose smoke
         env:
           OWNER: ${{ github.repository_owner }}
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
         run: |
           set -euo pipefail
-          engine="$(bash scripts/engine-pin.sh image)"
+          engine="$(bash scripts/pin.sh engine-image)"
           docker build \
             --build-arg ENGINE_IMAGE="$engine" \
             -t supatype/control-plane:ci \
@@ -303,7 +304,7 @@ jobs:
           docker build -t supatype/studio:ci -f packages/studio/Dockerfile .
           docker build -t supatype/storage:ci packages/storage
           docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
-          engine="$(bash scripts/engine-pin.sh image)"
+          engine="$(bash scripts/pin.sh engine-image)"
           docker build \
             --build-arg ENGINE_IMAGE="$engine" \
             -t supatype/control-plane:ci \
@@ -371,9 +372,9 @@ jobs:
   ownership-e2e:
     name: ownership commands (adopt, release, reclaim, rebaseline, rollback)
     # One Postgres container and the CLI driving the engine directly, so it runs on pull requests
-    # like storage-backend. The engine is not whatever the CLI resolves (the latest release, which
+    # like storage-backend. The engine is not whatever the CLI resolves (an engine release, which
     # can predate the commands): it is built from the engine commit pinned in
-    # .github/schema-engine-commit, the way the release train builds it, and the script fails when
+    # release/images.json, the way the release train builds it, and the script fails when
     # no check could run. The engine is fetched with PRIVATE_REPO_TOKEN while its repository is
     # private and with github.token once it is public; a fetch that fails fails the job.
     if: github.event_name != 'schedule'
@@ -402,7 +403,7 @@ jobs:
           IN_SHA: ${{ inputs.schema_engine_sha }}
         run: |
           set -euo pipefail
-          sha="${IN_SHA:-$(tr -d '[:space:]' < .github/schema-engine-commit)}"
+          sha="${IN_SHA:-$(bash scripts/pin.sh commit engine)}"
           if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::The engine commit must be a full 40-character SHA, got '$sha'."
             exit 1
@@ -607,7 +608,7 @@ jobs:
         run: |
           docker build             -t supatype/functions-worker:ci             -f packages/functions-worker/Dockerfile             packages/functions-worker
 
-      # The constraint names asserted below are the pinned engine's (scripts/engine-pin.sh).
+      # The constraint names asserted below are the pinned engine's (scripts/pin.sh).
       # :latest, the last release, names them `<table>_check_<n>`.
       - name: Use the pinned engine
         uses: ./.github/actions/pinned-engine
@@ -1047,7 +1048,7 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
-      # The row types asserted below are the pinned engine's (scripts/engine-pin.sh). :latest, the
+      # The row types asserted below are the pinned engine's (scripts/pin.sh). :latest, the
       # last release, types a JSON<T> column as Json rather than T.
       - name: Use the pinned engine
         uses: ./.github/actions/pinned-engine

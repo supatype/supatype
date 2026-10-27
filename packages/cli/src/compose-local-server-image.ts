@@ -5,6 +5,7 @@ import { VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { appendStackOutput, getActiveDevSession } from "./dev-session.js"
 import { requireDockerDaemon } from "./docker-runtime.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
+import { RELEASE_IMAGES } from "./release-images.js"
 
 /** Docker tag for compose dev when `versions.server` is `local`. */
 export const LOCAL_SERVER_DOCKER_IMAGE = "supatype/server:local-dev"
@@ -57,7 +58,7 @@ export async function ensureLocalServerDockerImage(
   if (!root) {
     console.warn(
       `[supatype] ⚠  versions.server is "local" but no Dockerfile found near ${override}. ` +
-        "Compose will use the default supatype/server:latest image.",
+        `Compose will use this release's server image, ${RELEASE_IMAGES.server}.`,
     )
     return undefined
   }

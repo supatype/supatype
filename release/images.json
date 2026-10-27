@@ -1,0 +1,17 @@
+{
+  "engine": {
+    "image": "supatype/schema-engine",
+    "tag": "v0.7.0",
+    "commit": "a2753ec4bf2b539fcde72a9170917bbab8604020"
+  },
+  "server": {
+    "image": "supatype/server",
+    "tag": "v2.2.0",
+    "commit": "ff54f576c4aedd6aa61a60a48b2af7510710793a"
+  },
+  "postgres": {
+    "image": "supatype/postgres",
+    "tag": "17.2.10",
+    "commit": "821ef480971d4c6ed4b4143916beec77161caa31"
+  }
+}

@@ -70,7 +70,7 @@ npm install @supatype/cli@latest @supatype/client@latest @supatype/types@latest
 
 Pin all `@supatype/*` packages to the **same version** to avoid client/type skew.
 
-Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
+Omit `versions` in `supatype.config.ts` to run the exact images the installed CLI release was tested with.
 
 **Scaffold:** run `supatype init` and answer its prompts (production target, local runtime, schema
 path, front end), or pass `--defaults` to take the defaults. `--mode dev | standalone` still works

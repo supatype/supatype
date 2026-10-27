@@ -12,6 +12,8 @@
 # <root> holds one checkout per repository: supatype-schema-engine, supatype, supatype-auth,
 # supatype-cloud, supatype-postgres. To create them as detached worktrees first:
 #   --worktree <name>=<repository path>@<sha>    (repeat per repository)
+# To train what a release ships, take the engine, server and Postgres commits from
+# `bash scripts/pin.sh check`, as release.yml does.
 #
 # Options:
 #   --skip-build          use the :train images already built

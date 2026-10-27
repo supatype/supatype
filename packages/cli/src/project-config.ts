@@ -84,7 +84,7 @@ export interface SupatypeProjectConfig {
     port?: number
     /**
      * Docker image to use (provider=docker).
-     * Defaults to supatype/postgres:latest.
+     * Defaults to the supatype/postgres release this CLI was tested with.
      * Override in supatype.local.config.ts for local builds.
      */
     image?: string

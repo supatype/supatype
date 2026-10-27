@@ -4,12 +4,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { projectConfig } from "./support/project-config.js"
-import { cachedBinaryPath, currentPlatform, resolveBinary } from "../src/binary-cache.js"
+import { cachedBinaryPath, currentPlatform, resolveBinary, type Component } from "../src/binary-cache.js"
+import { pinnedComponentVersion } from "../src/release-images.js"
 import { binaryCapabilities } from "../src/engine-ownership-gate.js"
 
 /**
  * The engine the gate checks is the one that will run, found without the network when it can be:
- * an override, or a cached release when `latest` cannot be looked up.
+ * an override, the release this CLI pins, or, for a component it does not pin, a cached release when
+ * `latest` cannot be looked up.
  */
 let home: string
 let cwd: string
@@ -17,6 +19,15 @@ const saved = { HOME: process.env["HOME"], USERPROFILE: process.env["USERPROFILE
 
 function config(extra: Partial<SupatypeProjectConfig> = {}): SupatypeProjectConfig {
   return projectConfig({ project: { name: "offline" }, ...extra })
+}
+
+/** The engine version this CLI runs when the project pins none. */
+const ENGINE_PIN = pinnedComponentVersion("engine")
+
+function cache(component: Component, version: string): void {
+  const path = cachedBinaryPath(component, version, currentPlatform())
+  mkdirSync(join(path, ".."), { recursive: true })
+  writeFileSync(path, "bin")
 }
 
 beforeEach(() => {
@@ -49,19 +60,27 @@ describe("resolveBinary() offline", () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it("uses the newest cached release when latest cannot be looked up", async () => {
+  it("uses the engine release this CLI pins, from the cache, without looking anything up", async () => {
     const platform = currentPlatform()
-    for (const v of ["0.6.0", "0.10.0", "0.9.1"]) {
-      const path = cachedBinaryPath("engine", v, platform)
-      mkdirSync(join(path, ".."), { recursive: true })
-      writeFileSync(path, "bin")
-    }
-    expect(await resolveBinary("engine", config())).toBe(cachedBinaryPath("engine", "0.10.0", platform))
+    for (const v of ["0.6.0", ENGINE_PIN, "99.0.0"]) cache("engine", v)
+    expect(await resolveBinary("engine", config())).toBe(cachedBinaryPath("engine", ENGINE_PIN, platform))
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("asks for the pinned engine to be downloaded rather than running another cached one", async () => {
+    cache("engine", "99.0.0")
+    await expect(resolveBinary("engine", config())).rejects.toThrow(`engine v${ENGINE_PIN} not found in cache`)
+  })
+
+  it("uses the newest cached release of a component it does not pin when latest cannot be looked up", async () => {
+    const platform = currentPlatform()
+    for (const v of ["2.1.0", "2.10.0", "2.9.1"]) cache("deno", v)
+    expect(await resolveBinary("deno", config())).toBe(cachedBinaryPath("deno", "2.10.0", platform))
   })
 
   it("says what to do when nothing is cached, rather than failing on fetch", async () => {
-    await expect(resolveBinary("engine", config())).rejects.toThrow(
-      /Could not look up the latest engine release \(fetch failed\), and no engine binary is cached\. .*overrides\.engine/,
+    await expect(resolveBinary("deno", config())).rejects.toThrow(
+      /Could not look up the latest deno release \(fetch failed\), and no deno binary is cached\. .*overrides\.deno/,
     )
   })
 })
