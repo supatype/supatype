@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto"
 import { p, runClackFlow } from "../ui/clack.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
-import { CONTROL_PLANE_SECRET_ENV, generateControlPlaneSecret } from "../local-secrets.js"
+import { CONTROL_PLANE_SECRET_ENV, generateControlPlaneSecret, generateJwtSecret } from "../local-secrets.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
@@ -1224,7 +1224,7 @@ function envTemplate(opts: ScaffoldOptions): string {
   // only because `supatype dev` no longer overwrites them on every run (see local-secrets.ts).
   const postgresPassword = randomBytes(24).toString("base64url")
 
-  sections.push(`DATABASE_URL=postgresql://supatype_admin:${postgresPassword}@localhost:5432/${opts.projectName}
+  sections.push(`DATABASE_URL=postgresql://supatype_admin:${encodeURIComponent(postgresPassword)}@localhost:5432/${opts.projectName}
 POSTGRES_USER=supatype_admin
 POSTGRES_PASSWORD=${postgresPassword}
 POSTGRES_DB=${opts.projectName}
@@ -1243,7 +1243,7 @@ SUPATYPE_SQL_EDITOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
 
   sections.push(`# JWT: ANON_KEY and SERVICE_ROLE_KEY are derived from this secret.
 # Changing it invalidates every issued token; re-run \`supatype keys\` afterwards.
-JWT_SECRET=${randomBytes(48).toString("base64url")}
+JWT_SECRET=${generateJwtSecret()}
 ANON_KEY=
 SERVICE_ROLE_KEY=`)
 

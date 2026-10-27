@@ -15,7 +15,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { anonKeyEnvUpdates, writeKeysToEnv } from "../src/commands/keys.js"
+import { anonKeyEnvUpdates, generateAndWriteKeys, resolveSecret, writeKeysToEnv } from "../src/commands/keys.js"
+import { verifyJwt } from "../src/jwt.js"
 
 const PAIR = { anonKey: "anon.jwt.value", serviceKey: "service.jwt.value" }
 
@@ -138,11 +139,65 @@ describe("anonKeyEnvUpdates", () => {
       "VITE_SUPATYPE_ANON_KEY",
       "PUBLIC_SUPATYPE_ANON_KEY",
       "EXPO_PUBLIC_SUPATYPE_ANON_KEY",
+      "NEXT_PUBLIC_SUPATYPE_ANON_KEY",
     ])
   })
 
   it("adds the URL names only when given a URL", () => {
     expect(Object.keys(anonKeyEnvUpdates("a", "s", "http://x"))).toContain("VITE_SUPATYPE_URL")
     expect(Object.keys(anonKeyEnvUpdates("a", "s"))).not.toContain("VITE_SUPATYPE_URL")
+    expect(Object.keys(anonKeyEnvUpdates("a", "s", "http://x"))).toContain("NEXT_PUBLIC_SUPATYPE_URL")
+    expect(Object.keys(anonKeyEnvUpdates("a", "s"))).not.toContain("NEXT_PUBLIC_SUPATYPE_URL")
+  })
+})
+
+describe("reading JWT_SECRET for keys", () => {
+  let dir: string
+  const savedSecret = process.env["JWT_SECRET"]
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "supatype-keys-secret-"))
+    delete process.env["JWT_SECRET"]
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    if (savedSecret === undefined) delete process.env["JWT_SECRET"]
+    else process.env["JWT_SECRET"] = savedSecret
+  })
+
+  it("leaves an inline comment out of the secret, as compose does", () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=the-real-secret-of-at-least-32-chars  # rotated in May\n")
+    expect(resolveSecret(dir)).toBe("the-real-secret-of-at-least-32-chars")
+  })
+
+  it("reads the last JWT_SECRET when the key is assigned twice", () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=old-one\nJWT_SECRET=new-one\n")
+    expect(resolveSecret(dir)).toBe("new-one")
+  })
+})
+
+describe("generateAndWriteKeys (init)", () => {
+  let dir: string
+  const SECRET = "a-local-development-secret-at-least-32-chars"
+  const savedSecret = process.env["JWT_SECRET"]
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "supatype-keys-init-"))
+    delete process.env["JWT_SECRET"]
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    if (savedSecret === undefined) delete process.env["JWT_SECRET"]
+    else process.env["JWT_SECRET"] = savedSecret
+  })
+
+  it("writes the Next.js names with the rest, and keys that verify against the secret", () => {
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${SECRET}  # note\nPUBLIC_SUPATYPE_URL=http://localhost:18999\n`)
+    const keys = generateAndWriteKeys(dir)
+
+    expect(keys).not.toBeNull()
+    expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_ANON_KEY")).toBe(keys?.anonKey)
+    expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_URL")).toBe("http://localhost:18999")
+    expect(verifyJwt(envValue(dir, "ANON_KEY") ?? "", SECRET)).not.toBeNull()
   })
 })

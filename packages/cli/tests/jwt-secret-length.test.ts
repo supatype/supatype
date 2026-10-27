@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { JWT_SECRET_REMEDY, MIN_JWT_SECRET_LENGTH, jwtSecretTooShort } from "../src/jwt-secret-length.js"
-import { FALLBACK_JWT_SECRET } from "../src/local-secrets.js"
+import { generateJwtSecret } from "../src/local-secrets.js"
 
 /**
  * PostgREST 13 and later refuse to start when the JWT secret is shorter than 32 characters. The
@@ -22,8 +22,8 @@ describe("JWT secret length", () => {
     expect(jwtSecretTooShort("x".repeat(32))).toBeNull()
   })
 
-  it("accepts the fallback a project without .env runs with", () => {
-    expect(jwtSecretTooShort(FALLBACK_JWT_SECRET)).toBeNull()
+  it("accepts the secret generated for a project without one", () => {
+    expect(jwtSecretTooShort(generateJwtSecret())).toBeNull()
   })
 })
 

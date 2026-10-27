@@ -20,6 +20,8 @@ import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, relative, resolve } from "node:path"
+import { parseEnvText } from "../env-file.js"
+import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
 import { isParsedBuckets, type ParsedStorageBucket } from "../storage-provision.js"
@@ -249,6 +251,8 @@ export function registerDev(program: Command): void {
       // Before the session takes the terminal, so a refusal reaches it.
       const overwriteDrift = opts.overwriteDrift === true
       if (overwriteDrift) await requireDevEngineSupports(cwd, config, provider === "docker")
+      // The compose file puts the database passwords into URLs as `${VAR}`, unencoded.
+      if (provider === "docker") requireUrlSafeComposePasswords(cwd, config)
 
       beginDevSession(resolveDevUiMode(opts.stream === true))
       if (hasMeaningfulOverrides(config)) {
@@ -259,8 +263,8 @@ export function registerDev(program: Command): void {
         console.warn("")
       }
 
-      // Both providers, before anything starts: the secret a docker stack is seeded with when .env
-      // has none is the same fallback this reads.
+      // Both providers, before anything starts. A project without one gets a generated secret in
+      // .env here, which every later step signs and validates with.
       requireUsableJwtSecret(devJwtSecret(cwd))
 
       if (provider === "docker") {
@@ -1366,18 +1370,12 @@ function runAuthMigrations(
   }
 }
 
+/** `.env` then `.env.local`, the later file winning, each read through the one dotenv parser. */
 function loadDotEnv(cwd: string): Record<string, string> {
   const candidates = [resolve(cwd, ".env"), resolve(cwd, ".env.local")]
   const vars: Record<string, string> = {}
   for (const envPath of candidates) {
-    if (!existsSync(envPath)) continue
-    for (const line of readFileSync(envPath, "utf8").split("\n")) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith("#")) continue
-      const eq = trimmed.indexOf("=")
-      if (eq === -1) continue
-      vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
-    }
+    if (existsSync(envPath)) Object.assign(vars, parseEnvText(readFileSync(envPath, "utf8")))
   }
   return vars
 }

@@ -159,14 +159,14 @@ From the monorepo root:
 pnpm install
 pnpm build           # the CLI and the libraries run from their dist/
 cd examples/kitchen-sink
-cp .env.example .env # `supatype keys --write` needs a JWT_SECRET; it does not invent one
+cp .env.example .env # `supatype keys` writes into .env only when there is one
 pnpm keys            # mints ANON_KEY / SERVICE_ROLE_KEY into .env
 pnpm build:app       # app.mode is "static", so the SPA must exist before the stack serves it
 pnpm dev             # Postgres, the schema, the whole stack
 ```
 
-The `.env` copy is not optional and the order is not arbitrary. `supatype keys` reads
-`JWT_SECRET` and fails without one, and the SPA reads `VITE_SUPATYPE_ANON_KEY` at **build**
+The `.env` copy is not optional and the order is not arbitrary. `supatype keys` only
+prints the keys when there is no `.env` to write them to, and the SPA reads `VITE_SUPATYPE_ANON_KEY` at **build**
 time, so a build that runs before the keys exist ships `anonKey: undefined` and every request
 it makes is rejected by the gateway. Rebuild after re-minting keys.
 
