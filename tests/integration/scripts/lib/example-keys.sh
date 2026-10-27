@@ -4,28 +4,29 @@
 #
 #   source "$(dirname "${BASH_SOURCE[0]}")/lib/example-keys.sh"
 #
-# `supatype dev` writes ANON_KEY into .env, but only once the stack is starting. A script that reads
-# the keys from there before dev has run fails on a fresh checkout with a 401 that names nothing.
-# This mints them the same way the CLI does, from the example's own JWT_SECRET, and fails loudly
-# instead.
+# On a fresh checkout an example's .env holds no keys until something writes them, and a script
+# that reads them from there fails with a 401 that names nothing. This mints them with the CLI, from
+# the example's own JWT_SECRET, and fails loudly instead.
 #
 # Call it BEFORE starting the stack: a front end that bakes its key in at build time (Vite,
 # Next) needs the value to exist before its build runs, not after.
-
-# The secret `supatype dev` falls back to when .env names none. Written explicitly so the keys this
-# mints verify against the stack that starts later, rather than depending on which of the two paths
-# happened to run first.
-EXAMPLE_JWT_SECRET="${EXAMPLE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}"
+#
+# The secret lives in the example's .env, which is where `supatype dev` reads it from, so the keys
+# minted here verify against the stack that starts later. Set EXAMPLE_JWT_SECRET to choose it;
+# otherwise `supatype keys` generates one into .env when it has none, as `supatype dev` would.
 
 # mint_keys <example-dir> <cli-bin> - exports ANON_KEY and SERVICE_ROLE_KEY.
 mint_keys() {
   local dir="$1" cli="$2" out=""
 
-  if [[ ! -f "$dir/.env" ]] || ! grep -q '^JWT_SECRET=' "$dir/.env"; then
+  touch "$dir/.env"
+  if [[ -n "${EXAMPLE_JWT_SECRET:-}" ]] && ! grep -q '^JWT_SECRET=.' "$dir/.env"; then
     printf 'JWT_SECRET=%s\n' "$EXAMPLE_JWT_SECRET" >> "$dir/.env"
   fi
 
-  out="$(cd "$dir" && node "$cli" keys 2>&1)" || true
+  # `keys` writes into .env, generating JWT_SECRET there when it has none; `--print` then prints a
+  # pair signed with that secret for this script to read.
+  out="$(cd "$dir" && node "$cli" keys >/dev/null 2>&1 && node "$cli" keys --print 2>&1)" || true
   ANON_KEY="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*ANON_KEY=//p' | tail -1)"
   SERVICE_ROLE_KEY="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*SERVICE_ROLE_KEY=//p' | tail -1)"
 

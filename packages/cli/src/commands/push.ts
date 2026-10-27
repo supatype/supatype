@@ -42,7 +42,6 @@ import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from 
 import { adoptKeysNeed, OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
-import { signJwt } from "../jwt.js"
 import { isParsedBuckets, provisionBucketsFromAst } from "../storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
@@ -72,8 +71,6 @@ import { info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
-
-const DEV_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
 export function registerPush(program: Command): void {
   program
@@ -539,15 +536,15 @@ async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig
 
 /**
  * The service-role key for the project's own stack: an explicit one, else the key that stack was
- * configured with. A docker stack's comes from its `.env`, signed with the project's own secret;
- * signing one with the published dev secret was refused by a stack with a secret of its own.
+ * configured with. Docker and native dev both run with the project's own `JWT_SECRET` from `.env`,
+ * so the key comes from there for either; signing one with the published dev secret was refused by
+ * every stack with a secret of its own.
  */
-function localServiceRoleKey(config: SupatypeProjectConfig): string | undefined {
+export function localServiceRoleKey(config: SupatypeProjectConfig): string | undefined {
   const explicit = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? process.env["SERVICE_ROLE_KEY"]
   if (explicit) return explicit
   if (config.server.mode !== "dev") return undefined
-  if (resolveRuntimeProvider(config) === "docker") return devApiKeys(process.cwd()).serviceRoleKey
-  return signJwt({ role: "service_role", iss: "supatype", iat: Math.floor(Date.now() / 1000) }, DEV_JWT_SECRET)
+  return devApiKeys(process.cwd()).serviceRoleKey
 }
 
 async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig): Promise<void> {

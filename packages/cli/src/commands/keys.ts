@@ -1,61 +1,90 @@
 import type { Command } from "commander"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { readEnvFile, upsertEnvFile } from "../env-file.js"
 import { signJwt } from "../jwt.js"
+import { devJwtSecret, generateJwtSecret } from "../local-secrets.js"
 import { error, plain } from "../ui/messages.js"
+
+interface KeysOptions {
+  secret?: string
+  expYears: string
+  print?: boolean
+  write?: boolean
+  force?: boolean
+}
 
 export function registerKeys(program: Command): void {
   program
     .command("keys")
-    .description("Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET")
+    .description(
+      "Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET and fill the blank ones in .env " +
+        "(printed instead when there is no .env, or with --print)",
+    )
     .option("--secret <secret>", "JWT secret (defaults to JWT_SECRET env var or value in .env)")
     .option("--exp-years <years>", "Token expiry in years (default: 10)", "10")
-    .option("--write", "Write the keys into .env in the current directory instead of printing them")
-    .option("--force", "With --write, replace every key already in .env rather than filling blanks")
-    .action((opts: { secret?: string; expYears: string; write?: boolean; force?: boolean }) => {
-      const secret = opts.secret ?? resolveSecret()
-      if (!secret) {
-        error("JWT_SECRET not found. Set it in .env or pass --secret <value>")
-        process.exit(1)
-      }
-
+    .option("--print", "Only print the keys, even when there is a .env to write them to")
+    .option("--write", "Write the keys into .env. The default when there is one; kept for older scripts")
+    .option("--force", "Replace every key already in .env rather than filling blanks")
+    .action((opts: KeysOptions) => {
       const expYears = parseInt(opts.expYears, 10)
       if (isNaN(expYears) || expYears < 1) {
         error("--exp-years must be a positive integer")
         process.exit(1)
       }
-
-      const { anonKey, serviceKey } = signKeyPair(secret, expYears)
-
-      if (opts.write) {
-        const written = writeKeysToEnv(
-          process.cwd(),
-          { anonKey, serviceKey },
-          opts.force === true,
-        )
-        if (written.path === null) {
-          error("No .env here to write to. Create one, or drop --write to print the keys.")
-          process.exit(1)
-        }
-        plain(`\nKeys valid for ${expYears} years, written to ${written.path}:\n`)
-        // The names come back from the writer rather than being restated here, which is the whole
-        // point of there being one list.
-        for (const key of written.written) plain(`  ${key}`)
-        if (written.kept.length > 0) {
-          plain(`\nLeft alone, because they already hold a value:\n`)
-          for (const key of written.kept) plain(`  ${key}`)
-          plain("\nRe-run with --force to replace them.")
-        }
-        plain("\nDo not commit .env to source control.")
-        return
+      if (opts.print === true && opts.write === true) {
+        error("--print and --write contradict each other. Pass one.")
+        process.exit(1)
       }
 
-      plain(`\nGenerated keys (valid for ${expYears} years):\n`)
-      plain("ANON_KEY=" + anonKey)
-      plain("SERVICE_ROLE_KEY=" + serviceKey)
-      plain("\nAdd these to your .env file, or re-run with --write. Do not commit .env to source control.")
+      const cwd = process.cwd()
+      const hasEnv = existsSync(resolve(cwd, ".env"))
+      if (opts.write === true && !hasEnv) {
+        error("No .env here to write to. Create one, or drop --write to print the keys.")
+        process.exit(1)
+      }
+      if (hasEnv && opts.print !== true) writeKeys(cwd, opts, expYears)
+      else printKeys(cwd, opts, expYears, hasEnv)
     })
+}
+
+/** `supatype keys` with a `.env` to write to: blanks only unless `--force`. */
+function writeKeys(cwd: string, opts: KeysOptions, expYears: number): void {
+  const known = opts.secret ?? resolveSecret(cwd)
+  // Generated into .env when it has none, so the keys written beside it can be verified.
+  const secret = known ?? devJwtSecret(cwd)
+  const written = writeKeysToEnv(cwd, signKeyPair(secret, expYears), opts.force === true)
+  if (known === undefined) plain("\nGenerated a JWT_SECRET in .env, which had none.")
+  plain(`\nKeys valid for ${expYears} years, written to ${written.path ?? ".env"}:\n`)
+  // The names come back from the writer rather than being restated here, which is the whole
+  // point of there being one list.
+  for (const key of written.written) plain(`  ${key}`)
+  if (written.kept.length > 0) {
+    plain(`\nLeft alone, because they already hold a value:\n`)
+    for (const key of written.kept) plain(`  ${key}`)
+    plain("\nRe-run with --force to replace them.")
+  }
+  plain("\nDo not commit .env to source control.")
+}
+
+/**
+ * `supatype keys` printing instead of writing. With no secret anywhere, one is generated and
+ * printed with the keys, since keys signed with a secret nobody kept could never be verified.
+ */
+function printKeys(cwd: string, opts: KeysOptions, expYears: number, hasEnv: boolean): void {
+  const known = opts.secret ?? resolveSecret(cwd)
+  const secret = known ?? generateJwtSecret()
+  const { anonKey, serviceKey } = signKeyPair(secret, expYears)
+  plain(`\nGenerated keys (valid for ${expYears} years):\n`)
+  if (known === undefined) plain("JWT_SECRET=" + secret)
+  plain("ANON_KEY=" + anonKey)
+  plain("SERVICE_ROLE_KEY=" + serviceKey)
+  plain(
+    hasEnv
+      ? "\nRe-run without --print to fill the blank ones in .env. Do not commit .env to source control."
+      : "\nCreate a .env here and re-run `supatype keys` to write them into it, or add these lines yourself. " +
+          "Do not commit .env to source control.",
+  )
 }
 
 /**
@@ -80,12 +109,19 @@ export function anonKeyEnvUpdates(
     VITE_SUPATYPE_ANON_KEY: anonKey,
     PUBLIC_SUPATYPE_ANON_KEY: anonKey,
     EXPO_PUBLIC_SUPATYPE_ANON_KEY: anonKey,
+    NEXT_PUBLIC_SUPATYPE_ANON_KEY: anonKey,
     ...(apiUrl !== undefined && {
       VITE_SUPATYPE_URL: apiUrl,
       PUBLIC_SUPATYPE_URL: apiUrl,
       EXPO_PUBLIC_SUPATYPE_URL: apiUrl,
+      NEXT_PUBLIC_SUPATYPE_URL: apiUrl,
     }),
   }
+}
+
+/** The API URL a project's `.env` records, for the front-end URL copies, or undefined. */
+function recordedApiUrl(env: Record<string, string>): string | undefined {
+  return env["PUBLIC_SUPATYPE_URL"] || env["API_EXTERNAL_URL"] || undefined
 }
 
 export interface WriteKeysResult {
@@ -117,8 +153,7 @@ export function writeKeysToEnv(
   if (!existsSync(envPath)) return { path: null, written: [], kept: [] }
 
   const existing = readEnvFile(dir)
-  const apiUrl = existing["PUBLIC_SUPATYPE_URL"] || existing["API_EXTERNAL_URL"] || undefined
-  const candidates = anonKeyEnvUpdates(keys.anonKey, keys.serviceKey, apiUrl)
+  const candidates = anonKeyEnvUpdates(keys.anonKey, keys.serviceKey, recordedApiUrl(existing))
 
   const updates: Record<string, string> = {}
   const kept: string[] = []
@@ -153,7 +188,7 @@ export function signKeyPair(
 
 /**
  * Generate keys from the JWT_SECRET found in `dir`'s .env (or env var) and
- * rewrite the ANON_KEY / SERVICE_ROLE_KEY lines in that .env file in place.
+ * rewrite every name {@link anonKeyEnvUpdates} owns in that .env file in place.
  * Returns the minted pair, or null if no secret could be resolved.
  */
 export function generateAndWriteKeys(
@@ -164,68 +199,22 @@ export function generateAndWriteKeys(
   if (!secret) return null
 
   const { anonKey, serviceKey } = signKeyPair(secret, expYears)
-
-  const envPath = resolve(dir, ".env")
-  if (existsSync(envPath)) {
-    let content = readFileSync(envPath, "utf8")
-    content = upsertEnvVar(content, "ANON_KEY", anonKey)
-    content = upsertEnvVar(content, "SERVICE_ROLE_KEY", serviceKey)
-    content = upsertEnvVar(content, "VITE_SUPATYPE_ANON_KEY", anonKey)
-    content = upsertEnvVar(content, "PUBLIC_SUPATYPE_ANON_KEY", anonKey)
-    content = upsertEnvVar(content, "EXPO_PUBLIC_SUPATYPE_ANON_KEY", anonKey)
-    const apiUrl = readEnvVar(content, "PUBLIC_SUPATYPE_URL") ?? readEnvVar(content, "API_EXTERNAL_URL")
-    if (apiUrl) {
-      content = upsertEnvVar(content, "VITE_SUPATYPE_URL", apiUrl)
-      content = upsertEnvVar(content, "EXPO_PUBLIC_SUPATYPE_URL", apiUrl)
-    }
-    writeFileSync(envPath, content, "utf8")
+  if (existsSync(resolve(dir, ".env"))) {
+    upsertEnvFile(dir, anonKeyEnvUpdates(anonKey, serviceKey, recordedApiUrl(readEnvFile(dir))))
   }
-
   return { anonKey, serviceKey }
 }
 
-function upsertEnvVar(content: string, key: string, value: string): string {
-  const re = new RegExp(`^${key}=.*$`, "m")
-  if (re.test(content)) return content.replace(re, `${key}=${value}`)
-  const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n"
-  return `${content}${sep}${key}=${value}\n`
-}
-
-/** Whether `.env` declares `key` at all, with or without a value. */
-function hasEnvLine(content: string, key: string): boolean {
-  return new RegExp(`^${key}=`, "m").test(content)
-}
-
-function readEnvVar(content: string, key: string): string | undefined {
-  const re = new RegExp(`^${key}=(.*)$`, "m")
-  const match = re.exec(content)
-  if (!match?.[1]) return undefined
-  const value = match[1].trim()
-  return value.length > 0 ? value : undefined
-}
-
+/** The JWT secret: the `JWT_SECRET` environment variable, else `dir`'s .env, read as compose reads it. */
 export function resolveSecret(dir: string = process.cwd()): string | undefined {
-  // 1. Check environment variable
   const fromEnv = process.env["JWT_SECRET"]
   if (fromEnv) return fromEnv
-
-  // 2. Parse .env file in the target directory
-  const envPath = resolve(dir, ".env")
-  if (!existsSync(envPath)) return undefined
-
   try {
-    const contents = readFileSync(envPath, "utf8")
-    for (const line of contents.split("\n")) {
-      const trimmed = line.trim()
-      if (trimmed.startsWith("JWT_SECRET=")) {
-        const value = trimmed.slice("JWT_SECRET=".length).trim()
-        if (value && !value.startsWith("#")) return value
-      }
-    }
+    return readEnvFile(dir)["JWT_SECRET"] || undefined
   } catch {
-    // ignore read errors
+    // An unreadable .env is the same as none here: the caller says what to do without a secret.
+    return undefined
   }
-  return undefined
 }
 
 /**
@@ -242,16 +231,12 @@ export function resolveSecret(dir: string = process.cwd()): string | undefined {
  * left the documented quick start unable to start at all.
  */
 export function fillMissingKeys(dir: string, expYears = 10): string[] {
-  const envPath = resolve(dir, ".env")
-  if (!existsSync(envPath)) return []
+  if (!existsSync(resolve(dir, ".env"))) return []
 
-  const content = readFileSync(envPath, "utf8")
-  const blank = (name: string): boolean => {
-    const current = readEnvVar(content, name)
-    return current === undefined || current.trim() === ""
-  }
-
-  const needed = (["ANON_KEY", "SERVICE_ROLE_KEY"] as const).filter(blank)
+  const existing = readEnvFile(dir)
+  const needed = (["ANON_KEY", "SERVICE_ROLE_KEY"] as const).filter(
+    (name) => (existing[name]?.trim() ?? "") === "",
+  )
   if (needed.length === 0) return []
 
   const secret = resolveSecret(dir)
@@ -259,11 +244,6 @@ export function fillMissingKeys(dir: string, expYears = 10): string[] {
 
   const { anonKey, serviceKey } = signKeyPair(secret, expYears)
   const minted = { ANON_KEY: anonKey, SERVICE_ROLE_KEY: serviceKey }
-
-  let next = content
-  for (const name of needed) {
-    next = upsertEnvVar(next, name, minted[name])
-  }
-  writeFileSync(envPath, next, "utf8")
+  upsertEnvFile(dir, Object.fromEntries(needed.map((name) => [name, minted[name]])))
   return needed
 }

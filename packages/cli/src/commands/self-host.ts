@@ -18,6 +18,7 @@ import { devPostgresPassword } from "../local-secrets.js"
 import { splitPassword } from "../host-database.js"
 import { fillMissingKeys, resolveSecret } from "./keys.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
+import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { resolveBinary } from "../binary-cache.js"
 import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
@@ -47,6 +48,7 @@ export function registerSelfHost(program: Command): void {
     .action(() => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      requireUrlSafeComposePasswords(cwd, config)
       warnProjectAuthProviderSecrets(cwd, config)
       const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
       file("wrote", out.composePath)
@@ -60,6 +62,7 @@ export function registerSelfHost(program: Command): void {
     .action(async (opts: { detach?: boolean }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      requireUrlSafeComposePasswords(cwd, config)
       const project = composeProjectName(config.project.name)
       const args = opts.detach ? ["up", "-d"] : ["up"]
       // A missing secret is compose's to report; a short one only PostgREST would notice.
@@ -443,6 +446,7 @@ async function confirmVolumeRemoval(): Promise<boolean> {
 function renderAndRunCompose(args: string[]): number {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
+  requireUrlSafeComposePasswords(cwd, config)
   const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   return runDockerCompose(out.composePath, args, cwd, composeProjectName(config.project.name), {
     brand: SELF_HOST_BRAND,

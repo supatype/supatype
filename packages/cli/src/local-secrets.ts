@@ -48,13 +48,10 @@ export function ensureControlPlaneSecret(cwd: string): void {
   upsertEnvFile(cwd, { [CONTROL_PLANE_SECRET_ENV]: generateControlPlaneSecret() })
 }
 
-/**
- * Fallback JWT signing secret for a project that has none.
- *
- * Published, therefore worthless as a secret, anyone can mint a token for a stack still using
- * it. That is precisely why `init` generates one instead of relying on this.
- */
-export const FALLBACK_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
+/** A new JWT signing secret: 48 random bytes, base64url, so 64 characters. */
+export function generateJwtSecret(): string {
+  return randomBytes(48).toString("base64url")
+}
 
 /** Fallback Postgres superuser password for a project that has none. */
 export const FALLBACK_POSTGRES_PASSWORD = "postgres"
@@ -74,9 +71,17 @@ export const SQL_EDITOR_PASSWORD_ENV = "SUPATYPE_SQL_EDITOR_PASSWORD"
  */
 export const BUNDLED_DB_USER = "supatype_admin"
 
-/** The secret the local stack signs and validates tokens with. */
+/**
+ * The secret the local stack signs and validates tokens with: `.env`'s, or a generated one
+ * written there first.
+ *
+ * Generated rather than defaulted. A published fallback let anyone mint a token for a stack using
+ * it, and the docker dev path wrote it into the same `.env` a server reads. A secret a project
+ * already has is kept, whatever it is, because replacing it invalidates every token issued.
+ */
 export function devJwtSecret(cwd: string): string {
-  return readEnvValue(cwd, "JWT_SECRET", FALLBACK_JWT_SECRET)
+  if (!hasEnvValue(cwd, "JWT_SECRET")) upsertEnvFile(cwd, { JWT_SECRET: generateJwtSecret() })
+  return readEnvValue(cwd, "JWT_SECRET", "")
 }
 
 /** The password for the Postgres superuser the engine and server connect as. */
@@ -140,10 +145,12 @@ export function devSqlEditorPassword(cwd: string): string {
  * `supatype init` writing them.
  *
  * **Fills with the fallback, does not generate.** Preserving the value such a project has been
- * running with is the point: generating a new `JWT_SECRET` would invalidate tokens already
- * issued, and a new `POSTGRES_PASSWORD` would not match the password baked into an existing
- * Postgres volume, which `initdb` only sets once. New projects get generated values from
+ * running with is the point: a new `POSTGRES_PASSWORD` would not match the password baked into an
+ * existing Postgres volume, which `initdb` only sets once. New projects get generated values from
  * `init`; existing ones keep working and are no worse off than before.
+ *
+ * Not `JWT_SECRET`: {@link devJwtSecret} generates that one, and every caller signs its keys
+ * through it before this runs.
  *
  * `POSTGRES_PASSWORD` only for the bundled database. An external one is reached through the
  * operator's `DATABASE_URL`, and a fallback password beside it describes a credential that does
@@ -154,7 +161,6 @@ export function seedMissingLocalSecrets(
   config: SupatypeProjectConfig,
 ): Record<string, string> {
   const out: Record<string, string> = {}
-  if (!hasEnvValue(cwd, "JWT_SECRET")) out.JWT_SECRET = FALLBACK_JWT_SECRET
   if (!usesExternalDatabase(config) && !hasEnvValue(cwd, "POSTGRES_PASSWORD")) {
     out.POSTGRES_PASSWORD = FALLBACK_POSTGRES_PASSWORD
   }
@@ -221,7 +227,7 @@ export function devDatabaseIdentity(cwd: string): DevDatabaseIdentity {
 /** A connection string to the local database at `hostPort`, `db:5432` inside the network. */
 export function devDatabaseUrl(cwd: string, hostPort: string): string {
   const { user, password, database } = devDatabaseIdentity(cwd)
-  return `postgresql://${user}:${password}@${hostPort}/${database}?sslmode=disable`
+  return `postgresql://${user}:${encodeURIComponent(password)}@${hostPort}/${database}?sslmode=disable`
 }
 
 /**

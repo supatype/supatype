@@ -110,10 +110,11 @@ describe("seeding the database identity", () => {
   })
 
   // The external stack never reads it: every service connects with the operator's DATABASE_URL.
-  it("seeds no Postgres password for an external database, and still the JWT secret", () => {
+  // The JWT secret is not seeded at all: `devJwtSecret` generates one before the seed runs.
+  it("seeds no Postgres password for an external database", () => {
     const seeded = seedMissingLocalSecrets(project(), external())
     expect(seeded).not.toHaveProperty("POSTGRES_PASSWORD")
-    expect(seeded).toHaveProperty("JWT_SECRET")
+    expect(seeded).toHaveProperty("AUTHENTICATOR_PASSWORD")
     expect(seedMissingLocalSecrets(project(), bundled())).toHaveProperty("POSTGRES_PASSWORD")
   })
 })

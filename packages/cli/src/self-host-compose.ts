@@ -21,6 +21,7 @@ import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
+import { addressPoolExhaustionHint } from "./docker-address-pool.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
 import {
   BUNDLED_DB_USER,
@@ -147,15 +148,8 @@ export function hasLocalVersionPins(config: SupatypeProjectConfig): boolean {
 }
 
 function readComposeImageEnvValues(cwd: string): string[] {
-  const envPath = resolve(cwd, ".env")
-  if (!existsSync(envPath)) return []
-  const text = readFileSync(envPath, "utf8")
-  const values: string[] = []
-  for (const key of COMPOSE_IMAGE_ENV_KEYS) {
-    const match = text.match(new RegExp(`^${key}=(.+)$`, "m"))
-    if (match?.[1]) values.push(match[1].trim())
-  }
-  return values
+  const env = readEnvFile(cwd)
+  return COMPOSE_IMAGE_ENV_KEYS.flatMap((key) => (env[key] ? [env[key]] : []))
 }
 
 /**
@@ -1483,16 +1477,28 @@ export function runDockerCompose(
     args[0] === "up" && composeProject !== undefined
       ? upKeepingKongCurrent(projectRoot, { project: composeProject, composePath }, runCompose)
       : runCompose()
-  if (options?.quiet && result.status !== 0) {
-    const detail = [result.stderr, result.stdout]
-      .filter((s): s is string => typeof s === "string" && s.trim() !== "")
-      .join("\n")
-      .trim()
-    if (detail) {
-      console.error(`[supatype] docker compose: ${detail}`)
-    }
+  if (result.status !== 0) {
+    reportComposeFailure(args, options?.quiet === true ? capturedComposeOutput(result) : null)
   }
   return result.status ?? 1
+}
+
+/** What a quiet compose run printed, from the streams the CLI captured. */
+function capturedComposeOutput(result: { stdout?: unknown; stderr?: unknown }): string {
+  return [result.stderr, result.stdout]
+    .filter((s): s is string => typeof s === "string" && s.trim() !== "")
+    .join("\n")
+    .trim()
+}
+
+/**
+ * Say what a failed compose run printed, when the CLI captured it, and any cause it recognises.
+ * `captured` is null when the output already went to the terminal.
+ */
+function reportComposeFailure(args: readonly string[], captured: string | null): void {
+  if (captured) console.error(`[supatype] docker compose: ${captured}`)
+  if (args[0] !== "up") return
+  for (const line of addressPoolExhaustionHint(captured)) console.error(`[supatype] ${line}`)
 }
 
 /** Compose project name for a Supatype project, isolates docker state per project. */
