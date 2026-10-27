@@ -18,7 +18,7 @@ import type { RealtimePayload } from "./realtime.js"
 import { subscribeToTable, type TableSubscribeOptions, type TableSubscription } from "./table-subscription.js"
 import { PostgrestError, transportFailure } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
-import { isJsonObject, readJsonObject, refusalText } from "./json.js"
+import { isJsonObject, isString, readJsonObject, refusalText } from "./json.js"
 import { jwtRole } from "./jwt.js"
 import { createGraphqlRunner } from "./graphql-transport.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
@@ -398,11 +398,10 @@ function isDeclaredReturn<T>(value: unknown): value is T {
  * (`{ error: "Email already taken" }`) and is the message.
  */
 function functionError(body: Record<string, unknown>, status: number): SupatypeError {
-  const message = typeof body["message"] === "string" ? body["message"] : undefined
-  const error = typeof body["error"] === "string" ? body["error"] : undefined
-  const code = typeof body["code"] === "string" ? body["code"] : message !== undefined ? error : undefined
+  const workerCode = isString(body["message"]) && body["message"] !== "" ? body["error"] : undefined
+  const code = isString(body["code"]) ? body["code"] : isString(workerCode) ? workerCode : undefined
   return {
-    message: message ?? error ?? `Function returned ${status}`,
+    message: refusalText(body) ?? `Function returned ${status}`,
     status,
     ...(code !== undefined && { code }),
   }

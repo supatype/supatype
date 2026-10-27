@@ -167,6 +167,12 @@ describe("a functions worker refusal", () => {
     expect(error).toEqual({ message: "Email already taken", status: 400 })
   })
 
+  it("reads the message the way every other refusal is read, `msg` and an empty `message` included", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ message: "", msg: "Rate limited" }, 429))
+    const { error } = await client().functions.invoke("fn")
+    expect(error).toEqual({ message: "Rate limited", status: 429 })
+  })
+
   it("leaves the code unset when `error` is not a string", async () => {
     vi.stubGlobal("fetch", fetchReturning({ error: { detail: "x" }, message: "bad" }, 400))
     const { error } = await client().functions.invoke("fn")
