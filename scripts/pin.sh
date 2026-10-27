@@ -45,6 +45,18 @@
 #   PIN_CDN_BASE       where the CLI downloads binaries (default https://releases.supatype.com)
 set -euo pipefail
 
+# inherit_errexit keeps set -e on inside $(...), so a function read through a command substitution
+# stops at its first failing command instead of printing a half-built answer. It does not reach a
+# substitution used as an argument or inside [[ ]]: the outer command still runs and its status is
+# the one that counts, so those reads stay assigned on their own lines. Bash 4.4 added it, and
+# below 4.4 an empty "${auth[@]}" under set -u is already an error, so older bash (macOS ships
+# 3.2) is refused here rather than failing later for a reason that does not name itself.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+  printf 'pin: needs bash 4.4 or newer, this is %s (on macOS: brew install bash)\n' "$BASH_VERSION" >&2
+  exit 1
+fi
+shopt -s inherit_errexit
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/release-train/lib.sh"
 
@@ -69,11 +81,10 @@ repo_of() {
   esac
 }
 
-# A component's image at <tag>. The read returns on failure explicitly: bash clears set -e inside a
-# command substitution, and every caller reads this through one.
+# A component's image at <tag>.
 image_ref() {
   local image
-  image="$(pins get "$1" image)" || return
+  image="$(pins get "$1" image)"
   printf '%s:%s\n' "$image" "$2"
 }
 
@@ -241,5 +252,5 @@ case "${1:-}" in
   latest) shift; cmd_latest "$@" ;;
   commit | tag | image) read_pin "$@" ;;
   engine-image) shift; cmd_engine_image "$@" ;;
-  *) sed -n '2,44p' "$0" >&2; exit 2 ;;
+  *) sed -n '2,45p' "$0" >&2; exit 2 ;;
 esac
