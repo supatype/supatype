@@ -109,7 +109,13 @@ export type TSVector<O extends ScalarFieldOptions = {}> = Primitive<"TSVector", 
 export type DateOnly<O extends ScalarFieldOptions = {}> = Primitive<"DateOnly", Date> & FieldOptions<O>
 export type DateTime<O extends ScalarFieldOptions = {}> = Primitive<"DateTime", Date> & FieldOptions<O>
 export type Timestamp<O extends ScalarFieldOptions = {}> = Primitive<"Timestamp", Date> & FieldOptions<O>
-export type Geo = Primitive<"Geo", { type: "point" | "polygon" | "linestring"; coordinates: unknown }>
+/** A geography shape. */
+export type GeoShape = "point" | "polygon" | "linestring"
+/**
+ * A PostGIS `GEOGRAPHY(<shape>, 4326)` column. A bare `Geo` is a point; `Geo<"polygon">` and
+ * `Geo<"linestring">` declare the other shapes.
+ */
+export type Geo<S extends GeoShape = "point"> = Primitive<"Geo", { type: S; coordinates: unknown }>
 
 /** Source text with the language it is written in. Stored as `JSONB`. */
 export type Code<Lang extends string = string> = Primitive<"Code", { lang: Lang; source: string }>

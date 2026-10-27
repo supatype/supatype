@@ -33,7 +33,9 @@ import {
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { composeDbHostPort, redact, resolveHostDatabaseUrl } from "../host-database.js"
-import { collectSeed, SeedCollectionFailed } from "../seed-runner.js"
+import { collectSeed } from "../seed-runner.js"
+import { errorMessage } from "../error-message.js"
+import { connectAuthUsersByKey } from "../seed-auth-connect.js"
 import { seedBuilderPathWithDefaults } from "../type-generation.js"
 import type { SeedConfig, SeedIr } from "../seed.js"
 import { error, info, success, warn } from "../ui/messages.js"
@@ -118,7 +120,7 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
     }).dsn
   } catch (e) {
     // DsnNotFound and NoStackRunning say what to do in their message; the class name adds nothing.
-    error(e instanceof Error ? e.message : String(e))
+    error(errorMessage(e))
     return 2
   }
 
@@ -147,7 +149,7 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
         environment: opts.environment,
       })
     } catch (e) {
-      error(e instanceof SeedCollectionFailed ? e.message : String(e))
+      error(errorMessage(e))
       return 1
     }
 
@@ -250,10 +252,33 @@ interface ApplyOptions {
 async function apply(prepared: Prepared[], options: ApplyOptions): Promise<number> {
   const { cwd, config, dsn, opts, engine } = options
   const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  let documents: string[]
+  try {
+    documents = prepared.map((one) => JSON.stringify({ ...connectAuthUsersByKey(one.document, ast), file: one.file }))
+  } catch (e) {
+    error(errorMessage(e))
+    return 1
+  }
 
-  // The engine takes one `--run-once` for the run, so a file asking for it decides for all
-  // of them. Said out loud rather than generalised silently, because the difference is
-  // whether work someone expected to happen happens.
+  const result = await engineRequest("/seed", {
+    ast,
+    ir_documents: documents,
+    database_url: dsn,
+    schema: pgSchema(config),
+    atomic: opts.atomic,
+    run_once: runOnceForAll(prepared),
+    ...(opts.environment !== undefined ? { environment: opts.environment } : {}),
+  }, isSeedResult, engine)
+
+  return report(result, prepared.length, dsn)
+}
+
+/**
+ * The engine takes one `--run-once` for the run, so a file asking for it decides for all of them.
+ * Said out loud rather than generalised silently, because the difference is whether work someone
+ * expected to happen happens.
+ */
+function runOnceForAll(prepared: Prepared[]): boolean {
   const askedRunOnce = prepared.filter((one) => one.config.runOnce === true)
   if (askedRunOnce.length > 0 && askedRunOnce.length !== prepared.length) {
     warn(
@@ -263,18 +288,7 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
           .join(", ")} asked for it.`,
     )
   }
-
-  const result = await engineRequest("/seed", {
-    ast,
-    ir_documents: prepared.map((one) => JSON.stringify({ ...one.document, file: one.file })),
-    database_url: dsn,
-    schema: pgSchema(config),
-    atomic: opts.atomic,
-    run_once: askedRunOnce.length > 0,
-    ...(opts.environment !== undefined ? { environment: opts.environment } : {}),
-  }, isSeedResult, engine)
-
-  return report(result, prepared.length, dsn)
+  return askedRunOnce.length > 0
 }
 
 interface SeedResult {
@@ -358,14 +372,25 @@ function report(result: SeedResult, count: number, dsn: string): number {
     return 1
   }
 
-  const where = [failure.file, failure.path].filter((part) => part !== undefined && part !== "")
-  error(
-    (failure.message ?? failure.kind) +
-      (where.length > 0 ? `\n  at ${where.join(" ")}` : "") +
-      (failure.remedy !== undefined && failure.remedy !== null ? `\n  ${failure.remedy}` : ""),
-  )
+  error(seedFailureText(failure))
   // Nothing ran because nothing could: the environment, not the seed.
   return failure.kind === "connection" || failure.kind === "document" ? 2 : 1
+}
+
+/**
+ * The engine's error as one message: what failed, where, and the remedy. The engine already writes
+ * the remedy into the message of some failures (a column the database does not have), so it is
+ * added only when the message does not carry it, or it printed twice.
+ */
+export function seedFailureText(failure: NonNullable<SeedResult["error"]>): string {
+  const message = failure.message ?? failure.kind
+  const where = [failure.file, failure.path].filter((part) => part !== undefined && part !== "")
+  const remedy = failure.remedy ?? undefined
+  return (
+    message +
+    (where.length > 0 ? `\n  at ${where.join(" ")}` : "") +
+    (remedy !== undefined && !message.includes(remedy) ? `\n  ${remedy}` : "")
+  )
 }
 
 async function reportStatus(dsn: string, engine: ComposeEngine | undefined): Promise<number> {

@@ -23,6 +23,7 @@ import { hasEngineOverride } from "../binary-cache.js"
 import { readDevSessionLock } from "../dev-session-lock.js"
 import { composeProjectName } from "../self-host-compose.js"
 import { confirm as uiConfirm } from "../ui/confirm.js"
+import { adminPromptDeclined, recordAdminPromptDeclined } from "../admin-prompt-state.js"
 import { error, info, plain } from "../ui/messages.js"
 import { promptPassword, promptText } from "../ui/prompts.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -450,11 +451,14 @@ async function resolveAdminCredentials(
   }
 
   if (!isInteractive()) return null
+  // Asked once per project: a "no" is kept, so later starts neither ask nor wait.
+  if (adminPromptDeclined(cwd)) return null
 
   info("No admin users found for the admin panel.")
   const createAdmin = await uiConfirm("Create an admin user now?")
   if (!createAdmin) {
-    info("Skipped. You can create one later with: supatype admin create-user")
+    recordAdminPromptDeclined(cwd)
+    info("Skipped, and not asked again for this project. Create one with: supatype admin create-user")
     return null
   }
 

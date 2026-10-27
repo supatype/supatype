@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* **schema:** `Geo` takes its shape: `Geo<"polygon">` and `Geo<"linestring">` declare those
+  geography columns, and a bare `Geo` is `Geo<"point">`. It claimed point, polygon or linestring
+  while every `Geo` field compiled to a point. `GeoShape` names the three.
+
 ## 0.7.0
 
 Highlights: identity and generated columns; `AutoIncrement` as an identity by default and a

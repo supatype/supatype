@@ -51,6 +51,7 @@ export function mergeSupatypePackageJson(
   const dependencies = { ...(next.dependencies ?? {}) }
   if (dependencies["@supatype/cli"] === undefined) dependencies["@supatype/cli"] = `^${deps.cli}`
   if (dependencies["@supatype/types"] === undefined) dependencies["@supatype/types"] = `^${deps.types}`
+  if (dependencies["@supatype/client"] === undefined) dependencies["@supatype/client"] = `^${deps.client}`
   next.dependencies = dependencies
 
   const devDependencies = { ...(next.devDependencies ?? {}) }

@@ -36,7 +36,31 @@ export type Collected =
       shape: "legacy"
     }
 
-const isSeedConfig = isShape({ transaction: optional(isBoolean), runOnce: optional(isBoolean) })
+const isSeedConfig = isShape({ runOnce: optional(isBoolean) })
+
+/** What a seed file's `config` may set. */
+const SEED_CONFIG_KEYS: readonly string[] = ["runOnce"]
+
+/**
+ * A `config` key the runner does not read is refused rather than ignored, so a typo (`runonce`) or a
+ * setting that does nothing is not a promise silently not kept. `transaction` gets its own reason:
+ * the engine runs every seed document in a transaction and cannot run one outside it.
+ */
+function refuseUnknownConfig(file: string, collected: unknown): void {
+  const config = isJsonObject(collected) ? collected["config"] : undefined
+  if (!isJsonObject(config)) return
+  const unknown = Object.keys(config).filter((key) => !SEED_CONFIG_KEYS.includes(key))
+  if (unknown.length === 0) return
+  if (unknown.includes("transaction")) {
+    throw new Error(
+      `${file}: \`config.transaction\` is not supported. Every seed file runs in a transaction of its ` +
+        "own (all of them in one with `supatype seed --atomic`). Remove `transaction` from its `config`.",
+    )
+  }
+  throw new Error(
+    `${file}: \`config\` sets ${unknown.join(", ")}, which a seed file cannot. It may set: ${SEED_CONFIG_KEYS.join(", ")}.`,
+  )
+}
 
 /** The IR's header, and that each operation names its `op`. */
 const isIrHeader = isShape({
@@ -84,7 +108,8 @@ export function collectSeed(file: string, options: CollectOptions): { result: Co
     if (run.exitCode !== 0 || !existsSync(outPath)) {
       throw new SeedCollectionFailed(file, [run.stdout, run.stderr].filter(Boolean).join("\n").trim())
     }
-    const result = JSON.parse(readFileSync(outPath, "utf8"))
+    const result: unknown = JSON.parse(readFileSync(outPath, "utf8"))
+    refuseUnknownConfig(file, result)
     if (!isCollected(result)) throw new SeedCollectionFailed(file, "The seed module's collected document could not be read")
     return { result, stdout: run.stdout }
   } finally {

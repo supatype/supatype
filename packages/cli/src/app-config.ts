@@ -1,58 +1,19 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { resolve } from "node:path"
-import { Node, Project, QuoteKind, SyntaxKind, type ObjectLiteralExpression, type SourceFile } from "ts-morph"
+import {
+  Node,
+  Project,
+  QuoteKind,
+  SyntaxKind,
+  type ObjectLiteralElementLike,
+  type ObjectLiteralExpression,
+  type SourceFile,
+} from "ts-morph"
 
 export interface UpdateAppConfigInput {
   mode: "none" | "static" | "proxy"
   staticDir?: string
   upstream?: string
-}
-
-export function updateAppConfigInProject(cwd: string, input: UpdateAppConfigInput): string {
-  const configPath = resolve(cwd, "supatype.config.ts")
-  if (!existsSync(configPath)) {
-    throw new Error("supatype.config.ts not found. Run: supatype init")
-  }
-  const next = updateAppConfigAst(configPath, input)
-  writeFileSync(configPath, next, "utf8")
-  return configPath
-}
-
-function updateAppConfigAst(configPath: string, input: UpdateAppConfigInput): string {
-  const project = new Project({
-    useInMemoryFileSystem: false,
-    skipAddingFilesFromTsConfig: true,
-    manipulationSettings: {
-      quoteKind: QuoteKind.Double,
-    },
-  })
-  const srcText = readFileSync(configPath, "utf8")
-  const sourceFile = project.createSourceFile(configPath, srcText, { overwrite: true })
-  const rootObject = getRootConfigObject(sourceFile)
-
-  const appProperty = rootObject.getProperty("app")
-
-  if (appProperty === undefined) {
-    rootObject.addPropertyAssignment({
-      name: "app",
-      initializer: renderAppInitializer(input),
-    })
-  } else if (Node.isPropertyAssignment(appProperty)) {
-    const init = appProperty.getInitializer()
-    if (init && Node.isObjectLiteralExpression(init)) {
-      patchAppObject(init, input)
-    } else {
-      appProperty.setInitializer(renderAppInitializer(input))
-    }
-  } else {
-    appProperty.remove()
-    rootObject.addPropertyAssignment({
-      name: "app",
-      initializer: renderAppInitializer(input),
-    })
-  }
-
-  return sourceFile.getFullText()
 }
 
 export interface UpdateServerConfigInput {
@@ -62,77 +23,135 @@ export interface UpdateServerConfigInput {
 }
 
 /**
+ * What a writer puts in one block of the config: the keys it owns, and the value text of those it
+ * sets. An owned key it does not set is removed; every other key of the block is kept as written.
+ */
+interface BlockEntries {
+  owned: readonly string[]
+  set: ReadonlyArray<readonly [key: string, valueText: string]>
+}
+
+export function updateAppConfigInProject(cwd: string, input: UpdateAppConfigInput): string {
+  return rewriteConfigBlock(cwd, "app", appEntries(input))
+}
+
+/**
  * Set `server.mode = "standalone"` plus `domain` and `tls` in supatype.config.ts,
  * enabling self-host HTTPS. Preserves other `server` keys (port, etc).
  */
 export function updateServerConfigInProject(cwd: string, input: UpdateServerConfigInput): string {
+  return rewriteConfigBlock(cwd, "server", serverEntries(input))
+}
+
+function appEntries(input: UpdateAppConfigInput): BlockEntries {
+  const set: Array<readonly [string, string]> = [["mode", JSON.stringify(input.mode)]]
+  if (input.mode === "proxy") set.push(["upstream", JSON.stringify(input.upstream ?? "http://localhost:3000")])
+  if (input.mode === "static") set.push(["static_dir", JSON.stringify(input.staticDir ?? "./dist")])
+  return { owned: ["mode", "upstream", "static_dir"], set }
+}
+
+function serverEntries(input: UpdateServerConfigInput): BlockEntries {
+  const provider = input.provider ?? "kong"
+  return {
+    owned: ["mode", "domain", "tls"],
+    set: [
+      ["mode", JSON.stringify("standalone")],
+      ["domain", JSON.stringify(input.domain)],
+      ["tls", `{ email: ${JSON.stringify(input.tlsEmail)}, provider: ${JSON.stringify(provider)} }`],
+    ],
+  }
+}
+
+function rewriteConfigBlock(cwd: string, key: string, entries: BlockEntries): string {
   const configPath = resolve(cwd, "supatype.config.ts")
   if (!existsSync(configPath)) {
     throw new Error("supatype.config.ts not found. Run: supatype init")
   }
-  const next = updateServerConfigAst(configPath, input)
-  writeFileSync(configPath, next, "utf8")
-  return configPath
-}
-
-function updateServerConfigAst(configPath: string, input: UpdateServerConfigInput): string {
   const project = new Project({
     useInMemoryFileSystem: false,
     skipAddingFilesFromTsConfig: true,
-    manipulationSettings: {
-      quoteKind: QuoteKind.Double,
-    },
+    manipulationSettings: { quoteKind: QuoteKind.Double },
   })
-  const srcText = readFileSync(configPath, "utf8")
-  const sourceFile = project.createSourceFile(configPath, srcText, { overwrite: true })
-  const rootObject = getRootConfigObject(sourceFile)
+  const sourceFile = project.createSourceFile(configPath, readFileSync(configPath, "utf8"), { overwrite: true })
+  writeFileSync(configPath, withBlock(sourceFile, getRootConfigObject(sourceFile), key, entries), "utf8")
+  return configPath
+}
 
-  const serverProperty = rootObject.getProperty("server")
+/**
+ * The config text with `key: { ... }` in its root object, laid out one entry per line at the
+ * indentation the file already uses. Spliced as text rather than through ts-morph's manipulation,
+ * which against init's trailing commas wrote `mode: "proxy",,` and re-indented what it inserted to
+ * nothing around it.
+ */
+function withBlock(sourceFile: SourceFile, root: ObjectLiteralExpression, key: string, entries: BlockEntries): string {
+  const property = root.getProperty(key)
+  const initializer = property !== undefined && Node.isPropertyAssignment(property) ? property.getInitializer() : undefined
+  if (property !== undefined && initializer === undefined) property.remove()
+  const text = sourceFile.getFullText()
+  if (property !== undefined && initializer !== undefined) {
+    const existing = Node.isObjectLiteralExpression(initializer) ? initializer.getProperties() : []
+    const block = renderObject(mergeEntries(existing, entries), lineIndent(text, property.getStart()))
+    return splice(text, initializer.getStart(), initializer.getEnd(), block)
+  }
+  return withAppendedProperty(text, root, key, renderObject(mergeEntries([], entries), indentationOf(text, root)))
+}
 
-  if (serverProperty === undefined) {
-    rootObject.addPropertyAssignment({
-      name: "server",
-      initializer: renderServerInitializer(input),
-    })
-  } else if (Node.isPropertyAssignment(serverProperty)) {
-    const init = serverProperty.getInitializer()
-    if (init && Node.isObjectLiteralExpression(init)) {
-      patchServerObject(init, input)
-    } else {
-      serverProperty.setInitializer(renderServerInitializer(input))
+function splice(text: string, start: number, end: number, replacement: string): string {
+  return text.slice(0, start) + replacement + text.slice(end)
+}
+
+/** The block's lines: kept keys where they were, owned keys set in place or appended, or dropped. */
+function mergeEntries(existing: readonly ObjectLiteralElementLike[], entries: BlockEntries): string[] {
+  const values = new Map(entries.set)
+  const written = new Set<string>()
+  const lines: string[] = []
+  for (const element of existing) {
+    const name = elementName(element)
+    if (name === undefined || !entries.owned.includes(name)) {
+      // With its leading comments, which getText() leaves out.
+      lines.push(element.getFullText().trim())
+      continue
     }
-  } else {
-    serverProperty.remove()
-    rootObject.addPropertyAssignment({
-      name: "server",
-      initializer: renderServerInitializer(input),
-    })
+    const value = values.get(name)
+    if (value !== undefined) lines.push(`${name}: ${value}`)
+    written.add(name)
   }
-
-  return sourceFile.getFullText()
+  for (const [name, value] of entries.set) {
+    if (!written.has(name)) lines.push(`${name}: ${value}`)
+  }
+  return lines
 }
 
-function renderServerInitializer(input: UpdateServerConfigInput): string {
-  const provider = input.provider ?? "kong"
-  return `{
-    mode: "standalone",
-    domain: "${input.domain}",
-    tls: { email: "${input.tlsEmail}", provider: "${provider}" },
-  }`
+function elementName(element: ObjectLiteralElementLike): string | undefined {
+  if (Node.isPropertyAssignment(element) || Node.isShorthandPropertyAssignment(element)) return element.getName()
+  return undefined
 }
 
-function patchServerObject(serverObj: ObjectLiteralExpression, input: UpdateServerConfigInput): void {
-  upsertStringProperty(serverObj, "mode", "standalone")
-  upsertStringProperty(serverObj, "domain", input.domain)
-  const provider = input.provider ?? "kong"
-  const tlsInitializer = `{ email: "${input.tlsEmail}", provider: "${provider}" }`
-  const existing = serverObj.getProperty("tls")
-  if (existing && Node.isPropertyAssignment(existing)) {
-    existing.setInitializer(tlsInitializer)
-  } else {
-    if (existing) existing.remove()
-    serverObj.addPropertyAssignment({ name: "tls", initializer: tlsInitializer })
-  }
+function renderObject(lines: readonly string[], indent: string): string {
+  return `{\n${lines.map((line) => `${indent}  ${line},`).join("\n")}\n${indent}}`
+}
+
+/** The indentation of the root object's entries: that of its first entry, else two spaces. */
+function indentationOf(text: string, root: ObjectLiteralExpression): string {
+  const first = root.getProperties()[0]
+  return first === undefined ? "  " : lineIndent(text, first.getStart())
+}
+
+/** The whitespace that starts the line `pos` is on. */
+function lineIndent(text: string, pos: number): string {
+  const lineStart = text.lastIndexOf("\n", pos - 1) + 1
+  return /^[ \t]*/.exec(text.slice(lineStart, pos))?.[0] ?? ""
+}
+
+/** `text` with `key: value,` as the root object's last entry, adding the comma the entry before may lack. */
+function withAppendedProperty(text: string, root: ObjectLiteralExpression, key: string, value: string): string {
+  const entry = `\n${indentationOf(text, root)}${key}: ${value},`
+  const last = root.getProperties().at(-1)
+  if (last === undefined) return splice(text, root.getStart() + 1, root.getStart() + 1, `${entry}\n`)
+  const comma = text.slice(last.getEnd(), root.getEnd() - 1).indexOf(",")
+  if (comma === -1) return splice(text, last.getEnd(), last.getEnd(), `,${entry}`)
+  const at = last.getEnd() + comma + 1
+  return splice(text, at, at, entry)
 }
 
 function getRootConfigObject(sourceFile: SourceFile): ObjectLiteralExpression {
@@ -153,56 +172,4 @@ function getRootConfigObject(sourceFile: SourceFile): ObjectLiteralExpression {
   throw new Error(
     "supatype.config.ts must export an object literal or defineConfig({...}).",
   )
-}
-
-function renderAppInitializer(input: UpdateAppConfigInput): string {
-  if (input.mode === "proxy") {
-    return `{
-      mode: "proxy",
-      upstream: "${input.upstream ?? "http://localhost:3000"}",
-    }`
-  }
-  if (input.mode === "static") {
-    return `{
-      mode: "static",
-      static_dir: "${input.staticDir ?? "./dist"}",
-    }`
-  }
-  return `{
-    mode: "none",
-  }`
-}
-
-function patchAppObject(appObj: ObjectLiteralExpression, input: UpdateAppConfigInput): void {
-  upsertStringProperty(appObj, "mode", input.mode)
-
-  if (input.mode === "proxy") {
-    upsertStringProperty(appObj, "upstream", input.upstream ?? "http://localhost:3000")
-    removePropertyIfPresent(appObj, "static_dir")
-    return
-  }
-
-  if (input.mode === "static") {
-    upsertStringProperty(appObj, "static_dir", input.staticDir ?? "./dist")
-    removePropertyIfPresent(appObj, "upstream")
-    return
-  }
-
-  removePropertyIfPresent(appObj, "upstream")
-  removePropertyIfPresent(appObj, "static_dir")
-}
-
-function upsertStringProperty(obj: ObjectLiteralExpression, key: string, value: string): void {
-  const existing = obj.getProperty(key)
-  if (existing && Node.isPropertyAssignment(existing)) {
-    existing.setInitializer(`"${value}"`)
-    return
-  }
-  if (existing) existing.remove()
-  obj.addPropertyAssignment({ name: key, initializer: `"${value}"` })
-}
-
-function removePropertyIfPresent(obj: ObjectLiteralExpression, key: string): void {
-  const prop = obj.getProperty(key)
-  if (prop) prop.remove()
 }

@@ -9,8 +9,7 @@ export function registerGenerate(program: Command): void {
   program
     .command("generate")
     .description("Regenerate TypeScript types without running a migration")
-    .option("--connection <url>", "Database connection URL (overrides config)")
-    .action(async (_opts: { connection?: string }) => {
+    .action(async () => {
       info("Loading schema...")
       try {
         for (const message of await regenerateTypes(process.cwd())) info(message)
