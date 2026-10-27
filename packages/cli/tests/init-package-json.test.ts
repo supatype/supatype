@@ -6,7 +6,7 @@ describe("mergeSupatypePackageJson", () => {
     const merged = mergeSupatypePackageJson(
       { name: "existing", scripts: { dev: "next dev" } },
       { projectName: "existing", app: { mode: "none" }, helloFunction: false },
-      { cli: "0.1.1", types: "0.1.1" },
+      { cli: "0.1.1", types: "0.1.1", client: "0.1.1" },
     )
 
     expect(merged.dependencies?.["@supatype/cli"]).toBe("^0.1.1")

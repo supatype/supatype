@@ -56,3 +56,45 @@ describe("Insert type of an owner auth user id", () => {
     expect(insert).toMatch(/\buser_id: string/)
   })
 })
+
+// A profile keyed by its user (`id: SupatypeAuthUserId`) is a primary key, but not one the database
+// may invent: a random uuid names no user. With no default of its own, the engine's caller default
+// applies under `create: Owner<"id">`, so an insert can leave `id` out.
+function profileSchema(access: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "supatype-owner-default-"))
+  dirs.push(dir)
+  const schemaPath = join(dir, "schema.ts")
+  const source = [
+    'import type { Model, Owner, Public, SupatypeAuthUserId } from "@supatype/types"',
+    "",
+    "export type Profile = Model<{",
+    "  id: SupatypeAuthUserId",
+    "  name: string",
+    `}, { access: { read: Public${access} } }>`,
+    "",
+  ].join("\n")
+  writeFileSync(schemaPath, source, "utf8")
+  return schemaPath
+}
+
+describe("an auth user id primary key", () => {
+  it("gets no random uuid default", () => {
+    const schemaPath = profileSchema(', create: Owner<"id">')
+    const ast = extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))
+    const id = ast?.models[0]?.fields["id"]
+    expect(id).toMatchObject({ primaryKey: true, required: true })
+    expect(id?.default).toBeUndefined()
+  })
+
+  it("is optional on insert when the create rule is Owner<\"id\">", () => {
+    const schemaPath = profileSchema(', create: Owner<"id">')
+    const insert = insertBlock(generateClientAugmentation(extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))))
+    expect(insert).toContain("id?: string")
+  })
+
+  it("is required on insert when no create rule names it", () => {
+    const schemaPath = profileSchema("")
+    const insert = insertBlock(generateClientAugmentation(extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))))
+    expect(insert).toMatch(/\bid: string/)
+  })
+})

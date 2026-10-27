@@ -474,10 +474,13 @@ export interface SeedContext {
   environment?: string | undefined
 }
 
-/** What a seed file may ask of the runner. */
+/**
+ * What a seed file may ask of the runner.
+ *
+ * Every document runs in a transaction of its own (all of them in one with `--atomic`); the
+ * engine has no way to run one outside a transaction, so there is no setting for it.
+ */
 export interface SeedConfig {
-  /** Run this document in a transaction. Default true, and rarely worth changing. */
-  transaction?: boolean
   /**
    * Apply this document at most once per environment.
    *
