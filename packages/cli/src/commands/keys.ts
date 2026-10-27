@@ -1,9 +1,10 @@
 import type { Command } from "commander"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
-import { readEnvFile, upsertEnvFile } from "../env-file.js"
+import { readEnvFile, readEnvValue, upsertEnvFile } from "../env-file.js"
 import { signJwt } from "../jwt.js"
-import { generateJwtSecret } from "../local-secrets.js"
+import { envJwtSecret, generateJwtSecret, givenJwtSecret, type GivenJwtSecret } from "../local-secrets.js"
+import { fatalError } from "../ui/fatal.js"
 import { error, plain } from "../ui/messages.js"
 
 interface KeysOptions {
@@ -50,9 +51,12 @@ export function registerKeys(program: Command): void {
 
 /** `supatype keys` with a `.env` to write to: blanks only unless `--force`. */
 function writeKeys(cwd: string, opts: KeysOptions, expYears: number): void {
-  const { secret, note } = envFileSecret(cwd, opts)
-  const written = writeKeysToEnv(cwd, signKeyPair(secret, expYears), opts.force === true)
-  if (note !== undefined) plain(`\n${note}`)
+  const env = readEnvFile(cwd)
+  const given = givenJwtSecret(opts.secret)
+  const { secret, write } = secretForEnvKeys(env, given, KEYS_CONFLICT_HINTS)
+  const keys = signKeyPair(secret, expYears)
+  const written = writeKeysToEnv(cwd, keys, opts.force === true, { env, secret: write })
+  if (write["JWT_SECRET"] !== undefined) plain(`\n${wroteSecretNote(given)}`)
   plain(`\nKeys valid for ${expYears} years, written to ${written.path ?? ".env"}:\n`)
   // The names come back from the writer rather than being restated here, which is the whole
   // point of there being one list.
@@ -65,52 +69,59 @@ function writeKeys(cwd: string, opts: KeysOptions, expYears: number): void {
   plain("\nDo not commit .env to source control.")
 }
 
-/** A secret given to this run rather than read from `.env`, with where it came from. */
-interface GivenSecret {
-  value: string
-  source: string
-}
+const KEYS_CONFLICT_HINTS = [
+  "To sign with the other secret, set it as JWT_SECRET in .env and re-run.",
+  "To only print keys signed with it, add --print.",
+]
 
-function givenSecret(opts: KeysOptions): GivenSecret | undefined {
-  if (opts.secret !== undefined) return { value: opts.secret, source: "--secret" }
-  const fromShell = process.env["JWT_SECRET"]
-  return fromShell ? { value: fromShell, source: "the JWT_SECRET environment variable" } : undefined
-}
+const INIT_CONFLICT_HINTS = [
+  "Unset JWT_SECRET in this shell, then run `supatype keys` in the project to sign them with .env's.",
+]
+
+const COMPOSE_UP_CONFLICT_HINTS = [
+  "Compose reads JWT_SECRET from this shell ahead of .env, so the stack would verify tokens with a " +
+    "secret the keys in .env are not signed with.",
+  "To keep .env's secret: unset JWT_SECRET in this shell, then re-run.",
+  "To move the stack to the shell's secret: set it as JWT_SECRET in .env, run `supatype keys --force` " +
+    "to re-sign the keys, then re-run. Clients holding the old anon key need the new one.",
+]
 
 /**
- * The secret for keys written into `.env`: always the JWT_SECRET that file ends up holding, since
- * that is the one the stack verifies them against.
+ * Stop when a secret given to this run differs from the JWT_SECRET already in `.env`.
  *
- * A JWT_SECRET already in `.env` wins, and a different one given to this run is refused rather
- * than picked between: either choice would leave keys in `.env` that one of the two secrets cannot
- * verify. With none in `.env`, the given secret (or a generated one) is written there first.
+ * Refused rather than picked between: keys in `.env` have to verify against the secret `.env`
+ * holds, which every later run of the stack reads, and a different given one is either a mistake or
+ * a rotation that needs the keys re-signed. `hints` say how to resolve it from the caller's side.
  */
-function envFileSecret(cwd: string, opts: KeysOptions): { secret: string; note?: string } {
-  const inFile = readEnvFile(cwd)["JWT_SECRET"] || undefined
-  const given = givenSecret(opts)
-  if (inFile !== undefined) {
-    if (given !== undefined && given.value !== inFile) {
-      error(
-        `${given.source} differs from the JWT_SECRET in .env, and keys written into .env have to be ` +
-          "signed with the secret in .env, which is the one the stack verifies them against.",
-      )
-      plain(
-        "To sign with the other secret, set it as JWT_SECRET in .env and re-run. " +
-          "To only print keys signed with it, add --print.",
-      )
-      process.exit(1)
-    }
-    return { secret: inFile }
-  }
-  const secret = given?.value ?? generateJwtSecret()
-  upsertEnvFile(cwd, { JWT_SECRET: secret })
-  return {
-    secret,
-    note:
-      given === undefined
-        ? "Generated a JWT_SECRET in .env, which had none."
-        : `Wrote JWT_SECRET into .env from ${given.source}, since .env had none.`,
-  }
+function refuseJwtSecretConflict(
+  env: Record<string, string>,
+  given: GivenJwtSecret | undefined,
+  hints: string[],
+): void {
+  const inFile = env["JWT_SECRET"] ?? ""
+  if (inFile === "" || given === undefined || given.value === inFile) return
+  fatalError(
+    `${given.source} differs from the JWT_SECRET in .env, and keys in .env have to be signed with ` +
+      "the secret in .env, which is the one the stack verifies them against.",
+    hints,
+  )
+}
+
+/** The secret for keys written into `.env`, and the JWT_SECRET to write beside them when it had none. */
+function secretForEnvKeys(
+  env: Record<string, string>,
+  given: GivenJwtSecret | undefined,
+  hints: string[],
+): { secret: string; write: Record<string, string> } {
+  refuseJwtSecretConflict(env, given, hints)
+  return envJwtSecret(env, given)
+}
+
+/** What to say after writing a JWT_SECRET into a `.env` that had none. */
+function wroteSecretNote(given: GivenJwtSecret | undefined): string {
+  return given === undefined
+    ? "Generated a JWT_SECRET in .env, which had none."
+    : `Wrote JWT_SECRET into .env from ${given.source}, since .env had none.`
 }
 
 /**
@@ -119,7 +130,7 @@ function envFileSecret(cwd: string, opts: KeysOptions): { secret: string; note?:
  * `--print` never makes one up: a secret it printed would not be the one a later write generates.
  */
 function printKeys(cwd: string, opts: KeysOptions, expYears: number, hasEnv: boolean): void {
-  const known = opts.secret ?? resolveSecret(cwd)
+  const known = givenJwtSecret(opts.secret)?.value ?? (readEnvValue(cwd, "JWT_SECRET", "") || undefined)
   if (known === undefined && opts.print === true) {
     error("No JWT_SECRET to sign the keys with: none in .env, --secret or the environment.")
     plain(
@@ -187,6 +198,14 @@ export interface WriteKeysResult {
   kept: string[]
 }
 
+/** What a caller that has already read `.env` hands {@link writeKeysToEnv}. */
+export interface WriteKeysContext {
+  /** `.env` as the caller read it, so it is not read twice. */
+  env?: Record<string, string>
+  /** A JWT_SECRET to write in the same upsert as the keys it signed. */
+  secret?: Record<string, string>
+}
+
 /**
  * Write a minted pair into `dir`'s .env.
  *
@@ -204,11 +223,12 @@ export function writeKeysToEnv(
   dir: string,
   keys: { anonKey: string; serviceKey: string },
   force: boolean,
+  context: WriteKeysContext = {},
 ): WriteKeysResult {
   const envPath = resolve(dir, ".env")
   if (!existsSync(envPath)) return { path: null, written: [], kept: [] }
 
-  const existing = readEnvFile(dir)
+  const existing = context.env ?? readEnvFile(dir)
   const candidates = anonKeyEnvUpdates(keys.anonKey, keys.serviceKey, recordedApiUrl(existing))
 
   const updates: Record<string, string> = {}
@@ -223,7 +243,8 @@ export function writeKeysToEnv(
     updates[name] = value
   }
 
-  if (Object.keys(updates).length > 0) upsertEnvFile(dir, updates)
+  const upserts = { ...context.secret, ...updates }
+  if (Object.keys(upserts).length > 0) upsertEnvFile(dir, upserts)
   return { path: envPath, written: Object.keys(updates), kept }
 }
 
@@ -243,34 +264,30 @@ export function signKeyPair(
 }
 
 /**
- * Generate keys from the JWT_SECRET found in `dir`'s .env (or env var) and
- * rewrite every name {@link anonKeyEnvUpdates} owns in that .env file in place.
- * Returns the minted pair, or null if no secret could be resolved.
+ * `init`'s keys: signed with the JWT_SECRET `dir`'s .env holds, and written over every name
+ * {@link anonKeyEnvUpdates} owns in that .env, in place. Returns the minted pair, or null when there
+ * is no .env to write them to.
  */
 export function generateAndWriteKeys(
   dir: string,
   expYears = 10,
 ): { anonKey: string; serviceKey: string } | null {
-  const secret = resolveSecret(dir)
-  if (!secret) return null
-
-  const { anonKey, serviceKey } = signKeyPair(secret, expYears)
-  if (existsSync(resolve(dir, ".env"))) {
-    upsertEnvFile(dir, anonKeyEnvUpdates(anonKey, serviceKey, recordedApiUrl(readEnvFile(dir))))
-  }
-  return { anonKey, serviceKey }
+  if (!existsSync(resolve(dir, ".env"))) return null
+  const env = readEnvFile(dir)
+  const { secret, write } = secretForEnvKeys(env, givenJwtSecret(), INIT_CONFLICT_HINTS)
+  const keys = signKeyPair(secret, expYears)
+  writeKeysToEnv(dir, keys, true, { env, secret: write })
+  return keys
 }
 
-/** The JWT secret: the `JWT_SECRET` environment variable, else `dir`'s .env, read as compose reads it. */
-export function resolveSecret(dir: string = process.cwd()): string | undefined {
-  const fromEnv = process.env["JWT_SECRET"]
-  if (fromEnv) return fromEnv
-  try {
-    return readEnvFile(dir)["JWT_SECRET"] || undefined
-  } catch {
-    // An unreadable .env is the same as none here: the caller says what to do without a secret.
-    return undefined
-  }
+/** What `self-host compose up` filled in `.env`, and the secret its stack will run with. */
+export interface FilledKeys {
+  /** The JWT_SECRET compose will start the stack with, or undefined when there is none anywhere. */
+  secret: string | undefined
+  /** The key names minted into `.env`. */
+  filled: string[]
+  /** Set when JWT_SECRET itself was written into `.env`, saying where it came from. */
+  note?: string
 }
 
 /**
@@ -285,21 +302,29 @@ export function resolveSecret(dir: string = process.cwd()): string | undefined {
  * A self-host `.env` copied from the template arrives with both keys empty, and
  * the server refuses to serve without a service role key outside dev mode. That
  * left the documented quick start unable to start at all.
+ *
+ * A shell JWT_SECRET that differs from `.env`'s is refused whether or not a key is blank: compose
+ * reads the shell's ahead of `.env`, so the stack would verify with a secret `.env`'s keys are not
+ * signed with.
  */
-export function fillMissingKeys(dir: string, expYears = 10): string[] {
-  if (!existsSync(resolve(dir, ".env"))) return []
+export function fillMissingKeys(dir: string, expYears = 10): FilledKeys {
+  const given = givenJwtSecret()
+  if (!existsSync(resolve(dir, ".env"))) return { secret: given?.value, filled: [] }
 
-  const existing = readEnvFile(dir)
+  const env = readEnvFile(dir)
+  refuseJwtSecretConflict(env, given, COMPOSE_UP_CONFLICT_HINTS)
   const needed = (["ANON_KEY", "SERVICE_ROLE_KEY"] as const).filter(
-    (name) => (existing[name]?.trim() ?? "") === "",
+    (name) => (env[name]?.trim() ?? "") === "",
   )
-  if (needed.length === 0) return []
+  if (needed.length === 0) return { secret: env["JWT_SECRET"] || given?.value, filled: [] }
 
-  const secret = resolveSecret(dir)
-  if (!secret) return []
-
+  const { secret, write } = envJwtSecret(env, given)
   const { anonKey, serviceKey } = signKeyPair(secret, expYears)
   const minted = { ANON_KEY: anonKey, SERVICE_ROLE_KEY: serviceKey }
-  upsertEnvFile(dir, Object.fromEntries(needed.map((name) => [name, minted[name]])))
-  return needed
+  upsertEnvFile(dir, { ...write, ...Object.fromEntries(needed.map((name) => [name, minted[name]])) })
+  return {
+    secret,
+    filled: needed,
+    ...(write["JWT_SECRET"] !== undefined && { note: wroteSecretNote(given) }),
+  }
 }

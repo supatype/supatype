@@ -6,7 +6,12 @@ import { randomBytes } from "node:crypto"
 import { p, runClackFlow } from "../ui/clack.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
-import { CONTROL_PLANE_SECRET_ENV, generateControlPlaneSecret, generateJwtSecret } from "../local-secrets.js"
+import {
+  CONTROL_PLANE_SECRET_ENV,
+  envJwtSecret,
+  generateControlPlaneSecret,
+  givenJwtSecret,
+} from "../local-secrets.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
@@ -227,7 +232,7 @@ export function registerInit(program: Command): void {
         process.exit(1)
       }
       if (doKeys && !keysGenerated) {
-        error("Could not generate API keys. Check .env has JWT_SECRET, then run `supatype keys`.")
+        error("Could not generate API keys. Check the project has a .env, then run `supatype keys`.")
         process.exit(1)
       }
       if (doInstall && installOk && !binariesReady) {
@@ -325,7 +330,7 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
       process.exit(1)
     }
     if (doKeys && !keysGenerated) {
-      error("Could not generate API keys. Check .env has JWT_SECRET, then run `supatype keys`.")
+      error("Could not generate API keys. Check the project has a .env, then run `supatype keys`.")
       process.exit(1)
     }
     if (doInstall && installOk && !binariesReady) {
@@ -661,7 +666,7 @@ async function ensureInitBinaries(dir: string): Promise<boolean> {
 function writeKeys(dir: string): boolean {
   const keys = generateAndWriteKeys(dir)
   if (!keys) {
-    warn("Could not generate keys (JWT_SECRET missing). Run `supatype keys` manually.")
+    warn("Could not write keys: the project has no .env. Run `supatype keys` in it.")
     return false
   }
   return true
@@ -1241,9 +1246,11 @@ AUTHENTICATOR_PASSWORD=${randomBytes(24).toString("base64url")}
 # query typed there runs without superuser rights. Kept apart from both passwords above.
 SUPATYPE_SQL_EDITOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
 
+  // A JWT_SECRET exported in the shell is the one compose would run the stack with, so the new
+  // .env holds that one rather than a generated secret the stack would never use.
   sections.push(`# JWT: ANON_KEY and SERVICE_ROLE_KEY are derived from this secret.
 # Changing it invalidates every issued token; re-run \`supatype keys\` afterwards.
-JWT_SECRET=${generateJwtSecret()}
+JWT_SECRET=${envJwtSecret({}, givenJwtSecret()).secret}
 ANON_KEY=
 SERVICE_ROLE_KEY=`)
 

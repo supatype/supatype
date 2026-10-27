@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Command } from "commander"
@@ -13,6 +13,7 @@ const projectConfig: SupatypeProjectConfig = {
 }
 const rendered: string[] = []
 const composeRuns: string[][] = []
+const composeFiles: string[] = []
 
 vi.mock("../src/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/config.js")>()
@@ -23,16 +24,19 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/self-host-compose.js")>()
   return {
     ...actual,
-    writeSelfHostCompose: (cwd: string) => {
+    // The real writer, so the check it runs is the one under test, told what it would otherwise
+    // look up in a schema these projects do not have.
+    writeSelfHostCompose: (...[cwd, config, options]: Parameters<typeof actual.writeSelfHostCompose>) => {
+      const paths = actual.writeSelfHostCompose(cwd, config, {
+        ...options,
+        fieldMaskingTier: "extension",
+        drafts: false,
+      })
       rendered.push(cwd)
-      return {
-        dir: cwd,
-        composePath: join(cwd, "docker-compose.yml"),
-        kongPath: join(cwd, "kong.yml"),
-        s3ConfigPath: join(cwd, "s3.json"),
-      }
+      return paths
     },
-    runDockerCompose: (_path: string, args: string[]) => {
+    runDockerCompose: (path: string, args: string[]) => {
+      composeFiles.push(path)
       composeRuns.push(args)
       return 0
     },
@@ -65,6 +69,7 @@ beforeEach(() => {
   process.chdir(projectDir)
   rendered.length = 0
   composeRuns.length = 0
+  composeFiles.length = 0
   errors = []
   vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args.join(" ")))
   vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void errors.push(args.join(" ")))
@@ -97,13 +102,22 @@ describe("self-host compose render and URL-unsafe passwords", () => {
   })
 })
 
+const onDisk = (): string => join(projectDir, ".supatype", "self-host", "docker-compose.yml")
+
+function composeFileOnDisk(): void {
+  mkdirSync(join(projectDir, ".supatype", "self-host"), { recursive: true })
+  writeFileSync(onDisk(), "services: {}\n")
+}
+
 /**
- * Only the commands that start or recreate containers check. A stack started by an older CLI with a
- * "/" in its password has to stay stoppable and inspectable, or the refusal strands it.
+ * Only the commands that write the compose file check, since they start or recreate containers from
+ * it. A stack started by an older CLI with a "/" in its password has to stay stoppable and
+ * inspectable through the file it was started from, or the refusal strands it.
  */
 describe("self-host compose commands that leave containers as they are", () => {
   beforeEach(() => {
     writeFileSync(join(projectDir, ".env"), "POSTGRES_PASSWORD=pa/ss\n")
+    composeFileOnDisk()
   })
 
   it.each([
@@ -115,9 +129,43 @@ describe("self-host compose commands that leave containers as they are", () => {
     expect(composeRuns).toEqual([expected])
   })
 
-  it("restart still refuses, since it recreates a container with that password", async () => {
-    await expect(compose("restart", "db")).rejects.toThrow("exit 1")
-    expect(errors.join("\n")).toContain("POSTGRES_PASSWORD")
+  it.each([[["restart", "db"]], [["up"]]])(
+    "%j still refuses, since it recreates containers with that password",
+    async (command) => {
+      await expect(compose(...command)).rejects.toThrow("exit 1")
+      expect(errors.join("\n")).toContain("POSTGRES_PASSWORD")
+      expect(composeRuns).toEqual([])
+    },
+  )
+
+  it("with no compose file on disk yet, renders one, which refuses that password", async () => {
+    rmSync(onDisk())
+    await expect(compose("status")).rejects.toThrow("exit 1")
     expect(composeRuns).toEqual([])
+  })
+})
+
+/**
+ * `down`, `status` and `logs` act on the stack that is running, which was started from the compose
+ * file on disk. Rewriting that file from the current config first is what made them run the checks a
+ * new stack needs, and could point them at services the running stack does not have.
+ */
+describe("self-host compose commands that read the stack", () => {
+  it.each([[["down"]], [["status"]], [["logs", "--service", "db"]]])(
+    "%j runs against the compose file already on disk without rewriting it",
+    async (command) => {
+      composeFileOnDisk()
+      await compose(...command)
+      expect(rendered).toEqual([])
+      expect(composeFiles).toEqual([onDisk()])
+      expect(readFileSync(onDisk(), "utf8")).toBe("services: {}\n")
+    },
+  )
+
+  it("renders the compose file when there is none on disk yet", async () => {
+    await compose("status")
+    expect(rendered).toHaveLength(1)
+    expect(readFileSync(onDisk(), "utf8")).toContain("services:")
+    expect(composeRuns).toEqual([["ps"]])
   })
 })

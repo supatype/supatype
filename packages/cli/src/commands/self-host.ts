@@ -16,14 +16,19 @@ import { loadConfig } from "../config.js"
 import { connectionString } from "../project-config.js"
 import { devPostgresPassword } from "../local-secrets.js"
 import { splitPassword } from "../host-database.js"
-import { fillMissingKeys, resolveSecret } from "./keys.js"
+import { fillMissingKeys } from "./keys.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
-import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { resolveBinary } from "../binary-cache.js"
 import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
-import { composeProjectName, exitComposeFailed, runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
+import {
+  composeProjectName,
+  exitComposeFailed,
+  runDockerCompose,
+  selfHostComposePaths,
+  writeSelfHostCompose,
+} from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "../db-port.js"
 import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
@@ -48,7 +53,6 @@ export function registerSelfHost(program: Command): void {
     .action(() => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      requireUrlSafeComposePasswords(cwd, config)
       warnProjectAuthProviderSecrets(cwd, config)
       const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
       file("wrote", out.composePath)
@@ -62,17 +66,16 @@ export function registerSelfHost(program: Command): void {
     .action(async (opts: { detach?: boolean }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      requireUrlSafeComposePasswords(cwd, config)
       const project = composeProjectName(config.project.name)
       const args = opts.detach ? ["up", "-d"] : ["up"]
-      // A missing secret is compose's to report; a short one only PostgREST would notice.
-      const secret = resolveSecret(cwd)
-      if (secret !== undefined) requireUsableJwtSecret(secret)
       // A .env copied from the template arrives with both keys blank, and the
       // server will not serve without a service role key outside dev mode.
       // Only blanks are filled: reissuing a key an operator is already using
       // would lock out every client holding the old one.
-      const filled = fillMissingKeys(cwd)
+      const { secret, filled, note } = fillMissingKeys(cwd)
+      // A missing secret is compose's to report; a short one only PostgREST would notice.
+      if (secret !== undefined) requireUsableJwtSecret(secret)
+      if (note !== undefined) console.log(`[supatype] ${note}`)
       if (filled.length > 0) {
         console.log(`[supatype] Minted ${filled.join(" and ")} in .env from JWT_SECRET.`)
       }
@@ -106,8 +109,6 @@ export function registerSelfHost(program: Command): void {
     .command("restart <service>")
     .description("Recreate one service with the current config and .env, leaving the others running")
     .action((service: string) => {
-      const cwd = process.cwd()
-      requireUrlSafeComposePasswords(cwd, loadConfig(cwd))
       const status = renderAndRunCompose(["up", "-d", "--force-recreate", "--no-deps", service])
       if (status !== 0) {
         exitComposeFailed(status, `Could not restart ${service}.`, SELF_HOST_BRAND)
@@ -118,7 +119,7 @@ export function registerSelfHost(program: Command): void {
     .command("status")
     .description("Show compose service status")
     .action(() => {
-      process.exitCode = renderAndRunCompose(["ps"])
+      process.exitCode = runAgainstStack(["ps"])
     })
 
   composeCmd
@@ -130,7 +131,7 @@ export function registerSelfHost(program: Command): void {
       const args = ["logs"]
       if (opts.follow) args.push("-f")
       if (opts.service) args.push(opts.service)
-      process.exitCode = renderAndRunCompose(args)
+      process.exitCode = runAgainstStack(args)
     })
 
   // ── Native/systemd helpers (hidden; compose is the default self-host path) ─────
@@ -411,10 +412,6 @@ export function registerSelfHost(program: Command): void {
 const SELF_HOST_BRAND = { intro: "Self-host deployment" }
 
 /**
- * Render the compose file from the current config, then run `args` against this project's stack.
- * Rendered first every time, so the file never names a stale host path or a config that changed.
- */
-/**
  * `self-host compose down`. The volumes hold the database and every stored file, so removing them
  * is asked for by name and confirmed; a plain `down` says they were kept, since starting over used
  * to mean finding them with `docker volume ls`.
@@ -424,7 +421,7 @@ async function composeDown(opts: { volumes?: boolean; yes?: boolean }): Promise<
     plain("Nothing stopped and nothing removed.")
     return
   }
-  const status = renderAndRunCompose(opts.volumes === true ? ["down", "--volumes"] : ["down"])
+  const status = runAgainstStack(opts.volumes === true ? ["down", "--volumes"] : ["down"])
   if (status !== 0) {
     exitComposeFailed(status, "Could not stop the self-host Compose stack.", SELF_HOST_BRAND)
   }
@@ -449,14 +446,31 @@ async function confirmVolumeRemoval(): Promise<boolean> {
 }
 
 /**
- * The password check is left to the callers that start or recreate containers. A stack started by an
- * older CLI with a password this one refuses still has to be stoppable and inspectable.
+ * Render the compose file from the current config, then run `args` against this project's stack.
+ * Rendered first, so a container it creates never gets a stale host path or a config that changed.
  */
 function renderAndRunCompose(args: string[]): number {
+  return runCompose(args, true)
+}
+
+/**
+ * Run `args` against the compose file the running stack was started from, for the commands that
+ * stop or inspect it. Not rewritten from the current config first: that would hold them to the
+ * checks a new stack needs, so a stack started by an older CLI with a password this one refuses
+ * could not be stopped, and it could name services the running stack does not have. Rendered only
+ * when there is no file on disk yet.
+ */
+function runAgainstStack(args: string[]): number {
+  return runCompose(args, !existsSync(selfHostComposePaths(process.cwd()).composePath))
+}
+
+function runCompose(args: string[], render: boolean): number {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
-  const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
-  return runDockerCompose(out.composePath, args, cwd, composeProjectName(config.project.name), {
+  const composePath = render
+    ? writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name)).composePath
+    : selfHostComposePaths(cwd).composePath
+  return runDockerCompose(composePath, args, cwd, composeProjectName(config.project.name), {
     brand: SELF_HOST_BRAND,
   })
 }
