@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process"
-import { mkdirSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -9,6 +9,9 @@ const outDir = join(root, "release-bundle")
 mkdirSync(outDir, { recursive: true })
 const outfile = join(outDir, "supatype-realtime-bundle.cjs")
 
+// On Windows `npx` is a .cmd and only runs through a shell, which would split and rewrite an
+// argument holding the shebang ("#!/usr/bin/env node" has a space, and the path can be mangled).
+// So no argument carries it: the shebang is written onto the bundle afterwards.
 const result = spawnSync(
   "npx",
   [
@@ -19,9 +22,9 @@ const result = spawnSync(
     "--target=node22",
     "--format=cjs",
     `--outfile=${outfile}`,
-    `--banner:js=#!/usr/bin/env node`,
   ],
   { stdio: "inherit", shell: process.platform === "win32" },
 )
 if (result.status !== 0) process.exit(result.status ?? 1)
+writeFileSync(outfile, `#!/usr/bin/env node\n${readFileSync(outfile, "utf8")}`)
 console.log(`Wrote ${outfile}`)
