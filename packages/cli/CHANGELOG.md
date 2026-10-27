@@ -11,6 +11,13 @@
   stack verifies them with: a `--secret` or shell `JWT_SECRET` that differs is refused, naming both,
   and a `.env` with no `JWT_SECRET` gets the given secret written to it. `--print` with no secret
   anywhere exits 1 rather than printing keys signed with one it made up and kept nowhere.
+* **self-host, init:** `self-host compose up` and `init` sign the keys they write into `.env` the
+  same way `keys` does. Both signed with a shell `JWT_SECRET` ahead of the one in `.env`, so the
+  keys failed against the stack as soon as it ran from a shell without that variable. `compose up`
+  now refuses a shell `JWT_SECRET` that differs from `.env`'s, saying to unset it or to move `.env`
+  to it and re-sign with `supatype keys --force`, since compose would start the stack with the
+  shell's. A `.env` with no `JWT_SECRET` gets the shell's, or a generated one, written beside the
+  keys it signed. `init` writes a shell `JWT_SECRET` into the new `.env` instead of generating one.
 * **keys, dev:** `NEXT_PUBLIC_SUPATYPE_ANON_KEY` is written beside the `VITE_`, `PUBLIC_` and
   `EXPO_PUBLIC_` copies, and `NEXT_PUBLIC_SUPATYPE_URL` wherever the other URL copies are.
 
@@ -30,10 +37,13 @@
   `SUPATYPE_DEV_DB_PORT` appended a second time was ignored). Updating a key assigned twice leaves
   one line for it.
 * **dev, self-host:** database passwords are encoded in every connection URL the CLI builds. The
-  compose file cannot encode them, so `dev`, `self-host compose up`, `render` and `restart` refuse a
-  `POSTGRES_PASSWORD`, `AUTHENTICATOR_PASSWORD` or `SUPATYPE_SQL_EDITOR_PASSWORD` holding a character
-  that breaks a URL, naming the variable and how to generate a safe one. `down`, `status` and `logs`
-  do not check, so a stack started by an older CLI with such a password can still be stopped.
+  compose file cannot encode them, so every command that writes the compose file (`dev`, `push`,
+  `update` and `self-host compose up`, `render` and `restart`) refuses a `POSTGRES_PASSWORD`,
+  `AUTHENTICATOR_PASSWORD` or `SUPATYPE_SQL_EDITOR_PASSWORD` holding a character that breaks a URL,
+  naming the variable and how to generate a safe one. `self-host compose down`, `status` and `logs`
+  run against the compose file already on disk rather than rewriting it from the current config, so
+  a stack started by an older CLI with such a password can still be stopped and inspected. With no
+  compose file on disk yet they render one, which checks.
 * **self-host:** `self-host compose logs --service <name>` shows that service. The option was
   taken by the hidden native `logs` command, declared in a way that attached its options to
   `self-host` itself, so every service was shown. The other native commands had the same fault.

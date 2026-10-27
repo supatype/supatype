@@ -12,7 +12,7 @@
  */
 
 import { randomBytes } from "node:crypto"
-import { hasEnvValue, readEnvValue, upsertEnvFile } from "./env-file.js"
+import { hasEnvValue, readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
 import { usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
 
 /**
@@ -80,8 +80,40 @@ export const BUNDLED_DB_USER = "supatype_admin"
  * already has is kept, whatever it is, because replacing it invalidates every token issued.
  */
 export function devJwtSecret(cwd: string): string {
-  if (!hasEnvValue(cwd, "JWT_SECRET")) upsertEnvFile(cwd, { JWT_SECRET: generateJwtSecret() })
-  return readEnvValue(cwd, "JWT_SECRET", "")
+  const { secret, write } = envJwtSecret(readEnvFile(cwd))
+  if (Object.keys(write).length > 0) upsertEnvFile(cwd, write)
+  return secret
+}
+
+/** A JWT secret given to a run rather than read from `.env`, with where it came from. */
+export interface GivenJwtSecret {
+  value: string
+  source: string
+}
+
+/** `--secret` when one was passed, else the shell's JWT_SECRET, which compose reads ahead of `.env`. */
+export function givenJwtSecret(flag?: string): GivenJwtSecret | undefined {
+  if (flag !== undefined) return { value: flag, source: "--secret" }
+  const fromShell = process.env["JWT_SECRET"]
+  return fromShell ? { value: fromShell, source: "the JWT_SECRET environment variable" } : undefined
+}
+
+/**
+ * The JWT_SECRET `.env` holds once the caller upserts `write`: its own, else `given`, else a newly
+ * generated one. The one resolver for the secret that keys written into `.env` are signed with,
+ * since `.env` is what every later run of the stack reads.
+ *
+ * A `given` secret that differs from one already in `.env` is not consulted here. The callers that
+ * write keys refuse that case first, with `refuseJwtSecretConflict` in commands/keys.ts.
+ */
+export function envJwtSecret(
+  env: Record<string, string>,
+  given?: GivenJwtSecret,
+): { secret: string; write: Record<string, string> } {
+  const inFile = env["JWT_SECRET"] ?? ""
+  if (inFile !== "") return { secret: inFile, write: {} }
+  const secret = given?.value ?? generateJwtSecret()
+  return { secret, write: { JWT_SECRET: secret } }
 }
 
 /** The password for the Postgres superuser the engine and server connect as. */

@@ -19,6 +19,7 @@ import { keyspaceInPostgres } from "./cache-provider.js"
 import { postgresImageFor } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
+import { requireUrlSafeComposePasswords } from "./url-safe-passwords.js"
 import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
 import { addressPoolExhaustionHint } from "./docker-address-pool.js"
@@ -1364,6 +1365,9 @@ export function writeSelfHostCompose(
   config: SupatypeProjectConfig,
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
+  // Here, where every command that writes the file comes through, rather than in each of them. The
+  // commands that only stop or inspect a running stack use the file already on disk instead.
+  requireUrlSafeComposePasswords(cwd, config)
   assertExternalUrlMatchesEnv(cwd, config)
   assertBundledDbUser(cwd, config)
   const tier = resolveFieldMaskingTier(cwd, config, options)

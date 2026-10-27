@@ -251,7 +251,8 @@ export function registerDev(program: Command): void {
       // Before the session takes the terminal, so a refusal reaches it.
       const overwriteDrift = opts.overwriteDrift === true
       if (overwriteDrift) await requireDevEngineSupports(cwd, config, provider === "docker")
-      // The compose file puts the database passwords into URLs as `${VAR}`, unencoded.
+      // The compose file puts the database passwords into URLs as `${VAR}`, unencoded. Writing it
+      // checks this too, but by then the session holds the terminal, so dev checks here first.
       if (provider === "docker") requireUrlSafeComposePasswords(cwd, config)
 
       beginDevSession(resolveDevUiMode(opts.stream === true))
