@@ -7,6 +7,10 @@
 * **keys:** `supatype keys` writes into `.env` when there is one, filling only the blank keys, as
   `--write` did. `--print` only prints. `--write` still works, so scripts and docs written for 0.7.0
   keep running. With no `.env` the keys are printed, with a line saying how to have them written.
+  Keys written into `.env` are always signed with the `JWT_SECRET` in that `.env`, the one the
+  stack verifies them with: a `--secret` or shell `JWT_SECRET` that differs is refused, naming both,
+  and a `.env` with no `JWT_SECRET` gets the given secret written to it. `--print` with no secret
+  anywhere exits 1 rather than printing keys signed with one it made up and kept nowhere.
 * **keys, dev:** `NEXT_PUBLIC_SUPATYPE_ANON_KEY` is written beside the `VITE_`, `PUBLIC_` and
   `EXPO_PUBLIC_` copies, and `NEXT_PUBLIC_SUPATYPE_URL` wherever the other URL copies are.
 
@@ -28,7 +32,11 @@
 * **dev, self-host:** database passwords are encoded in every connection URL the CLI builds. The
   compose file cannot encode them, so `dev`, `self-host compose up`, `render` and `restart` refuse a
   `POSTGRES_PASSWORD`, `AUTHENTICATOR_PASSWORD` or `SUPATYPE_SQL_EDITOR_PASSWORD` holding a character
-  that breaks a URL, naming the variable and how to generate a safe one.
+  that breaks a URL, naming the variable and how to generate a safe one. `down`, `status` and `logs`
+  do not check, so a stack started by an older CLI with such a password can still be stopped.
+* **self-host:** `self-host compose logs --service <name>` shows that service. The option was
+  taken by the hidden native `logs` command, declared in a way that attached its options to
+  `self-host` itself, so every service was shown. The other native commands had the same fault.
 * **dev, self-host:** `compose up` failing with "all predefined address pools have been fully
   subnetted" says Docker is out of network addresses, how many Supatype networks there are, and that
   `docker network prune` frees the unused ones.

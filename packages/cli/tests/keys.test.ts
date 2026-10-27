@@ -3,7 +3,7 @@
  * Uses subprocess tests (requires built dist/) for the CLI integration,
  * plus direct module tests for the signing logic.
  */
-import { describe, it, expect } from "vitest"
+import { afterEach, beforeEach, describe, it, expect } from "vitest"
 import { spawnSync } from "node:child_process"
 import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -198,6 +198,69 @@ describe("supatype keys (CLI subprocess)", () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true })
     }
+  })
+
+  describe("the secret the keys written into .env are signed with", () => {
+    const OTHER = "a-different-secret-that-is-also-32-chars"
+    let tmpDir = ""
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), "st-keys-source-"))
+    })
+    afterEach(() => rmSync(tmpDir, { recursive: true, force: true }))
+
+    const envFile = (): string => readFileSync(join(tmpDir, ".env"), "utf8")
+    const envValue = (key: string): string => new RegExp(`^${key}=(.+)$`, "m").exec(envFile())?.[1] ?? ""
+
+    it.each([
+      ["--secret", ["--secret", OTHER], {}],
+      ["the JWT_SECRET environment variable", [], { JWT_SECRET: OTHER }],
+    ])("refuses when %s disagrees with .env's JWT_SECRET, and writes nothing", (source, args, env) => {
+      const before = `JWT_SECRET=${SECRET}\nANON_KEY=\n`
+      writeFileSync(join(tmpDir, ".env"), before, "utf8")
+      const { exitCode, stdout, stderr } = runCli(["keys", ...args], {
+        cwd: tmpDir,
+        env: { JWT_SECRET: undefined, ...env },
+      })
+      expect(exitCode).toBe(1)
+      const said = stdout + stderr
+      expect(said).toContain(source)
+      expect(said).toContain(".env")
+      expect(said).toContain("--print")
+      expect(envFile()).toBe(before)
+    })
+
+    it("signs with .env's JWT_SECRET when --secret agrees with it", () => {
+      writeFileSync(join(tmpDir, ".env"), `JWT_SECRET=${SECRET}\n`, "utf8")
+      const { exitCode } = runCli(["keys", "--secret", SECRET], { cwd: tmpDir, env: { JWT_SECRET: undefined } })
+      expect(exitCode).toBe(0)
+      expect(verifyJwt(envValue("ANON_KEY"), SECRET)).not.toBeNull()
+    })
+
+    it.each([
+      ["--secret", ["--secret", OTHER], {}],
+      ["the JWT_SECRET environment variable", [], { JWT_SECRET: OTHER }],
+    ])("writes %s into a .env that has no JWT_SECRET, beside keys signed with it", (_source, args, env) => {
+      writeFileSync(join(tmpDir, ".env"), "ANON_KEY=\n", "utf8")
+      const { exitCode } = runCli(["keys", ...args], { cwd: tmpDir, env: { JWT_SECRET: undefined, ...env } })
+      expect(exitCode).toBe(0)
+      expect(envValue("JWT_SECRET")).toBe(OTHER)
+      expect(verifyJwt(envValue("ANON_KEY"), OTHER)).not.toBeNull()
+      expect(verifyJwt(envValue("SERVICE_ROLE_KEY"), OTHER)).not.toBeNull()
+    })
+
+    it("--print invents no secret when there is none to sign with", () => {
+      writeFileSync(join(tmpDir, ".env"), "ANON_KEY=\n", "utf8")
+      const { exitCode, stdout, stderr } = runCli(["keys", "--print"], {
+        cwd: tmpDir,
+        env: { JWT_SECRET: undefined },
+      })
+      expect(exitCode).toBe(1)
+      const said = stdout + stderr
+      expect(said).toContain("No JWT_SECRET")
+      expect(said).toContain("`supatype keys`")
+      expect(said).not.toMatch(/^(JWT_SECRET|ANON_KEY)=/m)
+      expect(envFile()).toBe("ANON_KEY=\n")
+    })
   })
 
   it("keys --help shows --secret and --exp-years options", () => {
