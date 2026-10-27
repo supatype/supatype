@@ -24,6 +24,7 @@ INTEGRATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$INTEGRATION_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/e2e-project.sh"
+source "$SCRIPT_DIR/lib/pinned-image.sh"
 
 resolve_engine_binary() {
   local base="$ROOT_DIR/../supatype-schema-engine/target/release/supatype-engine"
@@ -257,7 +258,8 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
     docker_build_image "postgres" "${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:ci-dev}" "$PG_SRC"
     export SUPATYPE_POSTGRES_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:ci-dev}"
   else
-    export SUPATYPE_POSTGRES_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}"
+    SUPATYPE_POSTGRES_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-$(pinned_image postgres)}"
+    export SUPATYPE_POSTGRES_IMAGE
     docker_pull_image "postgres" "$SUPATYPE_POSTGRES_IMAGE"
   fi
   ENGINE_SRC=""
@@ -270,7 +272,8 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
     docker_build_image "schema-engine" "${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}" "$ENGINE_SRC"
     export SUPATYPE_ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}"
   else
-    export SUPATYPE_ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:latest}"
+    SUPATYPE_ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-$(pinned_image engine)}"
+    export SUPATYPE_ENGINE_IMAGE
     docker_pull_image "schema-engine" "$SUPATYPE_ENGINE_IMAGE"
   fi
   docker_build_image "realtime" "${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}" \
@@ -285,7 +288,8 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
     docker_build_image "server" "${SUPATYPE_SERVER_IMAGE:-supatype/server:ci-dev}" "$ROOT_DIR/../supatype-auth"
     export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:ci-dev}"
   else
-    export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:latest}"
+    SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-$(pinned_image server)}"
+    export SUPATYPE_SERVER_IMAGE
     docker_pull_image "server" "$SUPATYPE_SERVER_IMAGE"
   fi
   echo "==> Building control-plane image for compose dev"

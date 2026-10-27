@@ -22,7 +22,7 @@ export default defineConfig({
 With `provider: "native"`, init also writes `server.port: 54321`, the port the native server
 listens on. A Docker project's API is on the gateway port, `SUPATYPE_KONG_PORT` in `.env`.
 
-**Docker images:** omit `versions` so compose defaults to `:latest` (`supatype/server:latest`, `supatype/schema-engine:latest`, etc.). Pin `versions.*` only when you need a specific release.
+**Docker images:** omit `versions` so compose runs the exact images the installed CLI release was tested with (never `:latest`). Pin `versions.*` only when you need a different release.
 
 ## Self-host scaffold
 
@@ -74,7 +74,7 @@ export default { server: { mode: "dev" } }
 | `app.start` | package.json script name to run in proxy mode (e.g. `"vite"`) |
 | `output.types` | Generated TypeScript types path |
 | `build` | Framework build integration for `supatype deploy` (`framework`, `buildCommand`, `outputDirectory`, `env`) |
-| `versions.*` | Optional pin for engine, server, postgres, deno. **Omit for Docker `:latest`** |
+| `versions.*` | Optional pin for engine, server, postgres, deno. **Omit to run the CLI release's own images** |
 | `connection` | Override database URL (else `DATABASE_URL` env) |
 | `auth.providers` | OAuth providers (`github`, `google`, ...): `clientId`, `secret: env("NAME")`, optional `redirectUri`, `url`. See [OAuth providers](#oauth-providers) |
 | `studio.auth.providers` | The OAuth providers Studio's sign-in offers, e.g. `["keycloak"]`. Unset offers every enabled provider. A Studio role is still required. See [Studio sign-in](#studio-sign-in-with-the-projects-providers) |
@@ -109,7 +109,7 @@ VITE_SUPATYPE_ANON_KEY=   # copy from ANON_KEY for Vite builds / dev
 generated secret reaches production intact. It does rewrite the keys derived from them
 (`ANON_KEY`, `SERVICE_ROLE_KEY`), which is why those must not be edited by hand.
 
-Do **not** set `SUPATYPE_*_IMAGE` env vars unless overriding: pinned image tags in `.env` override compose `:latest` defaults.
+Do **not** set `SUPATYPE_*_IMAGE` env vars unless overriding: pinned image tags in `.env` override the CLI release's image defaults.
 
 ## Link and environment files
 

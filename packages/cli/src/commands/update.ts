@@ -13,6 +13,7 @@ import { runDockerCompose, writeSelfHostCompose, composePullNeedsIgnoreFailures,
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { syncComposeImagePins } from "../dev-compose.js"
 import { download, currentPlatform, fetchAllLatestVersions, pinnedVersion, type Component } from "../binary-cache.js"
+import { defaultComponentVersion } from "../release-images.js"
 import { error, info, plain } from "../ui/messages.js"
 
 const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]
@@ -87,6 +88,24 @@ export function registerUpdate(program: Command): void {
 
       for (const component of components) {
         const latest = latestVersions[component]
+        const current = pinnedVersion(component, config)
+        // Unpinned runs what this CLI release was tested with, so that is what to fetch, whatever
+        // the CDN says; its latest is fetched only for a component this CLI does not pin.
+        const target = current ? undefined : (defaultComponentVersion(component) ?? latest)
+        if (target) {
+          if (opts.check) {
+            plain(`  ${component}  (unpinned) → ${target}, ${latest ?? "nothing"} is the latest on the CDN`)
+          } else {
+            info(`Downloading ${component} v${target}...`)
+            try {
+              await download(component, target, platform)
+              info(`${component} v${target} downloaded.`)
+            } catch (err) {
+              error(`Failed: ${errorMessage(err)}`)
+            }
+          }
+          continue
+        }
         if (!latest) {
           if (component === "realtime") {
             // Realtime binaries publish with every stable supatype v* release, but releases from
@@ -97,22 +116,7 @@ export function registerUpdate(program: Command): void {
           error(`No latest version for ${component} on CDN`)
           continue
         }
-        const current = pinnedVersion(component, config)
-        if (!current) {
-          if (opts.check) {
-            plain(`  ${component}  (latest) → ${latest} on CDN`)
-          } else {
-            info(`Downloading latest ${component} v${latest}...`)
-            try {
-              await download(component, latest, platform)
-              info(`${component} v${latest} downloaded.`)
-            } catch (err) {
-              error(`Failed: ${errorMessage(err)}`)
-            }
-          }
-          continue
-        }
-        if (current === "local") continue
+        if (!current || current === "local") continue
         if (current !== latest) {
           updates.push({ component, from: current, to: latest })
         }

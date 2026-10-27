@@ -16,7 +16,7 @@
 #   OWNERSHIP_ENGINE_BIN  a local engine binary to test, written into the project's overrides.engine;
 #                         without it the CLI uses the engine it resolves itself. CI sets it to the
 #                         engine built from the pinned engine commit (integration.yml).
-#   SUPATYPE_POSTGRES_IMAGE  Postgres image (default supatype/postgres:latest)
+#   SUPATYPE_POSTGRES_IMAGE  Postgres image (default: the one release/images.json pins)
 #
 # An engine without the ledger commands means no check can run, and that exits 1: a run that
 # checked nothing has not passed (C17).
@@ -26,7 +26,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 PG_PORT="${OWNERSHIP_PG_PORT:-55441}"
-PG_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}"
+source "$SCRIPT_DIR/lib/pinned-image.sh"
+PG_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-$(pinned_image postgres)}"
 PG_CONTAINER="${OWNERSHIP_PG_CONTAINER:-supatype-ownership-e2e-pg}"
 PG_PASSWORD="ownership-e2e"
 URL="postgresql://supatype_admin:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/ownership?sslmode=disable"

@@ -13,10 +13,10 @@ import {
   usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
-import { hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
+import { hasStudioOverride, pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
-import { postgresImageFor } from "./postgres-image.js"
+import { postgresImageFor, runningPostgresImage } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.js"
@@ -35,6 +35,7 @@ import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-mask
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
+import { RELEASE_IMAGES } from "./release-images.js"
 import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
 
@@ -105,7 +106,8 @@ export function dockerImageRef(component: DockerPinComponent, version: string): 
 
 /**
  * When the user pins `versions` in config, sync matching SUPATYPE_*_IMAGE vars for Compose.
- * Unpinned components are omitted so compose falls back to :latest defaults.
+ * Unpinned components are omitted so compose falls back to its defaults: the images this CLI
+ * release was tested with (`RELEASE_IMAGES`).
  *
  * `database.image` is written whether or not `versions.postgres` is pinned. It used to reach
  * compose only through the pin, so without one compose ran `supatype/postgres:latest` while the
@@ -167,11 +169,6 @@ export function composePullNeedsIgnoreFailures(
 }
 
 /**
- * Schema-engine image for a one-off `docker compose run` when pushing schema.
- * Uses config pin when set; otherwise CDN engine semver (Docker Hub `:latest` can lag).
- * Does not touch `.env`, server/postgres still use compose `:latest` defaults.
- */
-/**
  * Whether this project's database is published to the host, and so needs a `DATABASE_URL` that
  * points at it.
  *
@@ -201,8 +198,9 @@ function composeDbPortsBlock(devLocal: boolean): string {
  * The engine image a compose push runs. An image named explicitly wins: `SUPATYPE_ENGINE_IMAGE` in
  * the environment (as CI and a local engine build set it) or in the project's `.env` (the documented
  * way to run a local build; the CLI writes it there only from a version pin). Otherwise the pinned
- * version, or the latest published one. This used to set the variable over whatever was named, so
- * every push ran the latest published engine whatever image a caller asked for.
+ * version, or the engine this CLI release was tested with. This used to set the variable over
+ * whatever was named, so every push ran the latest published engine whatever image a caller asked
+ * for; and unpinned, it asked the CDN for the latest engine, which moved under an unchanged CLI.
  */
 export async function schemaEngineImageForPush(
   config: SupatypeProjectConfig,
@@ -214,8 +212,7 @@ export async function schemaEngineImageForPush(
   const pinned = pinnedVersion("engine", config)
   if (pinned === VERSION_PIN_LOCAL) return undefined
   if (pinned) return dockerImageRef("engine", pinned)
-  const version = await fetchLatestVersion("engine")
-  return dockerImageRef("engine", version)
+  return RELEASE_IMAGES.engine
 }
 
 /**
@@ -421,9 +418,9 @@ function roleDatabaseUrl(config: SupatypeProjectConfig, role: string, passwordVa
  */
 export const COMPOSE_STUDIO_HOST_URL = `http://host.docker.internal:${STUDIO_DEV_PORT}`
 
-/** Studio container: always Docker Hub unless SUPATYPE_STUDIO_IMAGE is set in .env. */
+/** Studio container: this release's Studio image unless SUPATYPE_STUDIO_IMAGE is set in .env. */
 function studioServiceBlock(): string {
-  return `    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}`
+  return `    image: \${SUPATYPE_STUDIO_IMAGE:-${RELEASE_IMAGES.studio}}`
 }
 
 /** Host dev app (Astro/Vite on the machine) as seen from inside compose services. */
@@ -719,7 +716,7 @@ ${dbDependencyClause}      seaweedfs:
   const realtime = realtimeEnabled(config)
   const realtimeBlock = realtime
     ? `  realtime:
-    image: \${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:latest}
+    image: \${SUPATYPE_REALTIME_IMAGE:-${RELEASE_IMAGES.realtime}}
     expose:
       - "4000"
       - "4001"
@@ -840,7 +837,7 @@ ${dbDependency}`
   # database still needs (roles, extensions, wal_level for realtime).
 `
     : `  db:
-    image: \${SUPATYPE_POSTGRES_IMAGE:-${postgresImageFor(config).ref ?? "supatype/postgres:latest"}}
+    image: \${SUPATYPE_POSTGRES_IMAGE:-${runningPostgresImage(config)}}
 ${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    environment:
       POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}
@@ -899,7 +896,7 @@ ${dbServiceBlock}  postgrest:
       PGRST_DB_POOL: 3
 ${dbDependency}
   storage:
-    image: \${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}
+    image: \${SUPATYPE_STORAGE_IMAGE:-${RELEASE_IMAGES.storage}}
     expose:
       - "5000"
     environment:
@@ -913,7 +910,7 @@ ${dbDependency}
       S3_FORCE_PATH_STYLE: "true"
 ${storageDependency}
   functions-worker:
-    image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}
+    image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-${RELEASE_IMAGES["functions-worker"]}}
     expose:
       - "8001"
 ${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:
@@ -961,7 +958,7 @@ ${mounts.projectReadOnly}
 ${dbDependency}
 ${realtimeBlock}
   control-plane:
-    image: \${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:latest}
+    image: \${SUPATYPE_CONTROL_PLANE_IMAGE:-${RELEASE_IMAGES["control-plane"]}}
     expose:
       - "8080"
     volumes:
@@ -984,7 +981,7 @@ ${mounts.projectWritable}
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:?SERVICE_ROLE_KEY is missing from .env}
 ${realtimeControlPlaneEnv}${dbDependency}
   server:
-    image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
+    image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-${RELEASE_IMAGES.server}}}
     # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
     # mapped, so a project proxying the site or Studio to something on the host worked on macOS
     # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own
@@ -1088,7 +1085,7 @@ ${realtimeDependency}      control-plane:
 
 ${objectStoreBlock}
   schema-engine:
-    image: \${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:latest}
+    image: \${SUPATYPE_ENGINE_IMAGE:-${RELEASE_IMAGES.engine}}
     profiles: ["tools"]
     entrypoint: ["supatype-engine"]
     volumes:

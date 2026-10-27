@@ -1,0 +1,100 @@
+# Opens a pull request moving a pin in release/images.json when the engine, the server or Postgres
+# has a newer stable release than the one pinned: one pull request per component, made with
+# `scripts/pin.sh set`, so the commit is read from the release tag and the Docker Hub image and CDN
+# binary are checked before anything is proposed. Merging one is the decision to ship it; the next
+# CLI release then trains on it (release.yml) and runs it everywhere.
+#
+# Daily, and by hand. It never runs on a push, so a branch carrying this file triggers nothing.
+# A component whose pull request branch already exists is left alone, so a pull request nobody has
+# merged yet is not opened twice.
+#
+# Tokens: tags are read with PRIVATE_REPO_TOKEN while a component repository is private. The branch
+# is pushed and the pull request opened with PINS_PR_TOKEN when it is set, and github.token
+# otherwise. GitHub does not start workflows for a pull request github.token opens, so without
+# PINS_PR_TOKEN the checks on it have to be started by hand (close and reopen it). The repository
+# must also allow GitHub Actions to create pull requests.
+name: Bump image pins
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-pins
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: bump ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [engine, server, postgres]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PINS_PR_TOKEN || github.token }}
+
+      - name: Find the newest stable release
+        id: newest
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -euo pipefail
+          pinned="v$(bash scripts/pin.sh tag "$COMPONENT" | sed 's/^v//')"
+          latest="$(bash scripts/pin.sh latest "$COMPONENT")"
+          newest="$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -n 1)"
+          echo "$COMPONENT: pinned $pinned, newest stable release $latest"
+          if [ "$newest" = "$pinned" ]; then
+            echo "bump=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          branch="pins/$COMPONENT-$latest"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "::notice::$branch already exists, so its pull request is already open or was closed on purpose."
+            echo "bump=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "bump=true"
+            echo "pinned=$pinned"
+            echo "latest=$latest"
+            echo "branch=$branch"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Pin it and open a pull request
+        if: steps.newest.outputs.bump == 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+          PR_TOKEN: ${{ secrets.PINS_PR_TOKEN || github.token }}
+          COMPONENT: ${{ matrix.component }}
+          PINNED: ${{ steps.newest.outputs.pinned }}
+          LATEST: ${{ steps.newest.outputs.latest }}
+          BRANCH: ${{ steps.newest.outputs.branch }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          bash scripts/pin.sh set "$COMPONENT" "$LATEST"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add release/images.json packages/cli/src/generated/release-images.ts
+          git commit -m "chore(release): pin $COMPONENT to $LATEST" \
+            -m "$COMPONENT $LATEST is its newest stable release; the pin was $PINNED. Read from the release tag and checked against Docker Hub and the CDN by scripts/pin.sh set."
+          git push origin "$BRANCH"
+          note=""
+          if [ "$COMPONENT" = engine ]; then
+            note="The examples are generated with the pinned engine: run \`pnpm generate:examples\` on this branch and commit the result before merging."
+          fi
+          GH_TOKEN="$PR_TOKEN" gh pr create --base "$BASE" --head "$BRANCH" \
+            --title "chore(release): pin $COMPONENT to $LATEST" \
+            --body "$(printf 'Moves the %s pin in release/images.json from %s to %s, its newest stable release.\n\nThe next CLI release runs this image in every stack and its release train tests it first. %s\n' "$COMPONENT" "$PINNED" "$LATEST" "$note")"

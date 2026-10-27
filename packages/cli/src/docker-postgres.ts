@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process"
 import { dockerEnv } from "./docker-env.js"
 
 export interface DockerPgOptions {
-  /** Docker image to run. Defaults to supatype/postgres:latest. */
+  /** Docker image to run. Required: the caller resolves it (`postgresImageFor`, `RELEASE_IMAGES`). */
   image: string
   /** Project name: used to derive the container and volume names. */
   projectName: string
@@ -250,12 +250,6 @@ export function dockerDbUrl(projectName: string, port: number, password = DEFAUL
 export function dockerPgLoopbackDbUrl(projectName: string, password = DEFAULT_DEV_PASSWORD): string {
   return `postgres://${PG_USER}:${encodeURIComponent(password)}@127.0.0.1:5432/${projectName}?sslmode=disable`
 }
-
-/**
- * Published Hub tag for local dev when CDN server version is not on Docker Hub yet.
- * Keep in sync with tests/integration/scripts/compose-smoke.sh.
- */
-export const DEFAULT_SERVER_DOCKER_IMAGE = "supatype/server:latest"
 
 /**
  * Run `supatype-server migrate` on the Postgres container network (loopback trust).
