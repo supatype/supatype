@@ -80,28 +80,6 @@ describe("selecting an example", () => {
   it("refuses an unknown name, listing the valid ones", () => {
     expect(() => selectExample(readTarGz(TARBALL), "blogg")).toThrow(/Unknown example "blogg".*blog, realtime/s)
   })
-
-  it("refuses a path that climbs out of the example", () => {
-    const evil = fixtureTarball("supatype-0.7.0", [{ path: "examples/blog/../../escape.txt", content: "x" }])
-    expect(() => selectExample(readTarGz(evil), "blog")).toThrow(/outside the example/)
-  })
-
-  // An archive names its own paths, and on Windows `\` is a separator to join(), so a name only
-  // checked for POSIX `../` could still land outside the target.
-  it.each([
-    ["backslash parent segments", "..\\..\\escape.txt"],
-    ["a backslash anywhere", "src\\index.ts"],
-    ["a NUL", "README\0.md"],
-    ["a drive letter", "C:/escape.txt"],
-    ["a drive letter in a later segment", "src/C:escape.txt"],
-    ["an absolute path", "/etc/escape.txt"],
-  ])("refuses a name with %s", (_label, name) => {
-    const entries = [
-      { path: "supatype-0.7.0/examples/blog/README.md", kind: "file" as const, data: Buffer.from("# Blog\n") },
-      { path: `supatype-0.7.0/examples/blog/${name}`, kind: "file" as const, data: Buffer.from("x") },
-    ]
-    expect(() => selectExample(entries, "blog")).toThrow(/outside the example/)
-  })
 })
 
 describe("an example file's target", () => {
@@ -115,6 +93,7 @@ describe("an example file's target", () => {
     expect(() => exampleTarget(dir, "../escape.txt")).toThrow(/outside/)
     expect(() => exampleTarget(dir, "a/../../escape.txt")).toThrow(/outside/)
     expect(() => exampleTarget(dir, ".")).toThrow(/outside/)
+    expect(() => exampleTarget(dir, "/etc/escape.txt")).toThrow(/outside/)
   })
 })
 
@@ -160,6 +139,20 @@ describe("initFromExample()", () => {
     const dir = target()
     await expect(initFromExample({ dir, example: "nope", version: "0.7.0", download: serve(TARBALL) })).rejects.toThrow(
       /Unknown example "nope"/,
+    )
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  // The name checks themselves are the tar reader's (tar-reader.test.ts); this is that they stop
+  // an example before any file of it is written.
+  it("refuses an archive with a path that climbs out of the example before writing anything", async () => {
+    const dir = target()
+    const evil = fixtureTarball("supatype-0.7.0", [
+      { path: "examples/blog/README.md", content: "# Blog\n" },
+      { path: "examples/blog/../../escape.txt", content: "x" },
+    ])
+    await expect(initFromExample({ dir, example: "blog", version: "0.7.0", download: serve(evil) })).rejects.toThrow(
+      /unsafe entry name/,
     )
     expect(existsSync(dir)).toBe(false)
   })

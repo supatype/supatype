@@ -54,6 +54,10 @@
 
 ### Bug Fixes
 
+* **migrate:** restoring a migration's schema sources refuses a file that lands beside the project
+  under a path starting with the project's own (`/srv/app2/x.ts` for `/srv/app`). The check compared
+  string prefixes, so it took that file for one inside the project.
+
 * **schema:** an `id: SupatypeAuthUserId` primary key under `create: Owner<"id">` (also inside `Any`
   or `All`) no longer gets a `gen_random_uuid()` default. A random id names no user, and the default
   kept the engine from defaulting the column to the caller, so an insert leaving `id` out was

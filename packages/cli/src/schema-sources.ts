@@ -12,7 +12,7 @@ import { collectSchemaSourcePaths, type SchemaSourceGraph } from "./type-extract
 import { loadConfig } from "./config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "./project-config.js"
 import { projectAuthor } from "./push-audit.js"
-import { isArrayOf, isNumber, isOneOf, isShape, isString, optional, type Guard } from "@supatype/shared"
+import { isArrayOf, isNumber, isOneOf, isShape, isString, optional, resolveInside, type Guard } from "@supatype/shared"
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024
 const WARN_COMPRESSED_BYTES = 512 * 1024
@@ -105,8 +105,7 @@ export function unpackSchemaSources(tar: Buffer, projectRoot: string): Map<strin
     if (rel.startsWith("..") || rel.includes("/../")) {
       throw new Error(`Invalid tar path: ${name}`)
     }
-    const dest = resolve(root, rel)
-    if (!dest.startsWith(root)) {
+    if (resolveInside(root, rel, { includeRoot: true }) === undefined) {
       throw new Error(`Tar path escapes project root: ${name}`)
     }
     out.set(rel, Buffer.from(content))

@@ -32,7 +32,7 @@ import {
   type ParsedField,
 } from "./schema-ast-v2.js"
 import { jsonTypeArgText } from "./json-type-text.js"
-import { withoutRandomDefaultOnCallerIds } from "./owner-default.js"
+import { callerOwnedIds } from "./owner-default.js"
 import { compileBounds, measureFormFor, type DeclaredBounds } from "./field-bounds.js"
 
 export type { ExtractedSchemaAstV2 as ExtractedSchemaAst, ExtractedStorageBucketAst } from "./schema-ast-v2.js"
@@ -139,7 +139,7 @@ export function extractSchemaAstFromTypes(
       models.push(
         emitModel(
           stmt.name.text,
-          withoutRandomDefaultOnCallerIds(fields, access),
+          withUuidKeyDefaults(fields, access["create"]),
           options,
           tableName,
           access,
@@ -505,6 +505,21 @@ function isArrayLikeTypeNode(node: ts.TypeNode, sourceFile: ts.SourceFile): bool
   return false
 }
 
+/**
+ * `fields` with `gen_random_uuid()` on each uuid primary key that declares no default of its own,
+ * except an auth user id `createRule` makes the caller's: a random uuid would name no user, and the
+ * engine defaults that column to the caller instead. A default the schema writes is never touched.
+ */
+function withUuidKeyDefaults(fields: Record<string, FieldAstV2>, createRule: unknown): Record<string, FieldAstV2> {
+  const callerOwned = callerOwnedIds(createRule, fields)
+  const entries = Object.entries(fields).map(([name, field]) => {
+    const randomKey =
+      field.kind === "uuid" && field["primaryKey"] === true && field["default"] === undefined && !callerOwned.has(name)
+    return [name, randomKey ? { ...field, default: { kind: "genRandomUuid" } } : field] as const
+  })
+  return Object.fromEntries(entries)
+}
+
 function parseFieldType(
   fieldName: string,
   typeNode: ts.TypeNode,
@@ -800,17 +815,8 @@ function parseFieldType(
     }
   }
 
-  // An auth user id key the create rule makes the caller's loses this again in
-  // withoutRandomDefaultOnCallerIds, once the model's access is known.
-  if (parsed.kernel.primaryKey === true && parsed.kind === "uuid" && parsed.kernel.default === undefined) {
-    parsed = {
-      ...parsed,
-      kernel: { ...parsed.kernel, default: { kind: "genRandomUuid" } },
-    }
-  } else if (
-    parsed.kernel.primaryKey === true &&
-    (parsed.kind === "serial" || parsed.kind === "bigSerial")
-  ) {
+  // A uuid key's default waits for the model's access rule: withUuidKeyDefaults decides it.
+  if (parsed.kernel.primaryKey === true && (parsed.kind === "serial" || parsed.kind === "bigSerial")) {
     flags.serverGenerated = true
   }
 
@@ -1681,7 +1687,8 @@ function parseInlineBlockDefinition(
     name,
     ...(label !== undefined && { label }),
     ...(icon !== undefined && { icon }),
-    fields,
+    // A block has no access rule of its own, so none of its uuid keys is the caller's.
+    fields: withUuidKeyDefaults(fields, undefined),
   }
 }
 

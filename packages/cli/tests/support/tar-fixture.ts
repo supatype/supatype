@@ -48,13 +48,20 @@ function paxRecord(key: string, value: string): string {
 
 function entry(path: string, data: Buffer, type: string): Buffer[] {
   const blocks: Buffer[] = []
-  if (path.length > 100) {
+  // A NUL would end the ustar name field, so a name with one travels as a pax record, as a long one does.
+  if (path.length > 100 || path.includes("\0")) {
     const pax = Buffer.from(paxRecord("path", path))
     blocks.push(header("PaxHeader", pax.length, "x"), padded(pax))
   }
   blocks.push(header(path, data.length, type))
   if (data.length > 0) blocks.push(padded(data))
   return blocks
+}
+
+/** `files` named exactly as given, with no root folder or global header: for names an archive should not have. */
+export function plainTarball(files: readonly FixtureFile[]): Buffer {
+  const blocks = files.flatMap((file) => entry(file.path, Buffer.from(file.content), "0"))
+  return gzipSync(Buffer.concat([...blocks, Buffer.alloc(BLOCK * 2)]))
 }
 
 /** `files` under `root/`, each directory of theirs listed before them, as git archive does. */

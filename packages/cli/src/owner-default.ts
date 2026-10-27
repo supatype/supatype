@@ -6,6 +6,8 @@
  * own. The rule refuses any other value, so the one a client could send is one the database
  * already knows. This mirrors the engine's `default_owner_to_caller` (parser/normaliser.rs), so
  * the CLI's generated `Insert` type agrees with the engine's and leaves the column optional.
+ * The extractor asks the same question ({@link callerOwnedIds}) before it gives a uuid key the
+ * random default, which on such a column would name no user.
  */
 
 import { isJsonObject } from "@supatype/shared"
@@ -29,42 +31,31 @@ function isAuthUserId(meta: Record<string, unknown>): boolean {
 }
 
 /**
+ * The auth user ids `createRule` makes the caller's: fields an owner rule names (also inside `any`
+ * or `all`) that hold an auth user id. The engine defaults each to the caller when it declares no
+ * default of its own.
+ */
+export function callerOwnedIds(createRule: unknown, fields: Record<string, Record<string, unknown>>): Set<string> {
+  return new Set(
+    ownersInRule(createRule).filter((name) => {
+      const meta = fields[name]
+      return meta !== undefined && isAuthUserId(meta)
+    }),
+  )
+}
+
+/**
  * The model's fields with the caller default added where the engine adds it, for the write types.
- * Fields that already declare a default, or are not auth user ids, are returned as they are.
+ * Fields that already declare a default, or are not caller-owned auth user ids, are returned as they are.
  */
 export function fieldsWithCallerDefaults(model: {
   fields: Record<string, Record<string, unknown>>
 }): Record<string, Record<string, unknown>> {
-  const owners = new Set(ownersInRule(objectAt(model, "annotations", "platform", "access")?.["create"]))
-  if (owners.size === 0) return model.fields
+  const owned = callerOwnedIds(objectAt(model, "annotations", "platform", "access")?.["create"], model.fields)
+  if (owned.size === 0) return model.fields
   const entries = Object.entries(model.fields).map(([name, meta]) => {
-    const defaulted = owners.has(name) && isAuthUserId(meta) && meta["default"] === undefined
+    const defaulted = owned.has(name) && meta["default"] === undefined
     return [name, defaulted ? { ...meta, default: { expression: CALLER_ID_DEFAULT } } : meta] as const
   })
   return Object.fromEntries(entries)
-}
-
-/**
- * `fields` with the random uuid default taken off each auth user id the `create` rule makes the
- * caller's. Every uuid primary key without a default of its own is given `gen_random_uuid()`; on
- * these it would name no user and keep the engine's caller default from applying. Under any other
- * rule nothing else fills the column, so the key keeps it.
- */
-export function withoutRandomDefaultOnCallerIds<F extends Record<string, unknown>>(
-  fields: Record<string, F>,
-  access: Record<string, unknown>,
-): Record<string, F> {
-  const owners = new Set(ownersInRule(access["create"]))
-  if (owners.size === 0) return fields
-  const entries = Object.entries(fields).map(([name, meta]) => {
-    if (!owners.has(name) || !isAuthUserId(meta) || !isRandomUuidDefault(meta["default"])) return [name, meta] as const
-    const withoutDefault = { ...meta }
-    delete withoutDefault["default"]
-    return [name, withoutDefault] as const
-  })
-  return Object.fromEntries(entries)
-}
-
-function isRandomUuidDefault(value: unknown): boolean {
-  return isJsonObject(value) && value["kind"] === "genRandomUuid"
 }

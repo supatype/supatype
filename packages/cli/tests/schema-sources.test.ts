@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { collectSchemaSourcePaths } from "../src/type-extractor.js"
 import {
@@ -81,6 +81,17 @@ describe("schema-sources", () => {
       const restored = files.get(file.relativePath.replace(/\\/g, "/"))
       expect(restored?.equals(original)).toBe(true)
     }
+  })
+
+  // `<root>2/x.ts` starts with the root's own path and is beside it, not under it.
+  it("refuses an entry that lands beside the project under a name starting with its own", () => {
+    writeMultiFileSchema(tmp)
+    const graph = collectSchemaSourcePaths(join(tmp, "schema", "index.ts"), tmp)
+    const [first] = graph.files
+    if (first === undefined) throw new Error("no schema files")
+    const beside = { ...first, relativePath: `${resolve(tmp)}2/evil.ts`.replace(/\\/g, "/") }
+    const tar = packSchemaSources({ ...graph, files: [beside] })
+    expect(() => unpackSchemaSources(tar, tmp)).toThrow(/escapes project root/)
   })
 
   it("buildSchemaSourcesPayload includes manifest metadata", () => {

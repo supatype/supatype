@@ -8,8 +8,8 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs"
-import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path"
-import { isJsonObject, parseJsonObject } from "@supatype/shared"
+import { dirname, posix } from "node:path"
+import { isJsonObject, parseJsonObject, resolveInside } from "@supatype/shared"
 import { readTarGz, type TarEntry } from "./tar-reader.js"
 
 interface ExampleFile {
@@ -57,32 +57,17 @@ export function selectExample(entries: readonly TarEntry[], name: string): Examp
   const root = `examples/${name}/`
   return entries
     .filter((entry) => entry.kind === "file" && repoPath(entry).startsWith(root))
-    .map((entry) => ({ path: insideExample(repoPath(entry).slice(root.length), name), data: entry.data }))
+    .map((entry) => ({ path: repoPath(entry).slice(root.length), data: entry.data }))
 }
 
 /**
- * A path that stays inside the example folder, or a refusal: an archive names its own paths. A
- * backslash is a separator to Windows, so `..\..\x` would climb out there however POSIX reads it;
- * a NUL, a drive letter in any segment or an absolute path has no place in an example either.
+ * Where an example file is written: under `dir` once resolved on this platform, or a refusal. The
+ * tar reader has already refused a name with a `..` segment, a backslash or a drive letter; this
+ * checks where the file actually lands, whatever let it through.
  */
-function insideExample(path: string, name: string): string {
-  const normal = posix.normalize(path)
-  const unsafe =
-    /[\\\0]/.test(path) ||
-    posix.isAbsolute(normal) ||
-    normal.split("/").some((segment) => segment === ".." || /^[A-Za-z]:/.test(segment))
-  if (unsafe) throw new Error(`The archive's example "${name}" has a file outside the example: ${JSON.stringify(path)}`)
-  return normal
-}
-
-/** Where an example file is written: under `dir` once resolved on this platform, or a refusal. */
 export function exampleTarget(dir: string, path: string): string {
-  const root = resolve(dir)
-  const target = resolve(root, ...path.split("/"))
-  const rel = relative(root, target)
-  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-    throw new Error(`The example's file ${JSON.stringify(path)} resolves outside ${dir}.`)
-  }
+  const target = resolveInside(dir, path)
+  if (target === undefined) throw new Error(`The example's file ${JSON.stringify(path)} resolves outside ${dir}.`)
   return target
 }
 
