@@ -106,6 +106,8 @@ export function registerSelfHost(program: Command): void {
     .command("restart <service>")
     .description("Recreate one service with the current config and .env, leaving the others running")
     .action((service: string) => {
+      const cwd = process.cwd()
+      requireUrlSafeComposePasswords(cwd, loadConfig(cwd))
       const status = renderAndRunCompose(["up", "-d", "--force-recreate", "--no-deps", service])
       if (status !== 0) {
         exitComposeFailed(status, `Could not restart ${service}.`, SELF_HOST_BRAND)
@@ -137,10 +139,8 @@ export function registerSelfHost(program: Command): void {
   selfHostCmd.addCommand(legacyCmd, { hidden: true })
 
   legacyCmd
-    .command(
-      "install-service",
-      "Generate systemd unit files and (on Linux) install + enable them",
-    )
+    .command("install-service")
+    .description("Generate systemd unit files and (on Linux) install + enable them")
     .option("--output-dir <path>", "Write unit files here instead of /etc/systemd/system/")
     .option("--user <name>", "User to run services as")
     .option("--no-enable", "Generate unit files but do not enable/start them")
@@ -216,7 +216,8 @@ export function registerSelfHost(program: Command): void {
   // ── serve ──────────────────────────────────────────────────────────────────
 
   legacyCmd
-    .command("serve", "Start supatype-server in the foreground (for standalone mode)")
+    .command("serve")
+    .description("Start supatype-server in the foreground (for standalone mode)")
     .option("--port <port>", "Override port from config")
     .action(async (opts: { port?: string }) => {
       logNativeHint("serve")
@@ -247,7 +248,8 @@ export function registerSelfHost(program: Command): void {
   // ── reload ─────────────────────────────────────────────────────────────────
 
   legacyCmd
-    .command("reload", "Reload the running supatype-server (SIGHUP for config reload)")
+    .command("reload")
+    .description("Reload the running supatype-server (SIGHUP for config reload)")
     .action(() => {
       logNativeHint("reload")
       const cwd = process.cwd()
@@ -279,7 +281,8 @@ export function registerSelfHost(program: Command): void {
   // ── status ─────────────────────────────────────────────────────────────────
 
   legacyCmd
-    .command("status", "Show running status of supatype services")
+    .command("status")
+    .description("Show running status of supatype services")
     .action(() => {
       logNativeHint("status")
       const cwd = process.cwd()
@@ -313,8 +316,9 @@ export function registerSelfHost(program: Command): void {
 
   // ── logs ───────────────────────────────────────────────────────────────────
 
-  selfHostCmd
-    .command("logs", "Tail supatype service logs", { hidden: true })
+  legacyCmd
+    .command("logs")
+    .description("Tail supatype service logs")
     .option("--service <name>", "Show logs for: postgres | server")
     .option("--lines <n>", "Number of lines to show", "50")
     .option("-f, --follow", "Follow log output")
@@ -363,7 +367,8 @@ export function registerSelfHost(program: Command): void {
   // ── backup ─────────────────────────────────────────────────────────────────
 
   legacyCmd
-    .command("backup", "Create a Postgres dump of the project database")
+    .command("backup")
+    .description("Create a Postgres dump of the project database")
     .option("--output <path>", "Output file path (default: ./backups/backup-<timestamp>.sql.gz)")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action((opts: { output?: string; connection?: string }) => {
@@ -443,10 +448,13 @@ async function confirmVolumeRemoval(): Promise<boolean> {
   })
 }
 
+/**
+ * The password check is left to the callers that start or recreate containers. A stack started by an
+ * older CLI with a password this one refuses still has to be stoppable and inspectable.
+ */
 function renderAndRunCompose(args: string[]): number {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
-  requireUrlSafeComposePasswords(cwd, config)
   const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   return runDockerCompose(out.composePath, args, cwd, composeProjectName(config.project.name), {
     brand: SELF_HOST_BRAND,

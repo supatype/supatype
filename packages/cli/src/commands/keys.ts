@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { readEnvFile, upsertEnvFile } from "../env-file.js"
 import { signJwt } from "../jwt.js"
-import { devJwtSecret, generateJwtSecret } from "../local-secrets.js"
+import { generateJwtSecret } from "../local-secrets.js"
 import { error, plain } from "../ui/messages.js"
 
 interface KeysOptions {
@@ -21,7 +21,7 @@ export function registerKeys(program: Command): void {
       "Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET and fill the blank ones in .env " +
         "(printed instead when there is no .env, or with --print)",
     )
-    .option("--secret <secret>", "JWT secret (defaults to JWT_SECRET env var or value in .env)")
+    .option("--secret <secret>", "JWT secret (default: JWT_SECRET env var, else .env). Writing into .env, it must match .env's")
     .option("--exp-years <years>", "Token expiry in years (default: 10)", "10")
     .option("--print", "Only print the keys, even when there is a .env to write them to")
     .option("--write", "Write the keys into .env. The default when there is one; kept for older scripts")
@@ -50,11 +50,9 @@ export function registerKeys(program: Command): void {
 
 /** `supatype keys` with a `.env` to write to: blanks only unless `--force`. */
 function writeKeys(cwd: string, opts: KeysOptions, expYears: number): void {
-  const known = opts.secret ?? resolveSecret(cwd)
-  // Generated into .env when it has none, so the keys written beside it can be verified.
-  const secret = known ?? devJwtSecret(cwd)
+  const { secret, note } = envFileSecret(cwd, opts)
   const written = writeKeysToEnv(cwd, signKeyPair(secret, expYears), opts.force === true)
-  if (known === undefined) plain("\nGenerated a JWT_SECRET in .env, which had none.")
+  if (note !== undefined) plain(`\n${note}`)
   plain(`\nKeys valid for ${expYears} years, written to ${written.path ?? ".env"}:\n`)
   // The names come back from the writer rather than being restated here, which is the whole
   // point of there being one list.
@@ -67,12 +65,70 @@ function writeKeys(cwd: string, opts: KeysOptions, expYears: number): void {
   plain("\nDo not commit .env to source control.")
 }
 
+/** A secret given to this run rather than read from `.env`, with where it came from. */
+interface GivenSecret {
+  value: string
+  source: string
+}
+
+function givenSecret(opts: KeysOptions): GivenSecret | undefined {
+  if (opts.secret !== undefined) return { value: opts.secret, source: "--secret" }
+  const fromShell = process.env["JWT_SECRET"]
+  return fromShell ? { value: fromShell, source: "the JWT_SECRET environment variable" } : undefined
+}
+
 /**
- * `supatype keys` printing instead of writing. With no secret anywhere, one is generated and
+ * The secret for keys written into `.env`: always the JWT_SECRET that file ends up holding, since
+ * that is the one the stack verifies them against.
+ *
+ * A JWT_SECRET already in `.env` wins, and a different one given to this run is refused rather
+ * than picked between: either choice would leave keys in `.env` that one of the two secrets cannot
+ * verify. With none in `.env`, the given secret (or a generated one) is written there first.
+ */
+function envFileSecret(cwd: string, opts: KeysOptions): { secret: string; note?: string } {
+  const inFile = readEnvFile(cwd)["JWT_SECRET"] || undefined
+  const given = givenSecret(opts)
+  if (inFile !== undefined) {
+    if (given !== undefined && given.value !== inFile) {
+      error(
+        `${given.source} differs from the JWT_SECRET in .env, and keys written into .env have to be ` +
+          "signed with the secret in .env, which is the one the stack verifies them against.",
+      )
+      plain(
+        "To sign with the other secret, set it as JWT_SECRET in .env and re-run. " +
+          "To only print keys signed with it, add --print.",
+      )
+      process.exit(1)
+    }
+    return { secret: inFile }
+  }
+  const secret = given?.value ?? generateJwtSecret()
+  upsertEnvFile(cwd, { JWT_SECRET: secret })
+  return {
+    secret,
+    note:
+      given === undefined
+        ? "Generated a JWT_SECRET in .env, which had none."
+        : `Wrote JWT_SECRET into .env from ${given.source}, since .env had none.`,
+  }
+}
+
+/**
+ * `supatype keys` printing instead of writing. With no `.env` and no secret, one is generated and
  * printed with the keys, since keys signed with a secret nobody kept could never be verified.
+ * `--print` never makes one up: a secret it printed would not be the one a later write generates.
  */
 function printKeys(cwd: string, opts: KeysOptions, expYears: number, hasEnv: boolean): void {
   const known = opts.secret ?? resolveSecret(cwd)
+  if (known === undefined && opts.print === true) {
+    error("No JWT_SECRET to sign the keys with: none in .env, --secret or the environment.")
+    plain(
+      hasEnv
+        ? "Run `supatype keys` without --print to generate one and write it into .env with the keys."
+        : "Run `supatype keys` without --print to generate one and print it with the keys.",
+    )
+    process.exit(1)
+  }
   const secret = known ?? generateJwtSecret()
   const { anonKey, serviceKey } = signKeyPair(secret, expYears)
   plain(`\nGenerated keys (valid for ${expYears} years):\n`)

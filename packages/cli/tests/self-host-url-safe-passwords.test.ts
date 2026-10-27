@@ -12,6 +12,7 @@ const projectConfig: SupatypeProjectConfig = {
   app: { mode: "none" },
 }
 const rendered: string[] = []
+const composeRuns: string[][] = []
 
 vi.mock("../src/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/config.js")>()
@@ -31,6 +32,10 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => {
         s3ConfigPath: join(cwd, "s3.json"),
       }
     },
+    runDockerCompose: (_path: string, args: string[]) => {
+      composeRuns.push(args)
+      return 0
+    },
   }
 })
 
@@ -45,11 +50,13 @@ let projectDir = ""
 let originalCwd = ""
 let errors: string[] = []
 
-async function render(): Promise<void> {
+async function compose(...args: string[]): Promise<void> {
   const program = new Command().name("supatype").exitOverride()
   registerSelfHost(program)
-  await program.parseAsync(["node", "supatype", "self-host", "compose", "render"])
+  await program.parseAsync(["node", "supatype", "self-host", "compose", ...args])
 }
+
+const render = (): Promise<void> => compose("render")
 
 beforeEach(() => {
   projectDir = join(tmpdir(), `supatype-selfhost-urlsafe-${process.pid}-${Date.now()}`)
@@ -57,6 +64,7 @@ beforeEach(() => {
   originalCwd = process.cwd()
   process.chdir(projectDir)
   rendered.length = 0
+  composeRuns.length = 0
   errors = []
   vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args.join(" ")))
   vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void errors.push(args.join(" ")))
@@ -86,5 +94,30 @@ describe("self-host compose render and URL-unsafe passwords", () => {
     writeFileSync(join(projectDir, ".env"), "POSTGRES_PASSWORD=abc-DEF_123\n")
     await render()
     expect(rendered).toHaveLength(1)
+  })
+})
+
+/**
+ * Only the commands that start or recreate containers check. A stack started by an older CLI with a
+ * "/" in its password has to stay stoppable and inspectable, or the refusal strands it.
+ */
+describe("self-host compose commands that leave containers as they are", () => {
+  beforeEach(() => {
+    writeFileSync(join(projectDir, ".env"), "POSTGRES_PASSWORD=pa/ss\n")
+  })
+
+  it.each([
+    [["down"], ["down"]],
+    [["status"], ["ps"]],
+    [["logs", "--service", "db"], ["logs", "-f", "db"]],
+  ])("%j runs with a URL-unsafe password", async (command, expected) => {
+    await compose(...command)
+    expect(composeRuns).toEqual([expected])
+  })
+
+  it("restart still refuses, since it recreates a container with that password", async () => {
+    await expect(compose("restart", "db")).rejects.toThrow("exit 1")
+    expect(errors.join("\n")).toContain("POSTGRES_PASSWORD")
+    expect(composeRuns).toEqual([])
   })
 })

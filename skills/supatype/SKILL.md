@@ -46,7 +46,7 @@ supatype dev                               # terminal 1: Docker Compose (Kong :1
 npm run vite                               # terminal 2: if app.vite_dev_url is set
 ```
 
-Plain `supatype keys` prints the keys and writes nothing; `--write` puts them in `.env`.
+Plain `supatype keys` fills the blank keys in `.env` when there is one (`--write` is the same), signed with that `.env`'s `JWT_SECRET`; `--print` only prints.
 
 `supatype dev` keeps running. It pushes the schema when it starts and on every save, and
 regenerates the typed client each time; there is no separate `push` step locally. `push` is for
