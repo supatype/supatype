@@ -105,21 +105,26 @@ export const ENV_FILE_OVER_SHELL = ["JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY"
 /** The role a key under each name has to carry. */
 const KEY_ROLES = { ANON_KEY: "anon", SERVICE_ROLE_KEY: "service_role" } as const
 
+/** A key closer than this to expiry is treated as unusable: replaced in `.env`, refused from the shell. */
+const KEY_RENEW_WITHIN_SECONDS = 86_400
+
 /**
- * Whether the stack would accept `key` as `role`: signed with `secret`, issued by Supatype for that
- * role, and not expiring within `validForSeconds`.
+ * The claims of `key` when the stack would accept it as `role`: signed with `secret`, for that role,
+ * and not expiring within a day ({@link KEY_RENEW_WITHIN_SECONDS}). Null otherwise. The issuer is
+ * not checked, since nothing in the stack checks it.
  */
-export function keyUsable(key: string, role: string, secret: string, validForSeconds = 0): boolean {
+export function usableKeyClaims(key: string, role: string, secret: string): Record<string, unknown> | null {
   const claims = key === "" ? null : verifyJwt(key, secret)
-  if (claims === null || claims["role"] !== role || claims["iss"] !== "supatype") return false
+  if (claims === null || claims["role"] !== role) return null
   const expiry = claims["exp"]
-  return typeof expiry !== "number" || expiry > Math.floor(Date.now() / 1000) + validForSeconds
+  const live = typeof expiry !== "number" || expiry > Math.floor(Date.now() / 1000) + KEY_RENEW_WITHIN_SECONDS
+  return live ? claims : null
 }
 
 /**
  * Whether compose runs without the shell's `shellValue` for `name`, so the stack gets `.env`'s.
  * Always when `.env` defines the name. For a key `.env` leaves blank, only when `.env` holds a
- * JWT_SECRET and the shell's key is not one the stack would accept under it ({@link keyUsable}):
+ * JWT_SECRET and the shell's key is not one the stack would accept under it ({@link usableKeyClaims}):
  * a usable one is kept, since the compose file requires SERVICE_ROLE_KEY to be set at all.
  */
 export function envFileOverridesShell(
@@ -130,7 +135,7 @@ export function envFileOverridesShell(
   if ((env[name] ?? "") !== "") return true
   const secret = env["JWT_SECRET"] ?? ""
   if (name === "JWT_SECRET" || secret === "" || shellValue === undefined || shellValue === "") return false
-  return !keyUsable(shellValue, KEY_ROLES[name], secret)
+  return usableKeyClaims(shellValue, KEY_ROLES[name], secret) === null
 }
 
 /** A JWT secret given to a run rather than read from `.env`, with where it came from. */

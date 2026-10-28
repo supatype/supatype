@@ -4,13 +4,10 @@
 
 import { readEnvFile } from "./env-file.js"
 import { signJwt } from "./jwt.js"
-import { devJwtSecret, envFileOverridesShell, keyUsable } from "./local-secrets.js"
+import { devJwtSecret, envFileOverridesShell, usableKeyClaims } from "./local-secrets.js"
 
 /** Ten years, as the keys have always been minted. */
 const KEY_LIFETIME_SECONDS = 315_360_000
-
-/** A key closer than this to expiry is replaced rather than kept. */
-const RENEW_WITHIN_SECONDS = 86_400
 
 export interface DevApiKeys {
   anonKey: string
@@ -47,30 +44,36 @@ export function devApiKeys(cwd: string): DevApiKeys {
  */
 export function configuredServiceRoleKey(cwd: string): string | undefined {
   const env = readEnvFile(cwd)
-  const fromShell = process.env["SERVICE_ROLE_KEY"]
-  const key =
-    env["SERVICE_ROLE_KEY"] ||
-    (fromShell && !envFileOverridesShell(env, "SERVICE_ROLE_KEY", fromShell) ? fromShell : "") ||
-    env["SUPATYPE_SERVICE_ROLE_KEY"] ||
-    ""
-  return key === "" ? undefined : key
+  return stackServiceRoleKey(env) ?? (env["SUPATYPE_SERVICE_ROLE_KEY"]?.trim() || undefined)
+}
+
+/**
+ * The SERVICE_ROLE_KEY the stack is started with: `.env`'s, else the shell's when compose passes
+ * it on ({@link envFileOverridesShell}), else undefined.
+ */
+function stackServiceRoleKey(env: Record<string, string>): string | undefined {
+  const inFile = env["SERVICE_ROLE_KEY"]?.trim()
+  if (inFile) return inFile
+  const fromShell = process.env["SERVICE_ROLE_KEY"]?.trim()
+  return fromShell && !envFileOverridesShell(env, "SERVICE_ROLE_KEY", fromShell) ? fromShell : undefined
 }
 
 /**
  * A service-role key the shell exported for the local stack, as that stack would accept it, or
  * undefined when the shell has none. `SUPATYPE_SERVICE_ROLE_KEY` is the CLI's own and taken as
  * given. A shell `SERVICE_ROLE_KEY` reaches the stack only while `.env` does not override it
- * (self-host-compose.ts), so once it does, the key the stack was configured with is sent instead.
+ * (self-host-compose.ts), so once it does, `.env`'s SERVICE_ROLE_KEY is sent instead, or nothing.
  */
 export function shellServiceRoleKey(cwd: string): string | undefined {
   const own = process.env["SUPATYPE_SERVICE_ROLE_KEY"]
   if (own) return own
   if (!process.env["SERVICE_ROLE_KEY"]) return undefined
-  return configuredServiceRoleKey(cwd)
+  return stackServiceRoleKey(readEnvFile(cwd))
 }
 
+/** `existing` while the stack would accept it and it came from the CLI, else a newly signed key. */
 function keptOrSigned(existing: string | undefined, role: string, secret: string): string {
-  if (existing !== undefined && keyUsable(existing, role, secret, RENEW_WITHIN_SECONDS)) return existing
+  if (existing !== undefined && usableKeyClaims(existing, role, secret)?.["iss"] === "supatype") return existing
   const now = Math.floor(Date.now() / 1000)
   return signJwt({ iss: "supatype", iat: now, exp: now + KEY_LIFETIME_SECONDS, role }, secret)
 }

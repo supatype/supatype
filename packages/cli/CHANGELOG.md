@@ -16,7 +16,7 @@
   refused. Only a `keys --secret` that differs from `.env`'s is refused. Docker Compose reads the
   shell ahead of `.env`, so every compose command now runs without the shell's `JWT_SECRET`,
   `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines that name, and without a shell key the stack
-  would not accept under `.env`'s `JWT_SECRET` (another secret, another role, or expired):
+  would not accept under `.env`'s `JWT_SECRET` (another secret, another role, or expiring within a day):
   `supatype dev` on docker with a different shell `JWT_SECRET` started services that refused every
   key with 401. A shell key the stack accepts still fills a blank one. `push`, `status` and the
   other commands calling the local stack follow the same rule, and send `.env`'s `SERVICE_ROLE_KEY`,
