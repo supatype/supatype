@@ -23,15 +23,20 @@ mint_keys() {
 
   touch "$dir/.env"
   if [[ -n "${EXAMPLE_JWT_SECRET:-}" ]] && ! grep -q '^JWT_SECRET=.' "$dir/.env"; then
-    printf 'JWT_SECRET=%s\n' "$EXAMPLE_JWT_SECRET" >> "$dir/.env"
+    env_file_set "$dir/.env" JWT_SECRET "$EXAMPLE_JWT_SECRET"
   fi
 
-  # Read the pair back from .env, the one the stack hands its services: `keys --print` signs a new one.
-  out="$(cd "$dir" && node "$cli" keys 2>&1)" || true
+  # `keys` fills only blank keys, so blank them: a pair a previous run left may not verify against
+  # the secret .env holds now. The pair is read back from .env, the one the stack hands its
+  # services, since `keys --print` signs a new one.
+  env_file_set "$dir/.env" ANON_KEY ""
+  env_file_set "$dir/.env" SERVICE_ROLE_KEY ""
+  local status=0
+  out="$(cd "$dir" && node "$cli" keys 2>&1)" || status=$?
   ANON_KEY="$(env_file_value "$dir/.env" ANON_KEY)"
   SERVICE_ROLE_KEY="$(env_file_value "$dir/.env" SERVICE_ROLE_KEY)"
 
-  if [[ -z "$ANON_KEY" || -z "$SERVICE_ROLE_KEY" ]]; then
+  if [[ "$status" -ne 0 || -z "$ANON_KEY" || -z "$SERVICE_ROLE_KEY" ]]; then
     echo "ERROR: could not mint keys in $dir. 'supatype keys' said:" >&2
     printf '%s\n' "$out" >&2
     return 1
