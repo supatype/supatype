@@ -105,8 +105,8 @@
 
 * **dev, functions serve:** the local functions router loads and guards handlers as the deployed
   worker does. It accepted only `export default`, so a function exporting a named `handler`, which the
-  worker serves, failed to load locally; a module with neither is now refused at start, naming it. It
-  also gave every function the service-role key, in `ctx.serviceRoleKey` and in `Deno.env`, where the
+  worker serves, failed to load locally; a module with neither answers its own route with an error
+  naming it. It also gave every function the service-role key, in `ctx.serviceRoleKey` and in `Deno.env`, where the
   worker takes the key out of the environment before importing any handler and grants it only to the
   routes `functions.serviceRole` lists, and to hooks. The router now does the same, so a function that
   relies on the key without being listed fails locally rather than once deployed. The key is still
