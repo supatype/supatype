@@ -125,9 +125,19 @@ export function reservedComposePorts(
   return new Set((reader.portBindings(ids) ?? "").split("\n").flatMap(hostPortsFromBindings))
 }
 
-/** The Kong port a new project gets: the first from the default that is free and no stack claims. */
-export async function chooseInitKongPort(reader: ComposePortReader = dockerComposePortReader): Promise<number> {
-  return findNextFreePort(COMPOSE_DEV_KONG_PORT, reservedComposePorts(reader))
+/**
+ * The Kong port a new project gets: `SUPATYPE_KONG_PORT` from the shell when it is set, otherwise
+ * the first from the default that is free and no stack claims.
+ *
+ * Compose binds the shell's port ahead of `.env`, and every other command reads it first
+ * ({@link readPersistedKongPort}). Choosing past it had `init` write and announce a port the stack
+ * would never listen on.
+ */
+export async function chooseInitKongPort(
+  reader: ComposePortReader = dockerComposePortReader,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
+  return kongPortFromEnvironment(env) ?? findNextFreePort(COMPOSE_DEV_KONG_PORT, reservedComposePorts(reader))
 }
 
 export function isValidHostPort(port: number): boolean {
@@ -276,9 +286,19 @@ async function firstRunKongPort(cwd: string, prompt: boolean, reserved: Readonly
 
 /**
  * Wizard / init: pick a Kong port without writing `.env` (scaffold writes it). Neither the default
- * offered nor a port typed in may be one another Supatype stack is configured with (M2).
+ * offered nor a port typed in may be one another Supatype stack is configured with (M2). A port
+ * exported in the shell is taken without asking, as {@link chooseInitKongPort} does: compose binds it
+ * whatever is typed here.
  */
-export async function promptKongPortChoice(reader: ComposePortReader = dockerComposePortReader): Promise<number> {
+export async function promptKongPortChoice(
+  reader: ComposePortReader = dockerComposePortReader,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
+  const fromShell = kongPortFromEnvironment(env)
+  if (fromShell !== null) {
+    p.log.info(`Local API gateway port (Kong): ${fromShell}, from SUPATYPE_KONG_PORT in your shell.`)
+    return fromShell
+  }
   const reserved = reservedComposePorts(reader)
   const freeDefault = await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved)
 
