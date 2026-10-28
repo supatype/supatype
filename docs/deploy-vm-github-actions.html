@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0A0A0C" />
-  <link rel="icon" type="image/svg+xml" href="supatype-icon.svg" />
-  <link rel="apple-touch-icon" href="supatype-icon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
   <title>Deploy to a VM with GitHub Actions | Supatype</title>
   <meta name="description" content="End-to-end example: scaffold a Supatype project locally, self-host on a VM with Docker Compose, and deploy updates via GitHub Actions over SSH." />
   <meta name="robots" content="index, follow" />
@@ -13,150 +13,139 @@
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="site.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Geist+Mono:wght@400;600&family=Silkscreen&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/site.css" />
 </head>
-<body>
-
-<div class="status">
-  <strong>Active development.</strong> Supatype is pre-1.0: it runs, but APIs and config may change between releases.
-</div>
+<body class="docs-page">
 
 <header class="site-header">
-  <nav>
-    <a href="/" class="logo"><img src="supatype.svg" alt="Supatype" width="119" height="22" /></a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
     <div class="nav-links">
       <a href="/#how-it-works">How it works</a>
       <a href="/docs/">Docs</a>
       <a href="/docs/#self-host">Self-hosting</a>
-      <a href="deploy-vm-github-actions.html" aria-current="page">Guides</a>
+      <a href="/deploy-vm-github-actions.html" aria-current="page">Guides</a>
     </div>
     <div class="nav-end">
-      <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener" class="hide-sm">Discord</a>
-      <a href="https://github.com/supatype/supatype" target="_blank" rel="noopener" class="btn btn-primary btn-sm">GitHub</a>
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
     </div>
   </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
 </header>
 
-<main>
+<div class="docs">
 
-  <section class="page-head">
-    <div class="wrap">
-      <p class="crumbs"><a href="/docs/">Docs</a> / Guides</p>
-      <h1>Deploy to a VM with GitHub Actions</h1>
-      <p>
-        Create a project on your laptop, push it to GitHub, run the stack on a VM with Docker
-        Compose, and ship schema and frontend changes on every push to <code>main</code>.
-      </p>
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Guides: VM + GitHub Actions</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html" aria-current="page">VM + GitHub Actions</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Guides</nav>
+    <h1>Deploy to a VM with GitHub Actions</h1>
+    <p class="intro">Create a project on your laptop, push it to GitHub, run the stack on a VM with Docker Compose, and ship schema and frontend changes on every push to <code>main</code>.</p>
+    <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
+
+    <h2 id="overview">What you will have</h2>
+    <ul>
+      <li>One repository with <code>supatype.config.ts</code>, shared by local development and the VM.</li>
+      <li>A VM running <code>supatype self-host compose</code>, with the gateway on port <code>18473</code>.</li>
+      <li>A GitHub Action that connects over SSH, pulls, migrates, rebuilds static files and restarts Compose.</li>
+    </ul>
+    <div class="callout">
+      <span class="callout-label">SCOPE</span>
+      <p>This guide covers self-hosting only. Supatype Cloud is a separate product.</p>
     </div>
-  </section>
 
-  <section class="section">
-    <div class="wrap docs">
+    <h2 id="local">Create the project locally</h2>
+    <p>On your machine, with Node.js 22 or later.</p>
 
-      <aside class="docs-nav" aria-label="On this page">
-        <p class="group">On this page</p>
-        <ul>
-          <li><a href="#overview">What you will have</a></li>
-          <li><a href="#local">Create the project</a></li>
-          <li><a href="#vm">Prepare the VM</a></li>
-          <li><a href="#secrets">Repository secrets</a></li>
-          <li><a href="#workflow">The workflow</a></li>
-          <li><a href="#verify">Verify the pipeline</a></li>
-        </ul>
-      </aside>
+    <div class="step"><span class="step-num">1</span><h3>Scaffold</h3></div>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> npm install -g @supatype/cli
+<span class="pr">$</span> mkdir my-blog &amp;&amp; cd my-blog
+<span class="pr">$</span> supatype init
+<span class="pr">$</span> npm install
+<span class="pr">$</span> supatype keys</pre></div>
+    <p>Copy the printed <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> into <code>.env</code> for local development.</p>
 
-      <div>
-        <article class="doc" id="overview">
-          <h2>What you will have</h2>
-          <div class="step plain">
-            <div>
-              <ul>
-                <li>One repository with <code>supatype.config.ts</code>, shared by local development and the VM.</li>
-                <li>A VM running <code>supatype self-host compose</code>, with the gateway on port <code>18473</code>.</li>
-                <li>A GitHub Action that connects over SSH, pulls, migrates, rebuilds static files and restarts Compose.</li>
-              </ul>
-              <div class="note">
-                <span class="label">SCOPE</span>
-                This guide covers self-hosting only. Supatype Cloud is a separate product.
-              </div>
-            </div>
-          </div>
-        </article>
+    <div class="step"><span class="step-num">2</span><h3>Add a static frontend</h3></div>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype app add --static ./public
+<span class="pr">$</span> npm install -D vite
+<span class="c"># in package.json: "build": "vite build", with output in public/</span></pre></div>
+    <p>Commit <code>supatype.config.ts</code>. You do not run <code>app add</code> again on the server.</p>
 
-        <article class="doc" id="local">
-          <h2>Create the project locally</h2>
-          <p>On your machine, with Node.js 22 or later.</p>
+    <div class="step"><span class="step-num">3</span><h3>Develop, then push to GitHub</h3></div>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype dev
+<span class="pr">$</span> supatype push</pre></div>
+    <p>Optionally proxy to Vite from a gitignored <code>supatype.local.config.ts</code> while production stays <code>static</code>. See <a href="/docs/#deploy-changes">Deploy changes</a>.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> git init
+<span class="pr">$</span> git add .
+<span class="pr">$</span> git commit -m <span class="s">"Initial Supatype project"</span>
+<span class="pr">$</span> git branch -M main
+<span class="pr">$</span> git remote add origin git@github.com:YOUR_USER/my-blog.git
+<span class="pr">$</span> git push -u origin main</pre></div>
 
-          <div class="step">
-            <span class="num">1</span>
-            <div>
-              <h3>Scaffold</h3>
-              <pre class="code"><span class="p">$</span> npm install -g @supatype/cli
-<span class="p">$</span> mkdir my-blog &amp;&amp; cd my-blog
-<span class="p">$</span> supatype init
-<span class="p">$</span> npm install
-<span class="p">$</span> supatype keys</pre>
-              <p>Copy the printed <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> into <code>.env</code> for local development.</p>
-            </div>
-          </div>
+    <h2 id="vm">Prepare the VM</h2>
+    <p>A one-time setup on Ubuntu 22.04 or similar, with SSH access.</p>
 
-          <div class="step">
-            <span class="num">2</span>
-            <div>
-              <h3>Add a static frontend</h3>
-              <pre class="code"><span class="p">$</span> supatype app add --static ./public
-<span class="p">$</span> npm install -D vite
-<span class="c"># in package.json: "build": "vite build", with output in public/</span></pre>
-              <p>Commit <code>supatype.config.ts</code>. You do not run <code>app add</code> again on the server.</p>
-            </div>
-          </div>
+    <div class="step"><span class="step-num">4</span><h3>Install the tools and clone</h3></div>
+    <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="c"># Docker: https://docs.docker.com/engine/install/ubuntu/</span>
+<span class="pr">$</span> sudo apt update &amp;&amp; sudo apt install -y git nodejs npm
+<span class="pr">$</span> sudo npm install -g @supatype/cli
 
-          <div class="step">
-            <span class="num">3</span>
-            <div>
-              <h3>Develop, then push to GitHub</h3>
-              <pre class="code"><span class="p">$</span> supatype dev
-<span class="p">$</span> supatype push</pre>
-              <p>
-                Optionally proxy to Vite from a gitignored <code>supatype.local.config.ts</code> while
-                production stays <code>static</code>. See <a href="/docs/#deploy-changes">Deploy changes</a>.
-              </p>
-              <pre class="code"><span class="p">$</span> git init
-<span class="p">$</span> git add .
-<span class="p">$</span> git commit -m "Initial Supatype project"
-<span class="p">$</span> git branch -M main
-<span class="p">$</span> git remote add origin git@github.com:YOUR_USER/my-blog.git
-<span class="p">$</span> git push -u origin main</pre>
-            </div>
-          </div>
-        </article>
+<span class="pr">$</span> sudo mkdir -p /opt/my-blog
+<span class="pr">$</span> sudo chown <span class="s">"$USER"</span>:<span class="s">"$USER"</span> /opt/my-blog
+<span class="pr">$</span> cd /opt/my-blog
+<span class="pr">$</span> git clone git@github.com:YOUR_USER/my-blog.git .</pre></div>
 
-        <article class="doc" id="vm">
-          <h2>Prepare the VM</h2>
-          <p>A one-time setup on Ubuntu 22.04 or similar, with SSH access.</p>
-
-          <div class="step">
-            <span class="num">1</span>
-            <div>
-              <h3>Install the tools and clone</h3>
-              <pre class="code"><span class="c"># Docker: https://docs.docker.com/engine/install/ubuntu/</span>
-<span class="p">$</span> sudo apt update &amp;&amp; sudo apt install -y git nodejs npm
-<span class="p">$</span> sudo npm install -g @supatype/cli
-
-<span class="p">$</span> sudo mkdir -p /opt/my-blog
-<span class="p">$</span> sudo chown "$USER":"$USER" /opt/my-blog
-<span class="p">$</span> cd /opt/my-blog
-<span class="p">$</span> git clone git@github.com:YOUR_USER/my-blog.git .</pre>
-            </div>
-          </div>
-
-          <div class="step">
-            <span class="num">2</span>
-            <div>
-              <h3>Write the production secrets</h3>
-              <p>Create <code>/opt/my-blog/.env</code> on the server and never commit it. Use strong values and your public URLs:</p>
-              <pre class="code">DATABASE_URL=postgresql://supatype_admin:CHANGE_ME@localhost:5432/my-blog
+    <div class="step"><span class="step-num">5</span><h3>Write the production secrets</h3></div>
+    <p>Create <code>/opt/my-blog/.env</code> on the server and never commit it. Use strong values and your public URLs:</p>
+    <div class="cb"><div class="cb-bar"><span>/opt/my-blog/.env</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>DATABASE_URL=postgresql://supatype_admin:CHANGE_ME@localhost:5432/my-blog
 POSTGRES_USER=supatype_admin
 POSTGRES_PASSWORD=CHANGE_ME
 POSTGRES_DB=my-blog
@@ -164,60 +153,40 @@ JWT_SECRET=CHANGE_ME          <span class="c"># at least 32 characters: openssl 
 ANON_KEY=eyJ...            <span class="c"># from supatype keys on first setup</span>
 SERVICE_ROLE_KEY=eyJ...
 API_EXTERNAL_URL=https://api.example.com
-SITE_URL=https://example.com</pre>
-            </div>
-          </div>
+SITE_URL=https://example.com</pre></div>
 
-          <div class="step">
-            <span class="num">3</span>
-            <div>
-              <h3>First boot</h3>
-              <pre class="code"><span class="p">$</span> cd /opt/my-blog
-<span class="p">$</span> npm install
-<span class="p">$</span> supatype self-host compose render
-<span class="p">$</span> supatype self-host compose up -d
-<span class="p">$</span> supatype push
-<span class="p">$</span> npm run build
-<span class="p">$</span> supatype self-host compose render
-<span class="p">$</span> supatype self-host compose up -d</pre>
-              <p>
-                Open <code>http://YOUR_VM_IP:18473</code>, with Studio at <code>/studio/</code>. Put Nginx
-                or Caddy in front for HTTPS.
-              </p>
-            </div>
-          </div>
-        </article>
+    <div class="step"><span class="step-num">6</span><h3>First boot</h3></div>
+    <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> cd /opt/my-blog
+<span class="pr">$</span> npm install
+<span class="pr">$</span> supatype self-host compose render
+<span class="pr">$</span> supatype self-host compose up -d
+<span class="pr">$</span> supatype push
+<span class="pr">$</span> npm run build
+<span class="pr">$</span> supatype self-host compose render
+<span class="pr">$</span> supatype self-host compose up -d</pre></div>
+    <p>Open <code>http://YOUR_VM_IP:18473</code>, with Studio at <code>/studio/</code>. Put Nginx or Caddy in front for HTTPS.</p>
 
-        <article class="doc" id="secrets">
-          <h2>Repository secrets</h2>
-          <p>In your repository, open <strong>Settings → Secrets and variables → Actions</strong> and add:</p>
-          <div class="step plain">
-            <div>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr><th>Secret</th><th>Value</th></tr></thead>
-                  <tbody>
-                    <tr><td><code>VM_HOST</code></td><td>Public IP or hostname of the VM</td></tr>
-                    <tr><td><code>VM_USER</code></td><td>SSH user, for example <code>ubuntu</code></td></tr>
-                    <tr><td><code>VM_SSH_KEY</code></td><td>Private key (PEM) that can log in as <code>VM_USER</code></td></tr>
-                    <tr><td><code>DEPLOY_PATH</code></td><td>Project directory on the VM, for example <code>/opt/my-blog</code></td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="note">
-                <span class="label">NOTE</span>
-                The workflow never uploads <code>.env</code>. Production secrets stay on the VM.
-              </div>
-            </div>
-          </div>
-        </article>
+    <h2 id="secrets">Repository secrets</h2>
+    <p>In your repository, open <strong>Settings → Secrets and variables → Actions</strong> and add:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Secret</th><th scope="col">Value</th></tr></thead>
+      <tbody>
+        <tr><td><code>VM_HOST</code></td><td>Public IP or hostname of the VM</td></tr>
+        <tr><td><code>VM_USER</code></td><td>SSH user, for example <code>ubuntu</code></td></tr>
+        <tr><td><code>VM_SSH_KEY</code></td><td>Private key (PEM) that can log in as <code>VM_USER</code></td></tr>
+        <tr><td><code>DEPLOY_PATH</code></td><td>Project directory on the VM, for example <code>/opt/my-blog</code></td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout">
+      <span class="callout-label">NOTE</span>
+      <p>The workflow never uploads <code>.env</code>. Production secrets stay on the VM.</p>
+    </div>
 
-        <article class="doc" id="workflow">
-          <h2>The workflow</h2>
-          <p>Add <code>.github/workflows/deploy-self-host.yml</code> to your repository:</p>
-          <div class="step plain">
-            <div>
-              <pre class="code">name: Deploy self-host
+    <h2 id="workflow">The workflow</h2>
+    <p>Add <code>.github/workflows/deploy-self-host.yml</code> to your repository:</p>
+    <div class="cb"><div class="cb-bar"><span>.github/workflows/deploy-self-host.yml</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>name: Deploy self-host
 
 on:
   push:
@@ -237,97 +206,62 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
-            cd "${{ secrets.DEPLOY_PATH }}"
+            cd <span class="s">"${{ secrets.DEPLOY_PATH }}"</span>
             git fetch origin main
             git reset --hard origin/main
             npm ci
             supatype push
             npm run build
             supatype self-host compose render
-            supatype self-host compose up -d</pre>
-              <p>
-                On every push to <code>main</code> the VM pulls the latest code, applies schema
-                migrations, rebuilds <code>public/</code> and refreshes Compose.
-              </p>
-              <div class="note">
-                <span class="label">NOTE</span>
-                <code>supatype push</code> reads <code>DATABASE_URL</code> from the VM's <code>.env</code>,
-                which points at the Compose Postgres on <code>localhost:5432</code>. If you would rather not
-                install the CLI globally on the VM, use <code>npx @supatype/cli</code> in the script.
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="doc" id="verify">
-          <h2>Verify the pipeline</h2>
-          <div class="step">
-            <span class="num">1</span>
-            <div>
-              <h3>Push a change</h3>
-              <pre class="code"><span class="p">$</span> git add .
-<span class="p">$</span> git commit -m "Add posts and update the landing page"
-<span class="p">$</span> git push origin main</pre>
-              <p>Watch the run under <strong>Actions</strong> on GitHub. When it succeeds, load your gateway URL and check that the schema and static files changed.</p>
-            </div>
-          </div>
-
-          <div class="step plain">
-            <div>
-              <h3>If something fails</h3>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr><th>Symptom</th><th>Check</th></tr></thead>
-                  <tbody>
-                    <tr><td>SSH fails</td><td>The firewall allows port 22, and <code>VM_SSH_KEY</code> matches the VM's <code>authorized_keys</code>.</td></tr>
-                    <tr><td><code>supatype push</code> fails</td><td>Compose is up, and <code>DATABASE_URL</code> points at <code>localhost:5432</code>.</td></tr>
-                    <tr><td>Site unchanged</td><td><code>npm run build</code> writes to the directory in <code>app.static_dir</code>, then re-run <code>compose render</code> and <code>up -d</code>.</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </article>
-      </div>
-
+            supatype self-host compose up -d</pre></div>
+    <p>On every push to <code>main</code> the VM pulls the latest code, applies schema migrations, rebuilds <code>public/</code> and refreshes Compose.</p>
+    <div class="callout">
+      <span class="callout-label">NOTE</span>
+      <p><code>supatype push</code> reads <code>DATABASE_URL</code> from the VM's <code>.env</code>, which points at the Compose Postgres on <code>localhost:5432</code>. If you would rather not install the CLI globally on the VM, use <code>npx @supatype/cli</code> in the script.</p>
     </div>
-  </section>
 
-</main>
+    <h2 id="verify">Verify the pipeline</h2>
+    <div class="step"><span class="step-num">7</span><h3>Push a change</h3></div>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> git add .
+<span class="pr">$</span> git commit -m <span class="s">"Add posts and update the landing page"</span>
+<span class="pr">$</span> git push origin main</pre></div>
+    <p>Watch the run under <strong>Actions</strong> on GitHub. When it succeeds, load your gateway URL and check that the schema and static files changed.</p>
+
+    <h3>If something fails</h3>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Symptom</th><th scope="col">Check</th></tr></thead>
+      <tbody>
+        <tr><td>SSH fails</td><td>The firewall allows port 22, and <code>VM_SSH_KEY</code> matches the VM's <code>authorized_keys</code>.</td></tr>
+        <tr><td><code>supatype push</code> fails</td><td>Compose is up, and <code>DATABASE_URL</code> points at <code>localhost:5432</code>.</td></tr>
+        <tr><td>Site unchanged</td><td><code>npm run build</code> writes to the directory in <code>app.static_dir</code>, then re-run <code>compose render</code> and <code>up -d</code>.</td></tr>
+      </tbody>
+    </table></div>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/studio-roles.html"><small>PREVIOUS</small><span>Studio roles</span></a>
+      <a href="/licensing.html" class="next"><small>NEXT</small><span>Licensing</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#overview">What you will have</a>
+    <a href="#local">Create the project</a>
+    <a href="#vm">Prepare the VM</a>
+    <a href="#secrets">Repository secrets</a>
+    <a href="#workflow">The workflow</a>
+    <a href="#verify">Verify the pipeline</a>
+  </nav>
+</div>
 
 <footer class="site-footer">
-  <div class="wrap">
-    <div class="footer-brand">
-      <img src="/supatype.svg" alt="Supatype" width="108" height="20" />
-      <p>Zero drift. One set of types, database to component.</p>
-      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></p>
-      <p class="mono">Active development</p>
-    </div>
-    <div class="footer-links">
-      <div class="footer-col">
-        <span class="head">Docs</span>
-        <a href="/#local-dev">Quick start</a>
-        <a href="/docs/#local-dev">Local development</a>
-        <a href="/docs/schema.html">Schema</a>
-        <a href="/docs/client.html">Client</a>
-        <a href="/docs/seeding.html">Seeding</a>
-        <a href="/docs/studio-roles.html">Studio roles</a>
-        <a href="/docs/#self-host">Self-hosting</a>
-        <a href="/docs/#deploy-changes">Deploy changes</a>
-        <a href="/docs/#upgrading">Upgrading</a>
-        <a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a>
-      </div>
-      <div class="footer-col">
-        <span class="head">Community</span>
-        <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a>
-        <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener">Agent plugins</a>
-        <a href="/llms.txt">llms.txt</a>
-      </div>
-    </div>
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></span>
   </div>
 </footer>
 
-<script src="site.js"></script>
+<script src="/site.js"></script>
 </body>
 </html>

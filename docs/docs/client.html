@@ -13,18 +13,14 @@
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Geist+Mono:wght@400;600&family=Silkscreen&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/site.css" />
 </head>
-<body>
-
-<div class="status">
-  <strong>Active development.</strong> Supatype is pre-1.0: it runs, but APIs and config may change between releases.
-</div>
+<body class="docs-page">
 
 <header class="site-header">
-  <nav>
-    <a href="/" class="logo"><img src="/supatype.svg" alt="Supatype" width="119" height="22" /></a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
     <div class="nav-links">
       <a href="/#how-it-works">How it works</a>
       <a href="/docs/" aria-current="page">Docs</a>
@@ -32,312 +28,260 @@
       <a href="/deploy-vm-github-actions.html">Guides</a>
     </div>
     <div class="nav-end">
-      <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener" class="hide-sm">Discord</a>
-      <a href="https://github.com/supatype/supatype" target="_blank" rel="noopener" class="btn btn-primary btn-sm">GitHub</a>
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
     </div>
   </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
 </header>
 
-<main>
+<div class="docs">
 
-  <section class="page-head">
-    <div class="wrap">
-      <p class="crumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Client</p>
-      <h1>Client</h1>
-      <p>
-        <code>@supatype/client</code> talks to your project's REST, auth, storage, realtime and functions. Its types come from your schema, so a wrong table or column fails the build.
-      </p>
-    </div>
-  </section>
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Client</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
 
-  <section class="section" id="docs">
-    <div class="wrap docs">
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html" aria-current="page">Client</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
 
-      <aside class="docs-nav" aria-label="Documentation">
-        <p class="group">On this page</p>
-        <ul>
-          <li><a href="#setup">Create the client</a></li>
-          <li><a href="#types">Generated types</a></li>
-          <li><a href="#read">Read rows</a></li>
-          <li><a href="#filters">Filters</a></li>
-          <li><a href="#write">Insert, update, delete</a></li>
-          <li><a href="#drafts">Drafts and publishing</a></li>
-          <li><a href="#auth">Auth</a></li>
-          <li><a href="#storage">Storage</a></li>
-          <li><a href="#realtime">Realtime</a></li>
-          <li><a href="#functions">Functions</a></li>
-          <li><a href="#graphql">GraphQL</a></li>
-          <li><a href="#errors">Errors</a></li>
-        </ul>
-        <p class="group">Get started</p>
-        <ul>
-          <li><a href="/docs/#local-dev">Local development</a></li>
-          <li><a href="/docs/#self-host">Self-hosting</a></li>
-        </ul>
-        <p class="group">Build</p>
-        <ul>
-          <li><a href="/docs/schema.html">Schema</a></li>
-          <li><a href="/docs/client.html" aria-current="page">Client</a></li>
-          <li><a href="/docs/seeding.html">Seeding</a></li>
-          <li><a href="/docs/studio-roles.html">Studio roles</a></li>
-        </ul>
-        <p class="group">Operate</p>
-        <ul>
-          <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
-          <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
-        </ul>
-        <p class="group">Guides</p>
-        <ul>
-          <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
-        </ul>
-      </aside>
+  <main class="doc">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Client</nav>
+    <h1>Client</h1>
+    <p class="intro"><code>@supatype/client</code> talks to your project's REST, auth, storage, realtime and functions. Its types come from your schema, so a wrong table or column fails the build.</p>
+    <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
 
-      <div>
-        <article class="doc">
-          <div class="step plain" id="setup">
-            <div>
-              <h3>Create the client</h3>
-              <p>Import <code>createClient</code> from the client file the CLI generates, not from <code>@supatype/client</code> directly. The generated file tells the client which models keep drafts.</p>
-              <pre class="code">import { createClient } from "../supatype/generated/client"
+    <h2 id="setup">Create the client</h2>
+    <p>Import <code>createClient</code> from the client file the CLI generates, not from <code>@supatype/client</code> directly. The generated file tells the client which models keep drafts.</p>
+    <div class="cb"><div class="cb-bar"><span>src/supatype.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
-export const supatype = createClient({
-  url: "http://localhost:&lt;gateway-port&gt;", // API_EXTERNAL_URL in your project's .env
-  anonKey: "&lt;anon-key&gt;",
-})</pre>
-              <p>Use your own project's gateway URL, not a port copied from an example: <code>supatype init</code> picks a free gateway port for each project. Your project's <code>.env</code> holds the full URL as <code>API_EXTERNAL_URL</code>, and the port alone as <code>SUPATYPE_KONG_PORT</code>. <code>supatype keys</code> writes them to <code>.env</code> as <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks.</p>
-              <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
-            </div>
-          </div>
+<span class="k">export</span> <span class="k">const</span> supatype = createClient({
+  url: <span class="s">"http://localhost:&lt;gateway-port&gt;"</span>, <span class="c">// API_EXTERNAL_URL in your project's .env</span>
+  anonKey: <span class="s">"&lt;anon-key&gt;"</span>,
+})</pre></div>
+    <p>Use your own project's gateway URL, not a port copied from an example: <code>supatype init</code> picks a free gateway port for each project. Your project's <code>.env</code> holds the full URL as <code>API_EXTERNAL_URL</code>, and the port alone as <code>SUPATYPE_KONG_PORT</code>. <code>supatype keys</code> writes them to <code>.env</code> as <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks.</p>
+    <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
 
-          <div class="step plain" id="types">
-            <div>
-              <h3>Generated types</h3>
-              <p><code>supatype dev</code>, <code>supatype push</code> and <code>supatype generate</code> write these files. Do not edit them.</p>
-              <div class="table-wrap">
-              <table>
-              <thead><tr><th>File</th><th>Holds</th></tr></thead>
-              <tbody>
-              <tr><td><code>supatype/generated/client.ts</code></td><td>The <code>createClient</code> to import</td></tr>
-              <tr><td><code>supatype/generated/index.d.ts</code></td><td>Row, insert and update types for each table</td></tr>
-              <tr><td><code>types/database.ts</code></td><td>The <code>Database</code> type, for code that wants the raw shapes</td></tr>
-              </tbody>
-              </table>
-              </div>
-              <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types.</p>
-            </div>
-          </div>
+    <h2 id="types">Generated types</h2>
+    <p><code>supatype dev</code>, <code>supatype push</code> and <code>supatype generate</code> write these files. Do not edit them.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">File</th><th scope="col">Holds</th></tr></thead>
+      <tbody>
+        <tr><td><code>supatype/generated/client.ts</code></td><td>The <code>createClient</code> to import</td></tr>
+        <tr><td><code>supatype/generated/index.d.ts</code></td><td>Row, insert and update types for each table</td></tr>
+        <tr><td><code>types/database.ts</code></td><td>The <code>Database</code> type, for code that wants the raw shapes</td></tr>
+      </tbody>
+    </table></div>
+    <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types.</p>
 
-          <div class="step plain" id="read">
-            <div>
-              <h3>Read rows</h3>
-              <pre class="code">const { data: posts, error } = await supatype
-  .from("post")
-  .select("id, title, slug, author(name), comment(body)")
-  .order("published_at", { ascending: false })
+    <h2 id="read">Read rows</h2>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: posts, error } = <span class="k">await</span> supatype
+  .from(<span class="s">"post"</span>)
+  .select(<span class="s">"id, title, slug, author(name), comment(body)"</span>)
+  .order(<span class="s">"published_at"</span>, { ascending: <span class="k">false</span> })
   .limit(10)
-if (error) throw new Error(error.message)
-for (const post of posts ?? []) console.log(post.title, post.author?.name)</pre>
-              <p><code>select</code> takes a list of columns. The result type follows the list. <code>*</code> selects every column.</p>
-              <p>Name a related table to embed it: <code>author(name)</code> follows <code>author_id</code>, and <code>comment(body)</code> lists a post's comments. A many-to-many relation embeds through its junction table: <code>select("title, tag(name)")</code>.</p>
-              <p>A to-one embed can be <code>null</code>. Write <code>author!inner(name)</code> to keep only posts that have one. Rename an embed with <code>writer:author(name)</code>.</p>
-              <p><code>single()</code> returns one row and errors when there is not exactly one. <code>maybeSingle()</code> returns <code>null</code> for no row.</p>
-              <pre class="code">const { data: post } = await supatype.from("post").select("*").eq("slug", "hello-world").maybeSingle()
-console.log(post?.title)</pre>
-            </div>
-          </div>
 
-          <div class="step plain" id="filters">
-            <div>
-              <h3>Filters</h3>
-              <div class="table-wrap">
-              <table>
-              <thead><tr><th>Filter</th><th>Matches</th></tr></thead>
-              <tbody>
-              <tr><td><code>eq</code>, <code>neq</code></td><td>equal, not equal</td></tr>
-              <tr><td><code>gt</code>, <code>gte</code>, <code>lt</code>, <code>lte</code></td><td>greater or less than</td></tr>
-              <tr><td><code>like</code>, <code>ilike</code></td><td>a pattern, <code>ilike</code> ignores case</td></tr>
-              <tr><td><code>in</code></td><td>any of a list</td></tr>
-              <tr><td><code>is</code></td><td><code>null</code>, <code>true</code> or <code>false</code></td></tr>
-              <tr><td><code>not</code>, <code>or</code>, <code>match</code></td><td>negation, either filter, several equalities</td></tr>
-              </tbody>
-              </table>
-              </div>
-              <pre class="code">await supatype.from("post").select("id").in("kind", ["news", "guide"]).is("published_at", null)
-await supatype.from("post").select("id").ilike("title", "%hello%").range(0, 19)</pre>
-              <p>Reads also take <code>order</code>, <code>limit</code> and <code>range</code>. Filters work on <code>update</code> and <code>delete</code> too.</p>
-            </div>
-          </div>
+<span class="k">if</span> (error) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(error.message)
+<span class="k">for</span> (<span class="k">const</span> post <span class="k">of</span> posts ?? []) console.log(post.title, post.author?.name)</pre></div>
+    <p><code>select</code> takes a list of columns. The result type follows the list. <code>*</code> selects every column.</p>
+    <p>Name a related table to embed it: <code>author(name)</code> follows <code>author_id</code>, and <code>comment(body)</code> lists a post's comments. A many-to-many relation embeds through its junction table: <code>select("title, tag(name)")</code>.</p>
+    <p>A to-one embed can be <code>null</code>. Write <code>author!inner(name)</code> to keep only posts that have one. Rename an embed with <code>writer:author(name)</code>.</p>
+    <p><code>single()</code> returns one row and errors when there is not exactly one. <code>maybeSingle()</code> returns <code>null</code> for no row.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: post } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"*"</span>).eq(<span class="s">"slug"</span>, <span class="s">"hello-world"</span>).maybeSingle()
+console.log(post?.title)</pre></div>
 
-          <div class="step plain" id="write">
-            <div>
-              <h3>Insert, update, delete</h3>
-              <pre class="code">const { data: created, error: insertError } = await supatype
-  .from("post")
-  .insert({ title: "Draft idea", body: "Plain text is fine.", kind: "guide", author_id: userId })
-  .select("id")
+    <h2 id="filters">Filters</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Filter</th><th scope="col">Matches</th></tr></thead>
+      <tbody>
+        <tr><td><code>eq</code>, <code>neq</code></td><td>equal, not equal</td></tr>
+        <tr><td><code>gt</code>, <code>gte</code>, <code>lt</code>, <code>lte</code></td><td>greater or less than</td></tr>
+        <tr><td><code>like</code>, <code>ilike</code></td><td>a pattern, <code>ilike</code> ignores case</td></tr>
+        <tr><td><code>in</code></td><td>any of a list</td></tr>
+        <tr><td><code>is</code></td><td><code>null</code>, <code>true</code> or <code>false</code></td></tr>
+        <tr><td><code>not</code>, <code>or</code>, <code>match</code></td><td>negation, either filter, several equalities</td></tr>
+      </tbody>
+    </table></div>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id"</span>).in(<span class="s">"kind"</span>, [<span class="s">"news"</span>, <span class="s">"guide"</span>]).is(<span class="s">"published_at"</span>, <span class="k">null</span>)
+<span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id"</span>).ilike(<span class="s">"title"</span>, <span class="s">"%hello%"</span>).range(0, 19)</pre></div>
+    <p>Reads also take <code>order</code>, <code>limit</code> and <code>range</code>. Filters work on <code>update</code> and <code>delete</code> too.</p>
+
+    <h2 id="write">Insert, update, delete</h2>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: created, error: insertError } = <span class="k">await</span> supatype
+  .from(<span class="s">"post"</span>)
+  .insert({ title: <span class="s">"Draft idea"</span>, body: <span class="s">"Plain text is fine."</span>, kind: <span class="s">"guide"</span>, author_id: userId })
+  .select(<span class="s">"id"</span>)
   .single()
-if (insertError || !created) throw new Error(insertError?.message ?? "insert failed")
+<span class="k">if</span> (insertError || !created) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(insertError?.message ?? <span class="s">"insert failed"</span>)
 
-await supatype.from("comment").update({ body: "Edited" }).eq("id", commentId)
-await supatype.from("comment").delete().eq("id", commentId)</pre>
-              <p>A write returns no rows unless you add <code>.select()</code>. <code>upsert</code> inserts or updates by primary key.</p>
-              <p>A <code>RichText</code> field takes a plain string on write. Owner columns with an <code>Owner&lt;&gt;</code> create rule can be left out: they default to the caller.</p>
-            </div>
-          </div>
+<span class="k">await</span> supatype.from(<span class="s">"comment"</span>).update({ body: <span class="s">"Edited"</span> }).eq(<span class="s">"id"</span>, commentId)
+<span class="k">await</span> supatype.from(<span class="s">"comment"</span>).delete().eq(<span class="s">"id"</span>, commentId)</pre></div>
+    <p>A write returns no rows unless you add <code>.select()</code>. <code>upsert</code> inserts or updates by primary key.</p>
+    <p>A <code>RichText</code> field takes a plain string on write. Owner columns with an <code>Owner&lt;&gt;</code> create rule can be left out: they default to the caller.</p>
 
-          <div class="step plain" id="drafts">
-            <div>
-              <h3>Drafts and publishing</h3>
-              <p>On a model with <code>versions: { drafts: true }</code>, <code>update</code> saves a draft. The live row does not change until the record is published.</p>
-              <pre class="code"><span class="c">// Save a draft</span>
-await supatype.from("post").update({ title: "Better title" }).eq("id", postId)
+    <h2 id="drafts">Drafts and publishing</h2>
+    <p>On a model with <code>versions: { drafts: true }</code>, <code>update</code> saves a draft. The live row does not change until the record is published.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="c">// Save a draft</span>
+<span class="k">await</span> supatype.from(<span class="s">"post"</span>).update({ title: <span class="s">"Better title"</span> }).eq(<span class="s">"id"</span>, postId)
 
 <span class="c">// Save and publish in one call</span>
-await supatype.from("post").update({ title: "Final title" }, { publish: true }).eq("id", postId)
+<span class="k">await</span> supatype.from(<span class="s">"post"</span>).update({ title: <span class="s">"Final title"</span> }, { publish: <span class="k">true</span> }).eq(<span class="s">"id"</span>, postId)
 
 <span class="c">// Read drafts</span>
-const { data: drafts } = await supatype.from("post").draft().select("id, title").eq("id", postId)
+<span class="k">const</span> { data: drafts } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).draft().select(<span class="s">"id, title"</span>).eq(<span class="s">"id"</span>, postId)
 
 <span class="c">// Publish the saved draft</span>
-await supatype.rpc("publish", { model_table: "post", record_id: postId }, { schema: "supatype" })</pre>
-              <p><code>insert</code> on a drafts model creates a draft record. Publish it to make it live. A plain <code>select()</code> reads the live table, which holds the published values.</p>
-              <p><code>{ publish: true }</code> is only accepted on drafts models, and only when the client comes from the generated file.</p>
-            </div>
-          </div>
+<span class="k">await</span> supatype.rpc(<span class="s">"publish"</span>, { model_table: <span class="s">"post"</span>, record_id: postId }, { schema: <span class="s">"supatype"</span> })</pre></div>
+    <p><code>insert</code> on a drafts model creates a draft record. Publish it to make it live. A plain <code>select()</code> reads the live table, which holds the published values.</p>
+    <p><code>{ publish: true }</code> is only accepted on drafts models, and only when the client comes from the generated file.</p>
 
-          <div class="step plain" id="auth">
-            <div>
-              <h3>Auth</h3>
-              <pre class="code">await supatype.auth.signUp({ email: "alex@example.com", password: "a-long-password" })
+    <h2 id="auth">Auth</h2>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">await</span> supatype.auth.signUp({ email: <span class="s">"alex@example.com"</span>, password: <span class="s">"a-long-password"</span> })
 
-const { data, error: signInError } = await supatype.auth.signInWithPassword({
-  email: "alex@example.com",
-  password: "a-long-password",
+<span class="k">const</span> { data, error: signInError } = <span class="k">await</span> supatype.auth.signInWithPassword({
+  email: <span class="s">"alex@example.com"</span>,
+  password: <span class="s">"a-long-password"</span>,
 })
-if (signInError) throw new Error(signInError.message)
+<span class="k">if</span> (signInError) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(signInError.message)
 console.log(data.session?.user.id)
 
-const { data: { session } } = await supatype.auth.getSession()
+<span class="k">const</span> { data: { session } } = <span class="k">await</span> supatype.auth.getSession()
 console.log(session?.accessToken)
 
-const { data: { subscription } } = supatype.auth.onAuthStateChange((event, current) =&gt; {
+<span class="k">const</span> { data: { subscription } } = supatype.auth.onAuthStateChange((event, current) =&gt; {
   console.log(event, current?.user.email)
 })
 subscription.unsubscribe()
 
-await supatype.auth.signOut()</pre>
-              <p>Once signed in, every request carries the user's token, so access rules see them. <code>onAuthStateChange</code> calls back at once with the current state, then on each change.</p>
-              <p><code>getUser()</code> fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on <code>supatype.auth</code> too.</p>
-            </div>
-          </div>
+<span class="k">await</span> supatype.auth.signOut()</pre></div>
+    <p>Once signed in, every request carries the user's token, so access rules see them. <code>onAuthStateChange</code> calls back at once with the current state, then on each change.</p>
+    <p><code>getUser()</code> fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on <code>supatype.auth</code> too.</p>
 
-          <div class="step plain" id="storage">
-            <div>
-              <h3>Storage</h3>
-              <pre class="code">const bucket = supatype.storage.from("covers")
-const { data: upload, error: uploadError } = await bucket.upload(`${userId}/cover.png`, file, {
-  contentType: "image/png",
-  upsert: true,
+    <h2 id="storage">Storage</h2>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> bucket = supatype.storage.from(<span class="s">"covers"</span>)
+
+<span class="k">const</span> { data: upload, error: uploadError } = <span class="k">await</span> bucket.upload(<span class="s">`${userId}/cover.png`</span>, file, {
+  contentType: <span class="s">"image/png"</span>,
+  upsert: <span class="k">true</span>,
 })
-if (uploadError || !upload) throw new Error(uploadError?.message ?? "upload failed")
+<span class="k">if</span> (uploadError || !upload) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(uploadError?.message ?? <span class="s">"upload failed"</span>)
 
-const { data: { publicUrl } } = bucket.getPublicUrl(upload.path)
-const { data: signed } = await bucket.createSignedUrl(upload.path, 60)
-console.log(publicUrl, signed?.signedUrl)</pre>
-              <p><code>getPublicUrl</code> works for public buckets. <code>createSignedUrl</code> gives a link that expires after the number of seconds you pass. <code>download</code>, <code>list</code> and <code>remove</code> are on the bucket too.</p>
-              <p>The bucket's access rules from the schema decide who may upload, overwrite and delete.</p>
-            </div>
-          </div>
+<span class="k">const</span> { data: { publicUrl } } = bucket.getPublicUrl(upload.path)
+<span class="k">const</span> { data: signed } = <span class="k">await</span> bucket.createSignedUrl(upload.path, 60)
+console.log(publicUrl, signed?.signedUrl)</pre></div>
+    <p><code>getPublicUrl</code> works for public buckets. <code>createSignedUrl</code> gives a link that expires after the number of seconds you pass. <code>download</code>, <code>list</code> and <code>remove</code> are on the bucket too.</p>
+    <p>The bucket's access rules from the schema decide who may upload, overwrite and delete.</p>
 
-          <div class="step plain" id="realtime">
-            <div>
-              <h3>Realtime</h3>
-              <pre class="code">const sub = supatype.from("comment").subscribe((change) =&gt; {
+    <h2 id="realtime">Realtime</h2>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> sub = supatype.from(<span class="s">"comment"</span>).subscribe((change) =&gt; {
   console.log(change.eventType, change.new, change.old)
-}, { event: "INSERT" })
+}, { event: <span class="s">"INSERT"</span> })
 
-sub.unsubscribe()</pre>
-              <p>Each change reaches only subscribers allowed to read that row. <code>event</code> is <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> or <code>*</code>. For broadcast and presence, use <code>supatype.realtime.channel(name)</code>.</p>
-            </div>
-          </div>
+sub.unsubscribe()</pre></div>
+    <p>Each change reaches only subscribers allowed to read that row. <code>event</code> is <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> or <code>*</code>. For broadcast and presence, use <code>supatype.realtime.channel(name)</code>.</p>
 
-          <div class="step plain" id="functions">
-            <div>
-              <h3>Functions</h3>
-              <pre class="code">const { data: reply, error: fnError } = await supatype.functions.invoke("hello", { body: { name: "Alex" } })
-if (fnError) console.error(fnError.code, fnError.message)
-console.log(reply)</pre>
-              <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed.</p>
-            </div>
-          </div>
+    <h2 id="functions">Functions</h2>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: reply, error: fnError } = <span class="k">await</span> supatype.functions.invoke(<span class="s">"hello"</span>, { body: { name: <span class="s">"Alex"</span> } })
+<span class="k">if</span> (fnError) console.error(fnError.code, fnError.message)
+console.log(reply)</pre></div>
+    <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed.</p>
 
-          <div class="step plain" id="graphql">
-            <div>
-              <h3>GraphQL</h3>
-              <pre class="code">import type { TableRow } from "./supatype/generated/client"
+    <h2 id="graphql">GraphQL</h2>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"./supatype/generated/client"</span>
 
-type Talk = TableRow&lt;"talk"&gt;
-type TalkPage = { talkCollection: { edges: { node: Pick&lt;Talk, "title" | "abstract"&gt; }[] } }
+<span class="k">type</span> <span class="t">Talk</span> = <span class="t">TableRow</span>&lt;<span class="s">"talk"</span>&gt;
+<span class="k">type</span> <span class="t">TalkPage</span> = { talkCollection: { edges: { node: <span class="t">Pick</span>&lt;<span class="t">Talk</span>, <span class="s">"title"</span> | <span class="s">"abstract"</span>&gt; }[] } }
 
-const { data, error } = await supatype.graphql&lt;TalkPage&gt;(`{
+<span class="k">const</span> { data, error } = <span class="k">await</span> supatype.graphql&lt;<span class="t">TalkPage</span>&gt;(<span class="s">`{
   talkCollection(first: 10) { edges { node { title abstract } } }
-}`)
-const firstParagraph = data?.talkCollection.edges[0]?.node.abstract.root.children?.[0]</pre>
-              <p>The query goes to <code>/graphql/v1</code> as the signed-in user, under the same access rules as REST. Pass variables as the second argument, and <code>{ idempotent: true }</code> as the third to retry a read on a transient failure.</p>
-              <p>Rich text, blocks and json fields come back as objects and arrays, not strings. pg_graphql types every json and jsonb column with its <code>JSON</code> scalar and sends it as a JSON-encoded string, so the client reads the schema once per role, finds each field of that type in your query, and decodes it. Aliases, named and inline fragments, nested relations and lists all decode. A field the client cannot place stays exactly as returned: one added since the schema was read (it reads the schema again on the next call), a document with more than one operation, or a schema it could not read.</p>
-              <p>The type argument names the answer's shape and is not checked at runtime. Build it from the generated <code>TableRow</code> types so <code>abstract</code> is typed as the rich text document it now is. Variables you send are not encoded: a json argument still takes a string.</p>
-              <p>Using another GraphQL client? <code>readGraphqlSchema</code> reads the <code>data</code> of an introspection answer to <code>GRAPHQL_SCHEMA_QUERY</code>, and <code>decodeGraphqlJsonFields(query, data, schema)</code> decodes an answer the same way.</p>
-            </div>
-          </div>
+}`</span>)
+<span class="k">const</span> firstParagraph = data?.talkCollection.edges[0]?.node.abstract.root.children?.[0]</pre></div>
+    <p>The query goes to <code>/graphql/v1</code> as the signed-in user, under the same access rules as REST. Pass variables as the second argument, and <code>{ idempotent: true }</code> as the third to retry a read on a transient failure.</p>
+    <p>Rich text, blocks and json fields come back as objects and arrays, not strings. pg_graphql types every json and jsonb column with its <code>JSON</code> scalar and sends it as a JSON-encoded string, so the client reads the schema once per role, finds each field of that type in your query, and decodes it. Aliases, named and inline fragments, nested relations and lists all decode. A field the client cannot place stays exactly as returned: one added since the schema was read (it reads the schema again on the next call), a document with more than one operation, or a schema it could not read.</p>
+    <p>The type argument names the answer's shape and is not checked at runtime. Build it from the generated <code>TableRow</code> types so <code>abstract</code> is typed as the rich text document it now is. Variables you send are not encoded: a json argument still takes a string.</p>
+    <p>Using another GraphQL client? <code>readGraphqlSchema</code> reads the <code>data</code> of an introspection answer to <code>GRAPHQL_SCHEMA_QUERY</code>, and <code>decodeGraphqlJsonFields(query, data, schema)</code> decodes an answer the same way.</p>
 
-          <div class="step plain" id="errors">
-            <div>
-              <h3>Errors</h3>
-              <p>Queries, <code>rpc</code>, <code>functions.invoke</code>, auth and most storage calls return <code>{ data, error }</code>. Check <code>error</code> before using <code>data</code>.</p>
-              <p><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>. Do not test it with <code>instanceof</code>.</p>
-              <p>An insert an access rule refuses returns code <code>42501</code>. An update or delete that the rules hide matches no rows and returns no error. <code>single()</code> with no row returns <code>PGRST116</code>.</p>
-              <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code such as <code>NETWORK_TIMEOUT</code>. Auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail.</p>
-            </div>
-          </div>
-
-        </article>
-      </div>
-
+    <h2 id="errors">Errors</h2>
+    <p>Queries, <code>rpc</code>, <code>functions.invoke</code>, auth and most storage calls return <code>{ data, error }</code>. Check <code>error</code> before using <code>data</code>.</p>
+    <p><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>. Do not test it with <code>instanceof</code>.</p>
+    <p>An insert an access rule refuses returns code <code>42501</code>. An update or delete that the rules hide matches no rows and returns no error. <code>single()</code> with no row returns <code>PGRST116</code>.</p>
+    <div class="callout warn">
+      <span class="callout-label">NETWORK FAILURES</span>
+      <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code such as <code>NETWORK_TIMEOUT</code>. Auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail.</p>
     </div>
-  </section>
 
-</main>
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/schema.html"><small>PREVIOUS</small><span>Schema</span></a>
+      <a href="/docs/seeding.html" class="next"><small>NEXT</small><span>Seeding</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#setup">Create the client</a>
+    <a href="#types">Generated types</a>
+    <a href="#read">Read rows</a>
+    <a href="#filters">Filters</a>
+    <a href="#write">Insert, update, delete</a>
+    <a href="#drafts">Drafts and publishing</a>
+    <a href="#auth">Auth</a>
+    <a href="#storage">Storage</a>
+    <a href="#realtime">Realtime</a>
+    <a href="#functions">Functions</a>
+    <a href="#graphql">GraphQL</a>
+    <a href="#errors">Errors</a>
+  </nav>
+</div>
 
 <footer class="site-footer">
-  <div class="wrap">
-    <div class="footer-brand">
-      <img src="/supatype.svg" alt="Supatype" width="108" height="20" />
-      <p>Zero drift. One set of types, database to component.</p>
-      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></p>
-      <p class="mono">Active development</p>
-    </div>
-    <div class="footer-links">
-      <div class="footer-col">
-        <span class="head">Docs</span>
-        <a href="/#local-dev">Quick start</a>
-        <a href="/docs/#local-dev">Local development</a>
-        <a href="/docs/schema.html">Schema</a>
-        <a href="/docs/client.html">Client</a>
-        <a href="/docs/seeding.html">Seeding</a>
-        <a href="/docs/studio-roles.html">Studio roles</a>
-        <a href="/docs/#self-host">Self-hosting</a>
-        <a href="/docs/#deploy-changes">Deploy changes</a>
-        <a href="/docs/#upgrading">Upgrading</a>
-        <a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a>
-      </div>
-      <div class="footer-col">
-        <span class="head">Community</span>
-        <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a>
-        <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener">Agent plugins</a>
-        <a href="/llms.txt">llms.txt</a>
-      </div>
-    </div>
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></span>
   </div>
 </footer>
 

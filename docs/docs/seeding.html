@@ -13,18 +13,14 @@
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Geist+Mono:wght@400;600&family=Silkscreen&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/site.css" />
 </head>
-<body>
-
-<div class="status">
-  <strong>Active development.</strong> Supatype is pre-1.0: it runs, but APIs and config may change between releases.
-</div>
+<body class="docs-page">
 
 <header class="site-header">
-  <nav>
-    <a href="/" class="logo"><img src="/supatype.svg" alt="Supatype" width="119" height="22" /></a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
     <div class="nav-links">
       <a href="/#how-it-works">How it works</a>
       <a href="/docs/" aria-current="page">Docs</a>
@@ -32,276 +28,233 @@
       <a href="/deploy-vm-github-actions.html">Guides</a>
     </div>
     <div class="nav-end">
-      <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener" class="hide-sm">Discord</a>
-      <a href="https://github.com/supatype/supatype" target="_blank" rel="noopener" class="btn btn-primary btn-sm">GitHub</a>
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
     </div>
   </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
 </header>
 
-<main>
+<div class="docs">
 
-  <section class="page-head">
-    <div class="wrap">
-      <p class="crumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Seeding</p>
-      <h1>Seeding</h1>
-      <p>
-        A seed file describes the rows you want. Supatype checks it against your schema, orders the writes by foreign key and applies them in one transaction.
-      </p>
-    </div>
-  </section>
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Seeding</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
 
-  <section class="section" id="docs">
-    <div class="wrap docs">
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/seeding.html" aria-current="page">Seeding</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
 
-      <aside class="docs-nav" aria-label="Documentation">
-        <p class="group">On this page</p>
-        <ul>
-          <li><a href="#files">Seed files</a></li>
-          <li><a href="#builder">The builder</a></li>
-          <li><a href="#upsert">Create and upsert</a></li>
-          <li><a href="#relations">Relations</a></li>
-          <li><a href="#children">Nested children</a></li>
-          <li><a href="#values">Rich text and defaults</a></li>
-          <li><a href="#users">Sign-in users</a></li>
-          <li><a href="#junction">Many-to-many rows</a></li>
-          <li><a href="#run">Running seeds</a></li>
-        </ul>
-        <p class="group">Get started</p>
-        <ul>
-          <li><a href="/docs/#local-dev">Local development</a></li>
-          <li><a href="/docs/#self-host">Self-hosting</a></li>
-        </ul>
-        <p class="group">Build</p>
-        <ul>
-          <li><a href="/docs/schema.html">Schema</a></li>
-          <li><a href="/docs/client.html">Client</a></li>
-          <li><a href="/docs/seeding.html" aria-current="page">Seeding</a></li>
-          <li><a href="/docs/studio-roles.html">Studio roles</a></li>
-        </ul>
-        <p class="group">Operate</p>
-        <ul>
-          <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
-          <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
-        </ul>
-        <p class="group">Guides</p>
-        <ul>
-          <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
-        </ul>
-      </aside>
+  <main class="doc">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Seeding</nav>
+    <h1>Seeding</h1>
+    <p class="intro">A seed file describes the rows you want. Supatype checks it against your schema, orders the writes by foreign key and applies them in one transaction.</p>
+    <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
 
-      <div>
-        <article class="doc">
-          <div class="step plain" id="files">
-            <div>
-              <h3>Seed files</h3>
-              <p>Put seed files in <code>seeds/</code>. They run in alphabetical order, so name them <code>01-authors.ts</code>, <code>02-posts.ts</code>. Without a <code>seeds/</code> folder, <code>seed.ts</code> at the project root runs instead.</p>
-              <p>Each file exports a default function. The function does not connect or await anything. It records the writes, and the engine applies them.</p>
-              <pre class="code">import type { SeedContext } from "@supatype/cli/seed"
+    <h2 id="files">Seed files</h2>
+    <p>Put seed files in <code>seeds/</code>. They run in alphabetical order, so name them <code>01-authors.ts</code>, <code>02-posts.ts</code>. Without a <code>seeds/</code> folder, <code>seed.ts</code> at the project root runs instead.</p>
+    <p>Each file exports a default function. The function does not connect or await anything. It records the writes, and the engine applies them.</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/01-blog.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import type</span> { <span class="t">SeedContext</span> } <span class="k">from</span> <span class="s">"@supatype/cli/seed"</span>
 
 <span class="c">// Sign-in users are not seeded. Create them first, then use their ids:</span>
 <span class="c">//   supatype admin create-user --email alex@example.com --role editor</span>
 <span class="c">//   supatype admin list-users</span>
-const ALEX = "00000000-0000-4000-8000-0000000000a1"
+<span class="k">const</span> ALEX = <span class="s">"00000000-0000-4000-8000-0000000000a1"</span>
 
-export default async function seed({ db, expr, log }: SeedContext) {
-  log("seeding authors, tags and posts")
+<span class="k">export default async function</span> seed({ db, expr, log }: <span class="t">SeedContext</span>) {
+  log(<span class="s">"seeding authors, tags and posts"</span>)
 
   db.author.upsert({
     where: { id: ALEX },
-    data: { id: ALEX, name: "Alex Rivera" },
+    data: { id: ALEX, name: <span class="s">"Alex Rivera"</span> },
   })
 
-  db.tag.upsert({ where: { name: "news" }, data: { name: "news" } })
+  db.tag.upsert({ where: { name: <span class="s">"news"</span> }, data: { name: <span class="s">"news"</span> } })
 
   db.post.upsert({
-    where: { slug: "hello-world" },
+    where: { slug: <span class="s">"hello-world"</span> },
     data: {
-      title: "Hello world",
-      slug: "hello-world",
-      body: "Our first post.",
-      kind: "news",
+      title: <span class="s">"Hello world"</span>,
+      slug: <span class="s">"hello-world"</span>,
+      body: <span class="s">"Our first post."</span>,
+      kind: <span class="s">"news"</span>,
       views: expr.default(),
       published_at: expr.ago({ days: 1 }),
       author: { connect: { id: ALEX } },
-      comments: { create: [{ user_id: ALEX, body: "First!" }] },
+      comments: { create: [{ user_id: ALEX, body: <span class="s">"First!"</span> }] },
     },
   })
-}</pre>
-              <p>This uses the schema from the <a href="/docs/schema.html#relations">Schema</a> page.</p>
-            </div>
-          </div>
+}</pre></div>
+    <p>This uses the schema from the <a href="/docs/schema.html#relations">Schema</a> page.</p>
 
-          <div class="step plain" id="builder">
-            <div>
-              <h3>The builder</h3>
-              <p><code>db</code> has one property per table, typed from your schema. A wrong column or a missing required field fails to compile.</p>
-              <p>The types come from <code>supatype/generated/seed.ts</code>. <code>supatype generate</code>, <code>supatype dev</code> and <code>supatype push</code> write it. It needs no database, so it is gitignored and rebuilt on install.</p>
-              <p>The context also has <code>expr</code> (values the database computes), <code>log</code> (print a line) and <code>environment</code> (the <code>--environment</code> name, if given).</p>
-            </div>
-          </div>
+    <h2 id="builder">The builder</h2>
+    <p><code>db</code> has one property per table, typed from your schema. A wrong column or a missing required field fails to compile.</p>
+    <p>The types come from <code>supatype/generated/seed.ts</code>. <code>supatype generate</code>, <code>supatype dev</code> and <code>supatype push</code> write it. It needs no database, so it is gitignored and rebuilt on install.</p>
+    <p>The context also has <code>expr</code> (values the database computes), <code>log</code> (print a line) and <code>environment</code> (the <code>--environment</code> name, if given).</p>
 
-          <div class="step plain" id="upsert">
-            <div>
-              <h3>Create and upsert</h3>
-              <div class="table-wrap">
-              <table>
-              <thead><tr><th>Call</th><th>Does</th></tr></thead>
-              <tbody>
-              <tr><td><code>db.tag.create(data)</code></td><td>Inserts one row. Running the seed again inserts it again</td></tr>
-              <tr><td><code>db.tag.createMany(rows)</code></td><td>Inserts many rows in one statement</td></tr>
-              <tr><td><code>db.tag.upsert({ where, data })</code></td><td>Inserts the row, or updates the row <code>where</code> names</td></tr>
-              </tbody>
-              </table>
-              </div>
-              <p>Use <code>upsert</code> for fixtures. Seeds get run again, and <code>upsert</code> makes that safe. <code>where</code> takes only columns that name one row: the primary key or a <code>Unique&lt;&gt;</code> column. A model with neither cannot be upserted, so give it a unique key.</p>
-              <p>Fields you leave out of <code>data</code> keep their current value when an upsert updates.</p>
-            </div>
-          </div>
+    <h2 id="upsert">Create and upsert</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Call</th><th scope="col">Does</th></tr></thead>
+      <tbody>
+        <tr><td><code>db.tag.create(data)</code></td><td>Inserts one row. Running the seed again inserts it again</td></tr>
+        <tr><td><code>db.tag.createMany(rows)</code></td><td>Inserts many rows in one statement</td></tr>
+        <tr><td><code>db.tag.upsert({ where, data })</code></td><td>Inserts the row, or updates the row <code>where</code> names</td></tr>
+      </tbody>
+    </table></div>
+    <p>Use <code>upsert</code> for fixtures. Seeds get run again, and <code>upsert</code> makes that safe. <code>where</code> takes only columns that name one row: the primary key or a <code>Unique&lt;&gt;</code> column. A model with neither cannot be upserted, so give it a unique key.</p>
+    <p>Fields you leave out of <code>data</code> keep their current value when an upsert updates.</p>
 
-          <div class="step plain" id="relations">
-            <div>
-              <h3>Relations</h3>
-              <p>Set a foreign key by naming the related row by any unique key:</p>
-              <pre class="code">db.post.upsert({
-  where: { slug: "second-post" },
+    <h2 id="relations">Relations</h2>
+    <p>Set a foreign key by naming the related row by any unique key:</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/02-posts.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>db.post.upsert({
+  where: { slug: <span class="s">"second-post"</span> },
   data: {
-    title: "Second post",
-    slug: "second-post",
-    body: "More news.",
-    kind: "news",
+    title: <span class="s">"Second post"</span>,
+    slug: <span class="s">"second-post"</span>,
+    body: <span class="s">"More news."</span>,
+    kind: <span class="s">"news"</span>,
     author: { connect: { id: ALEX } },
   },
-})</pre>
-              <p><code>create</code> and <code>upsert</code> return a reference you can use in later writes, such as <code>post.id</code>. It is not a value read from the database. The engine fills it in when it applies the seed.</p>
-              <pre class="code">const tag = db.tag.create({ name: "release" })
-log(`created a tag, referenced as ${String(tag.id)}`)</pre>
-            </div>
-          </div>
+})</pre></div>
+    <p><code>create</code> and <code>upsert</code> return a reference you can use in later writes, such as <code>post.id</code>. It is not a value read from the database. The engine fills it in when it applies the seed.</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/02-posts.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> tag = db.tag.create({ name: <span class="s">"release"</span> })
+log(<span class="s">`created a tag, referenced as ${String(tag.id)}`</span>)</pre></div>
 
-          <div class="step plain" id="children">
-            <div>
-              <h3>Nested children</h3>
-              <p>Write a row's children inside it with <code>create</code> or <code>createMany</code>. Their foreign keys are filled in for you.</p>
-              <p>Under an <code>upsert</code>, a child is written only if the parent has no child with the same values. So:</p>
-              <ul>
-              <li>Running the seed again adds nothing.</li>
-              <li>A child whose values you changed is added beside the old one. The old one stays.</li>
-              <li>A child that matches is not updated. To change one, upsert it on its own model by a unique key.</li>
-              <li>Values the database computes, fields left out and <code>expr.default()</code> are not compared.</li>
-              </ul>
-            </div>
-          </div>
+    <h2 id="children">Nested children</h2>
+    <p>Write a row's children inside it with <code>create</code> or <code>createMany</code>. Their foreign keys are filled in for you.</p>
+    <p>Under an <code>upsert</code>, a child is written only if the parent has no child with the same values. So:</p>
+    <ul>
+      <li>Running the seed again adds nothing.</li>
+      <li>A child whose values you changed is added beside the old one. The old one stays.</li>
+      <li>A child that matches is not updated. To change one, upsert it on its own model by a unique key.</li>
+      <li>Values the database computes, fields left out and <code>expr.default()</code> are not compared.</li>
+    </ul>
 
-          <div class="step plain" id="values">
-            <div>
-              <h3>Rich text and defaults</h3>
-              <p>A <code>RichText</code> field takes a plain string. It becomes a one-paragraph document. Rich text inside a block is not converted, so write the full document there.</p>
-              <p><code>expr</code> gives values the database works out when the seed runs:</p>
-              <pre class="code">db.post.upsert({
-  where: { slug: "launch-day" },
+    <h2 id="values">Rich text and defaults</h2>
+    <p>A <code>RichText</code> field takes a plain string. It becomes a one-paragraph document. Rich text inside a block is not converted, so write the full document there.</p>
+    <p><code>expr</code> gives values the database works out when the seed runs:</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/02-posts.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>db.post.upsert({
+  where: { slug: <span class="s">"launch-day"</span> },
   data: {
-    title: "Launch day",
-    slug: "launch-day",
-    body: "We are live.",
-    kind: "news",
+    title: <span class="s">"Launch day"</span>,
+    slug: <span class="s">"launch-day"</span>,
+    body: <span class="s">"We are live."</span>,
+    kind: <span class="s">"news"</span>,
     views: expr.default(),
     published_at: expr.now({ days: 7 }),
     author: { connect: { id: ALEX } },
   },
-})</pre>
-              <p><code>expr.now()</code>, <code>expr.ago({ days: 1 })</code> and <code>expr.startOf("day", { days: 30, hours: 9 })</code> are times. They only fit date fields.</p>
-              <p><code>expr.default()</code> sets the column's own default. It is sent as <code>{ "$default": true }</code>. Leaving a field out of an upsert keeps the old value. <code>expr.default()</code> resets it. It only fits columns that have a default.</p>
-              <p>Leave <code>id</code> out and the database makes one.</p>
-            </div>
-          </div>
+})</pre></div>
+    <p><code>expr.now()</code>, <code>expr.ago({ days: 1 })</code> and <code>expr.startOf("day", { days: 30, hours: 9 })</code> are times. They only fit date fields.</p>
+    <p><code>expr.default()</code> sets the column's own default. It is sent as <code>{ "$default": true }</code>. Leaving a field out of an upsert keeps the old value. <code>expr.default()</code> resets it. It only fits columns that have a default.</p>
+    <p>Leave <code>id</code> out and the database makes one.</p>
 
-          <div class="step plain" id="users">
-            <div>
-              <h3>Sign-in users</h3>
-              <p>A seed cannot create sign-in users. Users live in the auth schema, which the seed builder does not reach. Create them first, then put their ids in the seed:</p>
-              <pre class="code"><span class="p">$</span> supatype admin create-user --email alex@example.com --role editor
-<span class="p">$</span> supatype admin list-users</pre>
-              <p><code>create-user</code> also gives the user a Studio role (<code>admin</code> if you do not pass <code>--role</code>). <code>list-users</code> prints each id.</p>
-              <p>For app users with no Studio access, sign them up through the client's <code>auth.signUp</code>, or create them in Studio under Authentication > Users with Studio access set to "No access".</p>
-              <p>A <code>SupatypeAuthUserId</code> field with <code>onDelete</code> has a foreign key to the user, so the user must exist before the seed runs.</p>
-            </div>
-          </div>
+    <h2 id="users">Sign-in users</h2>
+    <p>A seed cannot create sign-in users. Users live in the auth schema, which the seed builder does not reach. Create them first, then put their ids in the seed:</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype admin create-user --email alex@example.com --role editor
+<span class="pr">$</span> supatype admin list-users</pre></div>
+    <p><code>create-user</code> also gives the user a Studio role (<code>admin</code> if you do not pass <code>--role</code>). <code>list-users</code> prints each id.</p>
+    <p>For app users with no Studio access, sign them up through the client's <code>auth.signUp</code>, or create them in Studio under Authentication &gt; Users with Studio access set to "No access".</p>
+    <p>A <code>SupatypeAuthUserId</code> field with <code>onDelete</code> has a foreign key to the user, so the user must exist before the seed runs.</p>
 
-          <div class="step plain" id="junction">
-            <div>
-              <h3>Many-to-many rows</h3>
-              <p>Many-to-many relations have no nested write. The rows live in the junction table, which the builder does not list. Write them with <code>db.$sql</code>, which runs in the same transaction:</p>
-              <pre class="code">db.$sql(
-  `insert into post_tag (post_id, tag_id)
+    <h2 id="junction">Many-to-many rows</h2>
+    <p>Many-to-many relations have no nested write. The rows live in the junction table, which the builder does not list. Write them with <code>db.$sql</code>, which runs in the same transaction:</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/03-tags.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>db.$sql(
+  <span class="s">`insert into post_tag (post_id, tag_id)
    select p.id, t.id from post p, tag t
    where p.slug = $1 and t.name = $2
-   on conflict do nothing`,
-  ["hello-world", "news"],
-)</pre>
-              <p>The statement runs at its position in the file, after every write above it, so it can read the rows those writes made.</p>
-              <p>Each param binds by its JSON type: a string as <code>text</code>, a whole number as <code>bigint</code>, any other number as <code>double precision</code>, a boolean as <code>boolean</code>, and an object or array as <code>jsonb</code>. A column of another type needs a cast on its placeholder, such as <code>$1::uuid</code>. That includes an id taken from an earlier write, such as <code>post.id</code>, which binds as text:</p>
-              <pre class="code">const post = db.post.create({ slug: "hello-world", title: "Hello" })
+   on conflict do nothing`</span>,
+  [<span class="s">"hello-world"</span>, <span class="s">"news"</span>],
+)</pre></div>
+    <p>The statement runs at its position in the file, after every write above it, so it can read the rows those writes made.</p>
+    <p>Each param binds by its JSON type: a string as <code>text</code>, a whole number as <code>bigint</code>, any other number as <code>double precision</code>, a boolean as <code>boolean</code>, and an object or array as <code>jsonb</code>. A column of another type needs a cast on its placeholder, such as <code>$1::uuid</code>. That includes an id taken from an earlier write, such as <code>post.id</code>, which binds as text:</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/03-tags.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> post = db.post.create({ slug: <span class="s">"hello-world"</span>, title: <span class="s">"Hello"</span> })
 db.$sql(
-  `insert into post_tag (post_id, tag_id)
+  <span class="s">`insert into post_tag (post_id, tag_id)
    select $1::uuid, t.id from tag t where t.name = $2
-   on conflict do nothing`,
-  [post.id, "news"],
-)</pre>
-              <p>Pass exactly one param for each of <code>$1</code> to <code>$n</code> in the statement. A count that does not match is refused before anything runs. A param is a value, so write expressions such as <code>now()</code> in the statement itself.</p>
-            </div>
-          </div>
-
-          <div class="step plain" id="run">
-            <div>
-              <h3>Running seeds</h3>
-              <pre class="code"><span class="p">$</span> supatype seed                    # every file in seeds/
-<span class="p">$</span> supatype seed seeds/02-posts.ts  # one file
-<span class="p">$</span> supatype seed --atomic           # all files in one transaction
-<span class="p">$</span> supatype seed --status           # what ran, when, and what it wrote</pre>
-              <p>Each file is one transaction. Without <code>--atomic</code>, a failure in the third file leaves the first two applied, and the report says so.</p>
-              <p>Errors name your schema, such as <code>Tag.name is already taken</code>, with the file and position. Exit code <code>1</code> means a seed failed. Exit code <code>2</code> means the run could not start.</p>
-              <p>A seed writes the model's own table, so rows on a drafts model are seeded as published.</p>
-            </div>
-          </div>
-
-        </article>
-      </div>
-
+   on conflict do nothing`</span>,
+  [post.id, <span class="s">"news"</span>],
+)</pre></div>
+    <div class="callout warn">
+      <span class="callout-label">ONE PARAM PER PLACEHOLDER</span>
+      <p>Pass exactly one param for each of <code>$1</code> to <code>$n</code> in the statement. A count that does not match is refused before anything runs. A param is a value, so write expressions such as <code>now()</code> in the statement itself.</p>
     </div>
-  </section>
 
-</main>
+    <h2 id="run">Running seeds</h2>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype seed                    <span class="c"># every file in seeds/</span>
+<span class="pr">$</span> supatype seed seeds/02-posts.ts  <span class="c"># one file</span>
+<span class="pr">$</span> supatype seed --atomic           <span class="c"># all files in one transaction</span>
+<span class="pr">$</span> supatype seed --status           <span class="c"># what ran, when, and what it wrote</span></pre></div>
+    <p>Each file is one transaction. Without <code>--atomic</code>, a failure in the third file leaves the first two applied, and the report says so.</p>
+    <p>Errors name your schema, such as <code>Tag.name is already taken</code>, with the file and position. Exit code <code>1</code> means a seed failed. Exit code <code>2</code> means the run could not start.</p>
+    <p>A seed writes the model's own table, so rows on a drafts model are seeded as published.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/client.html"><small>PREVIOUS</small><span>Client</span></a>
+      <a href="/docs/studio-roles.html" class="next"><small>NEXT</small><span>Studio roles</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#files">Seed files</a>
+    <a href="#builder">The builder</a>
+    <a href="#upsert">Create and upsert</a>
+    <a href="#relations">Relations</a>
+    <a href="#children">Nested children</a>
+    <a href="#values">Rich text and defaults</a>
+    <a href="#users">Sign-in users</a>
+    <a href="#junction">Many-to-many rows</a>
+    <a href="#run">Running seeds</a>
+  </nav>
+</div>
 
 <footer class="site-footer">
-  <div class="wrap">
-    <div class="footer-brand">
-      <img src="/supatype.svg" alt="Supatype" width="108" height="20" />
-      <p>Zero drift. One set of types, database to component.</p>
-      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></p>
-      <p class="mono">Active development</p>
-    </div>
-    <div class="footer-links">
-      <div class="footer-col">
-        <span class="head">Docs</span>
-        <a href="/#local-dev">Quick start</a>
-        <a href="/docs/#local-dev">Local development</a>
-        <a href="/docs/schema.html">Schema</a>
-        <a href="/docs/client.html">Client</a>
-        <a href="/docs/seeding.html">Seeding</a>
-        <a href="/docs/studio-roles.html">Studio roles</a>
-        <a href="/docs/#self-host">Self-hosting</a>
-        <a href="/docs/#deploy-changes">Deploy changes</a>
-        <a href="/docs/#upgrading">Upgrading</a>
-        <a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a>
-      </div>
-      <div class="footer-col">
-        <span class="head">Community</span>
-        <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a>
-        <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener">Agent plugins</a>
-        <a href="/llms.txt">llms.txt</a>
-      </div>
-    </div>
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></span>
   </div>
 </footer>
 

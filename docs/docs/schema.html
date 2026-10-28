@@ -13,18 +13,14 @@
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Geist+Mono:wght@400;600&family=Silkscreen&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/site.css" />
 </head>
-<body>
-
-<div class="status">
-  <strong>Active development.</strong> Supatype is pre-1.0: it runs, but APIs and config may change between releases.
-</div>
+<body class="docs-page">
 
 <header class="site-header">
-  <nav>
-    <a href="/" class="logo"><img src="/supatype.svg" alt="Supatype" width="119" height="22" /></a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
     <div class="nav-links">
       <a href="/#how-it-works">How it works</a>
       <a href="/docs/" aria-current="page">Docs</a>
@@ -32,362 +28,300 @@
       <a href="/deploy-vm-github-actions.html">Guides</a>
     </div>
     <div class="nav-end">
-      <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener" class="hide-sm">Discord</a>
-      <a href="https://github.com/supatype/supatype" target="_blank" rel="noopener" class="btn btn-primary btn-sm">GitHub</a>
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
     </div>
   </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
 </header>
 
-<main>
+<div class="docs">
 
-  <section class="page-head">
-    <div class="wrap">
-      <p class="crumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Schema</p>
-      <h1>Schema</h1>
-      <p>
-        Your schema is a set of TypeScript types in <code>schema/index.ts</code>. Supatype builds the tables, access rules, APIs and the typed client from it.
-      </p>
-    </div>
-  </section>
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Schema</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
 
-  <section class="section" id="docs">
-    <div class="wrap docs">
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html" aria-current="page">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
 
-      <aside class="docs-nav" aria-label="Documentation">
-        <p class="group">On this page</p>
-        <ul>
-          <li><a href="#models">Models</a></li>
-          <li><a href="#fields">Field types</a></li>
-          <li><a href="#relations">Relations</a></li>
-          <li><a href="#access">Access rules</a></li>
-          <li><a href="#field-rules">Field rules</a></li>
-          <li><a href="#owners">Auth user ids</a></li>
-          <li><a href="#drafts">Drafts and versions</a></li>
-          <li><a href="#content">Slugs, rich text, blocks</a></li>
-          <li><a href="#buckets">Storage buckets</a></li>
-          <li><a href="#renames">Renames</a></li>
-          <li><a href="#push">What a push refuses</a></li>
-        </ul>
-        <p class="group">Get started</p>
-        <ul>
-          <li><a href="/docs/#local-dev">Local development</a></li>
-          <li><a href="/docs/#self-host">Self-hosting</a></li>
-        </ul>
-        <p class="group">Build</p>
-        <ul>
-          <li><a href="/docs/schema.html" aria-current="page">Schema</a></li>
-          <li><a href="/docs/client.html">Client</a></li>
-          <li><a href="/docs/seeding.html">Seeding</a></li>
-          <li><a href="/docs/studio-roles.html">Studio roles</a></li>
-        </ul>
-        <p class="group">Operate</p>
-        <ul>
-          <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
-          <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
-        </ul>
-        <p class="group">Guides</p>
-        <ul>
-          <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
-        </ul>
-      </aside>
+  <main class="doc">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Schema</nav>
+    <h1>Schema</h1>
+    <p class="intro">Your schema is a set of TypeScript types in <code>schema/index.ts</code>. Supatype builds the tables, access rules, APIs and the typed client from it.</p>
+    <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
 
-      <div>
-        <article class="doc">
-          <div class="step plain" id="models">
-            <div>
-              <h3>Models</h3>
-              <p>Each exported <code>Model&lt;&gt;</code> type is a table. Import the types from <code>@supatype/types</code>.</p>
-              <pre class="code">import type { Model, UUID, Optional, Public, LoggedIn } from "@supatype/types"
+    <h2 id="models">Models</h2>
+    <p>Each exported <code>Model&lt;&gt;</code> type is a table. Import the types from <code>@supatype/types</code>.</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> { <span class="t">Model</span>, <span class="t">UUID</span>, <span class="t">Optional</span>, <span class="t">Public</span>, <span class="t">LoggedIn</span> } <span class="k">from</span> <span class="s">"@supatype/types"</span>
 
-export type Note = Model&lt;{
-  id: UUID
+<span class="k">export</span> <span class="k">type</span> <span class="t">Note</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
   title: string
   done: boolean
-  due: Optional&lt;string&gt;
+  due: <span class="t">Optional</span>&lt;string&gt;
 }, {
-  access: { read: Public; create: LoggedIn; update: LoggedIn; delete: LoggedIn }
-}&gt;</pre>
-              <p>The table name is the type name in snake case: <code>Note</code> becomes <code>note</code>, <code>BlogPost</code> becomes <code>blog_post</code>. Set <code>tableName</code> in the second argument to choose another.</p>
-              <p>An <code>id: UUID</code> field becomes the primary key, and the database fills it in.</p>
-              <p>The second argument also takes <code>label</code> and <code>labelPlural</code> (names in Studio), <code>indexes</code>, <code>versions</code> and <code>singleton: true</code> (one row, such as site settings).</p>
-              <p><code>supatype dev</code> applies each save. <code>supatype push</code> applies the schema to another database. <code>supatype diff</code> shows the change without applying it.</p>
-            </div>
-          </div>
+  access: { read: <span class="t">Public</span>; create: <span class="t">LoggedIn</span>; update: <span class="t">LoggedIn</span>; delete: <span class="t">LoggedIn</span> }
+}&gt;</pre></div>
+    <p>The table name is the type name in snake case: <code>Note</code> becomes <code>note</code>, <code>BlogPost</code> becomes <code>blog_post</code>. Set <code>tableName</code> in the second argument to choose another.</p>
+    <p>An <code>id: UUID</code> field becomes the primary key, and the database fills it in.</p>
+    <p>The second argument also takes <code>label</code> and <code>labelPlural</code> (names in Studio), <code>indexes</code>, <code>versions</code> and <code>singleton: true</code> (one row, such as site settings).</p>
+    <p><code>supatype dev</code> applies each save. <code>supatype push</code> applies the schema to another database. <code>supatype diff</code> shows the change without applying it.</p>
 
-          <div class="step plain" id="fields">
-            <div>
-              <h3>Field types</h3>
-              <p>Every field is required (<code>NOT NULL</code>) unless you wrap it in <code>Optional&lt;&gt;</code>. Use <code>Optional&lt;&gt;</code>, not <code>?</code>.</p>
-              <div class="table-wrap">
-              <table>
-              <thead><tr><th>Write</th><th>Stores</th></tr></thead>
-              <tbody>
-              <tr><td><code>string</code></td><td>text</td></tr>
-              <tr><td><code>number</code>, <code>Float</code></td><td>a floating point number</td></tr>
-              <tr><td><code>Int</code>, <code>SmallInt</code>, <code>BigInt</code>, <code>Decimal&lt;10, 2&gt;</code>, <code>Money</code></td><td>exact numbers</td></tr>
-              <tr><td><code>boolean</code></td><td>true or false</td></tr>
-              <tr><td><code>Timestamp</code>, <code>DateTime</code>, <code>DateOnly</code></td><td>a time with zone, or a date</td></tr>
-              <tr><td><code>UUID</code>, <code>Email</code>, <code>URL</code>, <code>Color</code>, <code>PhoneNumber</code></td><td>text with a known format</td></tr>
-              <tr><td><code>"news" | "guide"</code></td><td>an enum of those values</td></tr>
-              <tr><td><code>string[]</code></td><td>an array</td></tr>
-              <tr><td><code>JSON&lt;T&gt;</code></td><td>JSONB, typed as <code>T</code> in the client</td></tr>
-              <tr><td><code>RichText</code>, <code>Blocks&lt;T&gt;</code>, <code>Slug&lt;"title"&gt;</code></td><td>content fields, see <a href="#content">below</a></td></tr>
-              <tr><td><code>ImageAsset&lt;Bucket&gt;</code>, <code>FileAsset</code></td><td>a file in a storage bucket</td></tr>
-              <tr><td><code>SupatypeAuthUserId</code></td><td>the id of a sign-in user, see <a href="#owners">below</a></td></tr>
-              </tbody>
-              </table>
-              </div>
-              <p>Wrap a field to add more: <code>Unique&lt;T&gt;</code>, <code>Indexed&lt;T&gt;</code>, <code>Default&lt;T, value&gt;</code>, <code>MaxLength&lt;T, n&gt;</code>, <code>Between&lt;T, min, max&gt;</code>.</p>
-            </div>
-          </div>
+    <h2 id="fields">Field types</h2>
+    <p>Every field is required (<code>NOT NULL</code>) unless you wrap it in <code>Optional&lt;&gt;</code>. Use <code>Optional&lt;&gt;</code>, not <code>?</code>.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Write</th><th scope="col">Stores</th></tr></thead>
+      <tbody>
+        <tr><td><code>string</code></td><td>text</td></tr>
+        <tr><td><code>number</code>, <code>Float</code></td><td>a floating point number</td></tr>
+        <tr><td><code>Int</code>, <code>SmallInt</code>, <code>BigInt</code>, <code>Decimal&lt;10, 2&gt;</code>, <code>Money</code></td><td>exact numbers</td></tr>
+        <tr><td><code>boolean</code></td><td>true or false</td></tr>
+        <tr><td><code>Timestamp</code>, <code>DateTime</code>, <code>DateOnly</code></td><td>a time with zone, or a date</td></tr>
+        <tr><td><code>UUID</code>, <code>Email</code>, <code>URL</code>, <code>Color</code>, <code>PhoneNumber</code></td><td>text with a known format</td></tr>
+        <tr><td><code>"news" | "guide"</code></td><td>an enum of those values</td></tr>
+        <tr><td><code>string[]</code></td><td>an array</td></tr>
+        <tr><td><code>JSON&lt;T&gt;</code></td><td>JSONB, typed as <code>T</code> in the client</td></tr>
+        <tr><td><code>RichText</code>, <code>Blocks&lt;T&gt;</code>, <code>Slug&lt;"title"&gt;</code></td><td>content fields, see <a href="#content">below</a></td></tr>
+        <tr><td><code>ImageAsset&lt;Bucket&gt;</code>, <code>FileAsset</code></td><td>a file in a storage bucket</td></tr>
+        <tr><td><code>SupatypeAuthUserId</code></td><td>the id of a sign-in user, see <a href="#owners">below</a></td></tr>
+      </tbody>
+    </table></div>
+    <p>Wrap a field to add more: <code>Unique&lt;T&gt;</code>, <code>Indexed&lt;T&gt;</code>, <code>Default&lt;T, value&gt;</code>, <code>MaxLength&lt;T, n&gt;</code>, <code>Between&lt;T, min, max&gt;</code>.</p>
 
-          <div class="step plain" id="relations">
-            <div>
-              <h3>Relations</h3>
-              <p><code>RelatedTo&lt;Model&gt;</code> adds a foreign key column named after the field plus <code>_id</code>. The field <code>author</code> becomes the column <code>author_id</code>. The column can be null unless you pass <code>{ required: true }</code>.</p>
-              <p><code>onDelete</code> takes <code>"cascade"</code>, <code>"setNull"</code>, <code>"restrict"</code> or <code>"noAction"</code>. It defaults to <code>"restrict"</code>: deleting an author with posts is refused.</p>
-              <p><code>HasMany&lt;Model&gt;</code> and <code>HasOne&lt;Model&gt;</code> are the other side of a <code>RelatedTo</code>. They add no column. They let the client and seeds reach the related rows.</p>
-              <p><code>ManyToMany&lt;Model&gt;</code> makes one junction table for the pair, whichever side declares it. It is named from both tables in alphabetical order, so posts and tags share <code>post_tag</code>. Pass <code>{ through: "name" }</code> to choose the name.</p>
-              <pre class="code">import type {
-  Model, UUID, SupatypeAuthUserId, Timestamp, RichText, Slug, Unique, Optional, Int,
-  RelatedTo, HasMany, ManyToMany, Owner, Role, LoggedIn, Public, Any, Lte, Now,
-  Bucket, BucketPublic, BucketLoggedIn, BucketOwner, ImageAsset, Block, Blocks, Default,
-} from "@supatype/types"
+    <h2 id="relations">Relations</h2>
+    <p><code>RelatedTo&lt;Model&gt;</code> adds a foreign key column named after the field plus <code>_id</code>. The field <code>author</code> becomes the column <code>author_id</code>. The column can be null unless you pass <code>{ required: true }</code>.</p>
+    <p><code>onDelete</code> takes <code>"cascade"</code>, <code>"setNull"</code>, <code>"restrict"</code> or <code>"noAction"</code>. It defaults to <code>"restrict"</code>: deleting an author with posts is refused.</p>
+    <p><code>HasMany&lt;Model&gt;</code> and <code>HasOne&lt;Model&gt;</code> are the other side of a <code>RelatedTo</code>. They add no column. They let the client and seeds reach the related rows.</p>
+    <p><code>ManyToMany&lt;Model&gt;</code> makes one junction table for the pair, whichever side declares it. It is named from both tables in alphabetical order, so posts and tags share <code>post_tag</code>. Pass <code>{ through: "name" }</code> to choose the name.</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> {
+  <span class="t">Model</span>, <span class="t">UUID</span>, <span class="t">SupatypeAuthUserId</span>, <span class="t">Timestamp</span>, <span class="t">RichText</span>, <span class="t">Slug</span>, <span class="t">Unique</span>, <span class="t">Optional</span>, <span class="t">Int</span>,
+  <span class="t">RelatedTo</span>, <span class="t">HasMany</span>, <span class="t">ManyToMany</span>, <span class="t">Owner</span>, <span class="t">Role</span>, <span class="t">LoggedIn</span>, <span class="t">Public</span>, <span class="t">Any</span>, <span class="t">Lte</span>, <span class="t">Now</span>,
+  <span class="t">Bucket</span>, <span class="t">BucketPublic</span>, <span class="t">BucketLoggedIn</span>, <span class="t">BucketOwner</span>, <span class="t">ImageAsset</span>, <span class="t">Block</span>, <span class="t">Blocks</span>, <span class="t">Default</span>,
+} <span class="k">from</span> <span class="s">"@supatype/types"</span>
 
-export type Author = Model&lt;{
-  id: SupatypeAuthUserId
+<span class="k">export</span> <span class="k">type</span> <span class="t">Author</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">SupatypeAuthUserId</span>
   name: string
-  bio: Optional&lt;string&gt;
-  posts: HasMany&lt;Post&gt;
+  bio: <span class="t">Optional</span>&lt;string&gt;
+  posts: <span class="t">HasMany</span>&lt;<span class="t">Post</span>&gt;
 }, {
-  access: { read: Public; create: Owner&lt;"id"&gt;; update: Owner&lt;"id"&gt;; delete: Owner&lt;"id"&gt; }
+  access: { read: <span class="t">Public</span>; create: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;; update: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;; delete: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt; }
 }&gt;
 
-export type Tag = Model&lt;{
-  id: UUID
-  name: Unique&lt;string&gt;
+<span class="k">export</span> <span class="k">type</span> <span class="t">Tag</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
+  name: <span class="t">Unique</span>&lt;string&gt;
 }, {
-  access: { read: Public; create: Role&lt;"admin"&gt;; update: Role&lt;"admin"&gt;; delete: Role&lt;"admin"&gt; }
+  access: { read: <span class="t">Public</span>; create: <span class="t">Role</span>&lt;<span class="s">"admin"</span>&gt;; update: <span class="t">Role</span>&lt;<span class="s">"admin"</span>&gt;; delete: <span class="t">Role</span>&lt;<span class="s">"admin"</span>&gt; }
 }&gt;
 
-export type Post = Model&lt;{
-  id: UUID
+<span class="k">export</span> <span class="k">type</span> <span class="t">Post</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
   title: string
-  slug: Unique&lt;Slug&lt;"title"&gt;&gt;
-  body: RichText
-  sections: Optional&lt;Blocks&lt;HeroBlock | ProseBlock&gt;&gt;
-  kind: "news" | "guide"
-  cover: Optional&lt;ImageAsset&lt;Covers&gt;&gt;
-  author: RelatedTo&lt;Author, { required: true; onDelete: "cascade" }&gt;
-  tags: ManyToMany&lt;Tag&gt;
-  comments: HasMany&lt;Comment&gt;
-  views: Default&lt;Int, 0&gt;
-  published_at: Optional&lt;Timestamp&gt;
+  slug: <span class="t">Unique</span>&lt;<span class="t">Slug</span>&lt;<span class="s">"title"</span>&gt;&gt;
+  body: <span class="t">RichText</span>
+  sections: <span class="t">Optional</span>&lt;<span class="t">Blocks</span>&lt;<span class="t">HeroBlock</span> | <span class="t">ProseBlock</span>&gt;&gt;
+  kind: <span class="s">"news"</span> | <span class="s">"guide"</span>
+  cover: <span class="t">Optional</span>&lt;<span class="t">ImageAsset</span>&lt;<span class="t">Covers</span>&gt;&gt;
+  author: <span class="t">RelatedTo</span>&lt;<span class="t">Author</span>, { required: <span class="k">true</span>; onDelete: <span class="s">"cascade"</span> }&gt;
+  tags: <span class="t">ManyToMany</span>&lt;<span class="t">Tag</span>&gt;
+  comments: <span class="t">HasMany</span>&lt;<span class="t">Comment</span>&gt;
+  views: <span class="t">Default</span>&lt;<span class="t">Int</span>, 0&gt;
+  published_at: <span class="t">Optional</span>&lt;<span class="t">Timestamp</span>&gt;
 }, {
-  versions: { drafts: true }
+  versions: { drafts: <span class="k">true</span> }
   access: {
-    read: Any&lt;[Lte&lt;"published_at", Now&gt;, Owner&lt;"author_id"&gt;]&gt;
-    create: Owner&lt;"author_id"&gt;
-    update: Owner&lt;"author_id"&gt;
-    delete: Any&lt;[Owner&lt;"author_id"&gt;, Role&lt;"admin"&gt;]&gt;
+    read: <span class="t">Any</span>&lt;[<span class="t">Lte</span>&lt;<span class="s">"published_at"</span>, <span class="t">Now</span>&gt;, <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;]&gt;
+    create: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;
+    update: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;
+    delete: <span class="t">Any</span>&lt;[<span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;, <span class="t">Role</span>&lt;<span class="s">"admin"</span>&gt;]&gt;
   }
 }&gt;
 
-export type Comment = Model&lt;{
-  id: UUID
-  post: RelatedTo&lt;Post, { required: true; onDelete: "cascade" }&gt;
-  user_id: SupatypeAuthUserId&lt;{ onDelete: "cascade" }&gt;
+<span class="k">export</span> <span class="k">type</span> <span class="t">Comment</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
+  post: <span class="t">RelatedTo</span>&lt;<span class="t">Post</span>, { required: <span class="k">true</span>; onDelete: <span class="s">"cascade"</span> }&gt;
+  user_id: <span class="t">SupatypeAuthUserId</span>&lt;{ onDelete: <span class="s">"cascade"</span> }&gt;
   body: string
 }, {
-  access: { read: Public; create: Owner&lt;"user_id"&gt;; update: Owner&lt;"user_id"&gt;; delete: Owner&lt;"user_id"&gt; }
-}&gt;</pre>
-              <p>The other pages use this schema in their examples. <code>HeroBlock</code>, <code>ProseBlock</code> and <code>Covers</code> are defined further down.</p>
-            </div>
-          </div>
+  access: { read: <span class="t">Public</span>; create: <span class="t">Owner</span>&lt;<span class="s">"user_id"</span>&gt;; update: <span class="t">Owner</span>&lt;<span class="s">"user_id"</span>&gt;; delete: <span class="t">Owner</span>&lt;<span class="s">"user_id"</span>&gt; }
+}&gt;</pre></div>
+    <p>The other pages use this schema in their examples. <code>HeroBlock</code>, <code>ProseBlock</code> and <code>Covers</code> are defined further down.</p>
 
-          <div class="step plain" id="access">
-            <div>
-              <h3>Access rules</h3>
-              <p>Each model has a rule for <code>read</code>, <code>create</code>, <code>update</code> and <code>delete</code>. The rules become Postgres row level security, so they hold for REST, GraphQL, realtime and the client alike.</p>
-              <p>An operation with no rule is denied. A model with no <code>access</code> at all is not reachable through the API.</p>
-              <div class="table-wrap">
-              <table>
-              <thead><tr><th>Rule</th><th>Who passes</th></tr></thead>
-              <tbody>
-              <tr><td><code>Public</code></td><td>Everyone, signed in or not</td></tr>
-              <tr><td><code>LoggedIn</code></td><td>Any signed-in user</td></tr>
-              <tr><td><code>Private</code></td><td>Nobody through the API</td></tr>
-              <tr><td><code>Owner&lt;"author_id"&gt;</code></td><td>The user whose id is in that column. Use <code>"id"</code>, a <code>SupatypeAuthUserId</code> field, or a relation's <code>_id</code> column</td></tr>
-              <tr><td><code>OwnerFrom&lt;"post"&gt;</code></td><td>The owner of the related row, one relation deep</td></tr>
-              <tr><td><code>Role&lt;"admin"&gt;</code></td><td>A user whose <code>app_metadata.role</code> is <code>admin</code></td></tr>
-              <tr><td><code>Any&lt;[A, B]&gt;</code>, <code>All&lt;[A, B]&gt;</code>, <code>Not&lt;A&gt;</code></td><td>Either rule, both rules, or the opposite</td></tr>
-              <tr><td><code>Eq</code>, <code>Neq</code>, <code>Gt</code>, <code>Gte</code>, <code>Lt</code>, <code>Lte</code>, <code>Like</code></td><td>A comparison, such as <code>Lte&lt;"published_at", Now&gt;</code></td></tr>
-              </tbody>
-              </table>
-              </div>
-              <p>In a comparison, a plain string names a column. Wrap a constant in <code>Literal&lt;&gt;</code>. <code>Now</code>, <code>AuthUid</code> and <code>Claim&lt;"app_metadata.plan"&gt;</code> are also available. <code>IsNull&lt;"col"&gt;</code> and <code>NotNull&lt;"col"&gt;</code> test for null.</p>
-              <p><code>Role&lt;&gt;</code> reads the user's <code>app_metadata.role</code>, which only the auth admin API can set. It is not the Studio role.</p>
-            </div>
-          </div>
+    <h2 id="access">Access rules</h2>
+    <p>Each model has a rule for <code>read</code>, <code>create</code>, <code>update</code> and <code>delete</code>. The rules become Postgres row level security, so they hold for REST, GraphQL, realtime and the client alike.</p>
+    <p>An operation with no rule is denied. A model with no <code>access</code> at all is not reachable through the API.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Rule</th><th scope="col">Who passes</th></tr></thead>
+      <tbody>
+        <tr><td><code>Public</code></td><td>Everyone, signed in or not</td></tr>
+        <tr><td><code>LoggedIn</code></td><td>Any signed-in user</td></tr>
+        <tr><td><code>Private</code></td><td>Nobody through the API</td></tr>
+        <tr><td><code>Owner&lt;"author_id"&gt;</code></td><td>The user whose id is in that column. Use <code>"id"</code>, a <code>SupatypeAuthUserId</code> field, or a relation's <code>_id</code> column</td></tr>
+        <tr><td><code>OwnerFrom&lt;"post"&gt;</code></td><td>The owner of the related row, one relation deep</td></tr>
+        <tr><td><code>Role&lt;"admin"&gt;</code></td><td>A user whose <code>app_metadata.role</code> is <code>admin</code></td></tr>
+        <tr><td><code>Any&lt;[A, B]&gt;</code>, <code>All&lt;[A, B]&gt;</code>, <code>Not&lt;A&gt;</code></td><td>Either rule, both rules, or the opposite</td></tr>
+        <tr><td><code>Eq</code>, <code>Neq</code>, <code>Gt</code>, <code>Gte</code>, <code>Lt</code>, <code>Lte</code>, <code>Like</code></td><td>A comparison, such as <code>Lte&lt;"published_at", Now&gt;</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>In a comparison, a plain string names a column. Wrap a constant in <code>Literal&lt;&gt;</code>. <code>Now</code>, <code>AuthUid</code> and <code>Claim&lt;"app_metadata.plan"&gt;</code> are also available. <code>IsNull&lt;"col"&gt;</code> and <code>NotNull&lt;"col"&gt;</code> test for null.</p>
+    <p><code>Role&lt;&gt;</code> reads the user's <code>app_metadata.role</code>, which only the auth admin API can set. It is not the Studio role.</p>
 
-          <div class="step plain" id="field-rules">
-            <div>
-              <h3>Field rules and masking</h3>
-              <p>A field rule limits who can read or write one column. Declare it under <code>access.fields</code>.</p>
-              <pre class="code">export type Employee = Model&lt;{
-  id: UUID
-  user_id: SupatypeAuthUserId
+    <h2 id="field-rules">Field rules and masking</h2>
+    <p>A field rule limits who can read or write one column. Declare it under <code>access.fields</code>.</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export</span> <span class="k">type</span> <span class="t">Employee</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
+  user_id: <span class="t">SupatypeAuthUserId</span>
   name: string
-  salary: Int
+  salary: <span class="t">Int</span>
 }, {
   access: {
-    read: LoggedIn
-    create: Role&lt;"hr"&gt;
-    update: Role&lt;"hr"&gt;
-    delete: Role&lt;"hr"&gt;
-    fields: { salary: { read: Any&lt;[Owner&lt;"user_id"&gt;, Role&lt;"hr"&gt;]&gt;; write: Role&lt;"hr"&gt; } }
+    read: <span class="t">LoggedIn</span>
+    create: <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt;
+    update: <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt;
+    delete: <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt;
+    fields: { salary: { read: <span class="t">Any</span>&lt;[<span class="t">Owner</span>&lt;<span class="s">"user_id"</span>&gt;, <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt;]&gt;; write: <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt; } }
   }
-}&gt;</pre>
-              <p>A caller who may not read the column still gets the row, with the value masked as <code>null</code>. A write the rule refuses fails with error <code>42501</code>.</p>
-              <p>Name a relation by its column, such as <code>author_id</code>.</p>
-              <div class="note">
-                <span class="label">NOT WITH VERSIONS</span>
-                A model with <code>versions</code> cannot have field rules. Old versions are stored as JSON snapshots, where a column rule cannot be enforced. The schema is refused and the message asks you to drop one of the two.
-              </div>
-            </div>
-          </div>
-
-          <div class="step plain" id="owners">
-            <div>
-              <h3>Auth user ids</h3>
-              <p><code>SupatypeAuthUserId</code> holds the id of a sign-in user. Use it for owner columns.</p>
-              <p>When the <code>create</code> rule is <code>Owner&lt;"col"&gt;</code> and the column has no default, the column defaults to the caller's own user id. So a client can leave it out on insert.</p>
-              <p>By default there is no foreign key to the user. Deleting a user leaves their rows as they were. Add <code>onDelete</code> to get one:</p>
-              <div class="table-wrap">
-              <table>
-              <thead><tr><th><code>onDelete</code></th><th>When the user is deleted</th></tr></thead>
-              <tbody>
-              <tr><td><code>"cascade"</code></td><td>Their rows are deleted too</td></tr>
-              <tr><td><code>"restrict"</code></td><td>Deleting the user is refused while they own rows</td></tr>
-              <tr><td><code>"setNull"</code></td><td>The column is set to null. The field must be <code>Optional&lt;&gt;</code></td></tr>
-              </tbody>
-              </table>
-              </div>
-              <p>The push that adds the key refuses if existing rows name a user that does not exist. Its message says how many rows and how to remove them.</p>
-            </div>
-          </div>
-
-          <div class="step plain" id="drafts">
-            <div>
-              <h3>Drafts and versions</h3>
-              <p><code>versions: { drafts: true }</code> keeps drafts and a history of each record. <code>keep</code> sets how many versions to keep (default 20).</p>
-              <p>The model's own table holds the published record. That is what <code>read</code> rules and the public API see. Drafts and old versions live in <code>post_versions</code>.</p>
-              <p>Publishing copies a draft into the live table. It also sets <code>published_at</code> if it is empty. The <code>update</code> rule decides who may publish.</p>
-              <p>A direct API write to the live row is refused. Save a draft with the client's <code>update</code>, then publish. See <a href="/docs/client.html#drafts">Client</a>.</p>
-              <p><code>versions: { drafts: false }</code> keeps history only. Writes go straight to the live row.</p>
-              <p>Who sees drafts in Studio is set by <code>publishing.draft_visibility</code> in <code>supatype.config.ts</code>. The default is admin, developer and editor.</p>
-            </div>
-          </div>
-
-          <div class="step plain" id="content">
-            <div>
-              <h3>Slugs, rich text and blocks</h3>
-              <p><code>Slug&lt;"title"&gt;</code> fills itself from <code>title</code> when you leave it empty. While it still holds the generated value, it follows the title when the title changes. Set it yourself to keep a URL fixed. Add <code>Unique&lt;&gt;</code> if it must be unique.</p>
-              <p><code>RichText</code> stores a rich text document. When you write, a plain string is accepted and becomes one paragraph. A read always returns the document.</p>
-              <p><code>Blocks&lt;T&gt;</code> is a list of sections an editor arranges in Studio. Each block is <code>Block&lt;"name", { fields }&gt;</code>:</p>
-              <pre class="code">export type HeroBlock = Block&lt;"hero", { heading: string; image: Optional&lt;ImageAsset&lt;Covers&gt;&gt; }&gt;
-export type ProseBlock = Block&lt;"prose", { body: RichText }&gt;</pre>
-              <p>Each entry is stored as <code>{ "type": "hero", "data": { "heading": "Hi" } }</code>. A renderer switches on <code>type</code> and reads <code>data</code>. Rich text inside a block is not converted from a string, so write the full document there.</p>
-            </div>
-          </div>
-
-          <div class="step plain" id="buckets">
-            <div>
-              <h3>Storage buckets</h3>
-              <pre class="code">export type Covers = Bucket&lt;"covers", {
-  accessMode: "public"
-  accept: ["image/png", "image/jpeg", "image/webp"]
-  maxSize: "5MB"
-  access: { read: BucketPublic; create: BucketLoggedIn; update: BucketOwner; delete: BucketOwner }
-}&gt;</pre>
-              <p>A bucket has the same four rules as a model. <code>update</code> means overwriting a file. The rules are <code>BucketPublic</code>, <code>BucketLoggedIn</code>, <code>BucketOwner</code> (the uploader), <code>BucketRole&lt;"name"&gt;</code> and <code>BucketPrivate</code>.</p>
-              <p>A rule you leave out is refused for everyone but the service role, and the push warns about it. <code>accessMode: "public"</code> serves files on a public URL whatever <code>read</code> says.</p>
-              <p><code>ImageAsset&lt;Covers&gt;</code> on a model stores a reference to a file in that bucket.</p>
-            </div>
-          </div>
-
-          <div class="step plain" id="renames">
-            <div>
-              <h3>Renames</h3>
-              <p>A push never guesses a rename. Renaming a field in the schema looks like a drop and an add.</p>
-              <p>In a terminal, <code>supatype push</code> asks "Was X renamed to Y?". Answer yes and it records the rename. Without a terminal it stops and prints the command to run.</p>
-              <pre class="code"><span class="p">$</span> supatype rename post.title post.headline   # a column
-<span class="p">$</span> supatype rename post article               # a table</pre>
-              <p>Renames are recorded in <code>supatype/renames.json</code>. Commit it. Every push replays it, so each database gets the same rename. <code>supatype rename --prune</code> removes entries the target database has already applied.</p>
-              <div class="note">
-                <span class="label">CAREFUL</span>
-                <code>supatype push --yes</code> does not ask about renames. An unrecorded rename is then pushed as a drop and an add, and the column's data is lost. Record renames first.
-              </div>
-            </div>
-          </div>
-
-          <div class="step plain" id="push">
-            <div>
-              <h3>What a push refuses</h3>
-              <div class="table-wrap">
-              <table>
-              <thead><tr><th>Push stops when</th><th>To go on</th></tr></thead>
-              <tbody>
-              <tr><td>A change can lose data, such as a drop</td><td>Answer yes in a terminal, or pass <code>--yes</code> in CI</td></tr>
-              <tr><td>A table the schema names exists but Supatype did not create it</td><td><code>supatype adopt</code>, or give the model another <code>tableName</code>. The push offers to adopt in a terminal</td></tr>
-              <tr><td>Policies, grants or row level security were changed by hand</td><td><code>--overwrite-drift</code> puts Supatype's back. To keep the hand edits, run <code>supatype doctor --rebaseline --accept-access-drift</code></td></tr>
-              <tr><td>A versioned model has field rules</td><td>Remove one of the two</td></tr>
-              <tr><td>An <code>onDelete</code> key would point at missing users</td><td>Delete or fix those rows</td></tr>
-              </tbody>
-              </table>
-              </div>
-              <p><code>--yes</code> does not override hand-edited access rules. Only <code>--overwrite-drift</code> does. Objects that Supatype did not create are never dropped or taken over.</p>
-            </div>
-          </div>
-
-        </article>
-      </div>
-
+}&gt;</pre></div>
+    <p>A caller who may not read the column still gets the row, with the value masked as <code>null</code>. A write the rule refuses fails with error <code>42501</code>.</p>
+    <p>Name a relation by its column, such as <code>author_id</code>.</p>
+    <div class="callout warn">
+      <span class="callout-label">NOT WITH VERSIONS</span>
+      <p>A model with <code>versions</code> cannot have field rules. Old versions are stored as JSON snapshots, where a column rule cannot be enforced. The schema is refused and the message asks you to drop one of the two.</p>
     </div>
-  </section>
 
-</main>
+    <h2 id="owners">Auth user ids</h2>
+    <p><code>SupatypeAuthUserId</code> holds the id of a sign-in user. Use it for owner columns.</p>
+    <p>When the <code>create</code> rule is <code>Owner&lt;"col"&gt;</code> and the column has no default, the column defaults to the caller's own user id. So a client can leave it out on insert.</p>
+    <p>By default there is no foreign key to the user. Deleting a user leaves their rows as they were. Add <code>onDelete</code> to get one:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col"><code>onDelete</code></th><th scope="col">When the user is deleted</th></tr></thead>
+      <tbody>
+        <tr><td><code>"cascade"</code></td><td>Their rows are deleted too</td></tr>
+        <tr><td><code>"restrict"</code></td><td>Deleting the user is refused while they own rows</td></tr>
+        <tr><td><code>"setNull"</code></td><td>The column is set to null. The field must be <code>Optional&lt;&gt;</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>The push that adds the key refuses if existing rows name a user that does not exist. Its message says how many rows and how to remove them.</p>
+
+    <h2 id="drafts">Drafts and versions</h2>
+    <p><code>versions: { drafts: true }</code> keeps drafts and a history of each record. <code>keep</code> sets how many versions to keep (default 20).</p>
+    <p>The model's own table holds the published record. That is what <code>read</code> rules and the public API see. Drafts and old versions live in <code>post_versions</code>.</p>
+    <p>Publishing copies a draft into the live table. It also sets <code>published_at</code> if it is empty. The <code>update</code> rule decides who may publish.</p>
+    <p>A direct API write to the live row is refused. Save a draft with the client's <code>update</code>, then publish. See <a href="/docs/client.html#drafts">Client</a>.</p>
+    <p><code>versions: { drafts: false }</code> keeps history only. Writes go straight to the live row.</p>
+    <p>Who sees drafts in Studio is set by <code>publishing.draft_visibility</code> in <code>supatype.config.ts</code>. The default is admin, developer and editor.</p>
+
+    <h2 id="content">Slugs, rich text and blocks</h2>
+    <p><code>Slug&lt;"title"&gt;</code> fills itself from <code>title</code> when you leave it empty. While it still holds the generated value, it follows the title when the title changes. Set it yourself to keep a URL fixed. Add <code>Unique&lt;&gt;</code> if it must be unique.</p>
+    <p><code>RichText</code> stores a rich text document. When you write, a plain string is accepted and becomes one paragraph. A read always returns the document.</p>
+    <p><code>Blocks&lt;T&gt;</code> is a list of sections an editor arranges in Studio. Each block is <code>Block&lt;"name", { fields }&gt;</code>:</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export</span> <span class="k">type</span> <span class="t">HeroBlock</span> = <span class="t">Block</span>&lt;<span class="s">"hero"</span>, { heading: string; image: <span class="t">Optional</span>&lt;<span class="t">ImageAsset</span>&lt;<span class="t">Covers</span>&gt;&gt; }&gt;
+<span class="k">export</span> <span class="k">type</span> <span class="t">ProseBlock</span> = <span class="t">Block</span>&lt;<span class="s">"prose"</span>, { body: <span class="t">RichText</span> }&gt;</pre></div>
+    <p>Each entry is stored as <code>{ "type": "hero", "data": { "heading": "Hi" } }</code>. A renderer switches on <code>type</code> and reads <code>data</code>. Rich text inside a block is not converted from a string, so write the full document there.</p>
+
+    <h2 id="buckets">Storage buckets</h2>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export</span> <span class="k">type</span> <span class="t">Covers</span> = <span class="t">Bucket</span>&lt;<span class="s">"covers"</span>, {
+  accessMode: <span class="s">"public"</span>
+  accept: [<span class="s">"image/png"</span>, <span class="s">"image/jpeg"</span>, <span class="s">"image/webp"</span>]
+  maxSize: <span class="s">"5MB"</span>
+  access: { read: <span class="t">BucketPublic</span>; create: <span class="t">BucketLoggedIn</span>; update: <span class="t">BucketOwner</span>; delete: <span class="t">BucketOwner</span> }
+}&gt;</pre></div>
+    <p>A bucket has the same four rules as a model. <code>update</code> means overwriting a file. The rules are <code>BucketPublic</code>, <code>BucketLoggedIn</code>, <code>BucketOwner</code> (the uploader), <code>BucketRole&lt;"name"&gt;</code> and <code>BucketPrivate</code>.</p>
+    <p>A rule you leave out is refused for everyone but the service role, and the push warns about it. <code>accessMode: "public"</code> serves files on a public URL whatever <code>read</code> says.</p>
+    <p><code>ImageAsset&lt;Covers&gt;</code> on a model stores a reference to a file in that bucket.</p>
+
+    <h2 id="renames">Renames</h2>
+    <p>A push never guesses a rename. Renaming a field in the schema looks like a drop and an add.</p>
+    <p>In a terminal, <code>supatype push</code> asks "Was X renamed to Y?". Answer yes and it records the rename. Without a terminal it stops and prints the command to run.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype rename post.title post.headline  <span class="c"> # a column</span>
+<span class="pr">$</span> supatype rename post article              <span class="c"> # a table</span></pre></div>
+    <p>Renames are recorded in <code>supatype/renames.json</code>. Commit it. Every push replays it, so each database gets the same rename. <code>supatype rename --prune</code> removes entries the target database has already applied.</p>
+    <div class="callout warn">
+      <span class="callout-label">CAREFUL</span>
+      <p><code>supatype push --yes</code> does not ask about renames. An unrecorded rename is then pushed as a drop and an add, and the column's data is lost. Record renames first.</p>
+    </div>
+
+    <h2 id="push">What a push refuses</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Push stops when</th><th scope="col">To go on</th></tr></thead>
+      <tbody>
+        <tr><td>A change can lose data, such as a drop</td><td>Answer yes in a terminal, or pass <code>--yes</code> in CI</td></tr>
+        <tr><td>A table the schema names exists but Supatype did not create it</td><td><code>supatype adopt</code>, or give the model another <code>tableName</code>. The push offers to adopt in a terminal</td></tr>
+        <tr><td>Policies, grants or row level security were changed by hand</td><td><code>--overwrite-drift</code> puts Supatype's back. To keep the hand edits, run <code>supatype doctor --rebaseline --accept-access-drift</code></td></tr>
+        <tr><td>A versioned model has field rules</td><td>Remove one of the two</td></tr>
+        <tr><td>An <code>onDelete</code> key would point at missing users</td><td>Delete or fix those rows</td></tr>
+      </tbody>
+    </table></div>
+    <p><code>--yes</code> does not override hand-edited access rules. Only <code>--overwrite-drift</code> does. Objects that Supatype did not create are never dropped or taken over.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/"><small>PREVIOUS</small><span>Get started</span></a>
+      <a href="/docs/client.html" class="next"><small>NEXT</small><span>Client</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#models">Models</a>
+    <a href="#fields">Field types</a>
+    <a href="#relations">Relations</a>
+    <a href="#access">Access rules</a>
+    <a href="#field-rules">Field rules</a>
+    <a href="#owners">Auth user ids</a>
+    <a href="#drafts">Drafts and versions</a>
+    <a href="#content">Slugs, rich text, blocks</a>
+    <a href="#buckets">Storage buckets</a>
+    <a href="#renames">Renames</a>
+    <a href="#push">What a push refuses</a>
+  </nav>
+</div>
 
 <footer class="site-footer">
-  <div class="wrap">
-    <div class="footer-brand">
-      <img src="/supatype.svg" alt="Supatype" width="108" height="20" />
-      <p>Zero drift. One set of types, database to component.</p>
-      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></p>
-      <p class="mono">Active development</p>
-    </div>
-    <div class="footer-links">
-      <div class="footer-col">
-        <span class="head">Docs</span>
-        <a href="/#local-dev">Quick start</a>
-        <a href="/docs/#local-dev">Local development</a>
-        <a href="/docs/schema.html">Schema</a>
-        <a href="/docs/client.html">Client</a>
-        <a href="/docs/seeding.html">Seeding</a>
-        <a href="/docs/studio-roles.html">Studio roles</a>
-        <a href="/docs/#self-host">Self-hosting</a>
-        <a href="/docs/#deploy-changes">Deploy changes</a>
-        <a href="/docs/#upgrading">Upgrading</a>
-        <a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a>
-      </div>
-      <div class="footer-col">
-        <span class="head">Community</span>
-        <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a>
-        <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener">Agent plugins</a>
-        <a href="/llms.txt">llms.txt</a>
-      </div>
-    </div>
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></span>
   </div>
 </footer>
 
