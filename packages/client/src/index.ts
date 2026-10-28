@@ -649,6 +649,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     initialSession: config.initialSession,
     persistSession: config.auth?.persistSession,
     autoRefreshToken: config.auth?.autoRefreshToken,
+    refreshExpiredToken: config.auth?.refreshExpiredToken,
     storageKey: config.auth?.storageKey,
     cookiePrefix: config.auth?.cookiePrefix,
     storage: config.auth?.storage,
