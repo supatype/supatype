@@ -41,6 +41,7 @@ export STUDIO_E2E_EMAIL STUDIO_E2E_PASSWORD
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/e2e-project.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
 
 e2e_project_use "$INTEGRATION_DIR" supatype-integration
 # Exported so `supatype dev` binds the port this script waits on, rather than the next free one.
@@ -102,7 +103,7 @@ echo "==> Creating the Studio admin"
 # The function-logs spec invokes a function to make it log, and the gateway wants an apikey for
 # that. Read from the .env this project just generated rather than hardcoded: the key is per
 # project and regenerated on init.
-SUPATYPE_ANON_KEY="$(grep -E '^ANON_KEY=' "$INTEGRATION_DIR/.env" | cut -d= -f2- || true)"
+SUPATYPE_ANON_KEY="$(env_file_value "$INTEGRATION_DIR/.env" ANON_KEY || true)"
 if [[ -z "$SUPATYPE_ANON_KEY" ]]; then
   echo "ERROR: no ANON_KEY in $INTEGRATION_DIR/.env; the function-logs spec cannot invoke anything."
   exit 1

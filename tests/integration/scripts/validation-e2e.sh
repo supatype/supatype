@@ -32,6 +32,7 @@ source "$SCRIPT_DIR/lib/compose-reset.sh"
 failures=0
 
 source "$SCRIPT_DIR/lib/e2e-project.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
 e2e_project_use "$EXAMPLE_DIR" validation
 # Exported so compose binds the port this script waits on, whatever an old .env says.
 export SUPATYPE_KONG_PORT="$KONG_PORT"
@@ -79,7 +80,7 @@ for i in $(seq 1 "$MAX_WAIT"); do
   sleep 1
 done
 
-ANON="$(grep -E '^ANON_KEY=' .env | tail -1 | cut -d= -f2-)"
+ANON="$(env_file_value .env ANON_KEY)"
 
 # `create` is LoggedIn, not Public, so an anon key alone cannot write. Signing up is part of the
 # path under test: a token that RLS accepts is what makes a refusal below mean "the rule bit"
@@ -98,7 +99,7 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-env_value() { grep -E "^$1=" .env | tail -1 | cut -d= -f2-; }
+env_value() { env_file_value .env "$1"; }
 
 # A query against the project's database, through the container: nothing publishes Postgres's port.
 db_query() {
