@@ -53,6 +53,24 @@ describe("functions serve files", () => {
     expect(existsSync(running.routerPath)).toBe(true)
   })
 
+  it("of a serve on another machine or system sharing the project are kept", () => {
+    // A pid means nothing across WSL and Windows, or a container, serving one mounted project.
+    const { cwd, functionsDir } = project()
+    const elsewhere = join(cwd, ".supatype", `functions-serve-key-00000000-1-${deadPid()}-e5f6`)
+    writeFileSync(elsewhere, "x")
+    sweepStaleServeFiles(cwd, functionsDir)
+    expect(existsSync(elsewhere)).toBe(true)
+  })
+
+  it("that cannot be swept do not stop the serve", () => {
+    const { cwd, functionsDir } = project()
+    const { keyPath } = functionsServeFiles(cwd, functionsDir, `1-${deadPid()}-a1b2`)
+    // A directory with something in it: rmSync without recursive refuses it, as Windows refuses a
+    // file held open.
+    mkdirSync(join(keyPath, "inside"), { recursive: true })
+    expect(() => sweepStaleServeFiles(cwd, functionsDir)).not.toThrow()
+  })
+
   it("that cannot be removed on exit do not stop the other exit listeners", () => {
     const { cwd } = project()
     // A directory with something in it: rmSync without recursive refuses it.

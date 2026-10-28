@@ -1,12 +1,5 @@
 import { spawn } from "node:child_process"
-
-/** Ctrl+C, a stop request, a closed terminal, and Ctrl+Break on Windows, as dev-shutdown.ts hears. */
-const STOP_SIGNALS: NodeJS.Signals[] = [
-  "SIGINT",
-  "SIGTERM",
-  "SIGHUP",
-  ...(process.platform === "win32" ? ["SIGBREAK" as const] : []),
-]
+import { STOP_SIGNALS } from "./stop-signals.js"
 
 /** 130 is how Deno and POSIX shells exit on SIGINT, 0xC000013A how a Windows console process does. */
 const CTRL_C_EXIT_CODES = new Set([130, 0xc000013a])
@@ -21,7 +14,8 @@ function stoppedByCtrlC(code: number | null, signal: NodeJS.Signals | null): boo
  * Runs `command` with this terminal until it exits, passing on Ctrl+C or a stop request rather than
  * dying first. Files removed on `exit` stay otherwise, since Node never emits it when a signal it
  * has no listener for kills it. Resolves to the exit code, 0 once asked to stop, and rejects when
- * the command cannot start.
+ * the command cannot start. The listeners go when it settles, so a caller that is done exits
+ * straight away: a late Ctrl+C after that would kill it with no `exit`.
  */
 export async function runUntilStopped(
   command: string,
