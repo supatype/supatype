@@ -210,6 +210,11 @@
   `STORAGE_QUOTA`, `TIER_MAX_UPLOAD_SIZE`, `MAX_UPLOAD_SIZE` (bytes, `-1` for unlimited, the
   default) and `PROJECT_TIER` now reach the storage service, which on its own applied the free
   tier's 1 GiB quota and 50 MB file limit to every self-hosted and local project.
+* **dev, push, self-host:** `DATABASE_URL` follows a database port exported in the shell
+  (`SUPATYPE_DEV_DB_PORT`, or `SUPATYPE_DB_PORT` for a self-host stack). Compose binds the shell's
+  port, and the URL was reconciled against `.env` alone, so seeds and host-side commands reached a
+  port nothing listened on. The shell's port is the run's: the URL changes for that run and `.env`
+  keeps its own.
 
 
 ## 0.7.0
