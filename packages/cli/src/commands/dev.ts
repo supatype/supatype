@@ -87,6 +87,7 @@ import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js
 import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
+import { recordNativeFunctions } from "../route-manifest.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { nativeMailerAutoconfirmEnv } from "../mailer-autoconfirm.js"
@@ -487,6 +488,9 @@ export function registerDev(program: Command): void {
       writeServiceRoleKeyFileUntilExit(devServiceRoleKeyPath(cwd), serviceRoleKey)
 
       writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
+
+      // After the push, failed or not: init's manifest names the compose worker.
+      recordNativeFunctions(manifestPath, denoBinPath !== undefined)
 
       const realtimeProc = await startNativeRealtime({
         config, cwd, manifestPath, pidDir, url: realtimeUrl, port: realtimePort,
