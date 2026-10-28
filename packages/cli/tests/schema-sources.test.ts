@@ -89,13 +89,20 @@ describe("schema-sources", () => {
   // `<root>2/x.ts` starts with the root's own path and is beside it, not under it. As an absolute
   // name (or a drive spec on Windows) the tar reader marks it unsafe before the landing check.
   it("refuses an entry that lands beside the project under a name starting with its own", () => {
+    const beside = `${resolve(tmp)}2/evil.ts`.replace(/\\/g, "/")
+    expect(() => restoreSchemaSourcesFromGz(plainTarball([{ path: beside, content: "x" }]), tmp)).toThrow(
+      /unsafe entry name/,
+    )
+  })
+
+  // A colon is a legal name on macOS and Linux, and restore refuses it everywhere, so push does too.
+  it("refuses at push a schema file whose name restore would refuse", () => {
     writeMultiFileSchema(tmp)
     const graph = collectSchemaSourcePaths(join(tmp, "schema", "index.ts"), tmp)
     const [first] = graph.files
     if (first === undefined) throw new Error("no schema files")
-    const beside = { ...first, relativePath: `${resolve(tmp)}2/evil.ts`.replace(/\\/g, "/") }
-    const gz = gzipSync(packSchemaSources({ ...graph, files: [beside] }))
-    expect(() => restoreSchemaSourcesFromGz(gz, tmp)).toThrow(/unsafe entry name/)
+    const colon = { ...first, relativePath: "schema/models/v1:legacy.ts" }
+    expect(() => packSchemaSources({ ...graph, files: [colon] })).toThrow(/cannot restore/)
   })
 
   // The snapshot is read by the same tar reader as `init --example`, so it gets the same name checks.
