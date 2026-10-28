@@ -378,22 +378,18 @@ export function writeServiceRoleKeyFile(keyPath: string, serviceRoleKey: string)
   chmodSync(keyPath, 0o600)
 }
 
-/**
- * {@link writeServiceRoleKeyFile}, removing the file again when this process exits, so the key is
- * on disk only while something that uses it is running. A process killed outright leaves it
- * behind, and the next run overwrites it.
- */
-export function writeServiceRoleKeyFileUntilExit(keyPath: string, serviceRoleKey: string): void {
-  writeServiceRoleKeyFile(keyPath, serviceRoleKey)
-  process.once("exit", () => rmSync(keyPath, { force: true }))
+/** Removes `path` when this process exits. A process killed outright leaves it behind. */
+export function removeOnExit(path: string): void {
+  process.once("exit", () => rmSync(path, { force: true }))
 }
 
 /**
- * Where one `functions serve` keeps the key: a file of its own, since each removes its file when
- * it stops while another may still be serving the same project.
+ * {@link writeServiceRoleKeyFile}, removing the file again when this process exits, so the key is
+ * on disk only while something that uses it is running.
  */
-export function functionsServeKeyPath(cwd: string, pid: number = process.pid): string {
-  return join(pathResolve(cwd, ".supatype"), `functions-serve-key-${pid}`)
+export function writeServiceRoleKeyFileUntilExit(keyPath: string, serviceRoleKey: string): void {
+  writeServiceRoleKeyFile(keyPath, serviceRoleKey)
+  removeOnExit(keyPath)
 }
 
 /**
