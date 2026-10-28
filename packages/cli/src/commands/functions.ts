@@ -24,6 +24,7 @@ import {
   discoverFunctionsOrExit,
   functionNameProblem,
   generateFunctionsRouterSource,
+  writeServiceRoleKeyFile,
   type DiscoveredFunctionRoute,
 } from "../functions-router-gen.js"
 import { loadProjectLink } from "../link.js"
@@ -258,7 +259,12 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
 
   // Generate a Deno entry script that routes requests to the correct function
   const routerPath = resolve(functionsDir, ".serve-router.ts")
-  const routerScript = generateFunctionsRouterSource(routerPath, routes)
+  // The router reads the key from this file, as it still can after a --watch reload, and grants it
+  // only to the routes SUPATYPE_SERVICE_ROLE_ROUTES names, as the deployed worker does.
+  const serviceRoleKey = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? ""
+  const serviceRoleKeyPath = serviceRoleKey !== "" ? resolve(cwd, ".supatype", "functions-serve-key") : undefined
+  if (serviceRoleKeyPath !== undefined) writeServiceRoleKeyFile(serviceRoleKeyPath, serviceRoleKey)
+  const routerScript = generateFunctionsRouterSource(routerPath, routes, serviceRoleKeyPath)
   writeFileSync(routerPath, routerScript, "utf8")
 
   const envFilePath = resolveEnvFilePath(cwd, functionsDir, opts.envFile)
@@ -301,8 +307,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
         SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localPublicApiUrl(cwd),
         SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
         SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
-        SUPATYPE_SERVICE_ROLE_KEY: process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? "",
-        // The router grants the key above only to these routes, as the deployed worker does.
+        // The router grants the key only to these routes, as the deployed worker does.
         SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
       },
     },
@@ -310,6 +315,9 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
 
   // Clean up router script
   try { unlinkSync(routerPath) } catch { /* ignore */ }
+  if (serviceRoleKeyPath !== undefined) {
+    try { unlinkSync(serviceRoleKeyPath) } catch { /* ignore */ }
+  }
 
   if (result.status !== 0) {
     error("Function server exited with errors.")

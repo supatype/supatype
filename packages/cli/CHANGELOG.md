@@ -90,8 +90,10 @@
   worker takes the key out of the environment before importing any handler and grants it only to the
   routes `functions.serviceRole` lists, and to hooks. The router now does the same, so a function that
   relies on the key without being listed fails locally rather than once deployed. The key is still
-  granted after `--watch` reloads the router on a change, including the reload that follows fixing a
-  function that failed to load.
+  granted after `--watch` reloads the router on a change, however the run before it ended: a function
+  that failed to load, an unhandled rejection or a crash no longer leaves every later reload without
+  the key until `dev` restarts. The router reads it from a file in `.supatype/`, readable by its owner
+  only, rather than from the environment it takes the key out of.
 
 * **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
   server and the control plane were all told `/project/functions` whatever the config said, so a

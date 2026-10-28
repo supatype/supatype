@@ -1,9 +1,22 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { generateFunctionsRouterSource } from "../src/functions-router-gen.js"
+import {
+  devServiceRoleKeyPath,
+  generateFunctionsRouterSource,
+  writeServiceRoleKeyFile,
+} from "../src/functions-router-gen.js"
 
 /**
  * The router native `dev` and `functions serve` run has to load and guard handlers the way the
@@ -30,6 +43,24 @@ describe("the generated router's source", () => {
     const firstImport = ROUTER.indexOf("await import(")
     expect(deleted).toBeGreaterThan(-1)
     expect(firstImport).toBeGreaterThan(deleted)
+  })
+
+  it("reads the key from the file it names, not from the environment it withholds it from", () => {
+    const withFile = generateFunctionsRouterSource("C:\\p\\.supatype\\functions-router.ts", [], "C:\\p\\.supatype\\service-role-key")
+    expect(withFile).toContain('const serviceRoleKeyFile = "C:\\\\p\\\\.supatype\\\\service-role-key"')
+    expect(ROUTER).toContain('const serviceRoleKeyFile = ""')
+    expect(ROUTER).not.toMatch(/serviceRoleKey = Deno\.env\.get/)
+  })
+
+  it.skipIf(process.platform === "win32")("writes the key file readable by its owner only", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-key-"))
+    dirs.push(dir)
+    const keyPath = devServiceRoleKeyPath(dir)
+    writeServiceRoleKeyFile(keyPath, "first")
+    chmodSync(keyPath, 0o644)
+    writeServiceRoleKeyFile(keyPath, "second")
+    expect(statSync(keyPath).mode & 0o777).toBe(0o600)
+    expect(readFileSync(keyPath, "utf8")).toBe("second")
   })
 
   it("takes the default export, else a named handler", () => {
@@ -60,7 +91,10 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-/** A project with the given functions and its generated router; returns the router's path. */
+/**
+ * A project with the given functions, the service-role key in the file native dev keeps it in, and
+ * its generated router; returns the router's path.
+ */
 function project(functions: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "supatype-router-"))
   dirs.push(dir)
@@ -72,7 +106,9 @@ function project(functions: Record<string, string>): string {
   })
   mkdirSync(join(dir, ".supatype"), { recursive: true })
   const routerPath = join(dir, ".supatype", "functions-router.ts")
-  writeFileSync(routerPath, generateFunctionsRouterSource(routerPath, fns))
+  const keyPath = devServiceRoleKeyPath(dir)
+  writeServiceRoleKeyFile(keyPath, "service-secret")
+  writeFileSync(routerPath, generateFunctionsRouterSource(routerPath, fns, keyPath))
   return routerPath
 }
 
@@ -84,6 +120,8 @@ interface RunningRouter {
   printed(pattern: RegExp, times: number): Promise<RegExpMatchArray>
   /** Its address once it has started `times` times (more than once only under `--watch`). */
   listening(times: number): Promise<string>
+  /** How many times it has printed a pattern so far. */
+  count(pattern: RegExp): number
 }
 
 /** Runs the router under Deno on a free port. */
@@ -131,6 +169,7 @@ function startRouter(
   return {
     printed,
     listening: async (times) => `http://127.0.0.1:${(await printed(LISTENING, times))[1]}`,
+    count: (pattern) => [...output.matchAll(new RegExp(pattern.source, "g"))].length,
   }
 }
 
@@ -146,6 +185,8 @@ export default (_req: Request, ctx: { serviceRoleKey?: string }) =>
   Response.json({ seenAtImport, ctxKey: ctx.serviceRoleKey ?? null, envKey: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null })
 `
 
+// The key is also in the environment, as native dev's server passes its own to the Deno child, and
+// has to be withheld all the same. The router reads the one it grants from the project's key file.
 const ADMIN_GRANTED = { SUPATYPE_SERVICE_ROLE_KEY: "service-secret", SUPATYPE_SERVICE_ROLE_ROUTES: "admin" }
 
 /** admin, which is listed, gets the key in ctx; hello does not; neither ever finds it in Deno.env. */
@@ -193,5 +234,19 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
     await router.printed(/neither a default export nor a named "handler"/, 1)
     writeFileSync(join(dirname(dirname(routerPath)), "functions", "admin", "index.ts"), REPORTS_KEY)
     await expectKeyOnlyForAdmin(await router.listening(1))
+  }, 60_000)
+
+  // An evaluation can end in ways the router never sees coming: here a function's floating promise
+  // rejects with nothing to catch it, and Deno ends the evaluation without dispatching "unload".
+  it("still grants the key after an evaluation dies of an unhandled rejection under --watch", async () => {
+    const routerPath = project({ admin: REPORTS_KEY, hello: REPORTS_KEY })
+    const adminPath = join(dirname(dirname(routerPath)), "functions", "admin", "index.ts")
+    const router = startRouter(routerPath, ADMIN_GRANTED, ["--watch"])
+    await router.listening(1)
+    writeFileSync(adminPath, `Promise.reject(new Error("unhandled-boom"))\n${REPORTS_KEY}`)
+    await router.printed(/unhandled-boom/, 1)
+    const started = router.count(LISTENING)
+    writeFileSync(adminPath, REPORTS_KEY)
+    await expectKeyOnlyForAdmin(await router.listening(started + 1))
   }, 60_000)
 })

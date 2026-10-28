@@ -36,16 +36,14 @@ describe("the generated functions router", () => {
     // lock back.
     //
     // The one delete is the service-role key's, once at start before any handler is imported, as
-    // the deployed worker does. The one set puts that key back when the router unloads, for the
-    // evaluation a --watch reload starts next. Neither is per invocation: both are outside the
-    // request handler, which Deno.serve takes last.
+    // the deployed worker does. Nothing puts it back: a --watch reload reads the key from its file
+    // again. The delete is not per invocation: it is outside the request handler, which Deno.serve
+    // takes last.
     expect(ROUTER.match(/Deno\.env\.delete\(/g)).toHaveLength(1)
     expect(ROUTER).toContain('Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")')
-    expect(ROUTER.match(/Deno\.env\.set\(/g)).toHaveLength(1)
-    expect(ROUTER).toContain('Deno.env.set("SUPATYPE_SERVICE_ROLE_KEY", serviceRoleKey)')
-    const serve = ROUTER.indexOf("Deno.serve(")
-    expect(ROUTER.indexOf("Deno.env.delete(")).toBeLessThan(serve)
-    expect(ROUTER.indexOf("Deno.env.set(")).toBeLessThan(serve)
+    expect(ROUTER).not.toMatch(/Deno\.env\.set\(/)
+    expect(ROUTER).not.toContain('addEventListener("unload"')
+    expect(ROUTER.indexOf("Deno.env.delete(")).toBeLessThan(ROUTER.indexOf("Deno.serve("))
   })
 
   it("passes the call's configuration to the handler instead", () => {
