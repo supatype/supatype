@@ -20,7 +20,8 @@ export interface BucketRow {
   public: boolean
   file_size_limit: number | null
   allowed_mime_types: string[] | null
-  access_mode: BucketAccessMode
+  /** NULL when the schema engine wrote a bucket that declares no mode; see accessModeOf. */
+  access_mode: BucketAccessMode | null
   /** Optional raw S3 bucket policy JSON from schema / API. */
   s3_bucket_policy: string | null
   created_at: string
