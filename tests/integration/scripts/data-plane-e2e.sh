@@ -122,10 +122,10 @@ if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
   exit 1
 fi
 
-ANON_KEY="$(sed -n 's/^ANON_KEY=//p' "$INTEGRATION_DIR/.env" | tr -d '"\r' | head -1)"
+ANON_KEY="$(env_file_value "$INTEGRATION_DIR/.env" ANON_KEY)"
 # Needed to seed the rows the owner check is made against. Asking whether one user can read
 # another user's row is worthless unless the other user's row demonstrably exists.
-SERVICE_ROLE_KEY="$(sed -n 's/^SERVICE_ROLE_KEY=//p' "$INTEGRATION_DIR/.env" | tr -d '"\r' | head -1)"
+SERVICE_ROLE_KEY="$(env_file_value "$INTEGRATION_DIR/.env" SERVICE_ROLE_KEY)"
 if [[ -z "$ANON_KEY" || -z "$SERVICE_ROLE_KEY" ]]; then
   echo "ERROR: no ANON_KEY or SERVICE_ROLE_KEY in $INTEGRATION_DIR/.env"
   exit 1

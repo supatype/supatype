@@ -15,10 +15,7 @@
 # minted here verify against the stack that starts later. Set EXAMPLE_JWT_SECRET to choose it;
 # otherwise `supatype keys` generates one into .env when it has none, as `supatype dev` would.
 
-# env_file_value <file> <name> - the last value <file> gives <name>, without quotes.
-env_file_value() {
-  sed -n "s/^$2=//p" "$1" | tr -d '"\r' | tail -1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/env-file.sh"
 
 # mint_keys <example-dir> <cli-bin> - exports ANON_KEY and SERVICE_ROLE_KEY.
 mint_keys() {
@@ -29,10 +26,7 @@ mint_keys() {
     printf 'JWT_SECRET=%s\n' "$EXAMPLE_JWT_SECRET" >> "$dir/.env"
   fi
 
-  # `keys` writes the pair into .env, generating JWT_SECRET there when it has none, and the keys are
-  # read back from there: they are the ones the stack hands its services. `keys --print` signs a
-  # fresh pair, which matched only when both ran in the same second, so a function comparing a
-  # caller's key with its own ctx.anonKey saw a different anon key now and then.
+  # Read the pair back from .env, the one the stack hands its services: `keys --print` signs a new one.
   out="$(cd "$dir" && node "$cli" keys 2>&1)" || true
   ANON_KEY="$(env_file_value "$dir/.env" ANON_KEY)"
   SERVICE_ROLE_KEY="$(env_file_value "$dir/.env" SERVICE_ROLE_KEY)"
