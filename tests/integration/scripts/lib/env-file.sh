@@ -24,6 +24,10 @@ env_file_value() {
 # The value is escaped for sed, so `&`, `\` and `|` in a secret arrive as written.
 env_file_set() {
   local file="$1" key="$2" value="$3" escaped
+  if [[ "$value" == *$'\n'* ]]; then
+    echo "env_file_set: $key holds a newline, which one .env line cannot" >&2
+    return 1
+  fi
   touch "$file"
   if grep -q "^${key}=" "$file"; then
     escaped="$(printf '%s' "$value" | sed -e 's/[&\\|]/\\&/g')"
