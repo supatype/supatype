@@ -11,7 +11,7 @@ import {
 } from "node:fs"
 import { resolve, join, relative, isAbsolute } from "node:path"
 import { spawnSync, execSync } from "node:child_process"
-import { localKongBaseUrl, localPublicApiUrl } from "../local-gateway.js"
+import { localPublicApiUrl } from "../local-gateway.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
@@ -298,7 +298,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
         PORT: opts.port,
         SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
         SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
-        SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localKongBaseUrl(),
+        SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localPublicApiUrl(cwd),
         SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
         SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
         SUPATYPE_SERVICE_ROLE_KEY: process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? "",

@@ -2,7 +2,7 @@ import type { Command } from "commander"
 import { errorMessage } from "../error-message.js"
 import { existsSync, mkdirSync } from "node:fs"
 import { resolve } from "node:path"
-import { localKongBaseUrl } from "../local-gateway.js"
+import { localPublicApiUrl } from "../local-gateway.js"
 import { updateAppConfigInProject } from "../app-config.js"
 import { loadConfig } from "../config.js"
 import { error, file, info, warn } from "../ui/messages.js"
@@ -66,7 +66,7 @@ function addStaticApp(cwd: string, staticDir: string): void {
     const configPath = updateAppConfigInProject(cwd, { mode: "static", staticDir })
     file("updated", configPath)
     info(`Static app directory: ${staticDir}`)
-    nextSteps("Build your frontend, then:", [...applySteps(cwd), `App URL: ${localKongBaseUrl()}/`])
+    nextSteps("Build your frontend, then:", [...applySteps(cwd), `App URL: ${localPublicApiUrl(cwd)}/`])
   } catch (err) {
     error(errorMessage(err))
     process.exit(1)
@@ -78,7 +78,7 @@ function addProxyApp(cwd: string, port: string, upstream?: string): void {
   try {
     const configPath = updateAppConfigInProject(cwd, { mode: "proxy", upstream: upstreamUrl })
     file("updated", configPath)
-    info(`Forwarding to ${upstreamUrl}: app at ${localKongBaseUrl()}/`)
+    info(`Forwarding to ${upstreamUrl}: app at ${localPublicApiUrl(cwd)}/`)
     nextSteps("Next:", applySteps(cwd))
   } catch (err) {
     error(errorMessage(err))

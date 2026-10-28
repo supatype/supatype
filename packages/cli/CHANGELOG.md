@@ -58,6 +58,12 @@
 
 ### Bug Fixes
 
+* **app, status, functions serve:** the local gateway address follows `.env`. `app add` printed the
+  app URL, `status` the API URL, and `functions serve` gave functions `SUPATYPE_URL`, all on the
+  default port 18473 whatever `SUPATYPE_KONG_PORT` said, so after `dev` moved Kong to another port
+  they pointed at whichever stack held 18473. They now use `.env`'s `API_EXTERNAL_URL`, else
+  `SUPATYPE_KONG_PORT`, as `ctx.publicUrl` already did.
+
 * **pull:** a uuid `id` column is drafted as `UUID`. Every one was drafted as `SupatypeAuthUserId`,
   which declares the key to be an auth user's id; telling the two apart needs the schema of a foreign
   key's table, which the engine does not report yet. A drafted model also names its table
