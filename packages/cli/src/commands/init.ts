@@ -8,9 +8,9 @@ import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
 import {
   CONTROL_PLANE_SECRET_ENV,
-  envJwtSecret,
   generateControlPlaneSecret,
   givenJwtSecret,
+  newJwtSecret,
 } from "../local-secrets.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -665,11 +665,22 @@ async function ensureInitBinaries(dir: string): Promise<boolean> {
 
 function writeKeys(dir: string): boolean {
   const keys = generateAndWriteKeys(dir)
-  if (!keys) {
-    warn("Could not write keys: the project has no .env. Run `supatype keys` in it.")
+  if (!keys.ok) {
+    warn(`Could not write keys: ${keys.reason} Run \`supatype keys\` in the project once that is fixed.`)
     return false
   }
+  if (keys.warning !== undefined) warn(keys.warning)
   return true
+}
+
+/**
+ * The new .env's JWT_SECRET: the shell's when one is exported and usable, else a generated one.
+ * Warned about rather than refused when the shell's is unusable, since init is mid-wizard.
+ */
+function initialJwtSecret(): string {
+  const { secret, problem } = newJwtSecret(givenJwtSecret())
+  if (problem !== undefined) warn(`${problem} Generated a JWT_SECRET for .env instead.`)
+  return secret
 }
 
 // ─── Scaffold ──────────────────────────────────────────────────────────────--
@@ -1246,11 +1257,11 @@ AUTHENTICATOR_PASSWORD=${randomBytes(24).toString("base64url")}
 # query typed there runs without superuser rights. Kept apart from both passwords above.
 SUPATYPE_SQL_EDITOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
 
-  // A JWT_SECRET exported in the shell is the one compose would run the stack with, so the new
-  // .env holds that one rather than a generated secret the stack would never use.
+  // A usable JWT_SECRET exported in the shell goes into the new .env, so tokens the developer
+  // already signed with it keep working. From then on .env's wins over the shell's.
   sections.push(`# JWT: ANON_KEY and SERVICE_ROLE_KEY are derived from this secret.
 # Changing it invalidates every issued token; re-run \`supatype keys\` afterwards.
-JWT_SECRET=${envJwtSecret({}, givenJwtSecret()).secret}
+JWT_SECRET=${initialJwtSecret()}
 ANON_KEY=
 SERVICE_ROLE_KEY=`)
 

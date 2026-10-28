@@ -5,36 +5,18 @@
  * accepts one, so without this check the stack comes up whole except for the REST API, which
  * restarts in a loop and gives its reason only in its own log.
  *
- * Kept out of `local-secrets.ts` on purpose: that module is imported widely, and the fatal error
- * below brings in the terminal UI.
+ * The rules themselves are in `jwt-secret-rules.ts`, which has no terminal UI so that
+ * `local-secrets.ts` can use them; this module adds the refusal.
  */
 
+import { JWT_SECRET_REMEDY, jwtSecretTooShort } from "./jwt-secret-rules.js"
 import { fatalError } from "./ui/fatal.js"
 
-/** The shortest JWT secret PostgREST will start with. */
-export const MIN_JWT_SECRET_LENGTH = 32
+export { JWT_SECRET_REMEDY, MIN_JWT_SECRET_LENGTH, jwtSecretTooShort } from "./jwt-secret-rules.js"
 
-/** Why `secret` cannot sign this stack's tokens, or null when it can. */
-export function jwtSecretTooShort(secret: string): string | null {
-  if (secret.length >= MIN_JWT_SECRET_LENGTH) return null
-  return (
-    `JWT_SECRET in .env is ${secret.length} characters, and the REST API needs at least ` +
-    `${MIN_JWT_SECRET_LENGTH}.`
-  )
-}
-
-/**
- * What to do about a short secret. `--force`, because the keys already in .env were signed with
- * the old secret and `keys --write` on its own only fills blank ones.
- */
-export const JWT_SECRET_REMEDY: readonly string[] = [
-  "Generate a longer one, for example with `openssl rand -base64 48`, and put it in .env as JWT_SECRET.",
-  "Then run `supatype keys --write --force` to sign ANON_KEY and SERVICE_ROLE_KEY with it again.",
-]
-
-/** Stop before starting a stack whose REST API could not start with `secret`. */
-export function requireUsableJwtSecret(secret: string): void {
-  const problem = jwtSecretTooShort(secret)
+/** Stop before starting a stack whose REST API could not start with `secret`, named by `where`. */
+export function requireUsableJwtSecret(secret: string, where?: string): void {
+  const problem = jwtSecretTooShort(secret, where)
   if (problem === null) return
   fatalError(problem, [...JWT_SECRET_REMEDY])
 }
