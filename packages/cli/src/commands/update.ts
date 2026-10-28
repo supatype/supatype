@@ -8,13 +8,14 @@ import { errorMessage } from "../error-message.js"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
-import { resolveRuntimeProvider } from "../project-config.js"
+import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
 import { runDockerCompose, writeSelfHostCompose, composePullNeedsIgnoreFailures, composeProjectName, exitComposeFailed } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { syncComposeImagePins } from "../dev-compose.js"
-import { download, currentPlatform, fetchAllLatestVersions, pinnedVersion, type Component } from "../binary-cache.js"
+import { download, currentPlatform, fetchAllLatestVersions, pinnedVersion, type Component, type PlatformId } from "../binary-cache.js"
 import { defaultComponentVersion } from "../release-images.js"
 import { error, info, plain } from "../ui/messages.js"
+import { fatalError } from "../ui/fatal.js"
 
 const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]
 
@@ -78,103 +79,188 @@ export function registerUpdate(program: Command): void {
         return
       }
 
-      const platform = currentPlatform()
-
-      const components: Component[] = ["engine", "server", "postgres", "deno", "realtime"]
-      const updates: Array<{ component: Component; from: string; to: string }> = []
-
-      info("Fetching latest component versions from CDN...")
-      const latestVersions = await fetchAllLatestVersions()
-
-      for (const component of components) {
-        const latest = latestVersions[component]
-        const current = pinnedVersion(component, config)
-        // Unpinned runs what this CLI release was tested with, so that is what to fetch, whatever
-        // the CDN says; its latest is fetched only for a component this CLI does not pin.
-        const target = current ? undefined : (defaultComponentVersion(component) ?? latest)
-        if (target) {
-          if (opts.check) {
-            plain(`  ${component}  (unpinned) → ${target}, ${latest ?? "nothing"} is the latest on the CDN`)
-          } else {
-            info(`Downloading ${component} v${target}...`)
-            try {
-              await download(component, target, platform)
-              info(`${component} v${target} downloaded.`)
-            } catch (err) {
-              error(`Failed: ${errorMessage(err)}`)
-            }
-          }
-          continue
-        }
-        if (!latest) {
-          if (component === "realtime") {
-            // Realtime binaries publish with every stable supatype v* release, but releases from
-            // before that have none, and a prerelease never moves realtime/latest.json.
-            info(`Skipping ${component}: no realtime/latest.json on the CDN (realtime binaries ship with each stable supatype v* release)`)
-            continue
-          }
-          error(`No latest version for ${component} on CDN`)
-          continue
-        }
-        if (!current || current === "local") continue
-        if (current !== latest) {
-          updates.push({ component, from: current, to: latest })
-        }
-      }
-
-      if (updates.length === 0) {
-        info(opts.check ? "All pinned components match CDN latest." : "All components are up to date.")
-        return
-      }
-
-      plain("Available updates:")
-      for (const { component, from, to } of updates) {
-        plain(`  ${component}  ${from} → ${to}`)
-      }
-
-      if (opts.check) return
-
-      // Download updated binaries.
-      for (const { component, to } of updates) {
-        info(`Downloading ${component} v${to}...`)
-        try {
-          await download(component, to, platform)
-        } catch (err) {
-          error(`Failed: ${errorMessage(err)}`)
-          continue
-        }
-        info(`${component} v${to} downloaded.`)
-      }
-
-      const configPath = resolveConfigFile(cwd)
-      if (configPath === null) {
-        error("No supatype.config.ts (or .js/.mjs) found to patch versions.")
-        process.exit(1)
-      }
-
-      let text = readFileSync(configPath, "utf8")
-      for (const { component, to } of updates) {
-        const key = component
-        if (text.includes(`${key}:`)) {
-          text = text.replace(
-            new RegExp(`(${key}\\s*:\\s*['"])[^'"]*(['"])`),
-            `$1${to}$2`,
-          )
-        } else if (text.includes("versions:")) {
-          text = text.replace(
-            /(versions:\s*\{[^}]*)(\})/,
-            `$1,\n    ${key}: "${to}"$2`,
-          )
-        } else {
-          text = text.replace(
-            /(\n)(\s*)(email:|schema:|storage:)/,
-            `$1$2versions: {\n$2  ${key}: "${to}",\n$2},\n$2$3`,
-          )
-        }
-      }
-
-      writeFileSync(configPath, text, "utf8")
-      info(`${basename(configPath)} updated.`)
-      pushReminder()
+      await updateNativeComponents(cwd, config, opts.check)
     })
+}
+
+/** The components a native project runs, in the order `update` fetches them. */
+const NATIVE_COMPONENTS: readonly Component[] = ["engine", "server", "postgres", "deno", "realtime"]
+
+/** A pinned component the CDN has a newer version of. */
+interface ComponentUpdate {
+  component: Component
+  from: string
+  to: string
+}
+
+/** A component `update` could not fetch, and why. */
+interface UpdateFailure {
+  component: Component
+  reason: string
+}
+
+/** What one component needs: a newer pinned version, a failure to report, or neither. */
+interface ComponentPlan {
+  update?: ComponentUpdate
+  failure?: UpdateFailure
+}
+
+/**
+ * Download what a native project runs, bump the pinned versions that have newer ones, and exit 1
+ * naming every component that could not be fetched.
+ *
+ * A failed download used to print "Failed: ..." and carry on, so a run where every download failed
+ * ended on "All components are up to date." with exit 0, and a pinned version was written into the
+ * config whether or not its binary had arrived.
+ */
+async function updateNativeComponents(cwd: string, config: SupatypeProjectConfig, check: boolean): Promise<void> {
+  const platform = currentPlatform()
+  const { updates, failures } = await planNativeUpdates(config, check, platform)
+  if (updates.length === 0) {
+    exitOnFailures(failures)
+    info(check ? "All pinned components match CDN latest." : "All components are up to date.")
+    return
+  }
+
+  plain("Available updates:")
+  for (const { component, from, to } of updates) {
+    plain(`  ${component}  ${from} → ${to}`)
+  }
+  if (check) {
+    exitOnFailures(failures)
+    return
+  }
+
+  const { downloaded, failed } = await downloadUpdates(updates, platform)
+  if (downloaded.length > 0) {
+    patchConfigVersions(cwd, downloaded)
+    pushReminder()
+  }
+  exitOnFailures([...failures, ...failed])
+}
+
+/** Every component's plan, downloading the unpinned ones on the way unless this is `--check`. */
+async function planNativeUpdates(
+  config: SupatypeProjectConfig,
+  check: boolean,
+  platform: PlatformId,
+): Promise<{ updates: ComponentUpdate[]; failures: UpdateFailure[] }> {
+  info("Fetching latest component versions from CDN...")
+  const latestVersions = await fetchAllLatestVersions()
+  const updates: ComponentUpdate[] = []
+  const failures: UpdateFailure[] = []
+  for (const component of NATIVE_COMPONENTS) {
+    const plan = await planComponent(component, latestVersions[component], config, check, platform)
+    if (plan.update !== undefined) updates.push(plan.update)
+    if (plan.failure !== undefined) failures.push(plan.failure)
+  }
+  return { updates, failures }
+}
+
+async function planComponent(
+  component: Component,
+  latest: string | undefined,
+  config: SupatypeProjectConfig,
+  check: boolean,
+  platform: PlatformId,
+): Promise<ComponentPlan> {
+  const current = pinnedVersion(component, config)
+  // Unpinned runs what this CLI release was tested with, so that is what to fetch, whatever
+  // the CDN says; its latest is fetched only for a component this CLI does not pin.
+  const target = current ? undefined : (defaultComponentVersion(component) ?? latest)
+  if (target) {
+    if (check) {
+      plain(`  ${component}  (unpinned) → ${target}, ${latest ?? "nothing"} is the latest on the CDN`)
+      return {}
+    }
+    const failure = await downloadComponent(component, target, platform)
+    return failure === null ? {} : { failure }
+  }
+  if (!latest) return missingLatest(component)
+  if (!current || current === "local" || current === latest) return {}
+  return { update: { component, from: current, to: latest } }
+}
+
+/** A pinned component the CDN names no latest version for: skipped for realtime, a failure otherwise. */
+function missingLatest(component: Component): ComponentPlan {
+  if (component === "realtime") {
+    // Realtime binaries publish with every stable supatype v* release, but releases from
+    // before that have none, and a prerelease never moves realtime/latest.json.
+    info(`Skipping ${component}: no realtime/latest.json on the CDN (realtime binaries ship with each stable supatype v* release)`)
+    return {}
+  }
+  error(`No latest version for ${component} on CDN`)
+  return { failure: { component, reason: "the CDN names no latest version" } }
+}
+
+/** Download one version, saying so. The failure, or null when it arrived. */
+async function downloadComponent(component: Component, version: string, platform: PlatformId): Promise<UpdateFailure | null> {
+  info(`Downloading ${component} v${version}...`)
+  try {
+    await download(component, version, platform)
+  } catch (err) {
+    const reason = errorMessage(err)
+    error(`Failed: ${reason}`)
+    return { component, reason }
+  }
+  info(`${component} v${version} downloaded.`)
+  return null
+}
+
+/** The pinned updates, split by whether their binary arrived. */
+async function downloadUpdates(
+  updates: readonly ComponentUpdate[],
+  platform: PlatformId,
+): Promise<{ downloaded: ComponentUpdate[]; failed: UpdateFailure[] }> {
+  const downloaded: ComponentUpdate[] = []
+  const failed: UpdateFailure[] = []
+  for (const update of updates) {
+    const failure = await downloadComponent(update.component, update.to, platform)
+    if (failure === null) downloaded.push(update)
+    else failed.push(failure)
+  }
+  return { downloaded, failed }
+}
+
+/** Exit 1 naming each component that could not be fetched; nothing when there are none. */
+function exitOnFailures(failures: readonly UpdateFailure[]): void {
+  if (failures.length === 0) return
+  fatalError(
+    `${failures.length} component(s) could not be updated.`,
+    [...failures.map(({ component, reason }) => `${component}: ${reason}`), "Run `supatype update` again once the CDN is reachable."],
+    { brand: { intro: "Update components" } },
+  )
+}
+
+/** Write each downloaded version into the project's config file. */
+function patchConfigVersions(cwd: string, updates: readonly ComponentUpdate[]): void {
+  const configPath = resolveConfigFile(cwd)
+  if (configPath === null) {
+    error("No supatype.config.ts (or .js/.mjs) found to patch versions.")
+    process.exit(1)
+  }
+
+  let text = readFileSync(configPath, "utf8")
+  for (const { component, to } of updates) {
+    const key = component
+    if (text.includes(`${key}:`)) {
+      text = text.replace(
+        new RegExp(`(${key}\\s*:\\s*['"])[^'"]*(['"])`),
+        `$1${to}$2`,
+      )
+    } else if (text.includes("versions:")) {
+      text = text.replace(
+        /(versions:\s*\{[^}]*)(\})/,
+        `$1,\n    ${key}: "${to}"$2`,
+      )
+    } else {
+      text = text.replace(
+        /(\n)(\s*)(email:|schema:|storage:)/,
+        `$1$2versions: {\n$2  ${key}: "${to}",\n$2},\n$2$3`,
+      )
+    }
+  }
+
+  writeFileSync(configPath, text, "utf8")
+  info(`${basename(configPath)} updated.`)
 }

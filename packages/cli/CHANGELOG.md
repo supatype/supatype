@@ -225,6 +225,9 @@
   starts, as it does Postgres, the server, PostgREST and realtime, and stops naming the variable
   that moves it. With the port taken, Deno failed after the stack was up and every function
   answered 502. A `SUPATYPE_DENO_PORT` in `.env` now reaches the server, not only an exported one.
+* **update:** `supatype update` exits 1 naming each component it could not fetch. A run where every
+  download failed ended on "All components are up to date." with exit 0, and a pinned version was
+  written into `supatype.config.ts` even when its download had failed.
 
 
 ## 0.7.0
