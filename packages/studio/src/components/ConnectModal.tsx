@@ -151,6 +151,10 @@ function getClientFile(fw: Framework, variant: NextVariant): { filename: string;
 import { cookies } from 'next/headers'
 import type { Database } from './types/supatype'
 
+// For Server Components, which cannot write cookies. Without setAll the client never refreshes
+// the session: a refresh would spend the browser's refresh token and the browser would never get
+// the new one. In a Route Handler or Server Action, add setAll and write each cookie with
+// cookieStore.set(name, value, options ?? {}).
 export async function createSupatypeClient() {
   const cookieStore = await cookies()
   return createServerClient<Database>(
@@ -159,13 +163,6 @@ export async function createSupatypeClient() {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll(toSet) {
-          try {
-            toSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options ?? {}))
-          } catch {
-            // A Server Component cannot write cookies; a Route Handler or Server Action can.
-          }
-        },
       },
     },
   )

@@ -12,6 +12,10 @@ const cookiePrefix = process.env["SUPATYPE_AUTH_COOKIE_PREFIX"] ?? "st"
  * This is the whole reason the marketing half is a server-rendered app rather than a second SPA: an
  * editor previewing an unpublished page and a reader seeing only what is live are the same code
  * path, distinguished by who the request is from. A static build cannot make that distinction.
+ *
+ * Every caller only reads, and most are Server Components, which cannot write cookies. So there is
+ * no `setAll`, and without one the client never refreshes the session: a refresh would spend the
+ * refresh token the browser holds and hand back one the browser never receives.
  */
 export async function createClient() {
   const cookieStore = await cookies()
@@ -20,13 +24,6 @@ export async function createClient() {
     cookies: {
       getAll() {
         return cookieStore.getAll()
-      },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options ?? {}))
-        } catch {
-          // Server Components are read-only; a refresh written here is picked up by middleware.
-        }
       },
     },
   })

@@ -764,4 +764,23 @@ describe("AuthClient autoRefreshToken", () => {
       vi.unstubAllGlobals()
     }
   })
+
+  it("leaves an expired session as it is when refreshExpiredToken is off", async () => {
+    const fetchSpy = mockFetch(TOKEN_RESPONSE)
+    vi.stubGlobal("fetch", fetchSpy)
+    try {
+      const client = new AuthClient(SUPATYPE_URL, HEADERS, {
+        initialSession: expired,
+        autoRefreshToken: false,
+        refreshExpiredToken: false,
+      })
+      await client.ensureValidSession()
+      const { data } = await client.getSession()
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(client.currentAccessToken).toBe("expired-token")
+      expect(data.session?.refreshToken).toBe("refresh-token-abc")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

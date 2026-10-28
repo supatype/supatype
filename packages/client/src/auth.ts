@@ -46,6 +46,8 @@ interface AuthClientOptions {
   persistSession?: boolean | undefined
   /** Refresh on a timer before the token expires, and at once when it starts expired. Default: true. */
   autoRefreshToken?: boolean | undefined
+  /** Refresh an expired access token when a request or `getSession` finds it. Default: true. */
+  refreshExpiredToken?: boolean | undefined
   storageKey?: string | undefined
   cookiePrefix?: string | undefined
   /** Custom session store (replaces browser localStorage/cookies when set). */
@@ -141,6 +143,8 @@ export class AuthClient {
   private readonly persistSession: boolean
   /** False leaves every refresh to `ensureValidSession`, which each request calls first. */
   private readonly autoRefreshToken: boolean
+  /** False makes `ensureValidSession` leave an expired session as it is, for the server to refuse. */
+  private readonly refreshExpiredToken: boolean
   private readonly storageKey: string
   private readonly cookieName: string
   private readonly storage: AuthStorage | null
@@ -164,6 +168,7 @@ export class AuthClient {
     this.baseHeaders = baseHeaders
     this.persistSession = opts.persistSession ?? true
     this.autoRefreshToken = opts.autoRefreshToken ?? true
+    this.refreshExpiredToken = opts.refreshExpiredToken ?? true
     this.storageKey = opts.storageKey ?? DEFAULT_STORAGE_KEY
     const cookiePrefix = opts.cookiePrefix ?? DEFAULT_COOKIE_PREFIX
     this.cookieName = `${cookiePrefix}-auth-token`
@@ -308,6 +313,8 @@ export class AuthClient {
   private async ensureValidSessionInternal(): Promise<void> {
     const session = this.currentSession
     if (session === null || !this.isAccessTokenExpired(session)) return
+    // Sent as it is: a refresh nobody can store spends a refresh token someone else holds.
+    if (!this.refreshExpiredToken) return
     if (!session.refreshToken?.trim()) {
       this._setSession(null)
       return
