@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import {
   appendFileSync,
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -14,8 +15,10 @@ import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   devServiceRoleKeyPath,
+  functionsServeKeyPath,
   generateFunctionsRouterSource,
   writeServiceRoleKeyFile,
+  writeServiceRoleKeyFileUntilExit,
 } from "../src/functions-router-gen.js"
 
 /**
@@ -61,6 +64,28 @@ describe("the generated router's source", () => {
     writeServiceRoleKeyFile(keyPath, "second")
     expect(statSync(keyPath).mode & 0o777).toBe(0o600)
     expect(readFileSync(keyPath, "utf8")).toBe("second")
+  })
+
+  it("removes the key file again when the process exits", () => {
+    // The key used to stay in .supatype/ after dev or functions serve stopped.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-key-"))
+    dirs.push(dir)
+    const keyPath = devServiceRoleKeyPath(dir)
+    const before = process.listeners("exit")
+    writeServiceRoleKeyFileUntilExit(keyPath, "k")
+    const added = process.listeners("exit").filter((listener) => !before.includes(listener))
+    expect(added).toHaveLength(1)
+    expect(existsSync(keyPath)).toBe(true)
+    for (const listener of added) {
+      process.removeListener("exit", listener)
+      listener.call(process, 0)
+    }
+    expect(existsSync(keyPath)).toBe(false)
+  })
+
+  it("gives each functions serve its own key file", () => {
+    // One shared file was deleted by whichever serve stopped first, under the others still running.
+    expect(functionsServeKeyPath("/p", 101)).not.toBe(functionsServeKeyPath("/p", 102))
   })
 
   it("takes the default export, else a named handler", () => {
