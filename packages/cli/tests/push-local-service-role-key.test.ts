@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { localServiceRoleKey } from "../src/commands/push.js"
-import { shellServiceRoleKey } from "../src/dev-api-keys.js"
+import { configuredServiceRoleKey, shellServiceRoleKey } from "../src/dev-api-keys.js"
 import { signJwt, verifyJwt } from "../src/jwt.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
@@ -66,6 +66,8 @@ describe("a service-role key exported in the shell", () => {
     vi.stubEnv("SERVICE_ROLE_KEY", good)
     writeFileSync(join(dir, ".env"), `JWT_SECRET=${SECRET}\nSERVICE_ROLE_KEY=\n`)
     expect(shellServiceRoleKey(dir)).toBe(good)
+    // The control plane and REST cache callers read the configured key: the one compose kept.
+    expect(configuredServiceRoleKey(dir)).toBe(good)
   })
 
   it("gives way to .env's SERVICE_ROLE_KEY, the name the stack runs with, not SUPATYPE_SERVICE_ROLE_KEY", () => {

@@ -57,22 +57,34 @@ describe("the environment docker compose runs with", () => {
     for (const name of NAMES) expect(env[name]).toBeUndefined()
   })
 
-  it("leaves out a shell key signed with another secret where .env's own is blank", () => {
-    // PostgREST, on .env's JWT_SECRET, would refuse it.
-    process.env["SERVICE_ROLE_KEY"] = signJwt({ role: "service_role" }, OTHER_SECRET)
-    writeFileSync(join(dir, ".env"), `JWT_SECRET=${ENV_SECRET}\nANON_KEY=\n`)
+  const key = (role: string, secret: string, exp?: number): string =>
+    signJwt({ iss: "supatype", role, ...(exp !== undefined && { exp }) }, secret)
+  const past = Math.floor(Date.now() / 1000) - 60
+
+  it.each([
+    ["signed with another secret", () => key("service_role", OTHER_SECRET)],
+    ["for another role", () => key("anon", ENV_SECRET)],
+    ["that has expired", () => key("service_role", ENV_SECRET, past)],
+  ])("leaves out a shell key %s where .env's own is blank", (_, shellKey) => {
+    // PostgREST, on .env's JWT_SECRET, would refuse it, or take it for a role it is not.
+    process.env["SERVICE_ROLE_KEY"] = shellKey()
+    process.env["ANON_KEY"] = key("service_role", ENV_SECRET)
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${ENV_SECRET}\nANON_KEY=\nSERVICE_ROLE_KEY=\n`)
     const env = composeEnv()
     for (const name of NAMES) expect(env[name]).toBeUndefined()
   })
 
-  it("keeps a shell key signed with .env's JWT_SECRET where .env's own is blank", () => {
+  it("keeps shell keys the stack accepts under .env's JWT_SECRET where .env's own are blank", () => {
     // The compose file requires SERVICE_ROLE_KEY: dropping a good one stopped push, diff and restart.
-    const key = signJwt({ role: "service_role" }, ENV_SECRET)
-    process.env["SERVICE_ROLE_KEY"] = key
-    writeFileSync(join(dir, ".env"), `JWT_SECRET=${ENV_SECRET}\nSERVICE_ROLE_KEY=\n`)
+    const anon = key("anon", ENV_SECRET)
+    const service = key("service_role", ENV_SECRET)
+    process.env["ANON_KEY"] = anon
+    process.env["SERVICE_ROLE_KEY"] = service
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${ENV_SECRET}\nANON_KEY=\nSERVICE_ROLE_KEY=\n`)
     const env = composeEnv()
     expect(env["JWT_SECRET"]).toBeUndefined()
-    expect(env["SERVICE_ROLE_KEY"]).toBe(key)
+    expect(env["ANON_KEY"]).toBe(anon)
+    expect(env["SERVICE_ROLE_KEY"]).toBe(service)
   })
 
   it("keeps the shell's secret and keys .env neither defines nor signs", () => {
