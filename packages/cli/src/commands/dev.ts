@@ -46,7 +46,7 @@ import {
   devServiceRoleKeyPath,
   discoverFunctionsOrExit,
   writeDevFunctionsRouter,
-  writeServiceRoleKeyFile,
+  writeServiceRoleKeyFileUntilExit,
 } from "../functions-router-gen.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
@@ -484,7 +484,7 @@ export function registerDev(program: Command): void {
       // The server passes its environment, the key included, on to Deno, but the functions router
       // reads the key from this file: a --watch reload evaluates it again in an environment an
       // earlier evaluation already took the key out of.
-      writeServiceRoleKeyFile(devServiceRoleKeyPath(cwd), serviceRoleKey)
+      writeServiceRoleKeyFileUntilExit(devServiceRoleKeyPath(cwd), serviceRoleKey)
 
       writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
 

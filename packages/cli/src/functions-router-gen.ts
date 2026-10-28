@@ -9,7 +9,7 @@ import {
   dirname,
   resolve as pathResolve,
 } from "node:path"
-import { chmodSync, existsSync, readdirSync, statSync, mkdirSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, readdirSync, rmSync, statSync, mkdirSync, writeFileSync } from "node:fs"
 import { FUNCTION_NAME_RULE, isFunctionName } from "@supatype/shared"
 import { fatalError } from "./ui/fatal.js"
 
@@ -376,6 +376,24 @@ export function writeServiceRoleKeyFile(keyPath: string, serviceRoleKey: string)
   writeFileSync(keyPath, serviceRoleKey, { encoding: "utf8", mode: 0o600 })
   // The mode above applies only to a file it creates; one left by an earlier run keeps its own.
   chmodSync(keyPath, 0o600)
+}
+
+/**
+ * {@link writeServiceRoleKeyFile}, removing the file again when this process exits, so the key is
+ * on disk only while something that uses it is running. A process killed outright leaves it
+ * behind, and the next run overwrites it.
+ */
+export function writeServiceRoleKeyFileUntilExit(keyPath: string, serviceRoleKey: string): void {
+  writeServiceRoleKeyFile(keyPath, serviceRoleKey)
+  process.once("exit", () => rmSync(keyPath, { force: true }))
+}
+
+/**
+ * Where one `functions serve` keeps the key: a file of its own, since each removes its file when
+ * it stops while another may still be serving the same project.
+ */
+export function functionsServeKeyPath(cwd: string, pid: number = process.pid): string {
+  return join(pathResolve(cwd, ".supatype"), `functions-serve-key-${pid}`)
 }
 
 /**

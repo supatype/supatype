@@ -93,7 +93,8 @@
   granted after `--watch` reloads the router on a change, however the run before it ended: a function
   that failed to load, an unhandled rejection or a crash no longer leaves every later reload without
   the key until `dev` restarts. The router reads it from a file in `.supatype/`, readable by its owner
-  only, rather than from the environment it takes the key out of.
+  only, rather than from the environment it takes the key out of. The file is removed when `dev` or
+  `functions serve` stops, Ctrl+C included, and each `functions serve` has a file of its own.
 
 * **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
   server and the control plane were all told `/project/functions` whatever the config said, so a
