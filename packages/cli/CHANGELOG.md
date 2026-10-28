@@ -18,8 +18,9 @@
 * **init:** `supatype init <dir> --example <name>` starts from `examples/<name>` of the release
   matching the CLI (`v<version>` on GitHub), with every `workspace:` dependency pinned to
   `^<version>`. An unknown name is refused with the list of examples in that release, and so is an
-  archive naming a file with `..`, a backslash, a NUL, a drive letter or an absolute path, or one that
-  resolves outside the directory.
+  example holding a file named with `..`, a backslash, a NUL, a leading drive (`C:`) or an absolute
+  path, or one that resolves outside the directory; nothing is written then. Such a name elsewhere
+  in the repository does not stop an example, and a colon later in a name (`docs/a:b.md`) is no drive.
 * **seed:** `authUser: { connect: { id } }` on a relation to the auth user (`RelatedTo<SupatypeAuthUser>`)
   writes the relation's key column. It failed with "`supatype:user` is not a model in this schema".
   The generated `...Create` type still offers the key column (`auth_user_id`) rather than `authUser`;
@@ -56,7 +57,12 @@
 
 * **migrate:** restoring a migration's schema sources refuses a file that lands beside the project
   under a path starting with the project's own (`/srv/app2/x.ts` for `/srv/app`). The check compared
-  string prefixes, so it took that file for one inside the project.
+  string prefixes, so it took that file for one inside the project. The snapshot is now read by the
+  same tar reader as `init --example`, so a name with a backslash, a NUL, a leading drive or an
+  absolute path is refused too (a backslash was read as a separator), an entry naming the project
+  root itself (`./`) is refused rather than failing on write, and a name that only starts with two
+  dots (`..notes/x.ts`) is restored rather than refused. The backup taken before a restore copies
+  the files the snapshot overwrites, not the paths its manifest lists, which were never checked.
 
 * **schema:** an `id: SupatypeAuthUserId` primary key under `create: Owner<"id">` (also inside `Any`
   or `All`) no longer gets a `gen_random_uuid()` default. A random id names no user, and the default

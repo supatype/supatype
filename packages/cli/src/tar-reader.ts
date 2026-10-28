@@ -6,8 +6,9 @@
  * rather than shelling out to `tar`, which on Windows is often Git Bash's and refuses drive-letter
  * paths, and rather than adding a dependency for a few dozen lines.
  *
- * An archive names its own paths, so an entry whose name could land outside wherever it is written
- * refuses the whole archive here, before any consumer sees it ({@link safeEntryName}).
+ * An archive names its own paths, so each entry says whether its name is one a consumer could write
+ * safely ({@link isSafeEntryName}). An unsafe name does not spoil the archive: a consumer that takes
+ * one folder of a whole repository refuses only an unsafe name it would use.
  */
 
 import { gunzipSync } from "node:zlib"
@@ -17,11 +18,13 @@ export interface TarEntry {
   path: string
   kind: "file" | "directory"
   data: Buffer
+  /** Whether the name can be written under a directory without landing outside it ({@link isSafeEntryName}). */
+  safe: boolean
 }
 
 const BLOCK = 512
 
-/** Every file and directory in `gz`; links and other special entries are left out. */
+/** Every file and directory in `gz`, unsafe names included; links and other special entries are left out. */
 export function readTarGz(gz: Buffer): TarEntry[] {
   return readTar(gunzip(gz))
 }
@@ -30,17 +33,18 @@ function gunzip(gz: Buffer): Buffer {
   try {
     return gunzipSync(gz)
   } catch (err) {
-    throw new Error(`The download is not a gzipped tarball: ${errorMessage(err)}`)
+    throw new Error(`The archive is not a gzipped tarball: ${errorMessage(err)}`)
   }
 }
 
-function readTar(tar: Buffer): TarEntry[] {
+/** {@link readTarGz} for a tarball that is not compressed. */
+export function readTar(tar: Buffer): TarEntry[] {
   const entries: TarEntry[] = []
   let nextPath: string | undefined
   for (let offset = 0; offset + BLOCK <= tar.length; ) {
     const header = tar.subarray(offset, offset + BLOCK)
     if (header.every((byte) => byte === 0)) break
-    if (header.toString("latin1", 257, 262) !== "ustar") throw new Error("The download is not a tarball (no ustar header).")
+    if (header.toString("latin1", 257, 262) !== "ustar") throw new Error("The archive is not a tarball (no ustar header).")
     const size = octal(header.subarray(124, 136))
     const data = tar.subarray(offset + BLOCK, offset + BLOCK + size)
     offset += BLOCK + Math.ceil(size / BLOCK) * BLOCK
@@ -49,7 +53,8 @@ function readTar(tar: Buffer): TarEntry[] {
     else if (type === "L") nextPath = cString(data)
     else if (type !== "g") {
       const kind = type === "5" ? "directory" : type === "0" || type === "\0" ? "file" : undefined
-      if (kind !== undefined) entries.push({ path: safeEntryName(nextPath ?? headerPath(header)), kind, data })
+      const path = nextPath ?? headerPath(header)
+      if (kind !== undefined) entries.push({ path, kind, data, safe: isSafeEntryName(path) })
       nextPath = undefined
     }
   }
@@ -57,17 +62,13 @@ function readTar(tar: Buffer): TarEntry[] {
 }
 
 /**
- * `name`, or a refusal when it has a NUL, a backslash, an absolute start, a drive letter in any
- * segment or a `..` segment. A backslash is a separator to Windows, so `..\..\x` climbs out there
- * however POSIX reads it, and `C:x` is relative to that drive's own working directory.
+ * False when `name` has a NUL, a backslash, an absolute start, a drive spec opening it or a `..`
+ * segment. A backslash is a separator to Windows, so `..\..\x` climbs out there however POSIX reads
+ * it, and `C:x` is relative to that drive's own working directory. A colon later in the name
+ * (`docs/a:b.md`) is no drive: joined under a directory it stays there.
  */
-function safeEntryName(name: string): string {
-  const unsafe =
-    /[\\\0]/.test(name) ||
-    name.startsWith("/") ||
-    name.split("/").some((segment) => segment === ".." || /^[A-Za-z]:/.test(segment))
-  if (unsafe) throw new Error(`The tarball has an unsafe entry name: ${JSON.stringify(name)}.`)
-  return name
+export function isSafeEntryName(name: string): boolean {
+  return !(/[\\\0]/.test(name) || name.startsWith("/") || /^[A-Za-z]:/.test(name) || name.split("/").includes(".."))
 }
 
 /** A ustar name, with its prefix field when it has one. */

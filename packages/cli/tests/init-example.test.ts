@@ -143,9 +143,10 @@ describe("initFromExample()", () => {
     expect(existsSync(dir)).toBe(false)
   })
 
-  // The name checks themselves are the tar reader's (tar-reader.test.ts); this is that they stop
-  // an example before any file of it is written.
-  it("refuses an archive with a path that climbs out of the example before writing anything", async () => {
+  // The name checks themselves are the tar reader's (tar-reader.test.ts); this is that an unsafe
+  // name inside the example stops it before any file of it is written, and one elsewhere in the
+  // repository does not.
+  it("refuses an example holding a path that climbs out of it before writing anything", async () => {
     const dir = target()
     const evil = fixtureTarball("supatype-0.7.0", [
       { path: "examples/blog/README.md", content: "# Blog\n" },
@@ -155,5 +156,30 @@ describe("initFromExample()", () => {
       /unsafe entry name/,
     )
     expect(existsSync(dir)).toBe(false)
+  })
+
+  it("refuses an example holding a backslash name before writing anything", async () => {
+    const dir = target()
+    const evil = fixtureTarball("supatype-0.7.0", [
+      { path: "examples/blog/README.md", content: "# Blog\n" },
+      { path: "examples/blog\\..\\..\\escape.txt", content: "x" },
+    ])
+    await expect(initFromExample({ dir, example: "blog", version: "0.7.0", download: serve(evil) })).rejects.toThrow(
+      /unsafe entry name/,
+    )
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  it("writes an example when an unsafe name is elsewhere in the repository", async () => {
+    const dir = target()
+    const tarball = fixtureTarball("supatype-0.7.0", [
+      { path: "examples/blog/README.md", content: "# Blog\n" },
+      { path: "docs/../../escape.txt", content: "x" },
+      { path: "examples/realtime/src\\index.ts", content: "x" },
+    ])
+    expect(exampleNames(readTarGz(tarball))).toEqual(["blog", "realtime"])
+    const result = await initFromExample({ dir, example: "blog", version: "0.7.0", download: serve(tarball) })
+    expect(result.files).toBe(1)
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toBe("# Blog\n")
   })
 })

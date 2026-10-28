@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs"
+import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
+import { gunzipSync } from "node:zlib"
 import { collectSchemaSourcePaths } from "../src/type-extractor.js"
 import {
   packSchemaSources,
@@ -10,6 +11,7 @@ import {
   restoreSchemaSourcesFromGz,
   findOrphanSchemaFiles,
 } from "../src/schema-sources.js"
+import { plainTarball } from "./support/tar-fixture.js"
 
 function writeMultiFileSchema(root: string): void {
   mkdirSync(join(root, "schema", "models"), { recursive: true })
@@ -83,7 +85,8 @@ describe("schema-sources", () => {
     }
   })
 
-  // `<root>2/x.ts` starts with the root's own path and is beside it, not under it.
+  // `<root>2/x.ts` starts with the root's own path and is beside it, not under it. As an absolute
+  // name (or a drive spec on Windows) the tar reader marks it unsafe before the landing check.
   it("refuses an entry that lands beside the project under a name starting with its own", () => {
     writeMultiFileSchema(tmp)
     const graph = collectSchemaSourcePaths(join(tmp, "schema", "index.ts"), tmp)
@@ -91,7 +94,48 @@ describe("schema-sources", () => {
     if (first === undefined) throw new Error("no schema files")
     const beside = { ...first, relativePath: `${resolve(tmp)}2/evil.ts`.replace(/\\/g, "/") }
     const tar = packSchemaSources({ ...graph, files: [beside] })
-    expect(() => unpackSchemaSources(tar, tmp)).toThrow(/escapes project root/)
+    expect(() => unpackSchemaSources(tar, tmp)).toThrow(/unsafe entry name/)
+  })
+
+  // The snapshot is read by the same tar reader as `init --example`, so it gets the same name checks.
+  it("reads a name that only starts with two dots", () => {
+    const files = unpackSchemaSources(gunzipSync(plainTarball([{ path: "..notes/x.ts", content: "x" }])), tmp)
+    expect([...files.keys()]).toEqual(["..notes/x.ts"])
+  })
+
+  it("refuses an entry that resolves to the project root itself", () => {
+    for (const path of ["./", "."]) {
+      expect(() => unpackSchemaSources(gunzipSync(plainTarball([{ path, content: "x" }])), tmp)).toThrow(
+        /does not land inside/,
+      )
+    }
+  })
+
+  it("refuses a backslash rather than reading it as a separator", () => {
+    const tar = gunzipSync(plainTarball([{ path: "schema\\models\\album.ts", content: "x" }]))
+    expect(() => unpackSchemaSources(tar, tmp)).toThrow(/unsafe/)
+  })
+
+  it("restore refuses a snapshot with an unsafe name before writing any file", () => {
+    const gz = plainTarball([
+      { path: "schema/index.ts", content: "x" },
+      { path: "../escape.ts", content: "x" },
+    ])
+    expect(() => restoreSchemaSourcesFromGz(gz, tmp)).toThrow(/unsafe/)
+    expect(existsSync(join(tmp, "schema", "index.ts"))).toBe(false)
+  })
+
+  // The manifest comes back from the database as the archive does, and its paths were never
+  // checked: the backup takes the archive's checked entries, the files restore overwrites.
+  it("restore backs up the checked files it overwrites", () => {
+    const project = join(tmp, "project")
+    const backupDir = join(tmp, "backups", "1")
+    mkdirSync(join(project, "schema"), { recursive: true })
+    writeFileSync(join(project, "schema", "index.ts"), "old\n")
+    const gz = plainTarball([{ path: "schema/index.ts", content: "new\n" }])
+    restoreSchemaSourcesFromGz(gz, project, { backupDir })
+    expect(readFileSync(join(backupDir, "schema", "index.ts"), "utf8")).toBe("old\n")
+    expect(readFileSync(join(project, "schema", "index.ts"), "utf8")).toBe("new\n")
   })
 
   it("buildSchemaSourcesPayload includes manifest metadata", () => {
@@ -129,7 +173,7 @@ describe("schema-sources", () => {
     const albumPath = join(tmp, "schema", "models", "album.ts")
     writeFileSync(albumPath, "// modified\n")
 
-    restoreSchemaSourcesFromGz(payload.gz, payload.manifest, tmp)
+    restoreSchemaSourcesFromGz(payload.gz, tmp)
     expect(readFileSync(albumPath, "utf8")).toContain("Nullable")
   })
 

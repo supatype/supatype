@@ -11,15 +11,13 @@ describe("pathInside()", () => {
     expect(pathInside(ROOT, join(ROOT, "src", "index.ts"))).toBe(true)
   })
 
-  it("is false for the root itself unless the caller counts it", () => {
+  it("is false for the root itself", () => {
     expect(pathInside(ROOT, ROOT)).toBe(false)
-    expect(pathInside(ROOT, ROOT, { includeRoot: true })).toBe(true)
   })
 
   it("is false for the parent and anything beside the root", () => {
     expect(pathInside(ROOT, resolve(ROOT, ".."))).toBe(false)
     expect(pathInside(ROOT, resolve(ROOT, "..", "other", "x.ts"))).toBe(false)
-    expect(pathInside(ROOT, resolve(ROOT, "..", "other", "x.ts"), { includeRoot: true })).toBe(false)
   })
 
   it("is false for a sibling whose name starts with the root's", () => {
@@ -47,8 +45,8 @@ describe("resolveInside()", () => {
     expect(resolveInside(ROOT, resolve("/etc/passwd"))).toBeUndefined()
   })
 
-  it("is undefined for the root itself unless the caller counts it", () => {
+  it("is undefined for the root itself", () => {
     expect(resolveInside(ROOT, ".")).toBeUndefined()
-    expect(resolveInside(ROOT, "a/..", { includeRoot: true })).toBe(ROOT)
+    expect(resolveInside(ROOT, "a/..")).toBeUndefined()
   })
 })
