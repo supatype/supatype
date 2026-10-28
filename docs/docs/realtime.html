@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>Realtime Postgres changes that respect access rules | Supatype</title>
+  <meta name="description" content="Supatype realtime: subscribe to table changes that respect read access and field rules, filters, broadcast and presence, React and Vue hooks, config and limits." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/docs/realtime.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Realtime Postgres changes that respect access rules | Supatype" />
+  <meta property="og:description" content="Supatype realtime: subscribe to table changes that respect read access and field rules, filters, broadcast and presence, React and Vue hooks, config and limits." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/realtime.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/realtime.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Realtime</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html" aria-current="page">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Realtime</nav>
+    <h1>Realtime</h1>
+    <p class="intro">Subscribe to inserts, updates and deletes on your tables over a WebSocket. Each change is checked against the subscriber's read access before it is sent.</p>
+    <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
+
+    <h2 id="changes">What is sent</h2>
+    <p>The realtime service reads changes from Postgres logical replication, so every committed <code>INSERT</code>, <code>UPDATE</code> and <code>DELETE</code> is seen, whether it came from the API, Studio, a function or plain SQL. There is nothing to switch on per table. A change is only sent to clients subscribed to that table.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Event</th><th scope="col"><code>new</code></th><th scope="col"><code>old</code></th></tr></thead>
+      <tbody>
+        <tr><td><code>INSERT</code></td><td>the whole row</td><td><code>null</code></td></tr>
+        <tr><td><code>UPDATE</code></td><td>the whole row</td><td>the primary key only</td></tr>
+        <tr><td><code>DELETE</code></td><td><code>null</code></td><td>the primary key only</td></tr>
+      </tbody>
+    </table></div>
+    <p><code>old</code> is typed as a row, but it holds only the key columns. Use it to find the row you already have, not to read the previous values.</p>
+    <p>Values arrive with the same types as a REST read. A <code>BigInt</code> column becomes a native <code>bigint</code>, and <code>Decimal</code> and <code>Money</code> stay exact strings.</p>
+
+    <h2 id="access">Read access</h2>
+    <p>Realtime follows the same <a href="/docs/schema.html#access">access rules</a> as the REST API. For each change and each subscriber, the service checks with the subscriber's token, inside Postgres:</p>
+    <ul>
+      <li>Insert and update: the row is selected again, by its <code>id</code> column, as the subscriber. If the <code>read</code> rule hides it, the change is not sent. The check sees the row as it is at that moment, so a row deleted straight after it was inserted is not sent either.</li>
+      <li>Field rules: a column the subscriber may not read under a <a href="/docs/schema.html#field-rules">field rule</a> arrives as <code>null</code>, in both <code>new</code> and <code>old</code>. A filter on such a column is matched against the masked value, so it cannot be used to test a hidden value.</li>
+      <li>Service role: sees every change unmasked.</li>
+      <li>No token: receives no changes.</li>
+    </ul>
+    <div class="callout warn"><span class="callout-label">WARNING</span><p>Deletes are checked more loosely. The row is gone, so there is nothing to select. A subscriber receives every delete on a table their role may read at all, even deletes of rows their <code>read</code> rule would hide. Field masking still applies, and <code>old</code> holds only the primary key, so what this reveals is the key of each deleted row. If that matters, do not use a guessable key, or do not subscribe untrusted users to deletes on that table.</p></div>
+    <p>The row check looks for a column called <code>id</code>. On a table without one it uses the first column of the row.</p>
+
+    <h2 id="subscribe">Subscribe</h2>
+    <p><code>from(table).subscribe()</code> is the shortest path, shown on the <a href="/docs/client.html#realtime">client page</a>. The callback's rows are typed from your schema.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> sub = supatype.from(<span class="s">"comment"</span>).subscribe(
+  (change) =&gt; {
+    <span class="k">if</span> (change.eventType === <span class="s">"INSERT"</span>) addComment(change.new)
+    <span class="k">if</span> (change.eventType === <span class="s">"UPDATE"</span>) replaceComment(change.new)
+    <span class="k">if</span> (change.eventType === <span class="s">"DELETE"</span>) removeComment(change.old?.id)
+  },
+  { event: <span class="s">"*"</span>, filter: <span class="s">`post_id=eq.${postId}`</span> },
+)
+
+<span class="c">// later</span>
+sub.unsubscribe()</pre></div>
+    <p>Each call opens its own channel, so two components watching the same table do not interfere. All channels share one WebSocket per client. The payload has <code>eventType</code>, <code>new</code>, <code>old</code>, <code>schema</code>, <code>table</code> and <code>commitTimestamp</code>.</p>
+    <h3>Options</h3>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Option</th><th scope="col">Values</th><th scope="col">Default</th></tr></thead>
+      <tbody>
+        <tr><td><code>event</code></td><td><code>"INSERT"</code>, <code>"UPDATE"</code>, <code>"DELETE"</code>, <code>"*"</code></td><td><code>"*"</code></td></tr>
+        <tr><td><code>filter</code></td><td><code>"column=op.value"</code>, several joined with commas</td><td>none</td></tr>
+        <tr><td><code>schema</code></td><td>the Postgres schema of the table</td><td><code>"public"</code></td></tr>
+      </tbody>
+    </table></div>
+    <h3>Filters</h3>
+    <p>A filter is checked on the server, so changes that do not match never reach the client. Several conditions joined with commas must all match. The operators are <code>eq</code>, <code>neq</code>, <code>gt</code>, <code>gte</code>, <code>lt</code> and <code>lte</code>.</p>
+    <ul>
+      <li>Values are compared as text. <code>eq</code> and <code>neq</code> behave as you expect. <code>gt</code> and <code>lt</code> on numbers do not: <code>"10"</code> sorts before <code>"9"</code>.</li>
+      <li>An operator not in that list is ignored, and the filter then matches every change.</li>
+      <li>A delete is matched on <code>old</code>, which holds only the primary key. A filter on any other column matches no deletes.</li>
+    </ul>
+    <h3>Channels</h3>
+    <p><code>supatype.realtime.channel(name)</code> is the lower-level form, for when you want the channel's status or want to mix changes with <a href="#broadcast">broadcast and presence</a>:</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> channel = supatype.realtime
+  .channel(<span class="s">`post:${postId}`</span>)
+  .on(<span class="s">"postgres_changes"</span>, { event: <span class="s">"INSERT"</span>, table: <span class="s">"comment"</span>, filter: <span class="s">`post_id=eq.${postId}`</span> }, (change) =&gt; {
+    showComment(change.new)
+  })
+  .subscribe((status) =&gt; console.log(status))</pre></div>
+    <p>Status is <code>SUBSCRIBING</code>, <code>SUBSCRIBED</code>, <code>CHANNEL_ERROR</code>, <code>TIMED_OUT</code> or <code>CLOSED</code>. Pass <code>table</code> explicitly. Without it the channel name is read as <code>schema:table</code>.</p>
+    <p>A channel carries one table subscription. If you call <code>.on("postgres_changes", ...)</code> more than once on a channel, the first call's table, event and filter are what the server registers. Use one channel per table.</p>
+
+    <h2 id="broadcast">Broadcast and presence</h2>
+    <p>Broadcast sends a message to everyone else on a channel. Presence tells a channel who has joined and left. Neither touches the database.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> room = supatype.realtime
+  .channel(<span class="s">`cursor:${docId}`</span>)
+  .onBroadcast(<span class="s">"move"</span>, (payload) =&gt; drawCursor(payload))
+  .onPresence(({ joins, leaves }) =&gt; updateUsers(joins, leaves))
+  .subscribe((status) =&gt; {
+    <span class="k">if</span> (status === <span class="s">"SUBSCRIBED"</span>) room.track({ name: displayName })
+  })
+
+room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y: <span class="s">48</span> })</pre></div>
+    <ul>
+      <li>Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.</li>
+      <li>A presence entry is the payload you pass to <code>track</code>, plus <code>user_id</code> from the token.</li>
+      <li>A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.</li>
+      <li>A client leaves on <code>untrack()</code>, on unsubscribe and when its socket closes.</li>
+      <li>Messages sent while the socket is not open are dropped, so send after <code>SUBSCRIBED</code>.</li>
+    </ul>
+    <div class="callout warn"><span class="callout-label">WARNING</span><p>Broadcast and presence have no access rules. Anyone with your anon key who knows a channel's name can join it, read its messages and send to it. Do not put private data in a broadcast, and use a hard-to-guess channel name for anything you would not show the public.</p></div>
+
+    <h2 id="hooks">Framework hooks</h2>
+    <p><code>@supatype/react</code> exports <code>useSubscription</code>. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing.</p>
+    <div class="cb"><div class="cb-bar"><span>tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { useSubscription } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+
+<span class="k">function</span> <span class="t">Comments</span>({ postId }: { postId: string }) {
+  <span class="k">const</span> { status } = useSubscription(<span class="s">`comments:${postId}`</span>, {
+    table: <span class="s">"comment"</span>,
+    event: <span class="s">"INSERT"</span>,
+    filter: <span class="s">`post_id=eq.${postId}`</span>,
+    callback: (change) =&gt; addComment(change.new),
+  })
+  <span class="k">return</span> &lt;p&gt;{status}&lt;/p&gt;
+}</pre></div>
+    <p>It needs <code>SupatypeProvider</code> above it, which takes your client as <code>client</code>. Give each use its own channel name: two hooks with the same name share a channel.</p>
+    <p><code>@supatype/vue</code> has <code>useSubscription(table, { event, filter })</code>, and <code>@supatype/svelte</code> and <code>@supatype/solid</code> have <code>createSubscription(table, { event, filter })</code>. These watch the <code>public</code> schema and return <code>data</code>, <code>error</code> and <code>status</code>. <code>data</code> starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same <code>id</code>, deletes remove it. They do not load the rows that already exist, so pair them with a query.</p>
+
+    <h2 id="connection">Connection and auth</h2>
+    <p>The client opens the socket at <code>/realtime/v1</code> on your project URL when the first channel subscribes, and closes it when the last one unsubscribes. It sends the current session's token, or the anon key when nobody is signed in.</p>
+    <p>When someone signs in, signs out or a different user signs in, the client reconnects with the new token and joins every channel again. Access is checked as the new identity from then on. A token refresh for the same user does not reconnect, so no changes are missed.</p>
+    <p>If the socket drops, the client retries after 1, 2, 4 seconds and so on, doubling each time, for up to 10 attempts. Channels report <code>SUBSCRIBING</code> while it retries and <code>TIMED_OUT</code> once it gives up. Changes made while the socket was down are not replayed, so refetch after a reconnect if you need the gaps filled.</p>
+
+    <h2 id="config">Config and requirements</h2>
+    <p>Realtime needs Postgres with <code>wal_level = logical</code>, the <code>wal2json</code> plugin, and a database role allowed to create replication slots. The Postgres that <code>supatype dev</code> and the self-host stack run has all three. For a database you bring yourself, <code>supatype db check</code> tests for them.</p>
+    <p>If the database cannot do logical decoding, realtime does not stop the stack. The service stays up and serves broadcast and presence, change subscriptions deliver nothing, and <code>/health/ready</code> on the service answers 503 with the reason. When you run against your own database, set <code>database.external.realtime</code> to <code>false</code> in <code>supatype.config.ts</code> to leave the service out of the stack.</p>
+    <p>The service reads these environment variables. The self-host compose file sets the first three.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Variable</th><th scope="col">Default</th><th scope="col">What it controls</th></tr></thead>
+      <tbody>
+        <tr><td><code>DATABASE_URL</code></td><td>required</td><td>The database to read changes from</td></tr>
+        <tr><td><code>JWT_SECRET</code></td><td>required</td><td>Verifies subscribers' tokens</td></tr>
+        <tr><td><code>SLOT_NAME</code></td><td><code>supatype_realtime</code></td><td>The replication slot the service creates and reads</td></tr>
+        <tr><td><code>PORT</code></td><td>4000</td><td>The port the service listens on</td></tr>
+        <tr><td><code>REPLICATION_POLL_INTERVAL</code></td><td>100</td><td>How often, in milliseconds, the slot is read</td></tr>
+        <tr><td><code>SECURE_CHANNELS</code></td><td><code>true</code></td><td>When <code>true</code>, a client must present a valid token before it can join a channel</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="limits">Limits</h2>
+    <ul>
+      <li>Changes are picked up by reading the replication slot every 100 ms, so expect that much delay on top of the network.</li>
+      <li>While <code>supatype push</code> is changing the schema, the slot is not read. Changes made during the push are held in the slot and sent once it finishes.</li>
+      <li>Each change costs one database query per subscriber, to check that subscriber's access. Many subscribers to a busy table means many queries.</li>
+      <li>The replication slot keeps WAL until the service reads it. If the service is stopped for a long time while the database keeps writing, WAL builds up on disk.</li>
+      <li>Subscriptions live in the service's memory. A restart drops every socket, and clients reconnect and join again.</li>
+    </ul>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/storage.html"><small>PREVIOUS</small><span>Storage</span></a>
+      <a href="/docs/functions.html" class="next"><small>NEXT</small><span>Functions</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#changes">What is sent</a>
+    <a href="#access">Read access</a>
+    <a href="#subscribe">Subscribe</a>
+    <a href="#broadcast">Broadcast and presence</a>
+    <a href="#hooks">Framework hooks</a>
+    <a href="#connection">Connection and auth</a>
+    <a href="#config">Config and requirements</a>
+    <a href="#limits">Limits</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

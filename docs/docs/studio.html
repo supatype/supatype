@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>Studio | Supatype</title>
+  <meta name="description" content="Supatype Studio: content editors built from your models, rich text, media, drafts, versions, live preview, API docs, a GraphQL explorer, a SQL runner and migration history." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/docs/studio.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Studio | Supatype" />
+  <meta property="og:description" content="Supatype Studio: content editors built from your models, rich text, media, drafts, versions, live preview, API docs, a GraphQL explorer, a SQL runner and migration history." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/studio.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/studio.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Studio</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html" aria-current="page">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Studio</nav>
+    <h1>Studio</h1>
+    <p class="intro">Studio is the admin app that ships with every Supatype stack. It builds content editors from your models and gives developers the API docs, a SQL runner and the database history in one place.</p>
+    <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
+
+    <h2 id="open">Open Studio</h2>
+    <p>Studio is served at <code>/studio/</code> on the project's gateway.</p>
+    <ul>
+      <li><strong>Local, Docker (the default):</strong> <code>supatype dev</code> prints it in the <strong>Services running</strong> panel as <code>http://localhost:&lt;gateway-port&gt;/studio/</code>. The port is <code>SUPATYPE_KONG_PORT</code> in <code>.env</code>.</li>
+      <li><strong>Self-hosted:</strong> <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;/studio/</code>, behind your reverse proxy. See <a href="/docs/#self-host">Self-host</a>.</li>
+      <li><strong>Local, Native:</strong> <code>supatype dev</code> does not start Studio with the Native provider.</li>
+    </ul>
+    <p>Sign in with an email and password. The first admin comes from <code>SUPATYPE_ADMIN_EMAIL</code> and <code>SUPATYPE_ADMIN_PASSWORD</code> in <code>.env</code>, as described in <a href="/docs/#local-dev">Local development</a>. Add more people with <code>supatype admin create-user</code>.</p>
+    <p>Studio also offers every OAuth provider the project has enabled. To offer only some, name them in <code>supatype.config.ts</code>:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>studio: { auth: { providers: [<span class="s">"github"</span>] } }</pre></div>
+    <p>Signing in is not enough on its own. Every person also needs a <a href="/docs/studio-roles.html">Studio role</a>.</p>
+
+    <h2 id="layout">Finding your way</h2>
+    <p>The sidebar holds the dashboard, Models, Database, Media &amp; Storage, Authentication, Edge Functions, Realtime and Observability, plus Settings. Entries marked as coming soon open a placeholder page and do nothing yet.</p>
+    <p><strong>Jump to</strong> in the top bar searches pages, users and records.</p>
+    <p>If the newest schema push was refused or failed, a notice shows above every screen. It says that nothing was applied and links to that push in the migration history. It goes away once a push applies.</p>
+
+    <h2 id="content">Editing content</h2>
+    <p>Studio reads your schema after each push and builds an editor for every model. There is nothing to configure: add a model, save, and it appears under <strong>Models</strong>.</p>
+    <h3>The list</h3>
+    <p>Each model opens on a list of its records. Columns you can sort have sortable headers. Searchable fields get a search box. Tick rows to delete several at once, after a confirmation. <strong>Create Post</strong> (named after the model) opens an empty form.</p>
+    <h3>The record editor</h3>
+    <p>Each field gets an input that matches its type: text, numbers, dates, slugs, selects, relations, JSON, code, images, files, rich text and blocks among them. The model's name in Studio comes from <code>label</code> and <code>labelPlural</code> in its options. A form also has <strong>Duplicate</strong> and <strong>Delete</strong>, and Delete asks first.</p>
+    <p>A <code>Slug&lt;"title"&gt;</code> field follows the title on a new record. A model with hooks shows "This post has custom logic that runs on save."</p>
+    <p>A singleton model (<code>singleton: true</code>) is listed under <strong>Globals</strong> and opens straight into its one record.</p>
+    <p>If the project has more than one locale, a language switcher appears in the top bar on content screens.</p>
+    <h3>Model tabs</h3>
+    <p>Each model has tabs beside the editor:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Tab</th><th scope="col">Shows</th></tr></thead>
+      <tbody>
+        <tr><td>Schema</td><td>The model's fields as the database has them</td></tr>
+        <tr><td>Rules</td><td>Field bounds, constraints and indexes, as the database enforces them</td></tr>
+        <tr><td>Data</td><td>A table browser for the model's table, with filters, inline edits and a record inspector</td></tr>
+        <tr><td>API</td><td>REST examples for this model</td></tr>
+        <tr><td>GraphQL</td><td>GraphQL examples for this model</td></tr>
+        <tr><td>Cache</td><td>The model's cached REST responses</td></tr>
+      </tbody>
+    </table></div>
+    <p>Editors do not see Schema or Rules. Cache is for admins and developers.</p>
+
+    <h2 id="rich-text">Rich text and blocks</h2>
+    <p>A <code>RichText</code> field opens a rich text editor with a toolbar for bold, italic, underline, strikethrough, headings 1 to 3, paragraphs, bullet lists and numbered lists. The field stores a Lexical document.</p>
+    <p>A <code>Blocks&lt;T&gt;</code> field is a list of sections. An editor adds a block by type, fills in its fields, and can move or duplicate it. See <a href="/docs/schema.html#content">Slugs, rich text and blocks</a> for how they are declared and stored.</p>
+    <p>To render a rich text field in React, pass the stored value to <code>RichText</code> from <code>@supatype/react</code>:</p>
+    <div class="cb"><div class="cb-bar"><span>src/PostBody.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { <span class="t">RichText</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+
+&lt;<span class="t">RichText</span> content={post.body} as=<span class="s">"article"</span> /&gt;</pre></div>
+
+    <h2 id="media">Media and files</h2>
+    <p><strong>Media &amp; Storage</strong> lists your buckets. Each bucket has two tabs:</p>
+    <ul>
+      <li><strong>Files:</strong> browse folders, upload files (or drop them on the page), create folders, and download or delete files. <strong>Details</strong> shows a file's size, type, owner, dates and its public URL.</li>
+      <li><strong>Policies:</strong> the bucket's access rules. Who can read or change them is on <a href="/docs/studio-roles.html#matrix">Studio roles</a>.</li>
+    </ul>
+    <p>Declare buckets in your schema with <code>Bucket&lt;&gt;</code> so they are versioned with everything else. Studio can create one by hand, but warns first and recommends the schema instead. See <a href="/docs/storage.html">Storage</a>.</p>
+    <p>An image field in the record editor takes a dropped file, an <strong>Upload</strong>, or <strong>Select from bucket</strong>, which browses the bucket the field names. A localized image field uploads one image per locale.</p>
+
+    <h2 id="drafts">Drafts and publishing</h2>
+    <p>On a model with <code>versions: { drafts: true }</code> (see <a href="/docs/schema.html#drafts">Drafts and versions</a>), the editor's side panel holds the publishing controls:</p>
+    <ul>
+      <li><strong>Save draft</strong> saves without changing what readers see. On a new record the first save creates it.</li>
+      <li><strong>Publish</strong> makes the saved draft live, saving any unsaved edits first.</li>
+      <li>The menu beside Publish has <strong>Schedule publish...</strong> (and <strong>Change schedule...</strong> or <strong>Cancel schedule</strong> once one is set), <strong>Discard changes</strong>, which returns the draft to the published version, and <strong>Unpublish</strong>, which keeps the content as a draft.</li>
+    </ul>
+    <p>A status badge shows Draft, Published, Scheduled or Partly published, and "Changed" when there are edits since publishing. With several locales a record can be published, and unpublished, per language.</p>
+    <p>A draft may leave a required field empty. Studio asks before saving it, and it cannot be published until the field is filled.</p>
+    <p>Who sees drafts and the publish controls is set by <code>publishing.draft_visibility</code>. See <a href="/docs/studio-roles.html#drafts">Drafts and publishing</a> in Studio roles, which also covers saving drafts from the Data tab.</p>
+
+    <h2 id="versions">Version history</h2>
+    <p>A model with <code>versions</code> keeps a history of each record. On a model with drafts, open it with <strong>History</strong> in the publishing panel. Each version shows when it was saved, by whom, and its state: Live, Scheduled, Pending draft or Superseded. Select a version to compare its fields with the newest one.</p>
+    <ul>
+      <li><strong>Restore as draft</strong> brings the version back as the current draft. Nothing goes live until it is published.</li>
+      <li><strong>Publish this version</strong> restores it and publishes it in one step.</li>
+    </ul>
+    <p>A model without <code>versions</code> says so, and keeps no history.</p>
+
+    <h2 id="preview">Live preview and preview links</h2>
+    <p>Tell Studio where each model renders in your app with <code>admin.livePreview</code>, keyed by model name. Field names in braces are filled from the record:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>admin: {
+  livePreview: {
+    <span class="t">Post</span>: { urlPattern: <span class="s">"/preview/{slug}"</span> },
+  },
+},</pre></div>
+    <p>A path is enough when the same stack serves your app (<code>app.mode</code> is <code>static</code> or <code>proxy</code>). With <code>app.mode: "none"</code> give a full URL. <code>supatype push</code> refuses a path in that mode.</p>
+    <h3>Live preview</h3>
+    <p>With this set, the editor gets a <strong>Live preview</strong> button. It opens your page in a side panel and sends the unsaved form values to it on every change. Read them with <code>useLivePreview</code>:</p>
+    <div class="cb"><div class="cb-bar"><span>src/PostPreview.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { useLivePreview } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+
+<span class="k">export function</span> <span class="t">PostPreview</span>({ post }: { post: { title: string } }) {
+  <span class="k">const</span> { data, isPreview } = useLivePreview({ initialData: post, model: <span class="s">"Post"</span> })
+  <span class="k">return</span> &lt;h1&gt;{data.title}{isPreview &amp;&amp; <span class="s">" (preview)"</span>}&lt;/h1&gt;
+}</pre></div>
+    <p><code>model</code> is the schema's model name, as in <code>admin.livePreview</code>. The hook only accepts messages from the window that frames the page, at Studio's origin. By default that is the origin of the client in <code>SupatypeProvider</code>. If Studio is served somewhere else, pass <code>studioOrigin</code>.</p>
+    <h3>Share a preview</h3>
+    <p>On a saved record, <strong>Share a preview</strong> makes a link for someone without an account. Choose how long it lives: 15 minutes, 1 hour, 1 day or 7 days. The link is your preview URL with a <code>preview</code> query parameter. Studio lists the links it has made, and each can be revoked.</p>
+    <p>On the preview page, create a client with that code as <code>previewCode</code> and read the draft with <code>.draft()</code>. The code is the client's whole credential: it cannot be combined with <code>serviceRoleKey</code>. See <a href="/docs/client.html#drafts">Drafts and publishing</a> in Client.</p>
+
+    <h2 id="api">API docs</h2>
+    <p><strong>Settings &gt; API &gt; REST</strong> opens the REST docs. They are built from your models plus the auth and storage endpoints. Each endpoint lists its parameters, an example body and response, and a curl example. Filter by category or table, or search.</p>
+    <p><strong>Try it</strong> sends a real request and shows the response headers and body. It asks who to send as: yourself, anonymous, the service role or a pasted token. See <a href="/docs/studio-roles.html#send-as">Send as</a>.</p>
+    <p>The REST section also has Settings and Cache tabs for admins and developers.</p>
+
+    <h2 id="graphql">GraphQL explorer</h2>
+    <p>The GraphQL page sends queries to <code>POST /graphql/v1</code>. Pick a model to start from a list query, edit it, and press <strong>Run</strong>. It uses the same Send as choice as Try it. Each model's GraphQL tab has examples for that model.</p>
+
+    <h2 id="sql">SQL runner</h2>
+    <p><strong>Database &gt; SQL Runner</strong> runs SQL against the project. Press <strong>Run Query</strong>, or Ctrl+Enter (Cmd+Enter on a Mac).</p>
+    <ul>
+      <li>Each run opens a result tab with its time. Export a result as CSV or JSON.</li>
+      <li>Statements that drop, empty or overwrite data (<code>DROP</code>, <code>TRUNCATE</code>, <code>DELETE</code>, <code>UPDATE</code>, and an <code>ALTER</code> that drops something or turns off row level security) ask first and name what they change.</li>
+      <li><code>EXPLAIN (FORMAT JSON)</code> draws the plan as a tree.</li>
+      <li>Query History lists earlier runs in this session.</li>
+    </ul>
+    <div class="callout warn">
+      <span class="callout-label">FULL ACCESS</span>
+      <p>Queries run as <code>supatype_sql_editor</code>, which has the rights of the role that owns your tables. Row level security does not apply and masked columns show in full. It is not a superuser. Every query is recorded. Only admins and developers can open it.</p>
+    </div>
+
+    <h2 id="database">Database, migrations and schema objects</h2>
+    <p>Editors do not see the Database pages. The SQL runner is for admins and developers only.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Page</th><th scope="col">Shows</th></tr></thead>
+      <tbody>
+        <tr><td>Overview</td><td>A diagram of your tables and their relations</td></tr>
+        <tr><td>Tables, Views, Triggers, Indexes, Constraints, Types, Roles, Extensions</td><td>The database's objects of that kind</td></tr>
+        <tr><td>Migrations</td><td>Every push: its status, number of changes, when it was applied, who pushed it and the engine version. Open one to see its schema changes and its SQL. Filter by status and date, or search by name or id</td></tr>
+        <tr><td>Schema objects</td><td>Every object Supatype manages, from the managed-object ledger, with its status (managed, adopted or released) and a link to the migration that last changed it</td></tr>
+        <tr><td>Seeds</td><td>Each recorded <code>supatype seed</code> run: file, status, rows written, time and duration</td></tr>
+      </tbody>
+    </table></div>
+    <p>Adopted and released objects come from <a href="/docs/cli.html#schema">supatype adopt</a>. Seed runs are covered in <a href="/docs/seeding.html#run">Seeding</a>.</p>
+
+    <h2 id="logs">Logs</h2>
+    <p>Function logs are on the <strong>Edge Functions</strong> page. Pick a function and open its <strong>Logs</strong> tab. Live tail is on by default. Turn it off to read recent logs by time range, with optional auto-refresh. A deployment that runs functions inside the server process has no worker to tail, so Studio shows recent logs instead.</p>
+    <p>The same page has an <strong>Invoke</strong> tab to call a function, and <strong>Environment Variables</strong>. See <a href="/docs/functions.html">Functions</a>.</p>
+    <div class="callout">
+      <span class="callout-label">NOTE</span>
+      <p>Under Observability, API request logs are not recorded yet. Auth, storage, realtime and Postgres logs are coming soon.</p>
+    </div>
+
+    <h2 id="other">Other screens</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Screen</th><th scope="col">For</th></tr></thead>
+      <tbody>
+        <tr><td>Dashboard</td><td>Totals and recent activity for users, records, storage and the database</td></tr>
+        <tr><td>Authentication</td><td>Users (including their Studio access), access policies, providers, configuration and email templates. See <a href="/docs/auth.html">Auth</a></td></tr>
+        <tr><td>Settings</td><td>API keys, CORS origins and database settings</td></tr>
+        <tr><td>Realtime</td><td>Channels, clients, a live stream and a broadcast tester, where the deployment's control plane supports the inspector</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="roles">Roles</h2>
+    <p>What each person can see and change in Studio depends on their Studio role: admin, developer, editor or viewer. Admins and developers work with full access. Editors and viewers work within the role's limits, and field masks still apply to them.</p>
+    <p>The full table, field masking, Send as and how to give someone a role are on <a href="/docs/studio-roles.html">Studio roles</a>.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/seeding.html"><small>PREVIOUS</small><span>Seeding</span></a>
+      <a href="/docs/studio-roles.html" class="next"><small>NEXT</small><span>Studio roles</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#open">Open Studio</a>
+    <a href="#layout">Finding your way</a>
+    <a href="#content">Editing content</a>
+    <a href="#rich-text">Rich text and blocks</a>
+    <a href="#media">Media and files</a>
+    <a href="#drafts">Drafts and publishing</a>
+    <a href="#versions">Version history</a>
+    <a href="#preview">Live preview and preview links</a>
+    <a href="#api">API docs</a>
+    <a href="#graphql">GraphQL explorer</a>
+    <a href="#sql">SQL runner</a>
+    <a href="#database">Database, migrations and schema objects</a>
+    <a href="#logs">Logs</a>
+    <a href="#other">Other screens</a>
+    <a href="#roles">Roles</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

@@ -4,6 +4,16 @@
  * no glows, no blur.
  */
 
+/*
+ * Fonts are served from /fonts, latin only, under the SIL Open Font License (the OFL-*.txt files
+ * beside them). Geist and Geist Mono are variable, so one file covers every weight. The Geist Mono
+ * symbols file covers the box-drawing lines in terminal output.
+ */
+@font-face { font-family: Geist; font-weight: 100 900; font-display: swap; src: url(/fonts/geist-latin.woff2) format("woff2"); }
+@font-face { font-family: "Geist Mono"; font-weight: 100 900; font-display: swap; src: url(/fonts/geist-mono-latin.woff2) format("woff2"); }
+@font-face { font-family: "Geist Mono"; font-weight: 100 900; font-display: swap; src: url(/fonts/geist-mono-symbols.woff2) format("woff2"); unicode-range: U+2000-2001, U+2004-2008, U+200A, U+23B8-23BD, U+2500-259F; }
+@font-face { font-family: Silkscreen; font-weight: 400; font-display: swap; src: url(/fonts/silkscreen-latin.woff2) format("woff2"); }
+
 *, *::before, *::after { box-sizing: border-box; }
 
 :root {
@@ -47,11 +57,13 @@
   --section-pad: 112px;
   /* Code and terminal text; phones drop it to 12px. */
   --code-size: 14px;
+  /* Height of the sticky header, so anchors and sticky columns land below it. */
+  --header-h: 77px;
 }
 
 .docs-page { --site: 1320px; }
 
-html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-h) + 24px); }
 
 body {
   margin: 0;
@@ -69,6 +81,13 @@ body {
 a { color: var(--link, var(--text)); text-decoration: none; }
 a:hover { color: var(--white); }
 :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
+/* Off screen until a keyboard user tabs to it, then over the top-left of the page. */
+.skip-link { position: absolute; left: 16px; top: -100px; z-index: 20; }
+.skip-link:focus { top: 12px; }
+
+/* The hidden attribute always wins over a component's own display. */
+[hidden] { display: none !important; }
 
 h1, h2, h3, p, ul, ol, pre, dl { margin: 0; }
 img { max-width: 100%; }
@@ -108,6 +127,14 @@ main > .section:last-child { border-bottom: 0; }
 
 .grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+/* .fill: a short last row shares the full width instead of leaving empty cells. Three columns are
+   laid on a six-column track so a last row of two can take half each. */
+@media (min-width: 961px) {
+  .grid-3.fill { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .grid-3.fill > * { grid-column: span 2; }
+  .grid-3.fill > :nth-last-child(2):nth-child(3n+1), .grid-3.fill > :last-child:nth-child(3n+2) { grid-column: span 3; }
+  .grid-3.fill > :last-child:nth-child(3n+1) { grid-column: 1 / -1; }
+}
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
@@ -133,6 +160,7 @@ main > .section:last-child { border-bottom: 0; }
 .body-sm { font-size: 15px; color: var(--text-2); }
 .dim { color: var(--text-3); }
 .text-2 { color: var(--text-2); }
+/* Decorative glyphs only: 2.77:1 on the surface colour, too faint for words. */
 .faint { color: var(--border-dim); }
 
 .inline-code { font-family: var(--mono); color: var(--text); }
@@ -196,20 +224,19 @@ main > .section:last-child { border-bottom: 0; }
 .announce .tag-new { font-family: var(--pixel); color: var(--accent-text); }
 .announce a { text-decoration: underline; }
 
-.site-header { border-bottom: 1px solid var(--border); }
+.site-header { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); }
 .nav { max-width: calc(var(--site) + 2 * var(--gutter)); margin: 0 auto; padding: 16px var(--gutter); display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; }
 .nav-logo { display: flex; align-items: center; padding: 8px 0; }
 .nav-logo img { height: 26px; width: auto; display: block; }
 .nav-links, .nav-end { --link: var(--text-3); font-size: 15px; }
 .nav-links { display: flex; flex-wrap: wrap; gap: 4px 24px; flex: 1 1 auto; }
 .nav-links a { padding: 10px 0; }
-.nav-links a[aria-current="page"] { color: var(--white); }
+.nav-links a[aria-current], .nav-drawer a[aria-current] { color: var(--white); }
 .nav-end { display: flex; gap: 12px; align-items: center; }
 .nav-sec { padding: 10px 4px; }
 .nav-menu { display: none; background: var(--surface); border-color: var(--border-strong); color: var(--text); margin-left: 4px; }
 
-.nav-drawer { --link: var(--text-2); border-top: 1px solid var(--border); background: var(--bg); }
-.nav-drawer[hidden] { display: none; }
+.nav-drawer { --link: var(--text-2); border-top: 1px solid var(--border); background: var(--bg); max-height: calc(100dvh - var(--header-h)); overflow-y: auto; }
 .nav-drawer ul { list-style: none; padding: 8px var(--gutter) 16px; }
 .nav-drawer a { display: flex; align-items: center; min-height: 44px; font-size: 16px; border-bottom: 1px solid var(--border); }
 .nav-drawer li:last-child a { border-bottom: 0; }
@@ -224,6 +251,8 @@ main > .section:last-child { border-bottom: 0; }
 .shadow-deep { box-shadow: 8px 8px 0 var(--accent-deep); }
 
 .panel-bar, .cb-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--border); font-family: var(--pixel); font-size: 13px; line-height: 1.2; color: var(--text-3); }
+/* A long file name in the bar breaks instead of pushing the page wider. */
+.panel-bar > span, .cb-bar > span { min-width: 0; overflow-wrap: anywhere; }
 .panel-bar.small, .cb-bar { font-size: 12px; }
 .cb-bar { padding: 6px 6px 6px 14px; }
 .panel-dots { display: flex; gap: 6px; }
@@ -258,6 +287,15 @@ main > .section:last-child { border-bottom: 0; }
 .tile.flat { border-color: var(--border); background: transparent; box-shadow: none; padding: 28px; gap: 12px; }
 .tile.soon { border: 1px dashed var(--accent); background: var(--accent-soft); box-shadow: 5px 5px 0 var(--accent-deep); }
 .tile-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+/* A text field. Studio's drawn form uses it too, so the mock and the real field match. */
+.input { min-width: 0; background: var(--bg); border: 1px solid var(--border-strong); color: var(--text); padding: 10px 12px; font: inherit; font-size: 15px; }
+.input::placeholder { color: var(--text-4); }
+.input:focus { border-color: var(--accent-text); }
+textarea.input { resize: vertical; min-height: 88px; }
+
+/* A sign-up form's email field takes the row's spare width; its button wraps under it on narrow cards. */
+.signup-row .input { flex: 1 1 180px; }
+
 .tag { font-family: var(--pixel); font-size: 12px; color: var(--accent-text); border: 1px solid var(--accent); padding: 3px 8px; }
 
 /* ---------- Home: comparison grid, agent session, Studio mock, man page ---------- */
@@ -286,7 +324,6 @@ main > .section:last-child { border-bottom: 0; }
 
 .studio-form { padding: 20px; display: flex; flex-direction: column; gap: 14px; font-size: 14px; color: var(--text-3); }
 .studio-form .field { display: flex; flex-direction: column; gap: 6px; }
-.studio-form .input { background: var(--bg); border: 1px solid var(--border-strong); color: var(--text); padding: 10px 12px; font-size: 15px; }
 .studio-form .input.mono { font-family: var(--mono); font-size: 14px; color: var(--text-4); }
 .studio-form .editor { border: 1px solid var(--border-strong); background: var(--bg); }
 .studio-form .toolbar { display: flex; gap: 4px; padding: 6px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 13px; }
@@ -350,7 +387,7 @@ main > .section:last-child { border-bottom: 0; }
 .docs-menu { display: none; width: 100%; min-height: 44px; margin: 24px 0; background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); font: inherit; font-size: 15px; padding: 0 16px; align-items: center; justify-content: space-between; cursor: pointer; text-align: left; }
 .docs-menu[aria-expanded="true"] svg { transform: rotate(180deg); }
 
-.toc { --link: var(--text-3); flex: 0 0 200px; padding: 40px 0; position: sticky; top: 0; }
+.toc { --link: var(--text-3); flex: 0 0 200px; padding: 40px 0; position: sticky; top: var(--header-h); }
 .toc a { display: block; line-height: 1.4; padding: 5px 0; font-size: 13px; }
 .toc a[aria-current] { color: var(--text); }
 
@@ -402,6 +439,13 @@ main > .section:last-child { border-bottom: 0; }
 .pn a.next { text-align: right; grid-column: 2; }
 .pn small { font-family: var(--pixel); font-size: 12px; color: var(--text-4); }
 
+/* ---------- Reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition: none !important; }
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1180px) {
@@ -410,6 +454,7 @@ main > .section:last-child { border-bottom: 0; }
 
 @media (max-width: 960px) {
   .grid-3, .cards.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3.fill > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 
 @media (max-width: 760px) {

@@ -6,31 +6,41 @@
   <meta name="theme-color" content="#0A0A0C" />
   <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
   <link rel="apple-touch-icon" href="/supatype-icon.svg" />
-  <title>Docs | Supatype</title>
+  <title>Get started with Supatype: local development and self-hosting</title>
   <meta name="description" content="Run Supatype locally, self-host it with Docker Compose, deploy changes and upgrade Supatype components." />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://www.supatype.com/docs/" />
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Geist+Mono:wght@400;600&family=Silkscreen&display=swap" rel="stylesheet" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Get started with Supatype: local development and self-hosting" />
+  <meta property="og:description" content="Run Supatype locally, self-host it with Docker Compose, deploy changes and upgrade Supatype components." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/" />
+  <meta property="og:image" content="https://www.supatype.com/og/docs.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/site.css" />
 </head>
 <body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
 
 <header class="site-header">
   <nav class="nav" aria-label="Main">
     <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
     <div class="nav-links">
       <a href="/#how-it-works">How it works</a>
-      <a href="/docs/" aria-current="page">Docs</a>
+      <a href="/docs/" aria-current="true">Docs</a>
       <a href="/docs/#self-host">Self-hosting</a>
       <a href="/deploy-vm-github-actions.html">Guides</a>
     </div>
     <div class="nav-end">
       <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
       <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
-      <a href="/docs/#local-dev" class="btn btn-primary btn-sm">Get started</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
       <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
       </button>
@@ -39,7 +49,7 @@
   <div class="nav-drawer" id="nav-drawer" hidden>
     <ul>
       <li><a href="/#how-it-works">How it works</a></li>
-      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
       <li><a href="/docs/#self-host">Self-hosting</a></li>
       <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
       <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
@@ -63,23 +73,37 @@
     <div><span class="label">BUILD</span><ul>
       <li><a href="/docs/schema.html">Schema</a></li>
       <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
       <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
       <li><a href="/docs/studio-roles.html">Studio roles</a></li>
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
     <div><span class="label">GUIDES</span><ul>
       <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
       <li><a href="/llms.txt">llms.txt</a></li>
     </ul></div>
   </nav>
 
-  <main class="doc">
+  <main class="doc" id="main">
     <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / Docs / Get started</nav>
     <h1>Get started</h1>
     <p class="intro">Run the stack on your machine, self-host it with Docker Compose, ship changes and upgrade Supatype components.</p>
@@ -97,7 +121,7 @@
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> mkdir my-app &amp;&amp; cd my-app
 <span class="pr">$</span> supatype init</pre></div>
-    <p><code>supatype init</code> writes <code>package.json</code>, <code>supatype.config.ts</code>, a starter schema and <code>public/</code>, installs dependencies with your package manager and writes the API keys to <code>.env</code>. Run <code>npm install</code> or <code>supatype keys</code> yourself only if you passed <code>--no-install</code> or <code>--no-keys</code>.</p>
+    <p><code>supatype init</code> writes <code>package.json</code>, <code>supatype.config.ts</code>, a starter schema and <code>public/</code>, installs dependencies with your package manager and writes the API keys to <code>.env</code>. Run <code>npm install</code> or <code>supatype keys --write</code> yourself only if you passed <code>--no-install</code> or <code>--no-keys</code>.</p>
 
     <div class="step"><span class="step-num">3</span><h3>Start the stack</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
@@ -106,6 +130,49 @@
     <p>It stops with its stack when the process that started it exits, as it does on Ctrl+C: a script that is killed, or a cancelled CI job, leaves nothing running. To leave a stack running with nothing attached, use <code>supatype self-host compose up -d</code>.</p>
     <p>If <code>dev</code> itself is killed (its process ended, or its window closed before it finished stopping), the stack can be left running. The next <code>supatype dev</code> finds it and offers to stop it, and <code>supatype self-host compose down</code> stops it now.</p>
     <p>The gateway serves REST at <code>/rest/v1/</code>, auth at <code>/auth/v1/</code>, storage and realtime. With Docker it listens on <code>http://localhost:&lt;gateway-port&gt;</code>: init picks a free port per project and writes the URL to <code>.env</code> as <code>API_EXTERNAL_URL</code> (the port alone is <code>SUPATYPE_KONG_PORT</code>). With Native it listens on <code>http://localhost:54321</code>.</p>
+
+    <div class="step"><span class="step-num">4</span><h3>Sign in to Studio</h3></div>
+    <p>When the stack is up, <code>supatype dev</code> prints a <strong>Services running</strong> panel with each address. With Docker, Studio is at <code>/studio/</code> on the gateway: <code>http://localhost:&lt;gateway-port&gt;/studio/</code>.</p>
+    <p>If you asked <code>init</code> for an admin, it wrote <code>SUPATYPE_ADMIN_EMAIL</code> and <code>SUPATYPE_ADMIN_PASSWORD</code> to <code>.env</code>. The first <code>supatype dev</code> or <code>supatype push</code> that finds no Studio admin creates one from them with the <code>admin</code> role, then removes the password from <code>.env</code>. Sign in with that email and password. To add one later, run <code>supatype admin create-user --email you@example.com</code>, which asks for the password.</p>
+
+    <div class="step"><span class="step-num">5</span><h3>Know what init scaffolded</h3></div>
+    <p><code>schema/index.ts</code> starts with two models:</p>
+    <ul>
+      <li><code>Profile</code>: one row per signed-in user, keyed by the auth user id. Any signed-in user can read profiles, and only the owner can create, update or delete theirs.</li>
+      <li><code>SiteSettings</code>: a singleton with a <code>site_name</code>, readable by everyone and editable by admins in Studio under Settings.</li>
+    </ul>
+
+    <div class="step"><span class="step-num">6</span><h3>Add a model</h3></div>
+    <p>Add a <code>Post</code> to <code>schema/index.ts</code> and save. The running <code>supatype dev</code> migrates the database and regenerates the typed client. There is nothing to push locally.</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> { <span class="t">Model</span>, <span class="t">UUID</span>, <span class="t">SupatypeAuthUserId</span>, <span class="t">Slug</span>, <span class="t">Unique</span>, <span class="t">Public</span>, <span class="t">Owner</span> } <span class="k">from</span> <span class="s">"@supatype/types"</span>
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">Post</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
+  title: string
+  slug: <span class="t">Unique</span>&lt;<span class="t">Slug</span>&lt;<span class="s">"title"</span>&gt;&gt;
+  body: string
+  author_id: <span class="t">SupatypeAuthUserId</span>
+}, {
+  access: { read: <span class="t">Public</span>; create: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;; update: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;; delete: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt; }
+}&gt;</pre></div>
+    <p>Merge the new names into the file's existing <code>import type</code> line. The table is <code>post</code>. See <a href="/docs/schema.html">Schema</a> for field types, relations and access rules.</p>
+
+    <div class="step"><span class="step-num">7</span><h3>Query it</h3></div>
+    <p>Create the client once, from the generated file, with the URL and key <code>init</code> wrote to <code>.env</code>:</p>
+    <div class="cb"><div class="cb-bar"><span>src/supatype.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
+
+<span class="k">export</span> <span class="k">const</span> supatype = createClient({
+  url: <span class="k">import</span>.meta.env.VITE_SUPATYPE_URL,
+  anonKey: <span class="k">import</span>.meta.env.VITE_SUPATYPE_ANON_KEY,
+})</pre></div>
+    <div class="cb"><div class="cb-bar"><span>src/posts.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { supatype } <span class="k">from</span> <span class="s">"./supatype"</span>
+
+<span class="k">const</span> { data: posts, error } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id, title, slug"</span>)
+<span class="k">if</span> (error) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(error.message)</pre></div>
+    <p>The result is typed from your schema. The <a href="/docs/client.html">Client</a> page covers filters, writes, auth, storage and realtime.</p>
 
     <div class="step"><span class="step-num">+</span><h3>Serve your frontend dev server at <code>/</code></h3></div>
     <p>Keep the committed <code>supatype.config.ts</code> pointing at your production build, and proxy to Vite or Next from a gitignored <code>supatype.local.config.ts</code>:</p>
@@ -135,7 +202,7 @@
 <pre><span class="pr">$</span> supatype self-host compose render
 <span class="pr">$</span> supatype self-host compose up -d
 <span class="pr">$</span> supatype push</pre></div>
-    <p>The gateway listens on <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;</code>, the port in <code>SUPATYPE_KONG_PORT</code> in <code>.env</code> (18473 when it is unset), with Studio at <code>/studio/</code>. Put a reverse proxy in front for HTTPS.</p>
+    <p>The gateway listens on <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;</code>, the port in <code>SUPATYPE_KONG_PORT</code> in <code>.env</code> (18473 when it is unset), with Studio at <code>/studio/</code>. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.</p>
     <div class="callout">
       <span class="callout-label">REST BEFORE THE FIRST PUSH</span>
       <p>Until the first <code>supatype push</code>, every REST request answers <code>503</code> with <code>PGRST002</code>: PostgREST will not serve until the schemas it exposes exist, and the push creates them. After a push PostgREST can take up to about 30 seconds to notice, so <code>push</code> waits (at most 40 seconds) until REST answers, printing one line while it does.</p>
@@ -146,7 +213,7 @@
     </div>
     <div class="callout">
       <span class="callout-label">PORTS</span>
-      <p>Only the gateway is published on every interface, at <code>SUPATYPE_KONG_PORT</code>. Postgres (<code>SUPATYPE_DB_PORT</code>, default 5432), the API server (<code>SUPATYPE_SERVER_PORT</code>, default 9999) and SeaweedFS (<code>SUPATYPE_SEAWEEDFS_PORT</code>, default 8333) bind <code>127.0.0.1</code>, so they are reachable from the server itself and nowhere else. To reach them from other machines, set <code>SUPATYPE_PUBLISH_ADDRESS=0.0.0.0</code> (or one interface's address) in <code>.env</code> and run <code>supatype self-host compose up -d</code>. Put a firewall in front first. <code>supatype init</code> lists these variables, commented out, in <code>.env</code>.</p>
+      <p>Only the gateway is published on every interface, at <code>SUPATYPE_KONG_PORT</code>, or on ports 80 and 443 once HTTPS is on. Postgres (<code>SUPATYPE_DB_PORT</code>, default 5432), the API server (<code>SUPATYPE_SERVER_PORT</code>, default 9999) and SeaweedFS (<code>SUPATYPE_SEAWEEDFS_PORT</code>, default 8333) bind <code>127.0.0.1</code>, so they are reachable from the server itself and nowhere else. To reach them from other machines, set <code>SUPATYPE_PUBLISH_ADDRESS=0.0.0.0</code> (or one interface's address) in <code>.env</code> and run <code>supatype self-host compose up -d</code>. Put a firewall in front first. <code>supatype init</code> lists these variables, commented out, in <code>.env</code>.</p>
     </div>
     <p>Images come from Docker Hub at <code>:latest</code>: <code>supatype/postgres:17-latest</code>, <code>supatype/server</code> (which includes realtime), <code>supatype/storage</code>, <code>supatype/studio</code>, <code>supatype/schema-engine</code>, <code>supatype/functions-worker</code> and <code>supatype/control-plane</code>. Pin versions with <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> if you need to.</p>
     <p>Every function is handed two addresses. <code>ctx.url</code> is for calling the API from inside the function. Under Docker it is <code>http://kong:8000</code>, which no browser can open. <code>ctx.publicUrl</code> is the project's public address, <code>API_EXTERNAL_URL</code> in <code>.env</code>, for links you give to people.</p>
@@ -156,6 +223,17 @@
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> supatype app add --static ./public</pre></div>
     <p>This writes <code>app.mode: "static"</code> to <code>supatype.config.ts</code>. Commit it. It is a one-time step, not something to repeat on the server.</p>
+
+    <div class="step"><span class="step-num">5</span><h3>Turn on HTTPS</h3></div>
+    <p>Point an A record for your domain at the server and open ports 80 and 443. Then:</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype add domain example.com --email you@example.com
+<span class="pr">$</span> supatype self-host compose up -d</pre></div>
+    <p><code>add domain</code> sets <code>server.mode: "standalone"</code>, <code>server.domain</code> and <code>server.tls</code> in <code>supatype.config.ts</code>. Commit it. On the next <code>compose up</code> the gateway listens on ports 80 and 443 instead of <code>SUPATYPE_KONG_PORT</code>, and gets and renews a Let's Encrypt certificate for the domain itself, accepting Let's Encrypt's terms under the email you gave. The app, the APIs and Studio all share the one domain.</p>
+    <p>Set <code>API_EXTERNAL_URL</code> and <code>SITE_URL</code> in <code>.env</code> to <code>https://example.com</code>: values in <code>.env</code> win over the HTTPS default. Certificates are kept in the stack's key-value store (the <code>valkey-data</code> volume, or the database when the cache is <code>pg_keyspace</code>), so they survive restarts. Port 80 also still answers plain HTTP: nothing redirects it to HTTPS.</p>
+    <p><code>supatype dev</code> never turns HTTPS on, so the same committed config still runs on <code>http://localhost</code>.</p>
+
+    <div class="callout"><span class="callout-label">RATHER NOT RUN IT YOURSELF?</span><p>Supatype Cloud runs the same stack for you, and it is coming soon. <a href="/#cloud">Join the waiting list</a>, or <a href="/#contact">book a call</a> about self-hosting with support.</p></div>
 
     <h2 id="deploy-changes">Deploy changes</h2>
     <p>Local and self-hosted environments read the same committed config. What differs between machines lives in files you do not commit.</p>
@@ -215,8 +293,40 @@
       <p>Upgrading from 0.6.0? Deploy the new realtime image before the first push, and upgrade the CLI with the engine. The <a href="https://github.com/supatype/supatype/blob/main/UPGRADING.md">upgrade notes</a> cover ownership checks, declared renames, identity columns and the rest.</p>
     </div>
 
+    <h2 id="production">Running in production</h2>
+    <p>A self-hosted stack is a Compose project, so you run it with the CLI and standard Postgres tools. Run these in the project directory on the server.</p>
+
+    <h3>Health and logs</h3>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype status                          <span class="c"># each service and whether it is running</span>
+<span class="pr">$</span> supatype self-host compose status        <span class="c"># Compose's own view, with health</span>
+<span class="pr">$</span> supatype logs --service server --since 1h
+<span class="pr">$</span> supatype self-host compose logs          <span class="c"># every service, followed</span></pre></div>
+    <p><code>supatype logs</code> shows up to 100 lines per service from the past 5 minutes (<code>--since</code> changes that), then keeps following until you press Ctrl+C. Ask for a service that does not exist and it lists the ones that do. Postgres has a health check, and the services that use it wait until it passes.</p>
+    <div class="callout warn">
+      <span class="callout-label">AFTER A REBOOT</span>
+      <p>The generated Compose file sets no restart policy except on <code>server</code>, which retries a failed start five times. Docker does not bring the stack back after the server reboots, so run <code>supatype self-host compose up -d</code> again, or from a boot-time unit of your own.</p>
+    </div>
+
+    <h3>Backups</h3>
+    <p>There is no backup command for a Compose stack. Use <code>pg_dump</code> 17 or later on the server, against <code>DATABASE_URL</code> from <code>.env</code>, which reaches the Compose Postgres on <code>127.0.0.1</code>. The dump holds every schema, including auth users, storage metadata and migration history.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> export DATABASE_URL=<span class="s">"$(grep '^DATABASE_URL=' .env | cut -d= -f2-)"</span>
+<span class="pr">$</span> pg_dump -Fc -f backup-$(date +%F).dump <span class="s">"$DATABASE_URL"</span>
+<span class="pr">$</span> pg_restore --clean --if-exists -d <span class="s">"$DATABASE_URL"</span> backup-2026-10-28.dump</pre></div>
+    <p>Stored files are not in the database. With the built-in storage they live in the <code>storage-data</code> volume, named <code>supatype-&lt;project&gt;_storage-data</code> in <code>docker volume ls</code>. Back that up with your usual volume tooling. <code>supatype self-host compose down</code> keeps both volumes, and only <code>down --volumes</code> deletes them.</p>
+
+    <h3>Roll back a bad push</h3>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype migrations list   <span class="c"># what was applied, when and by whom</span>
+<span class="pr">$</span> supatype rollback          <span class="c"># undo the last applied migration</span></pre></div>
+    <p><code>rollback</code> runs the reverse SQL stored with the last migration in one transaction and marks it rolled back. It then offers to restore your schema files from the snapshot stored with the migration before it, so the next push does not apply the change again. Pass <code>--sync-schema</code> to restore without asking, or <code>--no-sync-schema</code> to revert the database only. Commit the restored files.</p>
+    <div class="callout warn">
+      <span class="callout-label">DROPPED DATA</span>
+      <p>A rollback cannot bring back a table or column the push dropped, or data a type change discarded. Restore those from a backup. Run <code>supatype diff</code> before a push to see what it will change.</p>
+    </div>
+
     <nav class="pn" aria-label="More pages">
-      <a href="/deploy-vm-github-actions.html"><small>GUIDE</small><span>Deploy to a VM with GitHub Actions</span></a>
       <a href="/docs/schema.html" class="next"><small>NEXT</small><span>Schema</span></a>
     </nav>
   </main>
@@ -227,13 +337,14 @@
     <a href="#self-host">Self-hosting</a>
     <a href="#deploy-changes">Deploy changes</a>
     <a href="#upgrading">Upgrading Supatype</a>
+    <a href="#production">Running in production</a>
   </nav>
 </div>
 
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
-    <span>© Supatype Ltd · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></span>
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

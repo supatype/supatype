@@ -6,31 +6,41 @@
   <meta name="theme-color" content="#0A0A0C" />
   <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
   <link rel="apple-touch-icon" href="/supatype-icon.svg" />
-  <title>Client | Supatype</title>
+  <title>Typed Postgres client: queries, auth, storage, realtime | Supatype</title>
   <meta name="description" content="Use the typed @supatype/client: generated types, queries, filters, relations, drafts and publishing, auth, storage, realtime, functions and errors." />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://www.supatype.com/docs/client.html" />
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Geist+Mono:wght@400;600&family=Silkscreen&display=swap" rel="stylesheet" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Typed Postgres client: queries, auth, storage, realtime | Supatype" />
+  <meta property="og:description" content="Use the typed @supatype/client: generated types, queries, filters, relations, drafts and publishing, auth, storage, realtime, functions and errors." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/client.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/client.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/site.css" />
 </head>
 <body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
 
 <header class="site-header">
   <nav class="nav" aria-label="Main">
     <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
     <div class="nav-links">
       <a href="/#how-it-works">How it works</a>
-      <a href="/docs/" aria-current="page">Docs</a>
+      <a href="/docs/" aria-current="true">Docs</a>
       <a href="/docs/#self-host">Self-hosting</a>
       <a href="/deploy-vm-github-actions.html">Guides</a>
     </div>
     <div class="nav-end">
       <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
       <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
-      <a href="/docs/#local-dev" class="btn btn-primary btn-sm">Get started</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
       <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
       </button>
@@ -39,7 +49,7 @@
   <div class="nav-drawer" id="nav-drawer" hidden>
     <ul>
       <li><a href="/#how-it-works">How it works</a></li>
-      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
       <li><a href="/docs/#self-host">Self-hosting</a></li>
       <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
       <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
@@ -63,23 +73,37 @@
     <div><span class="label">BUILD</span><ul>
       <li><a href="/docs/schema.html">Schema</a></li>
       <li><a href="/docs/client.html" aria-current="page">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
       <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
       <li><a href="/docs/studio-roles.html">Studio roles</a></li>
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
     <div><span class="label">GUIDES</span><ul>
       <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
       <li><a href="/llms.txt">llms.txt</a></li>
     </ul></div>
   </nav>
 
-  <main class="doc">
+  <main class="doc" id="main">
     <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Client</nav>
     <h1>Client</h1>
     <p class="intro"><code>@supatype/client</code> talks to your project's REST, auth, storage, realtime and functions. Its types come from your schema, so a wrong table or column fails the build.</p>
@@ -91,10 +115,10 @@
 <pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
 <span class="k">export</span> <span class="k">const</span> supatype = createClient({
-  url: <span class="s">"http://localhost:&lt;gateway-port&gt;"</span>, <span class="c">// API_EXTERNAL_URL in your project's .env</span>
-  anonKey: <span class="s">"&lt;anon-key&gt;"</span>,
+  url: import.meta.env.VITE_SUPATYPE_URL,
+  anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
-    <p>Use your own project's gateway URL, not a port copied from an example: <code>supatype init</code> picks a free gateway port for each project. Your project's <code>.env</code> holds the full URL as <code>API_EXTERNAL_URL</code>, and the port alone as <code>SUPATYPE_KONG_PORT</code>. <code>supatype keys</code> writes them to <code>.env</code> as <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks.</p>
+    <p>Every page in these docs imports the client from this one file. <code>supatype init</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
     <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
 
     <h2 id="types">Generated types</h2>
@@ -232,18 +256,18 @@ console.log(reply)</pre></div>
 
     <h2 id="graphql">GraphQL</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="k">import</span> <span class="k">type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"./supatype/generated/client"</span>
+<pre><span class="k">import</span> <span class="k">type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
-<span class="k">type</span> <span class="t">Talk</span> = <span class="t">TableRow</span>&lt;<span class="s">"talk"</span>&gt;
-<span class="k">type</span> <span class="t">TalkPage</span> = { talkCollection: { edges: { node: <span class="t">Pick</span>&lt;<span class="t">Talk</span>, <span class="s">"title"</span> | <span class="s">"abstract"</span>&gt; }[] } }
+<span class="k">type</span> <span class="t">Post</span> = <span class="t">TableRow</span>&lt;<span class="s">"post"</span>&gt;
+<span class="k">type</span> <span class="t">PostPage</span> = { postCollection: { edges: { node: <span class="t">Pick</span>&lt;<span class="t">Post</span>, <span class="s">"title"</span> | <span class="s">"body"</span>&gt; }[] } }
 
-<span class="k">const</span> { data, error } = <span class="k">await</span> supatype.graphql&lt;<span class="t">TalkPage</span>&gt;(<span class="s">`{
-  talkCollection(first: 10) { edges { node { title abstract } } }
+<span class="k">const</span> { data, error } = <span class="k">await</span> supatype.graphql&lt;<span class="t">PostPage</span>&gt;(<span class="s">`{
+  postCollection(first: 10) { edges { node { title body } } }
 }`</span>)
-<span class="k">const</span> firstParagraph = data?.talkCollection.edges[0]?.node.abstract.root.children?.[0]</pre></div>
+<span class="k">const</span> firstParagraph = data?.postCollection.edges[0]?.node.body.root.children?.[0]</pre></div>
     <p>The query goes to <code>/graphql/v1</code> as the signed-in user, under the same access rules as REST. Pass variables as the second argument, and <code>{ idempotent: true }</code> as the third to retry a read on a transient failure.</p>
     <p>Rich text, blocks and json fields come back as objects and arrays, not strings. pg_graphql types every json and jsonb column with its <code>JSON</code> scalar and sends it as a JSON-encoded string, so the client reads the schema once per role, finds each field of that type in your query, and decodes it. Aliases, named and inline fragments, nested relations and lists all decode. A field the client cannot place stays exactly as returned: one added since the schema was read (it reads the schema again on the next call), a document with more than one operation, or a schema it could not read.</p>
-    <p>The type argument names the answer's shape and is not checked at runtime. Build it from the generated <code>TableRow</code> types so <code>abstract</code> is typed as the rich text document it now is. Variables you send are not encoded: a json argument still takes a string.</p>
+    <p>The type argument names the answer's shape and is not checked at runtime. Build it from the generated <code>TableRow</code> types so <code>body</code> is typed as the rich text document it now is. Variables you send are not encoded: a json argument still takes a string.</p>
     <p>Using another GraphQL client? <code>readGraphqlSchema</code> reads the <code>data</code> of an introspection answer to <code>GRAPHQL_SCHEMA_QUERY</code>, and <code>decodeGraphqlJsonFields(query, data, schema)</code> decodes an answer the same way.</p>
 
     <h2 id="errors">Errors</h2>
@@ -257,7 +281,7 @@ console.log(reply)</pre></div>
 
     <nav class="pn" aria-label="More pages">
       <a href="/docs/schema.html"><small>PREVIOUS</small><span>Schema</span></a>
-      <a href="/docs/seeding.html" class="next"><small>NEXT</small><span>Seeding</span></a>
+      <a href="/docs/frameworks.html" class="next"><small>NEXT</small><span>Frameworks</span></a>
     </nav>
   </main>
 
@@ -280,8 +304,8 @@ console.log(reply)</pre></div>
 
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
-    <span>© Supatype Ltd · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></span>
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

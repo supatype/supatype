@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>CLI | Supatype</title>
+  <meta name="description" content="Every supatype command with its subcommands and most useful flags: local development, schema and database, seeds, functions, self-host and Supatype Cloud." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/docs/cli.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="CLI | Supatype" />
+  <meta property="og:description" content="Every supatype command with its subcommands and most useful flags: local development, schema and database, seeds, functions, self-host and Supatype Cloud." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/cli.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/cli.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Reference: CLI</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html" aria-current="page">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / CLI</nav>
+    <h1>CLI</h1>
+    <p class="intro">Every <code>supatype</code> command, grouped by what it is for. Descriptions are the ones <code>supatype --help</code> prints.</p>
+    <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
+
+    <h2 id="usage">Install and help</h2>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> npm install -g @supatype/cli
+<span class="pr">$</span> supatype --help
+<span class="pr">$</span> supatype push --help</pre></div>
+    <p>Run commands from the project directory, where <code>supatype.config.ts</code> is. Every command also takes <code>--project-name &lt;name&gt;</code>, which names the project for this run over <code>supatype.config.ts</code>. <code>supatype --version</code> prints the CLI version.</p>
+    <p>Many commands that reach a database take <code>--connection &lt;url&gt;</code> to override the config, and <code>--env &lt;name&gt;</code> to pick an environment when the project is linked.</p>
+    <div class="callout">
+      <span class="callout-label">CLOUD</span>
+      <p>Commands marked <strong>Cloud</strong> need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.</p>
+    </div>
+
+    <h2 id="project">Project and local development</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
+      <tbody>
+        <tr><td><code>init [name]</code></td><td>Scaffold a new Supatype project</td><td><code>-y, --defaults</code>, <code>--no-install</code>, <code>--no-keys</code>, <code>--admin-email</code>, <code>--admin-password</code>, <code>--no-admin</code></td></tr>
+        <tr><td><code>dev</code></td><td>Start local Postgres, apply schema, and run supatype-server</td><td><code>--no-watch</code>, <code>--stream</code>, <code>--port &lt;port&gt;</code>, <code>--reset-db</code> (Docker only), <code>--yes</code>, <code>--overwrite-drift</code></td></tr>
+        <tr><td><code>keys</code></td><td>Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET</td><td><code>--write</code>, <code>--force</code>, <code>--secret &lt;secret&gt;</code>, <code>--exp-years &lt;years&gt;</code> (default 10)</td></tr>
+        <tr><td><code>status</code></td><td>Show linked target status or local stack services</td><td><code>--env &lt;name&gt;</code></td></tr>
+        <tr><td><code>logs</code></td><td>Tail logs from the local stack</td><td><code>--service &lt;name&gt;</code>, <code>--since &lt;duration&gt;</code> (default 5m), <code>-f, --follow</code></td></tr>
+        <tr><td><code>app add [dir]</code></td><td>Configure app routing: --static for a built site, or proxy to a dev server</td><td><code>--static</code>, <code>--port &lt;port&gt;</code> (default 3000), <code>--upstream &lt;url&gt;</code></td></tr>
+        <tr><td><code>app remove</code></td><td>Set app.mode=none in supatype.config.ts</td><td></td></tr>
+        <tr><td><code>admin create-user</code></td><td>Create an admin user for the admin panel</td><td><code>--email</code>, <code>--password</code> (asked for if left out), <code>--role</code> (default <code>admin</code>)</td></tr>
+        <tr><td><code>admin set-role</code></td><td>Change an existing user's admin role</td><td><code>--email</code> and <code>--role</code>, both required</td></tr>
+        <tr><td><code>admin list-users</code></td><td>List users with Studio access</td><td><code>--connection &lt;url&gt;</code></td></tr>
+        <tr><td><code>pg start</code></td><td>Start Postgres for the current project</td><td>Native provider only</td></tr>
+        <tr><td><code>pg stop</code></td><td>Stop Postgres for the current project</td><td></td></tr>
+        <tr><td><code>pg reset</code></td><td>Stop Postgres, wipe the data directory, and re-initialise</td><td><code>--force</code></td></tr>
+        <tr><td><code>pg psql [dbname]</code></td><td>Open a psql shell connected to the project database</td><td></td></tr>
+      </tbody>
+    </table></div>
+    <p><code>--role</code> is <code>admin</code>, <code>developer</code>, <code>editor</code> or <code>viewer</code>. See <a href="/docs/studio-roles.html#grant">Studio roles</a>. The first-run steps are in <a href="/docs/#local-dev">Local development</a>.</p>
+
+    <h2 id="schema">Schema and database</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
+      <tbody>
+        <tr><td><code>push</code></td><td>Push schema to the database: diff, prompt for destructive changes, apply migration, generate types</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--overwrite-drift</code></td></tr>
+        <tr><td><code>diff</code></td><td>Show planned schema changes without applying them (dry run)</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
+        <tr><td><code>generate</code></td><td>Regenerate TypeScript types without running a migration</td><td><code>--connection &lt;url&gt;</code></td></tr>
+        <tr><td><code>migrate</code></td><td>Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With --record the file also records the migration as a push does</td><td><code>-o, --output &lt;file&gt;</code>, <code>--record</code>, <code>--force</code></td></tr>
+        <tr><td><code>migrations list</code></td><td>List applied migrations with schema snapshot metadata</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
+        <tr><td><code>rollback</code></td><td>Roll back the last applied migration</td><td><code>--sync-schema</code>, <code>--no-sync-schema</code></td></tr>
+        <tr><td><code>reset</code></td><td>Drop all managed tables and re-apply the schema from scratch (destructive)</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code></td></tr>
+        <tr><td><code>rename [from] [to]</code></td><td>Record a rename in supatype/renames.json, so every push applies it as a rename and keeps the data: <code>supatype rename member.name member.title</code>, or <code>supatype rename member members</code> for a table</td><td><code>--prune</code></td></tr>
+        <tr><td><code>doctor</code></td><td>Report schema drift between schema/index.ts and the live database</td><td><code>--strict</code>, <code>--rebaseline</code>, <code>--accept-access-drift</code>, <code>--yes</code></td></tr>
+        <tr><td><code>adopt</code></td><td>Hand Supatype the objects a push refuses because their names are taken; take objects back with --release, and hand them back with --reclaim</td><td><code>--release &lt;object...&gt;</code>, <code>--reclaim &lt;object...&gt;</code>, <code>--key &lt;object...&gt;</code>, <code>--adopt-none</code>, <code>--yes</code></td></tr>
+        <tr><td><code>pull</code></td><td>Scaffold schema/index.ts from live database introspection (draft, review before push)</td><td><code>--connection &lt;url&gt;</code>, <code>--out &lt;path&gt;</code>, <code>--dry-run</code></td></tr>
+        <tr><td><code>introspect</code></td><td>Introspect the live Postgres database (JSON or summary)</td><td><code>--json</code>, <code>--out &lt;path&gt;</code></td></tr>
+        <tr><td><code>db check</code></td><td>Check whether a database meets Supatype's requirements (for external Postgres)</td><td><code>--connection &lt;url&gt;</code>, <code>--schema &lt;name&gt;</code>, <code>--emit</code>, <code>--fix</code>, <code>--authenticator-password &lt;password&gt;</code></td></tr>
+        <tr><td><code>types check</code></td><td>Validate generated client augmentation wiring</td><td></td></tr>
+      </tbody>
+    </table></div>
+    <p>An object passed to <code>adopt</code> is named as <code>doctor</code> names it: <code>kind:table.name</code>, or <code>kind:name</code> for a table. Studio shows the result under <a href="/docs/studio.html#database">Schema objects</a>.</p>
+    <div class="callout warn">
+      <span class="callout-label">PULL</span>
+      <p><code>pull</code> writes a draft. Review it before you push: it types every uuid <code>id</code> column as <code>SupatypeAuthUserId</code> and does not write <code>tableName</code>, so fix those by hand.</p>
+    </div>
+
+    <h2 id="data">Data and seeds</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
+      <tbody>
+        <tr><td><code>seed [file]</code></td><td>Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts</td><td><code>--status</code>, <code>--atomic</code>, <code>--connection &lt;dsn&gt;</code>, <code>--environment &lt;name&gt;</code></td></tr>
+        <tr><td><code>cache rest list</code></td><td>List cached REST GET entries</td><td><code>--table &lt;name&gt;</code>, <code>--json</code></td></tr>
+        <tr><td><code>cache rest get &lt;key&gt;</code></td><td>Show one cache entry (full key)</td><td><code>--json</code></td></tr>
+        <tr><td><code>cache rest delete &lt;key&gt;</code></td><td>Delete one cache entry</td><td></td></tr>
+        <tr><td><code>cache rest flush</code></td><td>Flush REST cache entries</td><td><code>--table &lt;name&gt;</code>, <code>--yes</code></td></tr>
+      </tbody>
+    </table></div>
+    <p><code>seed</code> refuses to run against a project linked to Supatype Cloud unless you pass <code>--force</code>. See <a href="/docs/seeding.html">Seeding</a>.</p>
+
+    <h2 id="functions">Functions and hooks</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
+      <tbody>
+        <tr><td><code>functions new &lt;name&gt;</code></td><td>Scaffold a new edge function</td><td></td></tr>
+        <tr><td><code>functions serve</code></td><td>Start a local Deno server that serves all functions with hot reload</td><td><code>--port &lt;port&gt;</code> (default 54321), <code>--env-file &lt;path&gt;</code> (default <code>.env.local</code>)</td></tr>
+        <tr><td><code>functions invoke &lt;name&gt;</code></td><td>Invoke a local or deployed function</td><td><code>--data &lt;json&gt;</code>, <code>--auth</code>, <code>--local</code></td></tr>
+        <tr><td><code>functions deploy</code></td><td>Deploy all functions (or --only &lt;name&gt; for one) to the linked project</td><td><code>--only &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--dry-run</code></td></tr>
+        <tr><td><code>functions list</code> <strong>Cloud</strong></td><td>List all deployed functions for the linked project</td><td></td></tr>
+        <tr><td><code>functions delete &lt;name&gt;</code> <strong>Cloud</strong></td><td>Remove a deployed function</td><td></td></tr>
+        <tr><td><code>functions logs &lt;name&gt;</code> <strong>Cloud</strong></td><td>Tail logs for a deployed function</td><td><code>--since &lt;duration&gt;</code> (default 1h)</td></tr>
+        <tr><td><code>functions env list</code>, <code>set &lt;KEY=value&gt;</code>, <code>unset &lt;key&gt;</code> <strong>Cloud</strong></td><td>Manage function environment variables</td><td></td></tr>
+        <tr><td><code>hooks new &lt;name&gt;</code></td><td>Scaffold a hook handler</td><td></td></tr>
+        <tr><td><code>hooks list</code></td><td>Show the hooks the schema declares and whether each one can run</td><td></td></tr>
+      </tbody>
+    </table></div>
+    <p><code>functions deploy</code> deploys to a self-hosted Compose stack when the project has one, and to Supatype Cloud otherwise. On a self-hosted stack, read function logs in Studio. See <a href="/docs/functions.html">Functions</a>.</p>
+
+    <h2 id="self-host">Self-host and deploy</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
+      <tbody>
+        <tr><td><code>self-host compose render</code></td><td>Render deterministic self-host compose artifacts</td><td></td></tr>
+        <tr><td><code>self-host compose up</code></td><td>Render and start compose services</td><td><code>-d, --detach</code> (on by default)</td></tr>
+        <tr><td><code>self-host compose down</code></td><td>Stop compose services (volumes are kept unless --volumes)</td><td><code>--volumes</code>, <code>-y, --yes</code></td></tr>
+        <tr><td><code>self-host compose restart &lt;service&gt;</code></td><td>Recreate one service with the current config and .env, leaving the others running</td><td></td></tr>
+        <tr><td><code>self-host compose status</code></td><td>Show compose service status</td><td></td></tr>
+        <tr><td><code>self-host compose logs</code></td><td>Tail compose logs</td><td><code>--service &lt;name&gt;</code>, <code>-f, --follow</code></td></tr>
+        <tr><td><code>add domain [domain]</code></td><td>Add a custom domain with automatic HTTPS (self-host)</td><td><code>--email &lt;email&gt;</code> for Let's Encrypt</td></tr>
+        <tr><td><code>link</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json)</td><td><code>--url &lt;url&gt;</code>, <code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--fix-gitignore</code></td></tr>
+        <tr><td><code>envs list</code></td><td>List linked environments</td><td></td></tr>
+        <tr><td><code>envs use &lt;name&gt;</code></td><td>Set the default environment</td><td></td></tr>
+        <tr><td><code>deploy</code></td><td>Deploy schema and app, Supatype Cloud by default when linked (<code>supatype link</code>); pass --local for engine + your database</td><td><code>--schema-only</code>, <code>--app-only</code>, <code>--skip-build</code>, <code>--yes</code>, <code>--overwrite-drift</code></td></tr>
+        <tr><td><code>deploy rollback</code></td><td>Roll back to the previous static site deployment</td><td><code>--to &lt;id&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
+        <tr><td><code>deploy status</code></td><td>Show current deployment status</td><td><code>--env &lt;name&gt;</code></td></tr>
+        <tr><td><code>deploy logs [version]</code></td><td>Show build logs for a deployment</td><td><code>--env &lt;name&gt;</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>For a self-hosted stack, <code>link --url</code> takes the stack's gateway URL and <code>--token</code> its <code>SERVICE_ROLE_KEY</code>. The full walkthrough is in <a href="/docs/#self-host">Self-host</a> and <a href="/deploy-vm-github-actions.html">Deploy to a VM with GitHub Actions</a>.</p>
+
+    <h2 id="cloud">Supatype Cloud</h2>
+    <p>All of these need Supatype Cloud, which is coming soon.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
+      <tbody>
+        <tr><td><code>login</code></td><td>Sign in to Supatype Cloud (stores refreshable session for push/deploy)</td><td><code>--email &lt;email&gt;</code>, <code>--password &lt;password&gt;</code> (prefer <code>SUPATYPE_PASSWORD</code>)</td></tr>
+        <tr><td><code>logout</code></td><td>Clear stored Supatype Cloud credentials</td><td></td></tr>
+        <tr><td><code>whoami</code></td><td>Show the current Supatype Cloud session</td><td></td></tr>
+        <tr><td><code>link --project &lt;slug&gt;</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json)</td><td><code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
+        <tr><td><code>projects list</code></td><td>List all projects in your organisation</td><td></td></tr>
+        <tr><td><code>projects create &lt;name&gt;</code></td><td>Create a new project</td><td><code>--tier &lt;tier&gt;</code>, <code>--region &lt;region&gt;</code></td></tr>
+        <tr><td><code>projects pause &lt;slug&gt;</code></td><td>Pause a project</td><td></td></tr>
+        <tr><td><code>projects resume &lt;slug&gt;</code></td><td>Resume a paused project</td><td></td></tr>
+        <tr><td><code>domains list</code>, <code>add &lt;domain&gt;</code>, <code>remove &lt;domainId&gt;</code>, <code>verify &lt;domainId&gt;</code></td><td>Manage custom domains for a project</td><td></td></tr>
+        <tr><td><code>envs create &lt;name&gt;</code></td><td>Create a cloud environment (staging/preview)</td><td></td></tr>
+        <tr><td><code>db connection-string</code></td><td>Show the database connection string for the linked project</td><td><code>--transaction</code>, <code>--env &lt;name&gt;</code></td></tr>
+        <tr><td><code>db reset-password</code></td><td>Reset the database password for the linked project</td><td><code>--env &lt;name&gt;</code></td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="misc">Binaries and updates</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
+      <tbody>
+        <tr><td><code>self-update</code></td><td>Update the supatype CLI (npm or standalone CDN binary)</td><td><code>--force</code></td></tr>
+        <tr><td><code>update</code></td><td>Download the latest component binaries and update versions in supatype.config.ts</td><td><code>--check</code></td></tr>
+        <tr><td><code>engine status</code></td><td>Run the host engine binary's --version and show which binary answered</td><td></td></tr>
+        <tr><td><code>cache list</code></td><td>List cached component binaries and their sizes</td><td><code>--project &lt;path&gt;</code></td></tr>
+        <tr><td><code>cache clean [component] [version]</code></td><td>Remove cached binaries not pinned by local project configs</td><td><code>--dry-run</code>, <code>--force</code>, <code>--project &lt;path&gt;</code></td></tr>
+        <tr><td><code>migrate-from-v1</code></td><td>Codemod runtime model() schema DSL into RFC v2 Model&lt;&gt; type aliases</td><td><code>--schema &lt;path&gt;</code>, <code>--write</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>Binaries are cached in <code>~/.supatype/cache/</code>. <code>cache clean --force</code> removes every cached binary, pinned or not.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/from-prisma.html"><small>PREVIOUS</small><span>Coming from Prisma</span></a>
+      <a href="/licensing.html" class="next"><small>NEXT</small><span>Licensing</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#usage">Install and help</a>
+    <a href="#project">Project and local development</a>
+    <a href="#schema">Schema and database</a>
+    <a href="#data">Data and seeds</a>
+    <a href="#functions">Functions and hooks</a>
+    <a href="#self-host">Self-host and deploy</a>
+    <a href="#cloud">Supatype Cloud</a>
+    <a href="#misc">Binaries and updates</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

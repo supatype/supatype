@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>Edge functions and model hooks in TypeScript on Deno | Supatype</title>
+  <meta name="description" content="Write TypeScript functions that run on Deno at /functions/v1, read the caller's token, keep secrets in env files and self-host on the functions worker." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/docs/functions.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Edge functions and model hooks in TypeScript on Deno | Supatype" />
+  <meta property="og:description" content="Write TypeScript functions that run on Deno at /functions/v1, read the caller's token, keep secrets in env files and self-host on the functions worker." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/functions.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/functions.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Functions</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html" aria-current="page">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Functions</nav>
+<h1>Functions</h1>
+<p class="intro">A function is a TypeScript file in <code>functions/</code> that runs on Deno and answers HTTP at <code>/functions/v1/&lt;name&gt;</code>. It receives a standard <code>Request</code> and returns a standard <code>Response</code>.</p>
+
+<h2 id="files">Where functions live</h2>
+<p>Functions sit in <code>functions/</code> at the project root. Each one is either a folder with an <code>index.ts</code> or a single <code>.ts</code> file. The name becomes the route.</p>
+<div class="tbl"><table><thead><tr><th scope="col">File</th><th scope="col">Route</th></tr></thead>
+<tbody>
+<tr><td><code>functions/send-invite/index.ts</code></td><td><code>/functions/v1/send-invite</code></td></tr>
+<tr><td><code>functions/ping.ts</code></td><td><code>/functions/v1/ping</code></td></tr>
+<tr><td><code>functions/_shared/email.ts</code></td><td>none: shared code</td></tr>
+</tbody></table></div>
+<ul>
+<li>Names starting with <code>_</code> or <code>.</code> are skipped, so <code>functions/_shared/</code> holds code every function can import with a relative path.</li>
+<li><code>.d.ts</code> files are skipped.</li>
+<li><code>_logs</code> is reserved by the worker, and the gateway refuses <code>/functions/v1/hooks</code> from outside, so do not use either name.</li>
+</ul>
+<p>To use another directory, set <code>functions.path</code> in <code>supatype.config.ts</code>. It resolves against the project root.</p>
+<div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">"@supatype/cli"</span>
+
+<span class="k">export default</span> defineConfig({
+  <span class="c">// ...</span>
+  functions: {
+    path: <span class="s">"functions"</span>,
+  },
+})</pre></div>
+
+<h2 id="runtime">Runtime</h2>
+<p>Functions run on Deno. Locally the CLI downloads Deno on first use. On a self-hosted stack they run in the <code>functions-worker</code> container, and <code>supatype-server</code> proxies <code>/functions/v1</code> to it.</p>
+<p>The worker loads every function once at startup and serves them from one process. Invocations run concurrently: nothing per call is written to the process environment, so one slow function does not block another.</p>
+<p>The CLI writes three files to help your editor: <code>functions/deno.d.ts</code>, <code>functions/tsconfig.json</code> and <code>functions/_shared/context.ts</code>. It also adds <code>functions</code> to the root <code>tsconfig.json</code> <code>exclude</code> list, so your app's type check skips Deno code. <code>context.ts</code> is rewritten by <code>init</code>, <code>functions new</code>, <code>push</code> and <code>dev</code>, so do not edit it.</p>
+
+<h2 id="write">Write a function</h2>
+<p>Scaffold one with the CLI:</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>$ npx supatype functions new greet</pre></div>
+<p>A function default-exports a handler. It gets the request and a context object, and returns a <code>Response</code>. There is no Supatype package to import at runtime and no client injected for you.</p>
+<div class="cb"><div class="cb-bar"><span>functions/greet/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import type</span> { <span class="t">FunctionContext</span> } <span class="k">from</span> <span class="s">"../_shared/context.ts"</span>
+
+<span class="k">export default async function</span> handler(req: <span class="t">Request</span>, ctx: <span class="t">FunctionContext</span>): <span class="t">Promise</span>&lt;<span class="t">Response</span>&gt; {
+  <span class="k">if</span> (req.method !== <span class="s">"POST"</span>) {
+    <span class="k">return</span> Response.json({ message: <span class="s">"Use POST"</span> }, { status: 405 })
+  }
+  <span class="k">const</span> { name } = (<span class="k">await</span> req.json()) <span class="k">as</span> { name?: <span class="t">string</span> }
+  <span class="k">return</span> Response.json({ greeting: <span class="s">`Hello, ${name ?? "there"}`</span>, region: ctx.region })
+}</pre></div>
+<p>A thrown error becomes a <code>500</code> with <code>{ "error": "function_error", "message": "..." }</code>. An unknown name returns <code>404</code> with the list of available functions.</p>
+
+<h2 id="context">The context object</h2>
+<p>The second argument carries what the function needs about its call and its project.</p>
+<div class="tbl"><table><thead><tr><th scope="col">Field</th><th scope="col">What it holds</th></tr></thead>
+<tbody>
+<tr><td><code>executionId</code></td><td>A UUID unique to this call. Every log line the call writes carries it.</td></tr>
+<tr><td><code>functionName</code></td><td>The route being served.</td></tr>
+<tr><td><code>url</code></td><td>The project's API base URL, reachable from inside the function.</td></tr>
+<tr><td><code>anonKey</code></td><td>The project's anon key.</td></tr>
+<tr><td><code>serviceRoleKey</code></td><td>Only present when the project grants this function the service role. See <a href="#service-role">Service role</a>.</td></tr>
+<tr><td><code>dbUrl</code></td><td>A direct database URL, only when the deployment provides one.</td></tr>
+<tr><td><code>region</code></td><td><code>local</code> unless the deployment sets a region.</td></tr>
+<tr><td><code>env</code></td><td>Your variables from the function env files. See <a href="#env">Environment and secrets</a>.</td></tr>
+</tbody></table></div>
+
+<h2 id="auth">Who is calling</h2>
+<p>The client sends the signed-in user's access token in the <code>Authorization</code> header. The function receives that header as it was sent. Nothing checks it for you, so a function that cares who is calling must ask auth.</p>
+<div class="cb"><div class="cb-bar"><span>functions/whoami/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import type</span> { <span class="t">FunctionContext</span> } <span class="k">from</span> <span class="s">"../_shared/context.ts"</span>
+
+<span class="k">export default async function</span> handler(req: <span class="t">Request</span>, ctx: <span class="t">FunctionContext</span>): <span class="t">Promise</span>&lt;<span class="t">Response</span>&gt; {
+  <span class="k">const</span> authorization = req.headers.get(<span class="s">"Authorization"</span>)
+  <span class="k">if</span> (!authorization) <span class="k">return</span> Response.json({ message: <span class="s">"Sign in first"</span> }, { status: 401 })
+
+  <span class="k">const</span> headers = { Authorization: authorization, apikey: ctx.anonKey }
+  <span class="k">const</span> res = <span class="k">await</span> fetch(<span class="s">`${ctx.url}/auth/v1/user`</span>, { headers })
+  <span class="k">if</span> (!res.ok) <span class="k">return</span> Response.json({ message: <span class="s">"Not signed in"</span> }, { status: 401 })
+
+  <span class="k">const</span> user = (<span class="k">await</span> res.json()) <span class="k">as</span> { id: <span class="t">string</span>; email?: <span class="t">string</span> }
+  <span class="c">// Forward the same headers to REST and the user's access rules apply.</span>
+  <span class="k">const</span> posts = <span class="k">await</span> fetch(<span class="s">`${ctx.url}/rest/v1/post?select=title`</span>, { headers })
+  <span class="k">return</span> Response.json({ id: user.id, posts: <span class="k">await</span> posts.json() })
+}</pre></div>
+<p>Forwarding the caller's token is the safe default: the database sees the user, not the function, and every <a href="/docs/schema.html">access rule</a> still applies.</p>
+
+<h2 id="service-role">Service role</h2>
+<p>A function is a public endpoint. By default it does not receive the service-role key, which reads and writes past every access rule. The worker removes the key from the environment before any function is imported, so <code>Deno.env</code> cannot reach it either.</p>
+<p>To give a function the key, name it in <code>functions.serviceRole</code>. It then appears as <code>ctx.serviceRoleKey</code>.</p>
+<div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export default</span> defineConfig({
+  <span class="c">// ...</span>
+  functions: {
+    serviceRole: [<span class="s">"send-invite"</span>],
+  },
+})</pre></div>
+<p><code>supatype push</code> refuses a name that matches no function, so a typo cannot silently grant nothing. <code>supatype doctor</code> lists the current grants.</p>
+<div class="callout warn"><span class="callout-label">LOCAL DEV</span><p>The local router does not apply this list. Under <code>supatype dev</code> every function receives <code>ctx.serviceRoleKey</code>, and under <code>supatype functions serve</code> every function does when <code>SUPATYPE_SERVICE_ROLE_KEY</code> is set in your shell. Test that a function works without the key on a self-hosted stack.</p></div>
+
+<h2 id="env">Environment and secrets</h2>
+<p>Variables for functions live in env files inside the functions directory:</p>
+<ul>
+<li><code>functions/.env.local</code> is shared by every function.</li>
+<li><code>functions/.env.&lt;name&gt;.local</code> applies to one function and overrides the shared file.</li>
+</ul>
+<p>Read them from <code>ctx.env</code>. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>$ npx supatype functions env set RESEND_API_KEY=re_123
+$ npx supatype functions env list
+$ npx supatype functions env unset RESEND_API_KEY</pre></div>
+<p>On a project that is not linked, these commands edit <code>functions/.env.local</code>. <code>list</code> masks the values.</p>
+<div class="cb"><div class="cb-bar"><span>functions/send-invite/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> apiKey = ctx.env[<span class="s">"RESEND_API_KEY"</span>]
+<span class="k">if</span> (!apiKey) <span class="k">return</span> Response.json({ message: <span class="s">"RESEND_API_KEY is not set"</span> }, { status: 500 })</pre></div>
+
+<h2 id="call">Call a function</h2>
+<p>From your app, use <code>functions.invoke</code> on the client. It posts JSON to <code>/functions/v1/&lt;name&gt;</code> with the user's token and returns <code>{ data, error }</code>. A non-2xx response becomes <code>error</code>, using the <code>message</code> field from the body when there is one.</p>
+<div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data, error } = <span class="k">await</span> supatype.functions.invoke(<span class="s">"greet"</span>, { body: { name: <span class="s">"Alex"</span> } })</pre></div>
+<p><code>invoke</code> also takes <code>method</code> (default <code>POST</code>) and <code>headers</code>. A JSON response is parsed and anything else comes back as text. On a <code>401</code> the client refreshes the session once and retries. More in <a href="/docs/client.html#functions">Client: Functions</a>.</p>
+
+<h2 id="local">Local development</h2>
+<p><code>supatype dev</code> serves functions through the same gateway as the rest of the API when a functions directory exists. You do not run anything else.</p>
+<p>To run functions on their own, with Deno watching for changes:</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>$ npx supatype functions serve
+$ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></div>
+<p><code>serve</code> listens on port <code>54321</code> by default; change it with <code>--port</code>. It loads <code>functions/.env.local</code> unless you pass <code>--env-file</code>. <code>invoke</code> sends a POST, prints the status and the response, and gives up after 30 seconds. <code>--auth</code> adds a test token to the request.</p>
+
+<h2 id="self-host">Self-host</h2>
+<p>The self-host Compose file always includes a <code>functions-worker</code> service, built from the <code>supatype/functions-worker</code> image. It mounts the project read-only and serves <code>functions/</code> from it. There is no bundle or upload step: the files on disk are what runs.</p>
+<p>The worker reads code once at startup, so restart it after changing a function:</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>$ docker compose -p supatype-&lt;project&gt; -f .supatype/self-host/docker-compose.yml restart functions-worker</pre></div>
+<p><code>&lt;project&gt;</code> is your project name from <code>supatype.config.ts</code> in lower case, with spaces and other symbols replaced by <code>-</code>. Env file changes do not need a restart.</p>
+<p>The worker gets the anon and service-role keys from the stack. To give functions a database connection, set <code>SUPATYPE_FUNCTIONS_DB_URL</code>; it appears as <code>ctx.dbUrl</code>. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.</p>
+<p>Function logs are JSON lines on the container's output, each with the call's <code>request_id</code>, status and duration:</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>$ npx supatype self-host compose logs --service functions-worker</pre></div>
+<div class="callout"><span class="callout-label">NOTE</span><p>The Compose file mounts <code>functions/</code> at the project root. Keep the default path on a self-hosted stack.</p></div>
+
+<h2 id="hooks">Model hooks</h2>
+<p>A model hook is a handler the API server calls around a write to one model: to check it, change it, refuse it, or react once it has happened. Hooks run on the same Deno worker as functions, but they are not public endpoints. They live in their own <code>hooks/</code> directory at the project root, the worker serves them under a <code>hooks/</code> route, and the gateway refuses that route from outside.</p>
+<h3>Triggers</h3>
+<div class="tbl"><table><thead><tr><th scope="col">Key</th><th scope="col">Runs</th><th scope="col">Can</th></tr></thead>
+<tbody>
+<tr><td><code>beforeChange</code></td><td>Before an insert or update reaches Postgres</td><td>Let it through, replace the rows or the patch, or refuse it</td></tr>
+<tr><td><code>afterChange</code></td><td>After an insert or update succeeded</td><td>React only. It cannot change or undo the write</td></tr>
+<tr><td><code>beforeDelete</code></td><td>Before a delete reaches Postgres</td><td>Let it through or refuse it</td></tr>
+<tr><td><code>afterDelete</code></td><td>After a delete succeeded</td><td>React only</td></tr>
+</tbody></table></div>
+<p>Hooks fire on writes to <code>/rest/v1/&lt;table&gt;</code>: <code>POST</code> and <code>PUT</code> are inserts, <code>PATCH</code> is an update, <code>DELETE</code> is a delete. That covers the client's <code>insert</code>, <code>upsert</code>, <code>update</code> and <code>delete</code>, including calls made with the service-role key. RPC calls, direct SQL, seeds and migrations do not fire them.</p>
+<h3>Declare a hook</h3>
+<p>Name the handler in the model's second argument. A string is the handler's directory name; an object adds options.</p>
+<div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export</span> <span class="k">type</span> <span class="t">Post</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
+  title: string
+  <span class="c">// ...</span>
+}, {
+  <span class="c">// access, versions, ...</span>
+  hooks: {
+    beforeChange: <span class="s">"check-post"</span>
+    afterChange: { function: <span class="s">"notify-post"</span>; timeout: 5000 }
+  }
+}&gt;</pre></div>
+<div class="tbl"><table><thead><tr><th scope="col">Option</th><th scope="col">Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>function</code></td><td>The directory under <code>hooks/</code>.</td></tr>
+<tr><td><code>timeout</code></td><td>Milliseconds to wait for an answer. Default <code>2000</code>.</td></tr>
+<tr><td><code>onUnavailable</code></td><td>What to do when the hook does not answer: a timeout, a connection failure, a <code>5xx</code>, a thrown error or an unreadable body. <code>"reject"</code> refuses the write, <code>"log"</code> lets it through and logs. Defaults to <code>"reject"</code> for <code>before*</code> hooks and <code>"log"</code> for <code>after*</code> hooks.</td></tr>
+</tbody></table></div>
+<p><code>supatype push</code> refuses a schema whose hook names a directory with no <code>index.ts</code>, so a typo cannot leave a hook that never fires.</p>
+<h3>Write the handler</h3>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>$ npx supatype hooks new check-post
+$ npx supatype hooks list</pre></div>
+<p><code>hooks new</code> creates <code>hooks/&lt;name&gt;/index.ts</code>. When a model already names it, the file is set up for that event; otherwise the command prints the line to add to the model. <code>hooks list</code> prints each <code>Model.event</code> with its handler and marks any whose handler is missing. <code>supatype doctor</code> reports the same.</p>
+<p>Handlers import their types from <code>hooks/_supatype/hooks.ts</code>, which <code>push</code>, <code>dev</code> and <code>generate</code> write from your schema. Until the first push it does not exist, so a new handler will not compile yet. Do not edit it.</p>
+<div class="cb"><div class="cb-bar"><span>hooks/check-post/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { hook, <span class="k">type</span> <span class="t">BeforeChange</span> } <span class="k">from</span> <span class="s">"../_supatype/hooks.ts"</span>
+
+<span class="k">const</span> checkPost: <span class="t">BeforeChange</span>&lt;<span class="s">"post"</span>&gt; = <span class="k">async</span> (ctx) =&gt; {
+  <span class="k">if</span> (ctx.operation === <span class="s">"insert"</span>) {
+    <span class="k">if</span> (ctx.rows.some((row) =&gt; row.title.trim() === <span class="s">""</span>)) <span class="k">return</span> { reject: <span class="s">"A post needs a title"</span> }
+    <span class="k">return</span> { rows: ctx.rows.map((row) =&gt; ({ ...row, title: row.title.trim() })) }
+  }
+  <span class="k">if</span> (ctx.patch.title !== <span class="k">undefined</span> &amp;&amp; ctx.patch.title.trim() === <span class="s">""</span>) {
+    <span class="k">return</span> { reject: { message: <span class="s">"A post needs a title"</span>, status: 422, code: <span class="s">"empty_title"</span> } }
+  }
+  <span class="k">return</span> {}
+}
+
+<span class="k">export</span> <span class="k">default</span> hook(checkPost)</pre></div>
+<p>The type argument is the table name. <code>BeforeChange</code>, <code>AfterChange</code>, <code>BeforeDelete</code> and <code>AfterDelete</code> type the context from the model, and only tables that declare a hook are accepted.</p>
+<div class="tbl"><table><thead><tr><th scope="col">Context field</th><th scope="col">What it holds</th></tr></thead>
+<tbody>
+<tr><td><code>table</code>, <code>operation</code></td><td>The table and <code>insert</code>, <code>update</code> or <code>delete</code>.</td></tr>
+<tr><td><code>user</code></td><td><code>sub</code>, <code>role</code> and <code>email</code> from the caller's verified token, or <code>null</code> for an anonymous caller.</td></tr>
+<tr><td><code>requestId</code></td><td>Matches the request in the server logs.</td></tr>
+<tr><td><code>rows</code></td><td>An insert's rows, always an array. On <code>afterChange</code>, the written rows, only when the caller asked for them back with <code>.select()</code>.</td></tr>
+<tr><td><code>patch</code></td><td>An update's changes.</td></tr>
+<tr><td><code>filter</code></td><td>The request's filter on an update or delete, such as <code>id=eq.42</code>. A hook cannot change it.</td></tr>
+<tr><td><code>previous()</code></td><td>Before an update or delete: fetches the rows about to change, up to 100, with <code>truncated: true</code> when there were more. They come back as stored, without field masking, so do not copy them into a refusal message.</td></tr>
+</tbody></table></div>
+<p>A <code>before*</code> handler returns <code>{}</code> to let the write through. <code>beforeChange</code> can return <code>{ rows }</code> for an insert or <code>{ patch }</code> for an update to replace what is written. <code>{ reject }</code> refuses the write: the caller gets your message with status <code>422</code>, or the <code>4xx</code> status you set. A thrown error is not a refusal: it counts as the hook not answering, and <code>onUnavailable</code> decides.</p>
+<p>To keep a model's whole lifecycle in one directory, point several events at the same name and export <code>hooks({ beforeChange: checkPost, afterChange: notify })</code> instead of <code>hook(...)</code>. An event with no handler in that map lets the write through.</p>
+<h3>How hooks run</h3>
+<ul>
+<li>The server reads the whole request body before any hook runs. A body over 1 MiB on a write to a hooked table is refused, rather than written without the hook.</li>
+<li>An <code>after*</code> hook runs once the caller already has its response. Its failures are logged and never reach the caller.</li>
+<li>A hook may write through the API, and those writes fire hooks too. A chain more than four hooks deep is refused with status <code>508</code>, so a hook that writes to its own table cannot loop forever.</li>
+<li>On a Docker stack the <code>functions-worker</code> container mounts <code>hooks/</code> next to <code>functions/</code>. When <code>supatype dev</code> runs on Docker, the worker restarts when a hook file changes. On a self-hosted stack, restart it after changing a hook, as for functions.</li>
+</ul>
+<div class="callout warn"><span class="callout-label">NOT A SECURITY BOUNDARY</span><p>Direct SQL, seeds and migrations skip hooks. A rule every writer must follow belongs in the model's <a href="/docs/schema.html#access">access rules</a> or a constraint. Use hooks for application logic: enrichment, notifications, indexing, and checks the database cannot express.</p></div>
+
+<h2 id="limits">Limits</h2>
+<ul>
+<li>The gateway waits up to two minutes for a function to start responding.</li>
+<li>The self-host worker sets no memory or CPU cap per function. Set container limits in Compose if you need them.</li>
+<li>Function names and bodies are not typed on the client.</li>
+</ul>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/realtime.html"><small>PREVIOUS</small><span>Realtime</span></a>
+      <a href="/docs/seeding.html" class="next"><small>NEXT</small><span>Seeding</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#files">Where functions live</a>
+    <a href="#runtime">Runtime</a>
+    <a href="#write">Write a function</a>
+    <a href="#context">The context object</a>
+    <a href="#auth">Who is calling</a>
+    <a href="#service-role">Service role</a>
+    <a href="#env">Environment and secrets</a>
+    <a href="#call">Call a function</a>
+    <a href="#local">Local development</a>
+    <a href="#self-host">Self-host</a>
+    <a href="#hooks">Model hooks</a>
+    <a href="#limits">Limits</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

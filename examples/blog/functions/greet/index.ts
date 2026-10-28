@@ -1,5 +1,5 @@
 // greet, Supatype Edge Function
-// Docs: https://supatype.com/docs/edge-functions
+// Docs: https://www.supatype.com/docs/functions.html
 
 import type { FunctionContext } from "../_shared/context.ts"
 

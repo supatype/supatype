@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>Prisma alternative: moving from Prisma to Supatype</title>
+  <meta name="description" content="How schema.prisma, prisma migrate and Prisma Client map to Supatype types, push and the typed client, what Supatype adds, and what does not carry over." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/from-prisma.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Prisma alternative: moving from Prisma to Supatype" />
+  <meta property="og:description" content="How schema.prisma, prisma migrate and Prisma Client map to Supatype types, push and the typed client, what Supatype adds, and what does not carry over." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/from-prisma.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/from-prisma.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html" aria-current="true">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html" aria-current="true">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Guides: Coming from Prisma</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html" aria-current="page">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / Coming from Prisma</nav>
+<h1>Coming from Prisma</h1>
+<p class="intro">Prisma gives you tables, migrations and a typed client from one schema file. Supatype does the same from TypeScript types, then goes on to access rules, an API, an admin UI, auth and storage, which with Prisma you write yourself.</p>
+
+<h2 id="map">What maps to what</h2>
+<div class="tbl"><table>
+  <thead><tr><th scope="col">In Prisma</th><th scope="col">In Supatype</th></tr></thead>
+  <tbody>
+    <tr><td><code>model</code> in <code>schema.prisma</code></td><td>A <code>Model&lt;&gt;</code> type in <code>schema/index.ts</code>. See <a href="/docs/schema.html#models">Models</a></td></tr>
+    <tr><td><code>prisma migrate dev</code></td><td><code>supatype dev</code>: each save is applied to the local database</td></tr>
+    <tr><td><code>prisma migrate deploy</code></td><td><code>supatype push</code>, which shows the plan and asks before anything that can lose data</td></tr>
+    <tr><td><code>prisma migrate diff</code></td><td><code>supatype diff</code>: the plan, without applying it</td></tr>
+    <tr><td><code>prisma db pull</code></td><td><code>supatype pull</code>: a draft schema from a live database</td></tr>
+    <tr><td><code>prisma generate</code></td><td>Types are written by <code>supatype dev</code> and <code>supatype push</code>. <code>supatype generate</code> writes them on their own</td></tr>
+    <tr><td>Prisma Client</td><td><code>@supatype/client</code>. See <a href="/docs/client.html">Client</a></td></tr>
+    <tr><td>Prisma Studio</td><td>Supatype Studio, a CMS built from the schema. See <a href="/docs/studio-roles.html">Studio roles</a></td></tr>
+    <tr><td><code>prisma db seed</code></td><td><code>supatype seed</code>. See <a href="/docs/seeding.html">Seeding</a></td></tr>
+  </tbody>
+</table></div>
+
+<h3 id="fields">Field by field</h3>
+<div class="tbl"><table>
+  <thead><tr><th scope="col">Prisma</th><th scope="col">Supatype</th></tr></thead>
+  <tbody>
+    <tr><td><code>String @id @default(uuid())</code></td><td><code>id: UUID</code>. The database fills it in</td></tr>
+    <tr><td><code>String?</code></td><td><code>Optional&lt;string&gt;</code>. Every other field is <code>NOT NULL</code></td></tr>
+    <tr><td><code>@unique</code></td><td><code>Unique&lt;T&gt;</code></td></tr>
+    <tr><td><code>@default(value)</code></td><td><code>Default&lt;T, value&gt;</code></td></tr>
+    <tr><td><code>enum Status { draft published }</code></td><td><code>"draft" | "published"</code></td></tr>
+    <tr><td><code>Json</code></td><td><code>JSON&lt;T&gt;</code>, typed as <code>T</code> in the client</td></tr>
+    <tr><td><code>@relation(fields: [authorId], references: [id])</code></td><td><code>RelatedTo&lt;Author&gt;</code>, which adds the column <code>author_id</code></td></tr>
+    <tr><td>The list side, <code>posts Post[]</code></td><td><code>HasMany&lt;Post&gt;</code>. It adds no column</td></tr>
+    <tr><td>An implicit many-to-many</td><td><code>ManyToMany&lt;Tag&gt;</code>, one junction table for the pair</td></tr>
+    <tr><td><code>@@index</code>, <code>@@map</code></td><td><code>indexes</code> and <code>tableName</code> in the model's second argument</td></tr>
+  </tbody>
+</table></div>
+<p>The full list is in <a href="/docs/schema.html#fields">Field types</a> and <a href="/docs/schema.html#relations">Relations</a>.</p>
+
+<h2 id="example">Before and after</h2>
+<h3>Prisma</h3>
+<div class="cb"><div class="cb-bar"><span>prisma/schema.prisma</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">enum</span> <span class="t">Status</span> {
+  draft
+  published
+}
+
+<span class="k">model</span> <span class="t">Author</span> {
+  id    <span class="t">String</span> @id @default(uuid())
+  email <span class="t">String</span> @unique
+  name  <span class="t">String</span>
+  posts <span class="t">Post</span>[]
+}
+
+<span class="k">model</span> <span class="t">Post</span> {
+  id       <span class="t">String</span> @id @default(uuid())
+  title    <span class="t">String</span>
+  status   <span class="t">Status</span> @default(draft)
+  author   <span class="t">Author</span> @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId <span class="t">String</span>
+}</pre></div>
+<div class="cb"><div class="cb-bar"><span>before: Prisma Client</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> posts = <span class="k">await</span> prisma.post.findMany({
+  where: { status: <span class="s">"published"</span> },
+  select: { id: <span class="k">true</span>, title: <span class="k">true</span>, author: { select: { name: <span class="k">true</span> } } },
+})</pre></div>
+
+<h3>Supatype</h3>
+<div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> {
+  <span class="t">Model</span>, <span class="t">UUID</span>, <span class="t">Email</span>, <span class="t">Unique</span>, <span class="t">Default</span>, <span class="t">SupatypeAuthUserId</span>,
+  <span class="t">RelatedTo</span>, <span class="t">HasMany</span>, <span class="t">Public</span>, <span class="t">Owner</span>, <span class="t">Any</span>, <span class="t">Eq</span>, <span class="t">Literal</span>,
+} <span class="k">from</span> <span class="s">"@supatype/types"</span>
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">Author</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">SupatypeAuthUserId</span>
+  email: <span class="t">Unique</span>&lt;<span class="t">Email</span>&gt;
+  name: string
+  posts: <span class="t">HasMany</span>&lt;<span class="t">Post</span>&gt;
+}, {
+  access: { read: <span class="t">Public</span>; create: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;; update: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;; delete: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt; }
+}&gt;
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">Post</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
+  title: string
+  status: <span class="t">Default</span>&lt;<span class="s">"draft"</span> | <span class="s">"published"</span>, <span class="s">"draft"</span>&gt;
+  author: <span class="t">RelatedTo</span>&lt;<span class="t">Author</span>, { required: <span class="k">true</span>; onDelete: <span class="s">"cascade"</span> }&gt;
+}, {
+  access: {
+    read: <span class="t">Any</span>&lt;[<span class="t">Eq</span>&lt;<span class="s">"status"</span>, <span class="t">Literal</span>&lt;<span class="s">"published"</span>&gt;&gt;, <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;]&gt;
+    create: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;
+    update: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;
+    delete: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;
+  }
+}&gt;</pre></div>
+<div class="cb"><div class="cb-bar"><span>after: @supatype/client</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: posts, error } = <span class="k">await</span> supatype
+  .from(<span class="s">"post"</span>)
+  .select(<span class="s">"id, title, author(name)"</span>)
+  .eq(<span class="s">"status"</span>, <span class="s">"published"</span>)</pre></div>
+<p>The author's id is a sign-in user's id, so each author row belongs to a user. The <code>access</code> blocks are the part Prisma has no place for: they become Postgres row level security, so the same query returns only what the caller may see, whether it runs on your server or in the browser.</p>
+
+<h2 id="adds">What Supatype adds</h2>
+<ul>
+  <li><strong>Access rules in the database.</strong> Each model's rules become row level security, and field rules mask single columns. They hold for REST, GraphQL, realtime and the client alike. See <a href="/docs/schema.html#access">Access rules</a>.</li>
+  <li><strong>An API you do not write.</strong> Every model with access rules is reachable over REST and GraphQL. A model with no <code>access</code> at all is not.</li>
+  <li><strong>A client that runs in the browser.</strong> It holds the anon key and the user's session, not a database connection.</li>
+  <li><strong>Studio.</strong> A form for each model built from its fields, drafts and version history, a media library, and roles for the people who edit content. See <a href="/docs/studio-roles.html">Studio roles</a>.</li>
+  <li><strong>Auth, storage, realtime and functions</strong> in the same project. Buckets are declared in the schema next to the models. See <a href="/docs/client.html#auth">Auth</a>, <a href="/docs/client.html#storage">Storage</a>, <a href="/docs/client.html#realtime">Realtime</a> and <a href="/docs/client.html#functions">Functions</a>.</li>
+</ul>
+
+<h2 id="existing-database">Bringing an existing database</h2>
+<p><code>supatype pull</code> drafts a schema from a live database. Prisma's <code>_prisma_migrations</code> table is skipped, along with any table whose name starts with <code>_</code>.</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype pull --connection "postgres://..." --out schema/index.ts
+<span class="pr">$</span> supatype diff</pre></div>
+<p>Prisma's defaults and Supatype's differ, so expect to edit the draft:</p>
+<ul>
+  <li>Prisma names a table after the model, such as <code>"Post"</code>. Supatype derives the table name from the model name in snake case, so <code>Post</code> means <code>post</code>. Add <code>tableName: "Post"</code> to keep the existing table.</li>
+  <li>A field's name is its column's name. A relation's column is the field name plus <code>_id</code>, and there is no option to name it otherwise, so a Prisma <code>authorId</code> column does not line up with an <code>author</code> relation. Keep it as a plain field, or rename the column.</li>
+  <li>Every drafted model has <code>Public</code> for all four rules. Replace them with the rules you mean before you push.</li>
+  <li>An <code>id</code> column of type uuid is drafted as <code>SupatypeAuthUserId</code>. Change it to <code>UUID</code> on every table whose id is not a user's id.</li>
+  <li>Prisma fills <code>@default(uuid())</code> in the client, and stores a <code>String</code> id as text unless you used <code>@db.Uuid</code>. Such an id is drafted as a string, not a <code>UUID</code>.</li>
+</ul>
+<p>The first push refuses tables that exist and that Supatype did not create. In a terminal it offers to adopt them: it asks <code>Adopt them now?</code>, shows what adoption will take, and asks again before changing anything. <code>--yes</code> does not answer those questions. Without a terminal, run <code>supatype adopt</code> and then push again. See <a href="/docs/schema.html#push">What a push refuses</a>.</p>
+
+<h2 id="not-carried">What does not carry over</h2>
+<ul>
+  <li><strong>Other databases.</strong> Supatype runs on Postgres 17 only. MySQL, SQLite, SQL Server and MongoDB projects need moving to Postgres first.</li>
+  <li><strong>Your migrations folder.</strong> Supatype does not read <code>prisma/migrations</code>. It compares the schema with the database and plans the change itself.</li>
+  <li><strong>Nested writes and transactions.</strong> The client writes one table per call and has no transaction API. Put a write that must touch several tables at once in a function.</li>
+  <li><strong>Raw queries.</strong> There is no <code>$queryRaw</code>. Studio has a SQL runner for one-off queries.</li>
+  <li><strong>Client extensions and middleware.</strong> Logic that ran around every query belongs in access rules, model hooks or functions.</li>
+</ul>
+<div class="callout"><span class="callout-label">PRISMA 8</span><p>Prisma 8, in release candidates at the time of writing, replaces <code>schema.prisma</code> with <code>contract.prisma</code> and renames the migrate commands. The mapping above is to Prisma 7.</p></div>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/from-supabase.html"><small>PREVIOUS</small><span>Coming from Supabase</span></a>
+      <a href="/docs/cli.html" class="next"><small>NEXT</small><span>CLI</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#map">What maps to what</a>
+    <a href="#example">Before and after</a>
+    <a href="#adds">What Supatype adds</a>
+    <a href="#existing-database">Existing database</a>
+    <a href="#not-carried">What does not carry over</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

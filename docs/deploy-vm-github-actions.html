@@ -11,12 +11,22 @@
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://www.supatype.com/deploy-vm-github-actions.html" />
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Geist+Mono:wght@400;600&family=Silkscreen&display=swap" rel="stylesheet" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Deploy to a VM with GitHub Actions | Supatype" />
+  <meta property="og:description" content="End-to-end example: scaffold a Supatype project locally, self-host on a VM with Docker Compose, and deploy updates via GitHub Actions over SSH." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/deploy-vm-github-actions.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/deploy-vm-github-actions.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/site.css" />
 </head>
 <body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
 
 <header class="site-header">
   <nav class="nav" aria-label="Main">
@@ -25,12 +35,12 @@
       <a href="/#how-it-works">How it works</a>
       <a href="/docs/">Docs</a>
       <a href="/docs/#self-host">Self-hosting</a>
-      <a href="/deploy-vm-github-actions.html" aria-current="page">Guides</a>
+      <a href="/deploy-vm-github-actions.html" aria-current="true">Guides</a>
     </div>
     <div class="nav-end">
       <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
       <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
-      <a href="/docs/#local-dev" class="btn btn-primary btn-sm">Get started</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
       <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
       </button>
@@ -41,7 +51,7 @@
       <li><a href="/#how-it-works">How it works</a></li>
       <li><a href="/docs/">Docs</a></li>
       <li><a href="/docs/#self-host">Self-hosting</a></li>
-      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="/deploy-vm-github-actions.html" aria-current="true">Guides</a></li>
       <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
       <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
@@ -63,23 +73,37 @@
     <div><span class="label">BUILD</span><ul>
       <li><a href="/docs/schema.html">Schema</a></li>
       <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
       <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
       <li><a href="/docs/studio-roles.html">Studio roles</a></li>
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
     <div><span class="label">GUIDES</span><ul>
       <li><a href="/deploy-vm-github-actions.html" aria-current="page">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
       <li><a href="/llms.txt">llms.txt</a></li>
     </ul></div>
   </nav>
 
-  <main class="doc">
+  <main class="doc" id="main">
     <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Guides</nav>
     <h1>Deploy to a VM with GitHub Actions</h1>
     <p class="intro">Create a project on your laptop, push it to GitHub, run the stack on a VM with Docker Compose, and ship schema and frontend changes on every push to <code>main</code>.</p>
@@ -88,7 +112,7 @@
     <h2 id="overview">What you will have</h2>
     <ul>
       <li>One repository with <code>supatype.config.ts</code>, shared by local development and the VM.</li>
-      <li>A VM running <code>supatype self-host compose</code>, with the gateway on port <code>18473</code>.</li>
+      <li>A VM running <code>supatype self-host compose</code>, with the gateway serving HTTPS for your domain on ports 80 and 443.</li>
       <li>A GitHub Action that connects over SSH, pulls, migrates, rebuilds static files and restarts Compose.</li>
     </ul>
     <div class="callout">
@@ -103,10 +127,8 @@
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> npm install -g @supatype/cli
 <span class="pr">$</span> mkdir my-blog &amp;&amp; cd my-blog
-<span class="pr">$</span> supatype init
-<span class="pr">$</span> npm install
-<span class="pr">$</span> supatype keys</pre></div>
-    <p>Copy the printed <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> into <code>.env</code> for local development.</p>
+<span class="pr">$</span> supatype init</pre></div>
+    <p><code>init</code> installs dependencies and writes generated secrets and API keys to <code>.env</code> for local development.</p>
 
     <div class="step"><span class="step-num">2</span><h3>Add a static frontend</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
@@ -114,6 +136,10 @@
 <span class="pr">$</span> npm install -D vite
 <span class="c"># in package.json: "build": "vite build", with output in public/</span></pre></div>
     <p>Commit <code>supatype.config.ts</code>. You do not run <code>app add</code> again on the server.</p>
+    <p>Give the deployment its domain while you are here. The gateway gets a Let's Encrypt certificate for it itself, so there is no reverse proxy to set up:</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype add domain example.com --email you@example.com</pre></div>
+    <p>This writes <code>server.mode</code>, <code>server.domain</code> and <code>server.tls</code> to <code>supatype.config.ts</code>. <code>supatype dev</code> ignores them, so local development stays on <code>http://localhost</code>. See <a href="/docs/#self-host">Self-hosting</a> for the details.</p>
 
     <div class="step"><span class="step-num">3</span><h3>Develop, then push to GitHub</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
@@ -134,7 +160,8 @@
     <div class="step"><span class="step-num">4</span><h3>Install the tools and clone</h3></div>
     <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="c"># Docker: https://docs.docker.com/engine/install/ubuntu/</span>
-<span class="pr">$</span> sudo apt update &amp;&amp; sudo apt install -y git nodejs npm
+<span class="c"># Node.js 22 or later (Ubuntu's own nodejs package is older): https://nodejs.org/en/download</span>
+<span class="pr">$</span> sudo apt update &amp;&amp; sudo apt install -y git
 <span class="pr">$</span> sudo npm install -g @supatype/cli
 
 <span class="pr">$</span> sudo mkdir -p /opt/my-blog
@@ -143,17 +170,21 @@
 <span class="pr">$</span> git clone git@github.com:YOUR_USER/my-blog.git .</pre></div>
 
     <div class="step"><span class="step-num">5</span><h3>Write the production secrets</h3></div>
-    <p>Create <code>/opt/my-blog/.env</code> on the server and never commit it. Use strong values and your public URLs:</p>
+    <p>Create <code>/opt/my-blog/.env</code> on the server and never commit it. Generate each <code>CHANGE_ME</code> with <code>openssl rand -base64 48 | tr -d '/+='</code>, use a different value for each, and set your public URL. Compose refuses to start while any of the passwords or secrets is missing.</p>
     <div class="cb"><div class="cb-bar"><span>/opt/my-blog/.env</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>DATABASE_URL=postgresql://supatype_admin:CHANGE_ME@localhost:5432/my-blog
 POSTGRES_USER=supatype_admin
-POSTGRES_PASSWORD=CHANGE_ME
+POSTGRES_PASSWORD=CHANGE_ME     <span class="c"># the same value as in DATABASE_URL</span>
 POSTGRES_DB=my-blog
-JWT_SECRET=CHANGE_ME          <span class="c"># at least 32 characters: openssl rand -base64 48</span>
-ANON_KEY=eyJ...            <span class="c"># from supatype keys on first setup</span>
-SERVICE_ROLE_KEY=eyJ...
-API_EXTERNAL_URL=https://api.example.com
+AUTHENTICATOR_PASSWORD=CHANGE_ME
+SUPATYPE_SQL_EDITOR_PASSWORD=CHANGE_ME
+SUPATYPE_CONTROL_PLANE_SECRET=CHANGE_ME
+JWT_SECRET=CHANGE_ME            <span class="c"># at least 32 characters</span>
+ANON_KEY=
+SERVICE_ROLE_KEY=
+API_EXTERNAL_URL=https://example.com
 SITE_URL=https://example.com</pre></div>
+    <p>Then run <code>supatype keys --write</code> in <code>/opt/my-blog</code>. It signs <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> from this <code>JWT_SECRET</code> and adds the <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> copies your frontend build reads. Keys from your laptop will not work here, because they were signed with a different secret.</p>
 
     <div class="step"><span class="step-num">6</span><h3>First boot</h3></div>
     <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>
@@ -165,7 +196,7 @@ SITE_URL=https://example.com</pre></div>
 <span class="pr">$</span> npm run build
 <span class="pr">$</span> supatype self-host compose render
 <span class="pr">$</span> supatype self-host compose up -d</pre></div>
-    <p>Open <code>http://YOUR_VM_IP:18473</code>, with Studio at <code>/studio/</code>. Put Nginx or Caddy in front for HTTPS.</p>
+    <p>Before this, point an A record for <code>example.com</code> at the VM and open ports 80 and 443 in its firewall. Then open <code>https://example.com</code>, with Studio at <code>/studio/</code>. Without a domain in <code>supatype.config.ts</code>, the gateway is on <code>http://YOUR_VM_IP:18473</code> instead. Backups, logs and rollbacks are covered in <a href="/docs/#production">Running in production</a>.</p>
 
     <h2 id="secrets">Repository secrets</h2>
     <p>In your repository, open <strong>Settings → Secrets and variables → Actions</strong> and add:</p>
@@ -238,9 +269,11 @@ jobs:
       </tbody>
     </table></div>
 
+    <div class="callout"><span class="callout-label">RATHER NOT RUN IT YOURSELF?</span><p>Supatype Cloud runs the same stack for you, and it is coming soon. <a href="/#cloud">Join the waiting list</a>, or <a href="/#contact">book a call</a> about self-hosting with support.</p></div>
+
     <nav class="pn" aria-label="More pages">
       <a href="/docs/studio-roles.html"><small>PREVIOUS</small><span>Studio roles</span></a>
-      <a href="/licensing.html" class="next"><small>NEXT</small><span>Licensing</span></a>
+      <a href="/from-supabase.html" class="next"><small>NEXT</small><span>Coming from Supabase</span></a>
     </nav>
   </main>
 
@@ -257,8 +290,8 @@ jobs:
 
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
-    <span>© Supatype Ltd · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></span>
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

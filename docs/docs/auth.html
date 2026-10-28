@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>Auth for Postgres: email, magic links, phone and OAuth | Supatype</title>
+  <meta name="description" content="Sign users in with email, magic links, phone codes or OAuth, manage sessions, tie tokens to access rules, and use the pre-built React and React Native UI." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/docs/auth.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Auth for Postgres: email, magic links, phone and OAuth | Supatype" />
+  <meta property="og:description" content="Sign users in with email, magic links, phone codes or OAuth, manage sessions, tie tokens to access rules, and use the pre-built React and React Native UI." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/auth.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/auth.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Auth</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html" aria-current="page">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Auth</nav>
+    <h1>Auth</h1>
+    <p class="intro">Auth is built into the Supatype server. It signs users in, issues the tokens every request carries, and those tokens are what your schema's access rules check.</p>
+
+    <h2 id="service">How it runs</h2>
+    <p>The auth service is part of <code>supatype-server</code>, the same process that serves REST, GraphQL, storage and functions. It answers under <code>/auth/v1</code> on your project's API URL. It keeps its users, identities and sessions in the <code>auth</code> schema of your project's database and runs its own migrations when the server starts.</p>
+    <ul>
+      <li><code>supatype dev</code> with <code>database.provider: "docker"</code> (what <code>supatype init</code> writes): the server runs in the Compose stack behind Kong. Your API URL is <code>API_EXTERNAL_URL</code> in the project's <code>.env</code>.</li>
+      <li><code>supatype dev</code> with <code>database.provider: "native"</code>: the server runs as a local process on <code>server.port</code>, <code>54321</code> by default.</li>
+      <li>Self-host: <code>supatype self-host compose up</code> runs the same server image. It needs <code>JWT_SECRET</code> in <code>.env</code> and fills in a blank <code>ANON_KEY</code> or <code>SERVICE_ROLE_KEY</code> from it. See <a href="/docs/#self-host">Self-hosting</a>.</li>
+    </ul>
+    <p>In local dev, sign-ups are confirmed automatically, so a new user gets a session straight away with no email round trip.</p>
+    <div class="callout"><span class="callout-label">NOTE</span><p>Who may open Studio, and what they may do there, is decided by Studio roles. See <a href="/docs/studio-roles.html">Studio roles</a>.</p></div>
+
+    <h2 id="methods">Sign-in methods</h2>
+    <p>Each method below is a call on <code>supatype.auth</code>. The <a href="/docs/client.html#auth">client page</a> shows the common ones in use.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Method</th><th scope="col">Client call</th><th scope="col">Default</th></tr></thead>
+      <tbody>
+        <tr><td>Email and password</td><td><code>signUp</code>, <code>signInWithPassword</code></td><td>On</td></tr>
+        <tr><td>Magic link or email code</td><td><code>signInWithOtp({ email })</code>, then <code>verifyOtp</code> for a code</td><td>On, needs a mail provider to deliver</td></tr>
+        <tr><td>Phone code (SMS, or WhatsApp with Twilio)</td><td><code>signInWithOtp({ phone })</code>, <code>verifyOtp</code></td><td>Off, needs an SMS provider</td></tr>
+        <tr><td>OAuth</td><td><code>signInWithOAuth({ provider })</code></td><td>Off until a provider is configured</td></tr>
+        <tr><td>Provider ID token (native Apple or Google sign-in)</td><td><code>signInWithIdToken</code></td><td>Off until the provider is configured</td></tr>
+        <tr><td>Anonymous</td><td><code>signInAnonymously</code></td><td>Off</td></tr>
+      </tbody>
+    </table></div>
+    <p>Password reset is <code>resetPasswordForEmail</code>, and <code>updateUser</code> changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise <code>SUPATYPE_PASSWORD_MIN_LENGTH</code>.</p>
+    <h3>Multi-factor</h3>
+    <p><code>supatype.auth.mfa</code> has <code>enroll</code>, <code>challenge</code>, <code>verify</code>, <code>challengeAndVerify</code> and <code>unenroll</code>. TOTP authenticator apps are on by default. Phone factors are off by default and need an SMS provider.</p>
+    <h3>Anonymous users</h3>
+    <p>An anonymous sign-in creates a real user with a user id and a session. Turn it on with <code>SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true</code>. Because the user has an id, an anonymous user passes <code>LoggedIn</code> and can own rows. The token carries <code>is_anonymous: true</code>.</p>
+
+    <h2 id="oauth">OAuth providers</h2>
+    <p>Each provider is switched on with environment variables named after it. For GitHub:</p>
+    <div class="cb"><div class="cb-bar"><span>.env</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="c"># Replace http://localhost:54321 with your API URL (API_EXTERNAL_URL)</span>
+SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
+SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
+SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
+SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:54321/auth/v1/callback</pre></div>
+    <p>The redirect URI is the auth service's callback: <code>/auth/v1/callback</code> on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.</p>
+    <p>Supported provider names: <code>apple</code>, <code>azure</code>, <code>bitbucket</code>, <code>discord</code>, <code>facebook</code>, <code>figma</code>, <code>fly</code>, <code>github</code>, <code>gitlab</code>, <code>google</code>, <code>kakao</code>, <code>keycloak</code>, <code>linkedin_oidc</code>, <code>notion</code>, <code>slack_oidc</code>, <code>snapchat</code>, <code>spotify</code>, <code>twitch</code>, <code>twitter</code>, <code>x</code>, <code>workos</code> and <code>zoom</code>. Upper-case the name for the variable, so <code>linkedin_oidc</code> becomes <code>SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED</code>.</p>
+    <h3>The sign-in round trip</h3>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data, error } = <span class="k">await</span> supatype.auth.signInWithOAuth({
+  provider: <span class="s">"github"</span>,
+  options: { redirectTo: <span class="s">"http://localhost:5173/auth/callback"</span> },
+})
+<span class="k">if</span> (error) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(error.message)
+window.location.assign(data.url)
+
+<span class="c">// On /auth/callback</span>
+<span class="k">const</span> { error: callbackError } = <span class="k">await</span> supatype.auth.getSessionFromUrl(window.location.href)
+<span class="k">if</span> (callbackError) console.error(callbackError.message)</pre></div>
+    <p><code>signInWithOAuth</code> returns the URL; it does not navigate for you. <code>redirectTo</code> must be on the same host as <code>SITE_URL</code>, a loopback address, or match an entry in <code>SUPATYPE_URI_ALLOW_LIST</code> (comma-separated, globs allowed). Anything else sends the user to <code>SITE_URL</code> instead. An app on another domain, or a mobile deep link, needs an allow list entry.</p>
+    <p>The web default is the implicit flow, which returns tokens in the URL fragment. Pass <code>flowType: "pkce"</code> in the options for a code exchange instead; mobile apps should always use PKCE. <code>getSessionFromUrl</code> handles both.</p>
+
+    <h2 id="sessions">Sessions and tokens</h2>
+    <p>A session is a short-lived access token and a refresh token.</p>
+    <ul>
+      <li>The access token is a JWT signed with <code>JWT_SECRET</code>, valid for one hour. The client sends it as <code>Authorization: Bearer</code> on every request.</li>
+      <li>The client refreshes it about a minute before it expires, and again on load if a saved session has already expired. If the refresh fails, the session is cleared rather than kept with a dead token.</li>
+      <li>Refresh tokens rotate: each refresh issues a new one.</li>
+      <li><code>signOut</code> ends the session on the server and clears it locally.</li>
+    </ul>
+    <p>In the browser the session is saved to <code>localStorage</code> under <code>supatype.auth.session</code> and mirrored to a cookie named <code>st-auth-token</code>, which <code>@supatype/ssr</code> reads on the server. Set <code>auth: { persistSession: false }</code>, <code>storageKey</code> or <code>cookiePrefix</code> on <code>createClient</code> to change this. On React Native, <code>createNativeClient</code> from <code>@supatype/react-native</code> stores the session in <code>expo-secure-store</code> or AsyncStorage.</p>
+    <h3>What the token says</h3>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Claim</th><th scope="col">Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>sub</code></td><td>The user id</td></tr>
+        <tr><td><code>role</code></td><td>The database role the API runs the request as: <code>authenticated</code> for a signed-in user</td></tr>
+        <tr><td><code>email</code>, <code>phone</code></td><td>The user's contact details</td></tr>
+        <tr><td><code>app_metadata</code></td><td>Set only through the admin API. Holds the application role that <code>Role&lt;&gt;</code> checks</td></tr>
+        <tr><td><code>user_metadata</code></td><td>Set by the user, for example through <code>signUp</code> options or <code>updateUser</code>. Never trust it for access</td></tr>
+        <tr><td><code>aal</code>, <code>amr</code></td><td>Assurance level and how the user signed in, for MFA</td></tr>
+        <tr><td><code>session_id</code>, <code>is_anonymous</code></td><td>The session, and whether the user signed in anonymously</td></tr>
+      </tbody>
+    </table></div>
+    <p>Requests made with only the anon key have no user. Requests made with the service role key pass every access rule; keep that key on the server.</p>
+
+    <h2 id="access">Access rules</h2>
+    <p>The access rules you declare in the schema compile to Postgres row level security that reads the verified token. Every request runs with the token's claims available to the database, so the same rule holds for REST, GraphQL and realtime. The rules themselves are listed on the <a href="/docs/schema.html#access">schema page</a>.</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> { <span class="t">Model</span>, <span class="t">UUID</span>, <span class="t">SupatypeAuthUserId</span>, <span class="t">Public</span>, <span class="t">LoggedIn</span>, <span class="t">Owner</span> } <span class="k">from</span> <span class="s">"@supatype/types"</span>
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">Profile</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">SupatypeAuthUserId</span>
+  display_name: string
+}, {
+  access: { read: <span class="t">Public</span>; create: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;; update: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;; delete: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt; }
+}&gt;
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">Bookmark</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">UUID</span>
+  owner_id: <span class="t">SupatypeAuthUserId</span>
+  post_id: <span class="t">UUID</span>
+}, {
+  access: { read: <span class="t">Owner</span>&lt;<span class="s">"owner_id"</span>&gt;; create: <span class="t">LoggedIn</span>; update: <span class="t">Owner</span>&lt;<span class="s">"owner_id"</span>&gt;; delete: <span class="t">Owner</span>&lt;<span class="s">"owner_id"</span>&gt; }
+}&gt;</pre></div>
+    <p>A profile keyed on the user id lets each user write only their own row. Bookmarks are private to whoever saved them.</p>
+    <h3>What the rules become</h3>
+    <p>The engine installs a small set of SQL functions in the <code>auth</code> schema, and every policy calls them:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Rule or function</th><th scope="col">SQL</th></tr></thead>
+      <tbody>
+        <tr><td><code>auth.uid()</code></td><td>The token's <code>sub</code> as a <code>uuid</code>, or <code>NULL</code> when there is no user</td></tr>
+        <tr><td><code>auth.role()</code></td><td><code>app_metadata.role</code>, falling back to the top-level <code>role</code> claim, then <code>anon</code></td></tr>
+        <tr><td><code>auth.claim(path)</code></td><td>A nested claim by dotted path, used by <code>Claim&lt;&gt;</code></td></tr>
+        <tr><td><code>LoggedIn</code></td><td><code>(SELECT auth.uid()) IS NOT NULL</code></td></tr>
+        <tr><td><code>Owner&lt;"owner_id"&gt;</code></td><td><code>(SELECT auth.uid()) = "owner_id"</code></td></tr>
+        <tr><td><code>Role&lt;"admin"&gt;</code></td><td><code>(SELECT auth.role()) = 'admin'</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>Because <code>auth.uid()</code> is <code>NULL</code> for a request with no user, an owner rule never matches an anonymous request, even on a row whose owner column is empty. The calls are wrapped in <code>SELECT</code> so Postgres evaluates them once per query rather than once per row.</p>
+    <p>To give a user an application role for <code>Role&lt;&gt;</code>, set <code>app_metadata.role</code> through the auth admin API with the service role key. Users cannot set it themselves.</p>
+
+    <h2 id="ui">Pre-built UI</h2>
+    <p>Two packages give you ready-made sign-in screens. Both use <code>useAuth()</code> from <code>@supatype/react</code>, so they must sit inside a <code>&lt;SupatypeProvider&gt;</code>.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Package</th><th scope="col">Components</th></tr></thead>
+      <tbody>
+        <tr><td><code>@supatype/react-auth</code></td><td><code>LoginForm</code>, <code>SignUpForm</code>, <code>OAuthButton</code></td></tr>
+        <tr><td><code>@supatype/react-native-auth</code></td><td><code>LoginForm</code>, <code>SignUpForm</code>, <code>MagicLinkForm</code>, <code>OAuthButton</code>, <code>ResetPassword</code>, <code>AuthGate</code>, <code>AuthThemeProvider</code></td></tr>
+      </tbody>
+    </table></div>
+    <h3>Web</h3>
+    <div class="cb"><div class="cb-bar"><span>src/SignIn.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { <span class="t">SupatypeProvider</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import</span> { <span class="t">LoginForm</span>, <span class="t">OAuthButton</span> } <span class="k">from</span> <span class="s">"@supatype/react-auth"</span>
+<span class="k">import</span> { supatype } <span class="k">from</span> <span class="s">"./supatype"</span>
+
+<span class="k">export</span> <span class="k">function</span> <span class="t">SignIn</span>() {
+  <span class="k">return</span> (
+    &lt;<span class="t">SupatypeProvider</span> client={supatype}&gt;
+      &lt;<span class="t">LoginForm</span> onSuccess={() =&gt; window.location.assign(<span class="s">"/"</span>)} /&gt;
+      &lt;<span class="t">OAuthButton</span> provider=<span class="s">"github"</span> redirectTo=<span class="s">"http://localhost:5173/auth/callback"</span> /&gt;
+    &lt;/<span class="t">SupatypeProvider</span>&gt;
+  )
+}</pre></div>
+    <p>The web forms are plain, unstyled markup: pass <code>className</code> and <code>labels</code> to fit your app. <code>OAuthButton</code> has a default style and an icon for GitHub, Google and Apple, which a <code>className</code> replaces. It sends the browser to the provider; your callback page still calls <code>getSessionFromUrl</code>.</p>
+    <h3>React Native</h3>
+    <div class="cb"><div class="cb-bar"><span>App.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> * <span class="k">as</span> SecureStore <span class="k">from</span> <span class="s">"expo-secure-store"</span>
+<span class="k">import</span> * <span class="k">as</span> WebBrowser <span class="k">from</span> <span class="s">"expo-web-browser"</span>
+<span class="k">import</span> * <span class="k">as</span> Linking <span class="k">from</span> <span class="s">"expo-linking"</span>
+<span class="k">import</span> { <span class="t">SupatypeProvider</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import</span> { createNativeClient } <span class="k">from</span> <span class="s">"@supatype/react-native"</span>
+<span class="k">import</span> { <span class="t">AuthGate</span>, <span class="t">LoginForm</span>, <span class="t">OAuthButton</span> } <span class="k">from</span> <span class="s">"@supatype/react-native-auth"</span>
+
+<span class="k">const</span> client = createNativeClient({
+  url: process.env.EXPO_PUBLIC_SUPATYPE_URL!,
+  anonKey: process.env.EXPO_PUBLIC_SUPATYPE_ANON_KEY!,
+  secureStore: SecureStore,
+})
+<span class="k">const</span> redirectTo = Linking.createURL(<span class="s">"auth/callback"</span>)
+
+<span class="k">export</span> <span class="k">default</span> <span class="k">function</span> <span class="t">App</span>() {
+  <span class="k">return</span> (
+    &lt;<span class="t">SupatypeProvider</span> client={client}&gt;
+      &lt;<span class="t">AuthGate</span> fallback={&lt;&gt;&lt;<span class="t">LoginForm</span> /&gt;&lt;<span class="t">OAuthButton</span> provider=<span class="s">"google"</span> redirectTo={redirectTo} webBrowser={WebBrowser} /&gt;&lt;/&gt;}&gt;
+        {<span class="c">/* signed-in app */</span>}
+      &lt;/<span class="t">AuthGate</span>&gt;
+    &lt;/<span class="t">SupatypeProvider</span>&gt;
+  )
+}</pre></div>
+    <p><code>AuthGate</code> renders its children only when there is a session, and <code>fallback</code> otherwise. The native <code>OAuthButton</code> uses PKCE and opens the provider in <code>expo-web-browser</code>. Wrap the tree in <code>AuthThemeProvider</code> to change colours and spacing.</p>
+
+    <h2 id="config">Configuration</h2>
+    <h3>Email delivery</h3>
+    <p>Confirmation, magic link and reset emails go through the <code>email</code> block in <code>supatype.config.ts</code>:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>email: {
+  provider: <span class="s">"smtp"</span>, <span class="c">// "console" | "smtp" | "resend" | "ses"</span>
+  smtp: { host: <span class="s">"smtp.example.com"</span>, port: <span class="t">587</span>, user: <span class="s">"apikey"</span>, pass: process.env.SMTP_PASS, admin_email: <span class="s">"no-reply@example.com"</span> },
+},</pre></div>
+    <div class="callout warn"><span class="callout-label">CONSOLE SENDS NOTHING</span><p><code>console</code>, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.</p></div>
+    <p>For Resend, set <code>SUPATYPE_RESEND_API_KEY</code> and <code>SUPATYPE_RESEND_FROM</code> in <code>.env</code>. For SES, set <code>SUPATYPE_SES_FROM</code>; credentials come from the environment's AWS configuration.</p>
+    <h3>Environment variables</h3>
+    <p>The server reads the project's <code>.env</code> when it starts, so <code>SUPATYPE_*</code> auth variables placed there take effect after a restart. In the Docker stacks, a few values are set by the generated Compose file and are read from the plain names shown.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Variable</th><th scope="col">What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>JWT_SECRET</code></td><td>Signs every token. Required for self-host. Change it and every issued token, including the anon and service role keys, stops working</td></tr>
+        <tr><td><code>ANON_KEY</code>, <code>SERVICE_ROLE_KEY</code></td><td>Keys signed with <code>JWT_SECRET</code>. <code>supatype keys --write</code> generates them</td></tr>
+        <tr><td><code>SITE_URL</code></td><td>Self-host: your app's URL, the default place users land after confirming or signing in</td></tr>
+        <tr><td><code>SUPATYPE_URI_ALLOW_LIST</code></td><td>Other URLs <code>redirectTo</code> may point at, comma-separated</td></tr>
+        <tr><td><code>DISABLE_SIGNUP</code> (self-host), <code>SUPATYPE_DISABLE_SIGNUP</code> (native dev)</td><td><code>true</code> stops new sign-ups</td></tr>
+        <tr><td><code>SUPATYPE_MAILER_AUTOCONFIRM</code></td><td><code>true</code> skips email confirmation. On in dev, and on by default in self-host until you set it to <code>false</code></td></tr>
+        <tr><td><code>SUPATYPE_EXTERNAL_&lt;PROVIDER&gt;_*</code></td><td>OAuth providers, see <a href="#oauth">above</a></td></tr>
+        <tr><td><code>SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED</code></td><td>Allow anonymous sign-in</td></tr>
+        <tr><td><code>SUPATYPE_EXTERNAL_EMAIL_MAGIC_LINK_ENABLED</code></td><td><code>false</code> turns magic links off</td></tr>
+        <tr><td><code>SUPATYPE_PASSWORD_MIN_LENGTH</code></td><td>Minimum password length, at least 6</td></tr>
+        <tr><td><code>SUPATYPE_EXTERNAL_PHONE_ENABLED</code>, <code>SUPATYPE_SMS_PROVIDER</code></td><td>Phone sign-in. The provider is <code>twilio</code>, <code>twilio_verify</code>, <code>messagebird</code>, <code>textlocal</code> or <code>vonage</code></td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout warn"><span class="callout-label">SELF-HOST</span><p>Self-host turns auto-confirm on unless you set <code>SUPATYPE_MAILER_AUTOCONFIRM=false</code>. Set it, and configure email delivery, before you open sign-up to the public.</p></div>
+    <p>To create users from a seed file, see <a href="/docs/seeding.html#users">Seeding users</a>.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/frameworks.html"><small>PREVIOUS</small><span>Frameworks</span></a>
+      <a href="/docs/storage.html" class="next"><small>NEXT</small><span>Storage</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#service">How it runs</a>
+    <a href="#methods">Sign-in methods</a>
+    <a href="#oauth">OAuth providers</a>
+    <a href="#sessions">Sessions and tokens</a>
+    <a href="#access">Access rules</a>
+    <a href="#ui">Pre-built UI</a>
+    <a href="#config">Configuration</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

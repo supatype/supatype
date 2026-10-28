@@ -6,31 +6,41 @@
   <meta name="theme-color" content="#0A0A0C" />
   <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
   <link rel="apple-touch-icon" href="/supatype-icon.svg" />
-  <title>Schema | Supatype</title>
+  <title>Schema: TypeScript models, access rules and migrations | Supatype</title>
   <meta name="description" content="Write Supatype models in TypeScript: field types, relations, access rules, field rules, drafts, slugs, rich text, blocks, storage buckets, renames and what a push refuses." />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://www.supatype.com/docs/schema.html" />
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Geist+Mono:wght@400;600&family=Silkscreen&display=swap" rel="stylesheet" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Schema: TypeScript models, access rules and migrations | Supatype" />
+  <meta property="og:description" content="Write Supatype models in TypeScript: field types, relations, access rules, field rules, drafts, slugs, rich text, blocks, storage buckets, renames and what a push refuses." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/schema.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/schema.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/site.css" />
 </head>
 <body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
 
 <header class="site-header">
   <nav class="nav" aria-label="Main">
     <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
     <div class="nav-links">
       <a href="/#how-it-works">How it works</a>
-      <a href="/docs/" aria-current="page">Docs</a>
+      <a href="/docs/" aria-current="true">Docs</a>
       <a href="/docs/#self-host">Self-hosting</a>
       <a href="/deploy-vm-github-actions.html">Guides</a>
     </div>
     <div class="nav-end">
       <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
       <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
-      <a href="/docs/#local-dev" class="btn btn-primary btn-sm">Get started</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
       <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
       </button>
@@ -39,7 +49,7 @@
   <div class="nav-drawer" id="nav-drawer" hidden>
     <ul>
       <li><a href="/#how-it-works">How it works</a></li>
-      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
       <li><a href="/docs/#self-host">Self-hosting</a></li>
       <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
       <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
@@ -63,23 +73,37 @@
     <div><span class="label">BUILD</span><ul>
       <li><a href="/docs/schema.html" aria-current="page">Schema</a></li>
       <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
       <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
       <li><a href="/docs/studio-roles.html">Studio roles</a></li>
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
     <div><span class="label">GUIDES</span><ul>
       <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
       <li><a href="/llms.txt">llms.txt</a></li>
     </ul></div>
   </nav>
 
-  <main class="doc">
+  <main class="doc" id="main">
     <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Schema</nav>
     <h1>Schema</h1>
     <p class="intro">Your schema is a set of TypeScript types in <code>schema/index.ts</code>. Supatype builds the tables, access rules, APIs and the typed client from it.</p>
@@ -90,15 +114,15 @@
     <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> <span class="k">type</span> { <span class="t">Model</span>, <span class="t">UUID</span>, <span class="t">Optional</span>, <span class="t">Public</span>, <span class="t">LoggedIn</span> } <span class="k">from</span> <span class="s">"@supatype/types"</span>
 
-<span class="k">export</span> <span class="k">type</span> <span class="t">Note</span> = <span class="t">Model</span>&lt;{
+<span class="k">export</span> <span class="k">type</span> <span class="t">Post</span> = <span class="t">Model</span>&lt;{
   id: <span class="t">UUID</span>
   title: string
-  done: boolean
-  due: <span class="t">Optional</span>&lt;string&gt;
+  published: boolean
+  published_at: <span class="t">Optional</span>&lt;string&gt;
 }, {
   access: { read: <span class="t">Public</span>; create: <span class="t">LoggedIn</span>; update: <span class="t">LoggedIn</span>; delete: <span class="t">LoggedIn</span> }
 }&gt;</pre></div>
-    <p>The table name is the type name in snake case: <code>Note</code> becomes <code>note</code>, <code>BlogPost</code> becomes <code>blog_post</code>. Set <code>tableName</code> in the second argument to choose another.</p>
+    <p>The table name is the type name in snake case: <code>Post</code> becomes <code>post</code>, <code>BlogPost</code> becomes <code>blog_post</code>. Set <code>tableName</code> in the second argument to choose another.</p>
     <p>An <code>id: UUID</code> field becomes the primary key, and the database fills it in.</p>
     <p>The second argument also takes <code>label</code> and <code>labelPlural</code> (names in Studio), <code>indexes</code>, <code>versions</code> and <code>singleton: true</code> (one row, such as site settings).</p>
     <p><code>supatype dev</code> applies each save. <code>supatype push</code> applies the schema to another database. <code>supatype diff</code> shows the change without applying it.</p>
@@ -207,18 +231,17 @@
     <h2 id="field-rules">Field rules and masking</h2>
     <p>A field rule limits who can read or write one column. Declare it under <code>access.fields</code>.</p>
     <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="k">export</span> <span class="k">type</span> <span class="t">Employee</span> = <span class="t">Model</span>&lt;{
-  id: <span class="t">UUID</span>
-  user_id: <span class="t">SupatypeAuthUserId</span>
-  name: string
-  salary: <span class="t">Int</span>
+<pre><span class="k">export</span> <span class="k">type</span> <span class="t">Profile</span> = <span class="t">Model</span>&lt;{
+  id: <span class="t">SupatypeAuthUserId</span>
+  display_name: string
+  email: string
 }, {
   access: {
-    read: <span class="t">LoggedIn</span>
-    create: <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt;
-    update: <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt;
-    delete: <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt;
-    fields: { salary: { read: <span class="t">Any</span>&lt;[<span class="t">Owner</span>&lt;<span class="s">"user_id"</span>&gt;, <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt;]&gt;; write: <span class="t">Role</span>&lt;<span class="s">"hr"</span>&gt; } }
+    read: <span class="t">Public</span>
+    create: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;
+    update: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;
+    delete: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;
+    fields: { email: { read: <span class="t">Any</span>&lt;[<span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt;, <span class="t">Role</span>&lt;<span class="s">"moderator"</span>&gt;]&gt;; write: <span class="t">Owner</span>&lt;<span class="s">"id"</span>&gt; } }
   }
 }&gt;</pre></div>
     <p>A caller who may not read the column still gets the row, with the value masked as <code>null</code>. A write the rule refuses fails with error <code>42501</code>.</p>
@@ -320,8 +343,8 @@
 
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
-    <span>© Supatype Ltd · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></span>
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

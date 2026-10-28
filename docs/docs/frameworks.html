@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>Frameworks | Supatype</title>
+  <meta name="description" content="Use Supatype from React, Vue, Svelte, Solid, React Native and Next.js server code: providers, query and mutation hooks, live preview, and cookie-based server clients." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/docs/frameworks.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="Frameworks | Supatype" />
+  <meta property="og:description" content="Use Supatype from React, Vue, Svelte, Solid, React Native and Next.js server code: providers, query and mutation hooks, live preview, and cookie-based server clients." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/frameworks.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/frameworks.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Frameworks</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html" aria-current="page">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Frameworks</nav>
+<h1>Frameworks</h1>
+<p class="intro">Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, and a server helper for Next.js. Each one wraps the client you already create, so everything on the <a href="/docs/client.html">Client</a> page still applies.</p>
+
+<h2 id="packages">Packages</h2>
+<div class="tbl"><table><thead><tr><th scope="col">Package</th><th scope="col">Exports</th></tr></thead>
+<tbody>
+<tr><td><code>@supatype/react</code></td><td><code>SupatypeProvider</code>, <code>useSupatype</code>, <code>useQuery</code>, <code>useMutation</code>, <code>useFunction</code>, <code>useAuth</code>, <code>useSubscription</code>, <code>useLivePreview</code>, <code>RichText</code></td></tr>
+<tr><td><code>@supatype/vue</code></td><td><code>supatypePlugin</code>, <code>useSupatype</code>, <code>useQuery</code>, <code>useMutation</code>, <code>useFunction</code>, <code>useAuth</code>, <code>useSubscription</code></td></tr>
+<tr><td><code>@supatype/svelte</code></td><td><code>setSupatypeClient</code>, <code>getSupatypeClient</code>, <code>createQuery</code>, <code>createMutation</code>, <code>createFunction</code>, <code>createAuth</code>, <code>createSubscription</code></td></tr>
+<tr><td><code>@supatype/solid</code></td><td><code>SupatypeContext</code>, <code>useSupatype</code>, <code>createQuery</code>, <code>createMutation</code>, <code>createFunction</code>, <code>createAuth</code>, <code>createSubscription</code></td></tr>
+<tr><td><code>@supatype/react-native</code></td><td><code>createNativeClient</code>, <code>secureStoreAdapter</code>, <code>asyncStorageAdapter</code>, <code>openOAuth</code>, <code>createAuthUrlListener</code></td></tr>
+<tr><td><code>@supatype/ssr</code></td><td><code>createServerClient</code></td></tr>
+</tbody></table></div>
+<p>Every example below imports the client from <code>src/supatype.ts</code>, created once as shown in <a href="/docs/client.html#setup">Client: Create the client</a>. With Vite, read the values <code>supatype keys</code> writes to <code>.env</code>:</p>
+<div class="cb"><div class="cb-bar"><span>src/supatype.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
+
+<span class="k">export</span> <span class="k">const</span> supatype = createClient({
+  url: <span class="k">import</span>.meta.env.VITE_SUPATYPE_URL,
+  anonKey: <span class="k">import</span>.meta.env.VITE_SUPATYPE_ANON_KEY,
+})</pre></div>
+<p>Sign-in screens are covered on <a href="/docs/auth.html#ui">Auth: Pre-built UI</a>, and the subscription hooks on <a href="/docs/realtime.html#hooks">Realtime: Framework hooks</a>. This page does not repeat them.</p>
+
+<h2 id="react">React</h2>
+<p>Wrap your app in <code>SupatypeProvider</code> and pass the client. Every hook reads the client from it and throws when there is no provider above it.</p>
+<div class="cb"><div class="cb-bar"><span>src/Posts.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { <span class="t">SupatypeProvider</span>, useQuery, useMutation, useFunction } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import</span> { supatype } <span class="k">from</span> <span class="s">"./supatype"</span>
+
+<span class="k">function</span> <span class="t">Posts</span>() {
+  <span class="k">const</span> { data: posts, loading, error, refetch } = useQuery(<span class="s">"post"</span>, {
+    select: <span class="s">"id, title, slug"</span>,
+    order: { column: <span class="s">"title"</span> },
+    limit: 20,
+  })
+  <span class="k">const</span> { mutate: removePost } = useMutation(<span class="s">"post"</span>, <span class="s">"delete"</span>)
+  <span class="k">const</span> { invoke: greet, data: reply } = useFunction&lt;{ greeting: <span class="t">string</span> }&gt;(<span class="s">"greet"</span>)
+
+  <span class="k">if</span> (loading) <span class="k">return</span> &lt;p&gt;Loading&lt;/p&gt;
+  <span class="k">if</span> (error) <span class="k">return</span> &lt;p&gt;{error.message}&lt;/p&gt;
+  <span class="k">return</span> (
+    &lt;ul&gt;
+      {posts?.map((post) =&gt; (
+        &lt;li key={post.id}&gt;
+          {post.title}
+          &lt;button onClick={<span class="k">async</span> () =&gt; { <span class="k">await</span> removePost(<span class="k">undefined</span>, { filter: { id: post.id } }); refetch() }}&gt;Delete&lt;/button&gt;
+        &lt;/li&gt;
+      ))}
+      &lt;button onClick={() =&gt; greet({ name: <span class="s">"Alex"</span> })}&gt;{reply?.greeting ?? <span class="s">"Say hello"</span>}&lt;/button&gt;
+    &lt;/ul&gt;
+  )
+}
+
+<span class="k">export</span> <span class="k">function</span> <span class="t">App</span>() {
+  <span class="k">return</span> &lt;<span class="t">SupatypeProvider</span> client={supatype}&gt;&lt;<span class="t">Posts</span> /&gt;&lt;/<span class="t">SupatypeProvider</span>&gt;
+}</pre></div>
+
+<h3>useQuery</h3>
+<p><code>useQuery(table, options)</code> returns <code>data</code>, <code>error</code>, <code>count</code>, <code>loading</code> and <code>refetch</code>. It runs again when the options change, and when a different user signs in or out.</p>
+<div class="tbl"><table><thead><tr><th scope="col">Option</th><th scope="col">What it does</th></tr></thead>
+<tbody>
+<tr><td><code>select</code></td><td>The select expression. Default <code>*</code>.</td></tr>
+<tr><td><code>filter</code></td><td>Equality filters, one per column.</td></tr>
+<tr><td><code>order</code></td><td><code>{ column, ascending }</code>. Ascending by default.</td></tr>
+<tr><td><code>limit</code>, <code>offset</code></td><td>Paging. <code>offset</code> only applies when <code>limit</code> is set.</td></tr>
+<tr><td><code>enabled</code></td><td><code>false</code> skips the query.</td></tr>
+<tr><td><code>refetchInterval</code></td><td>Runs the query again every so many milliseconds.</td></tr>
+<tr><td><code>cache</code></td><td>The same cache options as the client's <code>.cache()</code>.</td></tr>
+<tr><td><code>draft</code></td><td>Reads saved drafts instead of published rows, on a model with drafts. See <a href="/docs/client.html#drafts">Drafts and publishing</a>.</td></tr>
+</tbody></table></div>
+<p>For anything <code>filter</code> cannot say, such as ranges or embeds with conditions, use the client directly through <code>useSupatype()</code>.</p>
+
+<h3>useMutation and useFunction</h3>
+<p><code>useMutation(table, operation)</code> takes <code>"insert"</code>, <code>"update"</code>, <code>"delete"</code> or <code>"upsert"</code> and returns <code>mutate</code>, <code>loading</code> and <code>error</code>. <code>mutate(data, { filter, publish })</code> takes the rows to write; <code>filter</code> picks the rows for an update or delete, and <code>publish: true</code> publishes the drafts an update saves. It does not ask for the written rows back, so call <code>refetch</code> on your query afterwards.</p>
+<p><code>useFunction(name)</code> returns <code>invoke</code>, <code>data</code>, <code>error</code> and <code>loading</code>. <code>invoke(body, { method, headers })</code> calls <code>supatype.functions.invoke</code>. See <a href="/docs/functions.html#call">Functions: Call a function</a>.</p>
+<p><code>useAuth()</code> returns the user, the session and the sign-in methods. See <a href="/docs/auth.html">Auth</a>.</p>
+
+<h3>Live preview</h3>
+<p>Studio can show your app in a pane beside the edit form and stream the unsaved values into it as the editor types. Tell Studio where a record's page lives in <code>supatype.config.ts</code>:</p>
+<div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export default</span> defineConfig({
+  <span class="c">// ...</span>
+  admin: { livePreview: { <span class="t">Post</span>: { urlPattern: <span class="s">"https://example.com/preview/{slug}"</span> } } },
+})</pre></div>
+<p>A path such as <code>"/preview/{slug}"</code> is enough when the same deployment serves your app (<code>app.mode</code> set to <code>static</code> or <code>proxy</code>). With <code>app.mode: "none"</code>, <code>supatype push</code> refuses a path and wants the full URL.</p>
+<p>On that page, <code>useLivePreview</code> returns the live values while Studio is sending them and your own data otherwise:</p>
+<div class="cb"><div class="cb-bar"><span>src/PostPreview.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { useLivePreview, <span class="t">RichText</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+
+<span class="k">export</span> <span class="k">function</span> <span class="t">PostPreview</span>({ post }: { post: <span class="t">Post</span> }) {
+  <span class="k">const</span> { data, isPreview } = useLivePreview({ initialData: post })
+  <span class="k">return</span> (
+    &lt;article&gt;
+      {isPreview &amp;&amp; &lt;p&gt;Preview&lt;/p&gt;}
+      &lt;h1&gt;{data.title}&lt;/h1&gt;
+      &lt;<span class="t">RichText</span> content={data.body} /&gt;
+    &lt;/article&gt;
+  )
+}</pre></div>
+<p>A message is applied only when it comes from the window framing the page, at a Studio origin. By default that is the origin of the provider's client URL, since Studio is served at <code>/studio/</code> on your API. If Studio is served somewhere else, or the page has no provider, pass <code>studioOrigin</code> with one URL or a list. Messages from any other origin are ignored with a console warning. <code>model</code> limits the hook to messages for one model.</p>
+<p>This is the unsaved form state. To show the last saved draft instead, use <code>useQuery</code> with <code>draft: true</code>.</p>
+
+<h3>RichText</h3>
+<p><code>RichText</code> renders a saved rich text field as React elements. Text is rendered as text, never as HTML, and links keep only a safe <code>href</code>. It works in Server Components and Client Components. Props are <code>content</code>, <code>className</code>, and <code>as</code> to choose the wrapper: <code>div</code> (the default), <code>article</code>, <code>section</code>, <code>aside</code> or <code>main</code>. A <code>null</code> content renders nothing.</p>
+
+<h2 id="vue">Vue</h2>
+<p>Install the plugin with your client. The composables must be called inside <code>setup</code>.</p>
+<div class="cb"><div class="cb-bar"><span>src/main.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { createApp } <span class="k">from</span> <span class="s">"vue"</span>
+<span class="k">import</span> { supatypePlugin } <span class="k">from</span> <span class="s">"@supatype/vue"</span>
+<span class="k">import</span> { supatype } <span class="k">from</span> <span class="s">"./supatype"</span>
+<span class="k">import</span> <span class="t">App</span> <span class="k">from</span> <span class="s">"./App.vue"</span>
+
+createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span class="s">"#app"</span>)</pre></div>
+<div class="cb"><div class="cb-bar"><span>src/Posts.vue</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>&lt;script setup lang=<span class="s">"ts"</span>&gt;
+<span class="k">import</span> { useQuery, useMutation } <span class="k">from</span> <span class="s">"@supatype/vue"</span>
+
+<span class="k">const</span> { data: posts, loading, refetch } = useQuery(<span class="s">"post"</span>, { columns: <span class="s">"id, title"</span>, limit: 20 })
+<span class="k">const</span> { mutate: removePost } = useMutation(<span class="s">"post"</span>, <span class="s">"delete"</span>)
+
+<span class="k">async</span> <span class="k">function</span> remove(id: <span class="t">string</span>) {
+  <span class="k">await</span> removePost(<span class="k">undefined</span>, { filter: { id } })
+  <span class="k">await</span> refetch()
+}
+&lt;/script&gt;
+
+&lt;template&gt;
+  &lt;p v-if=<span class="s">"loading"</span>&gt;Loading&lt;/p&gt;
+  &lt;ul v-else&gt;
+    &lt;li v-for=<span class="s">"post in posts"</span> :key=<span class="s">"post.id"</span>&gt;
+      {{ post.title }} &lt;button @click=<span class="s">"remove(post.id)"</span>&gt;Delete&lt;/button&gt;
+    &lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/template&gt;</pre></div>
+<p>Results are refs. The query runs when the component mounts. <code>enabled</code> may be a ref; the query runs again when it turns <code>true</code>. <code>useFunction(name)</code> returns <code>invoke(body)</code>, <code>data</code>, <code>error</code> and <code>loading</code>.</p>
+
+<h2 id="svelte">Svelte</h2>
+<p>Set the client once in a parent component. The <code>create*</code> functions read it from context, so call them during component setup, then read the stores with <code>$</code>.</p>
+<div class="cb"><div class="cb-bar"><span>src/App.svelte</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>&lt;script lang=<span class="s">"ts"</span>&gt;
+  <span class="k">import</span> { setSupatypeClient } <span class="k">from</span> <span class="s">"@supatype/svelte"</span>
+  <span class="k">import</span> { supatype } <span class="k">from</span> <span class="s">"./supatype"</span>
+  <span class="k">import</span> <span class="t">Posts</span> <span class="k">from</span> <span class="s">"./Posts.svelte"</span>
+
+  setSupatypeClient(supatype)
+&lt;/script&gt;
+
+&lt;<span class="t">Posts</span> /&gt;</pre></div>
+<div class="cb"><div class="cb-bar"><span>src/Posts.svelte</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>&lt;script lang=<span class="s">"ts"</span>&gt;
+  <span class="k">import</span> { createQuery } <span class="k">from</span> <span class="s">"@supatype/svelte"</span>
+
+  <span class="k">const</span> { data: posts, loading } = createQuery(<span class="s">"post"</span>, { columns: <span class="s">"id, title"</span>, limit: 20 })
+&lt;/script&gt;
+
+{#if $loading}
+  &lt;p&gt;Loading&lt;/p&gt;
+{:else}
+  &lt;ul&gt;{#each $posts ?? [] <span class="k">as</span> post (post.id)}&lt;li&gt;{post.title}&lt;/li&gt;{/each}&lt;/ul&gt;
+{/if}</pre></div>
+<p><code>createQuery</code> fetches as soon as it is created and returns readable stores plus <code>refetch</code>. <code>createMutation</code> and <code>createFunction</code> work like the Vue versions.</p>
+
+<h2 id="solid">Solid</h2>
+<p>Provide the client with <code>SupatypeContext.Provider</code>. Results are accessors, so call them to read.</p>
+<div class="cb"><div class="cb-bar"><span>src/App.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { <span class="t">For</span>, <span class="t">Show</span> } <span class="k">from</span> <span class="s">"solid-js"</span>
+<span class="k">import</span> { <span class="t">SupatypeContext</span>, createQuery } <span class="k">from</span> <span class="s">"@supatype/solid"</span>
+<span class="k">import</span> { supatype } <span class="k">from</span> <span class="s">"./supatype"</span>
+
+<span class="k">function</span> <span class="t">Posts</span>() {
+  <span class="k">const</span> { data: posts, loading } = createQuery(<span class="s">"post"</span>, { columns: <span class="s">"id, title"</span>, limit: 20 })
+  <span class="k">return</span> (
+    &lt;<span class="t">Show</span> when={!loading()} fallback={&lt;p&gt;Loading&lt;/p&gt;}&gt;
+      &lt;ul&gt;&lt;<span class="t">For</span> each={posts() ?? []}&gt;{(post) =&gt; &lt;li&gt;{post.title}&lt;/li&gt;}&lt;/<span class="t">For</span>&gt;&lt;/ul&gt;
+    &lt;/<span class="t">Show</span>&gt;
+  )
+}
+
+<span class="k">export</span> <span class="k">function</span> <span class="t">App</span>() {
+  <span class="k">return</span> &lt;<span class="t">SupatypeContext</span>.Provider value={supatype}&gt;&lt;<span class="t">Posts</span> /&gt;&lt;/<span class="t">SupatypeContext</span>.Provider&gt;
+}</pre></div>
+<p>The query runs on mount. <code>createMutation</code> and <code>createFunction</code> work like the Vue versions.</p>
+
+<h3>How Vue, Svelte and Solid differ from React</h3>
+<ul>
+<li>The query option is <code>columns</code>, not <code>select</code>. <code>refetchInterval</code>, <code>cache</code> and <code>draft</code> are React only.</li>
+<li><code>mutate</code> takes <code>filter</code> but not <code>publish</code>.</li>
+<li><code>invoke</code> takes a body only, so the call is always a <code>POST</code>.</li>
+<li><code>signIn</code> and <code>signUp</code> take <code>(email, password)</code> rather than an object, <code>signInWithOAuth(provider)</code> sends the browser to the provider, and there is a <code>resetPassword(email)</code>.</li>
+<li>There is no live preview hook or rich text component.</li>
+</ul>
+<p>All four bindings run the query again when a different user signs in or out.</p>
+
+<h2 id="react-native">React Native</h2>
+<p><code>createNativeClient</code> is <code>createClient</code> with session storage that survives app restarts. Pass <code>expo-secure-store</code> (recommended) or AsyncStorage; without either it throws. Use the <code>EXPO_PUBLIC_</code> values <code>supatype keys</code> writes.</p>
+<div class="cb"><div class="cb-bar"><span>src/supatype.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> * <span class="k">as</span> SecureStore <span class="k">from</span> <span class="s">"expo-secure-store"</span>
+<span class="k">import</span> * <span class="k">as</span> Linking <span class="k">from</span> <span class="s">"expo-linking"</span>
+<span class="k">import</span> { createNativeClient, createAuthUrlListener } <span class="k">from</span> <span class="s">"@supatype/react-native"</span>
+
+<span class="k">export</span> <span class="k">const</span> supatype = createNativeClient({
+  url: process.env.EXPO_PUBLIC_SUPATYPE_URL!,
+  anonKey: process.env.EXPO_PUBLIC_SUPATYPE_ANON_KEY!,
+  secureStore: SecureStore,
+})
+
+<span class="c">// Finish sign-ins that come back through a deep link, on cold and warm start.</span>
+<span class="k">export</span> <span class="k">const</span> stopAuthLinks = createAuthUrlListener(supatype, { linking: Linking, pathIncludes: <span class="s">"auth/callback"</span> })</pre></div>
+<p>Wrap the app in <code>SupatypeProvider</code> from <code>@supatype/react</code> and use the same hooks as on the web. The native client does not read sessions from a URL by itself, which is why the listener is there.</p>
+<p><code>openOAuth(client, { provider, redirectTo, webBrowser })</code> runs an OAuth sign-in in <code>expo-web-browser</code> with PKCE and returns the session, or <code>cancelled: true</code> when the user closes the browser. The ready-made native screens are on <a href="/docs/auth.html#ui">Auth: Pre-built UI</a>.</p>
+
+<h2 id="nextjs">Next.js server code</h2>
+<p>In the browser the client copies the session into a cookie named <code>st-auth-token</code> (path <code>/</code>, <code>SameSite=Lax</code>, <code>Secure</code> on HTTPS). <code>createServerClient</code> from <code>@supatype/ssr</code> reads that cookie on the server and builds a client signed in as the same user. Use it in Server Components, Route Handlers and middleware.</p>
+<div class="cb"><div class="cb-bar"><span>src/supatype-server.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { cookies } <span class="k">from</span> <span class="s">"next/headers"</span>
+<span class="k">import</span> { createServerClient } <span class="k">from</span> <span class="s">"@supatype/ssr"</span>
+
+<span class="k">export</span> <span class="k">async</span> <span class="k">function</span> serverClient() {
+  <span class="k">const</span> store = <span class="k">await</span> cookies()
+  <span class="k">return</span> createServerClient(process.env.PUBLIC_SUPATYPE_URL!, process.env.PUBLIC_SUPATYPE_ANON_KEY!, {
+    cookies: { getAll: () =&gt; store.getAll(), setAll: () =&gt; {} },
+  })
+}</pre></div>
+<div class="cb"><div class="cb-bar"><span>app/posts/page.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { <span class="t">RichText</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import</span> { serverClient } <span class="k">from</span> <span class="s">"@/supatype-server"</span>
+
+<span class="k">export</span> <span class="k">default</span> <span class="k">async</span> <span class="k">function</span> <span class="t">Page</span>() {
+  <span class="k">const</span> supatype = <span class="k">await</span> serverClient()
+  <span class="k">const</span> { data: posts } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id, title, body"</span>)
+  <span class="k">return</span> posts?.map((post) =&gt; &lt;<span class="t">RichText</span> key={post.id} content={post.body} as=<span class="s">"article"</span> /&gt;)
+}</pre></div>
+<p>A Route Handler uses <code>serverClient()</code> the same way. In middleware, read the cookies from the request and check the user with the auth server:</p>
+<div class="cb"><div class="cb-bar"><span>middleware.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { <span class="t">NextResponse</span>, <span class="k">type</span> <span class="t">NextRequest</span> } <span class="k">from</span> <span class="s">"next/server"</span>
+<span class="k">import</span> { createServerClient } <span class="k">from</span> <span class="s">"@supatype/ssr"</span>
+
+<span class="k">export</span> <span class="k">async</span> <span class="k">function</span> middleware(request: <span class="t">NextRequest</span>) {
+  <span class="k">const</span> supatype = createServerClient(process.env.PUBLIC_SUPATYPE_URL!, process.env.PUBLIC_SUPATYPE_ANON_KEY!, {
+    cookies: { getAll: () =&gt; request.cookies.getAll(), setAll: () =&gt; {} },
+  })
+  <span class="k">const</span> { data } = <span class="k">await</span> supatype.auth.getUser()
+  <span class="k">if</span> (!data.user) <span class="k">return</span> <span class="t">NextResponse</span>.redirect(<span class="k">new</span> <span class="t">URL</span>(<span class="s">"/sign-in"</span>, request.url))
+  <span class="k">return</span> <span class="t">NextResponse</span>.next()
+}
+
+<span class="k">export</span> <span class="k">const</span> config = { matcher: [<span class="s">"/account/:path*"</span>] }</pre></div>
+<p>What the cookie handling does and does not do:</p>
+<ul>
+<li>It only reads. The <code>cookies</code> option needs both <code>getAll</code> and <code>setAll</code>, but <code>createServerClient</code> never calls <code>setAll</code>, so a no-op is fine. The browser client keeps the cookie fresh.</li>
+<li>A cookie whose access token has expired is ignored, and the server client runs as an anonymous caller. A page rendered after a long idle shows the signed-out view until the browser refreshes the session.</li>
+<li>The cookie is decoded, not verified. Queries made with it are checked by the API, so access rules hold. But do not trust <code>auth.getSession()</code> on the server to decide who someone is: call <code>auth.getUser()</code>, which asks the auth server, as the middleware above does.</li>
+<li>Decoding the cookie uses Node's <code>Buffer</code>. Where <code>Buffer</code> is missing, every cookie reads as expired, so run middleware on the Node.js runtime.</li>
+<li>Set <code>cookiePrefix</code> on both sides if you change the client's <code>auth.cookiePrefix</code>. The default is <code>st</code>.</li>
+<li>The server client is built from <code>@supatype/client</code>, not your generated client file, so <code>update(..., { publish: true })</code> is not accepted on it.</li>
+</ul>
+<p>The browser half of a Next.js app needs the URL and anon key in <code>NEXT_PUBLIC_</code> variables. <code>supatype keys</code> does not write those names, so copy the values across. Server code can read <code>PUBLIC_SUPATYPE_URL</code> and <code>PUBLIC_SUPATYPE_ANON_KEY</code> directly.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/client.html"><small>PREVIOUS</small><span>Client</span></a>
+      <a href="/docs/auth.html" class="next"><small>NEXT</small><span>Auth</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#packages">Packages</a>
+    <a href="#react">React</a>
+    <a href="#vue">Vue</a>
+    <a href="#svelte">Svelte</a>
+    <a href="#solid">Solid</a>
+    <a href="#react-native">React Native</a>
+    <a href="#nextjs">Next.js server code</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>
