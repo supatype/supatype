@@ -80,7 +80,9 @@ client writes, with `path: "/"`, `sameSite: "lax"` and a `maxAge` that ends with
 a sign-out or a refused refresh sends an empty value with `maxAge: 0`. The value is not encoded:
 pass it to your framework's cookie setter, which encodes it as it does any cookie. Add `secure` or
 `httpOnly` in the adapter if you want them. Leave `setAll` out (or let it throw) where cookies are
-read-only; the refreshed session is still used for the rest of that request.
+read-only; the refreshed session is still used for the rest of that request. A refresh spends the
+refresh token the browser holds, so where `setAll` cannot write, refresh in middleware (which can)
+before the page renders.
 
 ### Cookie prefix
 
@@ -98,7 +100,7 @@ createServerClient(url, anonKey, {
 1. Reads all cookies via the adapter's `getAll()`
 2. Finds the auth token cookie `<prefix>-auth-token`, or one matching `<prefix>-*-auth-token`
 3. Parses the JSON session value and checks the JWT `exp` claim. A session whose access token has expired is kept only when it has a refresh token
-4. Passes the session as `initialSession` to `createClient`, so all subsequent requests carry the user's JWT automatically. An expired access token is refreshed before the first request
+4. Passes the session as `initialSession` to `createClient`, so all subsequent requests carry the user's JWT automatically. The client keeps no session of its own and runs no refresh timer: an expired access token is refreshed only when a request the client makes finds it expired. Parsing uses `atob` and `TextDecoder`, not Node's `Buffer`, so it works on edge runtimes
 5. Writes every change to the session (a refresh, a sign-in, a sign-out) back through the adapter's `setAll`, so the browser holds the new tokens
 6. Signature verification is handled server-side by the gateway when the token is forwarded
 

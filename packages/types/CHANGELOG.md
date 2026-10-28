@@ -8,6 +8,13 @@
   geography columns, and a bare `Geo` is `Geo<"point">`. It claimed point, polygon or linestring
   while every `Geo` field compiled to a point. `GeoShape` names the three.
 
+### Documentation
+
+* **hooks:** `ModelMeta.hooks` and `ModelHookOptions.function` name a directory under `hooks/`,
+  where the CLI and the functions worker look, not `functions/`. The hook docs no longer say the
+  `service_role` key bypasses a hook: the server runs hooks for every write through the API, that
+  key included.
+
 ## 0.7.0
 
 Highlights: identity and generated columns; `AutoIncrement` as an identity by default and a

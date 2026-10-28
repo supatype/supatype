@@ -39,14 +39,25 @@ function parseSessionValue(value: string): Session | null {
     return normalizeSession(JSON.parse(decodeURIComponent(value)))
   } catch { /* not JSON */ }
   try {
-    return normalizeSession(JSON.parse(Buffer.from(value, "base64").toString("utf-8")))
+    return normalizeSession(JSON.parse(decodeBase64(value)))
   } catch { /* not base64 JSON */ }
   return null
 }
 
 /**
+ * Base64 or base64url text decoded as UTF-8, with `atob` and `TextDecoder` rather than Node's
+ * `Buffer`: the server client also runs on edge runtimes, which have no `Buffer`. Throws on input
+ * that is not base64.
+ */
+function decodeBase64(text: string): string {
+  const standard = text.replace(/-/g, "+").replace(/_/g, "/")
+  const binary = atob(standard + "=".repeat((4 - (standard.length % 4)) % 4))
+  return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)))
+}
+
+/**
  * The session a cookie holds. One whose access token has expired is kept when it carries a refresh
- * token: the client refreshes it before its first request, and the server client writes the new
+ * token: the first request the client makes refreshes it, and the server client writes the new
  * tokens back through `setAll`.
  */
 function normalizeSession(r: unknown): Session | null {
@@ -68,7 +79,7 @@ function isJwtExpired(token: string): boolean {
   const parts = token.split(".")
   if (parts.length !== 3) return true
   try {
-    const payload = JSON.parse(Buffer.from(parts[1]!, "base64").toString("utf-8"))
+    const payload = JSON.parse(decodeBase64(parts[1]!))
     // A payload that is not an object reads as expired, as it did when reading it threw.
     if (!isJsonObject(payload)) return true
     const exp = typeof payload["exp"] === "number" ? payload["exp"] : null

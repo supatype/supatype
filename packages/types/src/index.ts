@@ -1175,15 +1175,17 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
    * }
    * ```
    *
-   * The value names a function directory under your project's `functions/`, and the name is
-   * checked when you push, a hook that silently never fires because of a typo is the failure
-   * this feature must not have. `supatype push` also generates a typed handler signature per
-   * hooked model, so `row` is the model's real column set rather than `unknown`.
+   * The value names a hook directory under your project's `hooks/` (create one with
+   * `supatype hooks new <name>`), and the name is checked when you push, a hook that silently
+   * never fires because of a typo is the failure this feature must not have. `supatype push`
+   * also generates a typed handler signature per hooked model, so `row` is the model's real
+   * column set rather than `unknown`.
    *
-   * **A hook is not a security boundary.** It fires for writes through the API; direct SQL,
-   * seeds, migrations and anything holding `service_role` bypass it. Invariants belong in
-   * {@link ModelMeta.access}, a `CHECK`, or a generated column, all of which apply to every
-   * writer. A hook is for the work that is genuinely application logic: enrichment,
+   * **A hook is not a security boundary.** It fires for every write through the API, including
+   * one made with the `service_role` key: that key changes what Postgres permits, not whether the
+   * hook runs. Direct SQL, seeds and migrations do not go through the API and bypass it.
+   * Invariants belong in {@link ModelMeta.access}, a `CHECK`, or a generated column, all of which
+   * apply to every writer. A hook is for the work that is genuinely application logic: enrichment,
    * notification, indexing, a validation the database cannot express.
    *
    * `beforeChange` and `beforeDelete` are called before the write reaches Postgres and can
@@ -1397,7 +1399,7 @@ export type Matches<TColumn extends string, TPattern extends string> = Access<"M
 export type ModelHook = string | ModelHookOptions
 
 export type ModelHookOptions = {
-  /** Function directory under the project's `functions/`. */
+  /** Hook directory under the project's `hooks/`. */
   readonly function: string
   /** Milliseconds before the hook is abandoned. Default 2000. */
   readonly timeout?: number

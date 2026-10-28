@@ -427,6 +427,12 @@ export interface SupatypeClientConfig {
   auth?: {
     /** Persist session across page reloads (browser only). Default: true */
     persistSession?: boolean | undefined
+    /**
+     * Refresh the access token on a timer shortly before it expires, and at once when the client
+     * starts with an expired one. Default: true. Off, a refresh happens only when a request finds
+     * the token expired: what a client built for one server request wants (`@supatype/ssr`).
+     */
+    autoRefreshToken?: boolean | undefined
     /** localStorage key to use for session storage. Default: "supatype.auth.session" */
     storageKey?: string | undefined
     /**

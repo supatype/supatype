@@ -113,8 +113,9 @@ export default hook(handler)
 //
 // Runs before the write reaches Postgres, so it can reject it or rewrite the body.
 //
-// Not a security boundary: hooks fire for writes through the API, and direct SQL, seeds and anything
-// holding the service role bypass them. Invariants belong in the model's access rules or a CHECK.
+// Not a security boundary: hooks fire for every write through the API, service-role key included,
+// but direct SQL, seeds and migrations bypass them. Invariants belong in the model's access rules
+// or a CHECK.
 
 import { hook, type BeforeChange } from "../_supatype/hooks.ts"
 
