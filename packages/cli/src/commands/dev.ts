@@ -812,7 +812,7 @@ async function pushNativeSchema(
   )
   const { devPushConsentingToDrift } = await import("../drift-consent.js")
   await ensureEngine()
-  const sources = writeSchemaSourcePushArtifacts(cwd)
+  const sources = writeSchemaSourcePushArtifacts(cwd, true)
   let ast = schema.ast
   let stale = false
   const request = async () => {
