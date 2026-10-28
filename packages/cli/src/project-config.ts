@@ -972,6 +972,17 @@ export function nativeRealtimePort(cfg: SupatypeProjectConfig, cwd: string = pro
   return readComposeEnvInt(cwd, REALTIME_PORT_ENV) ?? cfg.server?.realtimePort ?? NATIVE_REALTIME_PORT
 }
 
+/** Where the native server starts Deno for functions when nothing moves it: the server's default. */
+export const NATIVE_DENO_PORT = 8001
+
+/** The environment key the server reads the Deno port from. */
+export const DENO_PORT_ENV = "SUPATYPE_DENO_PORT"
+
+/** The port native dev's Deno listens on: `SUPATYPE_DENO_PORT` (exported, then `.env`), then 8001. */
+export function nativeDenoPort(cwd: string = process.cwd()): number {
+  return readComposeEnvInt(cwd, DENO_PORT_ENV) ?? NATIVE_DENO_PORT
+}
+
 /**
  * Resolve the database connection string.
  * Prefers optional `connection` in config, then `DATABASE_URL` env, then a local default DSN with
