@@ -20,7 +20,7 @@ import {
 } from "../project-config.js"
 import { isProjectDatabase, projectStackUrl, studioUrlAt } from "../local-stack.js"
 import { byoPreflight } from "../byo-preflight.js"
-import { devApiKeys } from "../dev-api-keys.js"
+import { devApiKeys, shellServiceRoleKey } from "../dev-api-keys.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { assertEngineSupportsSchema } from "../engine-floor.js"
 import {
@@ -535,13 +535,13 @@ async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig
 }
 
 /**
- * The service-role key for the project's own stack: an explicit one, else the key that stack was
- * configured with. Docker and native dev both run with the project's own `JWT_SECRET` from `.env`,
- * so the key comes from there for either; signing one with the published dev secret was refused by
- * every stack with a secret of its own.
+ * The service-role key for the project's own stack: one the shell exported, as that stack accepts
+ * it, else the key that stack was configured with. Docker and native dev both run with the
+ * project's own `JWT_SECRET` from `.env`, so the key comes from there for either. Signing one with
+ * the published dev secret was refused by every stack with a secret of its own.
  */
 export function localServiceRoleKey(config: SupatypeProjectConfig): string | undefined {
-  const explicit = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? process.env["SERVICE_ROLE_KEY"]
+  const explicit = shellServiceRoleKey(process.cwd())
   if (explicit) return explicit
   if (config.server.mode !== "dev") return undefined
   return devApiKeys(process.cwd()).serviceRoleKey

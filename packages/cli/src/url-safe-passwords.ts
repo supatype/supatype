@@ -11,6 +11,7 @@ import { readEnvFile } from "./env-file.js"
 import { usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
 import { SQL_EDITOR_PASSWORD_ENV } from "./local-secrets.js"
 import { fatalError } from "./ui/fatal.js"
+import { warn } from "./ui/messages.js"
 
 /**
  * What may appear unencoded in a URL's userinfo: RFC 3986's unreserved and sub-delims. Anything
@@ -41,12 +42,32 @@ export function composePasswordProblems(env: Record<string, string>, external: b
   })
 }
 
+/** What is wrong with `cwd`'s compose passwords, as one sentence, or undefined when nothing is. */
+function composePasswordProblem(cwd: string, config: SupatypeProjectConfig): string | undefined {
+  const problems = composePasswordProblems(readEnvFile(cwd), usesExternalDatabase(config))
+  if (problems.length === 0) return undefined
+  return `${problems.join("; ")}, which breaks the database URL the compose file builds from it.`
+}
+
+const URL_SAFE_PASSWORD_REMEDY = [
+  "Use only letters, digits and - . _ ~ in these passwords. To generate one: openssl rand -hex 24",
+  "If the database already exists, also set the role's new password in it (ALTER ROLE ... PASSWORD).",
+]
+
 /** Stop before compose runs when a password in `.env` would break the URLs it is used in. */
 export function requireUrlSafeComposePasswords(cwd: string, config: SupatypeProjectConfig): void {
-  const problems = composePasswordProblems(readEnvFile(cwd), usesExternalDatabase(config))
-  if (problems.length === 0) return
-  fatalError(`${problems.join("; ")}, which breaks the database URL the compose file builds from it.`, [
-    "Use only letters, digits and - . _ ~ in these passwords. To generate one: openssl rand -hex 24",
-    "If the database already exists, also set the role's new password in it (ALTER ROLE ... PASSWORD).",
-  ])
+  const problem = composePasswordProblem(cwd, config)
+  if (problem !== undefined) fatalError(problem, URL_SAFE_PASSWORD_REMEDY)
+}
+
+/**
+ * Say so, without stopping, when a password in `.env` would break the URLs it is used in. For the
+ * commands that start only the database on the way to something else (push, diff, dev's recovery),
+ * which are not stopped over a database that starts either way.
+ */
+export function warnUrlUnsafeComposePasswords(cwd: string, config: SupatypeProjectConfig): void {
+  const problem = composePasswordProblem(cwd, config)
+  if (problem === undefined) return
+  warn(problem)
+  for (const hint of URL_SAFE_PASSWORD_REMEDY) warn(hint)
 }
