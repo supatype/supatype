@@ -20,6 +20,7 @@
  * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it.
  */
 import { readEnvFile, upsertEnvFile } from "./env-file.js"
+import { setInShell } from "./shell-ports.js"
 
 /** The `.env` key that moves the published Postgres port for a self-host stack. */
 export const DB_PORT_ENV = "SUPATYPE_DB_PORT"
@@ -87,8 +88,8 @@ export function composeDbPublish(devLocal: boolean): ComposeDbPublish {
 /** Hosts whose port is ours to correct. Anything else is somebody else's database. */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
 
-/** The port Postgres is published on for this project in one layout, from `.env`. */
-export function publishedDbPort(env: Record<string, string>, devLocal: boolean): number {
+/** The port Postgres is published on for this project in one layout, from `.env` or the shell. */
+export function publishedDbPort(env: Readonly<Record<string, string | undefined>>, devLocal: boolean): number {
   const { envKey, defaultPort } = composeDbPublish(devLocal)
   const raw = (env[envKey] ?? "").trim()
   const port = Number(raw)
@@ -103,11 +104,15 @@ export interface DbPortSync {
   to: string
   /** The variable the new port was read from, which is what the report must name. */
   envKey: ComposeDbPublish["envKey"]
+  /** The port came from the shell, so the URL changed for this run only and `.env` did not. */
+  runOnly?: true
 }
 
 /** The line every caller prints for a {@link DbPortSync}, naming the variable it read. */
 export function databaseUrlSyncMessage(sync: DbPortSync): string {
-  return `DATABASE_URL port ${sync.from} -> ${sync.to} in .env, to match ${sync.envKey}.`
+  return sync.runOnly === true
+    ? `DATABASE_URL port ${sync.from} -> ${sync.to} for this run, to match ${sync.envKey} in your shell. .env is unchanged.`
+    : `DATABASE_URL port ${sync.from} -> ${sync.to} in .env, to match ${sync.envKey}.`
 }
 
 /**
@@ -125,18 +130,44 @@ export function databaseUrlSyncMessage(sync: DbPortSync): string {
  * Postgres elsewhere has a port that is nothing to do with our compose mapping, and rewriting it
  * would repoint the whole project at a database that does not exist.
  */
-export function syncDatabaseUrlPort(cwd: string, devLocal: boolean): DbPortSync | null {
+export function syncDatabaseUrlPort(
+  cwd: string,
+  devLocal: boolean,
+  shell: NodeJS.ProcessEnv = process.env,
+): DbPortSync | null {
+  const { envKey } = composeDbPublish(devLocal)
+  if (setInShell(shell, envKey)) return syncRunDatabaseUrl(cwd, devLocal, shell)
   const env = readEnvFile(cwd)
-  const url = localDatabaseUrl(env["DATABASE_URL"])
-  if (url === null) return null
+  const moved = movedDatabaseUrl(env["DATABASE_URL"], publishedDbPort(env, devLocal))
+  if (moved === null) return null
+  upsertEnvFile(cwd, { DATABASE_URL: moved.url })
+  return { from: moved.from, to: moved.to, envKey }
+}
 
-  const wanted = String(publishedDbPort(env, devLocal))
+/**
+ * The same correction for a port the shell gave. Compose binds the shell's port ahead of `.env`,
+ * and reading `.env` alone left the URL on a port nothing listened on. The port is the run's, not
+ * the project's (DR9), so the URL goes into this process's environment, which compose, seeds and
+ * the CLI's own connections read ahead of `.env`, and `.env` keeps its own. A `DATABASE_URL` the
+ * shell sets, or this run already set from the same port, is left as it is.
+ */
+function syncRunDatabaseUrl(cwd: string, devLocal: boolean, shell: NodeJS.ProcessEnv): DbPortSync | null {
+  if (setInShell(shell, "DATABASE_URL")) return null
+  const moved = movedDatabaseUrl(readEnvFile(cwd)["DATABASE_URL"], publishedDbPort(shell, devLocal))
+  if (moved === null) return null
+  shell["DATABASE_URL"] = moved.url
+  return { from: moved.from, to: moved.to, envKey: composeDbPublish(devLocal).envKey, runOnly: true }
+}
+
+/** `value` with its port set to `port`, when it names this machine on a different port. */
+function movedDatabaseUrl(value: string | undefined, port: number): { url: string; from: string; to: string } | null {
+  const url = localDatabaseUrl(value)
+  if (url === null) return null
+  const wanted = String(port)
   const current = url.port === "" ? String(DEFAULT_DB_PORT) : url.port
   if (current === wanted) return null
-
   url.port = wanted
-  upsertEnvFile(cwd, { DATABASE_URL: url.toString() })
-  return { from: current, to: wanted, envKey: composeDbPublish(devLocal).envKey }
+  return { url: url.toString(), from: current, to: wanted }
 }
 
 /** True when `url` is a connection string to a database on this machine. */

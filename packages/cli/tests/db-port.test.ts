@@ -10,7 +10,7 @@
  * ours to repoint, and a malformed URL is not ours to half-fix.
  */
 
-import { describe, expect, it, beforeEach, afterEach } from "vitest"
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -20,9 +20,12 @@ let dir: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "supatype-dbport-"))
+  // A port exported in the shell running the suite would otherwise decide every case below.
+  for (const key of ["SUPATYPE_DB_PORT", "SUPATYPE_DEV_DB_PORT", "DATABASE_URL"]) vi.stubEnv(key, undefined)
 })
 
 afterEach(() => {
+  vi.unstubAllEnvs()
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -150,5 +153,40 @@ describe("syncDatabaseUrlPort follows the stack's own layout", () => {
   it("uses the dev default port in dev when the variable is unset", () => {
     writeEnv("DATABASE_URL=postgresql://u:p@127.0.0.1:5432/acme\n")
     expect(syncDatabaseUrlPort(dir, true)).toEqual({ from: "5432", to: "54329", envKey: "SUPATYPE_DEV_DB_PORT" })
+  })
+})
+
+describe("syncDatabaseUrlPort with a port given in the shell", () => {
+  // Local test C: `SUPATYPE_DEV_DB_PORT=54339` exported, `.env` without it. Compose binds the
+  // shell's port, and this read `.env` alone, so it kept DATABASE_URL on 54329, where nothing
+  // listened. The shell's port is the run's (DR9): the URL follows it for this run, `.env` keeps
+  // its own.
+  it("points this run's DATABASE_URL at the shell's port and leaves .env alone", () => {
+    vi.stubEnv("SUPATYPE_DEV_DB_PORT", "54339")
+    writeEnv("DATABASE_URL=postgresql://u:p@127.0.0.1:54329/acme\n")
+    expect(syncDatabaseUrlPort(dir, true)).toEqual({
+      from: "54329",
+      to: "54339",
+      envKey: "SUPATYPE_DEV_DB_PORT",
+      runOnly: true,
+    })
+    expect(process.env["DATABASE_URL"]).toBe("postgresql://u:p@127.0.0.1:54339/acme")
+    expect(envText()).toContain("127.0.0.1:54329/acme")
+  })
+
+  it("leaves a DATABASE_URL the shell sets to the shell", () => {
+    vi.stubEnv("SUPATYPE_DEV_DB_PORT", "54339")
+    vi.stubEnv("DATABASE_URL", "postgresql://u:p@127.0.0.1:6000/acme")
+    writeEnv("DATABASE_URL=postgresql://u:p@127.0.0.1:54329/acme\n")
+    expect(syncDatabaseUrlPort(dir, true)).toBeNull()
+    expect(process.env["DATABASE_URL"]).toBe("postgresql://u:p@127.0.0.1:6000/acme")
+    expect(envText()).toContain("127.0.0.1:54329/acme")
+  })
+
+  it("reads the shell's port for the stack's own layout only", () => {
+    vi.stubEnv("SUPATYPE_DEV_DB_PORT", "54339")
+    writeEnv("DATABASE_URL=postgresql://u:p@127.0.0.1:5432/acme\n")
+    expect(syncDatabaseUrlPort(dir, false)).toBeNull()
+    expect(process.env["DATABASE_URL"]).toBeUndefined()
   })
 })

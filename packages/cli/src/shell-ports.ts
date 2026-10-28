@@ -32,7 +32,7 @@ export interface ShellPortUpdates {
 }
 
 /** True when the shell sets `key` to something. */
-function setInShell(env: NodeJS.ProcessEnv, key: string): boolean {
+export function setInShell(env: NodeJS.ProcessEnv, key: string): boolean {
   return (env[key]?.trim() ?? "") !== ""
 }
 
