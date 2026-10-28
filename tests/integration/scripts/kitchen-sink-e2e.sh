@@ -134,12 +134,15 @@ echo "==> Bringing the stack up (static mode: the SPA is what / serves)"
 # The owner DSN is deliberate here and only here. This is a disposable CI stack asserting the wiring
 # works; a real project should point this at a role it restricted, since a function holding this
 # bypasses access rules, field masking and model hooks.
-export SUPATYPE_FUNCTIONS_DB_URL="postgresql://supatype_admin:$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_PASSWORD)@db:5432/kitchen-sink"
+# Read on their own lines: inside `export` or a command's env prefix a failed read is not caught by set -e.
+PG_PASSWORD="$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_PASSWORD)"
+PG_DB="$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_DB)"
+export SUPATYPE_FUNCTIONS_DB_URL="postgresql://supatype_admin:${PG_PASSWORD}@db:5432/kitchen-sink"
 start_stack
 
 echo ""
 echo "==> Seeding"
-(cd "$EXAMPLE_DIR" && DATABASE_URL="postgresql://supatype_admin:$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_PASSWORD)@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_DB)?sslmode=disable" npx tsx seed.ts)
+(cd "$EXAMPLE_DIR" && DATABASE_URL="postgresql://supatype_admin:${PG_PASSWORD}@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/${PG_DB}?sslmode=disable" npx tsx seed.ts)
 
 echo ""
 echo "==> What a browser cannot assert"

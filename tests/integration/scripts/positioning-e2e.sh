@@ -72,8 +72,7 @@ export type Member = Model<{
 /** Keeps the Optional import used before the checks add a field with it. */
 export type MaybeText = Optional<string>
 TS
-sed -i "s/^SUPATYPE_KONG_PORT=.*/SUPATYPE_KONG_PORT=${SUPATYPE_KONG_PORT}/" "$PROJECT_DIR/.env"
-grep -q '^SUPATYPE_KONG_PORT=' "$PROJECT_DIR/.env" || env_file_set "$PROJECT_DIR/.env" SUPATYPE_KONG_PORT "${SUPATYPE_KONG_PORT}"
+env_file_set "$PROJECT_DIR/.env" SUPATYPE_KONG_PORT "${SUPATYPE_KONG_PORT}"
 grep -q '^SUPATYPE_DEV_DB_PORT=' "$PROJECT_DIR/.env" || env_file_set "$PROJECT_DIR/.env" SUPATYPE_DEV_DB_PORT "${DB_PORT}"
 if [[ -n "${MASKING_ENGINE_BIN:-}" ]]; then
   MASKING_ENGINE_BIN="$MASKING_ENGINE_BIN" node -e '
