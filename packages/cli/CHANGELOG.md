@@ -58,6 +58,10 @@
 
 ### Bug Fixes
 
+* **functions serve:** a project with `functions/.env.local` serves again. The file was handed to
+  Deno as `--env-file <path>`, two arguments, and Deno takes the value only after `=`, so it ran
+  `.env.local` as the script and served nothing. `functions new` creates that file, so every project
+  that had made a function with it was affected.
 * **dev:** native dev writes a bucket declared `custom` as not public in the object store's
   `buckets.json`. It copied `public: true` from the declaration, so the store listed a custom
   bucket as public, which the store and the storage service never do.
