@@ -36,7 +36,7 @@ describe("a subscribe filter", () => {
     peer.send({ type: "subscribe", channel: "orders", table: "orders", filter: { id: "eq.1", status: "like.open" } })
 
     const refusal = await peer.next(isSystem("error"))
-    expect(refusal).toMatchObject({ type: "system", status: "error" })
+    expect(refusal).toMatchObject({ type: "system", status: "error", channel: "orders" })
     expect(refusal.type === "system" && refusal.message).toContain("status=like.open")
     await settle(peer)
     expect(peer.frames.some(isSystem("ok", "subscribed to orders"))).toBe(false)

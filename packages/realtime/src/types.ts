@@ -130,6 +130,11 @@ export interface SystemMessage {
   status: "ok" | "error"
   message: string
   ref?: string | undefined
+  /**
+   * The channel a refusal is about. The client fails only that channel; an error without one is
+   * about the socket, and fails every channel on it.
+   */
+  channel?: string | undefined
 }
 
 export type ServerMessage =
