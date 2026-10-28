@@ -9,9 +9,9 @@ import {
   writeFileSync,
 } from "node:fs"
 import { resolve, join, relative, isAbsolute } from "node:path"
-import { spawn, execSync } from "node:child_process"
+import { execSync } from "node:child_process"
 import { localPublicApiUrl } from "../local-gateway.js"
-import { uniqueFileToken } from "../unique-file-token.js"
+import { runUntilStopped } from "../run-until-stopped.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
@@ -19,12 +19,15 @@ import {
   functionsPathCandidatesFromProject,
   preferredFunctionsPathFromProject,
   serviceRoleRoutes,
+  type SupatypeProjectConfig,
 } from "../project-config.js"
 import {
   discoverFunctionsOrExit,
   functionNameProblem,
+  functionsServeFiles,
   generateFunctionsRouterSource,
   removeOnExit,
+  sweepStaleServeFiles,
   writeServiceRoleKeyFileUntilExit,
   type DiscoveredFunctionRoute,
 } from "../functions-router-gen.js"
@@ -244,39 +247,11 @@ function discoverFunctions(cwd: string): DiscoveredFunctionRoute[] {
 async function serve(cwd: string, opts: { port: string; envFile: string }): Promise<void> {
   const config = loadConfig(cwd)
   const functionsDir = resolveFunctionsDir(cwd, "read")
-  const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
-  const routes = discoverFunctionsOrExit(functionsDir)
-  if (routes.length === 0) {
-    error(`No functions found in ${functionsDirLabel}/`)
-    error("Create one with: npx supatype functions new <name>")
-    process.exit(1)
-  }
-
-  plain(`Discovered ${routes.length} function(s):`)
-  for (const fn of routes) {
-    plain(`  /${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
-  }
-  plain()
-
-  // Generate a Deno entry script that routes requests to the correct function. Each serve has its
-  // own router and key file, since each removes both when it stops while another may still be
-  // serving the same project.
-  const token = uniqueFileToken()
-  const routerPath = resolve(functionsDir, `.serve-router-${token}.ts`)
-  // The router reads the key from this file, as it still can after a --watch reload, and grants it
-  // only to the routes SUPATYPE_SERVICE_ROLE_ROUTES names, as the deployed worker does.
-  const serviceRoleKey = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? ""
-  const serviceRoleKeyPath = serviceRoleKey !== "" ? resolve(cwd, ".supatype", `functions-serve-key-${token}`) : undefined
-  if (serviceRoleKeyPath !== undefined) writeServiceRoleKeyFileUntilExit(serviceRoleKeyPath, serviceRoleKey)
-  const routerScript = generateFunctionsRouterSource(routerPath, routes, serviceRoleKeyPath)
-  writeFileSync(routerPath, routerScript, "utf8")
-  removeOnExit(routerPath)
+  const routes = discoverServeRoutes(cwd, functionsDir)
+  const routerPath = writeServeFiles(cwd, functionsDir, routes)
 
   const envFilePath = resolveEnvFilePath(cwd, functionsDir, opts.envFile)
-  const envArgs: string[] = []
-  if (existsSync(envFilePath)) {
-    envArgs.push("--env-file", envFilePath)
-  }
+  const envArgs = existsSync(envFilePath) ? ["--env-file", envFilePath] : []
 
   info(`Serving functions at http://localhost:${opts.port}/functions/v1/`)
   info("Watching for changes...")
@@ -290,26 +265,18 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
     process.exit(1)
   }
 
+  await runDenoServe(
+    denoBin,
+    ["run", "--allow-net", "--allow-env", "--allow-read", "--watch", ...envArgs, routerPath],
+    { cwd, env: denoServeEnv(cwd, functionsDir, opts.port, config) },
+  )
+}
+
+/** Runs the serve's Deno until it stops, ending the command with an error when it failed. */
+async function runDenoServe(denoBin: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): Promise<void> {
   let status: number
   try {
-    status = await runUntilStopped(
-      denoBin,
-      ["run", "--allow-net", "--allow-env", "--allow-read", "--watch", ...envArgs, routerPath],
-      {
-        cwd,
-        env: {
-          ...process.env,
-          PORT: opts.port,
-          SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
-          SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
-          SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localPublicApiUrl(cwd),
-          SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
-          SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
-          // The router grants the key only to these routes, as the deployed worker does.
-          SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
-        },
-      },
-    )
+    status = await runUntilStopped(denoBin, args, opts)
   } catch (err) {
     error(`Could not start Deno: ${errorMessage(err)}`)
     process.exit(1)
@@ -320,34 +287,56 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   }
 }
 
-/**
- * Runs `command` with this terminal until it exits, passing on Ctrl+C or a stop request rather than
- * dying first. The router and key files are removed on `exit`, which Node never emits when a
- * signal it has no listener for kills it, so a serve stopped with Ctrl+C used to leave both behind.
- * Resolves to the exit code, 0 once the serve was asked to stop, and rejects when it cannot start.
- */
-async function runUntilStopped(
-  command: string,
-  args: string[],
-  opts: { cwd: string; env: NodeJS.ProcessEnv },
-): Promise<number> {
-  const child = spawn(command, args, { ...opts, stdio: "inherit" })
-  let stopping = false
-  const stop = (): void => {
-    stopping = true
-    child.kill()
+/** The functions under `functionsDir`, listed for the terminal, ending the command when there are none. */
+function discoverServeRoutes(cwd: string, functionsDir: string): DiscoveredFunctionRoute[] {
+  const routes = discoverFunctionsOrExit(functionsDir)
+  if (routes.length === 0) {
+    error(`No functions found in ${relativeFunctionsDir(cwd, functionsDir)}/`)
+    error("Create one with: npx supatype functions new <name>")
+    process.exit(1)
   }
-  // Ctrl+Break on Windows, as dev-shutdown.ts listens for too.
-  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP", ...(process.platform === "win32" ? ["SIGBREAK" as const] : [])]
-  for (const signal of signals) process.on(signal, stop)
-  try {
-    const code = await new Promise<number | null>((resolveExit, rejectExit) => {
-      child.once("error", rejectExit)
-      child.once("exit", (exitCode) => resolveExit(exitCode))
-    })
-    return stopping ? 0 : (code ?? 1)
-  } finally {
-    for (const signal of signals) process.off(signal, stop)
+  plain(`Discovered ${routes.length} function(s):`)
+  for (const fn of routes) {
+    plain(`  /${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
+  }
+  plain()
+  return routes
+}
+
+/**
+ * Writes this serve's Deno router and, when the shell gave a key, its key file, both removed when
+ * the serve stops. The router reads the key from that file, as it still can after a --watch
+ * reload, and grants it only to the routes SUPATYPE_SERVICE_ROLE_ROUTES names, as the deployed
+ * worker does. Files of serves killed outright are swept first. Returns the router's path.
+ */
+function writeServeFiles(cwd: string, functionsDir: string, routes: DiscoveredFunctionRoute[]): string {
+  sweepStaleServeFiles(cwd, functionsDir)
+  const { routerPath, keyPath } = functionsServeFiles(cwd, functionsDir)
+  const serviceRoleKey = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? ""
+  const serviceRoleKeyPath = serviceRoleKey !== "" ? keyPath : undefined
+  if (serviceRoleKeyPath !== undefined) writeServiceRoleKeyFileUntilExit(serviceRoleKeyPath, serviceRoleKey)
+  writeFileSync(routerPath, generateFunctionsRouterSource(routerPath, routes, serviceRoleKeyPath), "utf8")
+  removeOnExit(routerPath)
+  return routerPath
+}
+
+/** The environment the serve's Deno runs with: this shell's, plus where it serves from. */
+function denoServeEnv(
+  cwd: string,
+  functionsDir: string,
+  port: string,
+  config: SupatypeProjectConfig,
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PORT: port,
+    SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
+    SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
+    SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localPublicApiUrl(cwd),
+    SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
+    SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
+    // The router grants the key only to these routes, as the deployed worker does.
+    SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
   }
 }
 

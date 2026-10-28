@@ -12,6 +12,7 @@ import {
 import { chmodSync, existsSync, readdirSync, rmSync, statSync, mkdirSync, writeFileSync } from "node:fs"
 import { FUNCTION_NAME_RULE, isFunctionName } from "@supatype/shared"
 import { fatalError } from "./ui/fatal.js"
+import { uniqueFileToken } from "./unique-file-token.js"
 
 export interface DiscoveredFunctionRoute {
   name: string
@@ -378,9 +379,68 @@ export function writeServiceRoleKeyFile(keyPath: string, serviceRoleKey: string)
   chmodSync(keyPath, 0o600)
 }
 
-/** Removes `path` when this process exits. A process killed outright leaves it behind. */
+/**
+ * Removes `path` when this process exits. A process killed outright leaves it behind, which
+ * {@link sweepStaleServeFiles} clears for `functions serve`. A file that cannot go (held open on
+ * Windows) stays rather than throwing past the exit listeners after this one.
+ */
 export function removeOnExit(path: string): void {
-  process.once("exit", () => rmSync(path, { force: true }))
+  process.once("exit", () => {
+    try {
+      rmSync(path, { force: true })
+    } catch {
+      // Nothing is left to report to: the process is exiting.
+    }
+  })
+}
+
+/** The router and key file one `functions serve` writes. */
+export interface FunctionsServeFiles {
+  routerPath: string
+  keyPath: string
+}
+
+/**
+ * Where one `functions serve` keeps its router and key: files of its own, since each removes them
+ * when it stops while another may still be serving the same project. `token` carries the pid
+ * {@link sweepStaleServeFiles} reads back.
+ */
+export function functionsServeFiles(
+  cwd: string,
+  functionsDir: string,
+  token: string = uniqueFileToken(),
+): FunctionsServeFiles {
+  return {
+    routerPath: join(functionsDir, `.serve-router-${token}.ts`),
+    keyPath: join(pathResolve(cwd, ".supatype"), `functions-serve-key-${token}`),
+  }
+}
+
+/** A serve file's name, capturing the pid inside its uniqueFileToken: `<time>-<pid>-<uuid>`. */
+const SERVE_FILE_NAME = /^(?:\.serve-router-|functions-serve-key-)\d+-(\d+)-[0-9a-f-]+(?:\.ts)?$/
+
+/**
+ * Removes the router and key files of serves whose process is gone. One killed outright runs no
+ * exit listener, and no later serve shares its file names, so its key would stay on disk for good.
+ */
+export function sweepStaleServeFiles(cwd: string, functionsDir: string): void {
+  for (const dir of [functionsDir, pathResolve(cwd, ".supatype")]) {
+    const names = existsSync(dir) ? readdirSync(dir) : []
+    for (const name of names) {
+      const pid = SERVE_FILE_NAME.exec(name)?.[1]
+      if (pid !== undefined && !processRunning(Number(pid))) rmSync(join(dir, name), { force: true })
+    }
+  }
+}
+
+/** Signal 0 checks a process exists without touching it. EPERM means it exists as someone else's. */
+function processRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err: unknown) {
+    return err instanceof Error && "code" in err && err.code === "EPERM"
+  }
 }
 
 /**
