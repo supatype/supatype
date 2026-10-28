@@ -306,6 +306,7 @@ export class RealtimeClient {
       state.subscribed = false
       state.joinSent = false
       state.joined = undefined
+      state.joining = undefined
       this.forgetMembers(state)
     }
   }
@@ -381,8 +382,9 @@ export class RealtimeClient {
       unsubscribe: () => {
         // Only the last handle on the name leaves the channel. A handle unsubscribing twice, or
         // after `removeChannel` already removed its channel, has nothing left to leave.
-        if (!state.handles.delete(handle) || state.handles.size > 0) return
-        if (this.channels.get(name) === state) this.removeChannel(name)
+        if (!state.handles.delete(handle)) return
+        if (state.handles.size > 0) this.rejoinIfUnheard(state)
+        else if (this.channels.get(name) === state) this.removeChannel(name)
       },
 
       broadcast: (event, payload) => {
@@ -452,6 +454,7 @@ export class RealtimeClient {
         subscribed: false,
         joinSent: false,
         joined: undefined,
+        joining: undefined,
         members: [],
       }
       this.channels.set(name, state)
@@ -591,6 +594,8 @@ export class RealtimeClient {
       const state = this.channels.get(channel)
       if (state) {
         state.subscribed = true
+        if (state.joining !== undefined) state.joined = state.joining
+        state.joining = undefined
         notifyHandles(state, "SUBSCRIBED")
       }
     }
@@ -626,12 +631,10 @@ export class RealtimeClient {
     // table's and goes only to listeners for it. Schema and table come from there, not from
     // splitting the channel name: a channel named for its purpose told a `chat_message` listener
     // its rows came from a table called `lobby-chat`. A listener for a different table on the same
-    // channel is never served by it, rather than handed these rows under its own table's name. A
-    // join sent before any row listener named no table, and then the first listener stands in.
-    const listeners = pgListenersOf(state)
-    const subscribed = state.joined ?? listeners[0]
+    // channel is never served by it, rather than handed these rows under its own table's name.
+    const subscribed = state.joined
     if (!subscribed) return
-    for (const listener of listeners) {
+    for (const listener of pgListenersOf(state)) {
       if (listener.schema !== subscribed.schema || listener.table !== subscribed.table) continue
       if (listener.event !== "*" && listener.event !== msg.event) continue
       listener.callback({
@@ -673,13 +676,15 @@ export class RealtimeClient {
     if (state.joinSent) return
     state.joinSent = true
 
-    // Build filter from the first pg listener (if any)
-    const firstListener = pgListenersOf(state)[0]
-    state.joined = firstListener && { schema: firstListener.schema, table: firstListener.table }
+    const target = joinTargetOf(state)
+    state.joining = target
+    // A first join's rows are its own from the start. A join sent again on this socket replaces one
+    // the server delivers for until it acknowledges this one, so the old target stays until then.
+    state.joined ??= target
     const filter: Record<string, string> = {}
-    if (firstListener?.filter) {
+    if (target.filter) {
       // Parse PostgREST filter format "column=eq.value" into { column: "eq.value" }
-      for (const part of firstListener.filter.split(",")) {
+      for (const part of target.filter.split(",")) {
         const eqIdx = part.indexOf("=")
         if (eqIdx > 0) {
           filter[part.slice(0, eqIdx)] = part.slice(eqIdx + 1)
@@ -699,11 +704,32 @@ export class RealtimeClient {
     this.sendMessage({
       type: "subscribe",
       channel: state.name,
-      event: firstListener?.event ?? "*",
-      ...(firstListener?.table !== undefined && { table: firstListener.table }),
-      ...(firstListener?.schema !== undefined && { schema: firstListener.schema }),
+      event: target.event,
+      table: target.table,
+      schema: target.schema,
       filter: Object.keys(filter).length > 0 ? filter : undefined,
     })
+  }
+
+  /**
+   * Join `state` again when no listener left on it is for the join it holds.
+   *
+   * Handles share one join, made for the oldest row listener. When that listener's handle left, the
+   * join stayed registered for its table, and every other handle reported SUBSCRIBED and was sent
+   * nothing. Joined again in place, without leaving first: the server replaces a channel's
+   * subscription on a second join, where leaving would drop the presence this socket tracks there.
+   * The server tells the new join who is present all over again, so the members known now leave.
+   */
+  private rejoinIfUnheard(state: ChannelState): void {
+    const held = state.joining ?? state.joined
+    if (!state.joinSent || held === undefined) return
+    const listeners = pgListenersOf(state)
+    if (listeners.length === 0 || listeners.some((listener) => sameJoin(listener, held))) return
+    state.subscribed = false
+    state.joinSent = false
+    this.forgetMembers(state)
+    notifyHandles(state, "SUBSCRIBING")
+    this.sendSubscribe(state)
   }
 
   private sendUnsubscribe(state: ChannelState): void {
@@ -751,12 +777,35 @@ interface ChannelState {
   joinSent: boolean
   /**
    * The table the join on the current socket registered, from the row listener first when it was
-   * sent. It stays registered after that listener's handle leaves, so it, not whichever listener is
-   * first now, is what an incoming row belongs to. Undefined when the join named no table.
+   * sent, else from the channel name. It, not whichever listener is first now, is what an incoming
+   * row belongs to: it stays registered while any listener is for it, and a join sent again in its
+   * place takes over only once the server acknowledges it. Undefined before any join on the socket.
    */
-  joined: Pick<PgListener, "schema" | "table"> | undefined
+  joined: JoinTarget | undefined
+  /** The join sent on the current socket and not yet acknowledged. */
+  joining: JoinTarget | undefined
   /** Who the current socket has said is tracked on this channel, one entry per tracking socket. */
   members: PresenceEntry[]
+}
+
+/** What a join registers on the server: the table whose changes it delivers, and which of them. */
+type JoinTarget = Pick<PgListener, "schema" | "table" | "event" | "filter">
+
+/**
+ * What a join on `state` registers now: its oldest row listener's table, event and filter. With no
+ * row listener, the table the channel name gives, read as the server's fallback reads it: the one
+ * the server would register for a join that named none.
+ */
+function joinTargetOf(state: ChannelState): JoinTarget {
+  const first = pgListenersOf(state)[0]
+  if (first !== undefined) return { schema: first.schema, table: first.table, event: first.event, filter: first.filter }
+  return { ...parseChannelName(state.name), event: "*", filter: undefined }
+}
+
+/** Whether a listener is for exactly what a join registered. */
+function sameJoin(listener: JoinTarget, join: JoinTarget): boolean {
+  return listener.schema === join.schema && listener.table === join.table &&
+    listener.event === join.event && listener.filter === join.filter
 }
 
 /** Every handle's row listeners, oldest handle first: the first of them is what the join registers. */
