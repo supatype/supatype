@@ -64,6 +64,10 @@
   that had made a function with it was affected.
 * **dev:** native dev's port-in-use message says which port to move ("Move this project's database
   port with ..."). It read "Move this project's with ...".
+* **dev:** a blank `SUPATYPE_SMTP_PORT=` in `.env` no longer stops native dev at "Running auth
+  migrations...". The server reads `.env` itself, took the blank as the port and refused it
+  (`converting '' to type int`). Native dev now gives it 587 for a blank port, as the compose file
+  always has.
 * **dev:** native dev writes a bucket declared `custom` as not public in the object store's
   `buckets.json`. It copied `public: true` from the declaration, so the store listed a custom
   bucket as public, which the store and the storage service never do.

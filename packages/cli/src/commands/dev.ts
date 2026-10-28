@@ -90,7 +90,7 @@ import { startNativeRealtime } from "../native-realtime.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { nativeMailerAutoconfirmEnv } from "../mailer-autoconfirm.js"
-import { mailerProviderEnv, withoutBlankMailerOverrides } from "../mailer-env.js"
+import { mailerProviderEnv, withoutBlankMailerOverrides, withSmtpPortFallback } from "../mailer-env.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
 import {
   nativeAuthMailerEnv,
@@ -417,7 +417,7 @@ export function registerDev(program: Command): void {
       // ── 8. auth migrations (auth.users before engine studio SQL) ─────────
       console.log("[supatype] Running auth migrations...")
       const migrateEnv = authMigrateEnv(serverPort, dbURL, LOCAL_JWT_SECRET)
-      runAuthMigrations(serverBin, migrateEnv)
+      runAuthMigrations(serverBin, withSmtpPortFallback(migrateEnv, loadDotEnv(cwd)))
 
       // ── 9. Engine: apply schema ───────────────────────────────────────────
       const schemaPath = schemaPathFromProject(config, cwd)
@@ -574,7 +574,7 @@ export function registerDev(program: Command): void {
         label: "server",
         pidDir,
         colour: "\x1b[32m",
-        env: serverEnv,
+        env: withSmtpPortFallback(serverEnv, loadDotEnv(cwd)),
       })
       serverProc.start()
 
