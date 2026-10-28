@@ -11,6 +11,7 @@ import {
 } from "../s3.js"
 
 import type { BucketAccessMode } from "../db.js"
+import { accessModeOf, nextAccessMode } from "../bucket-access.js"
 
 const isAccessMode = isOneOf(["public", "private", "custom"] as const satisfies readonly BucketAccessMode[])
 
@@ -42,18 +43,19 @@ export async function create(ctx: RequestContext): Promise<void> {
   }
 
   const id = body.id ?? body.name
-  const accessMode: BucketAccessMode =
-    body.access_mode ?? (body.public ? "public" : "private")
+  const accessMode = accessModeOf({ access_mode: body.access_mode ?? null, public: body.public ?? false })
+  // Public on S3 exactly when the mode says so: a custom bucket's rules decide who reads it.
+  const isPublic = accessMode === "public"
   try {
     await ensureS3Bucket(id)
     await applyBucketPolicyFromConfig(id, {
-      public: body.public ?? false,
+      public: isPublic,
       ...(body.s3_bucket_policy !== undefined && { s3BucketPolicy: body.s3_bucket_policy }),
     })
     const bucket = await db.createBucket(
       id,
       body.name,
-      body.public ?? false,
+      isPublic,
       body.file_size_limit,
       body.allowed_mime_types,
       accessMode,
@@ -88,16 +90,22 @@ export async function update(ctx: RequestContext): Promise<void> {
   const body = await readJson(ctx.req, isUpdateBucketBody)
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)
-  if (body.public !== undefined || body.s3_bucket_policy !== undefined) {
-    const nextPublic = body.public ?? existing?.public ?? false
-    const nextPolicy =
-      body.s3_bucket_policy !== undefined ? body.s3_bucket_policy : existing?.s3_bucket_policy
-    await applyBucketPolicyFromConfig(id, {
-      public: nextPublic,
-      ...(nextPolicy !== undefined && { s3BucketPolicy: nextPolicy }),
-    })
+  if (!existing) {
+    sendJson(ctx.res, 404, { error: "Bucket not found" })
+    return
   }
-  const bucket = await db.updateBucket(id, body)
+  // The flag and the mode change together, as on create. A flag set alone left the mode, which
+  // decides every read, where it was.
+  const accessMode = nextAccessMode(accessModeOf(existing), body)
+  const isPublic = accessMode === "public"
+  const changesAccess = body.public !== undefined || body.access_mode !== undefined
+  if (changesAccess || body.s3_bucket_policy !== undefined) {
+    const nextPolicy =
+      body.s3_bucket_policy !== undefined ? body.s3_bucket_policy : existing.s3_bucket_policy
+    await applyBucketPolicyFromConfig(id, { public: isPublic, s3BucketPolicy: nextPolicy })
+  }
+  const updates = changesAccess ? { ...body, access_mode: accessMode, public: isPublic } : body
+  const bucket = await db.updateBucket(id, updates)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return

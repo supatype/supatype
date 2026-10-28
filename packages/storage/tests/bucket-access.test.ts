@@ -47,3 +47,15 @@ describe("a bucket whose access mode is not public", () => {
     expect(getCorsHeaders(bucket(mode, isPublic))["Access-Control-Allow-Origin"]).toBeUndefined()
   })
 })
+
+describe("a bucket with no access mode", () => {
+  // The schema engine writes NULL for a bucket that names no mode, which goes by `public`.
+  it("is served on the public route when public is true", async () => {
+    expect(await publicStatus(bucket(null, true))).toBe(404)
+    expect(getCorsHeaders(bucket(null, true))["Access-Control-Allow-Origin"]).toBe("*")
+  })
+
+  it("is not served when public is false", async () => {
+    expect(await publicStatus(bucket(null, false))).toBe(403)
+  })
+})
