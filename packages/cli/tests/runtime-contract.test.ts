@@ -447,6 +447,37 @@ describe("runtime contract", () => {
     }
   })
 
+  it("routes realtime and functions to the stack's own services after native dev ran", () => {
+    // Local test D: native dev records its realtime on 127.0.0.1 and drops the worker URL. Docker
+    // dev then repaired only the functions flag, so the server proxied every subscription to a
+    // host port nothing in the stack listened on and realtime answered 502.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-native-to-docker-"))
+    try {
+      mkdirSync(join(dir, ".supatype"), { recursive: true })
+      writeFileSync(
+        join(dir, ".supatype", "manifest.json"),
+        JSON.stringify({
+          schema: "public",
+          realtime_enabled: true,
+          realtime_url: "http://127.0.0.1:18493",
+          functions_enabled: true,
+          functions_worker_url: "http://127.0.0.1:18494",
+        }),
+        "utf8",
+      )
+
+      writeSelfHostCompose(dir, baseConfig)
+
+      const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
+      expect(manifest["realtime_enabled"]).toBe(true)
+      expect(manifest["realtime_url"]).toBe("http://realtime:4000")
+      expect(manifest["functions_enabled"]).toBe(true)
+      expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it("leaves a project with no functions or hooks without those directories", () => {
     // Creating them on every `dev` made the context refresh, which runs when `functions/` exists,
     // scaffold `_shared/`, Deno types and a root tsconfig exclude into projects that have no

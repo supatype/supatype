@@ -41,6 +41,7 @@ import { RELEASE_IMAGES } from "./release-images.js"
 import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
+import { patchRouteManifest } from "./route-manifest.js"
 
 /**
  * The control plane secret as the server and the control plane receive it, and nobody else.
@@ -1182,47 +1183,41 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
   mkdirSync(dirname(manifestPath), { recursive: true })
 
   // The manifest is generated, not operator-authored, but `push` writes real values into it (the
-  // schema, for one), so an existing file is repaired rather than replaced.
+  // schema, for one), so an existing file keeps every key but the routes below. Malformed, it is
+  // left for the server to complain about rather than overwritten here.
   if (existsSync(manifestPath)) {
-    repairComposeFunctionsFlag(manifestPath)
+    if (readJsonObjectFile(manifestPath) !== undefined) patchRouteManifest(manifestPath, composeServiceRoutes(config))
     return
   }
 
-  const manifest = {
+  patchRouteManifest(manifestPath, {
     schema: "public",
     postgrest_url: "http://postgrest:3000",
     storage_url: "http://storage:5000",
+    ...composeServiceRoutes(config),
+  })
+}
+
+/**
+ * Where the server finds realtime and functions in this stack, set on every render rather than
+ * only into a new file. Native dev shares the manifest and records its own host ports for both, so
+ * a project moved from native to Docker kept native's realtime URL and the server proxied every
+ * subscription to a port nothing in the stack listened on (502). An older CLI's
+ * `functions_enabled: false` is put right by the same write.
+ */
+function composeServiceRoutes(config: SupatypeProjectConfig): Record<string, unknown> {
+  return {
     // Matches the compose file: a manifest advertising a service that was not generated is how
-    // the server ends up proxying subscriptions to a host that does not resolve.
+    // the server ends up proxying subscriptions to a host that does not resolve. Undefined drops
+    // the key.
     realtime_enabled: realtimeEnabled(config),
-    ...(realtimeEnabled(config) && { realtime_url: "http://realtime:4000" }),
+    realtime_url: realtimeEnabled(config) ? "http://realtime:4000" : undefined,
     // True because this file *always* generates a `functions-worker` service and hands the server
     // `SUPATYPE_FUNCTIONS_WORKER_URL`. It said false, so the server answered 404 for every function
     // in a stack that was running a worker for them, provisioned, then switched off.
     functions_enabled: true,
     functions_worker_url: COMPOSE_FUNCTIONS_WORKER_URL,
   }
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
-}
-
-/**
- * Turn functions on in a manifest written by an older CLI, leaving every other key alone.
- *
- * Without this, only new projects get working functions: a stack generated before the flag was
- * corrected keeps `functions_enabled: false` on disk, and regenerating the compose file, the
- * obvious thing to try, does not fix it.
- */
-function repairComposeFunctionsFlag(manifestPath: string): void {
-  // Malformed: leave it for the server to complain about rather than overwrite it here.
-  const parsed = readJsonObjectFile(manifestPath)
-  if (parsed === undefined) return
-  if (parsed["functions_enabled"] === true && parsed["functions_worker_url"] !== undefined) return
-
-  parsed["functions_enabled"] = true
-  if (parsed["functions_worker_url"] === undefined) {
-    parsed["functions_worker_url"] = COMPOSE_FUNCTIONS_WORKER_URL
-  }
-  writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
 }
 
 /**
