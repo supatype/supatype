@@ -15,6 +15,11 @@
 # minted here verify against the stack that starts later. Set EXAMPLE_JWT_SECRET to choose it;
 # otherwise `supatype keys` generates one into .env when it has none, as `supatype dev` would.
 
+# env_file_value <file> <name> - the last value <file> gives <name>, without quotes.
+env_file_value() {
+  sed -n "s/^$2=//p" "$1" | tr -d '"\r' | tail -1
+}
+
 # mint_keys <example-dir> <cli-bin> - exports ANON_KEY and SERVICE_ROLE_KEY.
 mint_keys() {
   local dir="$1" cli="$2" out=""
@@ -24,11 +29,13 @@ mint_keys() {
     printf 'JWT_SECRET=%s\n' "$EXAMPLE_JWT_SECRET" >> "$dir/.env"
   fi
 
-  # `keys` writes into .env, generating JWT_SECRET there when it has none; `--print` then prints a
-  # pair signed with that secret for this script to read.
-  out="$(cd "$dir" && node "$cli" keys >/dev/null 2>&1 && node "$cli" keys --print 2>&1)" || true
-  ANON_KEY="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*ANON_KEY=//p' | tail -1)"
-  SERVICE_ROLE_KEY="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*SERVICE_ROLE_KEY=//p' | tail -1)"
+  # `keys` writes the pair into .env, generating JWT_SECRET there when it has none, and the keys are
+  # read back from there: they are the ones the stack hands its services. `keys --print` signs a
+  # fresh pair, which matched only when both ran in the same second, so a function comparing a
+  # caller's key with its own ctx.anonKey saw a different anon key now and then.
+  out="$(cd "$dir" && node "$cli" keys 2>&1)" || true
+  ANON_KEY="$(env_file_value "$dir/.env" ANON_KEY)"
+  SERVICE_ROLE_KEY="$(env_file_value "$dir/.env" SERVICE_ROLE_KEY)"
 
   if [[ -z "$ANON_KEY" || -z "$SERVICE_ROLE_KEY" ]]; then
     echo "ERROR: could not mint keys in $dir. 'supatype keys' said:" >&2
