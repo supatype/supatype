@@ -102,11 +102,25 @@ export function devJwtSecret(cwd: string): string {
  */
 export const ENV_FILE_OVER_SHELL = ["JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY"] as const
 
+/** The role a key under each name has to carry. */
+const KEY_ROLES = { ANON_KEY: "anon", SERVICE_ROLE_KEY: "service_role" } as const
+
+/**
+ * Whether the stack would accept `key` as `role`: signed with `secret`, issued by Supatype for that
+ * role, and not expiring within `validForSeconds`.
+ */
+export function keyUsable(key: string, role: string, secret: string, validForSeconds = 0): boolean {
+  const claims = key === "" ? null : verifyJwt(key, secret)
+  if (claims === null || claims["role"] !== role || claims["iss"] !== "supatype") return false
+  const expiry = claims["exp"]
+  return typeof expiry !== "number" || expiry > Math.floor(Date.now() / 1000) + validForSeconds
+}
+
 /**
  * Whether compose runs without the shell's `shellValue` for `name`, so the stack gets `.env`'s.
  * Always when `.env` defines the name. For a key `.env` leaves blank, only when `.env` holds a
- * JWT_SECRET the shell's key does not verify against: a key signed with that secret is the one
- * the stack accepts, and the compose file requires SERVICE_ROLE_KEY to be set at all.
+ * JWT_SECRET and the shell's key is not one the stack would accept under it ({@link keyUsable}):
+ * a usable one is kept, since the compose file requires SERVICE_ROLE_KEY to be set at all.
  */
 export function envFileOverridesShell(
   env: Record<string, string>,
@@ -115,8 +129,8 @@ export function envFileOverridesShell(
 ): boolean {
   if ((env[name] ?? "") !== "") return true
   const secret = env["JWT_SECRET"] ?? ""
-  if (secret === "" || shellValue === undefined || shellValue === "") return false
-  return verifyJwt(shellValue, secret) === null
+  if (name === "JWT_SECRET" || secret === "" || shellValue === undefined || shellValue === "") return false
+  return !keyUsable(shellValue, KEY_ROLES[name], secret)
 }
 
 /** A JWT secret given to a run rather than read from `.env`, with where it came from. */

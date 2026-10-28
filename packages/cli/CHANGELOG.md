@@ -15,11 +15,12 @@
   that differs from `.env`'s gets a single warning line saying `.env`'s is used, and is never
   refused. Only a `keys --secret` that differs from `.env`'s is refused. Docker Compose reads the
   shell ahead of `.env`, so every compose command now runs without the shell's `JWT_SECRET`,
-  `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines that name, and without a shell key that
-  does not verify against `.env`'s `JWT_SECRET`: `supatype dev` on docker with a different shell
-  `JWT_SECRET` started services that refused every key with 401. A shell key signed with `.env`'s
-  secret still fills a blank one. `push` and other commands calling the local stack follow the same
-  rule, sending `.env`'s `SERVICE_ROLE_KEY` when the shell's is left out. When a
+  `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines that name, and without a shell key the stack
+  would not accept under `.env`'s `JWT_SECRET` (another secret, another role, or expired):
+  `supatype dev` on docker with a different shell `JWT_SECRET` started services that refused every
+  key with 401. A shell key the stack accepts still fills a blank one. `push`, `status` and the
+  other commands calling the local stack follow the same rule, and send `.env`'s `SERVICE_ROLE_KEY`,
+  the name the stack is started with, ahead of a `SUPATYPE_SERVICE_ROLE_KEY` there. When a
   `JWT_SECRET` is newly written into `.env` (given or generated), `keys` and `self-host compose up`
   sign both keys again and say so, since keys already there cannot verify against it. A secret is
   checked before anything is written: at least 32 characters, and for one written into `.env`, no

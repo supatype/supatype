@@ -2,9 +2,9 @@
  * The anon and service-role keys a docker project's stack is configured with.
  */
 
-import { readEnvFile, readEnvValue } from "./env-file.js"
-import { signJwt, verifyJwt } from "./jwt.js"
-import { devJwtSecret, envFileOverridesShell } from "./local-secrets.js"
+import { readEnvFile } from "./env-file.js"
+import { signJwt } from "./jwt.js"
+import { devJwtSecret, envFileOverridesShell, keyUsable } from "./local-secrets.js"
 
 /** Ten years, as the keys have always been minted. */
 const KEY_LIFETIME_SECONDS = 315_360_000
@@ -36,16 +36,23 @@ export function devApiKeys(cwd: string): DevApiKeys {
 }
 
 /**
- * The service-role key the project's running stack was configured with, read from `.env` as the
- * stack reads it, or undefined when `.env` has none.
+ * The service-role key the project's running stack was configured with, or undefined when there is
+ * none: `.env`'s SERVICE_ROLE_KEY, else the shell's when compose passes it to the stack
+ * ({@link envFileOverridesShell}). Both the compose file and native dev start the server with
+ * SERVICE_ROLE_KEY, so a SUPATYPE_SERVICE_ROLE_KEY in `.env` never reaches the stack, and is read
+ * only when nothing else is there.
  *
  * Read, never signed: a key minted here verifies only if it was signed with the secret the stack
  * started with, and an absent key is a clearer failure than a refused one.
  */
 export function configuredServiceRoleKey(cwd: string): string | undefined {
+  const env = readEnvFile(cwd)
+  const fromShell = process.env["SERVICE_ROLE_KEY"]
   const key =
-    readEnvValue(cwd, "SUPATYPE_SERVICE_ROLE_KEY", "").trim() ||
-    readEnvValue(cwd, "SERVICE_ROLE_KEY", "").trim()
+    env["SERVICE_ROLE_KEY"] ||
+    (fromShell && !envFileOverridesShell(env, "SERVICE_ROLE_KEY", fromShell) ? fromShell : "") ||
+    env["SUPATYPE_SERVICE_ROLE_KEY"] ||
+    ""
   return key === "" ? undefined : key
 }
 
@@ -53,29 +60,17 @@ export function configuredServiceRoleKey(cwd: string): string | undefined {
  * A service-role key the shell exported for the local stack, as that stack would accept it, or
  * undefined when the shell has none. `SUPATYPE_SERVICE_ROLE_KEY` is the CLI's own and taken as
  * given. A shell `SERVICE_ROLE_KEY` reaches the stack only while `.env` does not override it
- * (self-host-compose.ts), so once it does, `.env`'s SERVICE_ROLE_KEY is the one sent instead:
- * the name compose passes to the stack, not `.env`'s `SUPATYPE_SERVICE_ROLE_KEY`.
+ * (self-host-compose.ts), so once it does, the key the stack was configured with is sent instead.
  */
 export function shellServiceRoleKey(cwd: string): string | undefined {
   const own = process.env["SUPATYPE_SERVICE_ROLE_KEY"]
   if (own) return own
-  const fromShell = process.env["SERVICE_ROLE_KEY"]
-  if (!fromShell) return undefined
-  const env = readEnvFile(cwd)
-  if (!envFileOverridesShell(env, "SERVICE_ROLE_KEY", fromShell)) return fromShell
-  const inFile = (env["SERVICE_ROLE_KEY"] ?? "").trim()
-  return inFile === "" ? undefined : inFile
+  if (!process.env["SERVICE_ROLE_KEY"]) return undefined
+  return configuredServiceRoleKey(cwd)
 }
 
 function keptOrSigned(existing: string | undefined, role: string, secret: string): string {
+  if (existing !== undefined && keyUsable(existing, role, secret, RENEW_WITHIN_SECONDS)) return existing
   const now = Math.floor(Date.now() / 1000)
-  const claims = existing !== undefined && existing !== "" ? verifyJwt(existing, secret) : null
-  const expiry = claims?.["exp"]
-  const usable =
-    claims !== null &&
-    claims["role"] === role &&
-    claims["iss"] === "supatype" &&
-    (typeof expiry !== "number" || expiry > now + RENEW_WITHIN_SECONDS)
-  if (usable && existing !== undefined) return existing
   return signJwt({ iss: "supatype", iat: now, exp: now + KEY_LIFETIME_SECONDS, role }, secret)
 }
