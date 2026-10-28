@@ -88,6 +88,6 @@ describe("the generated functions router", () => {
     // ends the literal and emits broken code. Cheap to assert, and it has bitten twice.
     expect(ROUTER).not.toContain("\\`")
     expect(ROUTER).not.toContain("\\${")
-    expect(ROUTER).toContain('"hello": exportedHandler("hello", await import("')
+    expect(ROUTER).toContain('"hello": await loadHandler("hello", () => import("')
   })
 })

@@ -6,18 +6,12 @@
  * never ships.
  */
 
-const MAIN = new URL("../main.ts", import.meta.url).href
+import { expectEqual, startWorker as startHarnessWorker, type Worker } from "./worker-harness.ts"
 
 /** A function that answers with the two addresses it was handed. */
 const ECHO = `export default (_req: Request, ctx: { url: string; publicUrl: string }) =>
   new Response(JSON.stringify({ url: ctx.url, publicUrl: ctx.publicUrl }))
 `
-
-interface Worker {
-  readonly origin: string
-  readonly lines: string[]
-  stop(): Promise<void>
-}
 
 /** Every variable but the ones under test, so a developer's own shell cannot decide the result. */
 function baseEnv(): Record<string, string> {
@@ -27,56 +21,8 @@ function baseEnv(): Record<string, string> {
   return env
 }
 
-async function functionsRoot(): Promise<string> {
-  const root = await Deno.makeTempDir({ prefix: "worker-public-url-" })
-  await Deno.mkdir(`${root}/echo`)
-  await Deno.writeTextFile(`${root}/echo/index.ts`, ECHO)
-  return root
-}
-
-/** Collect stdout line by line, resolving once the worker says where it listens. */
-function watchStdout(stream: ReadableStream<Uint8Array>, lines: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = stream.getReader()
-    const decoder = new TextDecoder()
-    let buffered = ""
-    const pump = async (): Promise<void> => {
-      for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
-        buffered += decoder.decode(chunk.value, { stream: true })
-        const parts = buffered.split("\n")
-        buffered = parts.pop() ?? ""
-        for (const line of parts) {
-          lines.push(line)
-          const listening = /listening on (http:\/\/[^"\s]+)/.exec(line)
-          if (listening?.[1] !== undefined) resolve(listening[1].replace("0.0.0.0", "127.0.0.1"))
-        }
-      }
-      reject(new Error(`worker exited before listening:\n${lines.join("\n")}`))
-    }
-    pump().catch(reject)
-  })
-}
-
-async function startWorker(env: Record<string, string>): Promise<Worker> {
-  const root = await functionsRoot()
-  const child = new Deno.Command(Deno.execPath(), {
-    args: ["run", "--allow-net", "--allow-env", "--allow-read", MAIN],
-    env: { ...baseEnv(), ...env, PORT: "0", SUPATYPE_FUNCTIONS_ROOT: root },
-    clearEnv: true,
-    stdout: "piped",
-    stderr: "inherit",
-  }).spawn()
-  const lines: string[] = []
-  const origin = await watchStdout(child.stdout, lines)
-  return {
-    origin,
-    lines,
-    async stop() {
-      child.kill("SIGTERM")
-      await child.status
-      await Deno.remove(root, { recursive: true })
-    },
-  }
+function startWorker(env: Record<string, string>): Promise<Worker> {
+  return startHarnessWorker({ echo: ECHO }, { ...baseEnv(), ...env })
 }
 
 async function contextOf(worker: Worker): Promise<{ url: string; publicUrl: string }> {
@@ -86,10 +32,6 @@ async function contextOf(worker: Worker): Promise<{ url: string; publicUrl: stri
     throw new Error(`unexpected body: ${JSON.stringify(body)}`)
   }
   return { url: String(body.url), publicUrl: String(body.publicUrl) }
-}
-
-function expectEqual(actual: unknown, expected: unknown, what: string): void {
-  if (actual !== expected) throw new Error(`${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
 }
 
 function publicUrlWarnings(lines: readonly string[]): string[] {

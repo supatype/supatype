@@ -42,7 +42,7 @@ describe("the generated router's source", () => {
     // delete and could copy the key. A dynamic import runs where it is written.
     expect(ROUTER).not.toMatch(/^import handler_\d+ from /m)
     const deleted = ROUTER.indexOf('Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")')
-    const firstImport = ROUTER.indexOf("await import(")
+    const firstImport = ROUTER.indexOf('import("')
     expect(deleted).toBeGreaterThan(-1)
     expect(firstImport).toBeGreaterThan(deleted)
   })
@@ -226,10 +226,30 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
     expect(await res.text()).toBe("named ok")
   }, 60_000)
 
-  it("refuses to start, naming the function, when it exports neither", async () => {
-    await expect(serve(project({ empty: `export const other = 1\n` }), {})).rejects.toThrow(
-      /"empty".*neither a default export nor a named "handler"/s,
+  // One function that failed to load used to stop the router starting, so every function answered
+  // 502. Now only its own route fails, with why.
+  it("answers a function that failed to load with a 500 naming why, and serves the others", async () => {
+    const base = await serve(
+      project({
+        empty: `export const other = 1\n`,
+        syntax: `export default (\n`,
+        throws: `throw new Error("boom-at-import")\n`,
+        hello: `export default () => new Response("hello ok")\n`,
+      }),
+      {},
     )
+    expect(await (await fetch(`${base}/functions/v1/hello`)).text()).toBe("hello ok")
+    const failures: Record<string, RegExp> = {
+      empty: /"empty" failed to load: .*neither a default export nor a named "handler"/s,
+      syntax: /"syntax" failed to load: /,
+      throws: /"throws" failed to load: .*boom-at-import/s,
+    }
+    for (const [name, message] of Object.entries(failures)) {
+      const res = await fetch(`${base}/functions/v1/${name}`)
+      expect(res.status).toBe(500)
+      const body: unknown = await res.json()
+      expect(body).toMatchObject({ error: "function_load_failed", message: expect.stringMatching(message) })
+    }
   }, 60_000)
 
   it("withholds the service-role key from the environment and grants it only to listed routes", async () => {
@@ -251,8 +271,9 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
     const routerPath = project({ admin: `export const other = 1\n`, hello: REPORTS_KEY })
     const router = startRouter(routerPath, ADMIN_GRANTED, ["--watch"])
     await router.printed(/neither a default export nor a named "handler"/, 1)
+    await router.listening(1)
     writeFileSync(join(dirname(dirname(routerPath)), "functions", "admin", "index.ts"), REPORTS_KEY)
-    await expectKeyOnlyForAdmin(await router.listening(1))
+    await expectKeyOnlyForAdmin(await router.listening(2))
   }, 60_000)
 
   // An evaluation can end in ways the router never sees coming: here a function's floating promise
