@@ -250,8 +250,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   const routes = discoverServeRoutes(cwd, functionsDir)
   const routerPath = writeServeFiles(cwd, functionsDir, routes)
 
-  const envFilePath = resolveEnvFilePath(cwd, functionsDir, opts.envFile)
-  const envArgs = existsSync(envFilePath) ? ["--env-file", envFilePath] : []
+  const envArgs = denoEnvFileArgs(resolveEnvFilePath(cwd, functionsDir, opts.envFile))
 
   info(`Serving functions at http://localhost:${opts.port}/functions/v1/`)
   info("Watching for changes...")
@@ -270,6 +269,15 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
     ["run", "--allow-net", "--allow-env", "--allow-read", "--watch", ...envArgs, routerPath],
     { cwd, env: denoServeEnv(cwd, functionsDir, opts.port, config) },
   )
+}
+
+/**
+ * Deno's flag for `envFilePath`, or nothing when there is no such file. One argument: `--env-file`
+ * takes an optional value, which Deno reads only after `=`, so with the path as its own argument
+ * Deno loaded `.env` and ran the env file as the script.
+ */
+export function denoEnvFileArgs(envFilePath: string): string[] {
+  return existsSync(envFilePath) ? [`--env-file=${envFilePath}`] : []
 }
 
 /**
