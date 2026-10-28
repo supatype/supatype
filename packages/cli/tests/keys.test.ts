@@ -288,9 +288,15 @@ describe("supatype keys (CLI subprocess)", () => {
     })
 
     it.each([
-      ["--secret", ["--secret", "short123"], "", "--secret is 8 characters"],
-      [".env's", [], "JWT_SECRET=short123\n", "JWT_SECRET in .env is 8 characters"],
-    ])("--print refuses to sign with %s secret when the REST API could not start with it", (_, args, env, why) => {
+      ["a short --secret", ["--secret", "short123"], "", "--secret is 8 characters"],
+      ["a short secret in .env", [], "JWT_SECRET=short123\n", "JWT_SECRET in .env is 8 characters"],
+      [
+        "a --secret .env cannot hold unquoted",
+        ["--secret", "a secret long enough to use but with spaces"],
+        "",
+        "--secret contains whitespace",
+      ],
+    ])("--print refuses to sign with %s", (_, args, env, why) => {
       writeFileSync(join(tmpDir, ".env"), env, "utf8")
       const { exitCode, stdout, stderr } = runCli(["keys", "--print", ...args], {
         cwd: tmpDir,
@@ -309,5 +315,23 @@ describe("supatype keys (CLI subprocess)", () => {
     expect(stdout).toContain("--exp-years")
     expect(stdout).toContain("--print")
     expect(stdout).toContain("--write")
+  })
+})
+
+describe("supatype init with a shell JWT_SECRET it cannot use", () => {
+  // It said so when it generated one instead, and again as "differs from the JWT_SECRET in .env"
+  // when it signed the keys with the one it generated.
+  it("says so once", () => {
+    const parent = mkdtempSync(join(tmpdir(), "st-init-shell-secret-"))
+    try {
+      const { exitCode, stdout, stderr } = runCli(["init", "acme", "-y", "--no-install"], {
+        cwd: parent,
+        env: { JWT_SECRET: "short" },
+      })
+      expect(exitCode).toBe(0)
+      expect((stdout + stderr).match(/JWT_SECRET environment variable/g)).toHaveLength(1)
+    } finally {
+      rmSync(parent, { recursive: true, force: true })
+    }
   })
 })

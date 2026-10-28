@@ -13,6 +13,7 @@
 
 import { randomBytes } from "node:crypto"
 import { hasEnvValue, readEnvValue, upsertEnvFile } from "./env-file.js"
+import { verifyJwt } from "./jwt.js"
 import {
   GIVEN_JWT_SECRET_REMEDY,
   JWT_SECRET_REMEDY,
@@ -102,15 +103,20 @@ export function devJwtSecret(cwd: string): string {
 export const ENV_FILE_OVER_SHELL = ["JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY"] as const
 
 /**
- * Whether the stack runs with `.env`'s `name` rather than the shell's. Compose is run without the
- * shell's copy when `.env` defines the name, and without all three once `.env` holds a JWT_SECRET:
- * a shell key is signed with some other secret, even while `.env`'s own key is still blank.
+ * Whether compose runs without the shell's `shellValue` for `name`, so the stack gets `.env`'s.
+ * Always when `.env` defines the name. For a key `.env` leaves blank, only when `.env` holds a
+ * JWT_SECRET the shell's key does not verify against: a key signed with that secret is the one
+ * the stack accepts, and the compose file requires SERVICE_ROLE_KEY to be set at all.
  */
 export function envFileOverridesShell(
   env: Record<string, string>,
   name: (typeof ENV_FILE_OVER_SHELL)[number],
+  shellValue: string | undefined,
 ): boolean {
-  return (env[name] ?? "") !== "" || (env["JWT_SECRET"] ?? "") !== ""
+  if ((env[name] ?? "") !== "") return true
+  const secret = env["JWT_SECRET"] ?? ""
+  if (secret === "" || shellValue === undefined || shellValue === "") return false
+  return verifyJwt(shellValue, secret) === null
 }
 
 /** A JWT secret given to a run rather than read from `.env`, with where it came from. */

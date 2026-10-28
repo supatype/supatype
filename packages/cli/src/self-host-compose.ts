@@ -1491,7 +1491,7 @@ function composeProcessEnv(projectRoot: string, quiet: boolean): NodeJS.ProcessE
   const env: NodeJS.ProcessEnv = { ...process.env, ...(quiet && { COMPOSE_PROGRESS: "quiet" }) }
   const fromFile = readEnvFile(projectRoot)
   for (const name of ENV_FILE_OVER_SHELL) {
-    if (envFileOverridesShell(fromFile, name)) delete env[name]
+    if (envFileOverridesShell(fromFile, name, env[name])) delete env[name]
   }
   return env
 }

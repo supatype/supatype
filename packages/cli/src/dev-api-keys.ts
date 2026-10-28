@@ -53,14 +53,18 @@ export function configuredServiceRoleKey(cwd: string): string | undefined {
  * A service-role key the shell exported for the local stack, as that stack would accept it, or
  * undefined when the shell has none. `SUPATYPE_SERVICE_ROLE_KEY` is the CLI's own and taken as
  * given. A shell `SERVICE_ROLE_KEY` reaches the stack only while `.env` does not override it
- * (self-host-compose.ts), so once it does, `.env`'s key is the one sent instead.
+ * (self-host-compose.ts), so once it does, `.env`'s SERVICE_ROLE_KEY is the one sent instead:
+ * the name compose passes to the stack, not `.env`'s `SUPATYPE_SERVICE_ROLE_KEY`.
  */
 export function shellServiceRoleKey(cwd: string): string | undefined {
   const own = process.env["SUPATYPE_SERVICE_ROLE_KEY"]
   if (own) return own
   const fromShell = process.env["SERVICE_ROLE_KEY"]
   if (!fromShell) return undefined
-  return envFileOverridesShell(readEnvFile(cwd), "SERVICE_ROLE_KEY") ? configuredServiceRoleKey(cwd) : fromShell
+  const env = readEnvFile(cwd)
+  if (!envFileOverridesShell(env, "SERVICE_ROLE_KEY", fromShell)) return fromShell
+  const inFile = (env["SERVICE_ROLE_KEY"] ?? "").trim()
+  return inFile === "" ? undefined : inFile
 }
 
 function keptOrSigned(existing: string | undefined, role: string, secret: string): string {
