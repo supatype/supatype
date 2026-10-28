@@ -647,6 +647,23 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
     expect(await served.text()).toBe("second")
   })
 
+  it("issues a signed URL with the object's name encoded, which serves that object", async () => {
+    // The name went into the URL decoded, so a `?` or `#` in it cut the URL short and the token off.
+    const x = user()
+    const name = `${randomUUID()} b/c?d#e.png`
+    await upload(x.token, "avatars", name, "odd name")
+    const signed = await fetch(`${base}/object/sign/avatars/${encodedPath(name)}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${x.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ expiresIn: 60 }),
+    })
+    const url = (await bodyOf(signed, isShape({ signedURL: isString }))).signedURL
+    expect(url.split("?token=")[0]).toBe(`/object/sign/avatars/${encodedPath(name)}`)
+    const served = await fetch(`${base}${url}`)
+    expect(served.status).toBe(200)
+    expect(await served.text()).toBe("odd name")
+  })
+
   it("keeps a bucket's rows when emptying it fails to delete the bytes, so it can be retried", async () => {
     const name = unique("retry-empty")
     await upload(SERVICE, "loose", name, "x")

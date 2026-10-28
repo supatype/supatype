@@ -150,6 +150,18 @@ production web app's origin before upgrading. On Cloud, `api.corsOrigins` is not
 project's own URL and Cloud Studio are always allowed, and owners, admins and developers edit
 the rest in Studio's CORS tab.
 
+## Storage limits
+
+A self-hosted or local project has no plan, so storage sets no quota and no per-file limit. Set
+any of these in `.env`, in bytes, with `-1` for unlimited (the default):
+
+- `STORAGE_QUOTA`: the total every bucket together may hold.
+- `TIER_MAX_UPLOAD_SIZE`: the largest single file.
+- `MAX_UPLOAD_SIZE`: the largest single file when `TIER_MAX_UPLOAD_SIZE` is `-1`.
+
+A bucket's own `maxSize` still wins over both file limits. Run `supatype self-host compose restart
+storage` after changing them.
+
 ## Studio roles
 
 Studio signs in with email and password or with any of the project's enabled OAuth providers
