@@ -84,3 +84,20 @@ export function mailerProviderEnv(email: EmailConfig): Record<string, string> {
     ...(email !== undefined ? apiProviderEnv(email) : {}),
   }
 }
+
+/**
+ * `.env` as native dev lays it over {@link mailerProviderEnv}, less any blank value that would erase
+ * one `email` in supatype.config.ts sets. init scaffolds a provider's names into `.env` with nothing
+ * after the `=`, to be filled in, and those blanks used to replace the config's SMTP host or Resend
+ * key, so the server fell back to its noop mailer. A value in `.env` still wins, and a blank still
+ * applies to a name the config leaves unset. Docker dev needs none of this: it writes these names
+ * into `.env` from the config.
+ */
+export function withoutBlankMailerOverrides(
+  dotEnv: Record<string, string>,
+  configMailerEnv: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(dotEnv).filter(([name, value]) => value.trim() !== "" || (configMailerEnv[name] ?? "") === ""),
+  )
+}

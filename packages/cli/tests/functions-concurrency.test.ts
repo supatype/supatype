@@ -31,14 +31,21 @@ describe("the generated functions router", () => {
   })
 
   it("does not write per-invocation values into the process environment", () => {
-    // `Deno.env.set` is the mechanism, and there is no safe amount of it: the environment is shared
-    // by every invocation in the isolate, so one write is enough to need the lock back.
-    expect(ROUTER).not.toContain("Deno.env.set")
+    // `Deno.env.set` per invocation is the mechanism, and there is no safe amount of it: the
+    // environment is shared by every invocation in the isolate, so one write is enough to need the
+    // lock back.
+    //
     // The one delete is the service-role key's, once at start before any handler is imported, as
-    // the deployed worker does; it is not per invocation.
+    // the deployed worker does. The one set puts that key back when the router unloads, for the
+    // evaluation a --watch reload starts next. Neither is per invocation: both are outside the
+    // request handler, which Deno.serve takes last.
     expect(ROUTER.match(/Deno\.env\.delete\(/g)).toHaveLength(1)
     expect(ROUTER).toContain('Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")')
-    expect(ROUTER.indexOf("Deno.env.delete(")).toBeLessThan(ROUTER.indexOf("Deno.serve("))
+    expect(ROUTER.match(/Deno\.env\.set\(/g)).toHaveLength(1)
+    expect(ROUTER).toContain('Deno.env.set("SUPATYPE_SERVICE_ROLE_KEY", serviceRoleKey)')
+    const serve = ROUTER.indexOf("Deno.serve(")
+    expect(ROUTER.indexOf("Deno.env.delete(")).toBeLessThan(serve)
+    expect(ROUTER.indexOf("Deno.env.set(")).toBeLessThan(serve)
   })
 
   it("passes the call's configuration to the handler instead", () => {

@@ -85,6 +85,7 @@ import { startNativeRealtime } from "../native-realtime.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { nativeMailerAutoconfirmEnv } from "../mailer-autoconfirm.js"
+import { mailerProviderEnv, withoutBlankMailerOverrides } from "../mailer-env.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
 import {
   nativeAuthMailerEnv,
@@ -554,7 +555,8 @@ export function registerDev(program: Command): void {
         ...(config.storage?.provider !== "s3" ? localStorageEnv(stateRoot) : {}),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
-        ...loadDotEnv(cwd),
+        // A blank mailer value init scaffolded into .env does not erase the config's.
+        ...withoutBlankMailerOverrides(loadDotEnv(cwd), mailerProviderEnv(config.email)),
         // After .env: auth.email.enableConfirmations, unless the developer set their own value.
         ...nativeMailerAutoconfirmEnv(cwd, config),
       }

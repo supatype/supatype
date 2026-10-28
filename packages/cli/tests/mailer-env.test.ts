@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { AUTH_VERIFY_PATH, mailerProviderEnv, mailerUrlPathsEnv } from "../src/mailer-env.js"
+import { AUTH_VERIFY_PATH, mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides } from "../src/mailer-env.js"
 import { nativeAuthMailerEnv } from "../src/native-dev-env.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
@@ -91,5 +91,42 @@ describe("nativeAuthMailerEnv", () => {
     expect(env.SUPATYPE_HOOK_SEND_EMAIL_ENABLED).toBe("true")
     expect(env.SUPATYPE_HOOK_SEND_EMAIL_URI).toBe("http://127.0.0.1:54321/internal/v0hooks/send-email")
     expect(env.SUPATYPE_HOOK_SEND_EMAIL_SECRETS).toMatch(/^v1,whsec_/)
+  })
+})
+
+/**
+ * init scaffolds a provider's names into `.env` blank, to be filled in, and native dev lays `.env`
+ * over the config. The blanks used to replace what `email` in supatype.config.ts set, so the server
+ * had no SMTP host or Resend key and fell back to the noop mailer.
+ */
+describe("withoutBlankMailerOverrides", () => {
+  /** The server's mailer environment as native dev builds it: the config's, then `.env`. */
+  function nativeMailer(email: Email, dotEnv: Record<string, string>): Record<string, string> {
+    const fromConfig = mailerProviderEnv(email)
+    return { ...fromConfig, ...withoutBlankMailerOverrides(dotEnv, fromConfig) }
+  }
+
+  it("keeps the config's SMTP settings over the blanks init scaffolds", () => {
+    const smtp = { host: "mail.acme.dev", user: "u", pass: "p" }
+    const dotEnv = { SUPATYPE_SMTP_HOST: "", SUPATYPE_SMTP_PORT: "587", SUPATYPE_SMTP_USER: "", SUPATYPE_SMTP_PASS: " " }
+    expect(nativeMailer({ provider: "smtp", smtp }, dotEnv)).toMatchObject({
+      SUPATYPE_SMTP_HOST: "mail.acme.dev",
+      SUPATYPE_SMTP_PORT: "587",
+      SUPATYPE_SMTP_USER: "u",
+      SUPATYPE_SMTP_PASS: "p",
+    })
+  })
+
+  it("keeps the config's Resend key over a blank one", () => {
+    const env = nativeMailer({ provider: "resend", resend_api_key: "re_1" }, { SUPATYPE_RESEND_API_KEY: "" })
+    expect(env.SUPATYPE_RESEND_API_KEY).toBe("re_1")
+  })
+
+  it("lets a value in .env win, and leaves a blank alone where the config sets nothing", () => {
+    const env = nativeMailer(
+      { provider: "resend", resend_api_key: "re_1" },
+      { SUPATYPE_RESEND_API_KEY: "re_env", SUPATYPE_RESEND_FROM: "", OTHER: "" },
+    )
+    expect(env).toMatchObject({ SUPATYPE_RESEND_API_KEY: "re_env", SUPATYPE_RESEND_FROM: "", OTHER: "" })
   })
 })

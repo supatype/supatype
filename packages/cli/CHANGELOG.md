@@ -58,6 +58,11 @@
 
 ### Bug Fixes
 
+* **dev:** a blank mailer setting in `.env` no longer erases the one `email` in `supatype.config.ts`
+  sets. `init` scaffolds `SUPATYPE_SMTP_HOST=`, `SUPATYPE_RESEND_API_KEY=` and the rest blank, and
+  native `dev` applied `.env` over the config, so a project with its SMTP host or Resend key in the
+  config got the noop mailer and sent nothing. A value in `.env` still wins over the config.
+
 * **app, status, functions serve:** the local gateway address follows `.env`. `app add` printed the
   app URL, `status` the API URL, and `functions serve` gave functions `SUPATYPE_URL`, all on the
   default port 18473 whatever `SUPATYPE_KONG_PORT` said, so after `dev` moved Kong to another port
@@ -84,7 +89,9 @@
   also gave every function the service-role key, in `ctx.serviceRoleKey` and in `Deno.env`, where the
   worker takes the key out of the environment before importing any handler and grants it only to the
   routes `functions.serviceRole` lists, and to hooks. The router now does the same, so a function that
-  relies on the key without being listed fails locally rather than once deployed.
+  relies on the key without being listed fails locally rather than once deployed. The key is still
+  granted after `--watch` reloads the router on a change, including the reload that follows fixing a
+  function that failed to load.
 
 * **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
   server and the control plane were all told `/project/functions` whatever the config said, so a

@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { generateFunctionsRouterSource } from "../src/functions-router-gen.js"
 
@@ -43,8 +43,20 @@ const denoAvailable = spawnSync("deno", ["--version"], { stdio: "ignore", shell:
 const children: ChildProcess[] = []
 const dirs: string[] = []
 
+/**
+ * On Windows `deno` is started through a shell, and killing the shell leaves Deno running and
+ * holding its port, so the whole process tree goes.
+ */
+function stop(child: ChildProcess): void {
+  if (process.platform === "win32" && child.pid !== undefined) {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" })
+  } else {
+    child.kill()
+  }
+}
+
 afterEach(() => {
-  for (const child of children.splice(0)) child.kill()
+  for (const child of children.splice(0)) stop(child)
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
@@ -64,31 +76,67 @@ function project(functions: Record<string, string>): string {
   return routerPath
 }
 
-/** Runs the router under Deno on a free port and resolves with its address, or rejects with its output. */
-function serve(routerPath: string, env: Record<string, string>): Promise<string> {
-  const child = spawn("deno", ["run", "--allow-net", "--allow-env", "--allow-read", routerPath], {
+const LISTENING = /listening on http:\/\/[^:]+:(\d+)/g
+
+/** A router under Deno, and a wait for the `times`-th match of a pattern in what it prints. */
+interface RunningRouter {
+  /** Resolves with the match, or rejects with the output if the router exits or 30s pass first. */
+  printed(pattern: RegExp, times: number): Promise<RegExpMatchArray>
+  /** Its address once it has started `times` times (more than once only under `--watch`). */
+  listening(times: number): Promise<string>
+}
+
+/** Runs the router under Deno on a free port. */
+function startRouter(
+  routerPath: string,
+  env: Record<string, string>,
+  flags: readonly string[] = [],
+): RunningRouter {
+  const child = spawn("deno", ["run", ...flags, "--allow-net", "--allow-env", "--allow-read", routerPath], {
     env: { ...process.env, PORT: "0", ...env },
     shell: process.platform === "win32",
   })
   children.push(child)
   let output = ""
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`router did not start:\n${output}`)), 30_000)
-    const onData = (chunk: Buffer): void => {
-      output += chunk.toString()
-      const port = /listening on http:\/\/[^:]+:(\d+)/.exec(output)?.[1]
-      if (port !== undefined) {
-        clearTimeout(timer)
-        resolve(`http://127.0.0.1:${port}`)
-      }
-    }
-    child.stdout?.on("data", onData)
-    child.stderr?.on("data", onData)
-    child.on("exit", () => {
-      clearTimeout(timer)
-      reject(new Error(`router exited:\n${output}`))
-    })
+  let exited = false
+  const waiters = new Set<() => void>()
+  const onData = (chunk: Buffer): void => {
+    output += chunk.toString()
+    for (const check of waiters) check()
+  }
+  child.stdout?.on("data", onData)
+  child.stderr?.on("data", onData)
+  child.on("exit", () => {
+    exited = true
+    for (const check of waiters) check()
   })
+  const printed = (pattern: RegExp, times: number): Promise<RegExpMatchArray> =>
+    new Promise((resolve, reject) => {
+      const global = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g")
+      const timer = setTimeout(() => {
+        waiters.delete(check)
+        reject(new Error(`router did not print ${pattern} ${times} time(s):\n${output}`))
+      }, 30_000)
+      const check = (): void => {
+        const match = [...output.matchAll(global)][times - 1]
+        if (match === undefined && !exited) return
+        clearTimeout(timer)
+        waiters.delete(check)
+        if (match !== undefined) resolve(match)
+        else reject(new Error(`router exited:\n${output}`))
+      }
+      waiters.add(check)
+      check()
+    })
+  return {
+    printed,
+    listening: async (times) => `http://127.0.0.1:${(await printed(LISTENING, times))[1]}`,
+  }
+}
+
+/** Runs the router once and resolves with its address, or rejects with its output. */
+function serve(routerPath: string, env: Record<string, string>): Promise<string> {
+  return startRouter(routerPath, env).listening(1)
 }
 
 /** What a function reports about the key: whether its module body saw it, and what ctx gave it. */
@@ -97,6 +145,16 @@ const seenAtImport = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null
 export default (_req: Request, ctx: { serviceRoleKey?: string }) =>
   Response.json({ seenAtImport, ctxKey: ctx.serviceRoleKey ?? null, envKey: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null })
 `
+
+const ADMIN_GRANTED = { SUPATYPE_SERVICE_ROLE_KEY: "service-secret", SUPATYPE_SERVICE_ROLE_ROUTES: "admin" }
+
+/** admin, which is listed, gets the key in ctx; hello does not; neither ever finds it in Deno.env. */
+async function expectKeyOnlyForAdmin(base: string): Promise<void> {
+  const admin = await (await fetch(`${base}/functions/v1/admin`)).json()
+  const hello = await (await fetch(`${base}/functions/v1/hello`)).json()
+  expect(admin).toEqual({ seenAtImport: null, ctxKey: "service-secret", envKey: null })
+  expect(hello).toEqual({ seenAtImport: null, ctxKey: null, envKey: null })
+}
 
 describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
   it("serves a function whose only export is a named handler", async () => {
@@ -115,13 +173,25 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
   }, 60_000)
 
   it("withholds the service-role key from the environment and grants it only to listed routes", async () => {
-    const base = await serve(project({ admin: REPORTS_KEY, hello: REPORTS_KEY }), {
-      SUPATYPE_SERVICE_ROLE_KEY: "service-secret",
-      SUPATYPE_SERVICE_ROLE_ROUTES: "admin",
-    })
-    const admin = await (await fetch(`${base}/functions/v1/admin`)).json()
-    const hello = await (await fetch(`${base}/functions/v1/hello`)).json()
-    expect(admin).toEqual({ seenAtImport: null, ctxKey: "service-secret", envKey: null })
-    expect(hello).toEqual({ seenAtImport: null, ctxKey: null, envKey: null })
+    await expectKeyOnlyForAdmin(await serve(project({ admin: REPORTS_KEY, hello: REPORTS_KEY }), ADMIN_GRANTED))
+  }, 60_000)
+
+  // Native dev and functions serve run the router under --watch. A reload evaluates the router again
+  // in the same process, whose environment the first evaluation took the key out of, and with a fresh
+  // globalThis, so nothing the first evaluation kept in JavaScript survives.
+  it("still grants the key after deno run --watch reloads the router", async () => {
+    const routerPath = project({ admin: REPORTS_KEY, hello: REPORTS_KEY })
+    const router = startRouter(routerPath, ADMIN_GRANTED, ["--watch"])
+    await router.listening(1)
+    appendFileSync(routerPath, "\n// changed\n")
+    await expectKeyOnlyForAdmin(await router.listening(2))
+  }, 60_000)
+
+  it("still grants the key once a function that failed to load is fixed under --watch", async () => {
+    const routerPath = project({ admin: `export const other = 1\n`, hello: REPORTS_KEY })
+    const router = startRouter(routerPath, ADMIN_GRANTED, ["--watch"])
+    await router.printed(/neither a default export nor a named "handler"/, 1)
+    writeFileSync(join(dirname(dirname(routerPath)), "functions", "admin", "index.ts"), REPORTS_KEY)
+    await expectKeyOnlyForAdmin(await router.listening(1))
   }, 60_000)
 })
