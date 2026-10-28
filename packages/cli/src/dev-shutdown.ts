@@ -9,6 +9,7 @@ import { endDevSession } from "./dev-session.js"
 import { clearDevSessionLock } from "./dev-session-lock.js"
 import { runDockerCompose } from "./self-host-compose.js"
 import { watchParent, windowsParentOf, type ParentWatch } from "./parent-watch.js"
+import { STOP_SIGNALS } from "./stop-signals.js"
 
 export interface DevComposeShutdownFallback {
   cwd: string
@@ -51,14 +52,9 @@ export function ensureDevShutdownHooks(): void {
   if (hooksRegistered) return
   hooksRegistered = true
 
-  process.on("SIGINT", onSignal)
-  process.on("SIGTERM", onSignal)
-  // A closed terminal: the console window on Windows, a hung-up terminal elsewhere. Unheard, it
-  // killed dev with no shutdown and left the whole stack running (C5).
-  process.on("SIGHUP", onSignal)
-  if (process.platform === "win32") {
-    process.on("SIGBREAK", onSignal)
-  }
+  // SIGHUP included: a closed terminal, unheard, killed dev with no shutdown and left the whole
+  // stack running (C5).
+  for (const signal of STOP_SIGNALS) process.on(signal, onSignal)
   process.on("exit", onProcessExit)
   watchForOrphaning()
 

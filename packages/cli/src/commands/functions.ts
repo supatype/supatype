@@ -272,7 +272,11 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   )
 }
 
-/** Runs the serve's Deno until it stops, ending the command with an error when it failed. */
+/**
+ * Runs the serve's Deno until it stops, then ends the command, with an error when it failed. It
+ * exits on a clean stop too, in the same turn: a Ctrl+C heard once the stop listeners are gone
+ * would kill the CLI without the `exit` that removes the key and router files.
+ */
 async function runDenoServe(denoBin: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): Promise<void> {
   let status: number
   try {
@@ -281,10 +285,8 @@ async function runDenoServe(denoBin: string, args: string[], opts: { cwd: string
     error(`Could not start Deno: ${errorMessage(err)}`)
     process.exit(1)
   }
-  if (status !== 0) {
-    error("Function server exited with errors.")
-    process.exit(status)
-  }
+  if (status !== 0) error("Function server exited with errors.")
+  process.exit(status)
 }
 
 /** The functions under `functionsDir`, listed for the terminal, ending the command when there are none. */

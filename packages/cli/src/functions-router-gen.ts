@@ -13,6 +13,9 @@ import { chmodSync, existsSync, readdirSync, rmSync, statSync, mkdirSync, writeF
 import { FUNCTION_NAME_RULE, isFunctionName } from "@supatype/shared"
 import { fatalError } from "./ui/fatal.js"
 import { uniqueFileToken } from "./unique-file-token.js"
+import { pidAlive } from "./parent-watch.js"
+import { createHash } from "node:crypto"
+import { hostname } from "node:os"
 
 export interface DiscoveredFunctionRoute {
   name: string
@@ -401,45 +404,49 @@ export interface FunctionsServeFiles {
 }
 
 /**
+ * Which machine and system a serve file was written on. A pid is only meaningful there: WSL and
+ * Windows, or a container, can serve one mounted project, and each would read the other's live
+ * pids as dead.
+ */
+const SERVE_HOST_TAG = createHash("sha256").update(`${process.platform}:${hostname()}`).digest("hex").slice(0, 8)
+
+/**
  * Where one `functions serve` keeps its router and key: files of its own, since each removes them
- * when it stops while another may still be serving the same project. `token` carries the pid
- * {@link sweepStaleServeFiles} reads back.
+ * when it stops while another may still be serving the same project. The name carries this host's
+ * tag and, inside `token`, the pid {@link sweepStaleServeFiles} reads back.
  */
 export function functionsServeFiles(
   cwd: string,
   functionsDir: string,
   token: string = uniqueFileToken(),
 ): FunctionsServeFiles {
+  const name = `${SERVE_HOST_TAG}-${token}`
   return {
-    routerPath: join(functionsDir, `.serve-router-${token}.ts`),
-    keyPath: join(pathResolve(cwd, ".supatype"), `functions-serve-key-${token}`),
+    routerPath: join(functionsDir, `.serve-router-${name}.ts`),
+    keyPath: join(pathResolve(cwd, ".supatype"), `functions-serve-key-${name}`),
   }
 }
 
-/** A serve file's name, capturing the pid inside its uniqueFileToken: `<time>-<pid>-<uuid>`. */
-const SERVE_FILE_NAME = /^(?:\.serve-router-|functions-serve-key-)\d+-(\d+)-[0-9a-f-]+(?:\.ts)?$/
+/** A serve file's name: `<host tag>-<time>-<pid>-<uuid>`, capturing the tag and the pid. */
+const SERVE_FILE_NAME = /^(?:\.serve-router-|functions-serve-key-)([0-9a-f]{8})-\d+-(\d+)-[0-9a-f-]+(?:\.ts)?$/
 
 /**
- * Removes the router and key files of serves whose process is gone. One killed outright runs no
- * exit listener, and no later serve shares its file names, so its key would stay on disk for good.
+ * Removes the router and key files of this host's serves whose process is gone. One killed
+ * outright runs no exit listener, and no later serve shares its file names, so its key would stay
+ * on disk for good. A file that cannot go (held open on Windows) is left for a later sweep.
  */
 export function sweepStaleServeFiles(cwd: string, functionsDir: string): void {
   for (const dir of [functionsDir, pathResolve(cwd, ".supatype")]) {
     const names = existsSync(dir) ? readdirSync(dir) : []
     for (const name of names) {
-      const pid = SERVE_FILE_NAME.exec(name)?.[1]
-      if (pid !== undefined && !processRunning(Number(pid))) rmSync(join(dir, name), { force: true })
+      const match = SERVE_FILE_NAME.exec(name)
+      if (match?.[1] !== SERVE_HOST_TAG || pidAlive(Number(match[2]))) continue
+      try {
+        rmSync(join(dir, name), { force: true })
+      } catch {
+        // Left for the next serve to sweep.
+      }
     }
-  }
-}
-
-/** Signal 0 checks a process exists without touching it. EPERM means it exists as someone else's. */
-function processRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err: unknown) {
-    return err instanceof Error && "code" in err && err.code === "EPERM"
   }
 }
 
