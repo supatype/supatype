@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  databaseStateToSchemaScaffold,
   introspectColumnToColumnInfo,
   pgTypeToField,
   pgTypeToModelField,
@@ -196,5 +197,33 @@ describe("identity and generated columns in the scaffold", () => {
     )
     const serial = { name: "n", dataType: "integer", udtName: "int4", nullable: false, default: "nextval('s'::regclass)" }
     expect(field(serial, false)).toBe("n: Int")
+  })
+})
+
+/**
+ * `supatype pull` drafted every uuid `id` as SupatypeAuthUserId, which declares the row's key to be
+ * an auth user's id, so a pulled `orders` table was modelled as one row per user. And a table whose
+ * name the model name does not map back to (`HTTPLog` for a table `http_log` maps to `h_t_t_p_log`)
+ * was pushed back under the derived name, as a new, empty table.
+ */
+describe("databaseStateToSchemaScaffold()", () => {
+  const uuidId = { name: "id", dataType: "uuid", udtName: "uuid", nullable: false }
+  const scaffold = (table: string): string =>
+    databaseStateToSchemaScaffold({ tables: [{ name: table, columns: [uuidId] }] })
+
+  it("drafts a uuid id as UUID, not an auth user's id", () => {
+    const out = scaffold("orders")
+    expect(out).toMatch(/^ {2}id: UUID$/m)
+    expect(out).not.toContain("id: SupatypeAuthUserId")
+  })
+
+  it("names the table when the model name would derive a different one", () => {
+    expect(scaffold("HTTPLog")).toContain('  tableName: "HTTPLog",')
+    expect(scaffold("Orders")).toContain('  tableName: "Orders",')
+  })
+
+  it("leaves tableName out when the model name derives the same table", () => {
+    expect(scaffold("blog_posts")).toContain("export type BlogPosts = Model<{")
+    expect(scaffold("blog_posts")).not.toContain("tableName")
   })
 })
