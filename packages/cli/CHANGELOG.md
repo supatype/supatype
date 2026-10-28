@@ -228,6 +228,9 @@
 * **update:** `supatype update` exits 1 naming each component it could not fetch. A run where every
   download failed ended on "All components are up to date." with exit 0, and a pinned version was
   written into `supatype.config.ts` even when its download had failed.
+* **init:** `supatype init` uses an exported `SUPATYPE_KONG_PORT` as the project's gateway port, in
+  `.env` and in what it prints, and the wizard does not ask for one. It chose its own port, so `.env`
+  and the "API on" line named a port the stack, which binds the shell's, never listened on.
 
 
 ## 0.7.0
