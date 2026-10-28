@@ -34,6 +34,8 @@ import {
   nativeDataDir,
   nativeDbPort,
   nativeRealtimePort,
+  nativeDenoPort,
+  DENO_PORT_ENV,
   nativeStateRoot,
   REALTIME_PORT_ENV,
   resolveRuntimeProvider,
@@ -127,9 +129,11 @@ interface NativeDevPorts {
   server: number
   postgrest: number
   realtime: number
+  /** Where the server starts Deno, checked only for a project with functions: nothing binds it otherwise. */
+  deno?: number
 }
 
-const NATIVE_SERVICES = ["postgres", "server", "postgrest", "realtime"] as const satisfies readonly (keyof NativeDevPorts)[]
+const NATIVE_SERVICES = ["postgres", "server", "postgrest", "realtime", "deno"] as const satisfies readonly (keyof NativeDevPorts)[]
 
 export const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; move: string }> = {
   postgres: {
@@ -148,12 +152,17 @@ export const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; m
     holder: "Another realtime service, or any app on this port, may be running.",
     move: `Move this project's realtime port with ${REALTIME_PORT_ENV} in .env, or server.realtimePort in supatype.config.ts.`,
   },
+  deno: {
+    holder: "Another Deno process, or any app on this port, may be running.",
+    move: `Move the port functions run on with ${DENO_PORT_ENV} in .env.`,
+  },
 }
 
-async function assertNativeDevPortsFree(ports: NativeDevPorts): Promise<void> {
+/** Stop before anything starts when a port native dev binds is taken. Exported for tests. */
+export async function assertNativeDevPortsFree(ports: NativeDevPorts): Promise<void> {
   for (const service of NATIVE_SERVICES) {
     const port = ports[service]
-    if (!(await isPortInUse(port))) continue
+    if (port === undefined || !(await isPortInUse(port))) continue
     const { holder, move } = NATIVE_PORT_HINTS[service]
     fatalError(`Port ${port} is already in use.`, [holder, `Check: ${portCheckCommand(port)}`, move], {
       brand: { intro: "Local development" },
@@ -232,13 +241,16 @@ export function registerDev(program: Command): void {
       const postgrestPort = String(config.server.postgrestPort ?? 3001)
       const pgPort = nativeDbPort(config, cwd)
       const realtimePort = String(nativeRealtimePort(config, cwd))
+      const denoPort = nativeDenoPort(cwd)
 
       if (provider !== "docker") {
+        const hasFunctions = functionsPathCandidatesFromProject(config, cwd).some((dir) => existsSync(dir))
         await assertNativeDevPortsFree({
           postgres: pgPort,
           server: Number(serverPort),
           postgrest: Number(postgrestPort),
           realtime: Number(realtimePort),
+          ...(hasFunctions && { deno: denoPort }),
         })
         // Before anything is generated: a missing password would otherwise be replaced in .env
         // with a new one the existing cluster has never heard of.
@@ -522,6 +534,8 @@ export function registerDev(program: Command): void {
           databaseUrl: dbURL,
         }),
         SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
+        // The port checked above, so one set only in .env reaches the server as well.
+        [DENO_PORT_ENV]: String(denoPort),
         ...(denoFunctionsDir !== "" ? { SUPATYPE_SHARED_ENV_FILE: resolve(denoFunctionsDir, ".env.local") } : {}),
         ...(denoBinPath !== undefined ? { SUPATYPE_DENO_PATH: denoBinPath } : {}),
         ...(denoServeScriptAbs !== ""

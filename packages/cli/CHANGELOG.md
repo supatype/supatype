@@ -221,6 +221,10 @@
 * **dev:** native dev routes functions to the Deno the server runs. It kept the
   `functions-worker:8001` URL `init` writes for the compose stack, so every function answered 502
   with "lookup functions-worker: no such host".
+* **dev:** native dev checks the port functions run on (8001, or `SUPATYPE_DENO_PORT`) before it
+  starts, as it does Postgres, the server, PostgREST and realtime, and stops naming the variable
+  that moves it. With the port taken, Deno failed after the stack was up and every function
+  answered 502. A `SUPATYPE_DENO_PORT` in `.env` now reaches the server, not only an exported one.
 
 
 ## 0.7.0
