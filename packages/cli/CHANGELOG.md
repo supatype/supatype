@@ -58,6 +58,13 @@
 
 ### Bug Fixes
 
+* **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
+  server and the control plane were all told `/project/functions` whatever the config said, so a
+  project keeping its functions elsewhere had every one answer 404; hooks were likewise fixed at
+  `/project/hooks` rather than following `supatype.root`. A `functions.path` or `supatype.root`
+  outside the project directory is refused with a message saying why, since the stack mounts only
+  the project. `functions deploy` names the real directory instead of a fixed `functions/`.
+
 * **dev, self-host, init:** Resend and SES settings reach the auth server. Native `dev` sent them as
   `RESEND_API_KEY`, `RESEND_FROM` and `SES_FROM`, which the server does not read, docker `dev` sent
   none of them, and the self-host compose file had no way to pass them, so `email.provider: "resend"`

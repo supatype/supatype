@@ -358,7 +358,7 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
 
   const { selfHostComposePaths } = await import("../self-host-compose.js")
   if (existsSync(selfHostComposePaths(cwd).composePath)) {
-    deploySelfHosted(cwd, fns, FUNCTIONS_WORKER_RESTART_COMMAND)
+    deploySelfHosted(cwd, resolveFunctionsDir(cwd, "read"), fns, FUNCTIONS_WORKER_RESTART_COMMAND)
     return
   }
 
@@ -371,9 +371,15 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
  */
 const FUNCTIONS_WORKER_RESTART_COMMAND = "supatype self-host compose restart functions-worker"
 
-function deploySelfHosted(cwd: string, fns: DiscoveredFunctionRoute[], restartCommand: string): void {
+function deploySelfHosted(
+  cwd: string,
+  functionsDir: string,
+  fns: DiscoveredFunctionRoute[],
+  restartCommand: string,
+): void {
   info("Self-host Compose deployment.")
-  plain("Functions are served from your project functions/ directory (no bundle step).\n")
+  // The directory functions.path names, which the stack mounts; it is not always functions/.
+  plain(`Functions are served from ${relativeFunctionsDir(cwd, functionsDir)}/ in your project (no bundle step).\n`)
 
   for (const fn of fns) {
     plain(`  ${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)

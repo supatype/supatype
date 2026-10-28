@@ -129,3 +129,51 @@ describe("self-host compose bind mounts (SA3)", () => {
     expect(compose).toMatch(new RegExp(`^name: ${composeProjectName(config.project.name)}$`, "m"))
   })
 })
+
+/** Every `NAME: value` line for one variable across the rendered file. */
+function envValues(compose: string, name: string): string[] {
+  return compose
+    .split("\n")
+    .map((line) => new RegExp(`^\\s+${name}: (.+)$`).exec(line)?.[1]?.trim())
+    .filter((value): value is string => value !== undefined)
+}
+
+/**
+ * The stack mounts the project at /project, and the worker, the server and the control plane were
+ * all told the functions were at /project/functions whatever `functions.path` said, so a project
+ * keeping them in `api/functions` had every function answer 404.
+ */
+describe("self-host compose functions directory", () => {
+  it("points the worker, server and control plane at functions.path inside the project", () => {
+    const cwd = projectDir()
+    const out = writeSelfHostCompose(cwd, { ...config, functions: { path: "api/functions" } })
+    const compose = readFileSync(out.composePath, "utf8")
+
+    const values = [
+      ...envValues(compose, "SUPATYPE_FUNCTIONS_ROOT"),
+      ...envValues(compose, "SUPATYPE_DENO_FUNCTIONS_DIR"),
+    ]
+    expect(values.length).toBeGreaterThanOrEqual(4)
+    for (const value of values) expect(value).toBe("/project/api/functions")
+  })
+
+  it("keeps /project/functions when functions.path is unset", () => {
+    const out = writeSelfHostCompose(projectDir(), config)
+    const compose = readFileSync(out.composePath, "utf8")
+    for (const value of envValues(compose, "SUPATYPE_FUNCTIONS_ROOT")) expect(value).toBe("/project/functions")
+  })
+
+  it("follows the project root, where the hooks are too", () => {
+    const cwd = projectDir()
+    const out = writeSelfHostCompose(cwd, { ...config, supatype: { root: "backend" } })
+    const compose = readFileSync(out.composePath, "utf8")
+    for (const value of envValues(compose, "SUPATYPE_FUNCTIONS_ROOT")) expect(value).toBe("/project/backend/functions")
+    expect(envValues(compose, "SUPATYPE_HOOKS_ROOT")).toEqual(["/project/backend/hooks"])
+  })
+
+  it("refuses a functions.path outside the project, which the stack cannot mount", () => {
+    expect(() => writeSelfHostCompose(projectDir(), { ...config, functions: { path: "../shared/functions" } })).toThrow(
+      /functions\.path.*outside the project directory/,
+    )
+  })
+})
