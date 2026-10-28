@@ -218,6 +218,9 @@
 * **dev, self-host:** a project moved from native dev to Docker routes realtime and functions to the
   stack's own services. The compose render left native's `realtime_url` (a host port) in
   `.supatype/manifest.json`, so every realtime request answered 502.
+* **dev:** native dev routes functions to the Deno the server runs. It kept the
+  `functions-worker:8001` URL `init` writes for the compose stack, so every function answered 502
+  with "lookup functions-worker: no such host".
 
 
 ## 0.7.0
