@@ -10,6 +10,7 @@ import { checkReadAccess } from "../middleware/access-control.js"
 import type { JwtPayload } from "../auth.js"
 import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
 import { applyCorsHeaders } from "../middleware/cors.js"
+import { servesAnonymously } from "../bucket-access.js"
 import { isNumber, isShape, isString, isUnknown, optional } from "../json.js"
 
 // ─── MIME type inference ─────────────────────────────────────────────────────────
@@ -216,7 +217,7 @@ export async function downloadPublic(ctx: RequestContext): Promise<void> {
   // Apply bucket-specific CORS headers (task 46)
   applyCorsHeaders(ctx.res, bucket)
 
-  if (!bucket.public && bucket.access_mode !== "public") {
+  if (!servesAnonymously(bucket)) {
     sendJson(ctx.res, 403, { error: "Bucket is not public" })
     return
   }

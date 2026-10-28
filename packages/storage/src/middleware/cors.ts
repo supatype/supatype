@@ -8,6 +8,7 @@
 
 import type { ServerResponse } from "node:http"
 import type { BucketRow } from "../db.js"
+import { servesAnonymously } from "../bucket-access.js"
 
 /** Standard CORS headers for public bucket responses. */
 const PUBLIC_CORS_HEADERS: Record<string, string> = {
@@ -27,7 +28,7 @@ const PRIVATE_CORS_HEADERS: Record<string, string> = {
 /**
  * Get the appropriate CORS headers for a bucket.
  *
- * - Public buckets (access_mode: 'public' or public: true): full CORS with `*` origin
+ * - Public buckets (access_mode: 'public'): full CORS with `*` origin
  * - Private/custom buckets: limited CORS (no Access-Control-Allow-Origin)
  */
 export function getCorsHeaders(bucket: BucketRow | null): Record<string, string> {
@@ -36,8 +37,7 @@ export function getCorsHeaders(bucket: BucketRow | null): Record<string, string>
     return PUBLIC_CORS_HEADERS
   }
 
-  const isPublicBucket = bucket.public || bucket.access_mode === "public"
-  return isPublicBucket ? PUBLIC_CORS_HEADERS : PRIVATE_CORS_HEADERS
+  return servesAnonymously(bucket) ? PUBLIC_CORS_HEADERS : PRIVATE_CORS_HEADERS
 }
 
 /**
