@@ -1,10 +1,17 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { dockerDbUrl, dockerPgLoopbackDbUrl } from "../src/docker-postgres.js"
 import { devDatabaseUrl, generateJwtSecret } from "../src/local-secrets.js"
-import { composePasswordProblems } from "../src/url-safe-passwords.js"
+import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { composePasswordProblems, warnUrlUnsafeComposePasswords } from "../src/url-safe-passwords.js"
+
+const warned = vi.hoisted(() => vi.fn<(message: string) => void>())
+vi.mock("../src/ui/messages.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/ui/messages.js")>()),
+  warn: warned,
+}))
 
 /**
  * A database password goes into a connection URL, where `@`, `:`, `/`, `#` and `%` are syntax.
@@ -72,5 +79,37 @@ describe("composePasswordProblems", () => {
 
   it("ignores POSTGRES_PASSWORD with an external database, whose URL is the operator's", () => {
     expect(composePasswordProblems(env({ POSTGRES_PASSWORD: "a@b" }), true)).toEqual([])
+  })
+})
+
+describe("warnUrlUnsafeComposePasswords", () => {
+  // push, diff and dev's recovery start only the database, so they warn where up and dev refuse.
+  const config: SupatypeProjectConfig = {
+    project: { name: "acme" },
+    database: { provider: "docker" },
+    server: { mode: "dev" },
+    app: { mode: "none" },
+  }
+
+  function warningsFor(envText: string): string[] {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-url-warn-"))
+    warned.mockClear()
+    try {
+      writeFileSync(join(dir, ".env"), envText)
+      warnUrlUnsafeComposePasswords(dir, config)
+      return warned.mock.calls.map(([message]) => message)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it("names the password and the fix, and carries on", () => {
+    const said = warningsFor("POSTGRES_PASSWORD=a@b\n")
+    expect(said[0]).toContain('POSTGRES_PASSWORD in .env contains "@"')
+    expect(said.join("\n")).toContain("openssl rand -hex 24")
+  })
+
+  it("says nothing when every password is URL-safe", () => {
+    expect(warningsFor("POSTGRES_PASSWORD=abc\n")).toEqual([])
   })
 })

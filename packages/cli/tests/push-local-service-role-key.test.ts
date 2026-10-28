@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { localServiceRoleKey } from "../src/commands/push.js"
-import { verifyJwt } from "../src/jwt.js"
+import { shellServiceRoleKey } from "../src/dev-api-keys.js"
+import { signJwt, verifyJwt } from "../src/jwt.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 /**
@@ -44,5 +45,31 @@ describe("the service-role key push uses on a native dev stack", () => {
     const key = localServiceRoleKey(nativeConfig) ?? ""
     expect(verifyJwt(key, SECRET)?.["role"]).toBe("service_role")
     expect(verifyJwt(key, published)).toBeNull()
+  })
+})
+
+describe("a service-role key exported in the shell", () => {
+  // Compose runs without the shell's SERVICE_ROLE_KEY once .env holds a JWT_SECRET, so a shell key
+  // signed with another secret is one the stack refuses.
+  const shellKey = signJwt({ iss: "supatype", role: "service_role" }, published)
+
+  it("is passed over for .env's once .env holds the secret the stack runs with", () => {
+    vi.stubEnv("SERVICE_ROLE_KEY", shellKey)
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${SECRET}\n`)
+    const key = localServiceRoleKey(nativeConfig) ?? ""
+    expect(verifyJwt(key, SECRET)?.["role"]).toBe("service_role")
+    expect(shellServiceRoleKey(dir)).toBeUndefined()
+  })
+
+  it("is the one sent while .env holds no secret, since compose then passes it to the stack", () => {
+    vi.stubEnv("SERVICE_ROLE_KEY", shellKey)
+    writeFileSync(join(dir, ".env"), "")
+    expect(localServiceRoleKey(nativeConfig)).toBe(shellKey)
+  })
+
+  it("is taken as given under SUPATYPE_SERVICE_ROLE_KEY, which compose never reads", () => {
+    vi.stubEnv("SUPATYPE_SERVICE_ROLE_KEY", "the-cli-own-key")
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${SECRET}\n`)
+    expect(localServiceRoleKey(nativeConfig)).toBe("the-cli-own-key")
   })
 })

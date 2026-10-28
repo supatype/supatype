@@ -53,11 +53,18 @@ describe("the environment docker compose runs with", () => {
     for (const name of NAMES) expect(env[name]).toBeUndefined()
   })
 
-  it("keeps a shell value .env does not define, or leaves blank", () => {
+  it("leaves out the shell's keys once .env holds a JWT_SECRET, even while its own are blank", () => {
+    // A shell key is signed with some other secret, which PostgREST, on .env's, would refuse.
     writeFileSync(join(dir, ".env"), "JWT_SECRET=from-env-file\nANON_KEY=\n")
     const env = composeEnv()
-    expect(env["JWT_SECRET"]).toBeUndefined()
-    expect(env["ANON_KEY"]).toBe("shell-ANON_KEY")
+    for (const name of NAMES) expect(env[name]).toBeUndefined()
+  })
+
+  it("keeps the shell's secret and keys .env neither defines nor signs", () => {
+    writeFileSync(join(dir, ".env"), "ANON_KEY=a\nSERVICE_ROLE_KEY=\n")
+    const env = composeEnv()
+    expect(env["ANON_KEY"]).toBeUndefined()
+    expect(env["JWT_SECRET"]).toBe("shell-JWT_SECRET")
     expect(env["SERVICE_ROLE_KEY"]).toBe("shell-SERVICE_ROLE_KEY")
   })
 })

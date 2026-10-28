@@ -94,6 +94,25 @@ export function devJwtSecret(cwd: string): string {
   return secret
 }
 
+/**
+ * The names compose would take from the shell ahead of `--env-file`, where the CLI wants `.env`'s:
+ * the keys in `.env` are signed with its JWT_SECRET, so a different one from the shell would start
+ * the stack verifying with a secret those keys do not match, and refuse every request.
+ */
+export const ENV_FILE_OVER_SHELL = ["JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY"] as const
+
+/**
+ * Whether the stack runs with `.env`'s `name` rather than the shell's. Compose is run without the
+ * shell's copy when `.env` defines the name, and without all three once `.env` holds a JWT_SECRET:
+ * a shell key is signed with some other secret, even while `.env`'s own key is still blank.
+ */
+export function envFileOverridesShell(
+  env: Record<string, string>,
+  name: (typeof ENV_FILE_OVER_SHELL)[number],
+): boolean {
+  return (env[name] ?? "") !== "" || (env["JWT_SECRET"] ?? "") !== ""
+}
+
 /** A JWT secret given to a run rather than read from `.env`, with where it came from. */
 export interface GivenJwtSecret {
   value: string

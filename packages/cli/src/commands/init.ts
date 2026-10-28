@@ -669,7 +669,6 @@ function writeKeys(dir: string): boolean {
     warn(`Could not write keys: ${keys.reason} Run \`supatype keys\` in the project once that is fixed.`)
     return false
   }
-  if (keys.warning !== undefined) warn(keys.warning)
   return true
 }
 

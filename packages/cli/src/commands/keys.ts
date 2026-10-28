@@ -119,9 +119,7 @@ function requireEnvJwtSecret(
  * `--print` never makes one up: a secret it printed would not be the one a later write generates.
  */
 function printKeys(cwd: string, opts: KeysOptions, expYears: number, hasEnv: boolean): void {
-  const fromEnvFile = readEnvValue(cwd, "JWT_SECRET", "") || undefined
-  // `.env`'s ahead of the shell's, as when writing: it is the one the stack verifies with.
-  const known = opts.secret ?? fromEnvFile ?? givenJwtSecret()?.value
+  const known = printedKeysSecret(cwd, opts.secret)
   if (known === undefined && opts.print === true) {
     error("No JWT_SECRET to sign the keys with: none in .env, --secret or the environment.")
     plain(
@@ -143,6 +141,20 @@ function printKeys(cwd: string, opts: KeysOptions, expYears: number, hasEnv: boo
       : "\nCreate a .env here and re-run `supatype keys` to write them into it, or add these lines yourself. " +
           "Do not commit .env to source control.",
   )
+}
+
+/**
+ * The secret printed keys are signed with: `--secret`, else `.env`'s ahead of the shell's, as when
+ * writing, since `.env`'s is the one the stack verifies with. Refused when the REST API could not
+ * start with it, as a written one is: printed keys end up in a `.env` all the same.
+ */
+function printedKeysSecret(cwd: string, flag: string | undefined): string | undefined {
+  const fromEnvFile = readEnvValue(cwd, "JWT_SECRET", "")
+  const given = givenJwtSecret(flag)
+  const known =
+    given?.fromFlag !== true && fromEnvFile !== "" ? { value: fromEnvFile, source: "JWT_SECRET in .env" } : given
+  if (known !== undefined) requireUsableJwtSecret(known.value, known.source)
+  return known?.value
 }
 
 /**
@@ -256,12 +268,15 @@ export function signKeyPair(
 
 /** `init`'s keys, or why there are none. Never exits: init is mid-wizard and reports it itself. */
 export type GeneratedKeys =
-  | { ok: true; anonKey: string; serviceKey: string; warning?: string }
+  | { ok: true; anonKey: string; serviceKey: string }
   | { ok: false; reason: string }
 
 /**
  * `init`'s keys: signed with the JWT_SECRET `dir`'s .env holds, and written over every name
  * {@link anonKeyEnvUpdates} owns in that .env, in place.
+ *
+ * Nothing is said about a shell JWT_SECRET that differs: init has just written `.env`'s from the
+ * shell's, so it differs only when the shell's was unusable, and init said so when it wrote it.
  */
 export function generateAndWriteKeys(dir: string, expYears = 10): GeneratedKeys {
   if (!existsSync(resolve(dir, ".env"))) return { ok: false, reason: "the project has no .env." }
@@ -270,7 +285,7 @@ export function generateAndWriteKeys(dir: string, expYears = 10): GeneratedKeys 
   if (!resolved.ok) return { ok: false, reason: resolved.problem }
   const keys = signKeyPair(resolved.secret, expYears)
   writeKeysToEnv(dir, keys, true, { env, secret: resolved.write })
-  return { ok: true, ...keys, ...(resolved.warning !== undefined && { warning: resolved.warning }) }
+  return { ok: true, ...keys }
 }
 
 /** What `self-host compose up` filled in `.env`. */

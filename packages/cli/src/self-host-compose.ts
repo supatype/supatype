@@ -26,8 +26,10 @@ import { composeAuthProviderEnv } from "./auth-providers.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
+  ENV_FILE_OVER_SHELL,
   SQL_EDITOR_PASSWORD_ENV,
   ensureControlPlaneSecret,
+  envFileOverridesShell,
 } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
@@ -1364,8 +1366,9 @@ export function writeSelfHostCompose(
   config: SupatypeProjectConfig,
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
-  // No URL-unsafe password check here: `supatype update`, push, diff and the dev watcher write this
-  // file too, and none of them starts containers. The commands that do check before they start.
+  // No URL-unsafe password check here: `supatype update` and the dev watcher write this file too,
+  // and start nothing. up, render, restart and dev refuse before they start. push, diff and dev's
+  // recovery only start the database, so they warn (startComposeDatabase in dev-compose.ts).
   assertExternalUrlMatchesEnv(cwd, config)
   assertBundledDbUser(cwd, config)
   const tier = resolveFieldMaskingTier(cwd, config, options)
@@ -1483,19 +1486,12 @@ export function runDockerCompose(
   return result.status ?? 1
 }
 
-/**
- * The names compose would take from the shell ahead of `--env-file`, where the CLI wants `.env`'s:
- * the keys in `.env` are signed with its JWT_SECRET, so a different one from the shell would start
- * the stack verifying with a secret those keys do not match, and refuse every request.
- */
-const ENV_FILE_OVER_SHELL = ["JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY"] as const
-
-/** The environment compose runs with: the CLI's, less the names `.env` defines from the list above. */
+/** The environment compose runs with: the CLI's, less the shell's keys `.env` overrides. */
 function composeProcessEnv(projectRoot: string, quiet: boolean): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...(quiet && { COMPOSE_PROGRESS: "quiet" }) }
   const fromFile = readEnvFile(projectRoot)
   for (const name of ENV_FILE_OVER_SHELL) {
-    if ((fromFile[name] ?? "") !== "") delete env[name]
+    if (envFileOverridesShell(fromFile, name)) delete env[name]
   }
   return env
 }

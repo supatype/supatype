@@ -266,12 +266,15 @@ describe("the secret init signs its keys with", () => {
     ["holding a space", "a secret long enough to use but with spaces"],
   ])("is generated instead of a shell JWT_SECRET %s", (_case, shell) => {
     process.env["JWT_SECRET"] = shell
-    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     scaffold(dir, defaultScaffoldOptions("acme"))
 
     const secret = readEnvFile(dir)["JWT_SECRET"] ?? ""
     expect(secret).not.toBe(shell)
     expect(secret).toMatch(/^[A-Za-z0-9_-]{64}$/)
+    // Said once, when the secret was generated: the keys step has nothing to add about it.
+    expect(warned).toHaveBeenCalledTimes(1)
+    expect(generateAndWriteKeys(dir)).not.toHaveProperty("warning")
   })
 })
 

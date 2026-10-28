@@ -23,7 +23,7 @@ import type { SchemaSourcesPayload } from "./schema-sources.js"
 import type { AppliedRenameRecord } from "./rename-journal.js"
 import { pushAuditFields } from "./push-audit.js"
 import { resolveHostDatabaseUrl } from "./host-database.js"
-import { configuredServiceRoleKey } from "./dev-api-keys.js"
+import { configuredServiceRoleKey, shellServiceRoleKey } from "./dev-api-keys.js"
 import {
   pgSchema,
   resolveRuntimeProvider,
@@ -93,14 +93,6 @@ export interface DeployTarget {
 
 export function loadLocalEnvironmentFile(cwd: string): LocalEnvironment | null {
   return loadLocalEnvironment(cwd)
-}
-
-function readServiceRoleKey(cwd: string): string | undefined {
-  return process.env["SERVICE_ROLE_KEY"] ?? process.env["SUPATYPE_SERVICE_ROLE_KEY"]
-}
-
-function resolveLocalToken(cwd: string): string | undefined {
-  return readServiceRoleKey(cwd)
 }
 
 export function loadBranchContext(cwd: string): BranchContext | null {
@@ -173,7 +165,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
         projectRef: localEnv.projectRef,
         apiBaseUrl: localEnv.apiUrl.replace(/\/$/, ""),
         apiPrefix: "/platform/v1",
-        token: resolveLocalToken(cwd),
+        token: shellServiceRoleKey(cwd),
         link: null,
         databaseUrl: hostDatabaseUrl(cwd, config, flags.connection),
       }

@@ -4,7 +4,7 @@
 
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { signJwt, verifyJwt } from "./jwt.js"
-import { devJwtSecret } from "./local-secrets.js"
+import { devJwtSecret, envFileOverridesShell } from "./local-secrets.js"
 
 /** Ten years, as the keys have always been minted. */
 const KEY_LIFETIME_SECONDS = 315_360_000
@@ -47,6 +47,20 @@ export function configuredServiceRoleKey(cwd: string): string | undefined {
     readEnvValue(cwd, "SUPATYPE_SERVICE_ROLE_KEY", "").trim() ||
     readEnvValue(cwd, "SERVICE_ROLE_KEY", "").trim()
   return key === "" ? undefined : key
+}
+
+/**
+ * A service-role key the shell exported for the local stack, as that stack would accept it, or
+ * undefined when the shell has none. `SUPATYPE_SERVICE_ROLE_KEY` is the CLI's own and taken as
+ * given. A shell `SERVICE_ROLE_KEY` reaches the stack only while `.env` does not override it
+ * (self-host-compose.ts), so once it does, `.env`'s key is the one sent instead.
+ */
+export function shellServiceRoleKey(cwd: string): string | undefined {
+  const own = process.env["SUPATYPE_SERVICE_ROLE_KEY"]
+  if (own) return own
+  const fromShell = process.env["SERVICE_ROLE_KEY"]
+  if (!fromShell) return undefined
+  return envFileOverridesShell(readEnvFile(cwd), "SERVICE_ROLE_KEY") ? configuredServiceRoleKey(cwd) : fromShell
 }
 
 function keptOrSigned(existing: string | undefined, role: string, secret: string): string {

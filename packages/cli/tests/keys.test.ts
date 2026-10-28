@@ -286,6 +286,20 @@ describe("supatype keys (CLI subprocess)", () => {
       expect(said).not.toMatch(/^(JWT_SECRET|ANON_KEY)=/m)
       expect(envFile()).toBe("ANON_KEY=\n")
     })
+
+    it.each([
+      ["--secret", ["--secret", "short123"], "", "--secret is 8 characters"],
+      [".env's", [], "JWT_SECRET=short123\n", "JWT_SECRET in .env is 8 characters"],
+    ])("--print refuses to sign with %s secret when the REST API could not start with it", (_, args, env, why) => {
+      writeFileSync(join(tmpDir, ".env"), env, "utf8")
+      const { exitCode, stdout, stderr } = runCli(["keys", "--print", ...args], {
+        cwd: tmpDir,
+        env: { JWT_SECRET: undefined },
+      })
+      expect(exitCode).toBe(1)
+      expect(stdout + stderr).toContain(why)
+      expect(stdout).not.toMatch(/^ANON_KEY=/m)
+    })
   })
 
   it("keys --help shows --secret and --exp-years options", () => {

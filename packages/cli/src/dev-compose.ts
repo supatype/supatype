@@ -28,6 +28,7 @@ import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
 import { rowCacheChangeNote, syncRowCacheEnv } from "./model-cache.js"
 import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { devApiKeys } from "./dev-api-keys.js"
+import { warnUrlUnsafeComposePasswords } from "./url-safe-passwords.js"
 import { astRelatesToAuthUsers } from "./byo-preflight.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { applyForThisRun, splitShellPortUpdates } from "./shell-ports.js"
@@ -308,6 +309,10 @@ async function resolveKongPort(cwd: string, composeProject?: string): Promise<nu
  * already running, and its readiness is the operator's, `supatype db check` is what reports on it.
  * Four call sites did this inline, so an external project hit `compose up -d db` against a compose
  * file that deliberately has no `db`.
+ *
+ * Warns rather than refuses about a URL-unsafe password. dev has refused before it gets here, and
+ * push and diff are not stopped over a database that starts either way: the warning names the
+ * cause before any connection failure it leads to.
  */
 async function startComposeDatabase(
   config: SupatypeProjectConfig,
@@ -319,6 +324,7 @@ async function startComposeDatabase(
   onFailure?: () => void,
 ): Promise<void> {
   if (usesExternalDatabase(config)) return
+  warnUrlUnsafeComposePasswords(cwd, config)
 
   const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
     quiet: true,

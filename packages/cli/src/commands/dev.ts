@@ -20,7 +20,7 @@ import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, relative, resolve } from "node:path"
-import { parseEnvText } from "../env-file.js"
+import { hasEnvValue, parseEnvText } from "../env-file.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
@@ -270,10 +270,12 @@ export function registerDev(program: Command): void {
       // Both providers, before anything starts. A project without one gets one in .env here (the
       // shell's when usable, else generated), which every later step signs and validates with.
       // Compose is run without a shell JWT_SECRET that differs from it (self-host-compose.ts), so
-      // that one is only warned about.
+      // that one is only warned about, and only when .env already had a secret: one written just
+      // now was the shell's, or devJwtSecret has already said why it was not.
+      const hadJwtSecret = hasEnvValue(cwd, "JWT_SECRET")
       const jwtSecret = devJwtSecret(cwd)
       requireUsableJwtSecret(jwtSecret)
-      const ignored = ignoredJwtSecretWarning(jwtSecret, givenJwtSecret())
+      const ignored = hadJwtSecret ? ignoredJwtSecretWarning(jwtSecret, givenJwtSecret()) : undefined
       if (ignored !== undefined) console.warn(`[supatype] ${ignored}`)
 
       if (provider === "docker") {
