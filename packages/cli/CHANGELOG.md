@@ -215,6 +215,9 @@
   port, and the URL was reconciled against `.env` alone, so seeds and host-side commands reached a
   port nothing listened on. The shell's port is the run's: the URL changes for that run and `.env`
   keeps its own.
+* **dev, self-host:** a project moved from native dev to Docker routes realtime and functions to the
+  stack's own services. The compose render left native's `realtime_url` (a host port) in
+  `.supatype/manifest.json`, so every realtime request answered 502.
 
 
 ## 0.7.0
