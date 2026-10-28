@@ -155,6 +155,12 @@ describe("a functions worker refusal", () => {
     expect(error).toMatchObject({ code: "function_error", message: "boom", status: 500 })
   })
 
+  it("keeps the worker's code when the thrown error had no message", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ error: "function_error", message: "" }, 500))
+    const { error } = await client().functions.invoke("fn")
+    expect(error).toMatchObject({ code: "function_error", status: 500 })
+  })
+
   it("prefers a handler's own `code` over `error`", async () => {
     vi.stubGlobal("fetch", fetchReturning({ code: "out_of_stock", error: "conflict", message: "gone" }, 409))
     const { error } = await client().functions.invoke("fn")

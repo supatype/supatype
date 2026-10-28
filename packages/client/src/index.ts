@@ -398,7 +398,7 @@ function isDeclaredReturn<T>(value: unknown): value is T {
  * (`{ error: "Email already taken" }`) and is the message.
  */
 function functionError(body: Record<string, unknown>, status: number): SupatypeError {
-  const workerCode = isString(body["message"]) && body["message"] !== "" ? body["error"] : undefined
+  const workerCode = isString(body["message"]) ? body["error"] : undefined
   const code = isString(body["code"]) ? body["code"] : isString(workerCode) ? workerCode : undefined
   return {
     message: refusalText(body) ?? `Function returned ${status}`,
