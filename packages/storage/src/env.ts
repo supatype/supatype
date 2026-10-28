@@ -19,6 +19,21 @@ function projectTier(): (typeof PROJECT_TIERS)[number] {
   return tier
 }
 
+/**
+ * A byte limit read from the environment, refused at start when it is not a whole number. -1 is
+ * unlimited. Unset is `undefined`, so the limit falls to the tier's own: a deployment that sets
+ * nothing gets its tier's limits, and one that sets -1 gets none.
+ */
+function byteLimit(key: string): number | undefined {
+  const raw = process.env[key]
+  if (raw === undefined) return undefined
+  const bytes = Number(raw)
+  if (raw.trim() === "" || !Number.isInteger(bytes) || bytes < -1) {
+    throw new Error(`${key} must be a whole number of bytes, or -1 for unlimited, got "${raw}"`)
+  }
+  return bytes
+}
+
 export const config = {
   /** Postgres connection string for the storage metadata tables. */
   databaseUrl: env(
@@ -59,8 +74,8 @@ export const config = {
    */
   s3PublicUrl: env("S3_PUBLIC_URL", env("S3_ENDPOINT", "http://localhost:8333")),
 
-  /** Maximum upload size in bytes (default 50 MB). */
-  maxUploadSize: parseInt(env("MAX_UPLOAD_SIZE", String(50 * 1024 * 1024)), 10),
+  /** Per-file ceiling (bytes) when the tier sets none (default 50 MB). -1 = unlimited. */
+  maxUploadSize: byteLimit("MAX_UPLOAD_SIZE") ?? 50 * 1024 * 1024,
 
   /** Transform cache TTL in seconds (default 1 hour). */
   transformCacheTtl: parseInt(env("TRANSFORM_CACHE_TTL", "3600"), 10),
@@ -68,11 +83,11 @@ export const config = {
   /** Project tier: injected at deploy time for per-file and quota enforcement. */
   projectTier: projectTier(),
 
-  /** Per-file upload limit for the current tier (bytes). Overrides maxUploadSize when set. -1 = unlimited. */
-  tierMaxUploadSize: parseInt(env("TIER_MAX_UPLOAD_SIZE", String(50 * 1024 * 1024)), 10),
+  /** Per-file upload limit (bytes). Unset = the tier's. -1 = none, leaving maxUploadSize. */
+  tierMaxUploadSize: byteLimit("TIER_MAX_UPLOAD_SIZE"),
 
-  /** Total storage quota for this project (bytes). -1 = unlimited. */
-  storageQuota: parseInt(env("STORAGE_QUOTA", String(1024 * 1024 * 1024)), 10),
+  /** Total storage quota for this project (bytes). Unset = the tier's. -1 = unlimited. */
+  storageQuota: byteLimit("STORAGE_QUOTA"),
 
   /** HMAC secret for pre-signed URL tokens. Falls back to the JWT secret, which is required. */
   signedUrlSecret: env("SIGNED_URL_SECRET", env("JWT_SECRET")),

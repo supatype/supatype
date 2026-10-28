@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **limits:** `STORAGE_QUOTA=-1` is unlimited, and `TIER_MAX_UPLOAD_SIZE=-1` sets no per-file limit
+  of its own, leaving `MAX_UPLOAD_SIZE` (itself unlimited at `-1`). Both used to mean "use the tier
+  table", so a project told it had no quota still refused uploads past the free tier's 1 GiB and
+  50 MB. Unset means the `PROJECT_TIER` table's limits; it used to mean the free tier's whatever
+  `PROJECT_TIER` said, which is unchanged for a deployment that sets neither. A value that is not
+  a whole number of bytes, or `-1`, stops the service at start rather than reading as no limit.
+* **signed URLs:** the `signedURL` a signing request answers carries the object's name encoded
+  segment by segment. It went in as the router had decoded it, so a name holding `?` or `#` cut
+  the URL short, token included. `@supatype/client` now encodes the name the same way in every
+  URL it builds (`upload`, `download`, `getPublicUrl`, `createSignedUrl`).
+
 ## 0.7.0
 
 No changes to the storage service. Its Docker image now carries the package's LICENSE file.

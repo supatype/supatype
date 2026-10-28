@@ -945,6 +945,12 @@ ${dbDependency}
       S3_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
       S3_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
       S3_FORCE_PATH_STYLE: "true"
+      # Bytes, -1 for unlimited. A self-hosted project has no plan, so it has no limits until .env
+      # sets one; the service on its own defaults to the free tier's 1 GiB quota and 50 MB files.
+      PROJECT_TIER: \${PROJECT_TIER:-enterprise}
+      STORAGE_QUOTA: \${STORAGE_QUOTA:--1}
+      TIER_MAX_UPLOAD_SIZE: \${TIER_MAX_UPLOAD_SIZE:--1}
+      MAX_UPLOAD_SIZE: \${MAX_UPLOAD_SIZE:--1}
 ${storageDependency}
   functions-worker:
     image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-${RELEASE_IMAGES["functions-worker"]}}

@@ -322,8 +322,11 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
   // resolves the object's live version when the URL is used. A public bucket used to get an S3
   // presigned URL to one version's key, which stopped working the moment the object was
   // overwritten and its old version deleted.
+  // The path the router decoded, encoded again per segment: put back as decoded, a name holding `?`
+  // or `#` cut the URL short and the token with it.
   const token = createSignedToken(bucketId, objectPath, expiresIn)
-  sendJson(ctx.res, 200, { signedURL: `/object/sign/${bucketId}/${objectPath}?token=${token}` })
+  const urlPath = [bucketId, ...objectPath.split("/")].map(encodeURIComponent).join("/")
+  sendJson(ctx.res, 200, { signedURL: `/object/sign/${urlPath}?token=${token}` })
 }
 
 // ─── Remove objects ─────────────────────────────────────────────────────────────

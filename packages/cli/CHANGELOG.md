@@ -186,6 +186,10 @@
   `docker network prune` frees the unused ones.
 * **cli:** running the CLI from a monorepo checkout that has not been built says to run
   `pnpm install && pnpm build` at the repository root, rather than a bare "Cannot find module".
+* **self-host, dev:** storage has no quota and no per-file limit unless `.env` sets one.
+  `STORAGE_QUOTA`, `TIER_MAX_UPLOAD_SIZE`, `MAX_UPLOAD_SIZE` (bytes, `-1` for unlimited, the
+  default) and `PROJECT_TIER` now reach the storage service, which on its own applied the free
+  tier's 1 GiB quota and 50 MB file limit to every self-hosted and local project.
 
 
 ## 0.7.0
