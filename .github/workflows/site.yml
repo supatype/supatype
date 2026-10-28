@@ -1,0 +1,37 @@
+name: Site
+
+# www.supatype.com is the static docs/ folder, served by GitHub Pages straight from main. The
+# parts every page shares (header, sidebar, head tags, the versioned site.css and site.js links,
+# sitemap.xml, llms-full.txt) are written by scripts/site-sync.mjs. A change to docs/ that skips
+# that script ships pages out of step: an old site.css hash, for one, lets Cloudflare serve the
+# old stylesheet with the new pages. This fails the PR instead.
+#
+# It runs on every PR, with no paths filter, so it can be a required check: a filtered workflow
+# never reports on a PR outside its paths, and a required one would then block that PR. The
+# check takes a few seconds.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  in-step:
+    name: Site pages in step
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check every page against scripts/site-sync.mjs
+        run: node scripts/site-sync.mjs --check
