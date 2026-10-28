@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 #
-# Writing one key of a project's .env, for the live-stack scripts. Source it:
+# Reading and writing one key of a project's .env, for the live-stack scripts. Source it:
 #
 #   source "$(dirname "${BASH_SOURCE[0]}")/lib/env-file.sh"
 #
 # Three scripts carried their own copy of this, and one of them appended to a file whose last line
-# had no newline, which joins the new key onto that line and loses both.
+# had no newline, which joins the new key onto that line and loses both. Six read it their own way,
+# taking the first line or the last, and stripping quotes or not.
+
+# env_file_value <file> <key> - the key's value from its last line, as Compose reads it, without
+# quotes or a carriage return. Empty when the key or the file is absent.
+env_file_value() {
+  [[ -f "$1" ]] || return 0
+  sed -n "s/^$2=//p" "$1" | tr -d '"\r' | tail -1
+}
 
 # env_file_set <file> <key> <value> - replaces the key's line, or appends one. Creates the file.
 # The value goes through sed, so it must not contain `|`.
