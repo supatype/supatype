@@ -43,22 +43,20 @@ export async function create(ctx: RequestContext): Promise<void> {
   }
 
   const id = body.id ?? body.name
-  const accessMode = accessModeOf({ access_mode: body.access_mode ?? null, public: body.public ?? false })
-  // Public on S3 exactly when the mode says so: a custom bucket's rules decide who reads it.
-  const isPublic = accessMode === "public"
+  const accessMode: BucketAccessMode = body.access_mode ?? (body.public ? "public" : "private")
   try {
     await ensureS3Bucket(id)
+    // Public on S3 exactly when the mode says so: a custom bucket's rules decide who reads it.
     await applyBucketPolicyFromConfig(id, {
-      public: isPublic,
+      public: accessMode === "public",
       ...(body.s3_bucket_policy !== undefined && { s3BucketPolicy: body.s3_bucket_policy }),
     })
     const bucket = await db.createBucket(
       id,
       body.name,
-      isPublic,
+      accessMode,
       body.file_size_limit,
       body.allowed_mime_types,
-      accessMode,
       body.s3_bucket_policy,
     )
     sendJson(ctx.res, 200, { name: bucket.name })
@@ -94,18 +92,23 @@ export async function update(ctx: RequestContext): Promise<void> {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
-  // The flag and the mode change together, as on create. A flag set alone left the mode, which
-  // decides every read, where it was.
+  // A public flag moves the mode, which decides every read; setting the flag alone left it where
+  // it was. A row whose stored pair is not yet the mode's is written as well, NULL mode included.
   const accessMode = nextAccessMode(accessModeOf(existing), body)
   const isPublic = accessMode === "public"
-  const changesAccess = body.public !== undefined || body.access_mode !== undefined
-  if (changesAccess || body.s3_bucket_policy !== undefined) {
-    const nextPolicy =
-      body.s3_bucket_policy !== undefined ? body.s3_bucket_policy : existing.s3_bucket_policy
-    await applyBucketPolicyFromConfig(id, { public: isPublic, s3BucketPolicy: nextPolicy })
+  const accessChanged = accessMode !== existing.access_mode || isPublic !== existing.public
+  const policyChanged =
+    body.s3_bucket_policy !== undefined && body.s3_bucket_policy !== existing.s3_bucket_policy
+  if (accessChanged || policyChanged) {
+    const nextPolicy = policyChanged ? body.s3_bucket_policy : existing.s3_bucket_policy
+    await applyBucketPolicyFromConfig(id, { public: isPublic, s3BucketPolicy: nextPolicy ?? null })
   }
-  const updates = changesAccess ? { ...body, access_mode: accessMode, public: isPublic } : body
-  const bucket = await db.updateBucket(id, updates)
+  const bucket = await db.updateBucket(id, {
+    ...(body.file_size_limit !== undefined && { file_size_limit: body.file_size_limit }),
+    ...(body.allowed_mime_types !== undefined && { allowed_mime_types: body.allowed_mime_types }),
+    ...(body.s3_bucket_policy !== undefined && { s3_bucket_policy: body.s3_bucket_policy }),
+    ...(accessChanged && { access_mode: accessMode }),
+  })
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
