@@ -12,7 +12,7 @@ import { collectSchemaSourcePaths, type SchemaSourceGraph } from "./type-extract
 import { loadConfig } from "./config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "./project-config.js"
 import { projectAuthor } from "./push-audit.js"
-import { readTar, readTarGz, type TarEntry } from "./tar-reader.js"
+import { readTarGz, type TarEntry } from "./tar-reader.js"
 import { isArrayOf, isNumber, isOneOf, isShape, isString, optional, resolveInside, type Guard } from "@supatype/shared"
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024
@@ -86,10 +86,6 @@ export function packSchemaSources(graph: SchemaSourceGraph): Buffer {
   }
   chunks.push(Buffer.alloc(1024, 0))
   return Buffer.concat(chunks)
-}
-
-export function unpackSchemaSources(tar: Buffer, projectRoot: string): Map<string, Buffer> {
-  return schemaSourceFiles(readTar(tar), projectRoot)
 }
 
 /**

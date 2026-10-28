@@ -38,7 +38,7 @@ function gunzip(gz: Buffer): Buffer {
 }
 
 /** {@link readTarGz} for a tarball that is not compressed. */
-export function readTar(tar: Buffer): TarEntry[] {
+function readTar(tar: Buffer): TarEntry[] {
   const entries: TarEntry[] = []
   let nextPath: string | undefined
   for (let offset = 0; offset + BLOCK <= tar.length; ) {
@@ -62,13 +62,13 @@ export function readTar(tar: Buffer): TarEntry[] {
 }
 
 /**
- * False when `name` has a NUL, a backslash, an absolute start, a drive spec opening it or a `..`
- * segment. A backslash is a separator to Windows, so `..\..\x` climbs out there however POSIX reads
- * it, and `C:x` is relative to that drive's own working directory. A colon later in the name
- * (`docs/a:b.md`) is no drive: joined under a directory it stays there.
+ * False when `name` has a NUL, a backslash, a colon, an absolute start or a `..` segment. A
+ * backslash is a separator to Windows, so `..\..\x` climbs out there however POSIX reads it. A
+ * colon opening the name is a drive (`C:x` is relative to that drive's working directory), and
+ * anywhere else it names an NTFS stream: `docs/a:b.md` writes a hidden stream of a file `docs/a`.
  */
 export function isSafeEntryName(name: string): boolean {
-  return !(/[\\\0]/.test(name) || name.startsWith("/") || /^[A-Za-z]:/.test(name) || name.split("/").includes(".."))
+  return !(/[\\\0:]/.test(name) || name.startsWith("/") || name.split("/").includes(".."))
 }
 
 /** A ustar name, with its prefix field when it has one. */

@@ -19,8 +19,9 @@
   matching the CLI (`v<version>` on GitHub), with every `workspace:` dependency pinned to
   `^<version>`. An unknown name is refused with the list of examples in that release, and so is an
   example holding a file named with `..`, a backslash, a NUL, a leading drive (`C:`) or an absolute
-  path, or one that resolves outside the directory; nothing is written then. Such a name elsewhere
-  in the repository does not stop an example, and a colon later in a name (`docs/a:b.md`) is no drive.
+  path, or one that resolves outside the directory; nothing is written then. A colon anywhere in a
+  name is refused too, since on Windows `docs/a:b.md` writes a hidden stream of a file `docs/a`.
+  Such a name elsewhere in the repository does not stop an example.
 * **seed:** `authUser: { connect: { id } }` on a relation to the auth user (`RelatedTo<SupatypeAuthUser>`)
   writes the relation's key column. It failed with "`supatype:user` is not a model in this schema".
   The generated `...Create` type still offers the key column (`auth_user_id`) rather than `authUser`;

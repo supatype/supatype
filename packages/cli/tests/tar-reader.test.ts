@@ -10,22 +10,18 @@ import { fixtureTarball, plainTarball } from "./support/tar-fixture.js"
  */
 
 describe("readTarGz()", () => {
-  it("reads ordinary names, a pax long path and a colon inside a name included", () => {
+  it("reads ordinary names and a pax long path", () => {
     const long = `src/${"deeply-nested-".repeat(8)}component.tsx`
     const tarball = fixtureTarball("supatype-0.7.0", [
       { path: "README.md", content: "# Supatype\n" },
       { path: `examples/blog/${long}`, content: "export {}\n" },
       { path: "examples/blog/..notes", content: "x" },
-      { path: "docs/a:b.md", content: "x" },
-      { path: "docs/C:notes.md", content: "x" },
     ])
     const files = readTarGz(tarball).filter((e) => e.kind === "file")
     expect(files.map((e) => e.path)).toEqual([
       "supatype-0.7.0/README.md",
       `supatype-0.7.0/examples/blog/${long}`,
       "supatype-0.7.0/examples/blog/..notes",
-      "supatype-0.7.0/docs/a:b.md",
-      "supatype-0.7.0/docs/C:notes.md",
     ])
     expect(files.every((e) => e.safe)).toBe(true)
   })
@@ -38,6 +34,7 @@ describe("readTarGz()", () => {
     ["a NUL", "supatype-0.7.0/README\0.md"],
     ["a drive letter", "C:/escape.txt"],
     ["a drive-relative start", "C:escape.txt"],
+    ["a colon later in the name, an NTFS stream on Windows", "supatype-0.7.0/docs/a:b.md"],
     ["an absolute path", "/etc/escape.txt"],
   ])("marks a name with %s unsafe and reads the rest", (_label, name) => {
     const tarball = plainTarball([
@@ -58,10 +55,8 @@ describe("readTarGz()", () => {
 })
 
 describe("isSafeEntryName()", () => {
-  it("takes only a drive spec opening the name as a drive", () => {
-    expect(isSafeEntryName("a:b.md")).toBe(false)
-    expect(isSafeEntryName("docs/a:b.md")).toBe(true)
-    expect(isSafeEntryName("docs/C:")).toBe(true)
-    expect(isSafeEntryName("ab:c.md")).toBe(true)
+  it("refuses a colon anywhere: a drive opening the name, an NTFS stream after it", () => {
+    for (const name of ["a:b.md", "docs/a:b.md", "docs/C:", "ab:c.md"]) expect(isSafeEntryName(name)).toBe(false)
+    expect(isSafeEntryName("docs/a-b.md")).toBe(true)
   })
 })
