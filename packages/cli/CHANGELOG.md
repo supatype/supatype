@@ -58,6 +58,10 @@
 
 ### Bug Fixes
 
+* **plugins:** `plugins add` and `plugins list` no longer claim a plugin is in use. `add` said
+  "installed and registered" and `list` showed every compatible plugin as "active", but nothing in
+  Supatype loads plugins yet. Both now say the plugin is installed and that it is not loaded.
+
 * **functions:** the scaffolded `functions/_shared/context.ts` says where `ctx.env` comes from: the
   functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then `.env.<function>.local`,
   which wins. It said `.env`, which is never read for it.
