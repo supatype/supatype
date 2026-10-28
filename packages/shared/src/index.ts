@@ -19,7 +19,7 @@ export {
   utf8ByteLength,
   versionsTableName,
 } from "./identifier-names.js"
-export { pathInside, resolveInside, type PathInsideOptions } from "./path-inside.js"
+export { pathInside, resolveInside } from "./path-inside.js"
 export {
   isArrayOf,
   isBoolean,

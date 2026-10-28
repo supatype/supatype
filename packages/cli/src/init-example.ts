@@ -33,37 +33,52 @@ export function exampleTarballUrl(version: string): string {
   return `https://codeload.github.com/supatype/supatype/tar.gz/refs/tags/v${version}`
 }
 
-/** An entry's path inside the repository: the archive's root folder (`supatype-<version>/`) removed. */
+/**
+ * An entry's path inside the repository: the archive's root folder (`supatype-<version>/`) removed.
+ * A backslash is read as the separator Windows takes it for, so an unsafe name that would land in an
+ * example is counted as part of it.
+ */
 function repoPath(entry: TarEntry): string {
-  return entry.path.slice(entry.path.indexOf("/") + 1)
+  const path = entry.path.replace(/\\/g, "/")
+  return path.slice(path.indexOf("/") + 1)
 }
 
-/** The examples in the archive: folders directly under `examples/`. */
+/** The examples in the archive: folders directly under `examples/`, named by safe entries only. */
 export function exampleNames(entries: readonly TarEntry[]): string[] {
   const names = new Set<string>()
   for (const entry of entries) {
+    if (!entry.safe) continue
     const parts = repoPath(entry).split("/")
     if (parts[0] === "examples" && parts.length > 2 && parts[1] !== undefined && parts[1] !== "") names.add(parts[1])
   }
   return [...names].sort()
 }
 
-/** The files of `examples/<name>/`, relative to it; refuses a name the archive has no folder for. */
+/**
+ * The files of `examples/<name>/`, relative to it. Refuses a name the archive has no folder for, and
+ * an example holding an entry the tar reader marked unsafe; one elsewhere in the repository is never
+ * written, so it does not stop the example.
+ */
 export function selectExample(entries: readonly TarEntry[], name: string): ExampleFile[] {
   const names = exampleNames(entries)
   if (!names.includes(name)) {
     throw new Error(`Unknown example "${name}". The examples are: ${names.join(", ")}.`)
   }
   const root = `examples/${name}/`
-  return entries
-    .filter((entry) => entry.kind === "file" && repoPath(entry).startsWith(root))
+  const inExample = entries.filter((entry) => repoPath(entry).startsWith(root))
+  const unsafe = inExample.find((entry) => !entry.safe)
+  if (unsafe !== undefined) {
+    throw new Error(`The example "${name}" has an unsafe entry name: ${JSON.stringify(unsafe.path)}. Nothing was written.`)
+  }
+  return inExample
+    .filter((entry) => entry.kind === "file")
     .map((entry) => ({ path: repoPath(entry).slice(root.length), data: entry.data }))
 }
 
 /**
- * Where an example file is written: under `dir` once resolved on this platform, or a refusal. The
- * tar reader has already refused a name with a `..` segment, a backslash or a drive letter; this
- * checks where the file actually lands, whatever let it through.
+ * Where an example file is written: under `dir` once resolved on this platform, or a refusal.
+ * {@link selectExample} has already refused a name with a `..` segment, a backslash or a drive spec;
+ * this checks where the file actually lands, whatever let it through.
  */
 export function exampleTarget(dir: string, path: string): string {
   const target = resolveInside(dir, path)

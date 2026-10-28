@@ -7,11 +7,12 @@ import {
   cpSync,
 } from "node:fs"
 import { join, resolve, relative } from "node:path"
-import { gzipSync, gunzipSync } from "node:zlib"
+import { gzipSync } from "node:zlib"
 import { collectSchemaSourcePaths, type SchemaSourceGraph } from "./type-extractor.js"
 import { loadConfig } from "./config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "./project-config.js"
 import { projectAuthor } from "./push-audit.js"
+import { readTar, readTarGz, type TarEntry } from "./tar-reader.js"
 import { isArrayOf, isNumber, isOneOf, isShape, isString, optional, resolveInside, type Guard } from "@supatype/shared"
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024
@@ -88,27 +89,24 @@ export function packSchemaSources(graph: SchemaSourceGraph): Buffer {
 }
 
 export function unpackSchemaSources(tar: Buffer, projectRoot: string): Map<string, Buffer> {
+  return schemaSourceFiles(readTar(tar), projectRoot)
+}
+
+/**
+ * The snapshot's files by path, refusing the whole snapshot on any entry the tar reader marks unsafe
+ * or that does not land inside the project (the root itself included: a file cannot be written there).
+ * Every file in it is one restore writes, so one bad name stops it before anything is written.
+ */
+function schemaSourceFiles(entries: readonly TarEntry[], projectRoot: string): Map<string, Buffer> {
   const root = resolve(projectRoot)
   const out = new Map<string, Buffer>()
-  let offset = 0
-  while (offset + 512 <= tar.length) {
-    const header = tar.subarray(offset, offset + 512)
-    offset += 512
-    if (header.every((b) => b === 0)) break
-    const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/, "").trim()
-    if (!name) break
-    const sizeOct = header.subarray(124, 136).toString("utf8").replace(/\0.*$/, "").trim()
-    const size = parseInt(sizeOct, 8) || 0
-    const content = tar.subarray(offset, offset + size)
-    offset += size + ((512 - (size % 512)) % 512)
-    const rel = name.replace(/\\/g, "/")
-    if (rel.startsWith("..") || rel.includes("/../")) {
-      throw new Error(`Invalid tar path: ${name}`)
+  for (const entry of entries) {
+    if (entry.kind !== "file") continue
+    if (!entry.safe) throw new Error(`The schema snapshot has an unsafe entry name: ${JSON.stringify(entry.path)}`)
+    if (resolveInside(root, entry.path) === undefined) {
+      throw new Error(`The schema snapshot has a file that does not land inside ${root}: ${JSON.stringify(entry.path)}`)
     }
-    if (resolveInside(root, rel, { includeRoot: true }) === undefined) {
-      throw new Error(`Tar path escapes project root: ${name}`)
-    }
-    out.set(rel, Buffer.from(content))
+    out.set(entry.path, Buffer.from(entry.data))
   }
   return out
 }
@@ -163,23 +161,22 @@ export function cacheSchemaSourcesLocally(cwd: string, migrationName: string, gz
   writeFileSync(join(dir, `${migrationName}.tar.gz`), gz)
 }
 
-export function restoreSchemaSourcesFromGz(
-  gz: Buffer,
-  manifest: SchemaSourcesManifest,
-  projectRoot: string,
-  opts?: { backupDir?: string },
-): string[] {
-  const tar = gunzipSync(gz)
-  const files = unpackSchemaSources(tar, projectRoot)
+/**
+ * Write the snapshot's files into the project, first copying each one it overwrites into
+ * `backupDir`. Only the snapshot's checked entries are backed up and written, never a path the
+ * manifest names: both come back from the database, and only the entries have been checked.
+ */
+export function restoreSchemaSourcesFromGz(gz: Buffer, projectRoot: string, opts?: { backupDir?: string }): string[] {
+  const files = schemaSourceFiles(readTarGz(gz), projectRoot)
   const root = resolve(projectRoot)
   const restored: string[] = []
 
   if (opts?.backupDir) {
     mkdirSync(opts.backupDir, { recursive: true })
-    for (const path of manifest.files) {
-      const abs = join(root, path.path)
+    for (const rel of files.keys()) {
+      const abs = join(root, rel)
       if (existsSync(abs)) {
-        const dest = join(opts.backupDir, path.path)
+        const dest = join(opts.backupDir, rel)
         mkdirSync(join(dest, ".."), { recursive: true })
         cpSync(abs, dest)
       }
