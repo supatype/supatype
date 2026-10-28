@@ -648,6 +648,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   const auth = new AuthClient(`${config.url}/auth/v1`, baseHeaders, {
     initialSession: config.initialSession,
     persistSession: config.auth?.persistSession,
+    autoRefreshToken: config.auth?.autoRefreshToken,
     storageKey: config.auth?.storageKey,
     cookiePrefix: config.auth?.cookiePrefix,
     storage: config.auth?.storage,

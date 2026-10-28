@@ -4,6 +4,9 @@
 
 ### Bug Fixes
 
+* **logs:** the API logs page says request logging is coming soon, as the other unbuilt log pages
+  do. It mounted a log table with search and filters over a list that never filled, which read as a
+  project nobody had called.
 * **records:** a record path whose id names no record shows "not found" in place of an edit form.
   `/models/post/access` read `access` as a record id and opened an empty form under Postgres's
   `invalid input syntax for type uuid: "access"`; a well-formed id with no row behind it opened the

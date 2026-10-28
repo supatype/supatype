@@ -44,6 +44,8 @@ export type AuthListener = (event: AuthChangeEvent, session: Session | null) => 
 interface AuthClientOptions {
   initialSession?: Session | undefined
   persistSession?: boolean | undefined
+  /** Refresh on a timer before the token expires, and at once when it starts expired. Default: true. */
+  autoRefreshToken?: boolean | undefined
   storageKey?: string | undefined
   cookiePrefix?: string | undefined
   /** Custom session store (replaces browser localStorage/cookies when set). */
@@ -137,6 +139,8 @@ export class AuthClient {
   private readonly listeners = new Map<string, AuthListener>()
   private listenerIdCounter = 0
   private readonly persistSession: boolean
+  /** False leaves every refresh to `ensureValidSession`, which each request calls first. */
+  private readonly autoRefreshToken: boolean
   private readonly storageKey: string
   private readonly cookieName: string
   private readonly storage: AuthStorage | null
@@ -159,6 +163,7 @@ export class AuthClient {
     this.url = url
     this.baseHeaders = baseHeaders
     this.persistSession = opts.persistSession ?? true
+    this.autoRefreshToken = opts.autoRefreshToken ?? true
     this.storageKey = opts.storageKey ?? DEFAULT_STORAGE_KEY
     const cookiePrefix = opts.cookiePrefix ?? DEFAULT_COOKIE_PREFIX
     this.cookieName = `${cookiePrefix}-auth-token`
@@ -174,7 +179,7 @@ export class AuthClient {
     // Keep the access token fresh while the app is open (and refresh immediately
     // if a persisted session loaded already expired).
     this.scheduleAutoRefresh()
-    if (this.currentSession !== null && this.isAccessTokenExpired(this.currentSession)) {
+    if (this.autoRefreshToken && this.currentSession !== null && this.isAccessTokenExpired(this.currentSession)) {
       void this.ensureValidSession()
     }
   }
@@ -325,7 +330,7 @@ export class AuthClient {
       clearTimeout(this.refreshTimer)
       this.refreshTimer = null
     }
-    if (typeof setTimeout === "undefined") return
+    if (!this.autoRefreshToken || typeof setTimeout === "undefined") return
     const session = this.currentSession
     if (session === null || !session.refreshToken) return
 

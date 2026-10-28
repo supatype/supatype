@@ -322,7 +322,7 @@ const client = useSupatype<Database>() // escape hatch
 // on the platform origin, so name it.
 const { data: post, isPreview } = useLivePreview({
   initialData: serverPost,
-  model: "post",
+  model: "Post", // the model name Studio sends, as the schema declares it
   studioOrigin: "https://studio.supatype.com",
 })
 ```

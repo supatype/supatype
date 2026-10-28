@@ -3,6 +3,14 @@ import type { SupatypeClient, AnyDatabase } from "@supatype/client"
 import { DEFAULT_COOKIE_PREFIX, parseSessionFromCookies, sessionCookie } from "./cookie-parser.js"
 import type { CookieAdapter, ServerClientOptions } from "./types.js"
 
+/**
+ * A client for one server request, signed in as the session the request's cookies carry.
+ *
+ * It keeps no session of its own and runs no refresh timer: the cookie is the only store, and the
+ * client lives as long as the request. A refresh happens only when a request it makes finds the
+ * access token expired, and the rotated session goes back to the browser through `setAll`, so the
+ * browser holds the new refresh token rather than the one the refresh just spent.
+ */
 export function createServerClient<TDatabase extends AnyDatabase = AnyDatabase>(
   url: string,
   anonKey: string,
@@ -13,6 +21,7 @@ export function createServerClient<TDatabase extends AnyDatabase = AnyDatabase>(
   const client = createClient<TDatabase>({
     url,
     anonKey,
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     ...(session !== null && { initialSession: session }),
   })
   writeSessionChanges(client, options.cookies, prefix)
