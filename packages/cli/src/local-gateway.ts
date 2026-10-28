@@ -6,10 +6,6 @@ import { readComposeEnvInt, readEnvValue } from "./env-file.js"
  */
 export const LOCAL_KONG_HOST_PORT = 18473
 
-export function localKongBaseUrl(): string {
-  return `http://localhost:${LOCAL_KONG_HOST_PORT}`
-}
-
 /**
  * The local stack's public address, without a trailing slash: `.env`'s API_EXTERNAL_URL, the value
  * compose hands the server and the functions worker as their public address, else the gateway's
