@@ -137,6 +137,8 @@ interface ServerSystemMessage {
   type: "system"
   status: "ok" | "error"
   message: string
+  /** The channel a refusal is about; an error without one is about the socket. */
+  channel?: string
 }
 
 type ServerMessage = ServerChangeMessage | ServerPresenceMessage | ServerBroadcastMessage | ServerSystemMessage
@@ -172,6 +174,7 @@ const isSystemMessage: Guard<ServerSystemMessage> = isShape({
   type: isOneOf(["system"]),
   status: isOneOf(["ok", "error"]),
   message: isString,
+  channel: optional(isString),
 })
 
 /** A frame from the realtime service (packages/realtime/src/types.ts) in one of the four shapes. */
@@ -302,6 +305,7 @@ export class RealtimeClient {
     for (const state of this.channels.values()) {
       state.subscribed = false
       state.joinSent = false
+      state.joined = undefined
       this.forgetMembers(state)
     }
   }
@@ -447,6 +451,7 @@ export class RealtimeClient {
         handles: new Set(),
         subscribed: false,
         joinSent: false,
+        joined: undefined,
         members: [],
       }
       this.channels.set(name, state)
@@ -591,8 +596,13 @@ export class RealtimeClient {
     }
 
     if (msg.status === "error") {
-      // Find which channel this error relates to, broadcast to all as fallback
-      for (const state of this.channels.values()) {
+      // A refusal names its channel and fails that one alone: one bad filter used to put every
+      // healthy channel on the socket into CHANNEL_ERROR. An error naming none, from an older
+      // server or about the socket itself, still reaches them all. A named channel this client
+      // has since left is told nothing.
+      const affected = msg.channel === undefined ? [...this.channels.values()] : [this.channels.get(msg.channel)]
+      for (const state of affected) {
+        if (state === undefined) continue
         // A refused join registered nothing on the server, so a channel not yet confirmed may
         // join again on this socket. Marked as sent, a retry after authenticating sent nothing.
         if (!state.subscribed) state.joinSent = false
@@ -612,14 +622,14 @@ export class RealtimeClient {
     const newRecord = coerceRecord(msg.payload.new, exact)
     const oldRecord = coerceRecord(msg.payload.old, exact)
 
-    // The channel is subscribed to the first listener's table, which is what `sendSubscribe`
-    // registers, so a change is that table's and goes only to listeners for it. Schema and table
-    // come from there, not from splitting the channel name: a channel named for its purpose told
-    // a `chat_message` listener its rows came from a table called `lobby-chat`. A listener for a
-    // different table on the same channel is never served by it, rather than handed these rows
-    // under its own table's name.
+    // The channel is subscribed to the table `sendSubscribe` registered, so a change is that
+    // table's and goes only to listeners for it. Schema and table come from there, not from
+    // splitting the channel name: a channel named for its purpose told a `chat_message` listener
+    // its rows came from a table called `lobby-chat`. A listener for a different table on the same
+    // channel is never served by it, rather than handed these rows under its own table's name. A
+    // join sent before any row listener named no table, and then the first listener stands in.
     const listeners = pgListenersOf(state)
-    const subscribed = listeners[0]
+    const subscribed = state.joined ?? listeners[0]
     if (!subscribed) return
     for (const listener of listeners) {
       if (listener.schema !== subscribed.schema || listener.table !== subscribed.table) continue
@@ -665,6 +675,7 @@ export class RealtimeClient {
 
     // Build filter from the first pg listener (if any)
     const firstListener = pgListenersOf(state)[0]
+    state.joined = firstListener && { schema: firstListener.schema, table: firstListener.table }
     const filter: Record<string, string> = {}
     if (firstListener?.filter) {
       // Parse PostgREST filter format "column=eq.value" into { column: "eq.value" }
@@ -738,6 +749,12 @@ interface ChannelState {
    * used to send a second frame.
    */
   joinSent: boolean
+  /**
+   * The table the join on the current socket registered, from the row listener first when it was
+   * sent. It stays registered after that listener's handle leaves, so it, not whichever listener is
+   * first now, is what an incoming row belongs to. Undefined when the join named no table.
+   */
+  joined: Pick<PgListener, "schema" | "table"> | undefined
   /** Who the current socket has said is tracked on this channel, one entry per tracking socket. */
   members: PresenceEntry[]
 }

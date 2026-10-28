@@ -386,7 +386,7 @@ export class RealtimeServer {
   ): void {
     const admitted = admitChannelAction(client, msg.channel, msg.type)
     if (typeof admitted === "string") {
-      this.send(client.ws, { type: "system", status: "error", message: admitted })
+      this.refuse(client, msg.channel, admitted)
       return
     }
     switch (msg.type) {
@@ -400,6 +400,15 @@ export class RealtimeServer {
         this.handleBroadcast(clientId, client, msg)
         break
     }
+  }
+
+  /**
+   * Refuses something asked of one channel, naming it. The client reads an error that names no
+   * channel as about the whole socket, so a refusal without one put every healthy channel the
+   * client had into CHANNEL_ERROR.
+   */
+  private refuse(client: ConnectedClient, channel: string, message: string): void {
+    this.send(client.ws, { type: "system", status: "error", message, channel })
   }
 
   private handleUnsubscribe(clientId: string, client: ConnectedClient, channel: string): void {
@@ -432,7 +441,7 @@ export class RealtimeServer {
     },
   ): void {
     if (this.env.secureChannels && !client.claims) {
-      this.send(client.ws, { type: "system", status: "error", message: "authenticate before subscribing" })
+      this.refuse(client, msg.channel, "authenticate before subscribing")
       return
     }
 
@@ -441,7 +450,7 @@ export class RealtimeServer {
     const unreadable = unreadableCondition(msg.filter ?? {})
     if (unreadable !== null) {
       const message = `invalid filter ${unreadable}: expected column=op.value with op one of eq, neq, gt, gte, lt, lte`
-      this.send(client.ws, { type: "system", status: "error", message })
+      this.refuse(client, msg.channel, message)
       return
     }
 

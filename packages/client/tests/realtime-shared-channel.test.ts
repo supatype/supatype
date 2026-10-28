@@ -105,3 +105,27 @@ describe("two handles on one channel name", () => {
     expect(heard).toEqual(["b", "b-presence"])
   })
 })
+
+/**
+ * The join is made once, with the oldest handle's first row listener, and stays registered for that
+ * table after that handle leaves. Rows used to be matched and labelled against whichever listener
+ * was first now, so once the oldest handle unsubscribed, the next handle's listener for another
+ * table was handed this table's rows under its own table's name.
+ */
+describe("rows on a channel whose joining handle has left", () => {
+  it("go to listeners for the joined table, labelled with it, and not to one for another table", async () => {
+    const audit: Array<RealtimePayload<Record<string, unknown>>> = []
+    const messages: Array<RealtimePayload<Record<string, unknown>>> = []
+    const a = harness.realtime.channel(CHANNEL).on("postgres_changes", { event: "*", table: "messages" }, () => {}).subscribe()
+    harness.realtime.channel(CHANNEL).on("postgres_changes", { event: "*", table: "audit_log" }, (p) => audit.push(p)).subscribe()
+    harness.realtime.channel(CHANNEL).on("postgres_changes", { event: "*", table: "messages" }, (p) => messages.push(p)).subscribe()
+    await harness.settle()
+    harness.ackJoins()
+
+    a.unsubscribe()
+    deliverInsert(1)
+
+    expect(audit).toEqual([])
+    expect(messages.map((p) => [p.table, p.new])).toEqual([["messages", { id: 1 }]])
+  })
+})
