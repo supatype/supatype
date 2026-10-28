@@ -79,6 +79,14 @@ describe("a service-role key exported in the shell", () => {
     expect(shellServiceRoleKey(dir)).toBe("the-stack-key")
   })
 
+  it("never gives way to a SUPATYPE_SERVICE_ROLE_KEY in .env, which the stack never had", () => {
+    // push then signs one with .env's secret rather than sending a stale key.
+    vi.stubEnv("SERVICE_ROLE_KEY", shellKey)
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${SECRET}\nSERVICE_ROLE_KEY=\nSUPATYPE_SERVICE_ROLE_KEY=a-stale-key\n`)
+    expect(shellServiceRoleKey(dir)).toBeUndefined()
+    expect(verifyJwt(localServiceRoleKey(nativeConfig) ?? "", SECRET)?.["role"]).toBe("service_role")
+  })
+
   it("is the one sent while .env holds no secret, since compose then passes it to the stack", () => {
     vi.stubEnv("SERVICE_ROLE_KEY", shellKey)
     writeFileSync(join(dir, ".env"), "")
