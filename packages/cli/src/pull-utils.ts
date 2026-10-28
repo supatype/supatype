@@ -2,6 +2,8 @@
  * Utilities for `pull` and `introspect`, map engine DatabaseState to Model<> scaffold.
  */
 
+import { toSnakeCase } from "./augmentation-relationships.js"
+
 export interface DbColumnState {
   name: string
   dataType: string
@@ -152,8 +154,10 @@ export function pgTypeToModelField(col: ColumnInfo): string {
   const optional = col.nullable ? "Optional<" : ""
   const optionalClose = col.nullable ? ">" : ""
 
+  // A uuid id is drafted as UUID. It is SupatypeAuthUserId only when it references auth.users, and
+  // that cannot be told yet: the engine reports a foreign key's table but not its schema.
   if (name === "id" && type.includes("uuid")) {
-    return `id: SupatypeAuthUserId`
+    return `id: UUID`
   }
   if (name.endsWith("_id") && type.includes("uuid")) {
     const base = name.replace(/_id$/, "")
@@ -258,6 +262,9 @@ export function databaseStateToSchemaScaffold(
     lines.push(`export type ${modelName} = Model<{`)
     lines.push(fieldLines.join("\n"))
     lines.push(`}, {`)
+    // The table a model maps to is its name in snake_case unless it says otherwise, so a table that
+    // name does not come back to (`HTTPLog`, `Orders`) is named, or a push would create a new one.
+    if (toSnakeCase(modelName) !== table.name) lines.push(`  tableName: ${JSON.stringify(table.name)},`)
     lines.push(`  access: {`)
     lines.push(`    read: Public`)
     lines.push(`    create: Public`)

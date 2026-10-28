@@ -58,6 +58,12 @@
 
 ### Bug Fixes
 
+* **pull:** a uuid `id` column is drafted as `UUID`. Every one was drafted as `SupatypeAuthUserId`,
+  which declares the key to be an auth user's id; telling the two apart needs the schema of a foreign
+  key's table, which the engine does not report yet. A drafted model also names its table
+  (`tableName`) when its model name would not map back to it, as `HTTPLog` or `Orders` do, so a push
+  of the draft does not create a second, empty table.
+
 * **plugins:** `plugins add` and `plugins list` no longer claim a plugin is in use. `add` said
   "installed and registered" and `list` showed every compatible plugin as "active", but nothing in
   Supatype loads plugins yet. Both now say the plugin is installed and that it is not loaded.
