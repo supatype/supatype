@@ -6,12 +6,12 @@ import {
   readFileSync,
   readdirSync,
   statSync,
-  rmSync,
   writeFileSync,
 } from "node:fs"
 import { resolve, join, relative, isAbsolute } from "node:path"
 import { spawn, execSync } from "node:child_process"
 import { localPublicApiUrl } from "../local-gateway.js"
+import { uniqueFileToken } from "../unique-file-token.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
@@ -23,8 +23,8 @@ import {
 import {
   discoverFunctionsOrExit,
   functionNameProblem,
-  functionsServeKeyPath,
   generateFunctionsRouterSource,
+  removeOnExit,
   writeServiceRoleKeyFileUntilExit,
   type DiscoveredFunctionRoute,
 } from "../functions-router-gen.js"
@@ -259,16 +259,18 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   plain()
 
   // Generate a Deno entry script that routes requests to the correct function. Each serve has its
-  // own, since the router names this serve's key file and another serve may run from the same project.
-  const routerPath = resolve(functionsDir, `.serve-router-${process.pid}.ts`)
+  // own router and key file, since each removes both when it stops while another may still be
+  // serving the same project.
+  const token = uniqueFileToken()
+  const routerPath = resolve(functionsDir, `.serve-router-${token}.ts`)
   // The router reads the key from this file, as it still can after a --watch reload, and grants it
   // only to the routes SUPATYPE_SERVICE_ROLE_ROUTES names, as the deployed worker does.
   const serviceRoleKey = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? ""
-  const serviceRoleKeyPath = serviceRoleKey !== "" ? functionsServeKeyPath(cwd) : undefined
+  const serviceRoleKeyPath = serviceRoleKey !== "" ? resolve(cwd, ".supatype", `functions-serve-key-${token}`) : undefined
   if (serviceRoleKeyPath !== undefined) writeServiceRoleKeyFileUntilExit(serviceRoleKeyPath, serviceRoleKey)
   const routerScript = generateFunctionsRouterSource(routerPath, routes, serviceRoleKeyPath)
   writeFileSync(routerPath, routerScript, "utf8")
-  process.once("exit", () => rmSync(routerPath, { force: true }))
+  removeOnExit(routerPath)
 
   const envFilePath = resolveEnvFilePath(cwd, functionsDir, opts.envFile)
   const envArgs: string[] = []
@@ -288,25 +290,30 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
     process.exit(1)
   }
 
-  const status = await runUntilStopped(
-    denoBin,
-    ["run", "--allow-net", "--allow-env", "--allow-read", "--watch", ...envArgs, routerPath],
-    {
-      cwd,
-      env: {
-        ...process.env,
-        PORT: opts.port,
-        SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
-        SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
-        SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localPublicApiUrl(cwd),
-        SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
-        SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
-        // The router grants the key only to these routes, as the deployed worker does.
-        SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
+  let status: number
+  try {
+    status = await runUntilStopped(
+      denoBin,
+      ["run", "--allow-net", "--allow-env", "--allow-read", "--watch", ...envArgs, routerPath],
+      {
+        cwd,
+        env: {
+          ...process.env,
+          PORT: opts.port,
+          SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
+          SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
+          SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localPublicApiUrl(cwd),
+          SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
+          SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
+          // The router grants the key only to these routes, as the deployed worker does.
+          SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
+        },
       },
-    },
-  )
-  if (status === "stopped") process.exit(0)
+    )
+  } catch (err) {
+    error(`Could not start Deno: ${errorMessage(err)}`)
+    process.exit(1)
+  }
   if (status !== 0) {
     error("Function server exited with errors.")
     process.exit(status)
@@ -317,31 +324,28 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
  * Runs `command` with this terminal until it exits, passing on Ctrl+C or a stop request rather than
  * dying first. The router and key files are removed on `exit`, which Node never emits when a
  * signal it has no listener for kills it, so a serve stopped with Ctrl+C used to leave both behind.
- * Resolves to the exit code, or "stopped" once the serve was asked to stop.
+ * Resolves to the exit code, 0 once the serve was asked to stop, and rejects when it cannot start.
  */
 async function runUntilStopped(
   command: string,
   args: string[],
   opts: { cwd: string; env: NodeJS.ProcessEnv },
-): Promise<number | "stopped"> {
+): Promise<number> {
   const child = spawn(command, args, { ...opts, stdio: "inherit" })
   let stopping = false
   const stop = (): void => {
     stopping = true
     child.kill()
   }
-  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const
+  // Ctrl+Break on Windows, as dev-shutdown.ts listens for too.
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP", ...(process.platform === "win32" ? ["SIGBREAK" as const] : [])]
   for (const signal of signals) process.on(signal, stop)
   try {
     const code = await new Promise<number | null>((resolveExit, rejectExit) => {
       child.once("error", rejectExit)
       child.once("exit", (exitCode) => resolveExit(exitCode))
     })
-    if (stopping) return "stopped"
-    return code ?? 1
-  } catch (err) {
-    error(`Could not start Deno: ${errorMessage(err)}`)
-    return 1
+    return stopping ? 0 : (code ?? 1)
   } finally {
     for (const signal of signals) process.off(signal, stop)
   }

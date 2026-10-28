@@ -15,7 +15,6 @@ import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   devServiceRoleKeyPath,
-  functionsServeKeyPath,
   generateFunctionsRouterSource,
   writeServiceRoleKeyFile,
   writeServiceRoleKeyFileUntilExit,
@@ -81,11 +80,6 @@ describe("the generated router's source", () => {
       listener.call(process, 0)
     }
     expect(existsSync(keyPath)).toBe(false)
-  })
-
-  it("gives each functions serve its own key file", () => {
-    // One shared file was deleted by whichever serve stopped first, under the others still running.
-    expect(functionsServeKeyPath("/p", 101)).not.toBe(functionsServeKeyPath("/p", 102))
   })
 
   it("takes the default export, else a named handler", () => {
