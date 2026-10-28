@@ -48,6 +48,8 @@ import {
   ensureNativeAuthenticatorPassword,
   devJwtSecret,
   ensureNativeSuperuserPassword,
+  givenJwtSecret,
+  ignoredJwtSecretWarning,
   secretFingerprint,
 } from "../local-secrets.js"
 import {
@@ -251,8 +253,9 @@ export function registerDev(program: Command): void {
       // Before the session takes the terminal, so a refusal reaches it.
       const overwriteDrift = opts.overwriteDrift === true
       if (overwriteDrift) await requireDevEngineSupports(cwd, config, provider === "docker")
-      // The compose file puts the database passwords into URLs as `${VAR}`, unencoded. Writing it
-      // checks this too, but by then the session holds the terminal, so dev checks here first.
+      // The compose file puts the database passwords into URLs as `${VAR}`, unencoded. Checked
+      // here, before the session takes the terminal, and only here: the watcher rewrites the compose
+      // file mid-session, where a refusal would end the session.
       if (provider === "docker") requireUrlSafeComposePasswords(cwd, config)
 
       beginDevSession(resolveDevUiMode(opts.stream === true))
@@ -264,9 +267,14 @@ export function registerDev(program: Command): void {
         console.warn("")
       }
 
-      // Both providers, before anything starts. A project without one gets a generated secret in
-      // .env here, which every later step signs and validates with.
-      requireUsableJwtSecret(devJwtSecret(cwd))
+      // Both providers, before anything starts. A project without one gets one in .env here (the
+      // shell's when usable, else generated), which every later step signs and validates with.
+      // Compose is run without a shell JWT_SECRET that differs from it (self-host-compose.ts), so
+      // that one is only warned about.
+      const jwtSecret = devJwtSecret(cwd)
+      requireUsableJwtSecret(jwtSecret)
+      const ignored = ignoredJwtSecretWarning(jwtSecret, givenJwtSecret())
+      if (ignored !== undefined) console.warn(`[supatype] ${ignored}`)
 
       if (provider === "docker") {
         const { runDevCompose } = await import("../dev-compose.js")

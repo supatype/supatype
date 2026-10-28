@@ -17,7 +17,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { anonKeyEnvUpdates, generateAndWriteKeys, writeKeysToEnv } from "../src/commands/keys.js"
 import { readEnvFile } from "../src/env-file.js"
-import { envJwtSecret } from "../src/local-secrets.js"
 import { verifyJwt } from "../src/jwt.js"
 import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
 
@@ -170,12 +169,12 @@ describe("reading JWT_SECRET for keys", () => {
 
   it("leaves an inline comment out of the secret, as compose does", () => {
     writeFileSync(join(dir, ".env"), "JWT_SECRET=the-real-secret-of-at-least-32-chars  # rotated in May\n")
-    expect(envJwtSecret(readEnvFile(dir)).secret).toBe("the-real-secret-of-at-least-32-chars")
+    expect(readEnvFile(dir)["JWT_SECRET"]).toBe("the-real-secret-of-at-least-32-chars")
   })
 
   it("reads the last JWT_SECRET when the key is assigned twice", () => {
     writeFileSync(join(dir, ".env"), "JWT_SECRET=old-one\nJWT_SECRET=new-one\n")
-    expect(envJwtSecret(readEnvFile(dir)).secret).toBe("new-one")
+    expect(readEnvFile(dir)["JWT_SECRET"]).toBe("new-one")
   })
 })
 
@@ -196,10 +195,10 @@ describe("generateAndWriteKeys (init)", () => {
 
   it("writes the Next.js names with the rest, and keys that verify against the secret", () => {
     writeFileSync(join(dir, ".env"), `JWT_SECRET=${SECRET}  # note\nPUBLIC_SUPATYPE_URL=http://localhost:18999\n`)
-    const keys = generateAndWriteKeys(dir)
+    const result = generateAndWriteKeys(dir)
+    if (!result.ok) throw new Error(result.reason)
 
-    expect(keys).not.toBeNull()
-    expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_ANON_KEY")).toBe(keys?.anonKey)
+    expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_ANON_KEY")).toBe(result.anonKey)
     expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_URL")).toBe("http://localhost:18999")
     expect(verifyJwt(envValue(dir, "ANON_KEY") ?? "", SECRET)).not.toBeNull()
   })
@@ -240,11 +239,39 @@ describe("the secret init signs its keys with", () => {
     expect(verifyJwt(envValue(dir, "ANON_KEY") ?? "", secret)).not.toBeNull()
   })
 
-  it("refuses a shell JWT_SECRET that differs from the one already in .env", () => {
-    const before = "JWT_SECRET=a-local-development-secret-at-least-32-chars\nANON_KEY=\n"
+  it("signs with .env's JWT_SECRET when the shell's differs, and never exits mid-init", () => {
+    const inFile = "a-local-development-secret-at-least-32-chars"
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${inFile}\nANON_KEY=\n`)
+
+    const result = generateAndWriteKeys(dir)
+
+    expect(result.ok).toBe(true)
+    expect(envValue(dir, "JWT_SECRET")).toBe(inFile)
+    expect(verifyJwt(envValue(dir, "ANON_KEY") ?? "", inFile)).not.toBeNull()
+  })
+
+  it("comes back with the reason rather than exiting when .env's JWT_SECRET is too short", () => {
+    const before = "JWT_SECRET=twenty-chars-secret!\nANON_KEY=\n"
     writeFileSync(join(dir, ".env"), before)
 
-    expect(() => generateAndWriteKeys(dir)).toThrow("exit 1")
+    const result = generateAndWriteKeys(dir)
+
+    expect(result.ok).toBe(false)
     expect(readFileSync(join(dir, ".env"), "utf8")).toBe(before)
   })
+
+  it.each([
+    ["too short", "twenty-chars-secret!"],
+    ["holding a #, which .env would read as a comment", "a-secret-long-enough-to-use#but-commented"],
+    ["holding a space", "a secret long enough to use but with spaces"],
+  ])("is generated instead of a shell JWT_SECRET %s", (_case, shell) => {
+    process.env["JWT_SECRET"] = shell
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    scaffold(dir, defaultScaffoldOptions("acme"))
+
+    const secret = readEnvFile(dir)["JWT_SECRET"] ?? ""
+    expect(secret).not.toBe(shell)
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{64}$/)
+  })
 })
+

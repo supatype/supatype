@@ -17,7 +17,7 @@ import { connectionString } from "../project-config.js"
 import { devPostgresPassword } from "../local-secrets.js"
 import { splitPassword } from "../host-database.js"
 import { fillMissingKeys } from "./keys.js"
-import { requireUsableJwtSecret } from "../jwt-secret-length.js"
+import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { resolveBinary } from "../binary-cache.js"
 import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
@@ -53,6 +53,7 @@ export function registerSelfHost(program: Command): void {
     .action(() => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      requireUrlSafeComposePasswords(cwd, config)
       warnProjectAuthProviderSecrets(cwd, config)
       const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
       file("wrote", out.composePath)
@@ -68,13 +69,16 @@ export function registerSelfHost(program: Command): void {
       const config = loadConfig(cwd)
       const project = composeProjectName(config.project.name)
       const args = opts.detach ? ["up", "-d"] : ["up"]
+      // Before anything is written into .env, as the key and secret checks below are.
+      requireUrlSafeComposePasswords(cwd, config)
       // A .env copied from the template arrives with both keys blank, and the
       // server will not serve without a service role key outside dev mode.
       // Only blanks are filled: reissuing a key an operator is already using
-      // would lock out every client holding the old one.
-      const { secret, filled, note } = fillMissingKeys(cwd)
-      // A missing secret is compose's to report; a short one only PostgREST would notice.
-      if (secret !== undefined) requireUsableJwtSecret(secret)
+      // would lock out every client holding the old one. The secret is checked
+      // inside, before anything is written, since only PostgREST would notice a
+      // short one.
+      const { filled, note, warning } = fillMissingKeys(cwd)
+      if (warning !== undefined) console.warn(`[supatype] ${warning}`)
       if (note !== undefined) console.log(`[supatype] ${note}`)
       if (filled.length > 0) {
         console.log(`[supatype] Minted ${filled.join(" and ")} in .env from JWT_SECRET.`)
@@ -450,7 +454,7 @@ async function confirmVolumeRemoval(): Promise<boolean> {
  * Rendered first, so a container it creates never gets a stale host path or a config that changed.
  */
 function renderAndRunCompose(args: string[]): number {
-  return runCompose(args, true)
+  return runCompose(args, "start")
 }
 
 /**
@@ -461,15 +465,23 @@ function renderAndRunCompose(args: string[]): number {
  * when there is no file on disk yet.
  */
 function runAgainstStack(args: string[]): number {
-  return runCompose(args, !existsSync(selfHostComposePaths(process.cwd()).composePath))
+  return runCompose(args, existsSync(selfHostComposePaths(process.cwd()).composePath) ? "on-disk" : "render")
 }
 
-function runCompose(args: string[], render: boolean): number {
+/**
+ * Which compose file a command runs against: rendered to start or recreate containers, which is
+ * when a URL-unsafe password is refused; rendered only because there is none yet; or the one on disk.
+ */
+type ComposeFileUse = "start" | "render" | "on-disk"
+
+function runCompose(args: string[], use: ComposeFileUse): number {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
-  const composePath = render
-    ? writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name)).composePath
-    : selfHostComposePaths(cwd).composePath
+  if (use === "start") requireUrlSafeComposePasswords(cwd, config)
+  const composePath =
+    use === "on-disk"
+      ? selfHostComposePaths(cwd).composePath
+      : writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name)).composePath
   return runDockerCompose(composePath, args, cwd, composeProjectName(config.project.name), {
     brand: SELF_HOST_BRAND,
   })

@@ -110,9 +110,9 @@ function composeFileOnDisk(): void {
 }
 
 /**
- * Only the commands that write the compose file check, since they start or recreate containers from
- * it. A stack started by an older CLI with a "/" in its password has to stay stoppable and
- * inspectable through the file it was started from, or the refusal strands it.
+ * Only the commands that start or recreate containers check. A stack started by an older CLI with a
+ * "/" in its password has to stay stoppable and inspectable through the file it was started from, or
+ * the refusal strands it.
  */
 describe("self-host compose commands that leave containers as they are", () => {
   beforeEach(() => {
@@ -138,10 +138,26 @@ describe("self-host compose commands that leave containers as they are", () => {
     },
   )
 
-  it("with no compose file on disk yet, renders one, which refuses that password", async () => {
+  it("with no compose file on disk yet, renders one without refusing, since status starts nothing", async () => {
     rmSync(onDisk())
-    await expect(compose("status")).rejects.toThrow("exit 1")
-    expect(composeRuns).toEqual([])
+    await compose("status")
+    expect(rendered).toHaveLength(1)
+    expect(composeRuns).toEqual([["ps"]])
+  })
+})
+
+/**
+ * `supatype update`, a docker push or diff, and the dev watcher write the compose file too, and the
+ * watcher does it inside a dev session, where exiting would kill the session. Only the commands that
+ * start or recreate containers check, so the file writer itself never refuses.
+ */
+describe("writing the compose file", () => {
+  it("does not refuse a URL-unsafe password, leaving that to the commands that start containers", async () => {
+    writeFileSync(join(projectDir, ".env"), "POSTGRES_PASSWORD=pa/ss\n")
+    const actual = await vi.importActual<typeof import("../src/self-host-compose.js")>("../src/self-host-compose.js")
+    const options = { fieldMaskingTier: "extension", drafts: false } as const
+    const paths = actual.writeSelfHostCompose(projectDir, projectConfig, options)
+    expect(readFileSync(paths.composePath, "utf8")).toContain("services:")
   })
 })
 

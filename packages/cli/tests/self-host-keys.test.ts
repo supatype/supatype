@@ -16,8 +16,8 @@ import { verifyJwt } from "../src/jwt.js"
 const SECRET = "a-local-development-secret-at-least-32-chars"
 
 let dir: string
-// A JWT_SECRET in the environment is refused when it differs from the file's and written when the
-// file has none, so the runner's own would decide what these tests see.
+// A JWT_SECRET in the environment is warned about when it differs from the file's and written when
+// the file has none, so the runner's own would decide what these tests see.
 const savedSecret = process.env["JWT_SECRET"]
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "selfhost-keys-"))
@@ -99,7 +99,7 @@ describe("filling the self-host keys", () => {
 /**
  * Compose reads JWT_SECRET from the shell ahead of `.env`, and `.env` is what every later run reads.
  * Keys minted with a shell secret `.env` does not hold verify on this run and fail on the next one,
- * so the secret they are signed with is `.env`'s, a different shell one is refused, and a `.env`
+ * so the secret they are signed with is `.env`'s, a different shell one is warned about, and a `.env`
  * without one gets the secret the keys were signed with.
  */
 describe("the secret self-host compose up mints the keys with", () => {
@@ -116,17 +116,39 @@ describe("the secret self-host compose up mints the keys with", () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it("refuses a shell JWT_SECRET that differs from .env's, writes nothing, and says how to fix it", () => {
-    const before = `JWT_SECRET=${SECRET}\nANON_KEY=\nSERVICE_ROLE_KEY=\n`
-    writeFileSync(envPath(), before)
+  it("uses .env's JWT_SECRET when the shell's differs, with one warning and no refusal", () => {
+    writeFileSync(envPath(), `JWT_SECRET=${SECRET}\nANON_KEY=\nSERVICE_ROLE_KEY=\n`)
     process.env["JWT_SECRET"] = OTHER
+
+    const result = fillMissingKeys(dir)
+
+    expect(valueOf("JWT_SECRET")).toBe(SECRET)
+    expect(verifyJwt(valueOf("ANON_KEY"), SECRET)).not.toBeNull()
+    expect(verifyJwt(valueOf("SERVICE_ROLE_KEY"), SECRET)).not.toBeNull()
+    expect(JSON.stringify(result)).toContain("uses the one in .env")
+  })
+
+  it("re-signs keys already in .env when it writes a new JWT_SECRET, since they cannot verify against it", () => {
+    writeFileSync(envPath(), "ANON_KEY=signed-with-something-else\nSERVICE_ROLE_KEY=also-old\n")
+
+    const { filled } = fillMissingKeys(dir)
+
+    const secret = valueOf("JWT_SECRET")
+    expect(filled.sort()).toEqual(["ANON_KEY", "SERVICE_ROLE_KEY"])
+    expect(verifyJwt(valueOf("ANON_KEY"), secret)).not.toBeNull()
+    expect(verifyJwt(valueOf("SERVICE_ROLE_KEY"), secret)).not.toBeNull()
+  })
+
+  it.each([
+    ["a short JWT_SECRET in .env", "JWT_SECRET=twenty-chars-secret!\nANON_KEY=\nSERVICE_ROLE_KEY=\n", undefined],
+    ["a short shell JWT_SECRET", "ANON_KEY=\nSERVICE_ROLE_KEY=\n", "twenty-chars-secret!"],
+    ["a shell JWT_SECRET .env cannot hold unquoted", "ANON_KEY=\n", "a-secret-long-enough # but with a comment in it"],
+  ])("refuses %s before writing anything", (_case, before, shell) => {
+    writeFileSync(envPath(), before)
+    if (shell !== undefined) process.env["JWT_SECRET"] = shell
 
     expect(() => fillMissingKeys(dir)).toThrow("exit 1")
     expect(read()).toBe(before)
-    const out = said.join("\n")
-    expect(out).toContain("JWT_SECRET environment variable")
-    expect(out).toContain("unset JWT_SECRET")
-    expect(out).toContain("supatype keys --force")
   })
 
   it("writes a shell JWT_SECRET into a .env that has none, beside keys signed with it", () => {

@@ -19,7 +19,6 @@ import { keyspaceInPostgres } from "./cache-provider.js"
 import { postgresImageFor } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
-import { requireUrlSafeComposePasswords } from "./url-safe-passwords.js"
 import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
 import { addressPoolExhaustionHint } from "./docker-address-pool.js"
@@ -1365,9 +1364,8 @@ export function writeSelfHostCompose(
   config: SupatypeProjectConfig,
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
-  // Here, where every command that writes the file comes through, rather than in each of them. The
-  // commands that only stop or inspect a running stack use the file already on disk instead.
-  requireUrlSafeComposePasswords(cwd, config)
+  // No URL-unsafe password check here: `supatype update`, push, diff and the dev watcher write this
+  // file too, and none of them starts containers. The commands that do check before they start.
   assertExternalUrlMatchesEnv(cwd, config)
   assertBundledDbUser(cwd, config)
   const tier = resolveFieldMaskingTier(cwd, config, options)
@@ -1464,9 +1462,7 @@ export function runDockerCompose(
     composeArgs.push("--env-file", envFile)
   }
   composeArgs.push(...args)
-  const env: NodeJS.ProcessEnv = options?.quiet
-    ? { ...process.env, COMPOSE_PROGRESS: "quiet" }
-    : process.env
+  const env = composeProcessEnv(projectRoot, options?.quiet === true)
   const stdio = options?.quiet ? "pipe" : "inherit"
   const runCompose = () =>
     spawnSync("docker", composeArgs, {
@@ -1485,6 +1481,23 @@ export function runDockerCompose(
     reportComposeFailure(args, options?.quiet === true ? capturedComposeOutput(result) : null)
   }
   return result.status ?? 1
+}
+
+/**
+ * The names compose would take from the shell ahead of `--env-file`, where the CLI wants `.env`'s:
+ * the keys in `.env` are signed with its JWT_SECRET, so a different one from the shell would start
+ * the stack verifying with a secret those keys do not match, and refuse every request.
+ */
+const ENV_FILE_OVER_SHELL = ["JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY"] as const
+
+/** The environment compose runs with: the CLI's, less the names `.env` defines from the list above. */
+function composeProcessEnv(projectRoot: string, quiet: boolean): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...(quiet && { COMPOSE_PROGRESS: "quiet" }) }
+  const fromFile = readEnvFile(projectRoot)
+  for (const name of ENV_FILE_OVER_SHELL) {
+    if ((fromFile[name] ?? "") !== "") delete env[name]
+  }
+  return env
 }
 
 /** What a quiet compose run printed, from the streams the CLI captured. */

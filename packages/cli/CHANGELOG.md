@@ -7,26 +7,31 @@
 * **keys:** `supatype keys` writes into `.env` when there is one, filling only the blank keys, as
   `--write` did. `--print` only prints. `--write` still works, so scripts and docs written for 0.7.0
   keep running. With no `.env` the keys are printed, with a line saying how to have them written.
-  Keys written into `.env` are always signed with the `JWT_SECRET` in that `.env`, the one the
-  stack verifies them with: a `--secret` or shell `JWT_SECRET` that differs is refused, naming both,
-  and a `.env` with no `JWT_SECRET` gets the given secret written to it. `--print` with no secret
-  anywhere exits 1 rather than printing keys signed with one it made up and kept nowhere.
-* **self-host, init:** `self-host compose up` and `init` sign the keys they write into `.env` the
-  same way `keys` does. Both signed with a shell `JWT_SECRET` ahead of the one in `.env`, so the
-  keys failed against the stack as soon as it ran from a shell without that variable. `compose up`
-  now refuses a shell `JWT_SECRET` that differs from `.env`'s, saying to unset it or to move `.env`
-  to it and re-sign with `supatype keys --force`, since compose would start the stack with the
-  shell's. A `.env` with no `JWT_SECRET` gets the shell's, or a generated one, written beside the
-  keys it signed. `init` writes a shell `JWT_SECRET` into the new `.env` instead of generating one.
+  `--print` with no secret anywhere exits 1 rather than printing keys signed with one it made up and
+  kept nowhere.
+* **keys, self-host, init, dev:** one rule for the `JWT_SECRET` keys are signed with. `.env`'s always
+  wins. A shell `JWT_SECRET` is used only when `.env` has none, and is then written into `.env`; one
+  that differs from `.env`'s gets a single warning line saying `.env`'s is used, and is never
+  refused. Only a `keys --secret` that differs from `.env`'s is refused. Docker Compose reads the
+  shell ahead of `.env`, so every compose command now runs without the shell's `JWT_SECRET`,
+  `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines them: `supatype dev` on docker with a
+  different shell `JWT_SECRET` started services that refused every key with 401. When a
+  `JWT_SECRET` is newly written into `.env` (given or generated), `keys` and `self-host compose up`
+  sign both keys again and say so, since keys already there cannot verify against it. A secret is
+  checked before anything is written: at least 32 characters, and for one written into `.env`, no
+  whitespace, `#` or quotes. `compose up` used to write keys signed with a short secret and then
+  refuse it, leaving keys that were never re-signed once the secret was fixed. `init` warns and
+  generates a secret when the shell's is unusable, and never exits mid-wizard over the keys.
 * **keys, dev:** `NEXT_PUBLIC_SUPATYPE_ANON_KEY` is written beside the `VITE_`, `PUBLIC_` and
   `EXPO_PUBLIC_` copies, and `NEXT_PUBLIC_SUPATYPE_URL` wherever the other URL copies are.
 
 ### Bug Fixes
 
-* **security:** a project with no `JWT_SECRET` gets a generated one in `.env` from `dev` or `keys`.
-  Before, it signed with a published fallback, and the docker dev path wrote that fallback into the
-  `.env` a self-host deployment reads. A secret already in `.env` is kept, whatever it is. A native
-  dev project that never had one signs with the new secret, so its existing sessions sign out once.
+* **security:** a project with no `JWT_SECRET` gets one in `.env` from `dev` or `keys`: the shell's
+  when usable, else a generated one. Before, it signed with a published fallback, and the docker dev
+  path wrote that fallback into the `.env` a self-host deployment reads. A secret already in `.env`
+  is kept, whatever it is. A native dev project that never had one signs with the new secret, so its
+  existing sessions sign out once.
 * **push:** on a native dev stack, the service-role key push uses to create storage buckets is the
   project's, from `.env`, as on docker. It was signed with the published dev secret, which a stack
   running with its own `JWT_SECRET` refused with 401.
@@ -37,13 +42,14 @@
   `SUPATYPE_DEV_DB_PORT` appended a second time was ignored). Updating a key assigned twice leaves
   one line for it.
 * **dev, self-host:** database passwords are encoded in every connection URL the CLI builds. The
-  compose file cannot encode them, so every command that writes the compose file (`dev`, `push`,
-  `update` and `self-host compose up`, `render` and `restart`) refuses a `POSTGRES_PASSWORD`,
+  compose file cannot encode them, so the commands that start or recreate containers (`dev` at
+  startup, and `self-host compose up`, `render` and `restart`) refuse a `POSTGRES_PASSWORD`,
   `AUTHENTICATOR_PASSWORD` or `SUPATYPE_SQL_EDITOR_PASSWORD` holding a character that breaks a URL,
-  naming the variable and how to generate a safe one. `self-host compose down`, `status` and `logs`
-  run against the compose file already on disk rather than rewriting it from the current config, so
-  a stack started by an older CLI with such a password can still be stopped and inspected. With no
-  compose file on disk yet they render one, which checks.
+  naming the variable and how to generate a safe one. Writing the compose file does not check, so
+  `update`, push, diff and the dev watcher never exit over a password an older stack runs with.
+  `self-host compose down`, `status` and `logs` run against the compose file already on disk rather
+  than rewriting it from the current config, so such a stack can still be stopped and inspected.
+  With no compose file on disk yet they render one, without the check.
 * **self-host:** `self-host compose logs --service <name>` shows that service. The option was
   taken by the hidden native `logs` command, declared in a way that attached its options to
   `self-host` itself, so every service was shown. The other native commands had the same fault.
