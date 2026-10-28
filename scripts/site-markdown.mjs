@@ -1,6 +1,7 @@
 // Turns a page of the static site into Markdown, for the generated half of llms-full.txt. It
 // knows only the markup the docs pages use: headings, paragraphs, lists, tables, code blocks,
-// callouts, numbered steps and cards. Anything else loses its tags and keeps its text.
+// callouts, numbered steps and cards. Text that no rule reads stops the run with the page's name,
+// so nothing is dropped from llms-full.txt without a word.
 
 export const site = "https://www.supatype.com"
 
@@ -31,23 +32,35 @@ function codeBlock(name, code) {
   return `${name === "terminal" ? "" : `\`${name}\`:\n\n`}\`\`\`${lang}\n${body}\n\`\`\``
 }
 
+// Text that no rule reads would be dropped without a word, so it stops the run instead.
+function unhandled(url, html, what) {
+  const rest = stripTags(html).trim()
+  if (rest) throw new Error(`${url}: no Markdown rule for ${what} "${rest.slice(0, 80)}"`)
+}
+
+// The items of a table, card grid or list. Text between or around them stops the run.
+function items(html, pattern, url, what) {
+  unhandled(url, html.replace(pattern, ""), what)
+  return [...html.matchAll(pattern)]
+}
+
 function table(html, url) {
-  const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map(([, row]) =>
-    [...row.matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map(([, cell]) => inline(cell, url).replace(/\|/g, "\\|")))
+  const rows = items(html, /<tr[^>]*>([\s\S]*?)<\/tr>/g, url, "table markup").map(([, row]) =>
+    items(row, /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g, url, "table row markup").map(([, cell]) => inline(cell, url).replace(/\|/g, "\\|")))
+  if (rows.length === 0) throw new Error(`${url}: a table with no rows`)
   const line = (cells) => `| ${cells.join(" | ")} |`
   return [line(rows[0]), line(rows[0].map(() => "---")), ...rows.slice(1).map(line)].join("\n")
 }
 
-const cards = (html, url) => [...html.matchAll(/<div><h3>([\s\S]*?)<\/h3><p>([\s\S]*?)<\/p><\/div>/g)]
-  .map(([, title, body]) => `- **${inline(title, url)}**: ${inline(body, url)}`).join("\n")
+// A card has an <h3> or <strong> title, and may carry a label above it (the licence cards). Each
+// card is its own paragraph, not a bullet, so a list that follows the cards stays a separate list.
+const cards = (html, url) => items(html, /<div>(?:<span class="label">([^<]*)<\/span>)?<(h3|strong)>([\s\S]*?)<\/\2><p>([\s\S]*?)<\/p><\/div>/g, url, "card markup")
+  .map(([, label, , title, body]) => `**${inline(title, url)}**${label ? ` (${inline(label, url)})` : ""}: ${inline(body, url)}`).join("\n\n")
 
-// A list of plain <li> items. Anything else in the list (an item with attributes, a nested list)
-// would be dropped without a word, so it stops the run instead.
+// A list of plain <li> items. A nested list has no rule either.
 function list(html, url) {
   if (/<[ou]l[\s>]/.test(html)) throw new Error(`${url}: no Markdown rule for a nested list`)
-  const rest = html.replace(/<li>[\s\S]*?<\/li>/g, "").trim()
-  if (rest) throw new Error(`${url}: no Markdown rule for list markup "${rest.slice(0, 80)}"`)
-  return [...html.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(([, item]) => `- ${inline(item, url)}`).join("\n")
+  return items(html, /<li>([\s\S]*?)<\/li>/g, url, "list markup").map(([, item]) => `- ${inline(item, url)}`).join("\n")
 }
 
 const callout = (label, body, url) => `> **${inline(label, url)}:** ${inline(body.replace(/<\/p>\s*<p>/g, " "), url)}`
@@ -76,9 +89,7 @@ export function pageMarkdown(html, url) {
   for (const [pattern, render] of blockRules) {
     body = body.replace(pattern, (_, ...groups) => `\u0000${blocks.push(render(url, ...groups)) - 1}\u0000`)
   }
-  // Text outside every rule would be dropped without a word, so it stops the run instead.
-  const leftover = stripTags(body.replace(/\u0000\d+\u0000/g, "")).trim()
-  if (leftover) throw new Error(`${url}: no Markdown rule for "${leftover.slice(0, 80)}"`)
+  unhandled(url, body.replace(/\u0000\d+\u0000/g, ""), "text")
   const text = [...body.matchAll(/\u0000(\d+)\u0000/g)].map(([, i]) => blocks[Number(i)].replace(/\u0000(\d+)\u0000/g, (_, j) => blocks[Number(j)]))
   return [`## ${decode(article[1])}`, `Source: ${site}${url}`, ...text].join("\n\n")
 }

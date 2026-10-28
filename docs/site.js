@@ -74,26 +74,29 @@ async function sendForm(event, email, properties) {
 // data-submit-event and its thank-you line in data-done, where {email} stands for the address given.
 // The thank-you line shows only once PostHog has the event. If it never arrives (a blocker,
 // offline, or not the live site), the form shows its own "did not go through" message instead.
-// While it sends, its button says "Sending" and the form ignores another submit. The status line
-// keeps its privacy link until there is an answer.
-const sending = new WeakSet()
-
+// While it sends, its button is disabled and says "Sending", which also stops a second submit by
+// click or Enter. The status line keeps its privacy link until there is an answer.
 document.addEventListener("submit", async (event) => {
   const form = event.target
   if (!form.matches(".signup")) return
   event.preventDefault()
   const status = form.querySelector("[role='status']")
   const blocked = form.querySelector(".signup-blocked")
-  if (!status || !blocked || sending.has(form)) return
+  // Safari before 15.4 has no event.submitter, so the form's own button stands in.
+  const button = event.submitter ?? form.querySelector("[type='submit']")
+  if (!status || !blocked || !button || button.disabled) return
   const { email: { value }, note } = form.elements
   const email = value.trim()
-  const button = event.submitter
-  const label = button?.textContent
-  sending.add(form)
-  if (button) button.textContent = "Sending"
-  const sent = await sendForm(form.dataset.submitEvent, email, { note: note?.value.trim() || undefined })
-  sending.delete(form)
-  if (button) button.textContent = label
+  const label = button.textContent
+  button.disabled = true
+  button.textContent = "Sending"
+  let sent = false
+  try {
+    sent = await sendForm(form.dataset.submitEvent, email, { note: note?.value.trim() || undefined })
+  } finally {
+    button.disabled = false
+    button.textContent = label
+  }
   if (!sent) return status.replaceChildren(blocked.content.cloneNode(true))
   for (const part of form.children) part.hidden = part !== status
   // A function, so a "$" in the address is not read as a replacement pattern.
@@ -102,16 +105,14 @@ document.addEventListener("submit", async (event) => {
 
 // Copy to clipboard. A button with data-copy copies that text; a code block's Copy button copies
 // its block. A terminal session copies only its commands: no "$ " prompts, no output lines, and no
-// comments. A comment is the block's <span class="c"> part, or in a block without that markup, a
-// "# " set off by two or more spaces, so a "#" inside a quoted argument stays.
+// comments, which are the block's <span class="c"> parts, so a "#" inside an argument stays.
 function commandsFrom(pre) {
-  const text = pre.textContent.replace(/\n$/, "")
-  if (!text.split("\n").some((line) => line.startsWith("$ "))) return text
+  if (!/^\$ /m.test(pre.textContent)) return pre.textContent.replace(/\n$/, "")
   const bare = pre.cloneNode(true)
   bare.querySelectorAll(".c").forEach((comment) => comment.remove())
-  const lines = bare.textContent.split("\n").filter((line) => line.startsWith("$ "))
-  const commands = lines.map((line) => line.slice(2).replace(/\s{2,}#\s.*$/, "").trimEnd())
-  return commands.filter(Boolean).join("\n")
+  const prompts = bare.textContent.split("\n").filter((line) => line.startsWith("$ "))
+  if (prompts.length === 0) return pre.textContent.replace(/\n$/, "")
+  return prompts.map((line) => line.slice(2).trimEnd()).filter(Boolean).join("\n")
 }
 
 // The label to go back to is kept on the button the first time, so a second click inside the
@@ -195,9 +196,10 @@ if (navBar) {
 // grouped by the id they point at, once, up front. /docs/ and /docs/index.html are the same page.
 // (Other pages link their sections as "#id", which resolves against the address the page is at.)
 const samePath = (path) => path.replace(/\/index\.html$/, "/")
+const here = samePath(location.pathname)
 const linksById = new Map()
 for (const a of document.querySelectorAll(".nav-links a[href^='#'], .nav-drawer a[href^='#'], .docs-side a[href*='#'], .toc a[href^='#']")) {
-  if (samePath(a.pathname) !== samePath(location.pathname)) continue
+  if (samePath(a.pathname) !== here) continue
   const id = a.hash.slice(1)
   if (!linksById.has(id)) linksById.set(id, [])
   linksById.get(id).push(a)

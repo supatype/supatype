@@ -2617,10 +2617,13 @@ Pre-1.0: APIs and config may change between releases.
 
 A self-hosted project has four Studio roles:
 
-- **Admin**: Everything, including giving and removing Studio roles.
-- **Developer**: Everything an admin can do, except Studio roles.
-- **Editor**: Content and files. No schema, SQL or settings.
-- **Viewer**: Reads content, files, schema and logs. Changes nothing.
+**Admin**: Everything, including giving and removing Studio roles.
+
+**Developer**: Everything an admin can do, except Studio roles.
+
+**Editor**: Content and files. No schema, SQL or settings.
+
+**Viewer**: Reads content, files, schema and logs. Changes nothing.
 
 Supatype Cloud adds owner and billing roles for the organisation.
 
@@ -3396,7 +3399,11 @@ Pre-1.0: APIs and config may change between releases.
 
 ### In one minute
 
+**SDKs** (MIT): The client SDKs, framework bindings and plugins. Use them for anything.
 
+**CLI and services** (APACHE 2.0): The CLI, Studio and the services (storage, realtime, functions worker). Use them for anything.
+
+**Schema engine** (BSL 1.1): Source-available under the Business Source License 1.1 (SPDX `BUSL-1.1`), and its source is at [github.com/supatype/schema-engine](https://github.com/supatype/schema-engine). You can read it, change it, redistribute it and run it in production.
 
 - The one thing you cannot do without a commercial licence: offer Supatype or the engine to others as a hosted or managed service, paid or free, or sell a product whose primary value is the engine.
 - Each engine version becomes **Apache 2.0** on its Change Date, four years after that version's release.

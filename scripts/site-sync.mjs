@@ -115,7 +115,7 @@ function withHead(html, url, file) {
   const stripped = html
     .replace(/^ *<meta (property="og:|name="twitter:)[^>]*>\n/gm, "")
     .replace(/^ *<link rel="alternate" type="application\/atom\+xml"[^>]*>\n/gm, "")
-  return replaceOne(stripped, /^( *<link rel="alternate" type="text\/plain"[^>]*>\n)/m, (llms) => `${llms}${feedLink}${tags}`, "llms.txt alternate link", file)
+  return replaceOne(stripped, /^ *<link rel="alternate" type="text\/plain"[^>]*>\n/m, (llms) => `${llms}${feedLink}${tags}`, "llms.txt alternate link", file)
 }
 
 // Guides opens on the first guide in the sidebar.
