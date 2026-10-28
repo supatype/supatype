@@ -241,16 +241,19 @@ export interface SchemaSourcePushArtifacts {
 }
 
 /**
- * Write schema source blob + manifest under `.supatype/` for dev's pushes. A file name restore would
- * refuse costs the snapshot, not the push: dev applies the schema on every save, and it is
- * `supatype push` that refuses such a name.
+ * Write schema source blob + manifest under `.supatype/` for an engine push. With `snapshotOptional`
+ * (dev, which pushes on every save) a file name restore would refuse costs the snapshot, not the
+ * push. Without it, as for `supatype push` on every route, such a name is refused.
  */
-export function writeSchemaSourcePushArtifacts(cwd: string): SchemaSourcePushArtifacts | null {
+export function writeSchemaSourcePushArtifacts(
+  cwd: string,
+  snapshotOptional: boolean,
+): SchemaSourcePushArtifacts | null {
   let payload: SchemaSourcesPayload | null
   try {
     payload = buildSchemaSourcesPayload(cwd)
   } catch (err) {
-    if (!(err instanceof UnrestorableSchemaFileName)) throw err
+    if (!snapshotOptional || !(err instanceof UnrestorableSchemaFileName)) throw err
     console.warn(`Warning: ${err.message} This push keeps no schema snapshot.`)
     return null
   }

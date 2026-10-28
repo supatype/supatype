@@ -49,12 +49,13 @@ afterEach(() => {
 })
 
 describe("a schema file name a snapshot cannot restore", () => {
-  it("stops supatype push", () => {
+  it("stops supatype push, through the control plane or the project's own engine", () => {
     expect(() => buildSchemaSourcesPayload(dir, "a@example.com")).toThrow(/cannot restore/)
+    expect(() => writeSchemaSourcePushArtifacts(dir, false)).toThrow(/cannot restore/)
   })
 
   it("costs dev's push its snapshot, with a warning, rather than stopping every save", () => {
-    expect(writeSchemaSourcePushArtifacts(dir)).toBeNull()
+    expect(writeSchemaSourcePushArtifacts(dir, true)).toBeNull()
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("keeps no schema snapshot"))
   })
 })
