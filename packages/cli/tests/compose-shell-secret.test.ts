@@ -65,7 +65,6 @@ describe("the environment docker compose runs with", () => {
     ["signed with another secret", () => key("service_role", OTHER_SECRET)],
     ["for another role", () => key("anon", ENV_SECRET)],
     ["that has expired", () => key("service_role", ENV_SECRET, now - 60)],
-    ["that expires within a day", () => key("service_role", ENV_SECRET, now + 60)],
   ])("leaves out a shell key %s where .env's own is blank", (_, shellKey) => {
     // PostgREST, on .env's JWT_SECRET, would refuse it, or take it for a role it is not.
     process.env["SERVICE_ROLE_KEY"] = shellKey()
@@ -86,6 +85,14 @@ describe("the environment docker compose runs with", () => {
     expect(env["JWT_SECRET"]).toBeUndefined()
     expect(env["ANON_KEY"]).toBe(anon)
     expect(env["SERVICE_ROLE_KEY"]).toBe(service)
+  })
+
+  it("keeps a shell key the stack still accepts, however soon it expires", () => {
+    // Dropping it would start nothing: the compose file requires SERVICE_ROLE_KEY.
+    const service = key("service_role", ENV_SECRET, now + 3_600)
+    process.env["SERVICE_ROLE_KEY"] = service
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${ENV_SECRET}\nSERVICE_ROLE_KEY=\n`)
+    expect(composeEnv()["SERVICE_ROLE_KEY"]).toBe(service)
   })
 
   it("keeps a shell key minted by another tool, with no issuer, which the stack does not check", () => {
