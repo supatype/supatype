@@ -8,17 +8,18 @@
   `--write` did. `--print` only prints. `--write` still works, so scripts and docs written for 0.7.0
   keep running. With no `.env` the keys are printed, with a line saying how to have them written.
   `--print` with no secret anywhere exits 1 rather than printing keys signed with one it made up and
-  kept nowhere. `--print` refuses a secret shorter than 32 characters, as writing does, since
-  printed keys end up in a `.env` all the same.
+  kept nowhere. `--print` checks the secret as writing does, since printed keys end up in a `.env`
+  all the same: at least 32 characters, and for a given one, no whitespace, `#` or quotes.
 * **keys, self-host, init, dev:** one rule for the `JWT_SECRET` keys are signed with. `.env`'s always
   wins. A shell `JWT_SECRET` is used only when `.env` has none, and is then written into `.env`; one
   that differs from `.env`'s gets a single warning line saying `.env`'s is used, and is never
   refused. Only a `keys --secret` that differs from `.env`'s is refused. Docker Compose reads the
   shell ahead of `.env`, so every compose command now runs without the shell's `JWT_SECRET`,
-  `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines that name or holds a `JWT_SECRET`:
-  `supatype dev` on docker with a different shell `JWT_SECRET` started services that refused every
-  key with 401. `push` and other commands calling the local stack send `.env`'s service-role key
-  then too, not the shell's, which the stack no longer runs with. When a
+  `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines that name, and without a shell key that
+  does not verify against `.env`'s `JWT_SECRET`: `supatype dev` on docker with a different shell
+  `JWT_SECRET` started services that refused every key with 401. A shell key signed with `.env`'s
+  secret still fills a blank one. `push` and other commands calling the local stack follow the same
+  rule, sending `.env`'s `SERVICE_ROLE_KEY` when the shell's is left out. When a
   `JWT_SECRET` is newly written into `.env` (given or generated), `keys` and `self-host compose up`
   sign both keys again and say so, since keys already there cannot verify against it. A secret is
   checked before anything is written: at least 32 characters, and for one written into `.env`, no

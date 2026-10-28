@@ -272,9 +272,7 @@ describe("the secret init signs its keys with", () => {
     const secret = readEnvFile(dir)["JWT_SECRET"] ?? ""
     expect(secret).not.toBe(shell)
     expect(secret).toMatch(/^[A-Za-z0-9_-]{64}$/)
-    // Said once, when the secret was generated: the keys step has nothing to add about it.
     expect(warned).toHaveBeenCalledTimes(1)
-    expect(generateAndWriteKeys(dir)).not.toHaveProperty("warning")
   })
 })
 

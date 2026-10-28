@@ -15,6 +15,10 @@ vi.mock("../src/docker-runtime.js", async (importOriginal) => ({
 }))
 
 const { runDockerCompose } = await import("../src/self-host-compose.js")
+const { signJwt } = await import("../src/jwt.js")
+
+const ENV_SECRET = "the-secret-in-env-at-least-32-characters"
+const OTHER_SECRET = "another-secret-also-at-least-32-characters"
 
 /**
  * Compose takes a variable from the shell ahead of `--env-file`. The keys in `.env` are signed with
@@ -53,11 +57,22 @@ describe("the environment docker compose runs with", () => {
     for (const name of NAMES) expect(env[name]).toBeUndefined()
   })
 
-  it("leaves out the shell's keys once .env holds a JWT_SECRET, even while its own are blank", () => {
-    // A shell key is signed with some other secret, which PostgREST, on .env's, would refuse.
-    writeFileSync(join(dir, ".env"), "JWT_SECRET=from-env-file\nANON_KEY=\n")
+  it("leaves out a shell key signed with another secret where .env's own is blank", () => {
+    // PostgREST, on .env's JWT_SECRET, would refuse it.
+    process.env["SERVICE_ROLE_KEY"] = signJwt({ role: "service_role" }, OTHER_SECRET)
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${ENV_SECRET}\nANON_KEY=\n`)
     const env = composeEnv()
     for (const name of NAMES) expect(env[name]).toBeUndefined()
+  })
+
+  it("keeps a shell key signed with .env's JWT_SECRET where .env's own is blank", () => {
+    // The compose file requires SERVICE_ROLE_KEY: dropping a good one stopped push, diff and restart.
+    const key = signJwt({ role: "service_role" }, ENV_SECRET)
+    process.env["SERVICE_ROLE_KEY"] = key
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${ENV_SECRET}\nSERVICE_ROLE_KEY=\n`)
+    const env = composeEnv()
+    expect(env["JWT_SECRET"]).toBeUndefined()
+    expect(env["SERVICE_ROLE_KEY"]).toBe(key)
   })
 
   it("keeps the shell's secret and keys .env neither defines nor signs", () => {

@@ -4,6 +4,7 @@ import { resolve } from "node:path"
 import { readEnvFile, readEnvValue, upsertEnvFile } from "../env-file.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
+import { GIVEN_JWT_SECRET_REMEDY, jwtSecretUnwritable } from "../jwt-secret-rules.js"
 import {
   generateJwtSecret,
   givenJwtSecret,
@@ -145,16 +146,21 @@ function printKeys(cwd: string, opts: KeysOptions, expYears: number, hasEnv: boo
 
 /**
  * The secret printed keys are signed with: `--secret`, else `.env`'s ahead of the shell's, as when
- * writing, since `.env`'s is the one the stack verifies with. Refused when the REST API could not
- * start with it, as a written one is: printed keys end up in a `.env` all the same.
+ * writing, since `.env`'s is the one the stack verifies with. Checked as a written one is, since
+ * printed keys and their secret end up in a `.env` all the same: `.env`'s for length, a given one
+ * also for what `.env` cannot hold unquoted.
  */
 function printedKeysSecret(cwd: string, flag: string | undefined): string | undefined {
   const fromEnvFile = readEnvValue(cwd, "JWT_SECRET", "")
   const given = givenJwtSecret(flag)
-  const known =
-    given?.fromFlag !== true && fromEnvFile !== "" ? { value: fromEnvFile, source: "JWT_SECRET in .env" } : given
-  if (known !== undefined) requireUsableJwtSecret(known.value, known.source)
-  return known?.value
+  if (given?.fromFlag !== true && fromEnvFile !== "") {
+    requireUsableJwtSecret(fromEnvFile, "JWT_SECRET in .env")
+    return fromEnvFile
+  }
+  if (given === undefined) return undefined
+  const problem = jwtSecretUnwritable(given.value, given.source)
+  if (problem !== null) fatalError(problem, [...GIVEN_JWT_SECRET_REMEDY])
+  return given.value
 }
 
 /**
