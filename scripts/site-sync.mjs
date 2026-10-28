@@ -48,9 +48,11 @@ function match(html, pattern, what, file) {
   return found
 }
 
+// The replacement is always a function, so a "$" in a title or description is never read as a
+// replacement pattern. A string stands for itself.
 function replaceOne(html, pattern, replacement, what, file) {
   match(html, pattern, what, file)
-  return html.replace(pattern, replacement)
+  return html.replace(pattern, typeof replacement === "function" ? replacement : () => replacement)
 }
 
 // The sidebar link that stands for a page: its own, or for Get started, which has no link of its
@@ -111,9 +113,9 @@ const feedLink = `  <link rel="alternate" type="application/atom+xml" title="Sup
 function withHead(html, url, file) {
   const tags = previewTags(html, url, file)
   const stripped = html
-    .replace(/^ *<meta (property="og:|name="twitter:)[^>]*>\r?\n/gm, "")
-    .replace(/^ *<link rel="alternate" type="application\/atom\+xml"[^>]*>\r?\n/gm, "")
-  return replaceOne(stripped, /^( *<link rel="alternate" type="text\/plain"[^>]*>\r?\n)/m, `$1${feedLink}${tags}`, "llms.txt alternate link", file)
+    .replace(/^ *<meta (property="og:|name="twitter:)[^>]*>\n/gm, "")
+    .replace(/^ *<link rel="alternate" type="application\/atom\+xml"[^>]*>\n/gm, "")
+  return replaceOne(stripped, /^( *<link rel="alternate" type="text\/plain"[^>]*>\n)/m, (llms) => `${llms}${feedLink}${tags}`, "llms.txt alternate link", file)
 }
 
 // Guides opens on the first guide in the sidebar.
@@ -175,7 +177,7 @@ function syncedPage(html, url, headings) {
   out = replaceOne(out, /<main class="doc"[^>]*>/, `<main class="doc" id="main">`, "main", file)
   out = replaceOne(out, /<footer class="site-footer">[\s\S]*?<\/footer>/, footerHtml, "site footer", file)
   out = replaceOne(out, /<nav class="docs-side"[\s\S]*?\n  <\/nav>/, sidebarHtml(url), "docs sidebar", file)
-  out = replaceOne(out, /(<button type="button" class="docs-menu"[^>]*>\s*<span>)[^<]*/, `$1${menuLabel(url)}`, "docs menu button", file)
+  out = replaceOne(out, /(<button type="button" class="docs-menu"[^>]*>\s*<span>)[^<]*/, (_, button) => `${button}${menuLabel(url)}`, "docs menu button", file)
   const pager = pagerHtml(url, headings)
   if (!pager) return out.replace(/\n*\s*<nav class="pn"[\s\S]*?<\/nav>/, "")
   return replaceOne(out, /<nav class="pn"[\s\S]*?<\/nav>/, pager, "previous/next links", file)
@@ -183,11 +185,13 @@ function syncedPage(html, url, headings) {
 
 // sitemap.xml lists every page with the date its file last changed in git, or today for a file
 // with changes not yet committed. Two git runs answer for every file at once: the log, newest
-// first, gives each path its latest commit date, and status marks the uncommitted ones.
+// first, gives each path its latest commit date (the day it landed, which is what a crawler
+// wants), and status marks the uncommitted ones. Today is this machine's local date.
 function lastModifiedDates(files) {
   const run = (args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" })
   const paths = files.map((file) => `docs/${file}`)
-  const today = new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const today = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, "0")).join("-")
   const dates = new Map()
   let date = today
   for (const line of run(["log", "--format=date %cs", "--name-only", "--", ...paths]).split("\n")) {
@@ -212,14 +216,16 @@ function sitemapXml() {
 const docsHeading = "## Documentation pages"
 
 function llmsFullTxt(current, synced) {
-  const summary = current.replace(/\r\n/g, "\n").split(`\n${docsHeading}\n`)[0].trimEnd()
+  const summary = current.split(`\n${docsHeading}\n`)[0].trimEnd()
   const sections = pageUrls.filter((url) => sidebarEntry(url).llms).map((url) => pageMarkdown(synced[url], url))
   const intro = `Every page of the docs and guides, as Markdown, generated from the pages on ${site}/.`
   return `${summary}\n\n${docsHeading}\n\n${intro}\n\n${sections.join("\n\n")}\n`
 }
 
 const check = process.argv.includes("--check")
-const read = (file) => readFileSync(docs + file, "utf8")
+// Git keeps these files with LF endings, but a Windows checkout may write CRLF. Reading as LF
+// keeps --check from calling every page out of step there.
+const read = (file) => readFileSync(docs + file, "utf8").replace(/\r\n/g, "\n")
 const pages = Object.fromEntries([...pageUrls, ...extraUrls].map((url) => [url, read(fileOf(url))]))
 const headings = Object.fromEntries(pageUrls.map((url) => [url, match(pages[url], /<h1>([^<]*)<\/h1>/, "<h1>", fileOf(url))[1]]))
 const synced = Object.fromEntries(Object.entries(pages).map(([url, html]) => [url, syncedPage(html, url, headings)]))
@@ -231,7 +237,11 @@ const results = [
   ["llms-full.txt", llmsFull, llmsFullTxt(llmsFull, synced)],
   ["sitemap.xml", read("sitemap.xml"), sitemapXml()],
 ]
-const changed = results.filter(([, before, after]) => before !== after)
+// A squash merge gives the sitemap's pages a new date with no change to them, so --check compares
+// the sitemap's pages and not its dates. A plain run still writes the dates.
+const withoutDates = (xml) => xml.replace(/<lastmod>[^<]*<\/lastmod>/g, "")
+const inStep = (file, before, after) => (check && file === "sitemap.xml" ? withoutDates(before) === withoutDates(after) : before === after)
+const changed = results.filter(([file, before, after]) => !inStep(file, before, after))
 if (!check) changed.forEach(([file, , after]) => writeFileSync(docs + file, after))
 changed.forEach(([file]) => console.log(`${check ? "out of step" : "updated"}: docs/${file}`))
 console.log(`${results.length} files, ${changed.length} ${check ? "out of step" : "updated"}.`)

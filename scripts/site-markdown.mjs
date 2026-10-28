@@ -41,6 +41,15 @@ function table(html, url) {
 const cards = (html, url) => [...html.matchAll(/<div><h3>([\s\S]*?)<\/h3><p>([\s\S]*?)<\/p><\/div>/g)]
   .map(([, title, body]) => `- **${inline(title, url)}**: ${inline(body, url)}`).join("\n")
 
+// A list of plain <li> items. Anything else in the list (an item with attributes, a nested list)
+// would be dropped without a word, so it stops the run instead.
+function list(html, url) {
+  if (/<[ou]l[\s>]/.test(html)) throw new Error(`${url}: no Markdown rule for a nested list`)
+  const rest = html.replace(/<li>[\s\S]*?<\/li>/g, "").trim()
+  if (rest) throw new Error(`${url}: no Markdown rule for list markup "${rest.slice(0, 80)}"`)
+  return [...html.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(([, item]) => `- ${inline(item, url)}`).join("\n")
+}
+
 const callout = (label, body, url) => `> **${inline(label, url)}:** ${inline(body.replace(/<\/p>\s*<p>/g, " "), url)}`
 
 // Block rules, in the order they run. Each finished block is set aside as a placeholder so later
@@ -54,7 +63,7 @@ const blockRules = [
   [/<div class="step"><span class="step-num">([^<]*)<\/span><h3>([\s\S]*?)<\/h3><\/div>/g, (url, n, title) => `#### ${/^\d+$/.test(n) ? `${n}. ` : ""}${inline(title, url)}`],
   [/<h2[^>]*>([\s\S]*?)<\/h2>/g, (url, html) => `### ${inline(html, url)}`],
   [/<h3[^>]*>([\s\S]*?)<\/h3>/g, (url, html) => `#### ${inline(html, url)}`],
-  [/<ul[^>]*>([\s\S]*?)<\/ul>/g, (url, html) => [...html.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(([, item]) => `- ${inline(item, url)}`).join("\n")],
+  [/<ul[^>]*>([\s\S]*?)<\/ul>/g, (url, html) => list(html, url)],
   [/<p[^>]*>([\s\S]*?)<\/p>/g, (url, html) => inline(html, url)],
 ]
 

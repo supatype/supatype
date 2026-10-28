@@ -2,16 +2,19 @@
 // browser and counts visitors with a daily hash made on PostHog's servers, so no consent banner is
 // needed. The project token is a public, write-only key by design.
 const POSTHOG_TOKEN = "phc_udSTXPBgv6MJEUwEibzzYgq6DYAVw53SQ3sX5q2omJjx"
+const POSTHOG_HOST = "https://eu.i.posthog.com"
 const live = location.hostname === "www.supatype.com"
 // Events sent before the library has loaded wait here.
 const pending = []
 
 // Every event carries the page it was sent from as source.
-function track(event, properties = {}, options) {
+const withSource = (properties) => ({ source: location.pathname, ...properties })
+
+function track(event, properties = {}) {
   if (!live) return
-  properties = { source: location.pathname, ...properties }
-  if (window.posthog?.__loaded) window.posthog.capture(event, properties, options)
-  else pending.push([event, properties, options])
+  properties = withSource(properties)
+  if (window.posthog?.__loaded) window.posthog.capture(event, properties)
+  else pending.push([event, properties])
 }
 
 if (live) {
@@ -19,7 +22,7 @@ if (live) {
   script.src = "https://eu-assets.i.posthog.com/static/array.js"
   script.async = true
   script.onload = () => window.posthog?.init(POSTHOG_TOKEN, {
-    api_host: "https://eu.i.posthog.com",
+    api_host: POSTHOG_HOST,
     cookieless_mode: "always",
     person_profiles: "identified_only",
     loaded: (posthog) => pending.splice(0).forEach((args) => posthog.capture(...args)),
@@ -34,7 +37,7 @@ if (document.body.dataset.eventOnLoad) {
 
 // A link or button with data-event sends that event, with data-where saying which one it was.
 // Moving through the docs by sidebar, "On this page" or previous/next sends docs_nav. Any other
-// link off the site sends outbound_clicked.
+// web link off the site sends outbound_clicked; mailto: links send nothing.
 const docsNav = [[".docs-side", "sidebar"], [".toc", "toc"], [".pn", "pager"]]
 
 document.addEventListener("click", (event) => {
@@ -44,36 +47,71 @@ document.addEventListener("click", (event) => {
   if (!link) return
   const where = docsNav.find(([selector]) => link.closest(selector))?.[1]
   if (where) return track("docs_nav", { where, to: link.pathname + link.hash })
-  if (link.hostname !== location.hostname) track("outbound_clicked", { url: link.href })
+  if (link.protocol.startsWith("http") && link.hostname !== location.hostname) track("outbound_clicked", { url: link.href })
 })
+
+// A form's event is posted straight to PostHog rather than queued by the library, so the form
+// learns whether it arrived. The email, lower-cased, is the event's distinct id, with no person
+// profile, so nothing ties it to the visitor's daily hash. Resolves false on the local site, on
+// any failure, or after 10 seconds without an answer, so a stalled request cannot leave the form
+// stuck. The timeout is a plain timer, as AbortSignal.timeout is missing from Safari before 16.
+async function sendForm(event, email, properties) {
+  if (!live) return false
+  const body = { api_key: POSTHOG_TOKEN, event, distinct_id: email.toLowerCase(), properties: withSource({ email, ...properties, $process_person_profile: false }) }
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), 10000)
+  try {
+    const response = await fetch(`${POSTHOG_HOST}/i/v0/e/`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: abort.signal })
+    return response.ok
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 // Sign-up forms: the Cloud waiting list and "book a call". A form names the event it sends in
 // data-submit-event and its thank-you line in data-done, where {email} stands for the address given.
-// Giving an email is consent to be identified by it. If PostHog never loaded (a blocker, or not
-// the live site), the form shows its own "blocked" message instead.
-document.addEventListener("submit", (event) => {
+// The thank-you line shows only once PostHog has the event. If it never arrives (a blocker,
+// offline, or not the live site), the form shows its own "did not go through" message instead.
+// While it sends, its button says "Sending" and the form ignores another submit. The status line
+// keeps its privacy link until there is an answer.
+const sending = new WeakSet()
+
+document.addEventListener("submit", async (event) => {
   const form = event.target
   if (!form.matches(".signup")) return
   event.preventDefault()
   const status = form.querySelector("[role='status']")
   const blocked = form.querySelector(".signup-blocked")
-  if (!status || !blocked) return
-  if (!window.posthog?.__loaded) return status.replaceChildren(blocked.content.cloneNode(true))
+  if (!status || !blocked || sending.has(form)) return
   const { email: { value }, note } = form.elements
   const email = value.trim()
-  window.posthog.identify(email, { email })
-  track(form.dataset.submitEvent, { note: note?.value.trim() || undefined }, { send_instantly: true })
+  const button = event.submitter
+  const label = button?.textContent
+  sending.add(form)
+  if (button) button.textContent = "Sending"
+  const sent = await sendForm(form.dataset.submitEvent, email, { note: note?.value.trim() || undefined })
+  sending.delete(form)
+  if (button) button.textContent = label
+  if (!sent) return status.replaceChildren(blocked.content.cloneNode(true))
   for (const part of form.children) part.hidden = part !== status
-  status.textContent = form.dataset.done.replace("{email}", email)
+  // A function, so a "$" in the address is not read as a replacement pattern.
+  status.textContent = form.dataset.done.replace("{email}", () => email)
 })
 
 // Copy to clipboard. A button with data-copy copies that text; a code block's Copy button copies
-// its block, minus the "$ " prompts and the output lines of a terminal session.
-function commandsFrom(text) {
-  const lines = text.replace(/\n$/, "").split("\n")
-  const commands = lines.filter((line) => line.startsWith("$ "))
-  if (commands.length === 0) return lines.join("\n")
-  return commands.map((line) => line.slice(2).replace(/\s+#.*$/, "")).join("\n")
+// its block. A terminal session copies only its commands: no "$ " prompts, no output lines, and no
+// comments. A comment is the block's <span class="c"> part, or in a block without that markup, a
+// "# " set off by two or more spaces, so a "#" inside a quoted argument stays.
+function commandsFrom(pre) {
+  const text = pre.textContent.replace(/\n$/, "")
+  if (!text.split("\n").some((line) => line.startsWith("$ "))) return text
+  const bare = pre.cloneNode(true)
+  bare.querySelectorAll(".c").forEach((comment) => comment.remove())
+  const lines = bare.textContent.split("\n").filter((line) => line.startsWith("$ "))
+  const commands = lines.map((line) => line.slice(2).replace(/\s{2,}#\s.*$/, "").trimEnd())
+  return commands.filter(Boolean).join("\n")
 }
 
 // The label to go back to is kept on the button the first time, so a second click inside the
@@ -99,7 +137,8 @@ async function copy(button, text) {
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-copy], .cb-copy")
   if (!button) return
-  const text = button.dataset.copy ?? commandsFrom(button.closest(".cb")?.querySelector("pre")?.textContent ?? "")
+  const pre = button.closest(".cb")?.querySelector("pre")
+  const text = button.dataset.copy ?? (pre ? commandsFrom(pre) : "")
   copy(button, text)
 })
 
@@ -153,10 +192,12 @@ if (navBar) {
 }
 
 // Mark the nav, sidebar and "On this page" links for the part of the page in view. Links are
-// grouped by the id they point at, once, up front.
+// grouped by the id they point at, once, up front. /docs/ and /docs/index.html are the same page.
+// (Other pages link their sections as "#id", which resolves against the address the page is at.)
+const samePath = (path) => path.replace(/\/index\.html$/, "/")
 const linksById = new Map()
 for (const a of document.querySelectorAll(".nav-links a[href^='#'], .nav-drawer a[href^='#'], .docs-side a[href*='#'], .toc a[href^='#']")) {
-  if (a.pathname !== location.pathname) continue
+  if (samePath(a.pathname) !== samePath(location.pathname)) continue
   const id = a.hash.slice(1)
   if (!linksById.has(id)) linksById.set(id, [])
   linksById.get(id).push(a)
