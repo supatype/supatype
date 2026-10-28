@@ -23,6 +23,7 @@
   name is refused too, since on Windows `docs/a:b.md` writes a hidden stream of a file `docs/a`.
   Such a name elsewhere in the repository does not stop an example. Schema snapshots are restored
   with the same checks, and `push` refuses a schema file named in a way restore would refuse.
+  `supatype dev` warns instead and pushes without a snapshot, so it does not stop on every save.
 * **seed:** `authUser: { connect: { id } }` on a relation to the auth user (`RelatedTo<SupatypeAuthUser>`)
   writes the relation's key column. It failed with "`supatype:user` is not a model in this schema".
   The generated `...Create` type still offers the key column (`auth_user_id`) rather than `authUser`;

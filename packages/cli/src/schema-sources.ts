@@ -78,16 +78,19 @@ function writeTarEntry(name: string, content: Buffer): Buffer {
   return Buffer.concat([header, content, Buffer.alloc(pad)])
 }
 
+/** A schema file named in a way restore refuses, so no snapshot of it can be taken. */
+export class UnrestorableSchemaFileName extends Error {}
+
 /**
- * The schema's files as a tarball. Refused at push for a name restore would refuse (a colon is legal
- * on macOS and Linux), since a snapshot holding one could never be restored, on any platform.
+ * The schema's files as a tarball. Refused for a name restore would refuse (a colon is legal on
+ * macOS and Linux), since a snapshot holding one could never be restored, on any platform.
  */
 export function packSchemaSources(graph: SchemaSourceGraph): Buffer {
   const chunks: Buffer[] = []
   for (const file of graph.files) {
     const name = file.relativePath.replace(/\\/g, "/")
     if (!isSafeEntryName(name)) {
-      throw new Error(
+      throw new UnrestorableSchemaFileName(
         `Schema file ${JSON.stringify(name)} has a name a schema snapshot cannot restore. ` +
           "Rename it without a colon, NUL or `..` segment.",
       )
@@ -237,9 +240,20 @@ export interface SchemaSourcePushArtifacts {
   payload: SchemaSourcesPayload
 }
 
-/** Write schema source blob + manifest under `.supatype/` for engine push (CLI + dev watch). */
+/**
+ * Write schema source blob + manifest under `.supatype/` for dev's pushes. A file name restore would
+ * refuse costs the snapshot, not the push: dev applies the schema on every save, and it is
+ * `supatype push` that refuses such a name.
+ */
 export function writeSchemaSourcePushArtifacts(cwd: string): SchemaSourcePushArtifacts | null {
-  const payload = buildSchemaSourcesPayload(cwd)
+  let payload: SchemaSourcesPayload | null
+  try {
+    payload = buildSchemaSourcesPayload(cwd)
+  } catch (err) {
+    if (!(err instanceof UnrestorableSchemaFileName)) throw err
+    console.warn(`Warning: ${err.message} This push keeps no schema snapshot.`)
+    return null
+  }
   if (!payload) return null
 
   const dir = join(cwd, ".supatype")
