@@ -21,12 +21,13 @@ env_file_value() {
 }
 
 # env_file_set <file> <key> <value> - replaces the key's line, or appends one. Creates the file.
-# The value goes through sed, so it must not contain `|`.
+# The value is escaped for sed, so `&`, `\` and `|` in a secret arrive as written.
 env_file_set() {
-  local file="$1" key="$2" value="$3"
+  local file="$1" key="$2" value="$3" escaped
   touch "$file"
   if grep -q "^${key}=" "$file"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    escaped="$(printf '%s' "$value" | sed -e 's/[&\\|]/\\&/g')"
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
     return
   fi
   if [[ -s "$file" && -n "$(tail -c1 "$file")" ]]; then printf '\n' >> "$file"; fi

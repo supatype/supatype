@@ -22,17 +22,16 @@ mint_keys() {
   local dir="$1" cli="$2" out=""
 
   touch "$dir/.env"
-  if [[ -n "${EXAMPLE_JWT_SECRET:-}" ]] && ! grep -q '^JWT_SECRET=.' "$dir/.env"; then
+  # A secret the caller names wins over one a previous run left in .env.
+  if [[ -n "${EXAMPLE_JWT_SECRET:-}" ]]; then
     env_file_set "$dir/.env" JWT_SECRET "$EXAMPLE_JWT_SECRET"
   fi
 
-  # `keys` fills only blank keys, so blank them: a pair a previous run left may not verify against
-  # the secret .env holds now. The pair is read back from .env, the one the stack hands its
-  # services, since `keys --print` signs a new one.
-  env_file_set "$dir/.env" ANON_KEY ""
-  env_file_set "$dir/.env" SERVICE_ROLE_KEY ""
+  # `--force` signs every key name .env holds afresh, front-end copies included, so none is left
+  # from a previous run that no longer verifies, and a failure leaves .env as it was. The pair is
+  # read back from .env, the one the stack hands its services: `keys --print` signs a new one.
   local status=0
-  out="$(cd "$dir" && node "$cli" keys 2>&1)" || status=$?
+  out="$(cd "$dir" && node "$cli" keys --force 2>&1)" || status=$?
   ANON_KEY="$(env_file_value "$dir/.env" ANON_KEY)"
   SERVICE_ROLE_KEY="$(env_file_value "$dir/.env" SERVICE_ROLE_KEY)"
 

@@ -103,7 +103,7 @@ echo "==> Creating the Studio admin"
 # The function-logs spec invokes a function to make it log, and the gateway wants an apikey for
 # that. Read from the .env this project just generated rather than hardcoded: the key is per
 # project and regenerated on init.
-SUPATYPE_ANON_KEY="$(env_file_value "$INTEGRATION_DIR/.env" ANON_KEY || true)"
+SUPATYPE_ANON_KEY="$(env_file_value "$INTEGRATION_DIR/.env" ANON_KEY)"
 if [[ -z "$SUPATYPE_ANON_KEY" ]]; then
   echo "ERROR: no ANON_KEY in $INTEGRATION_DIR/.env; the function-logs spec cannot invoke anything."
   exit 1
