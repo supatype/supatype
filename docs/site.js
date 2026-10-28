@@ -74,8 +74,9 @@ async function sendForm(event, email, properties) {
 // data-submit-event and its thank-you line in data-done, where {email} stands for the address given.
 // The thank-you line shows only once PostHog has the event. If it never arrives (a blocker,
 // offline, or not the live site), the form shows its own "did not go through" message instead.
-// While it sends, its button is disabled and says "Sending", which also stops a second submit by
-// click or Enter. The status line keeps its privacy link until there is an answer.
+// While it sends, its button says "Sending" and is marked aria-disabled, and a second submit by
+// click or Enter is ignored. The button is not truly disabled, so it keeps keyboard focus. The
+// status line keeps its privacy link until there is an answer.
 document.addEventListener("submit", async (event) => {
   const form = event.target
   if (!form.matches(".signup")) return
@@ -84,24 +85,34 @@ document.addEventListener("submit", async (event) => {
   const blocked = form.querySelector(".signup-blocked")
   // Safari before 15.4 has no event.submitter, so the form's own button stands in.
   const button = event.submitter ?? form.querySelector("[type='submit']")
-  if (!status || !blocked || !button || button.disabled) return
+  if (!status || !blocked || !button || button.getAttribute("aria-disabled") === "true") return
   const { email: { value }, note } = form.elements
   const email = value.trim()
   const label = button.textContent
-  button.disabled = true
+  button.setAttribute("aria-disabled", "true")
   button.textContent = "Sending"
   let sent = false
   try {
     sent = await sendForm(form.dataset.submitEvent, email, { note: note?.value.trim() || undefined })
   } finally {
-    button.disabled = false
+    button.removeAttribute("aria-disabled")
     button.textContent = label
   }
-  if (!sent) return status.replaceChildren(blocked.content.cloneNode(true))
+  if (sent) showThanks(form, status, email)
+  else status.replaceChildren(blocked.content.cloneNode(true))
+})
+
+// Hides the form's fields and leaves its thank-you line. A keyboard user in the form would lose
+// their place as the fields go, so focus moves to the thank-you line.
+function showThanks(form, status, email) {
+  const hadFocus = form.contains(document.activeElement)
   for (const part of form.children) part.hidden = part !== status
   // A function, so a "$" in the address is not read as a replacement pattern.
   status.textContent = form.dataset.done.replace("{email}", () => email)
-})
+  if (!hadFocus) return
+  status.tabIndex = -1
+  status.focus()
+}
 
 // Copy to clipboard. A button with data-copy copies that text; a code block's Copy button copies
 // its block. A terminal session copies only its commands: no "$ " prompts, no output lines, and no

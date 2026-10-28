@@ -188,20 +188,22 @@ main > .section:last-child { border-bottom: 0; }
   color: var(--white);
   background: var(--face);
   border: 1px solid var(--face);
-  box-shadow: 5px 5px 0 0 var(--edge), 5px 5px 0 1px var(--face);
 }
 .btn-secondary {
   --face: var(--border-strong);
   --edge: var(--border);
   background: var(--bg);
   border: 1px solid var(--face);
-  box-shadow: 4px 4px 0 0 var(--edge);
 }
-.btn-primary:hover, .btn-secondary:hover { transform: translate(2px, 2px); }
-.btn-primary:hover { box-shadow: 3px 3px 0 0 var(--edge), 3px 3px 0 1px var(--face); }
-.btn-secondary:hover { box-shadow: 2px 2px 0 0 var(--edge); }
-.btn-primary:active { transform: translate(5px, 5px); box-shadow: none; }
-.btn-secondary:active { transform: translate(4px, 4px); box-shadow: none; }
+/* Every button has one shadow, a block 5px down outlined in its face colour, so buttons side by
+   side stand the same depth. A kind sets only --face and --edge. Hover presses it part way, a
+   click all the way. */
+.btn { box-shadow: 5px 5px 0 0 var(--edge), 5px 5px 0 1px var(--face); }
+.btn:hover { transform: translate(2px, 2px); box-shadow: 3px 3px 0 0 var(--edge), 3px 3px 0 1px var(--face); }
+.btn:active { transform: translate(5px, 5px); box-shadow: none; }
+/* A busy button (a form sending) keeps keyboard focus, so it is aria-disabled, not disabled. It
+   fades and stops reacting to the pointer. */
+.btn[aria-disabled="true"] { opacity: 0.6; pointer-events: none; }
 
 /* Square icon button; .cb-copy is the text variant used on code blocks. */
 .icon-btn, .cb-copy {

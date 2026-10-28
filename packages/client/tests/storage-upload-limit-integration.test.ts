@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { StorageClient } from "../src/storage.js"
 import { fetchCall, fetchReturning, header, type FetchMock } from "./support/fetch-mock.js"
+import { createMockBlob } from "./support/blob.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -16,11 +17,6 @@ const HEADERS = { apikey: "test-anon-key", Authorization: "Bearer test-token" }
 function freshClient(): StorageClient {
   // Headers are asked for per request now, so a session arriving after construction is used.
   return new StorageClient(STORAGE_URL, () => Promise.resolve(HEADERS))
-}
-
-function createMockBlob(sizeBytes: number): Blob {
-  const data = new Uint8Array(sizeBytes)
-  return new Blob([data])
 }
 
 function mockFetchResponse(status: number, body: unknown): FetchMock {
@@ -49,7 +45,7 @@ describe("Task 92: File upload size limit integration", () => {
       vi.stubGlobal("fetch", mockFetchResponse(200, { Key: "docs/file.pdf" }))
 
       const client = freshClient()
-      const blob = createMockBlob(50 * 1024 * 1024) // 50 MB, right at limit
+      const blob = createMockBlob(1024) // the mocked server's answer stands for a file at the limit
       const { data, error } = await client.from("docs").upload("file.pdf", blob, {
         contentType: "application/pdf",
       })
@@ -68,7 +64,7 @@ describe("Task 92: File upload size limit integration", () => {
       }))
 
       const client = freshClient()
-      const blob = createMockBlob(100 * 1024 * 1024) // 100 MB
+      const blob = createMockBlob(1024) // the mocked 413 stands for a file over the limit
       const { data, error } = await client.from("uploads").upload("large-video.mp4", blob)
 
       expect(data).toBeNull()
@@ -83,7 +79,7 @@ describe("Task 92: File upload size limit integration", () => {
       }))
 
       const client = freshClient()
-      const { error } = await client.from("uploads").upload("huge.zip", createMockBlob(200 * 1024 * 1024))
+      const { error } = await client.from("uploads").upload("huge.zip", createMockBlob(1024))
 
       expect(error!.message).toContain("50MB")
     })
@@ -94,7 +90,7 @@ describe("Task 92: File upload size limit integration", () => {
       }))
 
       const client = freshClient()
-      const blob = createMockBlob(50 * 1024 * 1024 + 1) // 50 MB + 1 byte
+      const blob = createMockBlob(1024) // the mocked 413 stands for one byte over
       const { data, error } = await client.from("uploads").upload("slightly-too-big.dat", blob)
 
       expect(data).toBeNull()
