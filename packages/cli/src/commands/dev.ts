@@ -154,7 +154,7 @@ export const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; m
   },
   deno: {
     holder: "Another Deno process, or any app on this port, may be running.",
-    move: `Move the port functions run on with ${DENO_PORT_ENV} in .env.`,
+    move: `Move this project's functions port with ${DENO_PORT_ENV} in .env.`,
   },
 }
 
