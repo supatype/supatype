@@ -133,6 +133,7 @@ import { spawnComposeEngine } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
 import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
+import { mailerProviderEnv } from "./mailer-env.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
@@ -266,36 +267,6 @@ export async function projectComposeEngine(
   }
 }
 
-/**
- * `email.provider` and `email.smtp` for the compose server service.
- *
- * The native dev path has mapped these since it existed; the compose path never
- * did, so a project that asked for smtp got the auth service's noop client and
- * no message at all. Console is the documented default, and it at least says
- * that a message would have been sent.
- */
-function composeMailerEnv(config: SupatypeProjectConfig): Record<string, string> {
-  const email = config.email
-  const out: Record<string, string> = {
-    // Mailer.MailerProvider, so the doubled word is the real name.
-    SUPATYPE_MAILER_MAILER_PROVIDER: email?.provider ?? "console",
-  }
-  const smtp = email?.smtp
-  if (email?.provider !== "smtp" || smtp === undefined) return out
-
-  if (smtp.host !== undefined && smtp.host !== "") out.SUPATYPE_SMTP_HOST = smtp.host
-  if (smtp.port !== undefined) out.SUPATYPE_SMTP_PORT = String(smtp.port)
-  if (smtp.user !== undefined && smtp.user !== "") out.SUPATYPE_SMTP_USER = smtp.user
-  if (smtp.pass !== undefined && smtp.pass !== "") out.SUPATYPE_SMTP_PASS = smtp.pass
-  if (smtp.admin_email !== undefined && smtp.admin_email !== "") {
-    out.SUPATYPE_SMTP_ADMIN_EMAIL = smtp.admin_email
-  }
-  if (smtp.sender_name !== undefined && smtp.sender_name !== "") {
-    out.SUPATYPE_SMTP_SENDER_NAME = smtp.sender_name
-  }
-  return out
-}
-
 async function resolveKongPort(cwd: string, composeProject?: string): Promise<number> {
   // The compose project is passed so an already-running stack of *this* project counts as
   // available rather than as a collision.
@@ -378,7 +349,10 @@ export function upsertDevComposeEnv(
     SITE_URL: apiUrl,
     // From auth.email.enableConfirmations, unless the developer set their own in .env.
     ...devMailerAutoconfirmUpdate(cwd, config),
-    ...composeMailerEnv(config),
+    // email.provider and its settings, which the compose file passes to the server. The compose
+    // path used to carry none of them, so a project that asked for smtp, Resend or SES got the auth
+    // service's noop client and no message at all.
+    ...mailerProviderEnv(config.email),
     ...imagePins,
   }
   // Never for an external database: this URL describes the `db` container, which that project does

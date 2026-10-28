@@ -226,8 +226,8 @@ export interface SupatypeProjectConfig {
      * Email delivery provider.
      * "console" = log to stdout (default for dev)
      * "smtp"    = SMTP (set `smtp` below and/or SUPATYPE_SMTP_* in `.env`)
-     * "resend"  = Resend API (requires RESEND_API_KEY, RESEND_FROM)
-     * "ses"     = AWS SES v2 (ambient credentials, requires SES_FROM)
+     * "resend"  = Resend API (requires SUPATYPE_RESEND_API_KEY, SUPATYPE_RESEND_FROM)
+     * "ses"     = AWS SES v2 (ambient credentials, requires SUPATYPE_SES_FROM)
      */
     provider: "console" | "smtp" | "resend" | "ses"
     /**
@@ -242,11 +242,11 @@ export interface SupatypeProjectConfig {
       admin_email?: string
       sender_name?: string
     }
-    /** Resend API key (provider=resend, or set RESEND_API_KEY env var). */
+    /** Resend API key (provider=resend, or set SUPATYPE_RESEND_API_KEY in `.env`). */
     resend_api_key?: string
-    /** From address for Resend (provider=resend, or set RESEND_FROM env var). */
+    /** From address for Resend (provider=resend, or set SUPATYPE_RESEND_FROM in `.env`). */
     resend_from?: string
-    /** From address for SES (provider=ses, or set SES_FROM env var). */
+    /** From address for SES (provider=ses, or set SUPATYPE_SES_FROM in `.env`). */
     ses_from?: string
     /**
      * When true, `supatype dev` enables the send-email HTTP hook pointing at this

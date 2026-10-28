@@ -37,6 +37,7 @@ import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
 import { RELEASE_IMAGES } from "./release-images.js"
 import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
+import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
 
 /**
@@ -437,6 +438,13 @@ function proxyUpstreamForCompose(upstream: string, devLocal: boolean): string {
     // keep literal upstream when not a URL
   }
   return trimmed
+}
+
+/** Environment entries as lines of a service's `environment:` block. */
+function composeEnvLines(env: Record<string, string>): string {
+  return Object.entries(env)
+    .map(([name, value]) => `      ${name}: ${value}`)
+    .join("\n")
 }
 
 /**
@@ -1051,10 +1059,7 @@ ${appEnv}
       # Emailed links are SUPATYPE_API_EXTERNAL_URL plus these paths. The external URL is the
       # gateway's root, where / belongs to the app, so the server's default of /verify sent every
       # confirmation, magic-link and recovery link to a 404. The auth routes are under /auth/v1/.
-      SUPATYPE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
-      SUPATYPE_MAILER_URLPATHS_INVITE: /auth/v1/verify
-      SUPATYPE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
-      SUPATYPE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+${composeEnvLines(mailerUrlPathsEnv())}
       # email.provider and email.smtp are config, and nothing used to carry
       # them here: with no provider and no SMTP host the auth service falls
       # through to its noop client, so every message was dropped in silence and
@@ -1071,6 +1076,9 @@ ${appEnv}
       SUPATYPE_SMTP_PASS: \${SUPATYPE_SMTP_PASS:-}
       SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
       SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
+      # Resend's key and sender, and SES's sender, from .env. Without these the server had no way
+      # to get them and a resend or ses provider fell back to the noop mailer.
+${composeEnvLines(Object.fromEntries(MAILER_PASSTHROUGH_ENV.map((name) => [name, `\${${name}:-}`])))}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
 ${authProviderEnv}
     depends_on:
