@@ -76,6 +76,22 @@ describe("functions deploy on a self-host compose stack", () => {
     expect(run.output).toContain("supatype self-host compose restart functions-worker")
     expect(run.output).not.toContain("docker compose -p")
   })
+
+  it("names the directory functions.path points at, not a fixed functions/", async () => {
+    writeFileSync(
+      join(project.dir, "supatype.config.ts"),
+      `export default { project: { name: "acme" }, database: { provider: "docker" }, server: { mode: "dev" }, app: { mode: "none" }, functions: { path: "api/edge" } }\n`,
+    )
+    mkdirSync(join(project.dir, "api", "edge", "hello"), { recursive: true })
+    writeFileSync(join(project.dir, "api", "edge", "hello", "index.ts"), "export default () => new Response('hi')\n")
+    mkdirSync(join(project.dir, ".supatype", "self-host"), { recursive: true })
+    writeFileSync(join(project.dir, ".supatype", "self-host", "docker-compose.yml"), "services: {}\n")
+
+    const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+
+    expect(run.output).toMatch(/Functions are served from api[\\/]edge\/ in your project/)
+    expect(run.output).not.toContain("functions/ directory")
+  })
 })
 
 describe("functions commands against a cloud link", () => {

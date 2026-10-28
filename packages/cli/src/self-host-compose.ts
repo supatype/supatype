@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve, sep } from "node:path"
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { spawnSync } from "node:child_process"
 import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
 import { fatalError } from "./ui/fatal.js"
@@ -7,6 +7,8 @@ import { readJsonObjectFile } from "./json-file.js"
 import {
   postgrestSchemaEnv,
   externalDatabaseUrl,
+  hooksPathFromProject,
+  preferredFunctionsPathFromProject,
   realtimeEnabled,
   serviceRoleRoutes,
   selfHostTlsEnabled,
@@ -312,6 +314,24 @@ function projectMounts(cwd: string) {
 }
 
 /**
+ * Where a directory of the project appears inside the stack, which mounts the project at /project.
+ * A directory outside the project is not in any container, so it is refused here rather than
+ * rendered as a path every service would answer 404 for.
+ */
+function containerProjectPath(cwd: string, hostPath: string, setting: string): string {
+  const root = resolve(cwd)
+  const rel = relative(root, hostPath)
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(
+      `${setting} points at ${hostPath}, which is outside the project directory ${root}. ` +
+        "The self-host stack mounts only the project directory, at /project, so no service could read it. " +
+        "Move it inside the project.",
+    )
+  }
+  return rel === "" ? "/project" : `/project/${rel.split(sep).join("/")}`
+}
+
+/**
  * The DSN every service uses for the schema-owning role.
  *
  * One expression instead of six identical constructions of `@db:5432`. With an external database it
@@ -573,6 +593,15 @@ export function renderSelfHostCompose(
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
   const staticDir = staticDirForCompose(config) ?? "./dist"
+  // functions.path and the project root, as the containers see them. These were hardcoded to
+  // /project/functions and /project/hooks, so a project keeping its functions anywhere else had every
+  // one of them answer 404 in the stack while native dev served them.
+  const functionsDir = containerProjectPath(
+    cwd,
+    preferredFunctionsPathFromProject(config, cwd),
+    config.functions?.path !== undefined ? "functions.path" : "supatype.root",
+  )
+  const hooksDir = containerProjectPath(cwd, hooksPathFromProject(config, cwd), "supatype.root")
   const composeProject = composeProjectName(config.project.name)
   const studioService = studioServiceBlock()
   const studioBlock = studioHostDev
@@ -924,12 +953,12 @@ ${storageDependency}
 ${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:
 ${mounts.projectReadOnly}
     environment:
-      SUPATYPE_FUNCTIONS_ROOT: /project/functions
-      SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
+      SUPATYPE_FUNCTIONS_ROOT: ${functionsDir}
+      SUPATYPE_DENO_FUNCTIONS_DIR: ${functionsDir}
       # Model hooks, served by this same worker under a hooks/ route the gateway refuses from
       # outside. One worker rather than two: a second container would cost a pod per project on
       # cloud, for isolation the route boundary already provides.
-      SUPATYPE_HOOKS_ROOT: /project/hooks
+      SUPATYPE_HOOKS_ROOT: ${hooksDir}
       # Every log line the worker writes carries this, and on cloud it is the label Loki indexes
       # each project's logs under. Without it a line is collected and filed under no project, which
       # is the same as losing it.
@@ -977,7 +1006,7 @@ ${mounts.projectWritable}
       SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
       SUPATYPE_PROJECT_ROOT: /project
       DATABASE_URL: "${ownerUrl}"
-      SUPATYPE_FUNCTIONS_ROOT: /project/functions
+      SUPATYPE_FUNCTIONS_ROOT: ${functionsDir}
       SUPATYPE_STATIC_ROOT: /project/${staticDir.replace(/^\.\//, "")}
       SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
       COMPOSE_PROJECT_NAME: ${composeProject}
@@ -1033,7 +1062,7 @@ ${mounts.projectState}
       # back to it and uses it for role membership.
       SUPATYPE_SQL_EDITOR_DATABASE_URL: "${sqlEditorUrl}"
 ${serverDbConnectEnv(config, devLocal)}
-      SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
+      SUPATYPE_DENO_FUNCTIONS_DIR: ${functionsDir}
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
 ${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
