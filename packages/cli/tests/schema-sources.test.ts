@@ -2,11 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
-import { gunzipSync } from "node:zlib"
+import { gzipSync } from "node:zlib"
 import { collectSchemaSourcePaths } from "../src/type-extractor.js"
 import {
   packSchemaSources,
-  unpackSchemaSources,
   buildSchemaSourcesPayload,
   restoreSchemaSourcesFromGz,
   findOrphanSchemaFiles,
@@ -76,12 +75,14 @@ describe("schema-sources", () => {
   it("roundtrips tar+gzip bytes", () => {
     writeMultiFileSchema(tmp)
     const graph = collectSchemaSourcePaths(join(tmp, "schema", "index.ts"), tmp)
-    const tar = packSchemaSources(graph)
-    const files = unpackSchemaSources(tar, tmp)
-    for (const file of graph.files) {
-      const original = readFileSync(file.absolutePath)
-      const restored = files.get(file.relativePath.replace(/\\/g, "/"))
-      expect(restored?.equals(original)).toBe(true)
+    const out = mkdtempSync(join(tmpdir(), "supatype-schema-restore-"))
+    try {
+      restoreSchemaSourcesFromGz(gzipSync(packSchemaSources(graph)), out)
+      for (const file of graph.files) {
+        expect(readFileSync(join(out, file.relativePath)).equals(readFileSync(file.absolutePath))).toBe(true)
+      }
+    } finally {
+      rmSync(out, { recursive: true, force: true })
     }
   })
 
@@ -93,27 +94,31 @@ describe("schema-sources", () => {
     const [first] = graph.files
     if (first === undefined) throw new Error("no schema files")
     const beside = { ...first, relativePath: `${resolve(tmp)}2/evil.ts`.replace(/\\/g, "/") }
-    const tar = packSchemaSources({ ...graph, files: [beside] })
-    expect(() => unpackSchemaSources(tar, tmp)).toThrow(/unsafe entry name/)
+    const gz = gzipSync(packSchemaSources({ ...graph, files: [beside] }))
+    expect(() => restoreSchemaSourcesFromGz(gz, tmp)).toThrow(/unsafe entry name/)
   })
 
   // The snapshot is read by the same tar reader as `init --example`, so it gets the same name checks.
-  it("reads a name that only starts with two dots", () => {
-    const files = unpackSchemaSources(gunzipSync(plainTarball([{ path: "..notes/x.ts", content: "x" }])), tmp)
-    expect([...files.keys()]).toEqual(["..notes/x.ts"])
+  it("restores a name that only starts with two dots", () => {
+    expect(restoreSchemaSourcesFromGz(plainTarball([{ path: "..notes/x.ts", content: "x" }]), tmp)).toEqual([
+      "..notes/x.ts",
+    ])
+    expect(readFileSync(join(tmp, "..notes", "x.ts"), "utf8")).toBe("x")
   })
 
   it("refuses an entry that resolves to the project root itself", () => {
     for (const path of ["./", "."]) {
-      expect(() => unpackSchemaSources(gunzipSync(plainTarball([{ path, content: "x" }])), tmp)).toThrow(
+      expect(() => restoreSchemaSourcesFromGz(plainTarball([{ path, content: "x" }]), tmp)).toThrow(
         /does not land inside/,
       )
     }
   })
 
-  it("refuses a backslash rather than reading it as a separator", () => {
-    const tar = gunzipSync(plainTarball([{ path: "schema\\models\\album.ts", content: "x" }]))
-    expect(() => unpackSchemaSources(tar, tmp)).toThrow(/unsafe/)
+  it.each([
+    ["a backslash rather than reading it as a separator", "schema\\models\\album.ts"],
+    ["a colon, which names an NTFS stream on Windows", "schema/models/a:b.ts"],
+  ])("refuses %s", (_label, path) => {
+    expect(() => restoreSchemaSourcesFromGz(plainTarball([{ path, content: "x" }]), tmp)).toThrow(/unsafe/)
   })
 
   it("restore refuses a snapshot with an unsafe name before writing any file", () => {
