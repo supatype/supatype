@@ -119,3 +119,23 @@ export async function provisionBuckets(
     console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
   }
 }
+
+/**
+ * A declared bucket as native dev writes it to the object store's `buckets.json`, created at `now`.
+ * `public` follows the access mode, true exactly when it is `public`, as the object store and the
+ * storage service write it: a custom bucket declared `public: true` was written public here.
+ */
+export function nativeBucketRow(bucket: ParsedStorageBucket, now: string): Record<string, unknown> {
+  const accessMode = bucket.accessMode ?? (bucket.public ? "public" : "private")
+  return {
+    id: bucket.id,
+    name: bucket.id,
+    public: accessMode === "public",
+    file_size_limit: bucket.fileSizeLimit ?? null,
+    allowed_mime_types: bucket.allowedMimeTypes ?? null,
+    access_mode: accessMode,
+    s3_bucket_policy: bucket.s3BucketPolicy ?? null,
+    created_at: now,
+    updated_at: now,
+  }
+}

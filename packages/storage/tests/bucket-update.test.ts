@@ -79,6 +79,14 @@ describe("PUT /bucket/:id", () => {
     expect(vi.mocked(db.updateBucket).mock.lastCall?.[1]).not.toHaveProperty("access_mode")
     expect(s3.applyBucketPolicyFromConfig).not.toHaveBeenCalled()
   })
+
+  it("leaves S3 alone when the row is gone by the time it is written", async () => {
+    // A bucket deleted between the read and the write was made public on S3, then answered 404.
+    vi.mocked(db.getBucket).mockResolvedValue(row("private", false))
+    vi.mocked(db.updateBucket).mockResolvedValue(null)
+    await buckets.update(context({ public: true }))
+    expect(s3.applyBucketPolicyFromConfig).not.toHaveBeenCalled()
+  })
 })
 
 describe("POST /bucket", () => {

@@ -99,10 +99,6 @@ export async function update(ctx: RequestContext): Promise<void> {
   const accessChanged = accessMode !== existing.access_mode || isPublic !== existing.public
   const policyChanged =
     body.s3_bucket_policy !== undefined && body.s3_bucket_policy !== existing.s3_bucket_policy
-  if (accessChanged || policyChanged) {
-    const nextPolicy = policyChanged ? body.s3_bucket_policy : existing.s3_bucket_policy
-    await applyBucketPolicyFromConfig(id, { public: isPublic, s3BucketPolicy: nextPolicy ?? null })
-  }
   const bucket = await db.updateBucket(id, {
     ...(body.file_size_limit !== undefined && { file_size_limit: body.file_size_limit }),
     ...(body.allowed_mime_types !== undefined && { allowed_mime_types: body.allowed_mime_types }),
@@ -112,6 +108,10 @@ export async function update(ctx: RequestContext): Promise<void> {
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
+  }
+  // S3 follows the row once it is written, so a bucket deleted in between is not opened on S3.
+  if (accessChanged || policyChanged) {
+    await applyBucketPolicyFromConfig(id, { public: isPublic, s3BucketPolicy: bucket.s3_bucket_policy })
   }
   sendJson(ctx.res, 200, { message: "Successfully updated" })
 }

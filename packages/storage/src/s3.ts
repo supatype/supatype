@@ -8,6 +8,7 @@ import {
   HeadObjectCommand,
   CreateBucketCommand,
   DeleteBucketCommand,
+  DeleteBucketPolicyCommand,
   HeadBucketCommand,
   PutBucketPolicyCommand,
   PutPublicAccessBlockCommand,
@@ -112,8 +113,24 @@ export async function applyPublicPolicy(name: string): Promise<void> {
   }))
 }
 
+/** Errors that mean there is no policy to remove: none was put, or the backend has no policies. */
+const NOTHING_TO_REMOVE = new Set(["NoSuchBucketPolicy", "NotImplemented"])
+
 /**
- * Choose S3 policy application: custom JSON wins; else default public-read when `public`.
+ * Removes the bucket's policy. It could only ever be put, so a bucket made private kept the
+ * public-read policy and stayed readable by anyone straight from S3. A bucket with no policy has
+ * nothing to remove, and a backend without bucket policies could never have put one.
+ */
+async function removeBucketPolicy(name: string): Promise<void> {
+  try {
+    await s3.send(new DeleteBucketPolicyCommand({ Bucket: name }))
+  } catch (err: unknown) {
+    if (!(err instanceof Error && NOTHING_TO_REMOVE.has(err.name))) throw err
+  }
+}
+
+/**
+ * Choose S3 policy application: custom JSON wins, else public-read when `public`, else none.
  */
 export async function applyBucketPolicyFromConfig(
   name: string,
@@ -125,6 +142,7 @@ export async function applyBucketPolicyFromConfig(
     return
   }
   if (opts.public) await applyPublicPolicy(name)
+  else await removeBucketPolicy(name)
 }
 
 /** Build the direct S3/CDN URL for a public object (path-style or virtual-hosted). */

@@ -58,6 +58,9 @@
 
 ### Bug Fixes
 
+* **dev:** native dev writes a bucket declared `custom` as not public in the object store's
+  `buckets.json`. It copied `public: true` from the declaration, so the store listed a custom
+  bucket as public, which the store and the storage service never do.
 * **dev:** a blank mailer setting in `.env` no longer erases the one `email` in `supatype.config.ts`
   sets. `init` scaffolds `SUPATYPE_SMTP_HOST=`, `SUPATYPE_RESEND_API_KEY=` and the rest blank, and
   native `dev` applied `.env` over the config, so a project with its SMTP host or Resend key in the
