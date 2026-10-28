@@ -16,6 +16,11 @@ jobs:
       # there is nothing to build. --root-dir resolves its root-relative links ("/docs/",
       # "/site.css") against that folder, and --index-files lets "/docs/#self-host" find its
       # anchor in docs/docs/index.html.
+      #
+      # The "Ask ChatGPT" and "Ask Claude" prompt links (chatgpt.com/?q= and claude.ai/new?q=,
+      # on the home page today) are skipped on every page: both sites answer an automated request
+      # with 403 Forbidden, though the links open fine in a browser. Any other link to either
+      # site is still requested, and may meet the same 403.
       - name: Check links
         uses: lycheeverse/lychee-action@v2
         with:
@@ -24,6 +29,8 @@ jobs:
             --root-dir "${{ github.workspace }}/docs"
             --index-files index.html
             --include-fragments
+            --exclude "^https://chatgpt\.com/\?q="
+            --exclude "^https://claude\.ai/new\?q="
             "docs/**/*.html"
           fail: true
           lycheeVersion: v0.24.2
