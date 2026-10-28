@@ -12,7 +12,7 @@ import { collectSchemaSourcePaths, type SchemaSourceGraph } from "./type-extract
 import { loadConfig } from "./config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "./project-config.js"
 import { projectAuthor } from "./push-audit.js"
-import { readTarGz, type TarEntry } from "./tar-reader.js"
+import { isSafeEntryName, readTarGz, type TarEntry } from "./tar-reader.js"
 import { isArrayOf, isNumber, isOneOf, isShape, isString, optional, resolveInside, type Guard } from "@supatype/shared"
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024
@@ -78,11 +78,21 @@ function writeTarEntry(name: string, content: Buffer): Buffer {
   return Buffer.concat([header, content, Buffer.alloc(pad)])
 }
 
+/**
+ * The schema's files as a tarball. Refused at push for a name restore would refuse (a colon is legal
+ * on macOS and Linux), since a snapshot holding one could never be restored, on any platform.
+ */
 export function packSchemaSources(graph: SchemaSourceGraph): Buffer {
   const chunks: Buffer[] = []
   for (const file of graph.files) {
-    const content = readFileSync(file.absolutePath)
-    chunks.push(writeTarEntry(file.relativePath.replace(/\\/g, "/"), content))
+    const name = file.relativePath.replace(/\\/g, "/")
+    if (!isSafeEntryName(name)) {
+      throw new Error(
+        `Schema file ${JSON.stringify(name)} has a name a schema snapshot cannot restore. ` +
+          "Rename it without a colon, NUL or `..` segment.",
+      )
+    }
+    chunks.push(writeTarEntry(name, readFileSync(file.absolutePath)))
   }
   chunks.push(Buffer.alloc(1024, 0))
   return Buffer.concat(chunks)

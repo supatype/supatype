@@ -21,7 +21,8 @@
   example holding a file named with `..`, a backslash, a NUL, a leading drive (`C:`) or an absolute
   path, or one that resolves outside the directory; nothing is written then. A colon anywhere in a
   name is refused too, since on Windows `docs/a:b.md` writes a hidden stream of a file `docs/a`.
-  Such a name elsewhere in the repository does not stop an example.
+  Such a name elsewhere in the repository does not stop an example. Schema snapshots are restored
+  with the same checks, and `push` refuses a schema file named in a way restore would refuse.
 * **seed:** `authUser: { connect: { id } }` on a relation to the auth user (`RelatedTo<SupatypeAuthUser>`)
   writes the relation's key column. It failed with "`supatype:user` is not a model in this schema".
   The generated `...Create` type still offers the key column (`auth_user_id`) rather than `authUser`;
