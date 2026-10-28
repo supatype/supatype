@@ -200,16 +200,30 @@ async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, H
       })
       continue
     }
-    // A module loaded by URL is typed `any`; read its exports as unknown until checked.
-    const mod: unknown = await import(entrypointImportUrl(route.entrypoint))
-    const handler = exportedHandler(mod)
-    if (!isHandler(handler)) {
-      throw new Error(`Function "${route.name}" has no default export handler`)
-    }
-    handlers[route.name] = handler
+    handlers[route.name] = await loadHandler(route)
   }
 
   return handlers
+}
+
+/**
+ * The route's handler, or, when its module fails to import or exports no handler, one that answers
+ * the route with a 500 saying why. The first such module used to stop the worker starting, so one
+ * broken function took every function in the project down with it.
+ */
+async function loadHandler(route: DiscoveredRoute): Promise<Handler> {
+  try {
+    // A module loaded by URL is typed `any`; read its exports as unknown until checked.
+    const mod: unknown = await import(entrypointImportUrl(route.entrypoint))
+    const handler = exportedHandler(mod)
+    if (!isHandler(handler)) throw new Error('it has neither a default export nor a named "handler" export')
+    return handler
+  } catch (err) {
+    const message = `Function "${route.name}" failed to load: ${err instanceof Error ? err.message : String(err)}`
+    log("error", message, { function: route.name })
+    const body = JSON.stringify({ error: "function_load_failed", message })
+    return () => new Response(body, { status: 500, headers: { "Content-Type": "application/json" } })
+  }
 }
 
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)

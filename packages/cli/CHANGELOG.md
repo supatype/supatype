@@ -68,6 +68,10 @@
   migrations...". The server reads `.env` itself, took the blank as the port and refused it
   (`converting '' to type int`). Native dev now gives it 587 for a blank port, as the compose file
   always has.
+* **dev, functions serve, functions worker:** a function that fails to load answers its own route
+  with a 500, `function_load_failed` and why, and every other function keeps serving. A module that
+  threw on import, did not parse, or exported no handler stopped the router (or the deployed
+  worker) starting, so every function answered 502.
 * **dev:** native dev writes a bucket declared `custom` as not public in the object store's
   `buckets.json`. It copied `public: true` from the declaration, so the store listed a custom
   bucket as public, which the store and the storage service never do.
