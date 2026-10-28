@@ -130,22 +130,22 @@ interface NativeDevPorts {
 
 const NATIVE_SERVICES = ["postgres", "server", "postgrest", "realtime"] as const satisfies readonly (keyof NativeDevPorts)[]
 
-const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; move: string }> = {
+export const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; move: string }> = {
   postgres: {
     holder: "Another Postgres instance may be running.",
-    move: `Move this project's with ${DEV_DB_PORT_ENV} in .env, or database.port in supatype.config.ts.`,
+    move: `Move this project's database port with ${DEV_DB_PORT_ENV} in .env, or database.port in supatype.config.ts.`,
   },
   server: {
     holder: "Another supatype-server may be running.",
-    move: "Move this project's with server.port in supatype.config.ts, or `supatype dev --port`.",
+    move: "Move this project's API server port with server.port in supatype.config.ts, or `supatype dev --port`.",
   },
   postgrest: {
     holder: "Another service may be running.",
-    move: "Move this project's with server.postgrestPort in supatype.config.ts.",
+    move: "Move this project's PostgREST port with server.postgrestPort in supatype.config.ts.",
   },
   realtime: {
     holder: "Another realtime service, or any app on this port, may be running.",
-    move: `Move this project's with ${REALTIME_PORT_ENV} in .env, or server.realtimePort in supatype.config.ts.`,
+    move: `Move this project's realtime port with ${REALTIME_PORT_ENV} in .env, or server.realtimePort in supatype.config.ts.`,
   },
 }
 
