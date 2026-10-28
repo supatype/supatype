@@ -101,3 +101,24 @@ export function withoutBlankMailerOverrides(
     Object.entries(dotEnv).filter(([name, value]) => value.trim() !== "" || (configMailerEnv[name] ?? "") === ""),
   )
 }
+
+/** The SMTP port the server defaults to, and the one the compose file writes for a blank value. */
+const DEFAULT_SMTP_PORT = "587"
+
+/**
+ * `env`, what native dev starts the server with over `inherited` (its own environment), plus
+ * `SUPATYPE_SMTP_PORT=587` when the port would otherwise reach the server blank. The server reads the
+ * project's `.env` (`dotEnv`) itself and takes each name its environment leaves unset, so a blank
+ * `SUPATYPE_SMTP_PORT=` there arrived as "" whatever the CLI passed, and the server would not start:
+ * `converting '' to type int`, at `migrate` first. A name set in its environment, even blank, keeps
+ * the file's from being read. The compose file has always written `${SUPATYPE_SMTP_PORT:-587}`.
+ */
+export function withSmtpPortFallback(
+  env: Record<string, string>,
+  dotEnv: Readonly<Record<string, string>>,
+  inherited: Readonly<Record<string, string | undefined>> = process.env,
+): Record<string, string> {
+  const name = "SUPATYPE_SMTP_PORT"
+  const port = env[name] ?? inherited[name] ?? dotEnv[name]
+  return port !== undefined && port.trim() === "" ? { ...env, [name]: DEFAULT_SMTP_PORT } : env
+}
