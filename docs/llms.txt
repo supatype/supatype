@@ -2,7 +2,7 @@
 
 > Zero drift: one set of TypeScript types runs the whole stack, database to component. Define `Model<>` types and Supatype derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, auth, storage, realtime, Studio editing views and the typed client your components use. Change a field once; rename a field and the build fails instead of production.
 
-Supatype is a type-first backend platform on real Postgres 17. The TypeScript schema is the source of truth; SQL, policies, APIs, the typed client and admin UI are generated from it rather than kept in step by hand. `supatype dev` runs the full stack locally (Docker Compose by default), applies schema changes as you save and regenerates the typed client. Production can self-host with Docker Compose (`supatype self-host compose up`) or use Supatype Cloud (EU-hosted, early access).
+Supatype is a type-first backend platform on real Postgres 17. The TypeScript schema is the single source of truth; SQL, policies, APIs, the typed client and admin UI are generated from it rather than kept in step by hand. `supatype dev` runs the full stack locally (Docker Compose by default), applies schema changes as you save and regenerates the typed client. Production can self-host with Docker Compose (`supatype self-host compose up`) or use Supatype Cloud (EU-hosted, coming soon: join the waiting list at https://www.supatype.com/#cloud).
 
 Licensing: client SDKs, framework bindings and plugins are MIT; the CLI, Studio and services are Apache 2.0; the schema engine is source-available under the Business Source License 1.1 (production use allowed except offering a competing hosted service or product; each version becomes Apache 2.0 four years after release).
 
@@ -15,7 +15,7 @@ Contact: GitHub and Discord, linked from the site. Licensing questions: licensin
 ## Product
 
 - [Home](https://www.supatype.com/): Overview: one set of types from database to component, how it works, frameworks, comparison, quick start
-- [Full LLM context](https://www.supatype.com/llms-full.txt): Self-contained summary of the product, CLI, workflow, licensing and status for agents with limited round-trips
+- [Full LLM context](https://www.supatype.com/llms-full.txt): A product summary, then every docs and guide page as Markdown, in one file for agents with limited round-trips
 - [Licensing](https://www.supatype.com/licensing.html): What is MIT, Apache 2.0 and BSL 1.1, what you can and cannot do, Change Dates, contributing
 - [Sitemap](https://www.supatype.com/sitemap.xml): Machine-readable list of public URLs
 
@@ -24,13 +24,24 @@ Contact: GitHub and Discord, linked from the site. Licensing questions: licensin
 - [Docs](https://www.supatype.com/docs/): Local development, self-hosting, deploying changes, upgrading, plus the guides below
 - [Schema](https://www.supatype.com/docs/schema.html): Models, field types, relations, access rules, field rules and masking, drafts and versions, slugs, rich text, blocks, buckets, auth user ids, renames, what a push refuses
 - [Client](https://www.supatype.com/docs/client.html): `@supatype/client` from the generated file: queries, filters, embeds, writes, drafts and publishing, auth, storage, realtime, functions, errors
+- [Frameworks](https://www.supatype.com/docs/frameworks.html): React, Vue, Svelte, Solid and React Native bindings, and @supatype/ssr server clients for Next.js
+- [Auth](https://www.supatype.com/docs/auth.html): Email and password, magic links, phone codes and OAuth, sessions and tokens, how tokens reach access rules, the React and React Native auth UI
+- [Storage](https://www.supatype.com/docs/storage.html): Buckets declared in the schema, file and image fields, bucket access rules, uploads, signed URLs, image transforms, limits
+- [Realtime](https://www.supatype.com/docs/realtime.html): Table changes filtered by read access and field rules, filters, broadcast and presence, React and Vue hooks
+- [Functions](https://www.supatype.com/docs/functions.html): TypeScript functions on Deno at /functions/v1, the caller's token, secrets, local dev and self-host
 - [Seeding](https://www.supatype.com/docs/seeding.html): `seeds/*.ts`, the generated builder, create vs upsert, nested children, relations by key, `expr.default()`, sign-in users, `supatype seed`
+- [Studio](https://www.supatype.com/docs/studio.html): The CMS and admin app generated from your models: editors, rich text, media, drafts and versions, live preview, API docs, GraphQL explorer, SQL runner, history
 - [Studio roles](https://www.supatype.com/docs/studio-roles.html): Admin, developer, editor and viewer: what each can do, full access vs Studio mode, masking, Send as, drafts and publishing, granting roles
+- [CLI reference](https://www.supatype.com/docs/cli.html): Every supatype command with its subcommands and main flags
 - [Local development](https://www.supatype.com/docs/#local-dev): `supatype init` and `supatype dev` run a full local stack
 - [Self-hosting](https://www.supatype.com/docs/#self-host): Docker Compose on a server you own
 - [Upgrading](https://www.supatype.com/docs/#upgrading): Updating images and binaries, then pushing the schema
+- [Running in production](https://www.supatype.com/docs/#production): Status, logs, backups with pg_dump, and rolling back a push
 - [Upgrade notes for 0.7.0](https://github.com/supatype/supatype/blob/main/UPGRADING.md): Ownership checks, declared renames, identity columns, realtime DELETE rules, lock waits, licence
 - [VM deploy with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html): Self-host deploy path using GitHub Actions onto a VM
+- [Coming from Supabase](https://www.supatype.com/from-supabase.html): How Supabase tables, RLS, supabase-js, storage, auth, realtime and functions map to Supatype, and adopting existing tables
+- [Coming from Prisma](https://www.supatype.com/from-prisma.html): How schema.prisma, prisma migrate and Prisma Client map to Supatype types, push and the typed client
+- [Changelog](https://www.supatype.com/changelog.html): What changed in each release
 - [Agent skill](https://github.com/supatype/supatype/tree/main/skills/supatype): Schema, config, CLI and self-host reference for coding agents
 
 ## Platform capabilities

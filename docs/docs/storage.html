@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>File storage with access rules and image transforms | Supatype</title>
+  <meta name="description" content="Supatype storage: declare buckets in the schema, file and image fields, bucket access rules, uploads, signed URLs, image transforms, limits and where files are kept." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/docs/storage.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="File storage with access rules and image transforms | Supatype" />
+  <meta property="og:description" content="Supatype storage: declare buckets in the schema, file and image fields, bucket access rules, uploads, signed URLs, image transforms, limits and where files are kept." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/storage.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/storage.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Storage</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html" aria-current="page">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Storage</nav>
+    <h1>Storage</h1>
+    <p class="intro">Declare buckets in your schema, point file and image fields at them, and upload through the client. Who may read, upload, overwrite and delete is decided by Postgres from the bucket's rules.</p>
+    <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
+
+    <h2 id="buckets">Declare a bucket</h2>
+    <p>A bucket is a type alias for <code>Bucket&lt;"id", { ... }&gt;</code> in your schema. The <a href="/docs/schema.html#buckets">schema page</a> has the short version. Every key in the second argument is optional.</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> { <span class="t">Bucket</span>, <span class="t">BucketLoggedIn</span>, <span class="t">BucketOwner</span>, <span class="t">BucketRole</span> } <span class="k">from</span> <span class="s">"@supatype/types"</span>
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">Attachments</span> = <span class="t">Bucket</span>&lt;<span class="s">"attachments"</span>, {
+  accessMode: <span class="s">"private"</span>
+  accept: [<span class="s">"application/pdf"</span>, <span class="s">"image/*"</span>]
+  maxSize: <span class="s">"20MB"</span>
+  access: {
+    read: <span class="t">BucketOwner</span>
+    create: <span class="t">BucketLoggedIn</span>
+    update: <span class="t">BucketOwner</span>
+    delete: <span class="t">BucketRole</span>&lt;<span class="s">"admin"</span>&gt;
+  }
+}&gt;</pre></div>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Key</th><th scope="col">What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>accessMode</code></td><td><code>"public"</code>, <code>"private"</code> or <code>"custom"</code>. Defaults to <code>"private"</code>. Only <code>"public"</code> serves files on a public URL. <code>"custom"</code> reads like <code>"private"</code> and is for buckets that set <code>s3BucketPolicy</code>.</td></tr>
+        <tr><td><code>maxSize</code></td><td>Largest file accepted, written as <code>"500KB"</code>, <code>"20MB"</code> or <code>"1GB"</code>. Units are B, KB, MB and GB, counted in 1024s. Anything else fails the push.</td></tr>
+        <tr><td><code>accept</code></td><td>Content types the bucket takes. Exact types such as <code>"image/png"</code>, or a wildcard such as <code>"image/*"</code>. Leave it out to accept any type.</td></tr>
+        <tr><td><code>access</code></td><td>The <code>read</code>, <code>create</code>, <code>update</code> and <code>delete</code> rules, covered <a href="#access">below</a>. Any other key fails the push.</td></tr>
+        <tr><td><code>s3BucketPolicy</code></td><td>A raw S3 bucket policy as a JSON string, applied to the object store bucket in place of the default.</td></tr>
+      </tbody>
+    </table></div>
+    <p><code>supatype push</code> and <code>supatype dev</code> register each bucket and write its settings. Changing <code>maxSize</code>, <code>accept</code> or <code>accessMode</code> and pushing again updates the bucket. Declaring the same bucket id twice with different settings fails the push.</p>
+
+    <h2 id="fields">File and image fields</h2>
+    <p><code>ImageAsset&lt;Bucket&gt;</code> and <code>FileAsset&lt;Bucket&gt;</code> are fields that point at a file in a bucket. The column is JSONB holding the bucket and the path, and the generated type is <code>StorageReference</code>:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype/generated</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export</span> <span class="k">type</span> <span class="t">StorageReference</span> = {
+  bucket: string
+  path: string
+}</pre></div>
+    <p>The field stores a reference, not the file. Upload the file first, then write its path to the row:</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> path = <span class="s">`${userId}/${file.name}`</span>
+<span class="k">const</span> { error: uploadError } = <span class="k">await</span> supatype.storage.from(<span class="s">"attachments"</span>).upload(path, file)
+<span class="k">if</span> (uploadError) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(uploadError.message)
+
+<span class="k">await</span> supatype.from(<span class="s">"post"</span>).update({ attachment: { bucket: <span class="s">"attachments"</span>, path } }).eq(<span class="s">"id"</span>, postId)</pre></div>
+    <ul>
+      <li>Always name the bucket. Without one, <code>ImageAsset</code> points at a bucket called <code>images</code> and <code>FileAsset</code> at one called <code>assets</code>, and neither exists unless you declare it.</li>
+      <li><code>ImageAsset&lt;Covers, { localized: true }&gt;</code> stores one reference per locale instead of one.</li>
+      <li>Deleting a row does not delete its file, and deleting a file does not clear the field.</li>
+    </ul>
+
+    <h2 id="access">Access rules</h2>
+    <p>Each rule becomes a row level security policy on the table that records every stored file. The storage service runs each upload, overwrite, delete and list as the caller, so Postgres decides, the same way it does for your models.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Rule</th><th scope="col">Who passes</th></tr></thead>
+      <tbody>
+        <tr><td><code>BucketPublic</code></td><td>Everyone, including the anon key</td></tr>
+        <tr><td><code>BucketLoggedIn</code></td><td>Any signed-in user</td></tr>
+        <tr><td><code>BucketOwner</code></td><td>The user who uploaded the file. An overwrite keeps the original owner.</td></tr>
+        <tr><td><code>BucketRole&lt;"admin"&gt;</code></td><td>Users whose <code>app_metadata.role</code> is <code>admin</code>, the same check as <code>Role</code> on a model</td></tr>
+        <tr><td><code>BucketPrivate</code></td><td>Nobody but the service role</td></tr>
+      </tbody>
+    </table></div>
+    <ul>
+      <li>A rule you leave out is refused, and the push prints a warning naming it.</li>
+      <li><code>update</code> and <code>delete</code> need a <code>read</code> rule beside them. Postgres only lets a caller change rows it can read, so without one they match nothing. The push warns about this too, even on a public bucket.</li>
+      <li><code>accessMode: "public"</code> serves files on the public URL without asking the <code>read</code> rule. Writes still go through <code>create</code>, <code>update</code> and <code>delete</code>.</li>
+      <li><code>list</code> returns only the files the caller may read. <code>remove</code> deletes only the files the caller may delete, leaves the rest in place and returns just the ones it removed.</li>
+      <li>A refused write answers 401 to the anon key, because signing in might change the answer, and 403 to a signed-in user.</li>
+    </ul>
+    <div class="callout"><span class="callout-label">NOTE</span><p>A bucket with no <code>access</code> of its own takes the access rules of each model that has a file or image field pointing at it. Owner rules then compare the caller with the file's uploader. Declare <code>access</code> on the bucket to keep its rules in one place.</p></div>
+
+    <h2 id="upload">Upload</h2>
+    <p>The <a href="/docs/client.html#storage">client page</a> shows the basic calls. <code>upload</code> sends the file in one request with the caller's token.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data, error } = <span class="k">await</span> supatype.storage.from(<span class="s">"attachments"</span>).upload(<span class="s">`${userId}/slides.pdf`</span>, file, {
+  contentType: <span class="s">"application/pdf"</span>,
+  upsert: <span class="k">false</span>,
+})
+<span class="k">if</span> (error) console.error(error.status, error.message)</pre></div>
+    <p>Without <code>contentType</code> the client uses the <code>File</code>'s own type. If that is missing or generic, the service guesses from the extension (<code>.png</code>, <code>.pdf</code>, <code>.mp4</code> and other common types). The type is checked against <code>accept</code> before anything is stored.</p>
+    <p>With <code>upsert: true</code> an existing file at that path is replaced if the <code>update</code> rule allows it. The new bytes are stored alongside the old ones and swapped in when the row commits, so a reader never sees a half-written file.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Status</th><th scope="col">Why</th></tr></thead>
+      <tbody>
+        <tr><td>401, 403</td><td>The bucket's <code>create</code> rule (or <code>update</code>, for an overwrite) refused the caller</td></tr>
+        <tr><td>404</td><td>No bucket with that id</td></tr>
+        <tr><td>409</td><td>A file already exists at that path and <code>upsert</code> was not set</td></tr>
+        <tr><td>413</td><td>The file is larger than the bucket's <code>maxSize</code>, or the service limit when there is none</td></tr>
+        <tr><td>415</td><td>The content type is not in <code>accept</code>. The body lists the allowed types.</td></tr>
+        <tr><td>507</td><td>The upload would take the project past its total storage quota</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="urls">Download and URLs</h2>
+    <p>There are three ways to read a file. All three go through the storage service, which looks up the file's current version, so a URL keeps working after the file is overwritten.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Method</th><th scope="col">Path</th><th scope="col">Who can use it</th></tr></thead>
+      <tbody>
+        <tr><td><code>getPublicUrl(path)</code></td><td><code>/storage/v1/object/public/…</code></td><td>Anyone, only on a bucket with <code>accessMode: "public"</code>. Builds the URL locally with no request.</td></tr>
+        <tr><td><code>download(path)</code></td><td><code>/storage/v1/object/authenticated/…</code></td><td>The caller, if the <code>read</code> rule allows. Returns a <code>Blob</code>.</td></tr>
+        <tr><td><code>createSignedUrl(path, seconds)</code></td><td><code>/storage/v1/object/sign/…?token=</code></td><td>Anyone holding the link until it expires</td></tr>
+      </tbody>
+    </table></div>
+    <p>A signed URL is only issued to a caller the <code>read</code> rule allows, and only for a file that exists. The expiry must be between 1 second and 7 days. The token is signed by the storage service and covers one bucket and one path. <code>createSignedUrls(paths, seconds)</code> signs several paths and reports an error per path.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> bucket = supatype.storage.from(<span class="s">"attachments"</span>)
+
+<span class="k">const</span> { data: blob } = <span class="k">await</span> bucket.download(<span class="s">`${userId}/slides.pdf`</span>)
+<span class="k">const</span> { data: link } = <span class="k">await</span> bucket.createSignedUrl(<span class="s">`${userId}/slides.pdf`</span>, <span class="s">3600</span>)
+<span class="k">const</span> { data: files } = <span class="k">await</span> bucket.list(<span class="s">`${userId}/`</span>, { limit: <span class="s">50</span>, offset: <span class="s">0</span> })</pre></div>
+    <p><code>list</code> returns up to 100 entries unless you pass <code>limit</code>. Each entry has <code>name</code>, <code>size</code>, <code>mimetype</code>, the owner and timestamps.</p>
+    <p>Public and private buckets differ in CORS too. A public bucket answers any origin. A private bucket sends no <code>Access-Control-Allow-Origin</code>, so read its files from a browser with a signed URL or <code>download</code>.</p>
+    <p><code>storage.listBuckets()</code> and <code>storage.createBucket()</code> need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead.</p>
+
+    <h2 id="transforms">Image transforms</h2>
+    <p><code>getPublicUrl</code> and <code>download</code> take a <code>transform</code> option. The service resizes and re-encodes the image on each request.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: { publicUrl } } = supatype.storage.from(<span class="s">"covers"</span>).getPublicUrl(post.cover.path, {
+  transform: { width: <span class="s">800</span>, height: <span class="s">450</span>, resize: <span class="s">"cover"</span>, format: <span class="s">"avif"</span>, quality: <span class="s">70</span> },
+})</pre></div>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Option</th><th scope="col">Values</th><th scope="col">Default</th></tr></thead>
+      <tbody>
+        <tr><td><code>width</code>, <code>height</code></td><td>1 to 4096 pixels</td><td>the original size</td></tr>
+        <tr><td><code>resize</code></td><td><code>cover</code>, <code>contain</code>, <code>fill</code>, <code>inside</code>, <code>outside</code></td><td><code>cover</code></td></tr>
+        <tr><td><code>format</code></td><td><code>webp</code>, <code>avif</code>, <code>png</code>, <code>jpeg</code></td><td><code>webp</code></td></tr>
+        <tr><td><code>quality</code></td><td>1 to 100</td><td>80</td></tr>
+      </tbody>
+    </table></div>
+    <ul>
+      <li>A transform runs only when <code>width</code>, <code>height</code>, <code>format</code> or <code>quality</code> is set. <code>resize</code> on its own does nothing.</li>
+      <li>Any transform re-encodes the image, as WebP unless you set <code>format</code>.</li>
+      <li>Images are never enlarged past their original size.</li>
+      <li>Files whose type is not <code>image/*</code> are served unchanged.</li>
+      <li>The same query parameters (<code>width</code>, <code>height</code>, <code>resize</code>, <code>format</code>, <code>quality</code>) work when appended to a signed URL.</li>
+      <li>Transformed responses carry <code>Cache-Control: public, max-age=3600</code> by default. Put a CDN in front if the same sizes are requested often.</li>
+    </ul>
+
+    <h2 id="limits">Limits and config</h2>
+    <p>The storage service reads these environment variables. The self-host compose file sets the database, JWT and object store ones for you. The rest keep their defaults unless you set them on the <code>storage</code> service.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Variable</th><th scope="col">Default</th><th scope="col">What it controls</th></tr></thead>
+      <tbody>
+        <tr><td><code>TIER_MAX_UPLOAD_SIZE</code></td><td>52428800 (50 MB)</td><td>Largest file, in bytes, for a bucket with no <code>maxSize</code>. A bucket's <code>maxSize</code> always wins.</td></tr>
+        <tr><td><code>STORAGE_QUOTA</code></td><td>1073741824 (1 GB)</td><td>Total bytes across every bucket. An upload past it gets 507.</td></tr>
+        <tr><td><code>MAX_SIGNED_URL_EXPIRY</code></td><td>604800 (7 days)</td><td>Longest signed URL, in seconds</td></tr>
+        <tr><td><code>DEFAULT_SIGNED_URL_EXPIRY</code></td><td>3600</td><td>Expiry when a signing request names none</td></tr>
+        <tr><td><code>SIGNED_URL_SECRET</code></td><td>the JWT secret</td><td>Key that signs URL tokens. Changing it invalidates every signed URL.</td></tr>
+        <tr><td><code>TRANSFORM_CACHE_TTL</code></td><td>3600</td><td><code>max-age</code>, in seconds, on transformed images</td></tr>
+        <tr><td><code>S3_ENDPOINT</code>, <code>S3_REGION</code>, <code>S3_ACCESS_KEY</code>, <code>S3_SECRET_KEY</code>, <code>S3_FORCE_PATH_STYLE</code></td><td>the local SeaweedFS</td><td>Where the bytes are kept</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout warn"><span class="callout-label">WARNING</span><p>The 1 GB quota applies to self-hosted projects too, because the compose file does not set <code>STORAGE_QUOTA</code>. Raise it on the <code>storage</code> service if you expect to store more.</p></div>
+    <p>The service reads each upload fully into memory before storing it, so very large files cost memory on the storage container while they upload.</p>
+
+    <h2 id="where">Where files live</h2>
+    <p>File metadata is a row in the <code>storage</code> schema of your project's Postgres. The bytes go to an S3-compatible object store, each upload under its own versioned key. Read files through the storage API, not the object store, because the key is not the path you uploaded to.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Where you run</th><th scope="col">Where the bytes go</th></tr></thead>
+      <tbody>
+        <tr><td><code>supatype dev</code> (Docker, the default for new projects)</td><td>A SeaweedFS container, in the <code>storage-data</code> Docker volume. Its port is not published to your machine. <code>supatype dev --reset-db</code> keeps it.</td></tr>
+        <tr><td><code>supatype dev</code> with <code>provider: "native"</code></td><td>Plain files under <code>~/.supatype/projects/&lt;name&gt;/storage</code>, served by <code>supatype-server</code></td></tr>
+        <tr><td><code>supatype self-host compose up</code></td><td>A SeaweedFS service in the stack, in the <code>storage-data</code> volume. Its S3 port, 8333, is published (<code>SUPATYPE_SEAWEEDFS_PORT</code> changes it) and needs the stack's credentials. There is no anonymous access.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout warn"><span class="callout-label">WARNING</span><p>The native dev store is a stand-in. It checks that a bucket is public before serving a public URL, and that a request carries a token, but it does not apply bucket access rules, <code>maxSize</code> or <code>accept</code>, and it ignores transforms. Use the Docker provider to test storage rules before you deploy.</p></div>
+    <p>Back up the <code>storage-data</code> volume along with the database. A database dump holds the file records but not the bytes.</p>
+    <p>Removing a bucket from the schema drops its policies on the next push. The bucket and its files stay where they are.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/auth.html"><small>PREVIOUS</small><span>Auth</span></a>
+      <a href="/docs/realtime.html" class="next"><small>NEXT</small><span>Realtime</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#buckets">Declare a bucket</a>
+    <a href="#fields">File and image fields</a>
+    <a href="#access">Access rules</a>
+    <a href="#upload">Upload</a>
+    <a href="#urls">Download and URLs</a>
+    <a href="#transforms">Image transforms</a>
+    <a href="#limits">Limits and config</a>
+    <a href="#where">Where files live</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js"></script>
+</body>
+</html>

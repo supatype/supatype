@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Supatype changelog</title>
+  <subtitle>What changed in each Supatype release.</subtitle>
+  <link href="https://www.supatype.com/changelog.xml" rel="self" />
+  <link href="https://www.supatype.com/changelog.html" />
+  <id>https://www.supatype.com/changelog.html</id>
+  <updated>2026-10-27T12:16:36Z</updated>
+  <author><name>Supatype Ltd</name></author>
+  <entry>
+    <title>Supatype 0.7.0</title>
+    <link href="https://www.supatype.com/changelog.html#v0-7-0" />
+    <id>https://www.supatype.com/changelog.html#v0-7-0</id>
+    <updated>2026-10-27T12:16:36Z</updated>
+    <summary>Supatype knows what it owns: adopt, release and reclaim. supatype doctor shows drift. Safer pushes, realtime deletes judged by read rules, auth providers in config, and a Realtime Inspector in Studio.</summary>
+  </entry>
+  <entry>
+    <title>Supatype 0.3</title>
+    <link href="https://www.supatype.com/changelog.html#v0-3" />
+    <id>https://www.supatype.com/changelog.html#v0-3</id>
+    <updated>2026-10-02T20:53:09Z</updated>
+    <summary>Publishing, drafts and versions, concurrent functions with logs, storage on SeaweedFS, model caches, and Vue, Svelte and Solid at parity with React.</summary>
+  </entry>
+  <entry>
+    <title>Supatype 0.2</title>
+    <link href="https://www.supatype.com/changelog.html#v0-2" />
+    <id>https://www.supatype.com/changelog.html#v0-2</id>
+    <updated>2026-09-03T08:11:52Z</updated>
+    <summary>Supatype's own auth replaces GoTrue in the CLI, the client and Studio.</summary>
+  </entry>
+</feed>

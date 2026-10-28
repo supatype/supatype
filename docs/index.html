@@ -4,308 +4,588 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0A0A0C" />
-  <link rel="icon" type="image/svg+xml" href="supatype-icon.svg" />
-  <link rel="apple-touch-icon" href="supatype-icon.svg" />
-  <title>Supatype | Zero drift</title>
-  <meta name="description" content="Postgres, migrations, row-level security, API, realtime, storage, Studio and the typed client your components use, all from the TypeScript you already write. Change a field once. Nothing else to update." />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>Supatype: the TypeScript-first Postgres backend with zero drift</title>
+  <meta name="description" content="Postgres, migrations, row and column level security, API, realtime, storage, a Studio CMS and a typed client, all generated from TypeScript you already write. Change a field once. Nothing else to update." />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <link rel="canonical" href="https://www.supatype.com/" />
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
   <meta property="og:site_name" content="Supatype" />
-  <meta property="og:title" content="Supatype | Zero drift" />
-  <meta property="og:description" content="Postgres, migrations, row-level security, API, realtime, storage, Studio and the typed client your components use, all from the TypeScript you already write. Change a field once. Nothing else to update." />
+  <meta property="og:title" content="Supatype: the TypeScript-first Postgres backend with zero drift" />
+  <meta property="og:description" content="Postgres, migrations, row and column level security, API, realtime, storage, a Studio CMS and a typed client, all generated from TypeScript you already write. Change a field once. Nothing else to update." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://www.supatype.com/" />
+  <meta property="og:image" content="https://www.supatype.com/og/home.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="site.css" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Supatype",
+    "url": "https://www.supatype.com/",
+    "description": "Postgres, migrations, row and column level security, API, realtime, storage, a Studio CMS and a typed client, all generated from TypeScript you already write. Change a field once. Nothing else to update.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS, Windows",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "Supatype Ltd",
+      "url": "https://www.supatype.com/",
+      "logo": "https://www.supatype.com/supatype-icon.svg",
+      "sameAs": [
+        "https://github.com/supatype",
+        "https://discord.gg/TzMtynufEH"
+      ]
+    }
+  }
+  </script>
 </head>
 <body>
 
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<div class="announce">
+  <div class="wrap">
+    <span class="tag-new">NEW</span>
+    <span class="dsk">The Supatype skill for Claude Code and Cursor.</span>
+    <span class="mob">Agent skill for Claude Code + Cursor</span>
+    <a href="#agents">Install it</a>
+  </div>
+</div>
+
 <header class="site-header">
-  <nav>
-    <a href="/" class="logo"><img src="supatype.svg" alt="Supatype" width="119" height="22" /></a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
     <div class="nav-links">
       <a href="#how-it-works">How it works</a>
-      <a href="#frameworks">Frameworks</a>
       <a href="#agents">Agents</a>
+      <a href="#frameworks">Frameworks</a>
       <a href="/docs/">Docs</a>
-      <a href="deploy-vm-github-actions.html">Guides</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
     </div>
     <div class="nav-end">
-      <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener" class="hide-sm">Discord</a>
-      <a href="https://github.com/supatype/supatype" target="_blank" rel="noopener" class="btn btn-primary btn-sm">GitHub</a>
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
     </div>
   </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="#how-it-works">How it works</a></li>
+      <li><a href="#agents">Agents</a></li>
+      <li><a href="#frameworks">Frameworks</a></li>
+      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
 </header>
 
-<main>
+<main id="main">
 
   <!-- Hero -->
-  <section class="hero">
-    <div class="wrap">
-      <div class="hero-copy">
-        <div class="eyebrow">MIT SDKs · Apache 2.0 CLI &amp; services · <a href="/licensing.html">Schema engine BSL 1.1</a></div>
-        <h1>Zero <span class="gradient">drift.</span></h1>
-        <p class="lede">
-          Postgres, migrations, row-level security, API, realtime, storage, Studio and the typed
-          client your components use, all from the TypeScript you already write. Change a field
-          once. Nothing else to update.
-        </p>
+  <section class="section hero dots">
+    <div class="wrap split">
+      <div class="stack hero-copy">
+        <div class="eyebrow"><span class="dsk">THE TYPE-FIRST ALTERNATIVE TO SUPABASE + PRISMA</span><span class="mob">ALTERNATIVE TO SUPABASE + PRISMA</span></div>
+        <h1 class="h-hero">Zero <span class="accent">drift.</span></h1>
+        <p class="lede">Postgres, migrations, row and column level security, API, realtime, storage, a Studio CMS and a typed client, all generated from TypeScript you already write. Change a field once. Nothing else to update.</p>
         <div class="actions">
-          <a href="#local-dev" class="btn btn-primary">Get started</a>
-          <a href="https://github.com/supatype/supatype" target="_blank" rel="noopener" class="btn btn-secondary">View on GitHub</a>
+          <a href="#local-dev" class="btn btn-primary" data-event="get_started_clicked" data-where="hero">Get started</a>
+          <a href="https://github.com/supatype/supatype" class="btn btn-secondary" target="_blank" rel="noopener">View on GitHub</a>
         </div>
-        <button type="button" class="copy-cmd" data-copy="npm install -g @supatype/cli">
-          <span class="prompt">$</span>
-          <span class="cmd">npm install -g @supatype/cli</span>
-          <span class="hint">copy</span>
-        </button>
+        <p class="meta"><span class="dsk">Free to use · Runs locally in Docker · No account needed</span><span class="mob">Free · Runs in Docker · No account</span></p>
+        <div class="copy-cmd">
+          <span class="pr" aria-hidden="true">$</span>
+          <code>npm install -g @supatype/cli</code>
+          <button type="button" class="icon-btn" aria-label="Copy install command" data-copy="npm install -g @supatype/cli">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12"></rect><path d="M5 15V3h12"></path></svg>
+          </button>
+        </div>
       </div>
 
-      <div class="panel">
-        <div class="panel-bar">
-          <span>Schema</span>
-          <span class="tag">Post</span>
-          <span class="path">schema/index.ts</span>
-        </div>
-<pre class="code"><code><span class="k">import type</span> {
-  Model, UUID, Slug, RichText, RelatedTo,
-  Public, LoggedIn, OwnerFrom, SupatypeAuthUser,
-} <span class="k">from</span> <span class="s">'@supatype/types'</span>
-
-<span class="k">export type</span> <span class="t">Post</span> = <span class="t">Model</span>&lt;{
+      <div class="stack hero-demo">
+        <div class="panel shadow-accent">
+          <div class="panel-bar"><span>post.ts</span><span class="panel-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+<pre class="code"><span class="k">export type</span> <span class="t">Post</span> = <span class="t">Model</span>&lt;{
   id: <span class="t">UUID</span>
   title: <span class="t">string</span>
-  slug: <span class="t">Slug</span>
+  slug: <span class="t">Slug</span>&lt;<span class="s">"title"</span>&gt;
   body: <span class="t">RichText</span>
-  authUser: <span class="t">RelatedTo</span>&lt;<span class="t">SupatypeAuthUser</span>&gt;
+  auth_user_id: <span class="t">SupatypeAuthUserId</span>
 }, {
   access: {
     read: <span class="t">Public</span>
     create: <span class="t">LoggedIn</span>
-    update: <span class="t">OwnerFrom</span>&lt;<span class="s">'authUser'</span>&gt;
+    update: <span class="t">Owner</span>&lt;<span class="s">"auth_user_id"</span>&gt;
   }
-}&gt;</code></pre>
-        <div class="panel-foot">
-          <div class="label">SUPATYPE PUSH GENERATES</div>
-          <span>Table and migration</span>
-          <span>Row-level security policies</span>
-          <span>REST and GraphQL endpoints</span>
-          <span>Realtime events</span>
-          <span>Typed client</span>
-          <span>Studio editing views</span>
+}&gt;</pre>
+        </div>
+        <div class="stack tight">
+<pre class="code term"><span class="pr">$</span> supatype push --direct
+<span class="dim">[supatype] Diffing against database...</span>
+
+<span class="dim">1 change(s):</span>
+
+  <span class="ok">[+]</span> create_table post  <span class="dim">(safe)</span>
+
+<span class="dim">[supatype] Applying migration...</span>
+<span class="dim">[supatype]</span> <span class="ok">Migration applied.</span></pre>
+        <p class="meta">One push generates: table + migration · RLS policies · REST + GraphQL endpoints · realtime events · typed client · Studio views</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Demo video -->
-  <!-- TODO: add the demo video here (change a field once, watch the migration, policies, API and client follow). Leave hidden until a real recording exists. -->
-  <section class="demo" id="demo" hidden></section>
-
-  <div class="status">
-  <strong>Active development.</strong> Supatype is pre-1.0: it runs, but APIs and config may change between releases.
-  </div>
-
-  <!-- Strip -->
-  <section class="strip">
-    <div class="wrap">
-      <span>MIT SDKs, Apache 2.0 services</span><span class="sep">/</span>
-      <span>Real Postgres 17</span><span class="sep">/</span>
-      <span>Rust schema engine</span><span class="sep">/</span>
-      <span>Self-host with Docker Compose</span>
+  <!-- Built on -->
+  <section class="section alt">
+    <div class="wrap strip-wrap">
+      <div class="strip">
+        <span>MIT SDKs, Apache 2.0 services</span><span class="sep" aria-hidden="true">/</span>
+        <span>Real Postgres 17</span><span class="sep" aria-hidden="true">/</span>
+        <span>Rust schema engine</span><span class="sep" aria-hidden="true">/</span>
+        <span>Self-host with Docker Compose</span>
+      </div>
     </div>
   </section>
 
   <!-- How it works -->
-  <section class="section deep" id="how-it-works">
-    <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">How it works</div>
-        <h2>One set of types,<br />
-          <span class="gradient">and everything that usually drifts from it.</span></h2>
-        <p>
-          Your stack describes the same data in six places, on both sides of the network. Supatype
-          has one. One set of types runs your whole stack, database to component. Rename a field and
-          the build fails instead of production.
-        </p>
+  <section class="section" id="how-it-works">
+    <div class="wrap split top">
+      <div class="stack narrow">
+        <div class="eyebrow">HOW IT WORKS</div>
+        <h2 class="h-section">One set of types, and everything that usually drifts from it.</h2>
+        <p class="body-lg">Your stack describes the same data in six places. Supatype keeps one set of types from database to component, so renaming a field fails the build instead of production.</p>
+      </div>
+      <div class="panel wide">
+        <div class="panel-bar"><span>drift.log</span><span>rename: title → headline</span></div>
+        <div class="drift" role="table" aria-label="Files to edit for one rename">
+          <div class="head c" role="columnheader">WITHOUT SUPATYPE</div>
+          <div class="head pr" role="columnheader">WITH SUPATYPE</div>
+          <div role="cell"><span class="err" aria-label="edit by hand">✗</span> SQL table</div>
+          <div class="hl" role="cell"><span class="ok" aria-label="edit">✓</span> post.ts</div>
+          <div role="cell"><span class="err" aria-label="edit by hand">✗</span> migration file</div>
+          <div class="c" role="cell">generated</div>
+          <div role="cell"><span class="err" aria-label="edit by hand">✗</span> RLS policies</div>
+          <div class="c" role="cell">generated</div>
+          <div role="cell"><span class="err" aria-label="edit by hand">✗</span> API handlers</div>
+          <div class="c" role="cell">generated</div>
+          <div role="cell"><span class="err" aria-label="edit by hand">✗</span> client types</div>
+          <div class="c" role="cell">generated</div>
+          <div role="cell"><span class="err" aria-label="edit by hand">✗</span> admin forms</div>
+          <div class="c" role="cell">generated</div>
+        </div>
+        <div class="panel-foot meta"><span>6 files to edit</span><span class="pr">1 file to edit</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Agents -->
+  <section class="section alt" id="agents">
+    <div class="wrap stack-lg">
+      <div class="stack section-head">
+        <div class="eyebrow">AGENTS</div>
+        <h2 class="h-section">Your agent edits one file. <br />The whole stack follows.</h2>
+        <p class="body-lg">Agents are good at changing a type and bad at keeping six other files in step with it. With Supatype there are no other files. Install the skill and your agent knows how to model data, write access rules and push changes.</p>
+      </div>
+      <div class="split stretch">
+        <div class="stack">
+          <div class="tile">
+            <div class="tile-head"><h3 class="h-card">Claude Code</h3><span class="meta">plugin + skill</span></div>
+<pre class="code well"><span class="pr">&gt;</span> /plugin marketplace add supatype/supatype
+<span class="pr">&gt;</span> /plugin install supatype@supatype</pre>
+          </div>
+          <div class="tile">
+            <div class="tile-head"><h3 class="h-card">Cursor</h3><span class="meta">project skill</span></div>
+<pre class="code well"><span class="pr">$</span> npx --yes degit supatype/supatype/skills/supatype .cursor/skills/supatype</pre>
+          </div>
+          <p class="body-sm dim">Using something else? Point it at <a href="/llms.txt" class="inline-code">supatype.com/llms.txt</a>.</p>
+          <div><a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" class="btn btn-primary" target="_blank" rel="noopener">Install the Supatype skill</a></div>
+        </div>
+        <div class="panel shadow-deep wide">
+          <div class="panel-bar"><span>agent session</span></div>
+          <div class="session-turn">
+            <span class="label">YOU</span>
+            Add an excerpt to posts. Only the author can edit it.
+          </div>
+          <div class="session-turn agent">
+            <span class="label">AGENT</span>
+            Added one field to <code>Post</code> and ran <code>supatype push</code>.
+<pre class="code">  body: <span class="t">RichText</span>
+<span class="ok">+ excerpt: Optional&lt;string&gt;</span>
+  auth_user_id: <span class="t">SupatypeAuthUserId</span>
+}, {
+  access: {
+    <span class="c">...</span>
+<span class="ok">+   fields: { excerpt: { write: Owner&lt;"auth_user_id"&gt; } },</span>
+  }</pre>
+          </div>
+          <ul class="checklist">
+            <li class="c">1 file changed. Generated:</li>
+            <li><span class="ok">✓</span>migration: add column post.excerpt</li>
+            <li><span class="ok">✓</span>field rule: only the owner writes excerpt</li>
+            <li><span class="ok">✓</span>REST + GraphQL field</li>
+            <li><span class="ok">✓</span>typed client: Post.excerpt</li>
+            <li><span class="ok">✓</span>Studio: excerpt input</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Why -->
+  <section class="section">
+    <div class="wrap stack-lg">
+      <div class="stack section-head">
+        <div class="eyebrow">WHY</div>
+        <h2 class="h-section">Why teams pick Supatype</h2>
+      </div>
+      <div class="grid-3 fill">
+        <div class="tile">
+          <h3 class="h-card">Renames fail the build</h3>
+          <p class="body-sm">Rename a column and every stale reference breaks at compile time, not in production.</p>
+        </div>
+        <div class="tile">
+          <h3 class="h-card">Types, not a new language</h3>
+          <p class="body-sm">You write plain TypeScript types. No extra language to learn, no codegen step to run by hand.</p>
+        </div>
+        <div class="tile">
+          <h3 class="h-card">Real Postgres</h3>
+          <p class="body-sm">Not an abstraction over a database. Our Postgres image ships with pgvector and PostGIS, and every table and policy is there to inspect with psql.</p>
+        </div>
+        <div class="tile">
+          <h3 class="h-card">Self-host, no sales call</h3>
+          <p class="body-sm">Docker Compose on any VM, same layout as local development. Images on Docker Hub.</p>
+        </div>
+        <div class="tile">
+          <h3 class="h-card">Open where you touch it</h3>
+          <p class="body-sm">MIT SDKs, Apache 2.0 CLI and services. The schema engine is BSL 1.1. <a href="/licensing.html" class="link">Licensing</a></p>
+        </div>
+      </div>
+      <div class="tile soon" id="cloud">
+        <div class="split">
+          <div class="stack tight">
+            <div class="tile-head"><h3 class="h-card">Supatype Cloud</h3><span class="tag">COMING SOON</span></div>
+            <p class="body-sm">The same stack, hosted for you. A free tier to start, paid plans when you grow.</p>
+          </div>
+          <form class="signup stack tight" data-submit-event="waitlist_joined" data-done="You're on the list. We'll email {email} when Cloud opens.">
+            <label for="waitlist-email" class="label">YOUR EMAIL</label>
+            <div class="actions signup-row">
+              <input type="email" id="waitlist-email" name="email" class="input" required autocomplete="email" placeholder="you@company.com" />
+              <button type="submit" class="btn btn-primary btn-sm">Join the waiting list</button>
+            </div>
+            <p class="meta" role="status" aria-live="polite">Only Cloud news. <a href="/privacy.html" class="link">Privacy</a></p>
+            <template class="signup-blocked">The sign-up did not go through. It may be blocked in your browser. Ask in <a href="https://discord.gg/TzMtynufEH" class="link">Discord</a> and we'll add you.</template>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section">
+    <div class="wrap stack-lg">
+      <div class="stack section-head">
+        <div class="eyebrow">FEATURES</div>
+        <h2 class="h-section">The basics, generated properly</h2>
       </div>
 
-      <div class="cards">
-        <div class="card">
-          <div class="n">01</div>
-          <h3>Migrations you can review</h3>
-          <p>The schema engine diffs your types against the live database, never guesses a rename or drops a column without your say, and classifies every change before it runs.</p>
+      <div class="split">
+        <div class="stack narrow">
+          <div class="num">01</div>
+          <h3 class="h-feature">Migrations you can review</h3>
+          <p class="body">Supatype diffs your types against the live database, classifies each change, and never renames or drops a column without your approval.</p>
         </div>
-        <div class="card">
-          <div class="n">02</div>
-          <h3>Access rules that compile to RLS</h3>
-          <p>Declare who can read, create and update next to the model. Supatype writes the Postgres row-level security policies for you.</p>
+        <div class="panel shadow wide">
+          <div class="panel-bar"><span>supatype push</span></div>
+<pre class="code"><span class="pr">◆</span>  Was post.title renamed to post.headline? (recorded in supatype/renames.json)
+<span class="faint">│</span>  <span class="ok">●</span> Yes / <span class="c">○ No</span>
+
+<span class="dim">2 change(s):</span>
+
+  <span class="ok">[+]</span> add_column post.excerpt  <span class="dim">(safe)</span>
+  <span class="err">[!]</span> drop_column post.legacy_id  <span class="err">(DANGER)</span>
+
+  <span class="wn">1 dangerous change(s). Review before pushing.</span>
+
+<span class="pr">◆</span>  1 risky change(s) above. Proceed?</pre>
         </div>
-        <div class="card">
-          <div class="n">03</div>
-          <h3>Studio, built from the schema</h3>
-          <p>List views, edit forms, rich text and a media library for your editors. Add a field to the type and it appears with the right widget.</p>
+      </div>
+
+      <div class="split reverse">
+        <div class="panel shadow wide">
+          <div class="panel-bar"><span>generated: post_policies.sql</span></div>
+<pre class="code"><span class="k">CREATE POLICY</span> <span class="s">"post_select"</span> <span class="k">ON</span> <span class="s">"public"</span>.<span class="s">"post"</span>
+<span class="k">FOR SELECT USING</span> (
+    <span class="k">TRUE</span>
+  );
+<span class="k">CREATE POLICY</span> <span class="s">"post_insert"</span> <span class="k">ON</span> <span class="s">"public"</span>.<span class="s">"post"</span>
+<span class="k">FOR INSERT WITH CHECK</span> (
+    (<span class="k">SELECT</span> _supatype.jwt_uid()) <span class="k">IS NOT NULL</span>
+  );
+<span class="k">CREATE POLICY</span> <span class="s">"post_update"</span> <span class="k">ON</span> <span class="s">"public"</span>.<span class="s">"post"</span>
+<span class="k">FOR UPDATE USING</span> (
+    <span class="s">"auth_user_id"</span> = (<span class="k">SELECT</span> _supatype.jwt_uid())
+  );</pre>
+<pre class="code panel-foot-code"><span class="c">-- column access: same query, two roles</span>
+<span class="text-2">anon </span>  title: <span class="s">"Zero drift"</span>  internal_notes: <span class="err">null</span>
+<span class="text-2">owner</span>  title: <span class="s">"Zero drift"</span>  internal_notes: <span class="s">"check SEO"</span></pre>
         </div>
-        <div class="card">
-          <div class="n">04</div>
-          <h3>Storage with permissions</h3>
-          <p>File and image fields get a bucket with matching access rules. Image transforms and signed URLs are included.</p>
+        <div class="stack narrow">
+          <div class="num">02</div>
+          <h3 class="h-feature">Row and column access from one set of rules</h3>
+          <p class="body">Write read, create and update rules next to the model, down to individual fields. Row rules compile to Postgres RLS policies. Field rules hide columns per role with supatype_mask, or through generated views where the extension isn't installed.</p>
         </div>
-        <div class="card">
-          <div class="n">05</div>
-          <h3>Realtime</h3>
-          <p>Subscribe to changes on any model from the client. Every event, deletes included, reaches only the subscribers whose access rules let them read that row.</p>
+      </div>
+
+      <div class="split">
+        <div class="stack narrow">
+          <div class="num">03</div>
+          <h3 class="h-feature">Studio, a CMS built from your types</h3>
+          <p class="body">Your types are the content model. Studio reads them and generates the CMS your content team uses: list views, edit forms, rich text, media and role-based editing. Add a field to a type and editors get it on the next push. <a href="/docs/studio.html" class="link">Studio</a></p>
         </div>
-        <div class="card">
-          <div class="n">06</div>
-          <h3>APIs and a typed client</h3>
-          <p>REST through PostgREST, GraphQL through pg_graphql, OpenAPI docs, and a TypeScript client generated from the same types.</p>
+        <div class="panel shadow wide">
+          <div class="panel-bar"><span>studio / posts / edit</span></div>
+          <div class="studio-form" aria-hidden="true">
+            <div class="field">Title<div class="input">Zero drift, explained</div></div>
+            <div class="field">Slug<div class="input mono">zero-drift-explained</div></div>
+            <div class="field">Body
+              <div class="editor">
+                <div class="toolbar"><span>B</span><span>I</span><span>H2</span><span>Link</span><span>Image</span></div>
+                <p>One set of types, database to component…</p>
+              </div>
+            </div>
+            <div class="actions"><span class="btn btn-primary btn-sm">Save</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-3 fill">
+        <div class="tile flat">
+          <div class="num">04</div>
+          <h3 class="h-card">Auth built in</h3>
+          <p class="body-sm">Email, magic link, phone and OAuth sign-in, with tokens your access rules check in Postgres on every request. <a href="/docs/auth.html" class="link">Auth</a></p>
+        </div>
+        <div class="tile flat">
+          <div class="num">05</div>
+          <h3 class="h-card">Storage with permissions</h3>
+          <p class="body-sm">File and image fields get buckets with matching rules, plus image transforms and signed URLs. <a href="/docs/storage.html" class="link">Storage</a></p>
+        </div>
+        <div class="tile flat">
+          <div class="num">06</div>
+          <h3 class="h-card">Realtime</h3>
+          <p class="body-sm">Subscribe to model changes. Events, deletes included, reach only subscribers allowed to read the row. <a href="/docs/realtime.html" class="link">Realtime</a></p>
+        </div>
+        <div class="tile flat">
+          <div class="num">07</div>
+          <h3 class="h-card">Edge functions</h3>
+          <p class="body-sm">TypeScript functions on Deno. Drop a file in <code class="inline-code">functions/</code> and it answers at <code class="inline-code">/functions/v1</code> with the caller's token. <a href="/docs/functions.html" class="link">Functions</a></p>
+        </div>
+        <div class="tile flat">
+          <div class="num">08</div>
+          <h3 class="h-card">APIs and a typed client</h3>
+          <p class="body-sm">REST via PostgREST, GraphQL via pg_graphql, API docs in Studio and a generated TypeScript client. <a href="/docs/client.html" class="link">Client</a></p>
         </div>
       </div>
     </div>
   </section>
 
   <!-- Frameworks -->
-  <section class="section" id="frameworks">
-    <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">Frameworks</div>
-        <h2>The same types<br />
-          <span class="gradient">in every component.</span></h2>
-        <p>
-          React, React Native, Vue, Svelte and Solid, plus SSR for Next.js server components, route
-          handlers and middleware. Pre-built auth UI for React and React Native.
-        </p>
+  <section class="section alt" id="frameworks">
+    <div class="wrap split">
+      <div class="stack">
+        <div class="eyebrow">FRAMEWORKS</div>
+        <h2 class="h-sub">The same types in every component.</h2>
+        <p class="body-sm">React, React Native, Vue, Svelte and Solid, plus SSR for Next.js server components, route handlers and middleware. Pre-built auth UI for React and React Native. <a href="/docs/frameworks.html" class="link">Frameworks</a></p>
       </div>
-      <div class="chips">
-        <code>@supatype/react</code>
-        <code>@supatype/react-native</code>
-        <code>@supatype/vue</code>
-        <code>@supatype/svelte</code>
-        <code>@supatype/solid</code>
-        <code>@supatype/ssr</code>
-        <code>@supatype/react-auth</code>
-        <code>@supatype/react-native-auth</code>
-      </div>
+<pre class="panel code"><span class="c"># pick yours</span>
+<span class="pr">$</span> npm i @supatype/react
+<span class="pr">$</span> npm i @supatype/vue
+<span class="pr">$</span> npm i @supatype/svelte
+<span class="pr">$</span> npm i @supatype/solid
+<span class="pr">$</span> npm i @supatype/ssr</pre>
     </div>
   </section>
 
-  <!-- Built for agents -->
-  <section class="section deep" id="agents">
-    <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">Built for agents</div>
-        <h2>One file for<br />
-          <span class="gradient">the agent to change.</span></h2>
-        <p>
-          Supatype ships an agent skill and plugins for Claude Code and Cursor. One file for the agent
-          to change, and the migration, policies, API and client follow.
-        </p>
-      </div>
-      <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener" class="link-card">
-        <div>
-          <div class="title">Install the Supatype skill</div>
-          <div class="desc">Plugins for Claude Code and Cursor, or copy the skill into your project.</div>
-        </div>
-        <span class="arrow">→</span>
-      </a>
-    </div>
-  </section>
-
-  <!-- How it compares -->
+  <!-- Compare -->
   <section class="section" id="compare">
-    <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">How it compares</div>
-        <h2>Where the types<br />
-          <span class="gradient">stop.</span></h2>
+    <div class="wrap stack-lg">
+      <div class="stack section-head">
+        <div class="eyebrow">COMPARE</div>
+        <h2 class="h-section">Where the types stop.</h2>
       </div>
-      <ul class="compare">
-        <li><strong>tRPC</strong> End-to-end types across the API. You still write the database and policies.</li>
-        <li><strong>Prisma</strong> Schema to types and migrations. You still write the access rules and the API.</li>
-        <li><strong>Supabase</strong> A backend. Types introspected after the fact.</li>
-        <li class="us"><strong>Supatype</strong> One set of types, database to component.</li>
-      </ul>
+      <div class="tbl compare">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col"><span class="visually-hidden">Tool</span></th>
+              <th scope="col">TABLES + MIGRATIONS</th>
+              <th scope="col">ROW + COLUMN ACCESS</th>
+              <th scope="col">API</th>
+              <th scope="col">CLIENT TYPES</th>
+              <th scope="col">ADMIN / CMS</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">tRPC</th><td>you write</td><td>you write</td><td>you write</td><td class="on">inferred</td><td>you build</td></tr>
+            <tr><th scope="row">Prisma</th><td class="on">from schema</td><td>you write</td><td>you write</td><td class="on">from schema</td><td>DB browser</td></tr>
+            <tr><th scope="row">Supabase</th><td>you write SQL</td><td>you write SQL</td><td class="on">generated</td><td>introspected after</td><td>table editor</td></tr>
+            <tr><th scope="row">Convex</th><td>schema.ts, you migrate data</td><td>you write, in functions</td><td>you write functions</td><td class="on">generated</td><td>dashboard</td></tr>
+            <tr><th scope="row">Payload</th><td class="on">from config</td><td>app-level, not RLS</td><td class="on">from config</td><td class="on">generated from config</td><td class="on">from config</td></tr>
+            <tr class="us"><th scope="row">Supatype</th><td>from your types</td><td>from your types</td><td>from your types</td><td>from your types</td><td>from your types</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="body-sm">Moving over? <a href="/from-supabase.html" class="link">Coming from Supabase</a> and <a href="/from-prisma.html" class="link">Coming from Prisma</a> map what you have to what you write here.</p>
     </div>
   </section>
 
   <!-- Quick start -->
-  <section class="section deep" id="local-dev">
-    <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">Quick start</div>
-        <h2>Three commands<br />
-          <span class="gradient">to a running stack.</span></h2>
-        <p>Supatype runs the stack in Docker by default. <a href="/docs/#local-dev">Local development</a> covers native mode, ports and the frontend proxy.</p>
+  <section class="section dots" id="local-dev">
+    <div class="wrap stack-lg">
+      <div class="stack section-head">
+        <div class="eyebrow">QUICK START</div>
+        <h2 class="h-section">Three commands to <br />a running stack.</h2>
       </div>
-      <pre class="code quickstart"><span class="p">$</span> npm install -g @supatype/cli
-<span class="p">$</span> supatype init
-<span class="p">$</span> supatype dev</pre>
-      <p><code>supatype dev</code> applies your schema, then watches it: save a change and it migrates the database and regenerates the typed client. Run <code>supatype push</code> to apply the schema to another database, such as staging or production.</p>
+      <div class="grid-auto">
+        <div class="panel shadow-accent-sm">
+          <div class="panel-bar small"><span>1. INSTALL</span></div>
+          <pre class="code"><span class="pr">$</span> npm install -g @supatype/cli</pre>
+        </div>
+        <div class="panel shadow-accent-sm">
+          <div class="panel-bar small"><span>2. INIT</span></div>
+          <pre class="code"><span class="pr">$</span> supatype init</pre>
+        </div>
+        <div class="panel shadow-accent-sm">
+          <div class="panel-bar small"><span>3. DEV</span></div>
+          <pre class="code"><span class="pr">$</span> supatype dev</pre>
+        </div>
+      </div>
+      <p class="body-sm measure"><code class="inline-code">supatype dev</code> applies your types, watches for changes, migrates the database and regenerates the client. <code class="inline-code">supatype push</code> applies them to staging or production. You need Node 22 or newer, and Docker running for the default mode. <a href="/docs/#local-dev" class="link">Local development</a> covers native mode, ports and the frontend proxy.</p>
     </div>
   </section>
 
-  <!-- Self-host -->
-  <section class="section" id="self-host">
+  <!-- FAQ -->
+  <section class="section">
     <div class="wrap">
-      <div class="section-head">
-        <div class="eyebrow">Self-hosting</div>
-        <h2>Run it on<br />
-          <span class="gradient">a server you own.</span></h2>
-        <p>
-          Docker Compose on any VM, with the same project layout you use locally. Images come from
-          Docker Hub; put a reverse proxy in front for HTTPS.
-        </p>
+      <div class="panel man">
+        <div class="panel-bar"><span>SUPATYPE(1)</span><span>User Commands</span><span>SUPATYPE(1)</span></div>
+        <dl>
+          <div><dt>NAME</dt><dd>supatype - one set of types, database to component</dd></div>
+          <div><dt>WHAT DO I ACTUALLY WRITE?</dt><dd>TypeScript types and the access rules next to them. Supatype generates the tables, migrations, policies, API, client and Studio from those.</dd></div>
+          <div id="self-host"><dt>CAN I SELF-HOST?</dt><dd>Yes. Docker Compose on any VM, with the same project layout as local development. See the <a href="/docs/#self-host">self-hosting guide</a>.</dd></div>
+          <div><dt>WHICH DATABASES?</dt><dd>Postgres 17, shipped as our own image.</dd></div>
+          <div id="licensing"><dt>HOW IS IT LICENSED?</dt><dd>SDKs are MIT. CLI and services are Apache 2.0. The schema engine is BSL 1.1. See <a href="/licensing.html">licensing</a>.</dd></div>
+          <div id="leaving"><dt>WHAT IF WE LEAVE?</dt><dd>Your data stays in ordinary Postgres tables, and access rules are ordinary row level security policies, so the database keeps working with Postgres and PostgREST without the CLI. Migration history stays in the <code class="inline-code">_supatype</code> schema, and <code class="inline-code">supatype migrate -o file.sql</code> writes a change as plain SQL. Model hooks run in the Supatype server, so those would need a new home.</dd></div>
+          <div id="custom-rules"><dt>WHAT IF A RULE CANNOT EXPRESS MY POLICY?</dt><dd>A model hook runs a handler of yours before a write through the API, and can refuse it. A hook is not a security boundary, because direct SQL skips it. There is no raw SQL rule type, on purpose. A push leaves policies you wrote by hand in place and reports them, and <code class="inline-code">supatype adopt</code> decides which objects Supatype owns. See <a href="/docs/functions.html#hooks">model hooks</a>.</dd></div>
+          <div id="existing-auth"><dt>WE ALREADY USE AUTH0.</dt><dd>Supatype issues its own tokens, and <code class="inline-code">auth.claim()</code> reads any claim in them. Accepting tokens from another issuer directly is not supported yet. <a href="#contact">Book a call</a> if you need it.</dd></div>
+          <div id="testing"><dt>HOW ARE ACCESS RULES TESTED?</dt><dd>Against a real Postgres 17 in CI on every change: generated policies, field access, attempts to leak masked values through filters and ordering, and every field type against one shared fixture.</dd></div>
+          <div id="security"><dt>FOUND A SECURITY ISSUE?</dt><dd>Email <a href="mailto:hello@supatype.com">hello@supatype.com</a> privately rather than opening a public issue. Details are in <a href="/.well-known/security.txt">security.txt</a>.</dd></div>
+          <div><dt>SEE ALSO</dt><dd><a href="#local-dev">quick-start(7)</a>, <a href="/docs/schema.html">schema(7)</a>, <a href="/docs/#self-host">self-hosting(7)</a>, <a href="/llms.txt">llms.txt</a></dd></div>
+        </dl>
       </div>
-      <a href="/docs/#self-host" class="link-card">
-        <div>
-          <div class="title">Self-hosting guide</div>
-          <div class="desc">Prepare the server, set secrets, start Compose, deploy changes and upgrade.</div>
+    </div>
+  </section>
+
+  <!-- Book a call -->
+  <section class="section">
+    <div class="wrap">
+      <div class="tile" id="contact">
+        <div class="split">
+          <div class="stack tight">
+            <div class="eyebrow">TALK TO US</div>
+            <h2 class="h-sub">Running it for a team?</h2>
+            <p class="body-sm">Book a call. We can talk through your stack, self-hosting with support, and what Cloud will offer.</p>
+          </div>
+          <form class="signup stack tight" data-submit-event="call_requested" data-done="Thanks. We'll email {email} to find a time.">
+            <label for="contact-email" class="label">YOUR EMAIL</label>
+            <input type="email" id="contact-email" name="email" class="input" required autocomplete="email" placeholder="you@company.com" />
+            <label for="contact-note" class="label">WHAT SHOULD WE TALK ABOUT? (OPTIONAL)</label>
+            <textarea id="contact-note" name="note" class="input" rows="3" placeholder="Team size, current stack, self-host or Cloud"></textarea>
+            <button type="submit" class="btn btn-primary btn-sm">Book a call</button>
+            <p class="meta" role="status" aria-live="polite">We reply by email. <a href="/privacy.html" class="link">Privacy</a></p>
+            <template class="signup-blocked">The form did not go through. It may be blocked in your browser. Email <a href="mailto:hello@supatype.com" class="link">hello@supatype.com</a> and we'll find a time.</template>
+          </form>
         </div>
-        <span class="arrow">→</span>
-      </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final call to action -->
+  <section class="section dots">
+    <div class="wrap cta">
+      <h2 class="h-cta">Zero <span class="accent">drift.</span></h2>
+      <a href="#local-dev" class="btn btn-primary" data-event="get_started_clicked" data-where="cta">Get started</a>
+      <p class="body-sm dim">Still deciding? Ask
+        <a href="https://chatgpt.com/?q=Read%20https%3A%2F%2Fwww.supatype.com%2Fllms.txt%20first.%20Supatype%20promises%20zero%20drift%3A%20one%20set%20of%20TypeScript%20types%20is%20the%20single%20source%20of%20truth%20for%20the%20database%2C%20migrations%2C%20access%20rules%2C%20API%2C%20typed%20client%20and%20Studio%20CMS.%20Tell%20me%20how%20it%20works%20and%20whether%20it%20fits%20my%20project." class="link" target="_blank" rel="noopener" data-event="ask_ai_clicked" data-where="chatgpt">ChatGPT</a> or
+        <a href="https://claude.ai/new?q=Read%20https%3A%2F%2Fwww.supatype.com%2Fllms.txt%20first.%20Supatype%20promises%20zero%20drift%3A%20one%20set%20of%20TypeScript%20types%20is%20the%20single%20source%20of%20truth%20for%20the%20database%2C%20migrations%2C%20access%20rules%2C%20API%2C%20typed%20client%20and%20Studio%20CMS.%20Tell%20me%20how%20it%20works%20and%20whether%20it%20fits%20my%20project." class="link" target="_blank" rel="noopener" data-event="ask_ai_clicked" data-where="claude">Claude</a>.
+      </p>
     </div>
   </section>
 
 </main>
 
 <footer class="site-footer">
-  <div class="wrap">
-    <div class="footer-brand">
-      <img src="/supatype.svg" alt="Supatype" width="108" height="20" />
-      <p>Zero drift. One set of types, database to component.</p>
-      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></p>
-      <p class="mono">Active development</p>
-    </div>
-    <div class="footer-links">
-      <div class="footer-col">
-        <span class="head">Docs</span>
-        <a href="/#local-dev">Quick start</a>
+  <div class="wrap footer">
+    <div class="footer-cols">
+      <div class="footer-brand">
+        <img src="/supatype.svg" alt="Supatype" width="130" height="24" />
+        <p class="body-sm dim">Zero drift. One set of types, database to component.</p>
+        <p class="meta">Built by Supatype Ltd, a UK company.</p>
+      </div>
+      <nav class="footer-col" aria-label="Docs">
+        <span class="label">DOCS</span>
+        <a href="#local-dev">Quick start</a>
         <a href="/docs/#local-dev">Local development</a>
         <a href="/docs/schema.html">Schema</a>
         <a href="/docs/client.html">Client</a>
+        <a href="/docs/auth.html">Auth</a>
+        <a href="/docs/storage.html">Storage</a>
+        <a href="/docs/realtime.html">Realtime</a>
+        <a href="/docs/functions.html">Functions</a>
         <a href="/docs/seeding.html">Seeding</a>
         <a href="/docs/studio-roles.html">Studio roles</a>
+      </nav>
+      <nav class="footer-col" aria-label="Deploy">
+        <span class="label">DEPLOY</span>
         <a href="/docs/#self-host">Self-hosting</a>
         <a href="/docs/#deploy-changes">Deploy changes</a>
         <a href="/docs/#upgrading">Upgrading</a>
         <a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a>
-      </div>
-      <div class="footer-col">
-        <span class="head">Community</span>
+        <a href="/from-supabase.html">Coming from Supabase</a>
+        <a href="/from-prisma.html">Coming from Prisma</a>
+      </nav>
+      <nav class="footer-col" aria-label="Community">
+        <span class="label">COMMUNITY</span>
         <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
         <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a>
         <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener">Agent plugins</a>
+        <a href="/changelog.html">Changelog</a>
+        <a href="#contact">Book a call</a>
         <a href="/llms.txt">llms.txt</a>
-      </div>
+      </nav>
+    </div>
+    <div class="footer-base">
+      <span>© Supatype Ltd</span>
+      <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a></span>
     </div>
   </div>
 </footer>
 
-<script src="site.js"></script>
+<script src="/site.js"></script>
 </body>
 </html>

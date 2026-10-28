@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { StorageClient } from "../src/storage.js"
 import { UNOWNED } from "./support/storage-object.js"
+import { createMockBlob } from "./support/blob.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -16,10 +17,6 @@ const HEADERS = { apikey: "test-anon-key", Authorization: "Bearer test-token" }
 function freshClient(): StorageClient {
   // Headers are asked for per request now, so a session arriving after construction is used.
   return new StorageClient(STORAGE_URL, () => Promise.resolve(HEADERS))
-}
-
-function createMockBlob(sizeBytes: number): Blob {
-  return new Blob([new Uint8Array(sizeBytes)])
 }
 
 function mockFetchResponse(
@@ -49,7 +46,7 @@ describe("Task 93: Storage quota integration", () => {
       }, false))
 
       const client = freshClient()
-      const blob = createMockBlob(10 * 1024 * 1024) // 10 MB
+      const blob = createMockBlob(1024)
       const { data, error } = await client.from("uploads").upload("file.dat", blob)
 
       expect(data).toBeNull()
@@ -115,10 +112,10 @@ describe("Task 93: Storage quota integration", () => {
 
       const client = freshClient()
 
-      const first = await client.from("bucket").upload("first.txt", createMockBlob(500 * 1024 * 1024))
+      const first = await client.from("bucket").upload("first.txt", createMockBlob(1024))
       expect(first.error).toBeNull()
 
-      const second = await client.from("bucket").upload("second.txt", createMockBlob(600 * 1024 * 1024))
+      const second = await client.from("bucket").upload("second.txt", createMockBlob(1024))
       expect(second.data).toBeNull()
       expect(second.error!.status).toBe(507)
     })
