@@ -4,6 +4,8 @@
 
 ### Bug Fixes
 
+* **access:** the public download route and bucket CORS go by `access_mode` alone, as every other
+  read does. A `custom` or `private` bucket with a stale `public: true` was served to anyone there.
 * **limits:** `STORAGE_QUOTA=-1` is unlimited, and `TIER_MAX_UPLOAD_SIZE=-1` sets no per-file limit
   of its own, leaving `MAX_UPLOAD_SIZE` (itself unlimited at `-1`). Both used to mean "use the tier
   table", so a project told it had no quota still refused uploads past the free tier's 1 GiB and
