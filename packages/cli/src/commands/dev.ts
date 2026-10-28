@@ -42,7 +42,12 @@ import {
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
-import { discoverFunctionsOrExit, writeDevFunctionsRouter } from "../functions-router-gen.js"
+import {
+  devServiceRoleKeyPath,
+  discoverFunctionsOrExit,
+  writeDevFunctionsRouter,
+  writeServiceRoleKeyFile,
+} from "../functions-router-gen.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
@@ -476,6 +481,10 @@ export function registerDev(program: Command): void {
       const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
       const realtimeUrl = `http://127.0.0.1:${realtimePort}`
+      // The server passes its environment, the key included, on to Deno, but the functions router
+      // reads the key from this file: a --watch reload evaluates it again in an environment an
+      // earlier evaluation already took the key out of.
+      writeServiceRoleKeyFile(devServiceRoleKeyPath(cwd), serviceRoleKey)
 
       writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
 
