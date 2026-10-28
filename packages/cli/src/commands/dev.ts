@@ -24,7 +24,7 @@ import { hasEnvValue, parseEnvText } from "../env-file.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
-import { isParsedBuckets, nativeBucketRow, type ParsedStorageBucket } from "../storage-provision.js"
+import { isParsedBuckets, nativeBucketRow, withPublicFromMode, type ParsedStorageBucket } from "../storage-provision.js"
 import { readJsonFile } from "../json-file.js"
 import { isArrayOf, isJsonObject } from "@supatype/shared"
 import {
@@ -1018,7 +1018,9 @@ function provisionStorageBuckets(
   mkdirSync(bucketsDir, { recursive: true })
 
   // Absent until the first bucket, and anything that is not a list of buckets reads as none.
-  const existing = readJsonFile(bucketsFile, isArrayOf(isJsonObject)) ?? []
+  const stored = readJsonFile(bucketsFile, isArrayOf(isJsonObject)) ?? []
+  const existing = stored.map(withPublicFromMode)
+  const corrected = existing.filter((row, i) => row["public"] !== stored[i]?.["public"]).length
   const existingIds = new Set(existing.map((b) => b["id"]))
   let added = 0
 
@@ -1029,10 +1031,8 @@ function provisionStorageBuckets(
     added++
   }
 
-  if (added > 0) {
-    writeFileSync(bucketsFile, JSON.stringify(existing, null, 2))
-    console.log(`[supatype] Storage: provisioned ${added} bucket(s).`)
-  }
+  if (added > 0 || corrected > 0) writeFileSync(bucketsFile, JSON.stringify(existing, null, 2))
+  if (added > 0) console.log(`[supatype] Storage: provisioned ${added} bucket(s).`)
 }
 
 // ---------------------------------------------------------------------------

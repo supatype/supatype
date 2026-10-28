@@ -114,7 +114,7 @@ export async function applyPublicPolicy(name: string): Promise<void> {
 }
 
 /** Errors that mean there is no policy to remove: none was put, or the backend has no policies. */
-const NOTHING_TO_REMOVE = new Set(["NoSuchBucketPolicy", "NotImplemented"])
+const NOTHING_TO_REMOVE = new Set(["NoSuchBucketPolicy", "NotImplemented", "MethodNotAllowed"])
 
 /**
  * Removes the bucket's policy. It could only ever be put, so a bucket made private kept the

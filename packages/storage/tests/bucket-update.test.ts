@@ -69,15 +69,23 @@ describe("PUT /bucket/:id", () => {
   })
 
   it.each([
-    ["public", true, { public: true }],
-    ["custom", false, { public: true }],
-    ["private", false, { access_mode: "private" }],
+    ["public", true, { file_size_limit: 10 }],
+    ["custom", false, { allowed_mime_types: ["image/png"] }],
   ] as const)("leaves a %s bucket (public %s) and its S3 policy alone given %o", async (mode, isPublic, body) => {
     vi.mocked(db.getBucket).mockResolvedValue(row(mode, isPublic))
     vi.mocked(db.updateBucket).mockResolvedValue(row(mode, isPublic))
     await buckets.update(context(body))
     expect(vi.mocked(db.updateBucket).mock.lastCall?.[1]).not.toHaveProperty("access_mode")
     expect(s3.applyBucketPolicyFromConfig).not.toHaveBeenCalled()
+  })
+
+  it("applies the S3 policy again when a write the row already holds is retried", async () => {
+    // The row is written first. When S3 then failed, a retry found nothing changed in the row and
+    // skipped S3, so a bucket made private stayed public on S3 for good.
+    vi.mocked(db.getBucket).mockResolvedValue(row("private", false))
+    vi.mocked(db.updateBucket).mockResolvedValue(row("private", false))
+    await buckets.update(context({ public: false }))
+    expect(vi.mocked(s3.applyBucketPolicyFromConfig).mock.lastCall?.[1]).toMatchObject({ public: false })
   })
 
   it("leaves S3 alone when the row is gone by the time it is written", async () => {
@@ -94,6 +102,20 @@ describe("POST /bucket", () => {
     vi.mocked(db.createBucket).mockResolvedValue(row("custom", false))
     await buckets.create(context({ name: "b", public: true, access_mode: "custom" }))
     expect(vi.mocked(db.createBucket).mock.lastCall?.[2]).toBe("custom")
-    expect(vi.mocked(s3.applyBucketPolicyFromConfig).mock.lastCall?.[1]).toMatchObject({ public: false })
+    expect(s3.applyBucketPolicyFromConfig).not.toHaveBeenCalled()
+  })
+
+  it("makes a public bucket public on S3 once its row exists", async () => {
+    vi.mocked(db.createBucket).mockResolvedValue(row("public", true))
+    await buckets.create(context({ name: "b", public: true }))
+    expect(vi.mocked(s3.applyBucketPolicyFromConfig).mock.lastCall?.[1]).toMatchObject({ public: true })
+  })
+
+  it("leaves the S3 policy of a bucket whose name is taken alone", async () => {
+    // Provisioning posts every declared bucket and takes 409 as success, so a create that touched
+    // S3 first stripped the policy of a bucket an admin had since made public.
+    vi.mocked(db.createBucket).mockRejectedValue(new Error("duplicate key value violates unique constraint"))
+    await buckets.create(context({ name: "b", public: true }))
+    expect(s3.applyBucketPolicyFromConfig).not.toHaveBeenCalled()
   })
 })

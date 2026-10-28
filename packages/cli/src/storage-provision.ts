@@ -139,3 +139,14 @@ export function nativeBucketRow(bucket: ParsedStorageBucket, now: string): Recor
     updated_at: now,
   }
 }
+
+/**
+ * A `buckets.json` row with `public` brought into line with its access mode. Rows an earlier build
+ * wrote keep a custom bucket public otherwise, since the object store only corrects a row when the
+ * bucket is next updated. A row with no mode is left as it is: its flag is all it has.
+ */
+export function withPublicFromMode<T extends Record<string, unknown>>(row: T): T {
+  const mode = row["access_mode"]
+  if (mode !== "public" && mode !== "private" && mode !== "custom") return row
+  return { ...row, public: mode === "public" }
+}
