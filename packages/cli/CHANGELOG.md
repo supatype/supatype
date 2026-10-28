@@ -58,6 +58,10 @@
 
 ### Bug Fixes
 
+* **functions:** the scaffolded `functions/_shared/context.ts` says where `ctx.env` comes from: the
+  functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then `.env.<function>.local`,
+  which wins. It said `.env`, which is never read for it.
+
 * **dev, functions serve:** the local functions router loads and guards handlers as the deployed
   worker does. It accepted only `export default`, so a function exporting a named `handler`, which the
   worker serves, failed to load locally; a module with neither is now refused at start, naming it. It

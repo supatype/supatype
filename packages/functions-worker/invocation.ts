@@ -63,7 +63,10 @@ export interface FunctionContext {
    */
   readonly dbUrl?: string
   readonly region: string
-  /** Values from `.env` and `.env.<function>.local`, which are per-route rather than per-call. */
+  /**
+   * Values from the functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then from
+   * `.env.<function>.local`, which wins. Per route rather than per call.
+   */
   readonly env: Readonly<Record<string, string>>
 }
 
