@@ -58,6 +58,14 @@
 
 ### Bug Fixes
 
+* **dev, functions serve:** the local functions router loads and guards handlers as the deployed
+  worker does. It accepted only `export default`, so a function exporting a named `handler`, which the
+  worker serves, failed to load locally; a module with neither is now refused at start, naming it. It
+  also gave every function the service-role key, in `ctx.serviceRoleKey` and in `Deno.env`, where the
+  worker takes the key out of the environment before importing any handler and grants it only to the
+  routes `functions.serviceRole` lists, and to hooks. The router now does the same, so a function that
+  relies on the key without being listed fails locally rather than once deployed.
+
 * **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
   server and the control plane were all told `/project/functions` whatever the config said, so a
   project keeping its functions elsewhere had every one answer 404; hooks were likewise fixed at

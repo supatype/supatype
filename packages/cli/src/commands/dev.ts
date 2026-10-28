@@ -38,6 +38,7 @@ import {
   REALTIME_PORT_ENV,
   resolveRuntimeProvider,
   schemaPathFromProject,
+  serviceRoleRoutes,
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
@@ -519,6 +520,9 @@ export function registerDev(program: Command): void {
         SUPATYPE_REALTIME_URL: realtimeUrl,
         SUPATYPE_ANON_KEY: anonKey,
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
+        // functions.serviceRole: the functions router withholds the key above from every other one,
+        // as the deployed worker does, so a function relying on it fails here first, not in production.
+        SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
         PORT: serverPort,
         SUPATYPE_APP_MODE: config.app.mode ?? "none",
         ...(config.app.mode === "static" && config.app.static_dir?.trim()

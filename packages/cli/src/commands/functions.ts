@@ -302,6 +302,8 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
         SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
         SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
         SUPATYPE_SERVICE_ROLE_KEY: process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? "",
+        // The router grants the key above only to these routes, as the deployed worker does.
+        SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
       },
     },
   )
