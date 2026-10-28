@@ -19,11 +19,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/env-file.sh"
 
 # mint_keys <example-dir> <cli-bin> - exports ANON_KEY and SERVICE_ROLE_KEY.
 mint_keys() {
-  local dir="$1" cli="$2" out="" status=0
+  local dir="$1" cli="$2" out="" status=0 backup
 
   touch "$dir/.env"
-  # Restored when minting fails, so a failure never leaves a new secret beside the old keys.
-  cp "$dir/.env" "$dir/.env.mint-keys-backup"
+  # Restored when minting fails, so a failure never leaves a new secret beside the old keys. Kept
+  # outside the repo: a copy of .env next to it is a file git would offer to commit.
+  backup="$(mktemp)"
+  cp "$dir/.env" "$backup"
   # A secret the caller names wins over one a previous run left in .env.
   if [[ -n "${EXAMPLE_JWT_SECRET:-}" ]]; then
     env_file_set "$dir/.env" JWT_SECRET "$EXAMPLE_JWT_SECRET"
@@ -37,12 +39,13 @@ mint_keys() {
   SERVICE_ROLE_KEY="$(env_file_value "$dir/.env" SERVICE_ROLE_KEY)"
 
   if [[ "$status" -ne 0 || -z "$ANON_KEY" || -z "$SERVICE_ROLE_KEY" ]]; then
-    mv "$dir/.env.mint-keys-backup" "$dir/.env"
+    cp "$backup" "$dir/.env"
+    rm -f "$backup"
     echo "ERROR: could not mint keys in $dir. 'supatype keys' said:" >&2
     printf '%s\n' "$out" >&2
     return 1
   fi
-  rm -f "$dir/.env.mint-keys-backup"
+  rm -f "$backup"
 
   export ANON_KEY SERVICE_ROLE_KEY
 }
