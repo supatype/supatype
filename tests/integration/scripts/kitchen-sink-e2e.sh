@@ -134,10 +134,15 @@ echo "==> Bringing the stack up (static mode: the SPA is what / serves)"
 # The owner DSN is deliberate here and only here. This is a disposable CI stack asserting the wiring
 # works; a real project should point this at a role it restricted, since a function holding this
 # bypasses access rules, field masking and model hooks.
-# Read on their own lines: inside `export` or a command's env prefix a failed read is not caught by set -e.
+# Read on their own lines and checked: inside `export` or a command's env prefix nothing would
+# stop on a missing file or key, and both URLs would carry an empty password.
 PG_PASSWORD="$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_PASSWORD)"
 PG_DB="$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_DB)"
-export SUPATYPE_FUNCTIONS_DB_URL="postgresql://supatype_admin:${PG_PASSWORD}@db:5432/kitchen-sink"
+if [[ -z "$PG_PASSWORD" || -z "$PG_DB" ]]; then
+  echo "ERROR: no POSTGRES_PASSWORD or POSTGRES_DB in $EXAMPLE_DIR/.env"
+  exit 1
+fi
+export SUPATYPE_FUNCTIONS_DB_URL="postgresql://supatype_admin:${PG_PASSWORD}@db:5432/${PG_DB}"
 start_stack
 
 echo ""
