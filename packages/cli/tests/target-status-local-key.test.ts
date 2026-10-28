@@ -57,10 +57,10 @@ describe("targetStatus on the local dev stack", () => {
     expect(seen).toEqual(["Bearer the-stack-key"])
   })
 
-  it("falls back to SUPATYPE_SERVICE_ROLE_KEY in .env when it is the only key there", async () => {
-    writeFileSync(join(dir, ".env"), "SUPATYPE_SERVICE_ROLE_KEY=only\n", "utf8")
-    await targetStatus(localTarget(), dir)
-    expect(seen).toEqual(["Bearer only"])
+  it("never sends a SUPATYPE_SERVICE_ROLE_KEY from .env, which the stack never had", async () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=x\nSUPATYPE_SERVICE_ROLE_KEY=stale\n", "utf8")
+    await expect(targetStatus(localTarget(), dir)).rejects.toThrow(/No service-role key/)
+    expect(seen).toEqual([])
   })
 
   it("keeps a token the target already carries", async () => {

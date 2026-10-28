@@ -105,19 +105,21 @@ export const ENV_FILE_OVER_SHELL = ["JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY"
 /** The role a key under each name has to carry. */
 const KEY_ROLES = { ANON_KEY: "anon", SERVICE_ROLE_KEY: "service_role" } as const
 
-/** A key closer than this to expiry is treated as unusable: replaced in `.env`, refused from the shell. */
-const KEY_RENEW_WITHIN_SECONDS = 86_400
-
 /**
  * The claims of `key` when the stack would accept it as `role`: signed with `secret`, for that role,
- * and not expiring within a day ({@link KEY_RENEW_WITHIN_SECONDS}). Null otherwise. The issuer is
- * not checked, since nothing in the stack checks it.
+ * and not expiring within `validForSeconds`. Null otherwise. The issuer is not checked, since
+ * nothing in the stack checks it.
  */
-export function usableKeyClaims(key: string, role: string, secret: string): Record<string, unknown> | null {
+export function usableKeyClaims(
+  key: string,
+  role: string,
+  secret: string,
+  validForSeconds = 0,
+): Record<string, unknown> | null {
   const claims = key === "" ? null : verifyJwt(key, secret)
   if (claims === null || claims["role"] !== role) return null
   const expiry = claims["exp"]
-  const live = typeof expiry !== "number" || expiry > Math.floor(Date.now() / 1000) + KEY_RENEW_WITHIN_SECONDS
+  const live = typeof expiry !== "number" || expiry > Math.floor(Date.now() / 1000) + validForSeconds
   return live ? claims : null
 }
 
