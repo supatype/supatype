@@ -1,12 +1,13 @@
 // Keeps the parts every page of the static site in docs/ shares in step, from one definition:
 // the header, skip link and footer, the docs sidebar, the phone menu label, the previous/next
-// links, the link preview and feed tags, sitemap.xml, and the docs half of llms-full.txt. The
-// home page keeps its own header and footer, and gets only the head tags.
-// Run after adding a page or changing a title or description. --check changes nothing and exits
-// non-zero when a page is out of step:
+// links, the link preview and feed tags, the site.css and site.js links, sitemap.xml, and the docs
+// half of llms-full.txt. The home page keeps its own header and footer, and gets only the head tags.
+// Run after adding a page, changing a title or description, or editing site.css or site.js.
+// --check changes nothing and exits non-zero when a page is out of step:
 //   node scripts/site-sync.mjs [--check]
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
+import { createHash } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import { pageMarkdown, site } from "./site-markdown.mjs"
 
@@ -115,7 +116,15 @@ function withHead(html, url, file) {
   const stripped = html
     .replace(/^ *<meta (property="og:|name="twitter:)[^>]*>\n/gm, "")
     .replace(/^ *<link rel="alternate" type="application\/atom\+xml"[^>]*>\n/gm, "")
-  return replaceOne(stripped, /^ *<link rel="alternate" type="text\/plain"[^>]*>\n/m, (llms) => `${llms}${feedLink}${tags}`, "llms.txt alternate link", file)
+  const head = replaceOne(stripped, /^ *<link rel="alternate" type="text\/plain"[^>]*>\n/m, (llms) => `${llms}${feedLink}${tags}`, "llms.txt alternate link", file)
+  return withAssetVersions(head, file)
+}
+
+// site.css and site.js are linked with a hash of their contents, so a deploy that changes either
+// changes its link. Cloudflare and browsers cache them for hours, and without this they paired
+// new pages with the old files after a deploy. The hashes are in `assets`, below `read`.
+function withAssetVersions(html, file) {
+  return assets.reduce((out, { name, link, version }) => replaceOne(out, link, `${name}?v=${version}`, `${name} link`, file), html)
 }
 
 // Guides opens on the first guide in the sidebar.
@@ -226,6 +235,12 @@ const check = process.argv.includes("--check")
 // Git keeps these files with LF endings, but a Windows checkout may write CRLF. Reading as LF
 // keeps --check from calling every page out of step there.
 const read = (file) => readFileSync(docs + file, "utf8").replace(/\r\n/g, "\n")
+// site.css and site.js, each with a hash of its contents and the pattern for its link on a page.
+const assets = ["site.css", "site.js"].map((name) => ({
+  name,
+  version: createHash("sha256").update(read(name)).digest("hex").slice(0, 10),
+  link: new RegExp(`(?<=(?:href|src)="/)${name.replaceAll(".", "\\.")}(?:\\?v=[0-9a-f]+)?(?=")`),
+}))
 const pages = Object.fromEntries([...pageUrls, ...extraUrls].map((url) => [url, read(fileOf(url))]))
 const headings = Object.fromEntries(pageUrls.map((url) => [url, match(pages[url], /<h1>([^<]*)<\/h1>/, "<h1>", fileOf(url))[1]]))
 const synced = Object.fromEntries(Object.entries(pages).map(([url, html]) => [url, syncedPage(html, url, headings)]))
