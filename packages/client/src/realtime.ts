@@ -258,11 +258,9 @@ export class RealtimeClient {
     this.ensureConnection(token)
   }
 
-  /** Tell every channel's status callback the same thing. */
+  /** Tell every channel's status callbacks the same thing. */
   private notifyChannels(status: ChannelStatus): void {
-    for (const state of this.channels.values()) {
-      state.statusCallback?.(status)
-    }
+    for (const state of this.channels.values()) notifyHandles(state, status)
   }
 
   /**
@@ -312,11 +310,29 @@ export class RealtimeClient {
     if (state.members.length === 0) return
     const leaves = state.members
     state.members = []
-    for (const listener of state.presenceListeners) listener({ joins: [], leaves })
+    for (const handle of state.handles) {
+      for (const listener of handle.presenceListeners) listener({ joins: [], leaves })
+    }
   }
 
+  /**
+   * A handle on the channel `name`, with listeners and a status callback of its own.
+   *
+   * Handles on one name share the join, since the server knows one subscription per channel per
+   * socket, and nothing else. They used to share everything: a second `subscribe()` replaced the
+   * first one's status callback, and the first `unsubscribe()` left the channel for both, so two
+   * `useSubscription` hooks with one channel name broke each other when either unmounted. The join
+   * is now left only when the last handle on the name unsubscribes.
+   */
   channel<TRow = Record<string, unknown>>(name: string): ChannelSubscription<TRow> {
     const state = this.getOrCreateChannel(name)
+    const handle: ChannelHandle = {
+      pgListeners: [],
+      presenceListeners: [],
+      broadcastListeners: new Map(),
+      statusCallback: null,
+    }
+    state.handles.add(handle)
 
     const sub: ChannelSubscription<TRow> = {
       on(_event, opts, callback) {
@@ -324,7 +340,7 @@ export class RealtimeClient {
         // default to "public" regardless, and since the frame always carries a schema, a channel
         // named `app:orders` was registered against `public.orders`.
         const named = parseChannelName(name)
-        state.pgListeners.push({
+        handle.pgListeners.push({
           event: opts.event,
           schema: opts.schema ?? named.schema,
           table: opts.table ?? named.table,
@@ -335,20 +351,19 @@ export class RealtimeClient {
       },
 
       onPresence(callback) {
-        state.presenceListeners.push(callback)
+        handle.presenceListeners.push(callback)
         return sub
       },
 
       onBroadcast(event, callback) {
-        if (!state.broadcastListeners.has(event)) {
-          state.broadcastListeners.set(event, [])
-        }
-        state.broadcastListeners.get(event)!.push(callback)
+        const listeners = handle.broadcastListeners.get(event) ?? []
+        listeners.push(callback)
+        handle.broadcastListeners.set(event, listeners)
         return sub
       },
 
       subscribe: (callback) => {
-        state.statusCallback = callback ?? null
+        handle.statusCallback = callback ?? null
         // Joining twice is a no-op rather than a second frame, so `from(table).subscribe()` can
         // join on its own and a caller can still call this afterwards just to watch the status.
         // A join already acknowledged will not be acknowledged again, so say so here or the new
@@ -360,12 +375,10 @@ export class RealtimeClient {
       },
 
       unsubscribe: () => {
-        this.sendUnsubscribe(state)
-        this.channels.delete(name)
-        // Close WebSocket if no channels left
-        if (this.channels.size === 0) {
-          this.disconnect()
-        }
+        // Only the last handle on the name leaves the channel. A handle unsubscribing twice, or
+        // after `removeChannel` already removed its channel, has nothing left to leave.
+        if (!state.handles.delete(handle) || state.handles.size > 0) return
+        if (this.channels.get(name) === state) this.removeChannel(name)
       },
 
       broadcast: (event, payload) => {
@@ -431,10 +444,7 @@ export class RealtimeClient {
     if (!state) {
       state = {
         name,
-        pgListeners: [],
-        presenceListeners: [],
-        broadcastListeners: new Map(),
-        statusCallback: null,
+        handles: new Set(),
         subscribed: false,
         joinSent: false,
         members: [],
@@ -576,7 +586,7 @@ export class RealtimeClient {
       const state = this.channels.get(channel)
       if (state) {
         state.subscribed = true
-        state.statusCallback?.("SUBSCRIBED")
+        notifyHandles(state, "SUBSCRIBED")
       }
     }
 
@@ -586,7 +596,7 @@ export class RealtimeClient {
         // A refused join registered nothing on the server, so a channel not yet confirmed may
         // join again on this socket. Marked as sent, a retry after authenticating sent nothing.
         if (!state.subscribed) state.joinSent = false
-        state.statusCallback?.("CHANNEL_ERROR")
+        notifyHandles(state, "CHANNEL_ERROR")
       }
     }
   }
@@ -608,9 +618,10 @@ export class RealtimeClient {
     // a `chat_message` listener its rows came from a table called `lobby-chat`. A listener for a
     // different table on the same channel is never served by it, rather than handed these rows
     // under its own table's name.
-    const subscribed = state.pgListeners[0]
+    const listeners = pgListenersOf(state)
+    const subscribed = listeners[0]
     if (!subscribed) return
-    for (const listener of state.pgListeners) {
+    for (const listener of listeners) {
       if (listener.schema !== subscribed.schema || listener.table !== subscribed.table) continue
       if (listener.event !== "*" && listener.event !== msg.event) continue
       listener.callback({
@@ -629,8 +640,10 @@ export class RealtimeClient {
     if (!state) return
 
     state.members = withoutLeaves([...state.members, ...msg.joins], msg.leaves)
-    for (const listener of state.presenceListeners) {
-      listener({ joins: msg.joins, leaves: msg.leaves })
+    for (const handle of state.handles) {
+      for (const listener of handle.presenceListeners) {
+        listener({ joins: msg.joins, leaves: msg.leaves })
+      }
     }
   }
 
@@ -638,9 +651,8 @@ export class RealtimeClient {
     const state = this.channels.get(msg.channel)
     if (!state) return
 
-    const listeners = state.broadcastListeners.get(msg.event)
-    if (listeners) {
-      for (const listener of listeners) {
+    for (const handle of state.handles) {
+      for (const listener of handle.broadcastListeners.get(msg.event) ?? []) {
         listener(msg.payload)
       }
     }
@@ -652,7 +664,7 @@ export class RealtimeClient {
     state.joinSent = true
 
     // Build filter from the first pg listener (if any)
-    const firstListener = state.pgListeners[0]
+    const firstListener = pgListenersOf(state)[0]
     const filter: Record<string, string> = {}
     if (firstListener?.filter) {
       // Parse PostgREST filter format "column=eq.value" into { column: "eq.value" }
@@ -704,12 +716,19 @@ interface PgListener {
   callback: RealtimeCallback<Record<string, unknown>>
 }
 
-interface ChannelState {
-  name: string
+/** What one `channel(name)` call registered: its own listeners and status callback. */
+interface ChannelHandle {
   pgListeners: PgListener[]
   presenceListeners: Array<(event: { joins: PresenceEntry[]; leaves: PresenceEntry[] }) => void>
   broadcastListeners: Map<string, Array<(payload: Record<string, unknown>) => void>>
   statusCallback: ((status: ChannelStatus) => void) | null
+}
+
+/** One channel name's join on the socket, shared by every handle on that name. */
+interface ChannelState {
+  name: string
+  /** The handles on this name, oldest first. The channel is left when the last one unsubscribes. */
+  handles: Set<ChannelHandle>
   /** The server acknowledged the join on the current socket. */
   subscribed: boolean
   /**
@@ -721,6 +740,16 @@ interface ChannelState {
   joinSent: boolean
   /** Who the current socket has said is tracked on this channel, one entry per tracking socket. */
   members: PresenceEntry[]
+}
+
+/** Every handle's row listeners, oldest handle first: the first of them is what the join registers. */
+function pgListenersOf(state: ChannelState): PgListener[] {
+  return [...state.handles].flatMap((handle) => handle.pgListeners)
+}
+
+/** Tell each handle on a channel its status. */
+function notifyHandles(state: ChannelState, status: ChannelStatus): void {
+  for (const handle of state.handles) handle.statusCallback?.(status)
 }
 
 /** `members` with one entry removed per leave: a user on two tabs is two entries and leaves twice. */
