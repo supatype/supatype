@@ -10,7 +10,8 @@
 * **buckets:** `PUT /bucket/:id` with `public` moves a public or private bucket to the matching
   `access_mode`, and leaves a custom one custom. It changed the flag alone, so a bucket made public
   that way stayed private everywhere the mode is read. A custom bucket is never given a public S3
-  policy, whatever `public` says, and a change of mode now updates the S3 policy too.
+  policy, whatever `public` says. A bucket made private or custom loses its public-read S3 policy:
+  the policy could only be put, so such a bucket stayed readable by anyone straight from S3.
 * **limits:** `STORAGE_QUOTA=-1` is unlimited, and `TIER_MAX_UPLOAD_SIZE=-1` sets no per-file limit
   of its own, leaving `MAX_UPLOAD_SIZE` (itself unlimited at `-1`). Both used to mean "use the tier
   table", so a project told it had no quota still refused uploads past the free tier's 1 GiB and

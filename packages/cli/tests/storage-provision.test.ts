@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   bucketSpecsFromAst,
+  nativeBucketRow,
   provisionBuckets,
   provisionBucketsFromAst,
   type SchemaStorageBucketAst,
@@ -96,5 +97,18 @@ describe("provisionBucketsFromAst", () => {
     await provisionBucketsFromAst({}, "http://localhost:54321/storage/v1", "key")
 
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("nativeBucketRow", () => {
+  // Native dev writes buckets.json itself. A custom bucket declared public was written public
+  // there, while the object store and the storage service hold that a custom bucket never is.
+  it.each([
+    [{ id: "b", public: true, accessMode: "custom" as const }, "custom", false],
+    [{ id: "b", public: false, accessMode: "public" as const }, "public", true],
+    [{ id: "b", public: true }, "public", true],
+    [{ id: "b", public: false, accessMode: null }, "private", false],
+  ])("writes %o with mode %s and public %s", (bucket, mode, isPublic) => {
+    expect(nativeBucketRow(bucket, "t")).toMatchObject({ access_mode: mode, public: isPublic })
   })
 })

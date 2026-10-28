@@ -24,7 +24,7 @@ import { hasEnvValue, parseEnvText } from "../env-file.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
-import { isParsedBuckets, type ParsedStorageBucket } from "../storage-provision.js"
+import { isParsedBuckets, nativeBucketRow, type ParsedStorageBucket } from "../storage-provision.js"
 import { readJsonFile } from "../json-file.js"
 import { isArrayOf, isJsonObject } from "@supatype/shared"
 import {
@@ -1024,19 +1024,7 @@ function provisionStorageBuckets(
 
   for (const bucket of declared) {
     if (existingIds.has(bucket.id)) continue
-    const now = new Date().toISOString()
-    existing.push({
-      id: bucket.id,
-      name: bucket.id,
-      public: bucket.public,
-      file_size_limit: bucket.fileSizeLimit ?? null,
-      allowed_mime_types: bucket.allowedMimeTypes ?? null,
-      access_mode:
-        bucket.accessMode ?? (bucket.public ? "public" : "private"),
-      s3_bucket_policy: bucket.s3BucketPolicy ?? null,
-      created_at: now,
-      updated_at: now,
-    })
+    existing.push(nativeBucketRow(bucket, new Date().toISOString()))
     mkdirSync(join(storagePath, bucket.id), { recursive: true })
     added++
   }
