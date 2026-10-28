@@ -9,6 +9,7 @@
 
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
+import { mailerProviderEnv, mailerUrlPathsEnv } from "./mailer-env.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
@@ -68,4 +69,32 @@ export function nativePostgrestSchemaEnv(
 /** The roles script for a new native database, with the mask extension only when the install has it. */
 export function nativeDevRolesSql(pgBinDir: string | null): string {
   return nativeRolesSql(nativeMaskLibraryPresent(pgBinDir))
+}
+
+/** The send-email hook's signing secret in native dev, in the server's symmetric format. Override via .env. */
+const LOCAL_SEND_EMAIL_HOOK_SECRETS = "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567"
+
+/** `email.send_email_hook` as the server's hook settings, aimed at this server unless the config names a target. */
+function nativeSendEmailHookEnv(email: SupatypeProjectConfig["email"], serverPort: string): Record<string, string> {
+  if (email?.send_email_hook !== true) return {}
+  return {
+    SUPATYPE_HOOK_SEND_EMAIL_ENABLED: "true",
+    SUPATYPE_HOOK_SEND_EMAIL_URI:
+      email.send_email_hook_uri?.trim() || `http://127.0.0.1:${serverPort}/internal/v0hooks/send-email`,
+    SUPATYPE_HOOK_SEND_EMAIL_SECRETS: email.send_email_hook_secrets?.trim() || LOCAL_SEND_EMAIL_HOOK_SECRETS,
+  }
+}
+
+/**
+ * The auth server's external URL and mailer on the native path, where the server is the gateway
+ * and the auth routes sit under `/auth/v1`. The verify paths are what make emailed links land
+ * there: without them the server's default `/verify` resolved to the origin's root, a 404.
+ */
+export function nativeAuthMailerEnv(email: SupatypeProjectConfig["email"], serverPort: string): Record<string, string> {
+  return {
+    SUPATYPE_API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
+    ...mailerUrlPathsEnv(),
+    ...mailerProviderEnv(email),
+    ...nativeSendEmailHookEnv(email, serverPort),
+  }
 }

@@ -44,3 +44,18 @@ describe("emailed auth links", () => {
     })
   }
 })
+
+/**
+ * The auth server reads SUPATYPE_RESEND_API_KEY, SUPATYPE_RESEND_FROM and SUPATYPE_SES_FROM, and the
+ * server service used to pass none of them, so a self-host stack asking for Resend or SES had no
+ * way to give the server its key or sender and fell back to the noop mailer.
+ */
+describe("Resend and SES settings", () => {
+  for (const name of ["SUPATYPE_RESEND_API_KEY", "SUPATYPE_RESEND_FROM", "SUPATYPE_SES_FROM"]) {
+    it(`passes ${name} from .env through to the server`, () => {
+      const env = serverEnv(renderSelfHostCompose(config()))
+      expect(env.get("SUPATYPE_API_EXTERNAL_URL"), "the server block was not found").toBeDefined()
+      expect(env.get(name)).toBe(`\${${name}:-}`)
+    })
+  }
+})

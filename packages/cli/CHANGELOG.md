@@ -58,6 +58,20 @@
 
 ### Bug Fixes
 
+* **dev, self-host, init:** Resend and SES settings reach the auth server. Native `dev` sent them as
+  `RESEND_API_KEY`, `RESEND_FROM` and `SES_FROM`, which the server does not read, docker `dev` sent
+  none of them, and the self-host compose file had no way to pass them, so `email.provider: "resend"`
+  or `"ses"` fell back to the noop mailer and sent nothing. All three now use
+  `SUPATYPE_RESEND_API_KEY`, `SUPATYPE_RESEND_FROM` and `SUPATYPE_SES_FROM`, and the compose file
+  passes them through from `.env`. `init` scaffolds the email settings under those names too, and
+  SMTP's as `SUPATYPE_SMTP_*`; the unprefixed `SMTP_HOST` and the rest it used to write were never
+  read either. Rename any of these already in a project's `.env`.
+
+* **dev:** magic-link, confirmation, invite and recovery links in native `dev` open the auth
+  server's verify endpoint. They pointed at `http://localhost:<port>/verify` and 404'd: the external
+  URL ends in `/auth/v1`, and the server's default `/verify` replaced that path rather than adding to
+  it. Native `dev` now sets the same `/auth/v1/verify` paths the compose file does.
+
 * **migrate:** restoring a migration's schema sources refuses a file that lands beside the project
   under a path starting with the project's own (`/srv/app2/x.ts` for `/srv/app`). The check compared
   string prefixes, so it took that file for one inside the project. The snapshot is now read by the
