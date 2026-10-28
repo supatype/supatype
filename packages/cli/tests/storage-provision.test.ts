@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   bucketSpecsFromAst,
   nativeBucketRow,
+  withPublicFromMode,
   provisionBuckets,
   provisionBucketsFromAst,
   type SchemaStorageBucketAst,
@@ -110,5 +111,16 @@ describe("nativeBucketRow", () => {
     [{ id: "b", public: false, accessMode: null }, "private", false],
   ])("writes %o with mode %s and public %s", (bucket, mode, isPublic) => {
     expect(nativeBucketRow(bucket, "t")).toMatchObject({ access_mode: mode, public: isPublic })
+  })
+})
+
+describe("withPublicFromMode", () => {
+  // Rows an earlier build wrote to buckets.json keep a custom bucket public until rewritten.
+  it.each([
+    [{ id: "b", public: true, access_mode: "custom" }, false],
+    [{ id: "b", public: false, access_mode: "public" }, true],
+    [{ id: "b", public: true }, true],
+  ])("gives %o public %s", (row, isPublic) => {
+    expect(withPublicFromMode(row)["public"]).toBe(isPublic)
   })
 })

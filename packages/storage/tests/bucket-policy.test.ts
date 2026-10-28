@@ -26,12 +26,15 @@ describe("applyBucketPolicyFromConfig", () => {
     expect(sentCommands().some((c) => c instanceof DeleteBucketPolicyCommand)).toBe(true)
   })
 
-  it("does not fail on a bucket that never had a policy", async () => {
-    send.mockImplementation(async () => {
-      throw Object.assign(new Error("The bucket policy does not exist"), { name: "NoSuchBucketPolicy" })
-    })
-    await expect(storage.applyBucketPolicyFromConfig("b", { public: false })).resolves.toBeUndefined()
-  })
+  it.each(["NoSuchBucketPolicy", "NotImplemented", "MethodNotAllowed"])(
+    "does not fail when S3 answers %s: there is no policy to remove",
+    async (name) => {
+      send.mockImplementation(async () => {
+        throw Object.assign(new Error(name), { name })
+      })
+      await expect(storage.applyBucketPolicyFromConfig("b", { public: false })).resolves.toBeUndefined()
+    },
+  )
 
   it("still fails when the policy cannot be removed", async () => {
     send.mockImplementation(async () => {
