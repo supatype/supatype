@@ -227,3 +227,59 @@ describe("databaseStateToSchemaScaffold()", () => {
     expect(scaffold("blog_posts")).not.toContain("tableName")
   })
 })
+
+/**
+ * #19: a uuid column with a foreign key to `auth.users(id)` is a user's id, and the draft says so
+ * with SupatypeAuthUserId and the key's delete rule. The engine reports the referenced schema from
+ * 0.7.0 on; an older engine names only the table, and `users` in `auth` cannot be told from any
+ * other `users`, so the draft stays a plain UUID rather than guess.
+ */
+describe("databaseStateToSchemaScaffold() and auth.users foreign keys", () => {
+  const userId = { name: "user_id", dataType: "uuid", udtName: "uuid", nullable: false }
+  const editorId = { name: "editor_id", dataType: "uuid", udtName: "uuid", nullable: true }
+  const authKey = (column: string, onDelete: string, extra: Record<string, unknown> = {}) => ({
+    table: "posts",
+    name: `posts_${column}_fkey`,
+    constraintType: "foreignKey",
+    columns: [column],
+    foreignSchema: "auth",
+    foreignTable: "users",
+    foreignColumns: ["id"],
+    onDelete,
+    ...extra,
+  })
+  const draft = (constraints: Array<Record<string, unknown>>): string =>
+    databaseStateToSchemaScaffold({
+      tables: [{ name: "posts", columns: [userId, editorId] }],
+      constraints: constraints.map((c) => ({ table: "posts", name: "c", constraintType: "foreignKey", columns: [], ...c })),
+    })
+
+  it("drafts a user id with the key's delete rule", () => {
+    const out = draft([authKey("user_id", "CASCADE"), authKey("editor_id", "SET NULL")])
+    expect(out).toContain('  user_id: SupatypeAuthUserId<{ onDelete: "cascade" }>')
+    expect(out).toContain('  editor_id: Optional<SupatypeAuthUserId<{ onDelete: "setNull" }>>')
+    expect(draft([authKey("user_id", "RESTRICT")])).toContain('  user_id: SupatypeAuthUserId<{ onDelete: "restrict" }>')
+  })
+
+  it("says a key with no delete rule the type can declare would be dropped", () => {
+    const out = draft([authKey("user_id", "NO ACTION")])
+    expect(out).toMatch(/^ {2}user_id: SupatypeAuthUserId \/\/ TODO: .*ON DELETE NO ACTION.*no foreign key/m)
+  })
+
+  it("keeps a plain UUID for an engine that does not report the schema", () => {
+    const { foreignSchema: _omitted, ...old } = authKey("user_id", "CASCADE")
+    const out = draft([old])
+    expect(out).not.toContain("SupatypeAuthUserId<")
+    expect(out).toMatch(/^ {2}user_id: UUID$/m)
+  })
+
+  it("keeps a plain UUID for a key to another schema, another column, or more than one column", () => {
+    for (const other of [
+      authKey("user_id", "CASCADE", { foreignSchema: "public" }),
+      authKey("user_id", "CASCADE", { foreignColumns: ["email"] }),
+      authKey("user_id", "CASCADE", { columns: ["user_id", "editor_id"], foreignColumns: ["id", "id"] }),
+    ]) {
+      expect(draft([other])).not.toContain("SupatypeAuthUserId<")
+    }
+  })
+})
