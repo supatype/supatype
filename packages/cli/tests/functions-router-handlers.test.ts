@@ -12,6 +12,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   devServiceRoleKeyPath,
@@ -197,6 +198,15 @@ function serve(routerPath: string, env: Record<string, string>): Promise<string>
   return startRouter(routerPath, env).listening(1)
 }
 
+/** The deployed functions worker, run from source as its image runs it. */
+const WORKER_MAIN = fileURLToPath(new URL("../../functions-worker/main.ts", import.meta.url))
+
+/** What a server answers for one function: status, content type and parsed body. */
+async function loadFailureAnswer(base: string, name: string): Promise<{ status: number; contentType: string | null; body: unknown }> {
+  const res = await fetch(`${base}/functions/v1/${name}`)
+  return { status: res.status, contentType: res.headers.get("content-type"), body: await res.json() }
+}
+
 /** What a function reports about the key: whether its module body saw it, and what ctx gave it. */
 const REPORTS_KEY = `
 const seenAtImport = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null
@@ -249,6 +259,29 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
       expect(res.status).toBe(500)
       const body: unknown = await res.json()
       expect(body).toMatchObject({ error: "function_load_failed", message: expect.stringMatching(message) })
+    }
+  }, 60_000)
+
+  // The deployed worker answers the same failure with its own copy of this code
+  // (packages/functions-worker/main.ts). Both serve one functions dir here, so the two cannot drift.
+  it("answers a function that failed to load exactly as the deployed worker does", async () => {
+    const routerPath = project({
+      empty: `export const other = 1\n`,
+      throws: `throw new Error("boom-at-import")\n`,
+    })
+    const functionsRoot = join(dirname(dirname(routerPath)), "functions")
+    const [router, worker] = await Promise.all([
+      serve(routerPath, {}),
+      serve(WORKER_MAIN, { SUPATYPE_FUNCTIONS_ROOT: functionsRoot }),
+    ])
+    for (const name of ["empty", "throws"]) {
+      const fromRouter = await loadFailureAnswer(router, name)
+      expect(fromRouter).toEqual(await loadFailureAnswer(worker, name))
+      expect(fromRouter).toMatchObject({
+        status: 500,
+        contentType: "application/json",
+        body: { error: "function_load_failed", message: expect.stringMatching(`^Function "${name}" failed to load: `) },
+      })
     }
   }, 60_000)
 
