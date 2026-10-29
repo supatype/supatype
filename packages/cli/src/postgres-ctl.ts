@@ -202,13 +202,18 @@ export async function firstFreePort(base: number, span: number): Promise<number 
  * reserved at postmaster start whether or not anything caches, so a local
  * Postgres should not ask for a production keyspace. Durability is ephemeral
  * throughout: nothing in a dev keyspace is the only copy of anything.
+ *
+ * `wal_level=logical` because realtime decodes changes from a replication slot,
+ * and initdb's default, `replica`, refuses to create one: native realtime never
+ * ran, while dev announced it. Given on the command line, it beats
+ * postgresql.conf, so a cluster created before this takes it at its next start.
  */
 export function pgServerOptions(opts: PgOptions): string {
   const mask = nativeMaskLibraryPresent(opts.pgBinDir)
   const keyspace = opts.keyspacePort !== undefined && nativeKeyspaceLibraryPresent(opts.pgBinDir)
 
   const libs = [...(keyspace ? ["pg_keyspace"] : []), ...(mask ? ["supatype_mask"] : [])]
-  const parts = [`-p ${opts.port}`]
+  const parts = [`-p ${opts.port}`, "-c wal_level=logical"]
   if (libs.length > 0) parts.push(`-c shared_preload_libraries=${libs.join(",")}`)
   if (keyspace) {
     parts.push(

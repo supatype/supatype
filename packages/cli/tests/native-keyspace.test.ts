@@ -67,13 +67,22 @@ describe("the options pg_ctl hands the server", () => {
     ...extra,
   })
 
+  // Local test N3: native Postgres ran wal_level=replica, so realtime could not create its slot
+  // and never ran, on any archive. A command-line setting beats postgresql.conf, so a cluster made
+  // before this takes it at its next start, which every `supatype dev` is.
+  it("runs with logical decoding, which realtime needs, whatever the archive carries", () => {
+    for (const libs of [[], ["supatype_mask.so"], ["pg_keyspace.so", "supatype_mask.so"]]) {
+      expect(pgServerOptions(opts(install(libs), { keyspacePort: 6379 }))).toContain("-c wal_level=logical")
+    }
+  })
+
   it("preloads nothing an archive does not carry", () => {
-    expect(pgServerOptions(opts(install([]), { keyspacePort: 6379 }))).toBe("-p 55432")
+    expect(pgServerOptions(opts(install([]), { keyspacePort: 6379 }))).toBe("-p 55432 -c wal_level=logical")
   })
 
   it("preloads the mask alone, as it did before the keyspace existed", () => {
     const o = pgServerOptions(opts(install(["supatype_mask.so"]), { keyspacePort: 6379 }))
-    expect(o).toBe("-p 55432 -c shared_preload_libraries=supatype_mask")
+    expect(o).toBe("-p 55432 -c wal_level=logical -c shared_preload_libraries=supatype_mask")
   })
 
   // pg_keyspace refuses to serve when the mask loads before it, because RESP
@@ -100,7 +109,7 @@ describe("the options pg_ctl hands the server", () => {
   // library is not a reason to serve on a port nobody chose.
   it("serves no keyspace without a port, even with the library present", () => {
     const o = pgServerOptions(opts(install(["pg_keyspace.so", "supatype_mask.so"])))
-    expect(o).toBe("-p 55432 -c shared_preload_libraries=supatype_mask")
+    expect(o).toBe("-p 55432 -c wal_level=logical -c shared_preload_libraries=supatype_mask")
   })
 })
 
