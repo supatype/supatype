@@ -16,7 +16,8 @@ export type { ExtractedStorageBucketAst as SchemaStorageBucketAst } from "./sche
  */
 export interface ParsedStorageBucket {
   id: string
-  public: boolean
+  /** Absent, with `accessMode`, when the schema names no visibility. */
+  public?: boolean
   accessMode?: "public" | "private" | "custom" | null
   allowedMimeTypes?: string[] | null
   fileSizeLimit?: number | null
@@ -25,7 +26,7 @@ export interface ParsedStorageBucket {
 
 const isParsedStorageBucket: Guard<ParsedStorageBucket> = isShape({
   id: isString,
-  public: isBoolean,
+  public: optional(isBoolean),
   accessMode: optional(nullable(isOneOf(["public", "private", "custom"] as const))),
   allowedMimeTypes: optional(nullable(isArrayOf(isString))),
   fileSizeLimit: optional(nullable(isNumber)),
@@ -43,7 +44,8 @@ export const isParsedBuckets: Guard<ParsedBuckets> = isShape({
 
 export interface BucketSpec {
   id: string
-  public: boolean
+  /** Absent when the schema names no visibility: the storage service's own default applies. */
+  public?: boolean
   allowed_mime_types?: string[] | null
   file_size_limit?: number | null
   access_mode?: "public" | "private" | "custom" | null
@@ -53,7 +55,7 @@ export interface BucketSpec {
 export function bucketSpecsFromAst(ast: ParsedBuckets): BucketSpec[] {
   return (ast.storageBuckets ?? []).map((b) => ({
     id: b.id,
-    public: b.public,
+    ...(b.public !== undefined && { public: b.public }),
     ...(b.accessMode !== undefined && { access_mode: b.accessMode }),
     ...(b.allowedMimeTypes != null && { allowed_mime_types: b.allowedMimeTypes }),
     ...(b.fileSizeLimit != null && { file_size_limit: b.fileSizeLimit }),
@@ -95,7 +97,7 @@ export async function provisionBuckets(
     const body = JSON.stringify({
       id: bucket.id,
       name: bucket.id,
-      public: bucket.public,
+      ...(bucket.public !== undefined && { public: bucket.public }),
       ...(bucket.allowed_mime_types != null && { allowed_mime_types: bucket.allowed_mime_types }),
       ...(bucket.file_size_limit != null && { file_size_limit: bucket.file_size_limit }),
       ...(bucket.access_mode != null && { access_mode: bucket.access_mode }),
