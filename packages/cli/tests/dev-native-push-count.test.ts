@@ -40,7 +40,7 @@ async function pushOnce(): Promise<string[]> {
   vi.resetModules()
   const { runSchemaPush } = await import("../src/commands/dev.js")
   const missingEngine = join(cwd, "no-engine")
-  await runSchemaPush(cwd, missingEngine, "schema/index.ts", "postgres://x@127.0.0.1:1/x", join(cwd, "manifest.json"))
+  await runSchemaPush(cwd, missingEngine, "schema/index.ts", "postgres://x@127.0.0.1:1/x")
   return vi.mocked(console.log).mock.calls.map((call) => String(call[0]))
 }
 

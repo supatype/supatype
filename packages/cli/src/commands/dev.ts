@@ -443,7 +443,7 @@ export function registerDev(program: Command): void {
       // Native Postgres builds don't include PostGIS, skip geo fields rather than failing.
       const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
-      await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
+      await runSchemaPush(cwd, engineBin, schemaPath, dbURL, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
         reportDevPushFailure,
       )
 
@@ -727,7 +727,7 @@ export function registerDev(program: Command): void {
             JSON.stringify((await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast) !== _lastReadAst,
           push: (why) => {
             console.log(`\n[supatype] ${why}, checking schema...`)
-            runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
+            runSchemaPush(cwd, engineBin, schemaPath, dbURL, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
               reportDevPushFailure,
             )
           },
@@ -873,7 +873,6 @@ export async function runSchemaPush(
   engineBin: string,
   schemaPath: string,
   dbURL: string,
-  manifestPath: string,
   adminConfigPath?: string,
   storagePath?: string,
   skipFieldKinds?: ReadonlySet<string>,
@@ -899,7 +898,7 @@ export async function runSchemaPush(
   const pgSchemaName = config ? pgSchema(config) : "public"
   const ast = await applyNativeSchema(cwd, { ast: read, rebuild }, { dbURL, pgSchema: pgSchemaName, overwriteDrift })
   writeFileSync(astPath, JSON.stringify(ast))
-  await writeNativeSchemaArtifacts({ cwd, engineBin, astPath, manifestPath, adminConfigPath, storagePath }, ast, config)
+  await writeNativeSchemaArtifacts({ cwd, engineBin, astPath, adminConfigPath, storagePath }, ast, config)
 }
 
 /** The schema on disk as native dev pushes it, saying which fields were stood in for by JSONB. */
@@ -945,12 +944,15 @@ interface NativeArtifactPaths {
   cwd: string
   engineBin: string
   astPath: string
-  manifestPath: string
   adminConfigPath?: string | undefined
   storagePath?: string | undefined
 }
 
-/** The buckets, the server's manifest, Studio's admin config and the types, from the AST applied. */
+/**
+ * The buckets, Studio's admin config and the types, from the AST applied. The server's route
+ * manifest is not among them: it names where each service is, nothing from the schema, and native
+ * dev writes it as it starts them (native-realtime.ts, recordNativeFunctions).
+ */
 async function writeNativeSchemaArtifacts(
   paths: NativeArtifactPaths,
   ast: ExtractedSchemaAstV2,
@@ -958,14 +960,6 @@ async function writeNativeSchemaArtifacts(
 ): Promise<void> {
   const { cwd, engineBin, astPath } = paths
   if (paths.storagePath) provisionDeclaredBuckets(engineBin, cwd, astPath, paths.storagePath)
-  const genResult = spawnSync(engineBin, ["generate", "-i", astPath, "-o", paths.manifestPath], {
-    cwd,
-    stdio: "pipe",
-    encoding: "utf8",
-  })
-  if (genResult.status !== 0) {
-    console.warn("[supatype] Manifest generation failed, server routing may be stale.")
-  }
   if (paths.adminConfigPath) await writeNativeAdminConfig(paths, paths.adminConfigPath, ast, config)
   await writeNativeTypes(cwd, ast, config)
 }
