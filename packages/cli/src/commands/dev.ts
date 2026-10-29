@@ -350,6 +350,7 @@ export function registerDev(program: Command): void {
           dataDir,
           port: pgPort,
           logPath: join(logsDir, "postgres.log"),
+          database: projectName,
           ...(keyspacePort !== null
             ? { keyspacePort, keyspaceDatabase: projectName }
             : {}),

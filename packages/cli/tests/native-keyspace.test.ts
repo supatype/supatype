@@ -77,12 +77,16 @@ describe("the options pg_ctl hands the server", () => {
   })
 
   it("preloads nothing an archive does not carry", () => {
-    expect(pgServerOptions(opts(install([]), { keyspacePort: 6379 }))).toBe("-p 55432 -c wal_level=logical")
+    expect(pgServerOptions(opts(install([]), { keyspacePort: 6379 }))).toBe(
+      "-p 55432 -c wal_level=logical -c max_worker_processes=16",
+    )
   })
 
   it("preloads the mask alone, as it did before the keyspace existed", () => {
     const o = pgServerOptions(opts(install(["supatype_mask.so"]), { keyspacePort: 6379 }))
-    expect(o).toBe("-p 55432 -c wal_level=logical -c shared_preload_libraries=supatype_mask")
+    expect(o).toBe(
+      "-p 55432 -c wal_level=logical -c max_worker_processes=16 -c shared_preload_libraries=supatype_mask",
+    )
   })
 
   // pg_keyspace refuses to serve when the mask loads before it, because RESP
@@ -109,7 +113,39 @@ describe("the options pg_ctl hands the server", () => {
   // library is not a reason to serve on a port nobody chose.
   it("serves no keyspace without a port, even with the library present", () => {
     const o = pgServerOptions(opts(install(["pg_keyspace.so", "supatype_mask.so"])))
-    expect(o).toBe("-p 55432 -c wal_level=logical -c shared_preload_libraries=supatype_mask")
+    expect(o).toBe(
+      "-p 55432 -c wal_level=logical -c max_worker_processes=16 -c shared_preload_libraries=supatype_mask",
+    )
+  })
+
+  // The native archives now carry pg_cron, pg_net, plan_filter and safeupdate as the Docker image
+  // does, and each only works preloaded. Preloading one an archive lacks stops Postgres, so an older
+  // archive has to start exactly as it did.
+  const EVERY_LIBRARY = ["pg_keyspace", "pg_stat_statements", "pg_cron", "pg_net", "plan_filter", "safeupdate", "supatype_mask"]
+
+  it("preloads every library the archive carries, in the image's order", () => {
+    const o = pgServerOptions(
+      opts(install(EVERY_LIBRARY.map((lib) => `${lib}.so`)), { keyspacePort: 6379, database: "acme" }),
+    )
+    expect(o).toContain(`-c shared_preload_libraries=${EVERY_LIBRARY.join(",")}`)
+  })
+
+  it("preloads only what an older archive carries", () => {
+    const o = pgServerOptions(opts(install(["pg_stat_statements.so", "supatype_mask.so"]), { database: "acme" }))
+    expect(o).toContain("-c shared_preload_libraries=pg_stat_statements,supatype_mask")
+    expect(o).not.toMatch(/cron\.|pg_net\./)
+  })
+
+  it("points pg_cron and pg_net at the project's database", () => {
+    const o = pgServerOptions(opts(install(["pg_cron.dll", "pg_net.dll"], "windows"), { database: "acme" }))
+    expect(o).toContain("-c cron.database_name=acme")
+    expect(o).toContain("-c cron.use_background_workers=on")
+    expect(o).toContain("-c pg_net.database_name=acme")
+    expect(o).toContain("-c pg_net.batch_size=200")
+  })
+
+  it("leaves room for the background workers, as the image does", () => {
+    expect(pgServerOptions(opts(install([])))).toContain("-c max_worker_processes=16")
   })
 })
 

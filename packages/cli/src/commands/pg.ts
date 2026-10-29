@@ -123,5 +123,7 @@ async function pgOpts(config: ReturnType<typeof loadConfig>): Promise<PgOptions>
     dataDir: nativeDataDir(config),
     port: nativeDbPort(config),
     logPath: join(logsDir, "postgres.log"),
+    // Where pg_cron and pg_net run their jobs, as under `supatype dev`.
+    database: config.project.name,
   }
 }
