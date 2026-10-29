@@ -73,6 +73,20 @@ export function initdbArgs(dataDir: string, pwfile: string): string[] {
 }
 
 /**
+ * Prepare native dev's data directory, saying which of the two happens. It printed "Initialising
+ * Postgres data directory..." on every start, which read as the cluster being made again; an
+ * existing one never was ({@link initdb} returns at once when PG_VERSION is there).
+ */
+export function ensureCluster(opts: PgOptions, superuserPassword: string): void {
+  if (existsSync(join(opts.dataDir, "PG_VERSION"))) {
+    console.log(`[supatype] Using the existing Postgres data directory ${opts.dataDir}`)
+    return
+  }
+  console.log(`[supatype] Initialising a new Postgres data directory at ${opts.dataDir}...`)
+  initdb(opts, superuserPassword)
+}
+
+/**
  * Initialise a Postgres data directory, with `superuserPassword` for `postgres`.
  * Does nothing if the data directory already contains a PG_VERSION file.
  */
