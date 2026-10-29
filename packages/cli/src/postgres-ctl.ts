@@ -261,17 +261,25 @@ export function start(opts: PgOptions): void {
 }
 
 /**
- * Stop Postgres using pg_ctl (fast mode).
+ * Stop Postgres using pg_ctl (fast mode), when it is running.
+ *
+ * Ctrl+C in a terminal reaches Postgres as well as `supatype dev`, so by the time dev stops it,
+ * Postgres has usually shut itself down, and pg_ctl printed `PID file ... does not exist` on every
+ * exit. No pid file means no server to stop. A stop that leaves the pid file in place did fail,
+ * and says so, where it used to be ignored along with the harmless case.
  */
 export function stop(opts: PgOptions): void {
-  const bin = pgBin(opts.pgBinDir, "pg_ctl")
-  const result = spawnSync(bin, ["stop", "-D", opts.dataDir, "-m", "fast", "--wait"], {
-    stdio: "inherit",
+  const pidFile = join(opts.dataDir, "postmaster.pid")
+  if (!existsSync(pidFile)) return
+  const result = spawnSync(pgBin(opts.pgBinDir, "pg_ctl"), ["stop", "-D", opts.dataDir, "-m", "fast", "--wait"], {
+    stdio: "pipe",
     encoding: "utf8",
     env: pgSpawnEnv(opts.pgBinDir),
   })
-  // Ignore exit code: Postgres may already be stopped.
-  void result
+  // Gone meanwhile: it finished shutting down on its own while pg_ctl looked.
+  if (result.status === 0 || !existsSync(pidFile)) return
+  const said = (result.stderr ?? "").trim() || (result.error !== undefined ? result.error.message : `exit ${result.status}`)
+  console.warn(`[supatype] Could not stop Postgres (data directory ${opts.dataDir}): ${said}`)
 }
 
 /** Ask the running server to re-read its configuration, pg_hba.conf included. */
