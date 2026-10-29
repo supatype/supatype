@@ -99,10 +99,32 @@ interface UpdateFailure {
   reason: string
 }
 
-/** What one component needs: a newer pinned version, a failure to report, or neither. */
-interface ComponentPlan {
-  update?: ComponentUpdate
-  failure?: UpdateFailure
+/** One version of one component to download. */
+interface DownloadTarget {
+  component: Component
+  version: string
+}
+
+/** What one component needs: a newer pinned version, its unpinned version fetched, a failure to report, or nothing. */
+type ComponentPlan =
+  | { kind: "update"; update: ComponentUpdate }
+  | { kind: "fetch"; target: DownloadTarget }
+  | { kind: "failure"; failure: UpdateFailure }
+  | null
+
+/** Every component's plan, sorted by what it needs. */
+interface NativePlans {
+  updates: ComponentUpdate[]
+  fetches: DownloadTarget[]
+  failures: UpdateFailure[]
+}
+
+/** How {@link planComponent} plans one component. */
+interface PlanOptions {
+  /** The CDN's latest version of the component, when it names one. */
+  latest: string | undefined
+  /** `--check`: say what would be fetched instead of fetching it. */
+  check: boolean
 }
 
 /**
@@ -114,71 +136,61 @@ interface ComponentPlan {
  * config whether or not its binary had arrived.
  */
 async function updateNativeComponents(cwd: string, config: SupatypeProjectConfig, check: boolean): Promise<void> {
+  exitOnFailures(await applyNativeUpdates(cwd, config, check))
+}
+
+/** Everything `update` does for a native project but exit: the components that could not be fetched. */
+async function applyNativeUpdates(cwd: string, config: SupatypeProjectConfig, check: boolean): Promise<UpdateFailure[]> {
   const platform = currentPlatform()
-  const { updates, failures } = await planNativeUpdates(config, check, platform)
-  if (updates.length === 0) {
-    exitOnFailures(failures)
-    info(check ? "All pinned components match CDN latest." : "All components are up to date.")
-    return
+  const plans = await planNativeUpdates(config, check)
+  const failures = inComponentOrder([...plans.failures, ...(await downloadAll(plans.fetches, platform))])
+  if (plans.updates.length === 0) {
+    if (failures.length === 0) info(check ? "All pinned components match CDN latest." : "All components are up to date.")
+    return failures
   }
 
   plain("Available updates:")
-  for (const { component, from, to } of updates) {
+  for (const { component, from, to } of plans.updates) {
     plain(`  ${component}  ${from} → ${to}`)
   }
-  if (check) {
-    exitOnFailures(failures)
-    return
-  }
+  if (check) return failures
 
-  const { downloaded, failed } = await downloadUpdates(updates, platform)
+  const failed = await downloadAll(plans.updates.map(({ component, to }) => ({ component, version: to })), platform)
+  const downloaded = plans.updates.filter(({ component }) => !failed.some((failure) => failure.component === component))
   if (downloaded.length > 0) {
     patchConfigVersions(cwd, downloaded)
     pushReminder()
   }
-  exitOnFailures([...failures, ...failed])
+  return [...failures, ...failed]
 }
 
-/** Every component's plan, downloading the unpinned ones on the way unless this is `--check`. */
-async function planNativeUpdates(
-  config: SupatypeProjectConfig,
-  check: boolean,
-  platform: PlatformId,
-): Promise<{ updates: ComponentUpdate[]; failures: UpdateFailure[] }> {
+/** Every component's plan. Nothing is downloaded here: the unpinned ones come back as fetches. */
+async function planNativeUpdates(config: SupatypeProjectConfig, check: boolean): Promise<NativePlans> {
   info("Fetching latest component versions from CDN...")
   const latestVersions = await fetchAllLatestVersions()
-  const updates: ComponentUpdate[] = []
-  const failures: UpdateFailure[] = []
+  const plans: NativePlans = { updates: [], fetches: [], failures: [] }
   for (const component of NATIVE_COMPONENTS) {
-    const plan = await planComponent(component, latestVersions[component], config, check, platform)
-    if (plan.update !== undefined) updates.push(plan.update)
-    if (plan.failure !== undefined) failures.push(plan.failure)
+    const plan = planComponent(component, config, { latest: latestVersions[component], check })
+    if (plan?.kind === "update") plans.updates.push(plan.update)
+    else if (plan?.kind === "fetch") plans.fetches.push(plan.target)
+    else if (plan?.kind === "failure") plans.failures.push(plan.failure)
   }
-  return { updates, failures }
+  return plans
 }
 
-async function planComponent(
-  component: Component,
-  latest: string | undefined,
-  config: SupatypeProjectConfig,
-  check: boolean,
-  platform: PlatformId,
-): Promise<ComponentPlan> {
+function planComponent(component: Component, config: SupatypeProjectConfig, { latest, check }: PlanOptions): ComponentPlan {
   const current = pinnedVersion(component, config)
   // Unpinned runs what this CLI release was tested with, so that is what to fetch, whatever
   // the CDN says; its latest is fetched only for a component this CLI does not pin.
   const target = current ? undefined : (defaultComponentVersion(component) ?? latest)
   if (target) {
-    if (check) {
-      plain(`  ${component}  (unpinned) → ${target}, ${latest ?? "nothing"} is the latest on the CDN`)
-      return {}
-    }
-    const failure = await downloadComponent(component, target, platform)
-    return failure === null ? {} : { failure }
+    if (!check) return { kind: "fetch", target: { component, version: target } }
+    plain(`  ${component}  (unpinned) → ${target}, ${latest ?? "nothing"} is the latest on the CDN`)
+    return null
   }
   if (!latest) return missingLatest(component)
-  if (!current || current === "local" || current === latest) return {}
-  return { update: { component, from: current, to: latest } }
+  if (!current || current === "local" || current === latest) return null
+  return { kind: "update", update: { component, from: current, to: latest } }
 }
 
 /** A pinned component the CDN names no latest version for: skipped for realtime, a failure otherwise. */
@@ -187,39 +199,46 @@ function missingLatest(component: Component): ComponentPlan {
     // Realtime binaries publish with every stable supatype v* release, but releases from
     // before that have none, and a prerelease never moves realtime/latest.json.
     info(`Skipping ${component}: no realtime/latest.json on the CDN (realtime binaries ship with each stable supatype v* release)`)
-    return {}
+    return null
   }
   error(`No latest version for ${component} on CDN`)
-  return { failure: { component, reason: "the CDN names no latest version" } }
+  return { kind: "failure", failure: { component, reason: "the CDN names no latest version" } }
 }
 
-/** Download one version, saying so. The failure, or null when it arrived. */
-async function downloadComponent(component: Component, version: string, platform: PlatformId): Promise<UpdateFailure | null> {
-  info(`Downloading ${component} v${version}...`)
+/**
+ * Download every target at once, then say how each went in the order given, so the output reads
+ * the same however the downloads finish. The failures, in that order.
+ */
+async function downloadAll(targets: readonly DownloadTarget[], platform: PlatformId): Promise<UpdateFailure[]> {
+  const attempts = targets.map((target) => {
+    info(`Downloading ${target.component} v${target.version}...`)
+    return { target, done: download(target.component, target.version, platform) }
+  })
+  await Promise.allSettled(attempts.map(({ done }) => done))
+  const failures: UpdateFailure[] = []
+  for (const { target, done } of attempts) {
+    const failure = await reportDownload(target, done)
+    if (failure !== null) failures.push(failure)
+  }
+  return failures
+}
+
+/** Say how one settled download went. The failure, or null when it arrived. */
+async function reportDownload({ component, version }: DownloadTarget, done: Promise<unknown>): Promise<UpdateFailure | null> {
   try {
-    await download(component, version, platform)
+    await done
   } catch (err) {
     const reason = errorMessage(err)
-    error(`Failed: ${reason}`)
+    error(`Failed: ${component} v${version}: ${reason}`)
     return { component, reason }
   }
   info(`${component} v${version} downloaded.`)
   return null
 }
 
-/** The pinned updates, split by whether their binary arrived. */
-async function downloadUpdates(
-  updates: readonly ComponentUpdate[],
-  platform: PlatformId,
-): Promise<{ downloaded: ComponentUpdate[]; failed: UpdateFailure[] }> {
-  const downloaded: ComponentUpdate[] = []
-  const failed: UpdateFailure[] = []
-  for (const update of updates) {
-    const failure = await downloadComponent(update.component, update.to, platform)
-    if (failure === null) downloaded.push(update)
-    else failed.push(failure)
-  }
-  return { downloaded, failed }
+/** `failures` in the order `update` fetches components, whichever step found each. */
+function inComponentOrder(failures: readonly UpdateFailure[]): UpdateFailure[] {
+  return [...failures].sort((a, b) => NATIVE_COMPONENTS.indexOf(a.component) - NATIVE_COMPONENTS.indexOf(b.component))
 }
 
 /** Exit 1 naming each component that could not be fetched; nothing when there are none. */
