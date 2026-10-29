@@ -58,17 +58,6 @@ export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
   "SUPATYPE_POSTGRES_IMAGE",
 ] as const
 
-/** Compose image env vars that may be overridden manually in `.env`. */
-export const COMPOSE_IMAGE_ENV_KEYS = [
-  ...COMPOSE_PINNED_IMAGE_ENV_KEYS,
-  "SUPATYPE_CONTROL_PLANE_IMAGE",
-  "SUPATYPE_AUTH_IMAGE",
-  "SUPATYPE_STUDIO_IMAGE",
-  "SUPATYPE_STORAGE_IMAGE",
-  "SUPATYPE_FUNCTIONS_WORKER_IMAGE",
-  "SUPATYPE_SEAWEEDFS_IMAGE",
-] as const
-
 /** Pinned by digest, because the registry this replaced proved a tag can be taken away. */
 const SEAWEEDFS_IMAGE =
   "chrislusf/seaweedfs:4.46@sha256:08d516132314207d10c8e37cbffc1f32b147d870169688734cc61c6231625b62"
@@ -132,7 +121,10 @@ export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<str
   return env
 }
 
-/** True when a Docker image tag is a semver/latest ref we expect `docker pull` to resolve. */
+/**
+ * True when a Docker image tag is a semver/latest ref we expect `docker pull` to resolve. Any other
+ * tag may name an image built on this machine, which `update` keeps when no registry has it.
+ */
 export function isRegistryPullableImageRef(ref: string): boolean {
   const trimmed = ref.trim()
   if (!trimmed) return true
@@ -141,34 +133,6 @@ export function isRegistryPullableImageRef(ref: string): boolean {
   if (/^v?\d+\.\d+/.test(tag)) return true
   if (/^\d+-latest$/.test(tag)) return true
   return false
-}
-
-export function hasLocalVersionPins(config: SupatypeProjectConfig): boolean {
-  const versions = config.versions
-  if (!versions) return false
-  return (
-    versions.engine === VERSION_PIN_LOCAL ||
-    versions.server === VERSION_PIN_LOCAL ||
-    versions.postgres === VERSION_PIN_LOCAL ||
-    versions.deno === VERSION_PIN_LOCAL
-  )
-}
-
-function readComposeImageEnvValues(cwd: string): string[] {
-  const env = readEnvFile(cwd)
-  return COMPOSE_IMAGE_ENV_KEYS.flatMap((key) => (env[key] ? [env[key]] : []))
-}
-
-/**
- * Use `docker compose pull --ignore-pull-failures` only when the project may
- * reference local-only images (config `versions: local` or custom `.env` tags).
- */
-export function composePullNeedsIgnoreFailures(
-  config: SupatypeProjectConfig,
-  cwd: string = process.cwd(),
-): boolean {
-  if (hasLocalVersionPins(config)) return true
-  return readComposeImageEnvValues(cwd).some((ref) => !isRegistryPullableImageRef(ref))
 }
 
 /**

@@ -12,12 +12,17 @@ import type { SupatypeProjectConfig } from "../src/project-config.js"
  */
 
 const messages = vi.hoisted(() => ({ info: [] as string[], error: [] as string[] }))
-const project = vi.hoisted(() => ({ versions: undefined as Record<string, string> | undefined, latest: {} }))
+const project = vi.hoisted(() => ({
+  versions: undefined as Record<string, string> | undefined,
+  latest: {},
+  cached: new Set<string>(),
+}))
 
 vi.mock("../src/binary-cache.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/binary-cache.js")>()),
   currentPlatform: () => ({ os: "linux", arch: "amd64" }),
   fetchAllLatestVersions: vi.fn(async () => project.latest),
+  isCachedBinaryReady: (component: string) => project.cached.has(component),
   download: vi.fn(async () => {
     throw new Error("CDN answered 404")
   }),
@@ -66,6 +71,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   project.versions = undefined
   project.latest = {}
+  project.cached.clear()
 })
 
 describe("supatype update when downloads fail", () => {
@@ -154,5 +160,71 @@ describe("supatype update downloads", () => {
     expect(ended).not.toEqual(started)
     const reported = messages.error.flatMap((message) => /^Failed: (\w+) /.exec(message)?.slice(1) ?? [])
     expect(reported).toEqual(started)
+  })
+
+  // Local test: "postgres v17.2.10 already cached." was followed by "postgres v17.2.10 downloaded."
+  it("does not call a component it already had downloaded", async () => {
+    project.cached.add("postgres")
+    vi.mocked(download).mockImplementation(async () => "/cache/binary")
+    try {
+      // Components this CLI does not pin and the CDN names nothing for still fail; not the point here.
+      await runUpdate().catch(() => undefined)
+    } finally {
+      vi.mocked(download).mockImplementation(async () => {
+        throw new Error("CDN answered 404")
+      })
+    }
+    const said = messages.info.filter((message) => message.startsWith("postgres "))
+    expect(said).toEqual([expect.stringMatching(/^postgres v\S+ already cached\.$/)])
+    expect(vi.mocked(download).mock.calls.map(([component]) => component)).not.toContain("postgres")
+  })
+})
+
+/** The advice lines of the failure report: every line after the per-component ones. */
+async function reportedAdvice(): Promise<string> {
+  const failure = await runUpdate().then(
+    () => new Error("update succeeded"),
+    (err: unknown) => (err instanceof Error ? err : new Error(String(err))),
+  )
+  return failure.message
+    .split("\n")
+    .filter((line) => !/^\w+: /.test(line))
+    .join("\n")
+}
+
+describe("the advice for each failure", () => {
+  // Local test: with no release key, update said "Run `supatype update` again once the CDN is
+  // reachable". The CDN was reachable; the key was what was missing.
+  it("names the release key, not the CDN, when the key is missing", async () => {
+    const home = mkdtempSync(join(tmpdir(), "supatype-update-home-"))
+    vi.stubEnv("HOME", home)
+    vi.stubEnv("USERPROFILE", home)
+    vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", "")
+    vi.stubEnv("SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS", "")
+    vi.stubGlobal("fetch", async () => new Response("0000  supatype-realtime-linux-amd64\n"))
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const actual = await vi.importActual<typeof import("../src/binary-cache.js")>("../src/binary-cache.js")
+    vi.mocked(download).mockImplementation(actual.download)
+    try {
+      pinAll({ versions: { realtime: "0.6.0" }, latest: { realtime: "0.7.0" } })
+      const advice = await reportedAdvice()
+      expect(advice).not.toMatch(/CDN is reachable/)
+      expect(advice).toMatch(/SUPATYPE_RELEASE_PUBLIC_KEY/)
+    } finally {
+      vi.mocked(download).mockImplementation(async () => {
+        throw new Error("CDN answered 404")
+      })
+      vi.unstubAllEnvs()
+      vi.unstubAllGlobals()
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 20_000)
+
+  it("does not blame the network for a version the CDN never published", async () => {
+    pinAll({ versions: {}, latest: { server: undefined } })
+    const advice = await reportedAdvice()
+    expect(advice).not.toMatch(/CDN is reachable/)
+    expect(advice).toMatch(/Pin server under versions/)
   })
 })
