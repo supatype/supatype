@@ -3,7 +3,6 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { spawnSync } from "node:child_process"
 import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
 import { fatalError } from "./ui/fatal.js"
-import { readJsonObjectFile } from "./json-file.js"
 import {
   postgrestSchemaEnv,
   externalDatabaseUrl,
@@ -1186,7 +1185,7 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
   // schema, for one), so an existing file keeps every key but the routes below. Malformed, it is
   // left for the server to complain about rather than overwritten here.
   if (existsSync(manifestPath)) {
-    if (readJsonObjectFile(manifestPath) !== undefined) patchRouteManifest(manifestPath, composeServiceRoutes(config))
+    patchRouteManifest(manifestPath, composeServiceRoutes(config), { keepMalformed: true })
     return
   }
 
