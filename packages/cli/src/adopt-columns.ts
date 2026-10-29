@@ -23,6 +23,7 @@ import type { DbColumnState } from "./pull-utils.js"
 import { isJsonObject, keptName, pathInside } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
 import { isDbColumnState } from "./engine-answers.js"
+import { errorMessage } from "./error-message.js"
 import type { ExtractedSchemaAstV2, ModelAstV2 } from "./schema-ast-v2.js"
 
 const TYPES_MODULE = "@supatype/types"
@@ -320,8 +321,8 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
   try {
     ast = extractSchemaAstFromTypes(input.entryPath, input.cwd)
   } catch (err: unknown) {
-    if (input.live === undefined) return manual(`the schema could not be read (${messageOf(err)})`)
-    return withCanonicalLine(manual(`the schema could not be read (${messageOf(err)})`), input.live, input.identityColumns)
+    if (input.live === undefined) return manual(`the schema could not be read (${errorMessage(err)})`)
+    return withCanonicalLine(manual(`the schema could not be read (${errorMessage(err)})`), input.live, input.identityColumns)
   }
   // Declared already (adopting a table hands over its declared columns too): nothing to add.
   const declaring = modelsWithTable(ast, table).filter((m) => declaresColumn(m, column))
@@ -436,7 +437,7 @@ export function applyColumnDeclaration(plan: ColumnDeclarationPlan, entryPath: s
     writeFileSync(plan.file, plan.after, "utf8")
   } catch (err: unknown) {
     // Nothing of ours is known to be in it: a failed write is not undone over whatever is there.
-    return manual(`the file could not be written (${messageOf(err)})`)
+    return manual(`the file could not be written (${errorMessage(err)})`)
   }
   const problem = verify(plan, entryPath, cwd)
   return problem === undefined ? plan : undo(`the edited schema did not read back as planned (${problem})`)
@@ -451,7 +452,7 @@ function verify(plan: ColumnDeclarationPlan, entryPath: string, cwd: string): st
   try {
     ast = extractSchemaAstFromTypes(entryPath, cwd)
   } catch (err: unknown) {
-    return messageOf(err)
+    return errorMessage(err)
   }
   const models = modelsWithTable(ast, plan.table)
   if (models.length !== 1 || models[0]!.name !== plan.model) return `model ${plan.model} is not found`
@@ -512,7 +513,7 @@ function findModelDeclaration(
   try {
     paths = walkSchemaSourceAbsPaths(entryPath)
   } catch (err: unknown) {
-    return { reason: `the schema files could not be read (${messageOf(err)})` }
+    return { reason: `the schema files could not be read (${errorMessage(err)})` }
   }
   const project = new Project({ useInMemoryFileSystem: false, skipAddingFilesFromTsConfig: true })
   const declarations = []
@@ -711,10 +712,6 @@ function relativeName(sourceFile: SourceFile): string {
   return relative(process.cwd(), sourceFile.getFilePath()) || sourceFile.getFilePath()
 }
 
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 // ─── Before adopt ──────────────────────────────────────────────────────────────
 
 /** `column:<table>.<name>`, as `--key` names a column; undefined for any other key. */
@@ -749,7 +746,7 @@ export async function previewKeyedColumns(
   try {
     live = liveColumns(await deps.introspect())
   } catch (err: unknown) {
-    unread = messageOf(err)
+    unread = errorMessage(err)
   }
 
   return columns.map(({ table, column }) => {
@@ -830,7 +827,7 @@ export async function declareAdoptedColumns(
   try {
     live = liveColumns(await deps.introspect())
   } catch (err: unknown) {
-    deps.say.warn(`Could not read the adopted column(s) from the database: ${messageOf(err)}`)
+    deps.say.warn(`Could not read the adopted column(s) from the database: ${errorMessage(err)}`)
   }
 
   const results: ColumnDeclaration[] = []
@@ -867,7 +864,7 @@ export async function declareAdoptedColumns(
     try {
       for (const message of await deps.regenerate()) deps.say.info(message)
     } catch (err: unknown) {
-      deps.say.warn(`Types were not regenerated (${messageOf(err)}); run \`supatype generate\`.`)
+      deps.say.warn(`Types were not regenerated (${errorMessage(err)}); run \`supatype generate\`.`)
     }
     const names = declared.map((d) => `${d.table}.${d.column}`).join(", ")
     deps.say.plain(`The next \`supatype push\` treats ${names} as declared field(s).`)

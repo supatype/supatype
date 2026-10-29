@@ -1,4 +1,5 @@
 import type { DockerBrandOptions } from "../docker-runtime.js"
+import { errorMessage } from "../error-message.js"
 import { isInteractive } from "./interactive.js"
 import { error, plain } from "./messages.js"
 import { printLogo } from "./prompts.js"
@@ -29,8 +30,7 @@ export function fatalError(message: string, hints: string[] = [], opts?: FatalOp
 
 /** Top-level CLI catch: user-facing message without branding. */
 export function reportCliFatal(err: unknown): void {
-  const message = err instanceof Error ? err.message : String(err)
-  error(message)
+  error(errorMessage(err))
   if (process.env["SUPATYPE_DEBUG"] === "1" && err instanceof Error && err.stack) {
     plain()
     plain(err.stack)

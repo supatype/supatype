@@ -71,6 +71,7 @@ import { info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
+import { errorMessage } from "../error-message.js"
 
 export function registerPush(program: Command): void {
   program
@@ -442,7 +443,7 @@ async function deployHooksToTarget(
   } catch (err) {
     // Refused rather than partially uploaded: the schema is already applied, so the honest thing is to
     // say the hooks did not deploy and why, leaving the previous ones in place.
-    fatalError(err instanceof Error ? err.message : String(err))
+    fatalError(errorMessage(err))
     return
   }
   if (upload === null) return

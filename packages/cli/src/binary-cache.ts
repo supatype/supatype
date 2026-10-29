@@ -320,7 +320,7 @@ export async function resolveBinary(
     // Only an unpinned project looks anything up, so this is `latest` being unreachable.
     const cached = newestCachedVersion(component, platform)
     if (cached !== undefined) return cachedBinaryPath(component, cached, platform)
-    const reason = err instanceof Error ? err.message : String(err)
+    const reason = errorMessage(err)
     const key = component === "postgres" ? "postgres_dir" : component
     throw new Error(
       `Could not look up the latest ${component} release (${reason}), and no ${component} binary is cached. ` +
