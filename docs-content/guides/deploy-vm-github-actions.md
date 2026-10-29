@@ -73,7 +73,7 @@ A one-time setup on Ubuntu 22.04 or similar, with SSH access.
 
 ### 4. Install the tools and clone
 
-``` title="vm"
+```sh title="vm"
 # Docker: https://docs.docker.com/engine/install/ubuntu/
 # Node.js 22 or later (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
 $ sudo apt update && sudo apt install -y git
@@ -89,7 +89,7 @@ $ git clone git@github.com:YOUR_USER/my-blog.git .
 
 Create `/opt/my-blog/.env` on the server and never commit it. Generate each `CHANGE_ME` with `openssl rand -base64 48 | tr -d '/+='`, use a different value for each, and set your public URL. Compose refuses to start while any of the passwords or secrets is missing.
 
-``` title="/opt/my-blog/.env"
+```ini title="/opt/my-blog/.env"
 DATABASE_URL=postgresql://supatype_admin:CHANGE_ME@localhost:5432/my-blog
 POSTGRES_USER=supatype_admin
 POSTGRES_PASSWORD=CHANGE_ME     # the same value as in DATABASE_URL
@@ -108,7 +108,7 @@ Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SER
 
 ### 6. First boot
 
-``` title="vm"
+```sh title="vm"
 $ cd /opt/my-blog
 $ npm install
 $ supatype self-host compose render

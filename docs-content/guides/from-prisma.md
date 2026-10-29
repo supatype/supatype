@@ -40,7 +40,7 @@ The full list is in [Field types](/docs/schema.html#fields) and [Relations](/doc
 
 ### Prisma
 
-``` title="prisma/schema.prisma"
+```prisma title="prisma/schema.prisma"
 enum Status {
   draft
   published
@@ -62,7 +62,7 @@ model Post {
 }
 ```
 
-``` title="before: Prisma Client"
+```ts title="before: Prisma Client"
 const posts = await prisma.post.findMany({
   where: { status: "published" },
   select: { id: true, title: true, author: { select: { name: true } } },
@@ -101,7 +101,7 @@ export type Post = Model<{
 }>
 ```
 
-``` title="after: @supatype/client"
+```ts title="after: @supatype/client"
 const { data: posts, error } = await supatype
   .from("post")
   .select("id, title, author(name)")

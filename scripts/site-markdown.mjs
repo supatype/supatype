@@ -25,6 +25,17 @@ function docsLink(href) {
   return movedGuides.includes(path) ? `/docs/guides${path}${hash}` : href
 }
 
+// A code block's bar holds a file name, "terminal", "vm" (a terminal on a server), a language
+// name, or a label such as "before: supabase-js" on a TypeScript snippet. Names that are only a
+// language or a terminal need no title of their own.
+const languageLabels = ["terminal", "typescript", "tsx"]
+function languageOf(name) {
+  if (name === "terminal" || name === "vm") return "sh"
+  if (name === "typescript") return "ts"
+  if (name.endsWith(".env")) return "ini"
+  return name.match(/\.(ts|tsx|js|mjs|json|ya?ml|sql|toml|vue|svelte|prisma)$/)?.[1] ?? (name === "tsx" ? "tsx" : "ts")
+}
+
 // What differs between the two outputs. llms-full.txt nests each page under its "## Title", so
 // headings go one level down; Starlight keeps the page's own levels and ids, and has asides and
 // titled code blocks.
@@ -40,7 +51,7 @@ const styles = {
     link: docsLink,
     // An HTML heading keeps the live page's id, so links to /docs/#local-dev still land.
     heading: (level, id, text, html) => (id ? `<h${level} id="${id}">${html.trim()}</h${level}>` : `${"#".repeat(level)} ${text}`),
-    code: (name, lang, body) => `\`\`\`${name === "terminal" ? "sh" : `${lang} title="${name}"`}\n${body}\n\`\`\``,
+    code: (name, lang, body) => `\`\`\`${lang}${languageLabels.includes(name) ? "" : ` title="${name}"`}\n${body}\n\`\`\``,
     callout: (label, text) => `:::${label === "WARNING" ? "caution" : "note"}${["NOTE", "WARNING"].includes(label) ? "" : `[${sentence(label)}]`}\n${text}\n:::`,
     step: (title) => `### ${title}`,
   },
@@ -58,7 +69,7 @@ function inline(html, url, style) {
 // The code block's bar names a file or says "terminal".
 function codeBlock(name, code, style) {
   const body = decode(stripTags(code)).replace(/\n+$/, "")
-  const lang = name === "terminal" ? "sh" : (name.match(/\.(ts|tsx|js|json|ya?ml|sql|toml)$/)?.[1] ?? "")
+  const lang = languageOf(name)
   return style.code(name, lang, body)
 }
 

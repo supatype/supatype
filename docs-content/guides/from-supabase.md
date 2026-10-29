@@ -87,7 +87,7 @@ The table is named `post`, from the type name. Set `tableName: "posts"` in the s
 
 ### The query
 
-``` title="before: supabase-js"
+```ts title="before: supabase-js"
 import { createClient } from "@supabase/supabase-js"
 import type { Database } from "./database.types"
 
@@ -95,7 +95,7 @@ const supabase = createClient<Database>(url, key)
 const { data, error } = await supabase.from("posts").select("id, title").eq("status", "published")
 ```
 
-``` title="after: @supatype/client"
+```ts title="after: @supatype/client"
 import { createClient } from "../supatype/generated/client"
 
 const supatype = createClient({ url, anonKey })

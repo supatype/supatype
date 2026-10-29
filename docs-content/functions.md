@@ -150,7 +150,7 @@ if (!apiKey) return Response.json({ message: "RESEND_API_KEY is not set" }, { st
 
 From your app, use `functions.invoke` on the client. It posts JSON to `/functions/v1/<name>` with the user's token and returns `{ data, error }`. A non-2xx response becomes `error`, using the `message` field from the body when there is one.
 
-``` title="typescript"
+```ts
 const { data, error } = await supatype.functions.invoke("greet", { body: { name: "Alex" } })
 ```
 

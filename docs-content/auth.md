@@ -46,7 +46,7 @@ An anonymous sign-in creates a real user with a user id and a session. Turn it o
 
 Each provider is switched on with environment variables named after it. For GitHub:
 
-``` title=".env"
+```ini title=".env"
 # Replace http://localhost:54321 with your API URL (API_EXTERNAL_URL)
 SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
 SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
@@ -60,7 +60,7 @@ Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, 
 
 ### The sign-in round trip
 
-``` title="typescript"
+```ts
 const { data, error } = await supatype.auth.signInWithOAuth({
   provider: "github",
   options: { redirectTo: "http://localhost:5173/auth/callback" },

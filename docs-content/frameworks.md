@@ -142,7 +142,7 @@ import App from "./App.vue"
 createApp(App).use(supatypePlugin, supatype).mount("#app")
 ```
 
-``` title="src/Posts.vue"
+```vue title="src/Posts.vue"
 <script setup lang="ts">
 import { useQuery, useMutation } from "@supatype/vue"
 
@@ -171,7 +171,7 @@ Results are refs. The query runs when the component mounts. `enabled` may be a r
 
 Set the client once in a parent component. The `create*` functions read it from context, so call them during component setup, then read the stores with `$`.
 
-``` title="src/App.svelte"
+```svelte title="src/App.svelte"
 <script lang="ts">
   import { setSupatypeClient } from "@supatype/svelte"
   import { supatype } from "./supatype"
@@ -183,7 +183,7 @@ Set the client once in a parent component. The `create*` functions read it from 
 <Posts />
 ```
 
-``` title="src/Posts.svelte"
+```svelte title="src/Posts.svelte"
 <script lang="ts">
   import { createQuery } from "@supatype/svelte"
 

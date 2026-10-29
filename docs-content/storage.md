@@ -41,7 +41,7 @@ export type Attachments = Bucket<"attachments", {
 
 `ImageAsset<Bucket>` and `FileAsset<Bucket>` are fields that point at a file in a bucket. The column is JSONB holding the bucket and the path, and the generated type is `StorageReference`:
 
-``` title="supatype/generated"
+```ts title="supatype/generated"
 export type StorageReference = {
   bucket: string
   path: string
@@ -50,7 +50,7 @@ export type StorageReference = {
 
 The field stores a reference, not the file. Upload the file first, then write its path to the row:
 
-``` title="typescript"
+```ts
 const path = `${userId}/${file.name}`
 const { error: uploadError } = await supatype.storage.from("attachments").upload(path, file)
 if (uploadError) throw new Error(uploadError.message)
@@ -88,7 +88,7 @@ A bucket with no `access` of its own takes the access rules of each model that h
 
 The [client page](/docs/client.html#storage) shows the basic calls. `upload` sends the file in one request with the caller's token.
 
-``` title="typescript"
+```ts
 const { data, error } = await supatype.storage.from("attachments").upload(`${userId}/slides.pdf`, file, {
   contentType: "application/pdf",
   upsert: false,
@@ -121,7 +121,7 @@ There are three ways to read a file. All three go through the storage service, w
 
 A signed URL is only issued to a caller the `read` rule allows, and only for a file that exists. The expiry must be between 1 second and 7 days. The token is signed by the storage service and covers one bucket and one path. `createSignedUrls(paths, seconds)` signs several paths and reports an error per path.
 
-``` title="typescript"
+```ts
 const bucket = supatype.storage.from("attachments")
 
 const { data: blob } = await bucket.download(`${userId}/slides.pdf`)
@@ -139,7 +139,7 @@ Public and private buckets differ in CORS too. A public bucket answers any origi
 
 `getPublicUrl` and `download` take a `transform` option. The service resizes and re-encodes the image on each request.
 
-``` title="typescript"
+```ts
 const { data: { publicUrl } } = supatype.storage.from("covers").getPublicUrl(post.cover.path, {
   transform: { width: 800, height: 450, resize: "cover", format: "avif", quality: 70 },
 })

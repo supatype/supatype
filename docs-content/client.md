@@ -38,7 +38,7 @@ Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `cre
 
 <h2 id="read">Read rows</h2>
 
-``` title="typescript"
+```ts
 const { data: posts, error } = await supatype
   .from("post")
   .select("id, title, slug, author(name), comment(body)")
@@ -57,7 +57,7 @@ A to-one embed can be `null`. Write `author!inner(name)` to keep only posts that
 
 `single()` returns one row and errors when there is not exactly one. `maybeSingle()` returns `null` for no row.
 
-``` title="typescript"
+```ts
 const { data: post } = await supatype.from("post").select("*").eq("slug", "hello-world").maybeSingle()
 console.log(post?.title)
 ```
@@ -73,7 +73,7 @@ console.log(post?.title)
 | `is` | `null`, `true` or `false` |
 | `not`, `or`, `match` | negation, either filter, several equalities |
 
-``` title="typescript"
+```ts
 await supatype.from("post").select("id").in("kind", ["news", "guide"]).is("published_at", null)
 await supatype.from("post").select("id").ilike("title", "%hello%").range(0, 19)
 ```
@@ -82,7 +82,7 @@ Reads also take `order`, `limit` and `range`. Filters work on `update` and `dele
 
 <h2 id="write">Insert, update, delete</h2>
 
-``` title="typescript"
+```ts
 const { data: created, error: insertError } = await supatype
   .from("post")
   .insert({ title: "Draft idea", body: "Plain text is fine.", kind: "guide", author_id: userId })
@@ -102,7 +102,7 @@ A `RichText` field takes a plain string on write. Owner columns with an `Owner<>
 
 On a model with `versions: { drafts: true }`, `update` saves a draft. The live row does not change until the record is published.
 
-``` title="typescript"
+```ts
 // Save a draft
 await supatype.from("post").update({ title: "Better title" }).eq("id", postId)
 
@@ -122,7 +122,7 @@ await supatype.rpc("publish", { model_table: "post", record_id: postId }, { sche
 
 <h2 id="auth">Auth</h2>
 
-``` title="typescript"
+```ts
 await supatype.auth.signUp({ email: "alex@example.com", password: "a-long-password" })
 
 const { data, error: signInError } = await supatype.auth.signInWithPassword({
@@ -149,7 +149,7 @@ Once signed in, every request carries the user's token, so access rules see them
 
 <h2 id="storage">Storage</h2>
 
-``` title="typescript"
+```ts
 const bucket = supatype.storage.from("covers")
 
 const { data: upload, error: uploadError } = await bucket.upload(`${userId}/cover.png`, file, {
@@ -169,7 +169,7 @@ The bucket's access rules from the schema decide who may upload, overwrite and d
 
 <h2 id="realtime">Realtime</h2>
 
-``` title="typescript"
+```ts
 const sub = supatype.from("comment").subscribe((change) => {
   console.log(change.eventType, change.new, change.old)
 }, { event: "INSERT" })
@@ -181,7 +181,7 @@ Each change reaches only subscribers allowed to read that row. `event` is `INSER
 
 <h2 id="functions">Functions</h2>
 
-``` title="typescript"
+```ts
 const { data: reply, error: fnError } = await supatype.functions.invoke("hello", { body: { name: "Alex" } })
 if (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)
@@ -191,7 +191,7 @@ The call goes to `/functions/v1/hello` with the user's token. A JSON response is
 
 <h2 id="graphql">GraphQL</h2>
 
-``` title="typescript"
+```ts
 import type { TableRow } from "../supatype/generated/client"
 
 type Post = TableRow<"post">

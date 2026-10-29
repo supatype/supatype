@@ -40,7 +40,7 @@ The row check looks for a column called `id`. On a table without one it uses the
 
 `from(table).subscribe()` is the shortest path, shown on the [client page](/docs/client.html#realtime). The callback's rows are typed from your schema.
 
-``` title="typescript"
+```ts
 const sub = supatype.from("comment").subscribe(
   (change) => {
     if (change.eventType === "INSERT") addComment(change.new)
@@ -76,7 +76,7 @@ A filter is checked on the server, so changes that do not match never reach the 
 
 `supatype.realtime.channel(name)` is the lower-level form, for when you want the channel's status or want to mix changes with [broadcast and presence](#broadcast):
 
-``` title="typescript"
+```ts
 const channel = supatype.realtime
   .channel(`post:${postId}`)
   .on("postgres_changes", { event: "INSERT", table: "comment", filter: `post_id=eq.${postId}` }, (change) => {
@@ -93,7 +93,7 @@ A channel carries one table subscription. If you call `.on("postgres_changes", .
 
 Broadcast sends a message to everyone else on a channel. Presence tells a channel who has joined and left. Neither touches the database.
 
-``` title="typescript"
+```ts
 const room = supatype.realtime
   .channel(`cursor:${docId}`)
   .onBroadcast("move", (payload) => drawCursor(payload))
@@ -119,7 +119,7 @@ Broadcast and presence have no access rules. Anyone with your anon key who knows
 
 `@supatype/react` exports `useSubscription`. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing.
 
-``` title="tsx"
+```tsx
 import { useSubscription } from "@supatype/react"
 
 function Comments({ postId }: { postId: string }) {

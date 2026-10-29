@@ -705,7 +705,7 @@ Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `cre
 
 `typescript`:
 
-```
+```ts
 const { data: posts, error } = await supatype
   .from("post")
   .select("id, title, slug, author(name), comment(body)")
@@ -726,7 +726,7 @@ A to-one embed can be `null`. Write `author!inner(name)` to keep only posts that
 
 `typescript`:
 
-```
+```ts
 const { data: post } = await supatype.from("post").select("*").eq("slug", "hello-world").maybeSingle()
 console.log(post?.title)
 ```
@@ -744,7 +744,7 @@ console.log(post?.title)
 
 `typescript`:
 
-```
+```ts
 await supatype.from("post").select("id").in("kind", ["news", "guide"]).is("published_at", null)
 await supatype.from("post").select("id").ilike("title", "%hello%").range(0, 19)
 ```
@@ -755,7 +755,7 @@ Reads also take `order`, `limit` and `range`. Filters work on `update` and `dele
 
 `typescript`:
 
-```
+```ts
 const { data: created, error: insertError } = await supatype
   .from("post")
   .insert({ title: "Draft idea", body: "Plain text is fine.", kind: "guide", author_id: userId })
@@ -777,7 +777,7 @@ On a model with `versions: { drafts: true }`, `update` saves a draft. The live r
 
 `typescript`:
 
-```
+```ts
 // Save a draft
 await supatype.from("post").update({ title: "Better title" }).eq("id", postId)
 
@@ -799,7 +799,7 @@ await supatype.rpc("publish", { model_table: "post", record_id: postId }, { sche
 
 `typescript`:
 
-```
+```ts
 await supatype.auth.signUp({ email: "alex@example.com", password: "a-long-password" })
 
 const { data, error: signInError } = await supatype.auth.signInWithPassword({
@@ -828,7 +828,7 @@ Once signed in, every request carries the user's token, so access rules see them
 
 `typescript`:
 
-```
+```ts
 const bucket = supatype.storage.from("covers")
 
 const { data: upload, error: uploadError } = await bucket.upload(`${userId}/cover.png`, file, {
@@ -850,7 +850,7 @@ The bucket's access rules from the schema decide who may upload, overwrite and d
 
 `typescript`:
 
-```
+```ts
 const sub = supatype.from("comment").subscribe((change) => {
   console.log(change.eventType, change.new, change.old)
 }, { event: "INSERT" })
@@ -864,7 +864,7 @@ Each change reaches only subscribers allowed to read that row. `event` is `INSER
 
 `typescript`:
 
-```
+```ts
 const { data: reply, error: fnError } = await supatype.functions.invoke("hello", { body: { name: "Alex" } })
 if (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)
@@ -876,7 +876,7 @@ The call goes to `/functions/v1/hello` with the user's token. A JSON response is
 
 `typescript`:
 
-```
+```ts
 import type { TableRow } from "../supatype/generated/client"
 
 type Post = TableRow<"post">
@@ -1061,7 +1061,7 @@ createApp(App).use(supatypePlugin, supatype).mount("#app")
 
 `src/Posts.vue`:
 
-```
+```vue
 <script setup lang="ts">
 import { useQuery, useMutation } from "@supatype/vue"
 
@@ -1092,7 +1092,7 @@ Set the client once in a parent component. The `create*` functions read it from 
 
 `src/App.svelte`:
 
-```
+```svelte
 <script lang="ts">
   import { setSupatypeClient } from "@supatype/svelte"
   import { supatype } from "./supatype"
@@ -1106,7 +1106,7 @@ Set the client once in a parent component. The `create*` functions read it from 
 
 `src/Posts.svelte`:
 
-```
+```svelte
 <script lang="ts">
   import { createQuery } from "@supatype/svelte"
 
@@ -1293,7 +1293,7 @@ Each provider is switched on with environment variables named after it. For GitH
 
 `.env`:
 
-```
+```ini
 # Replace http://localhost:54321 with your API URL (API_EXTERNAL_URL)
 SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
 SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
@@ -1309,7 +1309,7 @@ Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, 
 
 `typescript`:
 
-```
+```ts
 const { data, error } = await supatype.auth.signInWithOAuth({
   provider: "github",
   options: { redirectTo: "http://localhost:5173/auth/callback" },
@@ -1544,7 +1544,7 @@ export type Attachments = Bucket<"attachments", {
 
 `supatype/generated`:
 
-```
+```ts
 export type StorageReference = {
   bucket: string
   path: string
@@ -1555,7 +1555,7 @@ The field stores a reference, not the file. Upload the file first, then write it
 
 `typescript`:
 
-```
+```ts
 const path = `${userId}/${file.name}`
 const { error: uploadError } = await supatype.storage.from("attachments").upload(path, file)
 if (uploadError) throw new Error(uploadError.message)
@@ -1593,7 +1593,7 @@ The [client page](https://www.supatype.com/docs/client.html#storage) shows the b
 
 `typescript`:
 
-```
+```ts
 const { data, error } = await supatype.storage.from("attachments").upload(`${userId}/slides.pdf`, file, {
   contentType: "application/pdf",
   upsert: false,
@@ -1628,7 +1628,7 @@ A signed URL is only issued to a caller the `read` rule allows, and only for a f
 
 `typescript`:
 
-```
+```ts
 const bucket = supatype.storage.from("attachments")
 
 const { data: blob } = await bucket.download(`${userId}/slides.pdf`)
@@ -1648,7 +1648,7 @@ Public and private buckets differ in CORS too. A public bucket answers any origi
 
 `typescript`:
 
-```
+```ts
 const { data: { publicUrl } } = supatype.storage.from("covers").getPublicUrl(post.cover.path, {
   transform: { width: 800, height: 450, resize: "cover", format: "avif", quality: 70 },
 })
@@ -1743,7 +1743,7 @@ The row check looks for a column called `id`. On a table without one it uses the
 
 `typescript`:
 
-```
+```ts
 const sub = supatype.from("comment").subscribe(
   (change) => {
     if (change.eventType === "INSERT") addComment(change.new)
@@ -1781,7 +1781,7 @@ A filter is checked on the server, so changes that do not match never reach the 
 
 `typescript`:
 
-```
+```ts
 const channel = supatype.realtime
   .channel(`post:${postId}`)
   .on("postgres_changes", { event: "INSERT", table: "comment", filter: `post_id=eq.${postId}` }, (change) => {
@@ -1800,7 +1800,7 @@ Broadcast sends a message to everyone else on a channel. Presence tells a channe
 
 `typescript`:
 
-```
+```ts
 const room = supatype.realtime
   .channel(`cursor:${docId}`)
   .onBroadcast("move", (payload) => drawCursor(payload))
@@ -1826,7 +1826,7 @@ room.broadcast("move", { x: 120, y: 48 })
 
 `tsx`:
 
-```
+```tsx
 import { useSubscription } from "@supatype/react"
 
 function Comments({ postId }: { postId: string }) {
@@ -2038,7 +2038,7 @@ From your app, use `functions.invoke` on the client. It posts JSON to `/function
 
 `typescript`:
 
-```
+```ts
 const { data, error } = await supatype.functions.invoke("greet", { body: { name: "Alex" } })
 ```
 
@@ -2796,7 +2796,7 @@ A one-time setup on Ubuntu 22.04 or similar, with SSH access.
 
 `vm`:
 
-```
+```sh
 # Docker: https://docs.docker.com/engine/install/ubuntu/
 # Node.js 22 or later (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
 $ sudo apt update && sudo apt install -y git
@@ -2814,7 +2814,7 @@ Create `/opt/my-blog/.env` on the server and never commit it. Generate each `CHA
 
 `/opt/my-blog/.env`:
 
-```
+```ini
 DATABASE_URL=postgresql://supatype_admin:CHANGE_ME@localhost:5432/my-blog
 POSTGRES_USER=supatype_admin
 POSTGRES_PASSWORD=CHANGE_ME     # the same value as in DATABASE_URL
@@ -2835,7 +2835,7 @@ Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SER
 
 `vm`:
 
-```
+```sh
 $ cd /opt/my-blog
 $ npm install
 $ supatype self-host compose render
@@ -3018,7 +3018,7 @@ The table is named `post`, from the type name. Set `tableName: "posts"` in the s
 
 `before: supabase-js`:
 
-```
+```ts
 import { createClient } from "@supabase/supabase-js"
 import type { Database } from "./database.types"
 
@@ -3028,7 +3028,7 @@ const { data, error } = await supabase.from("posts").select("id, title").eq("sta
 
 `after: @supatype/client`:
 
-```
+```ts
 import { createClient } from "../supatype/generated/client"
 
 const supatype = createClient({ url, anonKey })
@@ -3128,7 +3128,7 @@ The full list is in [Field types](https://www.supatype.com/docs/schema.html#fiel
 
 `prisma/schema.prisma`:
 
-```
+```prisma
 enum Status {
   draft
   published
@@ -3152,7 +3152,7 @@ model Post {
 
 `before: Prisma Client`:
 
-```
+```ts
 const posts = await prisma.post.findMany({
   where: { status: "published" },
   select: { id: true, title: true, author: { select: { name: true } } },
@@ -3195,7 +3195,7 @@ export type Post = Model<{
 
 `after: @supatype/client`:
 
-```
+```ts
 const { data: posts, error } = await supatype
   .from("post")
   .select("id, title, author(name)")
