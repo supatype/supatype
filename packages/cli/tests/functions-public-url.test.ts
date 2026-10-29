@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from "vitest"
 import { upsertDevComposeEnv } from "../src/dev-compose.js"
 import { readEnvValue } from "../src/env-file.js"
 import { ensureFunctionsDenoTypes, functionsContextModuleSource } from "../src/functions-deno-types.js"
-import { generateFunctionsRouterSource } from "../src/functions-router-gen.js"
 import { functionTemplateSource } from "../src/functions-template.js"
 import { renderSelfHostCompose } from "../src/self-host-compose.js"
 import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
@@ -113,25 +112,6 @@ describe("the functions worker's public URL in compose", () => {
       expect(serviceEnv(compose, "functions-worker").get("SUPATYPE_URL")).toBe("http://kong:8000")
     })
   }
-})
-
-describe("the generated router", () => {
-  const router = generateFunctionsRouterSource("/project/.supatype/functions-router.ts", [
-    { name: "hello", entrypoint: "/project/functions/hello/index.ts" },
-  ])
-
-  it("hands the handler publicUrl from SUPATYPE_PUBLIC_URL", () => {
-    expect(router).toContain("readonly publicUrl: string")
-    expect(router).toContain('Deno.env.get("SUPATYPE_PUBLIC_URL")')
-    expect(router).toMatch(/context: FunctionContext = \{[^}]*publicUrl,/)
-  })
-
-  it("falls back to url once, at start, with a warning", () => {
-    const resolver = router.slice(router.indexOf("function resolvePublicUrl"))
-    expect(resolver).toContain('emit("warn"')
-    // Resolved once at module level, not per request: one warning, not one per call.
-    expect(router).toMatch(/^const publicUrl = resolvePublicUrl\(\)$/m)
-  })
 })
 
 describe("the context type", () => {

@@ -112,6 +112,18 @@
   only, rather than from the environment it takes the key out of. The file is removed when `dev` or
   `functions serve` stops, Ctrl+C included, and each `functions serve` has a file of its own.
 
+* **dev, functions serve:** native `dev` and `functions serve` run the functions worker the deployed
+  image runs (packages/functions-worker), not a router the CLI generated to copy its rules, so the
+  two can no longer drift: the copy had already differed on which exports it took, who got the
+  service-role key and which env files it read. The CLI carries the worker's source and writes it to
+  `~/.supatype/cache/functions-worker/`. Native `dev` now also serves model hooks from `hooks/`, as
+  the compose stack does, including in a project with hooks and no functions, and picks up a hook
+  added while it runs; `functions serve` picks up a function added while it runs.
+
+* **functions:** `ctx.env` reads `.env.local` and `.env.<function>.local` with the CLI's own dotenv
+  parser, so `KEY="value"` is `value`, an inline ` # comment` is dropped and `export KEY=` is read,
+  as the CLI and compose read a `.env`. The worker kept the quotes and the comment.
+
 * **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
   server and the control plane were all told `/project/functions` whatever the config said, so a
   project keeping its functions elsewhere had every one answer 404; hooks were likewise fixed at

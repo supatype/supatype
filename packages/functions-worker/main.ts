@@ -1,8 +1,10 @@
 /**
  * Standalone edge-functions worker (per-project or per-function).
- * Routing contract matches CLI-generated `.supatype/functions-router.ts`.
+ * The image runs it, and so do native `supatype dev` and `supatype functions serve`, from the copy
+ * the CLI carries (scripts/functions-worker-source.mjs), so a function behaves the same in each.
  */
 
+import { parseEnvText } from "./dotenv.ts"
 import {
   currentHookDepth,
   runInvocation,
@@ -118,10 +120,30 @@ function serviceRoleGranted(route: string): boolean {
  * past every access rule in the schema. Opting in is a line in `supatype.config.ts`, which is
  * reviewable; ambient privilege is not.
  */
-function withholdServiceRoleKey(): string {
+async function withholdServiceRoleKey(): Promise<string> {
   const key = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? ""
   if (key) Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")
-  return key
+  const keyFile = (Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY_FILE") ?? "").trim()
+  return keyFile ? await readServiceRoleKeyFile(keyFile) : key
+}
+
+/**
+ * The service-role key from `path`, or "" (no function is given it) when the file cannot be read.
+ *
+ * For a worker run under `deno run --watch`, as native `supatype dev` and `supatype functions serve`
+ * run it. A reload evaluates this module again in the same process, whose environment the first
+ * evaluation already took the key out of, so a key from the environment is there once only. The
+ * file is still there however the earlier evaluation ended. Its path stays in the environment: a
+ * function able to read the disk can read the file whether or not it is told where it is, and the
+ * key a function is handed is still decided by serviceRoleGranted alone.
+ */
+async function readServiceRoleKeyFile(path: string): Promise<string> {
+  try {
+    return (await Deno.readTextFile(path)).trim()
+  } catch (err) {
+    log("error", `No function is given the service-role key: could not read ${path} (${errorText(err)})`)
+    return ""
+  }
 }
 
 async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
@@ -247,7 +269,7 @@ function jsonError(code: string, message: string, status: number, extra: Record<
 
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
 // Order matters: withhold, then import. See withholdServiceRoleKey.
-const serviceRoleKey = withholdServiceRoleKey()
+const serviceRoleKey = await withholdServiceRoleKey()
 const serviceRoleAllowed = serviceRoleRoutes()
 const root = functionsRoot()
 const routes = root ? await discoverRoutes(root) : []
@@ -294,19 +316,11 @@ const sharedEnvPath =
 
 
 
+/** The variables in the env file at `path`, read as the CLI and compose read one; none if it is absent. */
 async function readEnvFile(path: string): Promise<Record<string, string>> {
   if (!path) return {}
   try {
-    const text = await Deno.readTextFile(path)
-    const out: Record<string, string> = {}
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith("#")) continue
-      const eq = trimmed.indexOf("=")
-      if (eq <= 0) continue
-      out[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
-    }
-    return out
+    return parseEnvText(await Deno.readTextFile(path))
   } catch {
     return {}
   }

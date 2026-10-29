@@ -45,7 +45,7 @@ describe("the local API address of a native project with a Docker run's .env", (
 
   it("is what functions serve hands its handlers as ctx.url and ctx.publicUrl", () => {
     project("native", 18491)
-    const env = denoServeEnv(dir, join(dir, "functions"), projectConfig({ provider: "native", server: { mode: "dev", port: 18491 } }), { port: "18472", host: "127.0.0.1" })
+    const env = denoServeEnv({ cwd: dir, config: projectConfig({ provider: "native", server: { mode: "dev", port: 18491 } }), functionsDir: join(dir, "functions"), keyPath: undefined }, { port: "18472", host: "127.0.0.1" })
     expect(env["SUPATYPE_PUBLIC_URL"]).toBe("http://localhost:18491")
     expect(env["SUPATYPE_URL"]).toBe("http://localhost:18491")
   })

@@ -75,7 +75,7 @@ declare namespace Deno {
 }
 
 /**
- * The slice of Node's async_hooks the functions router uses. Deno provides the module at runtime;
+ * The slice of Node's async_hooks a function may use. Deno provides the module at runtime;
  * a functions tsconfig loads no Node types, so without it the import resolves to nothing.
  */
 declare module "node:async_hooks" {

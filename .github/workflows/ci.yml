@@ -219,6 +219,11 @@ jobs:
         working-directory: packages/functions-worker
         run: deno task test
 
+      # Native dev and functions serve run the copy of the worker the CLI carries; the CLI's build
+      # regenerates it, and this refuses a commit that changed the worker without it.
+      - name: The CLI's copy of the worker is current
+        run: node scripts/functions-worker-source.mjs generate --check
+
   docker:
     runs-on: ubuntu-latest
     steps:

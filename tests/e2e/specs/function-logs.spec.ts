@@ -6,7 +6,7 @@ import { signInToStudio } from "../lib/studio-session.js"
  *
  * This is the one part of the function-log chain nothing else covers. The worker's output, the
  * server's relay and the stream parser each have their own tests, and all of them pass against a
- * tab that renders its chrome over an empty table — which is exactly what shipped before, with
+ * tab that renders its chrome over an empty table. That is exactly what shipped before, with
  * "coming soon" in it.
  *
  * # The two deployment shapes, and why the test knows about both
@@ -89,7 +89,7 @@ test.describe("function logs", () => {
   })
 
   test("the tab does not present raw JSON as a log message", async ({ page, request }) => {
-    // The router emits structured JSON so cloud's pipeline can label each line. Both paths have to
+    // The worker emits structured JSON so cloud's pipeline can label each line. Both paths have to
     // unpack it: the relay passes it through as an object, and the in-process reader parses it. A
     // regression in either shows a whole JSON document where the message belongs, and every other
     // test still passes because the row is present and the timestamp is real.
