@@ -52,7 +52,23 @@ export async function reconcileNativeDatabaseUrl(cwd: string, nativeDsn: string)
     console.log("[supatype] DATABASE_URL in .env now names this project's native database; the CLI had written it for Docker.")
     return
   }
-  if (outcome !== "hand-written") return
+  if (outcome === "hand-written") await warnIfHandWrittenUrlSilent(cwd)
+}
+
+/**
+ * True when the CLI may write `.env`'s DATABASE_URL: there is none, or the CLI wrote the one there.
+ * Docker dev and native dev both rewrite only these; a hand-written URL always wins.
+ */
+export function cliMayWriteDatabaseUrl(cwd: string): boolean {
+  return envValueOwner(cwd, DATABASE_URL) === null || cliWroteDatabaseUrl(cwd)
+}
+
+/**
+ * Warn, naming host and port but never the password, when `.env` holds a hand-written DATABASE_URL
+ * and nothing answers where it points: every host command (push, seed, admin) will use it.
+ */
+export async function warnIfHandWrittenUrlSilent(cwd: string): Promise<void> {
+  if (cliMayWriteDatabaseUrl(cwd)) return
   const where = databaseHostPort(readEnvFile(cwd)[DATABASE_URL] ?? "")
   if (where === undefined || (await connectSucceeds(where.port, 1_000, where.host))) return
   console.warn(

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { offerToSaveShellDbPort, type DbPortAsk } from "../src/db-port-offer.js"
+import { MANAGED_MARKER } from "../src/env-file.js"
 
 /**
  * Local test C: Docker dev with `SUPATYPE_DEV_DB_PORT=54339` exported moved `DATABASE_URL` for its
@@ -10,7 +11,8 @@ import { offerToSaveShellDbPort, type DbPortAsk } from "../src/db-port-offer.js"
  * where nothing listened. Dev now asks whether to keep the port, when someone can answer, and
  * otherwise names the line that keeps it, writing nothing.
  */
-const URL_5432 = "DATABASE_URL=postgresql://supatype_admin:pw%2Fx@localhost:5432/acme?sslmode=disable"
+// Marked as the CLI's: a hand-written URL is never offered over (database-url-owner-docker.test.ts).
+const URL_5432 = `${MANAGED_MARKER}\nDATABASE_URL=postgresql://supatype_admin:pw%2Fx@localhost:5432/acme?sslmode=disable`
 let dir = ""
 let printed: string[] = []
 
