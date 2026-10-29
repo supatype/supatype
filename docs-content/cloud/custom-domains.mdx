@@ -27,7 +27,12 @@ Or from the CLI, in a linked project:
 npx supatype domains add api.your-domain.com
 ```
 
-Either way, the response tells you the CNAME target to use.
+Either way, the response tells you the CNAME target to use, and the CLI prints the domain's id,
+which `supatype domains verify` and `supatype domains remove` take. `supatype domains list` shows
+every domain of the linked project with its id, status and CNAME target.
+
+A domain belongs to one project only: adding one that is already registered answers
+`409 domain_taken`.
 
 ### Step 2: Configure DNS
 
@@ -41,11 +46,21 @@ Use a subdomain. Verification looks up a CNAME record on the exact name you adde
 
 ### Step 3: Verify
 
-After DNS propagation (typically 5-30 minutes), click **Verify** in the dashboard. Supatype will:
+Once the DNS record has propagated, click **Verify** in the dashboard, or run:
 
-1. Check that the CNAME record is correctly configured
+```bash
+npx supatype domains verify <domain-id>
+```
+
+Supatype will:
+
+1. Check that the CNAME record points at the target
 2. Request an SSL certificate from Let's Encrypt
-3. Start serving your API at the custom domain once the certificate is issued
+3. Mark the domain `active` once the certificate is issued
+
+If the CNAME is not there yet, verifying answers `422 cname_not_found` and the domain stays
+`pending_verification`. Supatype also checks pending domains by itself for 24 hours after they are
+added, so a record that appears later is picked up without another click.
 
 ### Step 4: Update your client
 
@@ -78,15 +93,15 @@ On plans that allow more than one, you can add several custom domains to a singl
 
 To remove a custom domain:
 
-1. Open **Custom Domains** in the dashboard
-2. Click **Remove** next to the domain
-3. Remove the CNAME record from your DNS
+1. Click **Remove** next to the domain on the dashboard's **Custom Domains** page, or run
+   `npx supatype domains remove <domain-id>`
+2. Remove the CNAME record from your DNS
 
 Your project will continue to be accessible at the default `<project ref>.supatype.com` URL.
 
 ## Cloudflare
 
-If your DNS is on Cloudflare, set the record to **DNS only** (grey cloud), at least until the certificate is issued. With the proxy on, Cloudflare answers with its own addresses instead of the CNAME, so verification cannot see the record, and the Let's Encrypt HTTP-01 challenge does not reach Supatype.
+If your DNS is on Cloudflare, set the record to **DNS only** (grey cloud), at least until the certificate is issued. With the proxy on, Cloudflare answers with its own addresses instead of the CNAME, so verification cannot see the record.
 
 ## Troubleshooting
 
@@ -100,7 +115,7 @@ dig api.your-domain.com CNAME
 
 ### SSL certificate not issued
 
-Ensure your CNAME record is correctly set and points at the target Supatype gave you. Certificate issuance typically takes 1-5 minutes after DNS verification.
+Ensure your CNAME record is correctly set and points at the target Supatype gave you. `supatype domains list` shows each domain's status: `provisioning_ssl` while the certificate is requested, then `active`.
 
 ### Mixed content warnings
 

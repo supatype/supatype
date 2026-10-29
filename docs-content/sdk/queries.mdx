@@ -17,8 +17,10 @@ Select specific columns:
 const { data } = await supatype.from("posts").select("title, slug, created_at")
 ```
 
-The select string decides what the server sends, not what TypeScript sees: `data` is typed as full
-`posts` rows either way. Pass the shape you selected as a type argument when it matters:
+With generated types, `data` is typed from the select string: `"title, slug, created_at"` gives rows
+with just those three columns, and a column or relation the schema does not have becomes a type
+error where you use it. A select string only known at run time is typed as the whole row. For a
+shape the string cannot describe, pass it as a type argument:
 
 ```typescript
 const { data } = await supatype
@@ -29,7 +31,8 @@ const { data } = await supatype
 ## Selecting relations
 
 Fetch related data using parentheses syntax (PostgREST resource embedding). Embedded relations are
-not typed for you either; use the type argument above:
+typed from the generated schema too: a to-one relation is the related row or `null` (the row alone
+when embedded with `!inner`, as in `author!inner(name)`), and a to-many relation is an array:
 
 ```typescript
 const { data } = await supatype

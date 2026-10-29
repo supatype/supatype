@@ -36,6 +36,10 @@ The presence of `database.external` is the switch. Note what is **absent**: no `
 because there is no backend for Supatype to choose. Setting both is an error rather than a
 precedence rule.
 
+The response cache then runs in a `valkey` container. Its default home, a keyspace inside Postgres,
+needs the bundled `supatype/postgres` image, so `cache: { provider: "pg_keyspace" }` together with
+`database.external` stops the config from loading.
+
 ### Where the credentials live
 
 Read the URL from the environment, as above. `supatype.config.ts` is TypeScript, so
@@ -107,7 +111,9 @@ Severity is about consequence:
 | Target schema | `schema.pg_schema` exists, or can be created | **fail** |
 | API roles | `anon`, `authenticated`, `service_role`, `authenticator` | **fail**: every `GRANT` is guarded with `IF EXISTS`, so a missing role is skipped silently and the symptom is an API that cannot switch roles at all |
 | `authenticator` shape | `NOINHERIT`, `LOGIN`, member of the three API roles only | **fail**: an inheriting `authenticator` holds every privilege of every role it belongs to, before any JWT is considered |
-| `supatype_mask` | Extension installed | **note**: field rules will be enforced by generated views instead (see below) |
+| `pgcrypto` | Available on the server | **fail**: UUID keys default to `gen_random_uuid()`. Available but not installed is a **warn** that `--fix` installs |
+| `vector`, `postgis` | Available on the server | **warn**: needed only by schemas with `Vector<>` or `Geo`/`GeoPoint` fields |
+| `supatype_mask` | Extension installed | **warn**: field rules will be enforced by generated views instead (see below) |
 | `USAGE` on `_supatype` | `anon`, `authenticated`, `service_role` | **degrade**: field rules and Studio's per-record checks are unavailable, and a push declaring `access.fields` refuses; row-level rules are unaffected |
 | `wal_level` | `logical` | **degrade**: realtime unavailable |
 | Replication slots | One spare | **degrade**: realtime cannot create its slot |
@@ -177,12 +183,15 @@ Support varies by provider and changes over time, so check rather than assume, a
   entirely.
 
 Whichever it is, realtime does not crash-loop. It starts, logs the reason, and reports it on its
-readiness endpoint:
+readiness endpoint, `/health/ready` on port 4000 inside the stack (the port is not published to the
+host), which answers `503` with:
 
-```bash
-$ curl -s localhost:4000/health/ready
+```json
 {"status":"unsupported","reason":"the wal2json output plugin is not installed"}
 ```
+
+The other reasons are `wal_level is not logical` and
+`the database role may not use replication slots`.
 
 Liveness stays healthy, because the process is fine; the feature is not available. Once you know,
 turn the service off so you are not running a container whose only job is to report that:
@@ -211,12 +220,12 @@ lists them so the silence is visible.
 **A table your schema *does* declare, which already exists without the marker, stops the push:**
 
 ```
-Your schema declares model(s) for table(s) Supatype does not manage: post.
-
-Nothing was applied. …
-Run `supatype adopt` to bring them under management, or point the model at a
-different table with `tableName`.
+The engine refused the schema push: these tables exist and Supatype did not create them: post. Nothing was applied.
 ```
+
+In a terminal, `supatype push` then offers to adopt them, shows what adoption takes, and pushes
+again once you agree. Off a terminal, or with `--yes`, it prints the `supatype adopt` step and
+stops.
 
 Refusing is the only honest outcome. Applying the rest and skipping that table would leave its
 access rules unenforced while PostgREST still served it. Any table in an exposed schema that the
@@ -224,8 +233,8 @@ request role can already read gets an endpoint, so a table you had granted to `P
 readable with none of your rules applied. And altering it instead is not ours to do: enabling
 row-level security on a table another application reads can stop it seeing its own rows.
 
-`--force` does not bypass this. Forcing is for accepting data loss you understand, not for taking
-ownership of someone else's table.
+`--yes` does not bypass this. It accepts data loss you understand, not ownership of someone else's
+table.
 
 To bring a table deliberately under management:
 
@@ -233,7 +242,7 @@ To bring a table deliberately under management:
 supatype adopt
 ```
 
-It stamps the marker on tables matching your schema, after showing you the exact SQL, and only on
+It stamps the marker on tables matching your schema, after showing you what it will take, and only on
 tables your schema declares, never on everything it finds. After that the same push applies
 everything: policies, privileges, field labels.
 
@@ -267,9 +276,11 @@ The first entry is what PostgREST serves as the default profile, so your managed
 
 ## A database that is not there yet
 
-Every service waits for Postgres rather than exiting: connection failures are retried with backoff,
-and each attempt logs how long it has been trying. A wrong password or a missing database still fails
-immediately: retrying that forever would bury the message that says what to fix.
+Storage, realtime and the server wait for Postgres rather than exiting: connection failures are
+retried with backoff. A wrong password or a missing database still fails immediately: retrying that
+forever would bury the message that says what to fix. The one exception is the migrations the server
+runs at start-up, which exit when the database is not ready yet, so the generated file restarts the
+server up to five times (`restart: on-failure:5`) before leaving it stopped.
 
 This also covers a database that restarts *under* a running stack, which the previous
 healthcheck-based approach never did. Realtime reconnects and resumes decoding; storage and the

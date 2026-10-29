@@ -28,7 +28,7 @@ These errors originate from PostgreSQL and are returned by the REST API.
 | `23503` | `foreign_key_violation` | Referenced row does not exist in the parent table |
 | `23502` | `not_null_violation` | A required (NOT NULL) column was not provided |
 | `23514` | `check_violation` | A CHECK constraint was violated |
-| `42501` | `insufficient_privilege` | RLS policy denied the operation |
+| `42501` | `insufficient_privilege` | Row-level security or a missing grant refused the operation |
 | `42P01` | `undefined_table` | A table named inside a function or view does not exist (a table requested directly is `PGRST205`) |
 | `42703` | `undefined_column` | The requested column does not exist |
 | `22P02` | `invalid_text_representation` | Invalid value for the column type (e.g., text in an integer column) |
@@ -52,6 +52,17 @@ These errors originate from PostgreSQL and are returned by the REST API.
 | `PGRST301` | 401 | JWT could not be decoded or verified: a bad signature, a malformed token, or an empty one |
 | `PGRST302` | 401 | Anonymous request when anonymous access is disabled |
 | `PGRST303` | 401 | JWT claims were rejected, an expired token among them |
+
+## Gateway errors
+
+On Cloud, before a request reaches `/rest/v1`, `/storage/v1`, `/realtime/v1` or `/functions/v1`,
+the project's gateway checks its API key and answers `{ "code": "...", "message": "..." }` when it
+cannot. A local or self-hosted stack does not run this check.
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `no_api_key` | 401 | The request carried no API key in the `apikey` header, the bearer token or the `apikey` query parameter |
+| `invalid_api_key` | 401 | The key was not signed with this project's JWT secret, or its role is not `anon`, `authenticated` or `service_role` |
 
 ## Auth errors
 
@@ -78,7 +89,6 @@ The auth server sends a machine-readable `error_code` with each error. The commo
 | `mfa_factor_not_found` | The MFA factor does not exist |
 | `mfa_challenge_expired` | The MFA challenge has expired |
 | `mfa_verification_failed` | The MFA code is incorrect |
-
 | `otp_expired` | The email link or one-time code has expired |
 | `invalid_grant` | The OAuth token endpoint refused the grant, such as a refresh token already used |
 
@@ -135,9 +145,10 @@ if (error) {
 
 For a REST error, `code` is the PostgreSQL or PostgREST code above, exactly as PostgREST 14 sends
 it: a database error keeps its bare SQLSTATE (`23505`, never `PGRST23505`). The PostgREST
-`details` and `hint` are not carried over. When `.single()` gets no row or more than one, `code`
-is `PGRST116` and `message` is `Cannot coerce the result to a single JSON object`, whether
-PostgREST or the client noticed.
+`details` and `hint` are kept as `error.details` and `error.hint` when they are non-empty; a unique
+violation's `details` names the key that collided (`Key (slug)=(intro) already exists.`). When
+`.single()` gets no row or more than one, `code` is `PGRST116` and `message` is
+`Cannot coerce the result to a single JSON object`, whether PostgREST or the client noticed.
 
 The client exports the codes it knows as constants, so a comparison is checked by the compiler:
 

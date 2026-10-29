@@ -11,7 +11,11 @@ for you.
 |---|---|---|
 | `Timestamps` | `WithTimestamps<F>` | `created_at`, `updated_at`, both `TIMESTAMPTZ NOT NULL DEFAULT now()` |
 | `SoftDelete` | `WithSoftDelete<F>` | `deleted_at TIMESTAMPTZ`, nullable |
-| `Publishable` | `WithPublishable<F>` | `published_at TIMESTAMPTZ`, nullable |
+| `Publishable` | `F & Publishable` | `published_at TIMESTAMPTZ`, nullable |
+
+All three also work as an intersection (`{ … } & Timestamps`). For `Publishable` the intersection is
+the only form that adds the column today: the CLI unwraps `WithPublishable<F>` to `F` and drops
+`published_at`.
 
 ## Timestamps
 
@@ -50,12 +54,12 @@ Recognised the same three ways: the wrapper, a `deleted_at` field you declare, o
 ## Publishable
 
 ```typescript
-import type { Model, UUID, WithPublishable } from "@supatype/types"
+import type { Model, Publishable, UUID } from "@supatype/types"
 
-export type Post = Model<WithPublishable<{
+export type Post = Model<{
   id: UUID
   title: string
-}>, { tableName: "posts" }>
+} & Publishable, { tableName: "posts" }>
 ```
 
 **One column, `published_at`.** It does not add a status enum or a scheduling column, because a
@@ -67,14 +71,14 @@ to put a date in.
 Declare the rest as ordinary fields when you want them:
 
 ```typescript
-import type { Model, Optional, Timestamp, UUID, WithPublishable } from "@supatype/types"
+import type { Model, Optional, Publishable, Timestamp, UUID } from "@supatype/types"
 
-export type Article = Model<WithPublishable<{
+export type Article = Model<{
   id: UUID
   title: string
   status: "draft" | "published" | "scheduled" | "archived"
   scheduled_at: Optional<Timestamp>
-}>, { tableName: "articles" }>
+} & Publishable, { tableName: "articles" }>
 ```
 
 That `status` union becomes a Postgres `TEXT` column with a `CHECK` constraint listing exactly

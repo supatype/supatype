@@ -19,17 +19,15 @@ This prompts for your Cloud account email and password. Once logged in, the CLI 
 
 ## Step 2: Link your project
 
-Link your local project to a Cloud project by its slug:
+Create the project in the Cloud dashboard if it does not exist yet, then link your local project to
+it by its slug or its ref:
 
 ```bash
-# Create a new Cloud project (prints its slug)
-npx @supatype/cli projects create my-project
-
-# Link to it, or to an existing Cloud project
 npx @supatype/cli link --project <project-slug>
 ```
 
-`supatype projects list` shows the slugs of the projects you can access.
+Once linked, `supatype projects list` shows the slugs of the other projects in the same
+organisation.
 
 ## Step 3: Deploy
 
@@ -39,10 +37,13 @@ npx supatype deploy
 
 This command:
 
-1. Diffs your local schema against the Cloud database
-2. Applies the changes
-3. Builds and deploys your static site, when the project has an app configured
-4. Prints the deployment URL
+1. Sends your schema to the linked project, which diffs it against the Cloud database
+2. Applies the changes without asking
+3. Builds and uploads your static site, when `supatype.config.ts` has a `build` section
+
+If policies, grants, labels or row level security were changed outside Supatype, the deploy refuses.
+Review the changes with `supatype push`, or pass `--overwrite-drift` to put
+Supatype's definitions back.
 
 Edge functions are not part of `deploy`; ship them with `supatype functions deploy`.
 
@@ -62,7 +63,14 @@ npx supatype deploy --env staging
 npx supatype deploy --env production
 ```
 
-The environment must exist first (see [Environments](/docs/cloud/environments.html)).
+The environment must exist first (see [Environments](/docs/cloud/environments.html)), and the link
+must know it: `supatype envs create` records the environment it creates, and running
+`supatype link` again picks up one created in the dashboard. `supatype envs list` shows the
+environments the link knows.
+
+`--env` chooses where the schema goes. The static site is not split by environment: a project has
+one live site, and deploying an app with `--env staging` replaces it. Use `--schema-only` for
+anything that is not production.
 
 ### Deploy only part of the project
 
@@ -102,7 +110,10 @@ jobs:
 
 ### Preview deployments
 
-For pull requests, deploy to the project's preview environment:
+For pull requests, push the schema to the project's preview environment. The preview environment
+must exist, and it expires 7 days after it is created, so create it again with
+`supatype envs create preview` once it has gone. `--schema-only` keeps the pull request's app away
+from the live site:
 
 ```yaml
 on:
@@ -122,7 +133,7 @@ jobs:
           SUPATYPE_EMAIL: ${{ secrets.SUPATYPE_EMAIL }}
           SUPATYPE_PASSWORD: ${{ secrets.SUPATYPE_PASSWORD }}
       - run: npx supatype link --project ${{ vars.SUPATYPE_PROJECT }}
-      - run: npx supatype deploy --env preview --yes
+      - run: npx supatype deploy --env preview --schema-only --yes
 ```
 
 ## Rollback
@@ -136,17 +147,22 @@ npx supatype deploy rollback
 Or roll back to a specific deployment:
 
 ```bash
-npx supatype deploy rollback --to <deployment-id>
+npx supatype deploy rollback --to <version>
 ```
 
-The deployment id is returned when you deploy, or from `supatype deploy status`. Omit `--to` to roll back to the immediately previous version. Rollback restores the site, not the database schema.
+`--to` takes a deployment's version, which `supatype deploy status` shows for the live one, or its
+id. Omit `--to` to roll back to the immediately previous version. Rollback restores the site, not
+the database schema.
 
 ## Deployment status and logs
 
 ```bash
 npx supatype deploy status
-npx supatype deploy logs
+npx supatype deploy logs <version>
 ```
+
+`deploy status` shows the live deployment's version, size and deploy time. `deploy logs` prints the
+build logs of the deployment with that version or id.
 
 ## Environment variables
 
@@ -156,7 +172,7 @@ Set environment variables for your project's edge functions:
 npx supatype functions env set MY_API_KEY=sk-123456
 ```
 
-List environment variables:
+List environment variables (the values are masked):
 
 ```bash
 npx supatype functions env list

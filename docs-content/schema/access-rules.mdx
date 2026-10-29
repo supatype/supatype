@@ -8,9 +8,10 @@ Access rules define who can perform operations on your data. They are declared a
 
 ## Default is deny
 
-A model with **no `access` block** gets RLS enabled with no policies at all:
+A model with **no `access` block** gets RLS enabled and no policy for your API's callers:
 `anon` and `authenticated` are denied every operation. `service_role` bypasses
-RLS, so server-side code, seeds and admin tooling keep working.
+RLS, so server-side code, seeds and admin tooling keep working. Studio reaches
+the table through its own policies, described under [Generated RLS](#generated-rls).
 
 Nothing is reachable from a client until you declare it. `supatype diff` lists
 any model it had to deny this way.
@@ -151,10 +152,7 @@ Literals are explicit precisely because bare strings are columns:
 columns. A missing claim is SQL `NULL`, so comparing against a claim that is absent
 denies rather than erroring.
 
-A claim is read as text, as Postgres prints it (`jsonb ->>`): a numeric claim of `10` is `"10"`,
-every digit in plain decimal. Studio, which works out the same verdicts to decide what to show,
-reads it the same way. Before 0.7.0 Studio trimmed trailing zeros from a whole number, so a claim of
-`10` matched a literal `1` there, and Studio could show as allowed what the policy refused.
+A claim is read as text, as Postgres prints it (`jsonb #>>`): a numeric claim of `10` is `"10"`.
 
 ### Comparisons
 
@@ -211,10 +209,11 @@ type MySites = Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>
 access: { read: In<"site_id", MySites> }
 ```
 
-`In<>` compiles to a semi-join (`EXISTS`), not `IN (SELECT …)`, so the planner stops
-at the first match per row instead of materialising the set. Because the join column
-is named in `Rows<>`, the engine emits the index for it: the classic RLS performance
-trap is a membership subquery scanning an unindexed join table once per row tested.
+Against `Rows<>` or a `Claim<>`, `In<>` compiles to a semi-join (`EXISTS`), not
+`IN (SELECT …)`, so the planner stops at the first match per row instead of
+materialising the set. Against a fixed `Values<>` set it is `= ANY(ARRAY[…])`.
+Because the join column is named in `Rows<>`, the engine emits the index for it:
+the classic RLS performance trap is a membership subquery scanning an unindexed join table once per row tested.
 
 Sources are `Rows<>`, a `Claim<>` holding an array, or a fixed `Values<>` set:
 
@@ -283,22 +282,34 @@ CREATE POLICY "posts_delete" ON "public"."posts" FOR DELETE
 Policies are named `{table}_{select|insert|update|delete}`, and pushes are
 idempotent: an unchanged rule leaves its policy untouched.
 
+Every managed table also carries `{table}_studio_read` and `{table}_studio_write`.
+They admit only requests that Studio's gateway has marked for a Studio viewer or
+editor, so Studio's roles decide what a Studio user may do with rows while your
+rules decide for everyone else. A model that keeps drafts gets a
+`{table}_draft_select` policy as well (see [Publishing](/docs/schema/publishing.html)).
+
 ## Many-to-many junction tables
 
 Junction tables are generated for you, so they take no `access` of their own.
-Their policies are derived from **both** parent models:
+Their policies follow from the two rows each link joins:
 
-- readable when both endpoints are readable
-- writable when both endpoints are writable
+- a link is readable when the caller can read **both** of the rows it joins;
+- a link can be added, changed or removed by a caller who can read both rows and
+  may update **at least one** of them.
 
-The stricter rule wins, and role sets intersect to the roles both parents accept.
-A `Game` with `read: Public` linked to a `Car` with `read: Role<"admin">` gives a
-junction readable only by `admin`.
+Each end is checked by reading its row as the caller, so that model's own policies
+decide. Tagging a post is an edit of the post: whoever may edit a post may tag it with
+any tag they can see, without needing the right to edit the tag. If neither model
+declares an `update` rule, nobody can write the links.
 
-Only `Public`, `Private`, `LoggedIn` and `Role<>` can be intersected this way. A rule
-that may depend on row data (`Owner`, `OwnerFrom`, a comparison, a membership test, or
-any `Any`/`All`/`Not` composition) cannot be evaluated against a junction row, because
-the junction has none of the parent's columns. That operation is denied, and
+One case falls back to a stricter derivation. When a parent's `read` rule uses the
+junction itself as a membership source (`Rows<>` naming the junction table), checking
+the parent from the junction would make the two policies read each other. That junction
+instead gets the intersection of the two parents' rules: the stricter rule wins, and
+role sets intersect to the roles both parents accept. Only `Public`, `Private`,
+`LoggedIn` and `Role<>` can be intersected; a rule that depends on row data (`Owner`,
+`OwnerFrom`, a comparison, a membership test, or any `Any`/`All`/`Not` composition)
+cannot be evaluated against a junction row, so that operation is denied and
 `supatype diff` warns and names the junction.
 
 ## `Role<>` and the JWT

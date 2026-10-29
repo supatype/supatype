@@ -3,9 +3,9 @@ title: Environments
 description: Manage production, staging, and preview environments for your Supatype Cloud project.
 ---
 
-Supatype Cloud supports multiple environments per project, and there are exactly three: `production`, `staging` and `preview`. Each environment is a **full compose-shaped stack** (own Postgres, PostgREST, storage, realtime, and `supatype-server` with in-process auth), the same shape as self-host compose. Edge functions run in production only; staging and preview stacks have no functions worker.
+Supatype Cloud supports multiple environments per project, and there are exactly three: `production`, `staging` and `preview`. Each environment is a **full stack of its own** (its own Postgres, PostgREST, storage, realtime, and `supatype-server` with in-process auth), the same shape as a self-hosted compose stack. Edge functions run in production only; staging and preview stacks have no functions worker.
 
-Staging and preview use a free-tier Postgres profile and are **paused after 24 hours without activity**. Continuous human traffic keeps them running (same cost idea as a second project).
+Staging and preview get the Free plan's Postgres resources and are **paused after 24 hours without activity**. The next request to a paused environment starts it again.
 
 ## Environment types
 
@@ -18,14 +18,14 @@ Your live environment. Serves real user traffic, at `https://<project ref>.supat
 A separate stack for testing before production.
 
 - Own database and API host (`https://<project ref>-staging.supatype.com`)
-- Sleeps when idle; bots do not count as activity
-- Ideal for QA and integration testing
+- Pauses after 24 hours without requests
 
 ### Preview
 
 A short-lived stack for pull requests or feature branches.
 
-- Expires 7 days after it is created; a project has one preview environment at a time
+- Expires 7 days after it is created, and is then deleted; a project has one preview environment at
+  a time
 - Fresh database; its own URL (`https://<project ref>-preview.supatype.com`)
 
 ## Creating environments
@@ -48,7 +48,10 @@ POST /api/v1/projects/{slug}/environments
 { "name": "staging" }
 ```
 
-The name must be `staging` or `preview`.
+The name must be `staging` or `preview` (any other name is refused with `400`), the project must be
+active (`409 project_not_ready` while it is not), and an environment that already exists answers
+`409 already_exists`. The CLI also records the new environment in the link, so
+`supatype deploy --env staging` can reach it straight away.
 
 ## Resetting an environment's database password
 
@@ -75,6 +78,16 @@ It answers `404` for an environment that does not exist.
 
 ## Isolation
 
-Auth users, schemas, and secrets are **not** shared with production. Deleting staging removes its namespace; production is untouched.
+Auth users, schemas, and secrets are **not** shared with production. Owners and admins delete
+staging or preview from the dashboard, or with the control-plane API:
 
-Legacy shared-schema staging (`{ref}_stg*` on the production Postgres) is deprecated: tear down leftovers after migrating to full stacks.
+```http
+DELETE /api/v1/projects/{slug}/environments/{name}
+```
+
+Deleting an environment removes its whole stack and its data; production is untouched and cannot be
+deleted.
+
+Projects from before environments had their own stacks kept staging and preview as schemas
+(`{ref}_stg*`, `{ref}_preview*`) in the production database. Owners and admins remove those leftovers
+with `POST /api/v1/projects/{slug}/environments/{name}/teardown-legacy-schemas`.

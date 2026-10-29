@@ -65,11 +65,12 @@ across every free organisation one person owns.
 Projects, members, environments and custom domains are hard limits: creating one more is refused
 with `403` and an error code (`project_limit_reached`, `member_limit_reached`,
 `environment_limit_reached`, `domain_limit_reached`; `free_limit_reached` and `free_tier_no_invites`
-on Free). Realtime connections are capped per project. The other figures are shown in the usage
-dashboard and are not blocked or billed yet: overage billing is coming soon.
+on Free). Realtime connections are capped per project. Database size and monthly active users are
+measured and shown in the usage dashboard; file storage, bandwidth and function invocations are not
+measured yet. None of these is blocked or billed yet: overage billing is coming soon.
 
 The database figure is your own data. Supatype's caching keeps its rows in a separate `supacache` schema,
-and those are subtracted before your usage is measured: your cache is never billed as your data.
+and those are subtracted before your usage is measured: your cache is never counted as your data.
 
 ## Getting started
 
@@ -79,15 +80,11 @@ Sign up at [accounts.supatype.com](https://accounts.supatype.com/signup).
 
 ### 2. Create a project
 
+Create the project in the Cloud dashboard. Then sign in from the CLI and link your local project to
+it by its slug or its ref:
+
 ```bash
 npx @supatype/cli login
-npx @supatype/cli projects create my-project
-```
-
-Or create the project from the Cloud dashboard. Either way, link your local project to it by its
-slug:
-
-```bash
 npx @supatype/cli link --project <project-slug>
 ```
 
@@ -97,8 +94,8 @@ npx @supatype/cli link --project <project-slug>
 npx supatype deploy
 ```
 
-This pushes your schema to the linked project and, when the project has an app configured, builds
-and deploys its static site. Edge functions are deployed separately with
+This pushes your schema to the linked project and, when `supatype.config.ts` has a `build` section,
+builds and deploys its static site. Edge functions are deployed separately with
 `supatype functions deploy`.
 
 Your API is served at `https://<project ref>.supatype.com`.
@@ -113,7 +110,9 @@ The Cloud dashboard at [studio.supatype.com](https://studio.supatype.com) provid
 - **Storage browser**: view and manage files and buckets
 - **API logs**: request logs with filtering
 - **SQL editor**: run queries directly against your database (owners, admins and developers)
-- **Settings**: project configuration, API keys, allowed browser origins (CORS), auth providers, billing
+- **Settings**: project configuration, API keys, environment variables, allowed browser origins
+  (CORS) and database settings
+- **Organisation pages**: members, billing and usage
 
 ## Members and roles
 
@@ -125,9 +124,10 @@ membership can only narrow it for that project. The role that used to be called 
 
 ## Allowed browser origins
 
-Each project's gateway decides which browser origins may call its API. The project's own URL and
-Cloud Studio are always allowed. Owners and admins add more origins, or reset the list, in Studio
-under **Settings > CORS**; the list is kept in the project's database. `api.corsOrigins` in
+Each project's gateway decides which browser origins may call its API. Cloud Studio is always
+allowed. With no list saved, the project's site URL is allowed as well; a saved list replaces that
+default. Owners and admins save a list, or reset it to the default, in Studio under
+**Settings > CORS**; the list is kept in the project's database. `api.corsOrigins` in
 `supatype.config.ts` is read by self-hosted stacks only, so on Cloud use the CORS tab.
 
 ## Next steps

@@ -69,6 +69,22 @@ await supatype.rpc("publish", { model_table: "posts", record_id: postId }, { sch
 The `schema` option is not optional: these functions live in the `supatype` schema, and PostgREST
 looks in the default one unless you say otherwise.
 
+The client's `update` does the saving for you on a model that keeps drafts (see
+[Creating a record](#creating-a-record) for how it knows). Each record the filters match gets a new
+draft, all or none in one call, and `{ publish: true }` publishes them in the same call:
+
+```typescript
+// Saves a draft of the record. The live row does not move.
+await supatype.from("posts").update({ title: "A better title" }).eq("id", postId)
+
+// Saves and publishes in one call.
+await supatype.from("posts").update({ title: "A better title" }, { publish: true }).eq("id", postId)
+```
+
+A plain `PATCH /rest/v1/posts` from a signed-in caller is refused with `42501` and a
+hint naming `supatype.publish`: on a drafts model the live row changes only by publishing. The
+service role, and a Studio editor's direct edits in the data browser, are not refused.
+
 **They run as you.** The access rule that governs editing a record governs drafting, publishing,
 scheduling and restoring it, so there is one set of rules rather than one for your app and another
 for the admin UI. If your `update` rule refuses the edit, it refuses the publish.
@@ -98,8 +114,8 @@ policy`: Postgres checks the returned row against your read rule as it inserts i
 has made the row visible to you. `create_record` inserts without reading back, then writes version 1,
 and from then on the record is visible to whoever created it.
 
-The client knows which models keep drafts from the generated `supatype/client.ts`, so import
-`createClient` from there. Its `insert` creates one record through `create_record` and returns the
+The client knows which models keep drafts from the generated `client.ts` (by default
+`supatype/generated/client.ts`), so import `createClient` from there. Its `insert` creates one record through `create_record` and returns the
 row read back from the draft view, in the shape an insert returns. `upsert` is left a plain write,
 since `create_record` cannot say what a conflict should do. A raw REST caller refused this way gets a
 `hint` naming `supatype.create_record` and `supatype.create_records`.
@@ -205,11 +221,16 @@ POST /admin/preview-links
 
 The link is the whole of their credential. It carries no subject, so holding it makes them nobody
 rather than making them you, and it names the one record it covers. It expires (fifteen minutes by
-default, a week at most), and each link can be revoked on its own from the same panel.
-`POST /admin/preview-links/revoke` withdraws every outstanding link at once.
+default, a week at most), and each link can be revoked on its own from the same panel
+(`POST /admin/preview-links/{id}/revoke`). `POST /admin/preview-links/revoke` withdraws every
+outstanding link at once.
 
 A project-wide link, covering every unpublished draft, can be minted by `admin` and `developer` only,
 and lives a day at most. Handing someone a URL is a different authority from editing content.
+
+Those lifetimes are defaults, set in seconds under `publishing.preview` in `supatype.config.ts`:
+`default_ttl`, `max_record_ttl` and `max_project_ttl`. Asking for a longer link than the ceiling is
+refused rather than shortened.
 
 ### Opening the link in your app
 
@@ -273,9 +294,11 @@ a future `published_at`, because the access rule compared it against `now()` and
 hidden until it arrived. That works only while the content is already in the row. Once publishing
 means copying a draft in, something has to do the copying.
 
-That something is `pg_cron`, which ships in the `supatype/postgres` image. **On a database without
-it, everything else works and only the timer is missing**: a scheduled publish waits until something
-calls `_supatype.run_due_publishes()`, which you can drive from a cron of your own or a worker.
+That something is `pg_cron`, which ships in the `supatype/postgres` image: a job checks for due
+publishes every minute. **On a database without it, everything else works and only the timer is
+missing**: a scheduled publish waits until something calls `_supatype.run_due_publishes()`, which you
+can drive from a cron of your own or a worker. The same goes for history pruning, below, which
+`pg_cron` runs hourly and you would run with `_supatype.prune_versions()`.
 
 ## History and restoring
 
@@ -295,7 +318,8 @@ publish an old version outright, restore it and then publish. Studio's **Publish
 button on the history page does both.
 
 History is not unbounded: `keep` bounds it, twenty by default, and pruning never removes the newest
-version or one that is currently live.
+version or one that is currently live. Pruning runs hourly, so a record can briefly hold more than
+`keep` versions.
 
 ## Two things it will not do
 

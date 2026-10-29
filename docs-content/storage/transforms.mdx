@@ -40,7 +40,7 @@ at its own size.
 
 ### Resize modes
 
-| Mode | Behavior |
+| Mode | Behaviour |
 |------|----------|
 | `cover` | Crop to fill the target dimensions, maintaining aspect ratio |
 | `contain` | Fit within the target dimensions, maintaining aspect ratio (may add padding) |
@@ -109,8 +109,12 @@ const thumbnailUrl = data
 You can also apply transforms directly via URL parameters on the object URL:
 
 ```
-https://<project ref>.supatype.com/storage/v1/object/public/avatars/photo.png?width=200&height=200&resize=cover
+<API URL>/storage/v1/object/public/avatars/photo.png?width=200&height=200&resize=cover
 ```
+
+The same parameters work on `/storage/v1/object/authenticated/...` (with the caller's token) and on
+signed URLs. Out-of-range `width`, `height` and `quality` values are clamped, and an unknown
+`format` or `resize` value is ignored.
 
 ## Caching
 
@@ -120,13 +124,14 @@ independently by any cache in front of the API.
 
 ## Supported input formats
 
-Transforms apply to objects stored with an `image/*` content type that the image library (sharp)
-can decode: PNG, JPEG, WebP, AVIF, GIF, TIFF, and SVG. Any other object is served unchanged, and the
-parameters are ignored.
+Transforms apply to objects stored with an `image/*` content type, decoded by the image library
+(sharp): PNG, JPEG, WebP, AVIF, GIF, TIFF and SVG. An object of any other content type is served
+unchanged, and the parameters are ignored. An `image/*` object that sharp cannot decode (an empty
+file, or a format it does not read) answers `400` with "The source image is invalid or
+unsupported for rendering".
 
 ## Limits
 
 | Resource | Limit |
 |----------|-------|
 | Max output dimensions | 4096 x 4096 pixels (larger values are clamped) |
-| Transforms per request | 1 (chain options in a single transform object) |

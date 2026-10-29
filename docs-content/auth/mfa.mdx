@@ -15,7 +15,13 @@ Multi-factor authentication (MFA) adds an extra layer of security by requiring u
 
 ## Enable MFA
 
-MFA is enabled per-user, not globally. Any authenticated user can enroll a TOTP factor.
+MFA is enabled per-user, not globally. TOTP enrollment is on by default, so any signed-in user can
+enroll a TOTP factor. A user who already has a verified factor needs an `aal2` session to enroll
+another, and each factor's `friendlyName` must be unique for that user.
+
+Phone factors (`factorType: "phone"`, a code sent by SMS) are off by default. They need the auth
+server's `SUPATYPE_MFA_PHONE_ENROLL_ENABLED` and `SUPATYPE_MFA_PHONE_VERIFY_ENABLED` set to `true`
+and an SMS provider configured.
 
 ## Enrollment flow
 
@@ -30,7 +36,7 @@ const { data, error } = await supatype.auth.mfa.enroll({
 if (data?.totp) {
   // Display the QR code to the user
   // data.totp.qrCode is SVG markup for the QR image
-  // data.totp.uri is the otpauth:// URI for manual entry
+  // data.totp.uri is the otpauth:// URI, and data.totp.secret the key, for manual entry
   // data.id is the factor ID: keep it for the verification step
 }
 ```
@@ -139,4 +145,6 @@ data?.totp.forEach((factor) => {
 
 Supatype does not issue recovery codes. A user who loses their authenticator app cannot complete
 the `aal2` step, so encourage users to enroll a second factor (a user can hold up to 10), and plan
-how an administrator will remove a lost factor for them.
+how an administrator will remove a lost factor for them. With the service role key, the auth admin
+API lists a user's factors at `GET /auth/v1/admin/users/<user id>/factors` and removes one with
+`DELETE /auth/v1/admin/users/<user id>/factors/<factor id>`.

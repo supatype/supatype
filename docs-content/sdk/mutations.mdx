@@ -82,8 +82,11 @@ An `or` filter on an update or delete works whether or not the `select` names th
 Supatype runs PostgREST 14.18; releases before 14.4 failed such a write with
 `column ... does not exist` and wrote nothing.
 
-You must include at least one filter when updating. The `supatype/postgres` image refuses an `UPDATE` with no `WHERE`
-clause (`pg-safeupdate`), so a filterless `.update()` returns an error instead of changing every row.
+Include at least one filter when updating. The `supatype/postgres` image (Docker `supatype dev`,
+self-host and Cloud) loads `safeupdate` for API requests, which refuses an `UPDATE` with no `WHERE`
+clause, so there a filterless `.update()` returns an error instead of changing every row. The native
+runtime (`provider: "native"`) runs a Postgres without it, and there a filterless update changes
+every row.
 
 ## Upsert
 
@@ -135,8 +138,9 @@ const { error } = await supatype
 ```
 
 A plain delete does not return the deleted rows: `data` is an empty array on success. Chain
-`.select()` (or `.select(columns)`) to get them back. Like updates, you must include at least one
-filter when deleting; the database refuses a `DELETE` with no `WHERE` clause.
+`.select()` (or `.select(columns)`) to get them back. Like updates, include at least one filter when
+deleting: on the `supatype/postgres` image the database refuses a `DELETE` with no `WHERE` clause,
+and on the native runtime it deletes every row.
 
 ## Returning data
 

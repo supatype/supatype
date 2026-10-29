@@ -9,15 +9,18 @@ Supatype supports sign-in with third-party OAuth providers. Users are redirected
 
 | Provider | Key | Notes |
 |----------|-----|-------|
-| GitHub | `github` | Scopes: `read:user`, `user:email` |
-| Google | `google` | Scopes: `openid`, `email`, `profile` |
+| GitHub | `github` | Default scope: `user:email`. `url` for GitHub Enterprise |
+| Google | `google` | Default scopes: `email`, `profile` |
 | Apple | `apple` | Requires Apple Developer account |
-| Discord | `discord` | Scopes: `identify`, `email` |
-| Twitter | `twitter` | Uses OAuth 2.0 |
-| GitLab | `gitlab` | Self-hosted GitLab supported |
+| Discord | `discord` | Default scopes: `email`, `identify` |
+| Twitter | `twitter` | OAuth 1.0a. Use `x` for X's OAuth 2.0 |
+| GitLab | `gitlab` | `url` for a self-hosted GitLab |
 | Bitbucket | `bitbucket` | |
-| Azure AD | `azure` | Microsoft work/school accounts |
-| Slack | `slack` | |
+| Microsoft | `azure` | The multi-tenant `common` endpoint unless `url` names a tenant |
+| Slack | `slack` | `slack_oidc` for Sign in with Slack (OIDC) |
+
+The full list of keys is under [Configure the provider](#2-configure-the-provider). Scopes you pass
+to `signInWithOAuth` are added to a provider's defaults.
 
 ## Setup
 
@@ -33,13 +36,13 @@ Each provider requires you to register an OAuth application and obtain a **Clien
 
 - **Local development (Docker):** `http://localhost:<gateway port>/auth/v1/callback`. The gateway port is `SUPATYPE_KONG_PORT` in `.env` (18473 unless `init` picked another).
 - **Self-host:** your public API URL, the `API_EXTERNAL_URL` in the stack's `.env`, for example `https://api.example.com/auth/v1/callback`.
-- **Supatype Cloud:** your project's API URL, shown in Studio, followed by `/auth/v1/callback`.
 
 ### 2. Configure the provider
 
-**Supatype Cloud:** add the Client ID and Secret for GitHub, Google or Apple in Studio's auth settings.
+Supatype Cloud does not yet pass OAuth provider settings to a project's auth server, and Studio
+shows providers read-only, so configure providers on local development or self-host.
 
-**Local development and self-host:** declare the provider in `supatype.config.ts`. `supatype dev` and `supatype self-host compose` turn it into the `SUPATYPE_EXTERNAL_<PROVIDER>_*` variables the auth server reads:
+Declare the provider in `supatype.config.ts`. `supatype dev` and `supatype self-host compose` turn it into the `SUPATYPE_EXTERNAL_<PROVIDER>_*` variables the auth server reads:
 
 ```typescript
 // docs:no-check (a fragment: the rest of your config stays as it is)
@@ -84,29 +87,46 @@ const { data, error } = await supatype.auth.signInWithOAuth({
   provider: "github",
   options: {
     redirectTo: "https://myapp.com/auth/callback",
-    scopes: "read:user user:email",
+    scopes: "read:org",
   },
 })
 
-// Redirect the user to the provider
-window.location.href = data.url
+if (error) {
+  // For example provider_disabled: the auth server lists this provider as off
+  console.error(error.message)
+} else {
+  // Redirect the user to the provider
+  window.location.href = data.url
+}
 ```
+
+`redirectTo` must be on the same host as the site URL, on a loopback address, or match the auth
+server's redirect allow list (`SUPATYPE_URI_ALLOW_LIST`); otherwise the user is sent to the site URL
+instead.
 
 ### 4. Handle the callback
 
-The provider sends the user back to your `redirectTo` URL with the session in it. The client does
-not read the URL on its own, so call `getSessionFromUrl` on your callback page:
+The provider sends the user back to your `redirectTo` URL with the session in it. In a browser the
+client finishes the sign-in itself as it starts: it reads the tokens from the URL hash (or exchanges
+`?code=` when you used `flowType: "pkce"`), emits `SIGNED_IN` and removes the parameters from the
+address bar. On your callback page, wait for that and check the result:
 
 ```typescript
 // On /auth/callback
-// Reads the tokens from the URL hash (or exchanges ?code= when you used flowType: "pkce")
-const { data: { session }, error } = await supatype.auth.getSessionFromUrl(window.location.href)
+const { error } = await supatype.auth.initialize()
+const { data: { session } } = await supatype.auth.getSession()
 
-if (session) {
+if (error) {
+  console.error(`Sign-in with ${error.provider ?? "the provider"} failed:`, error.message)
+} else if (session) {
   // User is signed in
-  router.push("/dashboard")
+  window.location.assign("/dashboard")
 }
 ```
+
+With `detectSessionInUrl: false` in the client's `auth` options, or outside a browser (a React
+Native deep link), the client leaves the URL alone: call `supatype.auth.getSessionFromUrl(url)`
+with the callback URL instead.
 
 ## Provider-specific setup
 
@@ -164,4 +184,4 @@ URL with an identity provider, change it to the one above.
 
 ## Linking accounts
 
-If a user signs in with OAuth and an account with the same email already exists (from email/password sign-up), the auth server links the new identity to that account automatically, provided the provider reports the email as verified (or the server auto-confirms emails, which is the default). Linking happens on every such sign-in, and `supatype.config.ts` has no key to turn it off. The user's `identities` list then holds one entry per provider.
+If a user signs in with OAuth and an account with the same email already exists (from email/password sign-up), the auth server links the new identity to that account automatically, provided the provider reports the email as verified (or the server auto-confirms emails, which the generated stack does unless `auth.email.enableConfirmations` is set). Linking happens on every such sign-in, and `supatype.config.ts` has no key to turn it off. The user's `identities` list then holds one entry per provider.

@@ -13,20 +13,22 @@ This is useful for guest checkout, try-before-sign-up flows, and saving progress
 |--|-------------------|--------------|
 | **What it is** | `signInAnonymously()` creates a user + JWT | Public key for unauthenticated API requests |
 | **Postgres role** | `authenticated` (user JWT) | `anon` (no user JWT) |
-| **`auth.uid()`** | Real user ID | Empty / zero UUID |
+| **`auth.uid()`** | Real user ID | `NULL` |
 | **JWT claim** | `is_anonymous: true` | No user session |
 
 Use the **anon key** for public read access with `Public` access rules. Use **anonymous sign-in** when you need a per-visitor user ID and `LoggedIn` access rules without asking for credentials first.
 
 ## Enable anonymous sign-in
 
-Anonymous sign-in is **disabled by default**. Enable it on the auth service:
+Anonymous sign-in is **disabled by default**. Enable it on the auth server by adding this to the
+project's `.env` (`supatype.config.ts` has no key for it):
 
 ```bash
 SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true
 ```
 
-For self-hosted deployments, add this to your auth environment. See [Self-hosting configuration](/docs/self-hosting/configuration.html) for the full auth variable reference.
+While it is off, `signInAnonymously()` is refused with `422` and the error code
+`anonymous_provider_disabled`. See [Self-hosting configuration](/docs/self-hosting/configuration.html) for the full auth variable reference.
 
 Check whether it is enabled at runtime:
 
@@ -85,7 +87,10 @@ const { data, error } = await supatype.auth.updateUser({
 })
 ```
 
-After verification, `user.isAnonymous` becomes `false`. See [Email & Password](/docs/auth/email-password.html) for confirmation and password flows.
+When the auth server auto-confirms emails (the generated stack's default), the email is attached
+straight away. Otherwise a confirmation email is sent, and the email is attached when the user
+follows the link. From then on `user.isAnonymous` is `false`. A password on its own is refused: an
+anonymous user needs an email or phone in the same update. See [Email & Password](/docs/auth/email-password.html) for confirmation and password flows.
 
 ## Access rules and RLS
 
@@ -121,12 +126,18 @@ The same rule reads on a **permanent-only** operation, and MFA-gating works the 
 
 ## Rate limits and cleanup
 
-Anonymous sign-ins are rate-limited per IP (default **30 per hour**). Stale anonymous users older than **30 days** are removed automatically when anonymous sign-in is enabled.
+Anonymous sign-ins are rate-limited per IP (default **30 per hour**, the auth server's
+`SUPATYPE_RATE_LIMIT_ANONYMOUS_USERS`). Like every per-IP limit, it applies only when the auth
+server can read the caller's IP from the header `SUPATYPE_RATE_LIMIT_HEADER` names, which the
+generated stack does not set. Anonymous users older than **30 days** are deleted only when
+the auth server's database cleanup is also on (`SUPATYPE_DB_CLEANUP_ENABLED=true`). It is off by
+default and the generated stack does not set it, so without it anonymous users stay until you
+remove them.
 
 Consider enabling captcha (`SUPATYPE_SECURITY_CAPTCHA_ENABLED`) on production projects to reduce abuse.
 
 ## Next steps
 
 - [Auth overview](/docs/auth.html): how auth fits with your schema
-- [Auth SDK methods](/docs/auth.html): the full `supatype.auth` reference
+- [Auth SDK methods](/docs/client.html#auth): the `supatype.auth` reference
 - [Access rules](/docs/schema/access-rules.html): RLS, and `LoggedIn` versus `Public`

@@ -189,6 +189,9 @@ The **HTTP status is the answer**, so a hook can pick one:
 | `{ reject: "message" }` | **422** with that message |
 | `{ reject: { message, status: 409, code } }` | **409**, your message and code |
 
+A rejection is always a `4xx`: a `status` outside that range is answered as **422**, because
+anything else would read as the hook being broken rather than saying no.
+
 A replacement body is substituted and then travels the normal path, with the same token and the same rules. So a hook
 that sets `author_id` to somebody else still fails that row's own policy; nothing is applied with
 elevated privilege.
@@ -237,9 +240,10 @@ with, and it is never sent anywhere but your own stack.
 ## What a hook costs
 
 A hooked write is **two network hops instead of one**, plus one edge-function invocation. On Supatype
-Cloud that invocation is billed and rate-limited like any other, and the concurrency limit becomes a
-limit on concurrent writes to hooked tables: 10 on the free tier. The default 2s timeout sits well
-below the 10s function ceiling so a hung hook fails fast instead of occupying a slot.
+Cloud that invocation counts against your plan's function limits like any other, and the concurrency
+limit becomes a limit on concurrent writes to hooked tables: 10 on the Free plan. The default 2s
+timeout sits well below the Free plan's 10s function time limit, so a hung hook fails fast instead of
+occupying a slot.
 
 Hooks are worth this on the tables that need them. `hooks` on every model is an easy and expensive
 mistake.

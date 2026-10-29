@@ -84,19 +84,25 @@ const { data, error } = await supatype.storage
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `contentType` | `string` | The file's own type, else inferred from the path's extension | MIME type of the file |
+| `contentType` | `string` | A `File`'s own type, else inferred by the storage service from the path's extension (`application/octet-stream` when the extension is unknown) | MIME type of the file |
 | `upsert` | `boolean` | `false` | Overwrite if the file already exists. Without it, uploading to a path that is taken fails with `409` |
+
+A `Blob`'s own `type` is not sent, so pass `contentType` for a `Blob` or an `ArrayBuffer` when the
+path's extension does not identify the type.
 
 ## Large files
 
 Each upload is a single request: the storage service reads the whole body and stores it in one
 piece. There are no multipart or resumable uploads, so a dropped connection means uploading the file
 again. The size ceiling is the bucket's `fileSizeLimit` (or `maxSize` in the schema) when it sets
-one, and otherwise the service-wide maximum, 50 MB by default; a larger file is refused with `413`.
+one, and otherwise the service-wide maximum (the storage service's `TIER_MAX_UPLOAD_SIZE`, 50 MB by
+default); a larger file is refused with `413`. An upload that would take the project's stored total
+past the storage service's quota (`STORAGE_QUOTA`, 1 GB by default, `-1` for none) is refused with
+`507`.
 
 ## Organizing files
 
-Use folder paths to organize files within a bucket:
+Use folder paths to organise files within a bucket:
 
 ```
 avatars/
@@ -144,4 +150,4 @@ await supatype.storage.createBucket("images", {
 })
 ```
 
-Attempting to upload a file with a disallowed MIME type returns `415`. Wildcards such as `image/*` are accepted.
+Attempting to upload a file with a disallowed MIME type returns `415`. Wildcards such as `image/*` are accepted. A bucket declared in the schema sets the same list with `accept` on its `Bucket` config.

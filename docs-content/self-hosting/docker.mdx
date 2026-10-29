@@ -12,7 +12,6 @@ checkout of your project rather than a hand-maintained stack.
 - A server with Docker 20.10+ and Docker Compose v2
 - Node.js 22 or later, for the Supatype CLI
 - A domain name (optional but recommended for production)
-- At least 4 GB RAM
 
 ## Step 1: Get the project onto the server
 
@@ -60,6 +59,7 @@ POSTGRES_USER=supatype_admin
 POSTGRES_PASSWORD=CHANGE_ME
 POSTGRES_DB=my-app
 AUTHENTICATOR_PASSWORD=a-different-long-random-string
+SUPATYPE_SQL_EDITOR_PASSWORD=a-third-long-random-string
 
 # JWT: the API keys are derived from this secret
 JWT_SECRET=your-super-secret-jwt-key-at-least-32-characters
@@ -85,8 +85,10 @@ Generate the API keys from `JWT_SECRET` and write them into `.env`:
 supatype keys --write
 ```
 
-`supatype self-host compose up` also fills in blank keys on its own, and `render` adds
-`SUPATYPE_CONTROL_PLANE_SECRET` when it is missing.
+`supatype self-host compose up` also fills in blank keys on its own, and every `self-host compose`
+command adds `SUPATYPE_CONTROL_PLANE_SECRET` when it is missing. The three passwords are required:
+Compose stops before starting anything and names the one that is missing. See
+[Configuration](/docs/self-hosting/configuration.html) for every variable the stack reads.
 
 `JWT_SECRET` must be at least 32 characters, because PostgREST will not start with a shorter one.
 `supatype self-host compose up` checks it first and stops with
@@ -118,9 +120,11 @@ supatype self-host compose status
 ```
 
 The stack runs `db`, `postgrest`, `server` (the API gateway service, including auth), `storage`,
-`seaweedfs` (the object store behind storage), `functions-worker`, `control-plane`,
-`schema-engine`, `studio` and `kong`, plus `realtime` unless realtime is turned off, and `valkey` if
-you chose `cache: { provider: "valkey" }`.
+`seaweedfs` (the object store behind storage), `functions-worker`, `control-plane`, `studio` and
+`kong`, plus `realtime` unless realtime is turned off, and `valkey` if you chose
+`cache: { provider: "valkey" }` or use an
+[external database](/docs/self-hosting/external-database.html). The file also declares
+`schema-engine`, which does not stay running: a push runs it once and it exits.
 
 Kong publishes the API on port **18473** (`SUPATYPE_KONG_PORT` in `.env` changes it), with Studio
 at `/studio/`: open `http://YOUR_SERVER_IP:18473/studio/`.
@@ -224,8 +228,9 @@ The repository secrets it needs:
 ## Backups
 
 The database is published on the host at port 5432 (`SUPATYPE_DB_PORT` changes it), so a nightly
-`pg_dump` can read `DATABASE_URL` from the project's `.env`. The port is bound on every interface,
-so keep it closed in your firewall.
+`pg_dump` on the server can read `DATABASE_URL` from the project's `.env`. The port is bound to
+`127.0.0.1` only, unless `SUPATYPE_PUBLISH_ADDRESS` in `.env` names another address; if you set
+one, keep the port closed in your firewall.
 
 ```bash
 # Add to crontab
@@ -281,12 +286,11 @@ Stop the stack (data is kept):
 supatype self-host compose down
 ```
 
-Reset the database (destroys all data). The CLI has no command for this, so call Docker Compose on
-the generated file, which names its own project:
+Reset the stack (destroys all data). `--volumes` removes the database and every stored file, and
+asks first; `--yes` skips the question:
 
 ```bash
-supatype self-host compose render
-docker compose -f .supatype/self-host/docker-compose.yml --env-file .env down -v
+supatype self-host compose down --volumes
 supatype self-host compose up -d
 supatype push
 ```

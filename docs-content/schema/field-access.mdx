@@ -74,6 +74,13 @@ X-Supatype-Masked-Fields: salary=row, ssn=identity
 The client surfaces it on the result:
 
 ```typescript
+import { createClient } from "@supatype/client"
+
+const supatype = createClient({
+  url: process.env.PUBLIC_SUPATYPE_URL!,
+  anonKey: process.env.ANON_KEY!,
+})
+
 const { data, meta } = await supatype.from("employees").select()
 
 meta?.maskedFields // [{ column: "salary", scope: "row" }]
@@ -150,11 +157,14 @@ Before 0.7.0 these rules were judged against an empty row, so a rule that read t
 on insert and the value was silently replaced by the default; see
 [Upgrading to 0.7.0](/docs/reference/upgrading-0-7.html).
 
-`supatype diff` refuses a schema where a field can provably never be set on insert: a column that is
-required, has no default, and either has a write rule that denies every caller (`Private`), or a
-write rule narrower than a `Public` create rule. That would otherwise surface as a not-null
-violation naming the constraint instead of the rule. A required column whose write rule reads the
-row is not refused, since the caller creating their own row can satisfy it.
+`supatype diff` and `supatype push` refuse a schema where a field can provably never be set on
+insert: a column that is required, has no default, sequence or generated expression, and either has
+a write rule that denies every caller (`Private`), or has a table `create` rule of `Public` and a
+write rule that is anything narrower. That would otherwise surface as a not-null violation naming
+the constraint instead of the rule. A `BEFORE INSERT` trigger on the table exempts it, and for a
+table not yet in the database the finding is a warning rather than a refusal, since such a trigger
+cannot be ruled out. A write rule that reads the row (`Owner<"user_id">`) under a `create` rule
+that is not `Public` is not refused, since the caller creating their own row can satisfy it.
 
 ## Behaviour by statement
 
@@ -274,7 +284,7 @@ cannot read it, because the value it would compare against is `null`.
 A column restricted only for *some* callers still costs a predicate call per row per read,
 loses its index, and cannot be aggregated by those callers. If a column is restricted from
 nearly everyone and queried often, a separate table with its own access rules is faster and
-simpler, and it is the only option on a Postgres that cannot load the extension.
+simpler.
 
 Field rules are the better answer when the column belongs with its row: one `employees` row
 with a `salary` its owner and admins can see beats an `employee_salaries` table joined on

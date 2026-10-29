@@ -3,13 +3,15 @@ title: API Reference
 description: "REST and GraphQL API reference for Supatype: endpoints, authentication, filtering, and response formats."
 ---
 
-Supatype auto-generates both REST and GraphQL APIs from your schema. Both APIs respect your access rules (RLS policies) and return fully typed responses.
+Supatype serves a REST API (PostgREST) and a GraphQL API (pg_graphql) over your database. Both run
+as the caller, so your access rules (RLS policies) and column grants apply to both.
 
 ## Base URL
 
+A Cloud project's REST API:
+
 ```
-https://<project-ref>.supatype.com/rest/v1     # REST API
-https://<project-ref>.supatype.com/graphql/v1   # GraphQL API
+https://<project-ref>.supatype.com/rest/v1
 ```
 
 For local development with `supatype dev` (Docker, the default), the gateway port is the project's
@@ -21,14 +23,18 @@ http://localhost:18473/graphql/v1
 ```
 
 With the native runtime (`provider: "native"`), the server listens on `server.port`, 54321 by
-default: `http://localhost:54321/rest/v1`. A self-hosted stack publishes the same gateway on port
-18473, or on 80/443 with HTTPS enabled.
+default: `http://localhost:54321/rest/v1`. A native Postgres has no pg_graphql, so there
+`/graphql/v1` answers 501 `graphql_unavailable`. A self-hosted stack publishes the same gateway as
+Docker dev on port 18473, or on 80/443 with HTTPS enabled.
 
 ## Authentication
 
-Requests to `/rest/v1`, `/storage/v1`, `/realtime/v1` and `/functions/v1` must carry a project API
-key, in an `apikey` header (or as the `Authorization` bearer token), and optionally a user's JWT in
-the `Authorization` header:
+On Cloud, requests to `/rest/v1`, `/storage/v1`, `/realtime/v1` and `/functions/v1` must carry a
+project API key, in an `apikey` header, as the `Authorization` bearer token, or as an `apikey`
+query parameter; without one the gateway answers 401 `no_api_key` (see
+[Gateway errors](/docs/reference/errors.html#gateway-errors)). Public storage objects and CORS
+preflight requests are exempt. A local or self-hosted stack does not require the key, and a request
+with no token runs as `anon`. A user's JWT goes in the `Authorization` header:
 
 ```bash
 curl "https://<project-ref>.supatype.com/rest/v1/posts" \
@@ -150,9 +156,10 @@ curl -X POST "https://<project-ref>.supatype.com/rest/v1/rpc/search_posts" \
 
 ## GraphQL API
 
-Supatype auto-generates a GraphQL schema from your database tables. A GraphQL request runs as
-the caller, with the `apikey` and `Authorization` headers it was sent with, so row-level security
-and column grants apply exactly as they do on the REST API.
+The gateway sends `/graphql/v1` to PostgREST's `graphql_public.graphql` function, so pg_graphql
+reflects your tables as collections. A GraphQL request runs as the caller, with the `apikey` and
+`Authorization` headers it was sent with, so row-level security and column grants apply exactly as
+they do on the REST API. A to-many relation is a `<table>Collection` field with its own `edges`.
 
 ### Query
 
@@ -172,9 +179,9 @@ query {
           name
           email
         }
-        tags {
+        commentsCollection {
           edges {
-            node { name }
+            node { body }
           }
         }
       }
@@ -204,7 +211,7 @@ mutation {
 ### GraphQL endpoint
 
 ```bash
-curl -X POST "https://<project-ref>.supatype.com/graphql/v1" \
+curl -X POST "http://localhost:18473/graphql/v1" \
   -H "apikey: <anon-key>" \
   -H "Authorization: Bearer <jwt>" \
   -H "Content-Type: application/json" \
