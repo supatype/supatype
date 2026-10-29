@@ -222,3 +222,25 @@ An insert an access rule refuses returns code `42501`. An update or delete that 
 :::note[Network failures]
 A network failure on a query, `rpc` or function call comes back as `error` with a code such as `NETWORK_TIMEOUT`. Auth and storage calls throw instead, so wrap them in `try` when the network may fail.
 :::
+
+<h2 id="timeouts-and-retries">Timeouts and retries</h2>
+
+Every HTTP request the client makes (tables, `rpc`, `graphql`, `functions`, auth and storage, uploads included) is aborted after `timeout` milliseconds, 30000 by default. Raise it for large uploads on slow links. The realtime socket is not an HTTP request and is not covered.
+
+Only requests that are safe to send twice are retried:
+
+- `GET` and `HEAD` requests: table selects, storage downloads, `auth.getUser()`, and an `rpc` call with `head: true`.
+- The two reads storage sends as `POST`: `list` and `createSignedUrl`.
+- An `rpc`, `graphql` or `functions.invoke` call you pass `idempotent: true`.
+
+Inserts, updates, upserts, deletes, uploads, sign-in and sign-up, and any `rpc`, `graphql` or function call without `idempotent: true` are sent once: a write that failed in flight may already have been applied, and sending it again could apply it twice. A 429 on one of these comes back as the server's own error.
+
+A retried request is retried up to 3 times, after 200 ms, 1 s and 3 s, on a dropped connection or a 5xx. A 429 waits for its `Retry-After` (5 seconds when the header is absent). A timeout and a 4xx are never retried. `retry: false` turns retries off for every request.
+
+```ts
+const { data, error } = await supatype.rpc(
+  "search_posts",
+  { query: "supatype" },
+  { idempotent: true }, // the function only reads, so a retry is harmless
+)
+```
