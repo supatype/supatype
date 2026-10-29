@@ -9,6 +9,7 @@ import { CLACK_CANCEL, isCancel, p } from "./ui/clack.js"
 import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 import { isPortInUse } from "./postgres-ctl.js"
 import { readComposeEnvInt, shellEnvInt, upsertEnvFile } from "./env-file.js"
+import { CLI_DATABASE_URL } from "./database-url-owner.js"
 import { isInteractive } from "./ui/interactive.js"
 import { fatalError } from "./ui/fatal.js"
 import { COMPOSE_DEV_DB_PORT, hostComposeDbUrl } from "./host-database.js"
@@ -434,9 +435,10 @@ export async function ensureDevDbPort(cwd: string, opts: EnsureDevDbPortOptions 
 }
 
 function persistDevDbPort(cwd: string, port: number): number {
-  upsertEnvFile(cwd, {
-    SUPATYPE_DEV_DB_PORT: String(port),
-    DATABASE_URL: hostComposeDbUrl(cwd, port),
-  })
+  upsertEnvFile(
+    cwd,
+    { SUPATYPE_DEV_DB_PORT: String(port), DATABASE_URL: hostComposeDbUrl(cwd, port) },
+    CLI_DATABASE_URL,
+  )
   return port
 }

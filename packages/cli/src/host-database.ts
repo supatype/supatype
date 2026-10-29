@@ -20,6 +20,7 @@ import { runningStackMode, type ComposeRenderMode } from "./compose-render-mode.
 import { composeDbPublish } from "./db-port.js"
 import { readComposeEnvInt, readEnvFile } from "./env-file.js"
 import { devDatabaseUrl, devPostgresPassword } from "./local-secrets.js"
+import { cliWroteDatabaseUrl } from "./database-url-owner.js"
 import {
   externalDatabaseUrl,
   localDSN,
@@ -194,11 +195,8 @@ export function resolveHostDatabaseUrl(
   }
 
   const fileLabel = `DATABASE_URL in ${envPath}`
-  const fileValue = candidate(
-    fileLabel,
-    fromFile["DATABASE_URL"],
-    existsSync(envPath) ? "the file has no DATABASE_URL" : "no .env file",
-  )
+  const fromEnvFile = envFileDatabaseUrl(root, config, options, fromFile["DATABASE_URL"])
+  const fileValue = candidate(fileLabel, fromEnvFile, existsSync(envPath) ? fileUrlAbsence(fromFile) : "no .env file")
   if (fileValue !== undefined) return { dsn: fileValue, source: fileLabel, tried }
 
   if (options.allowDerived === true) {
@@ -213,6 +211,30 @@ export function resolveHostDatabaseUrl(
   })
 
   throw new DsnNotFound(tried)
+}
+
+/**
+ * `.env`'s DATABASE_URL as this project should use it. A URL the CLI wrote belongs to the provider
+ * the project runs, so a native project that may fall back to its own database passes over one
+ * written for Docker (local test N1: `init` writes the Docker URL, and `push` after switching to
+ * native went to it). A hand-written URL is always used as written (database-url-owner.ts).
+ */
+function envFileDatabaseUrl(
+  root: string,
+  config: SupatypeProjectConfig,
+  options: ResolveOptions,
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined || options.allowDerived !== true) return value
+  if (resolveRuntimeProvider(config) !== "native" || !cliWroteDatabaseUrl(root)) return value
+  return value.trim() === derivedDsn(root, config) ? value : undefined
+}
+
+/** Why `.env` gave no DATABASE_URL, when the file exists. */
+function fileUrlAbsence(fromFile: Readonly<Record<string, string>>): string {
+  return fromFile["DATABASE_URL"] === undefined
+    ? "the file has no DATABASE_URL"
+    : "written by the CLI for the Docker stack, and this project runs native"
 }
 
 /**

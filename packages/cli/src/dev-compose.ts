@@ -42,6 +42,7 @@ import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-funct
 import { watchDevSchema } from "./dev-schema-watch.js"
 import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "./db-port.js"
 import { offerToSaveShellDbPort } from "./db-port-offer.js"
+import { CLI_DATABASE_URL } from "./database-url-owner.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
@@ -392,7 +393,8 @@ export function upsertDevComposeEnv(
   applyForThisRun(runOnly)
   upsertEnvFile(cwd, persist, {
     removeManaged: removeImageKeys,
-    managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
+    // DATABASE_URL marked as the CLI's, so it follows the provider the project runs.
+    managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV, ...CLI_DATABASE_URL.managed],
     // A local image left in `.env` after the project stopped asking for one would keep pointing
     // compose at a stale build, and it carries no marker for `removeManaged` to act on.
     remove: [

@@ -357,10 +357,10 @@ async function bindFails(port: number, host: string): Promise<boolean> {
  * port to compose, and compose failed with "Bind for 0.0.0.0:5432 failed: port is already
  * allocated". Connecting is what notices.
  */
-async function connectSucceeds(port: number, timeoutMs = 400): Promise<boolean> {
+export async function connectSucceeds(port: number, timeoutMs = 400, host = "127.0.0.1"): Promise<boolean> {
   const { connect } = await import("node:net")
   return new Promise((resolve) => {
-    const socket = connect({ port, host: "127.0.0.1" })
+    const socket = connect({ port, host })
     const done = (answer: boolean): void => {
       socket.destroy()
       resolve(answer)
