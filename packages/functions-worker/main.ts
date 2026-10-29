@@ -219,11 +219,23 @@ async function loadHandler(route: DiscoveredRoute): Promise<Handler> {
     if (!isHandler(handler)) throw new Error('it has neither a default export nor a named "handler" export')
     return handler
   } catch (err) {
-    const message = `Function "${route.name}" failed to load: ${err instanceof Error ? err.message : String(err)}`
+    const message = `Function "${route.name}" failed to load: ${errorText(err)}`
     log("error", message, { function: route.name })
-    const body = JSON.stringify({ error: "function_load_failed", message })
-    return () => new Response(body, { status: 500, headers: { "Content-Type": "application/json" } })
+    return () => jsonError("function_load_failed", message, 500)
   }
+}
+
+/** What a thrown value says: an Error's message, anything else as a string. */
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** A JSON error answer, `{ error: code, message, ...extra }`, as every route of the worker gives one. */
+function jsonError(code: string, message: string, status: number, extra: Record<string, unknown> = {}): Response {
+  return new Response(JSON.stringify({ error: code, message, ...extra }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  })
 }
 
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
@@ -394,14 +406,8 @@ Deno.serve({
   }
 
   if (!fnName || !handlers[fnName]) {
-    return new Response(
-      JSON.stringify({
-        error: "not_found",
-        message: fnName ? `Function "${fnName}" not found` : "No function specified",
-        available: Object.keys(handlers),
-      }),
-      { status: 404, headers: { "Content-Type": "application/json" } },
-    )
+    const message = fnName ? `Function "${fnName}" not found` : "No function specified"
+    return jsonError("not_found", message, 404, { available: Object.keys(handlers) })
   }
 
   // Nothing goes into the process environment, so nothing has to be taken back out and nothing has
@@ -437,18 +443,13 @@ Deno.serve({
     })
     return response
   } catch (err) {
-    log("error", err instanceof Error ? err.message : "Unknown error", {
+    const message = errorText(err)
+    log("error", message, {
       request_id: context.executionId,
       function: fnName,
       status: 500,
       duration_ms: Number((performance.now() - start).toFixed(1)),
     })
-    return new Response(
-      JSON.stringify({
-        error: "function_error",
-        message: err instanceof Error ? err.message : "Unknown error",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    )
+    return jsonError("function_error", message, 500)
   }
 })
