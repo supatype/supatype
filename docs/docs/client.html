@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -92,6 +92,13 @@
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
     </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
@@ -120,6 +127,20 @@
 })</pre></div>
     <p>Every page in these docs imports the client from this one file. <code>supatype init</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
     <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
+    <p><code>createClient</code> takes these options as well as <code>url</code> and <code>anonKey</code>:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Option</th><th scope="col">What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>serviceRoleKey</code></td><td>Bypasses row-level security. Use it only on a server or in a trusted tool, and never ship it to a browser.</td></tr>
+        <tr><td><code>headers</code></td><td>Headers sent with every request. Pass a function to have it read on each request.</td></tr>
+        <tr><td><code>auth.storageKey</code></td><td>Key the session is saved under. Default <code>"supatype.auth.session"</code>.</td></tr>
+        <tr><td><code>auth.storage</code></td><td>Your own session store with <code>getItem</code>, <code>setItem</code> and <code>removeItem</code>, such as AsyncStorage in React Native.</td></tr>
+        <tr><td><code>auth.cookiePrefix</code></td><td>Prefix of the auth cookie <code>@supatype/ssr</code> reads. Default <code>"st"</code>.</td></tr>
+        <tr><td><code>timeout</code>, <code>retry</code></td><td>See <a href="#timeouts-and-retries">Timeouts and retries</a>.</td></tr>
+        <tr><td><code>initialSession</code></td><td>A session to start with. <code>@supatype/ssr</code> uses it to hand a cookie session to the client.</td></tr>
+        <tr><td><code>queryCache</code></td><td>The in-memory cache for <code>.cache()</code> reads. Default: one shared cache.</td></tr>
+      </tbody>
+    </table></div>
 
     <h2 id="types">Generated types</h2>
     <p><code>supatype dev</code>, <code>supatype push</code> and <code>supatype generate</code> write these files. Do not edit them.</p>
@@ -131,7 +152,7 @@
         <tr><td><code>types/database.ts</code></td><td>The <code>Database</code> type, for code that wants the raw shapes</td></tr>
       </tbody>
     </table></div>
-    <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types.</p>
+    <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: <code>createClient&lt;MyDatabase&gt;({ ... })</code>.</p>
 
     <h2 id="read">Read rows</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -252,7 +273,8 @@ sub.unsubscribe()</pre></div>
 <pre><span class="k">const</span> { data: reply, error: fnError } = <span class="k">await</span> supatype.functions.invoke(<span class="s">"hello"</span>, { body: { name: <span class="s">"Alex"</span> } })
 <span class="k">if</span> (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)</pre></div>
-    <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed.</p>
+    <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed. <code>invoke</code> also takes <code>method</code> (default <code>POST</code>), <code>headers</code> and <code>idempotent</code>.</p>
+    <p><code>supatype.rpc(name, params, options)</code> calls a Postgres function. Its options are <code>count</code>, <code>head</code>, <code>schema</code> for a function outside the default schema, and <code>idempotent</code>.</p>
 
     <h2 id="graphql">GraphQL</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -272,12 +294,29 @@ console.log(reply)</pre></div>
 
     <h2 id="errors">Errors</h2>
     <p>Queries, <code>rpc</code>, <code>functions.invoke</code>, auth and most storage calls return <code>{ data, error }</code>. Check <code>error</code> before using <code>data</code>.</p>
-    <p><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>. Do not test it with <code>instanceof</code>.</p>
+    <p><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>. Do not test it with <code>instanceof</code>. When a field validator refused the write, <code>field</code> names the column, so you can mark that input.</p>
     <p>An insert an access rule refuses returns code <code>42501</code>. An update or delete that the rules hide matches no rows and returns no error. <code>single()</code> with no row returns <code>PGRST116</code>.</p>
     <div class="callout warn">
       <span class="callout-label">NETWORK FAILURES</span>
-      <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code such as <code>NETWORK_TIMEOUT</code>. Auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail.</p>
+      <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code: <code>NETWORK_TIMEOUT</code>, <code>NETWORK_CONNECTION_REFUSED</code>, <code>NETWORK_DNS_FAILURE</code> or <code>NETWORK_ERROR</code>. A read still answered 429 after its last retry has code <code>RATE_LIMITED</code>. Most auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail. Three return the failure as <code>error</code> like a query: <code>storage.listBuckets</code>, <code>storage.createBucket</code> and <code>auth.refreshSession</code>. <code>auth.signOut</code> ignores a network failure and clears the session on this device anyway.</p>
     </div>
+
+    <h2 id="timeouts-and-retries">Timeouts and retries</h2>
+    <p>Every HTTP request the client makes (tables, <code>rpc</code>, <code>graphql</code>, <code>functions</code>, auth and storage, uploads included) is aborted after <code>timeout</code> milliseconds, 30000 by default. Raise it for large uploads on slow links. The realtime socket is not an HTTP request and is not covered.</p>
+    <p>Only requests that are safe to send twice are retried:</p>
+    <ul>
+      <li><code>GET</code> and <code>HEAD</code> requests: table selects, storage downloads, <code>auth.getUser()</code>, and an <code>rpc</code> call with <code>head: true</code>.</li>
+      <li>The two reads storage sends as <code>POST</code>: <code>list</code> and <code>createSignedUrl</code>.</li>
+      <li>An <code>rpc</code>, <code>graphql</code> or <code>functions.invoke</code> call you pass <code>idempotent: true</code>.</li>
+    </ul>
+    <p>Inserts, updates, upserts, deletes, uploads, sign-in and sign-up, and any <code>rpc</code>, <code>graphql</code> or function call without <code>idempotent: true</code> are sent once: a write that failed in flight may already have been applied, and sending it again could apply it twice. A 429 on one of these comes back as the server's own error.</p>
+    <p>A retried request is retried up to 3 times, after 200 ms, 1 s and 3 s, on a dropped connection or a 5xx. A 429 waits for its <code>Retry-After</code> (5 seconds when the header is absent). A timeout and a 4xx are never retried. <code>retry: false</code> turns retries off for every request.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data, error } = <span class="k">await</span> supatype.rpc(
+  <span class="s">"search_posts"</span>,
+  { query: <span class="s">"supatype"</span> },
+  { idempotent: <span class="k">true</span> }, <span class="c">// the function only reads, so a retry is harmless</span>
+)</pre></div>
 
     <nav class="pn" aria-label="More pages">
       <a href="/docs/schema.html"><small>PREVIOUS</small><span>Schema</span></a>
@@ -299,6 +338,7 @@ console.log(reply)</pre></div>
     <a href="#functions">Functions</a>
     <a href="#graphql">GraphQL</a>
     <a href="#errors">Errors</a>
+    <a href="#timeouts-and-retries">Timeouts and retries</a>
   </nav>
 </div>
 

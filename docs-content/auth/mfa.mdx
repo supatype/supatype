@@ -1,0 +1,150 @@
+---
+title: Multi-Factor Authentication (MFA)
+description: Add TOTP-based multi-factor authentication to your Supatype project.
+---
+
+Multi-factor authentication (MFA) adds an extra layer of security by requiring users to provide a second form of verification beyond their password. Supatype supports time-based one-time passwords (TOTP) using authenticator apps.
+
+## How it works
+
+1. The user signs in with email and password.
+2. If MFA is enrolled, the session is issued at `aal1` (Authenticator Assurance Level 1).
+3. The user provides a TOTP code from their authenticator app.
+4. After verification, the session is elevated to `aal2`.
+5. Your access rules can require `aal2` for sensitive operations.
+
+## Enable MFA
+
+MFA is enabled per-user, not globally. TOTP enrollment is on by default, so any signed-in user can
+enroll a TOTP factor. A user who already has a verified factor needs an `aal2` session to enroll
+another, and each factor's `friendlyName` must be unique for that user.
+
+Phone factors (`factorType: "phone"`, a code sent by SMS) are off by default. They need the auth
+server's `SUPATYPE_MFA_PHONE_ENROLL_ENABLED` and `SUPATYPE_MFA_PHONE_VERIFY_ENABLED` set to `true`
+and an SMS provider configured.
+
+## Enrollment flow
+
+### Step 1: Enroll a TOTP factor
+
+```typescript
+const { data, error } = await supatype.auth.mfa.enroll({
+  factorType: "totp",
+  friendlyName: "Authenticator App",
+})
+
+if (data?.totp) {
+  // Display the QR code to the user
+  // data.totp.qrCode is SVG markup for the QR image
+  // data.totp.uri is the otpauth:// URI, and data.totp.secret the key, for manual entry
+  // data.id is the factor ID: keep it for the verification step
+}
+```
+
+### Step 2: Verify the factor
+
+After the user scans the QR code and enters the code from their authenticator app:
+
+```typescript
+const { data, error } = await supatype.auth.mfa.challengeAndVerify({
+  factorId: factorId,
+  code: userEnteredCode, // 6-digit code from the authenticator app
+})
+
+if (error) {
+  console.error("Verification failed:", error.message)
+} else {
+  console.log("MFA enrolled successfully")
+}
+```
+
+## Sign-in with MFA
+
+After a user with MFA signs in with their password, check if they need to provide a second factor:
+
+```typescript
+const { data, error } = await supatype.auth.signInWithPassword({
+  email: "user@example.com",
+  password: "password",
+})
+
+// Check the assurance level
+const { data: aal } = await supatype.auth.mfa.getAuthenticatorAssuranceLevel()
+
+if (aal?.currentLevel === "aal1" && aal.nextLevel === "aal2") {
+  // User has MFA enrolled: prompt for a TOTP code
+  showMfaPrompt()
+}
+```
+
+### Verify during sign-in
+
+```typescript
+// Get the user's enrolled factors
+const { data: factors } = await supatype.auth.mfa.listFactors()
+const factorId = factors?.totp[0]?.id
+
+// Challenge and verify
+if (factorId !== undefined) {
+  const { data, error } = await supatype.auth.mfa.challengeAndVerify({
+    factorId,
+    code: userEnteredCode,
+  })
+  // Session is now aal2
+}
+```
+
+## Requiring MFA in access rules
+
+Use the assurance level in your schema access rules to require MFA for sensitive operations:
+
+```typescript
+import type { Claim, Decimal, Eq, Literal, LoggedIn, Model, UUID } from "@supatype/types"
+
+export type BankTransfer = Model<{
+  id: UUID
+  amount: Decimal<12, 2>
+  recipient: string
+}, {
+  tableName: "bank_transfers"
+  access: {
+    create: Eq<Claim<"aal">, Literal<"aal2">>
+    read: LoggedIn
+  }
+}>
+```
+
+Unlike `is_anonymous`, the `aal` claim is **omitted** from the token when there is no assurance
+level to report. A missing claim is SQL null, so the comparison is null rather than true and the
+policy denies, which is the direction you want for an MFA gate. Nothing to spell out; the absence
+already fails closed.
+
+## Unenroll a factor
+
+```typescript
+const { error } = await supatype.auth.mfa.unenroll({
+  factorId: factorId,
+})
+```
+
+Removing a verified factor requires an `aal2` session.
+
+## List enrolled factors
+
+```typescript
+const { data, error } = await supatype.auth.mfa.listFactors()
+
+data?.totp.forEach((factor) => {
+  console.log(`${factor.friendlyName ?? "TOTP"}: enrolled at ${factor.createdAt}`)
+})
+```
+
+`totp` and `phone` list verified factors only; `all` includes factors still awaiting verification.
+
+## Recovery codes
+
+Supatype does not issue recovery codes. A user who loses their authenticator app cannot complete
+the `aal2` step, so encourage users to enroll a second factor (a user can hold up to 10), and plan
+how an administrator will remove a lost factor for them. With the service role key, the auth admin
+API lists a user's factors at `GET /auth/v1/admin/users/<user id>/factors` and removes one with
+`DELETE /auth/v1/admin/users/<user id>/factors/<factor id>`.

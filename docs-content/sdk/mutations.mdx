@@ -1,0 +1,192 @@
+---
+title: Mutations
+description: Insert, update, upsert, and delete data with the Supatype client SDK.
+---
+
+## Insert
+
+Insert a single row:
+
+```typescript
+const { data, error } = await supatype
+  .from("posts")
+  .insert({
+    title: "My First Post",
+    body: "Hello world!",
+    author_id: userId,
+    status: "draft",
+  })
+  .select()
+```
+
+Insert multiple rows:
+
+```typescript
+const { data, error } = await supatype
+  .from("posts")
+  .insert([
+    { title: "Post 1", body: "Content 1", author_id: userId },
+    { title: "Post 2", body: "Content 2", author_id: userId },
+  ])
+  .select()
+```
+
+Insert, update and upsert always return the written rows in `data` (an array). Chaining `.select()`
+is optional and only narrows which columns come back.
+
+## Update
+
+Update rows matching a filter:
+
+```typescript
+const { data, error } = await supatype
+  .from("posts")
+  .update({ status: "published", published_at: new Date().toISOString() })
+  .eq("id", postId)
+  .select()
+```
+
+Update multiple rows at once:
+
+```typescript
+const { data, error } = await supatype
+  .from("posts")
+  .update({ status: "archived" })
+  .in("id", [postId1, postId2])
+```
+
+## Filtering writes
+
+`update`, `upsert` and `delete` take every filter a select does: `eq`, `neq`, `gt`, `gte`, `lt`,
+`lte`, `like`, `ilike`, `in`, `is`, `not`, `contains`, `containedBy`, `match` and `or` (see
+[Queries](/docs/sdk/queries.html#filters)). A ranged or patterned write needs no read first:
+
+```typescript
+// Archive every draft created before 2025
+const { data, error } = await supatype
+  .from("posts")
+  .update({ status: "archived" })
+  .eq("status", "draft")
+  .lt("created_at", "2025-01-01")
+  .select("id")
+
+// Delete either of two posts, and get back the ids that went
+const { data: deleted } = await supatype
+  .from("posts")
+  .delete()
+  .or(`slug.eq.${first},slug.eq.${second}`)
+  .select("id")
+```
+
+An `or` filter on an update or delete works whether or not the `select` names the filtered column.
+Supatype runs PostgREST 14.18; releases before 14.4 failed such a write with
+`column ... does not exist` and wrote nothing.
+
+Include at least one filter when updating. The `supatype/postgres` image (Docker `supatype dev`,
+self-host and Cloud) loads `safeupdate` for API requests, which refuses an `UPDATE` with no `WHERE`
+clause, so there a filterless `.update()` returns an error instead of changing every row. The native
+runtime (`provider: "native"`) runs a Postgres without it, and there a filterless update changes
+every row.
+
+## Upsert
+
+Insert a row if it does not exist, or update it if it does. The conflict is resolved on the primary
+key, so include it in the payload:
+
+```typescript
+const { data, error } = await supatype
+  .from("profiles")
+  .upsert({
+    id: userId,
+    display_name: "Alice",
+  })
+```
+
+Upsert multiple rows:
+
+```typescript
+const { data, error } = await supatype
+  .from("profiles")
+  .upsert([
+    { id: user1Id, display_name: "Alice" },
+    { id: user2Id, display_name: "Bob" },
+  ])
+```
+
+`upsert` takes only the rows: there is no option to pick a different conflict column or to ignore
+duplicates. A conflicting row is merged, so the columns you provide are updated and the rest keep
+their values.
+
+## Delete
+
+Delete rows matching a filter:
+
+```typescript
+const { error } = await supatype
+  .from("posts")
+  .delete()
+  .eq("id", postId)
+```
+
+Delete multiple rows:
+
+```typescript
+const { error } = await supatype
+  .from("comments")
+  .delete()
+  .eq("post_id", postId)
+```
+
+A plain delete does not return the deleted rows: `data` is an empty array on success. Chain
+`.select()` (or `.select(columns)`) to get them back. Like updates, include at least one filter when
+deleting: on the `supatype/postgres` image the database refuses a `DELETE` with no `WHERE` clause,
+and on the native runtime it deletes every row.
+
+## Returning data
+
+Insert, update and upsert return the affected rows; a delete returns them when you chain
+`.select()`. Chain `.select(columns)` to choose which columns come back, and `.single()` or
+`.maybeSingle()` to get one row instead of an array:
+
+```typescript
+// The inserted row with all columns, as an array
+const { data: rows } = await supatype
+  .from("posts")
+  .insert({ title: "Test", body: "Hello", author_id: userId })
+
+// Only specific columns, as a single object
+const { data: post } = await supatype
+  .from("posts")
+  .insert({ title: "Test", body: "Hello", author_id: userId })
+  .select("id, title, created_at")
+  .single()
+```
+
+## Error handling
+
+All mutations return `{ data, error }`. Always check for errors:
+
+```typescript
+const { data, error } = await supatype
+  .from("posts")
+  .insert({ title: "Test", body: "Hello", author_id: userId })
+  .single()
+
+if (error) {
+  if (error.code === "23505") {
+    // Unique violation
+    console.error("A post with this slug already exists")
+  } else {
+    console.error("Insert failed:", error.message)
+  }
+} else {
+  console.log("Created post:", data?.id)
+}
+```
+
+A database error arrives under its Postgres code with no prefix (`23505`, `23503`, `42501`); codes
+that start with `PGRST` come from PostgREST itself. See [Error Codes](/docs/reference/errors.html).
+
+Writes are never retried. A request that failed in flight may still have been applied, so the
+client sends an insert, update, upsert or delete once and returns what happened, a timeout
+included (see [Timeouts and retries](/docs/client.html#timeouts-and-retries)).

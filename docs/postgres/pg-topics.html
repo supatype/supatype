@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>pg_topics: Kafka topics, with no broker to run | Supatype</title>
+  <meta name="description" content="pg_topics turns a Postgres table into a Kafka topic. Use stock Kafka clients or plain SQL, with no broker cluster to run, back up or patch." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/postgres/pg-topics.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="pg_topics: Kafka topics, with no broker to run | Supatype" />
+  <meta property="og:description" content="pg_topics turns a Postgres table into a Kafka topic. Use stock Kafka clients or plain SQL, with no broker cluster to run, back up or patch." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/postgres/pg-topics.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/pg-topics.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Postgres: pg_topics</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html" aria-current="page">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/postgres.html">Postgres</a> / pg_topics</nav>
+    <h1>pg_topics</h1>
+    <p class="intro">Kafka topics, with no broker to run. pg_topics turns a Postgres table into a Kafka topic. Stock Kafka clients produce and consume on a port the extension opens, and SQL can do the same work inside your own transaction.</p>
+    <div class="callout warn"><span class="callout-label">SOURCE ONLY</span><p>Not in the supatype/postgres image yet. Build it from source in the supatype/postgres repository.</p></div>
+    <h2 id="problem">Why pg_topics</h2>
+    <p>Most teams that want an event log already run Postgres. The usual answer is a second system: a Kafka cluster with its own backups, patching, users and monitoring. Then every write that must also publish an event needs an outbox table to keep the two in step.</p>
+    <p>pg_topics puts the topic in the database. Each topic is a table. A Kafka client logs in with a Postgres role and its password, over TLS, and produces and consumes as it would against a broker. A SQL user calls topic.publish inside the same transaction as the rest of their writes, so the event commits with the data or not at all.</p>
+    <p>History stays queryable with SQL, Postgres grants are the only permission system, and an optional worker keeps a normal table current from a topic so you can read the latest state with SELECT. It suits a team that needs up to tens of thousands of events a second, not hundreds of thousands.</p>
+    <h2 id="example">An example</h2>
+    <div class="cb"><div class="cb-bar"><span>orders.sql</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>-- A topic is a table whose name ends in _q. A band is a Kafka partition.
+SELECT topic.create_topic('shop.orders_q', band_count =&gt; 4);
+SELECT topic.grant_consume('shop.orders_q', 'billing_service');
+
+-- Publish in the same transaction as your own writes. No outbox table.
+BEGIN;
+UPDATE shop.stock SET count = count - 1 WHERE sku = 'A-100';
+SELECT topic.publish('shop.orders_q', '{&quot;order_id&quot;: 2, &quot;sku&quot;: &quot;A-100&quot;}', key =&gt; 'customer-42');
+COMMIT;
+
+-- Read it back in SQL.
+SELECT * FROM topic.fetch('shop.orders_q',
+  band =&gt; topic.band_for('customer-42', 4), from_offset =&gt; 0);
+
+-- Or with a stock Kafka client: SASL_SSL, PLAIN, a Postgres role and its password.
+--   kafka-console-consumer --bootstrap-server kafka.example.internal:9092 \
+--     --consumer.config client.properties --topic shop.orders_q --from-beginning
+
+-- Alert when ok = false.
+SELECT * FROM topic.health();</pre></div>
+    <h2 id="compare">pg_topics or a Kafka cluster</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col"></th><th scope="col">a Kafka cluster</th><th scope="col">pg_topics</th></tr></thead>
+      <tbody>
+        <tr><td>What you run</td><td>A broker cluster beside your database, with its own backups, patching and monitoring.</td><td>Your PostgreSQL 17 server. There is no broker to run, back up or patch.</td></tr>
+        <tr><td>Publish with a database write</td><td>Needs an outbox table, or a second write that can fail on its own.</td><td>topic.publish joins your transaction. A ROLLBACK removes the record.</td></tr>
+        <tr><td>Access control</td><td>Its own users and ACLs, kept apart from the database's.</td><td>Postgres roles and grants. A Kafka client logs in as a role.</td></tr>
+        <tr><td>Reading history</td><td>Consume the log, or copy it into a database first.</td><td>Every topic is a table that SQL can query, on the primary or a standby.</td></tr>
+        <tr><td>Current state per key</td><td>Log compaction.</td><td>No compaction. A sync worker keeps a normal table current instead.</td></tr>
+        <tr><td>Throughput</td><td>Scales out across brokers.</td><td>One primary does all the writes. About 10,000 records a second with low latency, and up to about 44,000 at top speed, on the test machine.</td></tr>
+        <tr><td>Transactions and exactly once</td><td>Supported.</td><td>Not supported. Idempotent producers are supported.</td></tr>
+        <tr><td>Monitoring</td><td>JMX metrics.</td><td>SQL views and topic.health(). There are no JMX metrics.</td></tr>
+      </tbody>
+    </table></div>
+    <h2 id="limits">What it does not do</h2>
+    <ul>
+      <li>PostgreSQL 17 only. Other versions are not built or tested.</li>
+      <li>A record value must be valid JSON, and a key must be UTF-8 text of 40 characters or fewer.</li>
+      <li>A topic name is schema.table_q, and clients must use the full name. A producer aimed at orders gets TOPIC_AUTHORIZATION_FAILED.</li>
+      <li>No Kafka transactions or exactly once. A transactional.id gets TRANSACTIONAL_ID_AUTHORIZATION_FAILED.</li>
+      <li>No log compaction, and no size based retention. Retention is by time only and drops whole partitions.</li>
+      <li>The band count is fixed when you make the topic. There is no CreatePartitions.</li>
+      <li>Only SASL PLAIN over TLS. No SCRAM, OAUTHBEARER, GSSAPI, mutual TLS or plain text.</li>
+      <li>Classic consumer groups only. The KIP-848 protocol, static membership and share groups are not offered.</li>
+      <li>Kafka Connect in distributed mode, Kafka Streams and Schema Registry make compacted topics, so they are expected to fail. They are not tested.</li>
+      <li>One broker and one primary. Publish throughput does not grow with more machines. Standbys give failover and SQL history reads.</li>
+      <li>Fetch returns the value as jsonb prints it, so a signature over the raw bytes does not match.</li>
+      <li>librdkafka clients must set partitioner=murmur2_random, or keyed records land on different bands from a SQL publish.</li>
+      <li>A restart of PostgreSQL makes every consumer group rebalance once.</li>
+    </ul>
+    <h2 id="use-it">Use it on its own</h2>
+    <p>Not in the supatype/postgres image yet. Build it from source in the supatype/postgres repository. Its README covers the install.</p>
+    <div class="cb"><div class="cb-bar"><span>postgresql.conf</span><button type="button" class="cb-copy">Copy</button></div>
+<pre># Add pg_topics to your existing shared_preload_libraries list.
+shared_preload_libraries = 'pg_topics'
+pg_topics.databases = 'app'
+pg_topics.failover_is_fenced = on
+
+# The Kafka port speaks TLS only.
+pg_topics.tls_cert_file = '/etc/pg_topics/server.crt'
+pg_topics.tls_key_file  = '/etc/pg_topics/server.key'
+pg_topics.advertised_host = 'kafka.example.internal'
+
+# Restart PostgreSQL, then in the app database run:
+#   CREATE EXTENSION pg_topics;</pre></div>
+    <h2 id="with-supatype">With Supatype</h2>
+    <p>Every Supatype project runs on this image, with migrations, access rules, an API, a typed client and Studio generated from your TypeScript types. <a href="/docs/#local-dev">Run it locally</a> in a few commands. The full reference is the extension's <a href="https://github.com/supatype/postgres/blob/develop/extensions/pg_topics/README.md">README</a>.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/postgres/pg-keyspace.html"><small>PREVIOUS</small><span>pg_keyspace</span></a>
+      <a href="/postgres/pg-guard.html" class="next"><small>NEXT</small><span>pg_guard</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#problem">Why</a>
+    <a href="#example">An example</a>
+    <a href="#compare">Compared</a>
+    <a href="#limits">Limits</a>
+    <a href="#use-it">Use it on its own</a>
+    <a href="#with-supatype">With Supatype</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js?v=19dd554888"></script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+---
+title: Environments
+description: Manage production, staging, and preview environments for your Supatype Cloud project.
+---
+
+Supatype Cloud supports multiple environments per project, and there are exactly three: `production`, `staging` and `preview`. Each environment is a **full stack of its own** (its own Postgres, PostgREST, storage, realtime, and `supatype-server` with in-process auth), the same shape as a self-hosted compose stack. Edge functions run in production only; staging and preview stacks have no functions worker.
+
+Staging and preview get the Free plan's Postgres resources and are **paused after 24 hours without activity**. The next request to a paused environment starts it again.
+
+## Environment types
+
+### Production
+
+Your live environment. Serves real user traffic, at `https://<project ref>.supatype.com`.
+
+### Staging
+
+A separate stack for testing before production.
+
+- Own database and API host (`https://<project ref>-staging.supatype.com`)
+- Pauses after 24 hours without requests
+
+### Preview
+
+A short-lived stack for pull requests or feature branches.
+
+- Expires 7 days after it is created, and is then deleted; a project has one preview environment at
+  a time
+- Fresh database; its own URL (`https://<project ref>-preview.supatype.com`)
+
+## Creating environments
+
+Every paid plan offers all three environments, so staging and preview are available on Pro and every
+plan above it. The Free plan has production only. Asking for one more environment than the plan
+allows is refused with `403 environment_limit_reached`. Only the organisation's owners and admins
+create environments.
+
+Create one from the Cloud dashboard (Project settings → Environments), from the CLI in a linked project:
+
+```bash
+npx supatype envs create staging
+```
+
+or with the control-plane API:
+
+```http
+POST /api/v1/projects/{slug}/environments
+{ "name": "staging" }
+```
+
+The name must be `staging` or `preview` (any other name is refused with `400`), the project must be
+active (`409 project_not_ready` while it is not), and an environment that already exists answers
+`409 already_exists`. The CLI also records the new environment in the link, so
+`supatype deploy --env staging` can reach it straight away.
+
+## Resetting an environment's database password
+
+Each environment has its own database and its own owning role, so a password reset applies to one
+environment and leaves the others alone. Owners and admins can reset it from the CLI in a linked
+project:
+
+```bash
+npx supatype db reset-password --env staging
+```
+
+`--env` defaults to `production`. The CLI prints the new password. The reset stores the new password
+everywhere the platform holds it (Studio, `supatype push`, the environment's services, which restart
+with it), and ends every database session that logged in with the old one. The REST API keeps serving
+throughout: it connects with its own credential, which the reset does not change.
+
+The same reset is available to the control-plane API:
+
+```http
+POST /api/v1/projects/{slug}/environments/{name}/reset-db-password
+```
+
+It answers `404` for an environment that does not exist.
+
+## Isolation
+
+Auth users, schemas, and secrets are **not** shared with production. Owners and admins delete
+staging or preview from the dashboard, or with the control-plane API:
+
+```http
+DELETE /api/v1/projects/{slug}/environments/{name}
+```
+
+Deleting an environment removes its whole stack and its data; production is untouched and cannot be
+deleted.
+
+Projects from before environments had their own stacks kept staging and preview as schemas
+(`{ref}_stg*`, `{ref}_preview*`) in the production database. Owners and admins remove those leftovers
+with `POST /api/v1/projects/{slug}/environments/{name}/teardown-legacy-schemas`.

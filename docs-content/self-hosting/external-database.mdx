@@ -1,0 +1,293 @@
+---
+title: Using Your Own Postgres
+description: "Point a self-hosted Supatype stack at a database you already run: what it requires, what degrades, and how to check before you deploy."
+---
+
+By default a self-hosted stack runs its own Postgres from the `supatype/postgres` image. You can
+instead point it at a database you already have, such as RDS, Cloud SQL, a Postgres you manage yourself, or
+one shared with an existing application.
+
+Supatype then creates no database, mounts no data volume, and connects everything to the URL you
+give it. Most of the stack works unchanged. Two things differ (realtime may be unavailable, and field
+rules are enforced differently), and this page is mostly about telling you which, before you find out
+in production.
+
+Cloud projects always use their provisioned database. On that path the database is part of what is
+being provided, so the setting below is rejected rather than ignored.
+
+## Configuration
+
+```typescript
+// supatype.config.ts
+export default {
+  project: { name: "acme" },
+  provider: "docker",
+  database: {
+    external: {
+      url: process.env.DATABASE_URL!,
+    },
+  },
+  server: { mode: "standalone", domain: "api.example.com" },
+  app: { mode: "none" },
+}
+```
+
+The presence of `database.external` is the switch. Note what is **absent**: no `database.provider`,
+because there is no backend for Supatype to choose. Setting both is an error rather than a
+precedence rule.
+
+The response cache then runs in a `valkey` container. Its default home, a keyspace inside Postgres,
+needs the bundled `supatype/postgres` image, so `cache: { provider: "pg_keyspace" }` together with
+`database.external` stops the config from loading.
+
+### Where the credentials live
+
+Read the URL from the environment, as above. `supatype.config.ts` is TypeScript, so
+`process.env.DATABASE_URL!` keeps the password out of version control and out of the generated
+compose file. The CLI loads your project's `.env` before importing the config, so a `.env` entry is
+enough.
+
+**Use a host the containers can reach.** `localhost` and `127.0.0.1` mean *that container* to every
+service in the stack, so a database on the Docker host is unreachable from inside it, even though the CLI
+reaches it fine, because the CLI runs on your machine. `supatype self-host compose` refuses a
+loopback URL for this reason. On Docker Desktop use `host.docker.internal`; on Linux the `docker0`
+address (commonly `172.17.0.1`); otherwise the database's own hostname:
+
+```bash
+# .env
+DATABASE_URL=postgres://supatype_owner:...@db.example.com:5432/appdb?sslmode=require
+AUTHENTICATOR_PASSWORD=...
+JWT_SECRET=...
+```
+
+One more inherited requirement: the auth service's migrations grant read access on the `auth` tables
+to a role named **`postgres`**, guarded on that role existing. On a database whose owner is called
+something else the grants are skipped, which is harmless; but if you want a dashboard role to read
+`auth`, create `postgres` or grant it yourself.
+
+Two roles, deliberately. `DATABASE_URL` is the role that owns the schema and runs migrations.
+PostgREST connects as `authenticator` with its own password, so rotating your own credential does not
+take the REST API down, and a request whose JWT names a privileged role cannot get it. `supatype db
+check --fix` creates `authenticator` for you, with a password you supply, because Supatype does not invent
+a credential for a database it does not own.
+
+`supatype self-host compose` refuses to run if `.env`'s `DATABASE_URL` disagrees with what the config
+resolved. That combination would migrate one database while the services serve another, which looks
+like data loss and is not.
+
+## Check before you deploy
+
+```bash
+supatype db check --connection "$DATABASE_URL"
+```
+
+Runs outside a project too, so you can evaluate a database before committing to any config. It
+reports each requirement, what depends on it, and the SQL that fixes it:
+
+```bash
+supatype db check --emit   # print the remediation SQL
+supatype db check --fix --authenticator-password "$AUTHENTICATOR_PASSWORD"
+```
+
+`--fix` applies everything in a **single transaction**, so a failure part-way leaves the database
+exactly as it was rather than half-configured. Remedies that cannot run in a transaction, such as server
+settings like `wal_level`, are reported for you to apply, never attempted.
+
+Severity is about consequence:
+
+| Severity | Meaning | Exit code |
+|---|---|---|
+| `pass` | Requirement met | 0 |
+| `warn` | Worth knowing; nothing is wrong | 0 |
+| `degrade` | A named feature is unavailable; everything else works | 0 |
+| `fail` | The stack will not work | 1 |
+
+## What it checks
+
+| Check | Requirement | If missing |
+|---|---|---|
+| Server version | Postgres 17 or later | **fail**: the masking rewrite depends on planner internals that are not stable across majors |
+| `CREATE` on the database | Four schemas: `storage`, `_platform`, `supatype`, `_supatype` | **fail**: storage exits at boot and the engine cannot record a migration |
+| Target schema | `schema.pg_schema` exists, or can be created | **fail** |
+| API roles | `anon`, `authenticated`, `service_role`, `authenticator` | **fail**: every `GRANT` is guarded with `IF EXISTS`, so a missing role is skipped silently and the symptom is an API that cannot switch roles at all |
+| `authenticator` shape | `NOINHERIT`, `LOGIN`, member of the three API roles only | **fail**: an inheriting `authenticator` holds every privilege of every role it belongs to, before any JWT is considered |
+| `pgcrypto` | Available on the server | **fail**: UUID keys default to `gen_random_uuid()`. Available but not installed is a **warn** that `--fix` installs |
+| `vector`, `postgis` | Available on the server | **warn**: needed only by schemas with `Vector<>` or `Geo`/`GeoPoint` fields |
+| `supatype_mask` | Extension installed | **warn**: field rules will be enforced by generated views instead (see below) |
+| `USAGE` on `_supatype` | `anon`, `authenticated`, `service_role` | **degrade**: field rules and Studio's per-record checks are unavailable, and a push declaring `access.fields` refuses; row-level rules are unaffected |
+| `wal_level` | `logical` | **degrade**: realtime unavailable |
+| Replication slots | One spare | **degrade**: realtime cannot create its slot |
+| Logical decoding | A `wal2json` slot can be created | **degrade**: realtime unavailable |
+| Existing tables | Reports tables Supatype did not create | **warn**: see [sharing a schema](#sharing-a-schema-with-your-own-tables) |
+
+The logical-decoding check creates the slot realtime would create, then drops it. There is no
+catalog to consult, because `wal2json` is a server library, not an extension, so it never appears in
+`pg_available_extensions` and asking the database is the only honest test.
+
+## What a generic Postgres changes
+
+Everything works: REST, GraphQL, auth, storage, edge functions, Studio, row-level access rules,
+migrations, field rules. Two things differ from `supatype/postgres`: realtime needs capabilities a
+provider may not offer, and field rules are enforced by a different mechanism with one behavioural
+difference.
+
+| Feature | Requires | On a provider without it |
+|---|---|---|
+| **Field-level access rules** (`access.fields`) | Nothing in particular: the `supatype_mask` extension where it is available, generated `api` views otherwise | Enforced by views, with one difference: an aggregate over a masked column returns the sum of what the caller may read instead of erroring |
+| **Realtime subscriptions** | `wal_level = logical`, a spare replication slot, the `wal2json` output plugin, and a role with `REPLICATION` | Realtime starts, reports the reason, and serves nothing; the rest of the stack is unaffected |
+
+`supatype_mask` requires `shared_preload_libraries`, which is a server-level setting and a restart,
+not something SQL can add. So on a managed provider your field rules are enforced by generated views
+instead. You write the same rules; see
+[how they are enforced](/docs/schema/field-access.html#how-they-are-enforced) for the one behavioural
+difference, which concerns aggregates and is unreachable through the API.
+
+**What changes under the view tier.** PostgREST is pointed at an `api` schema rather than your
+managed one, every model gets a view there, and the API roles (`anon`, `authenticated`) hold their
+privileges on those views rather than on the tables behind them. That last part is what makes the
+mask a boundary rather than a setting: a client picks its schema per request with `Accept-Profile`,
+so a table still reachable directly would be readable unmasked. `service_role` keeps its direct
+access, as it does everywhere: it is the escape hatch.
+
+Row-level [access rules](/docs/schema/access-rules.html) are plain Postgres RLS and work everywhere,
+unchanged by either tier.
+
+**One privilege both tiers need.** The API roles need `USAGE` on the `_supatype` schema, which
+holds the JWT readers the generated field predicates call, because those predicates are called from
+the query rather than from a policy. A push grants it
+where it can, and refuses rather than half-applying where it cannot, naming the schema's owner. See
+[one privilege both tiers need](/docs/schema/field-access.html#one-privilege-both-tiers-need). `supatype
+db check` reports it before you push.
+
+**Extensions go in the `extensions` schema.** A push creates the extensions a schema needs
+(`pgcrypto`, and `vector`, `postgis` or `unaccent` when the schema uses them) with
+`CREATE EXTENSION ... WITH SCHEMA extensions`, as it does on `supatype/postgres`, creating the
+`extensions` schema first when it is missing and granting the API roles `USAGE` on it. Their
+functions are then not served as `/rest/v1/rpc/*` endpoints, and PostgREST reaches their types and
+operators through its extra search path, `public,extensions` (`api,extensions` under the view tier),
+which the generated stack sets. If one of them is already installed in `public` (some providers
+install `pgcrypto` there), the first push moves it with `ALTER EXTENSION ... SET SCHEMA extensions`
+and asks first; Postgres allows that only to the extension's owner. PostGIS cannot be moved that
+way and stays where it is; see [where the extensions live](/docs/schema/fields.html#where-the-extensions-live).
+
+### Realtime on managed Postgres
+
+Support varies by provider and changes over time, so check rather than assume, and check with
+`supatype db check`, against the database you actually intend to use, rather than against docs:
+
+- **`wal_level`** is usually a parameter-group or flag change plus a restart on managed Postgres, not
+  something you can set over SQL.
+- **`wal2json`** is a server library that has to be installed or offered. Some managed providers ship
+  it, some offer only `pgoutput`, which Supatype does not yet decode.
+- **`REPLICATION`** is sometimes grantable through a provider-specific role, and sometimes withheld
+  entirely.
+
+Whichever it is, realtime does not crash-loop. It starts, logs the reason, and reports it on its
+readiness endpoint, `/health/ready` on port 4000 inside the stack (the port is not published to the
+host), which answers `503` with:
+
+```json
+{"status":"unsupported","reason":"the wal2json output plugin is not installed"}
+```
+
+The other reasons are `wal_level is not logical` and
+`the database role may not use replication slots`.
+
+Liveness stays healthy, because the process is fine; the feature is not available. Once you know,
+turn the service off so you are not running a container whose only job is to report that:
+
+```typescript
+database: {
+  external: {
+    url: process.env.DATABASE_URL!,
+    realtime: false,
+  },
+},
+```
+
+That omits the service, its dependency edge, and the URL the gateway would route subscriptions to.
+
+## Sharing a schema with your own tables
+
+Supatype will not change a table it did not create. Tables it creates carry an ownership marker in
+their `COMMENT`, and everything intrusive is gated on it.
+
+**A table your schema does not mention** is left completely alone: never dropped, never renamed
+into one of your models (renames are only ever applied when you declare them, and quietly taking over
+someone else's table while reporting success is worse than a failed migration). `supatype doctor`
+lists them so the silence is visible.
+
+**A table your schema *does* declare, which already exists without the marker, stops the push:**
+
+```
+The engine refused the schema push: these tables exist and Supatype did not create them: post. Nothing was applied.
+```
+
+In a terminal, `supatype push` then offers to adopt them, shows what adoption takes, and pushes
+again once you agree. Off a terminal, or with `--yes`, it prints the `supatype adopt` step and
+stops.
+
+Refusing is the only honest outcome. Applying the rest and skipping that table would leave its
+access rules unenforced while PostgREST still served it. Any table in an exposed schema that the
+request role can already read gets an endpoint, so a table you had granted to `PUBLIC` would be
+readable with none of your rules applied. And altering it instead is not ours to do: enabling
+row-level security on a table another application reads can stop it seeing its own rows.
+
+`--yes` does not bypass this. It accepts data loss you understand, not ownership of someone else's
+table.
+
+To bring a table deliberately under management:
+
+```bash
+supatype adopt
+```
+
+It stamps the marker on tables matching your schema, after showing you what it will take, and only on
+tables your schema declares, never on everything it finds. After that the same push applies
+everything: policies, privileges, field labels.
+
+One consequence worth expecting: once adopted, the table's columns are Supatype's to manage, so a
+model that disagrees with the existing column types will try to convert them. A model declaring
+`id: UUID` against an existing `id serial` cannot be converted at all, and the push fails without
+applying anything. Adopt tables whose shape already matches, or change the model to match the table.
+
+### Or keep to your own schema
+
+You can give Supatype a schema of its own instead of sharing `public`:
+
+```typescript
+schema: {
+  pg_schema: "supatype_app",
+},
+```
+
+Everything follows: the tables, their policies, grants, affordance functions, security labels and
+triggers, and the schemas PostgREST exposes. To control that last list yourself (to stop exposing
+Studio's views over REST, say):
+
+```typescript
+schema: {
+  pg_schema: "supatype_app",
+  api_schemas: ["supatype_app", "graphql_public", "auth"],
+},
+```
+
+The first entry is what PostgREST serves as the default profile, so your managed schema must lead.
+
+## A database that is not there yet
+
+Storage, realtime and the server wait for Postgres rather than exiting: connection failures are
+retried with backoff. A wrong password or a missing database still fails immediately: retrying that
+forever would bury the message that says what to fix. The one exception is the migrations the server
+runs at start-up, which exit when the database is not ready yet, so the generated file restarts the
+server up to five times (`restart: on-failure:5`) before leaving it stopped.
+
+This also covers a database that restarts *under* a running stack, which the previous
+healthcheck-based approach never did. Realtime reconnects and resumes decoding; storage and the
+server reconnect on their next use.
+
+## Backups are yours
+
+Supatype does not back up a database it does not manage, and `supatype self-host` will not restore
+one. Point your provider's snapshots or your own `pg_dump` schedule at it, and test a restore before
+you need it.

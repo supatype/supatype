@@ -1,0 +1,137 @@
+---
+title: Image Transforms
+description: Resize, convert, and optimize images on the fly with Supatype Storage transforms.
+---
+
+Supatype Storage can transform images on the fly when serving them. Transforms are applied via URL parameters or the SDK, with no pre-processing required.
+
+## Using transforms with the SDK
+
+```typescript
+const { data } = supatype.storage
+  .from("avatars")
+  .getPublicUrl("user-123/photo.png", {
+    transform: {
+      width: 200,
+      height: 200,
+      resize: "cover",
+    },
+  })
+
+// data.publicUrl includes transform parameters
+```
+
+`download(path, { transform })` takes the same options for objects in private buckets.
+
+## Transform options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `width` | `number` | Target width in pixels (1 to 4096) |
+| `height` | `number` | Target height in pixels (1 to 4096) |
+| `resize` | `"cover" \| "contain" \| "fill" \| "inside" \| "outside"` | Resize mode (default: `cover`) |
+| `quality` | `number` (1-100) | Output quality (default: 80) |
+| `format` | `"webp" \| "avif" \| "jpeg" \| "png"` | Output format (default: `webp`) |
+
+A transform runs when at least one of `width`, `height`, `format` or `quality` is set; `resize` on
+its own changes nothing. Once a transform runs the output is re-encoded, as WebP unless you ask for
+another `format`. Images are never enlarged: asking for a size bigger than the original returns it
+at its own size.
+
+### Resize modes
+
+| Mode | Behaviour |
+|------|----------|
+| `cover` | Crop to fill the target dimensions, maintaining aspect ratio |
+| `contain` | Fit within the target dimensions, maintaining aspect ratio (may add padding) |
+| `fill` | Stretch to fill the target dimensions exactly |
+| `inside` | Fit within the target dimensions, maintaining aspect ratio, with no cropping or padding |
+| `outside` | Cover at least the target dimensions, maintaining aspect ratio, with no cropping |
+
+## Examples
+
+### Thumbnail
+
+```typescript
+const { data } = supatype.storage
+  .from("avatars")
+  .getPublicUrl("photo.png", {
+    transform: { width: 100, height: 100, resize: "cover" },
+  })
+```
+
+### WebP conversion
+
+```typescript
+const { data } = supatype.storage
+  .from("images")
+  .getPublicUrl("hero.png", {
+    transform: { format: "webp", quality: 85 },
+  })
+```
+
+### Responsive images
+
+Generate multiple sizes for responsive layouts:
+
+```typescript
+const sizes = [320, 640, 1024, 1920]
+
+const srcSet = sizes
+  .map((w) => {
+    const { data } = supatype.storage
+      .from("images")
+      .getPublicUrl("hero.png", {
+        transform: { width: w, format: "webp" },
+      })
+    return `${data.publicUrl} ${w}w`
+  })
+  .join(", ")
+```
+
+### Signed URL with transforms
+
+A signed URL's token covers the bucket, the path and an expiry, not the transform, so add the
+transform parameters to the URL it returns:
+
+```typescript
+const { data } = await supatype.storage
+  .from("private-images")
+  .createSignedUrl("photo.png", 3600)
+
+const thumbnailUrl = data
+  ? `${data.signedUrl}&width=400&height=300&resize=cover&format=webp`
+  : null
+```
+
+## URL-based transforms
+
+You can also apply transforms directly via URL parameters on the object URL:
+
+```
+<API URL>/storage/v1/object/public/avatars/photo.png?width=200&height=200&resize=cover
+```
+
+The same parameters work on `/storage/v1/object/authenticated/...` (with the caller's token) and on
+signed URLs. Out-of-range `width`, `height` and `quality` values are clamped, and an unknown
+`format` or `resize` value is ignored.
+
+## Caching
+
+A transformed image is served with `Cache-Control: public, max-age=3600` by default (the storage
+service's `TRANSFORM_CACHE_TTL`). The parameters are part of the URL, so each size is cached
+independently by any cache in front of the API.
+
+## Supported input formats
+
+Transforms apply to objects stored with an `image/*` content type, decoded by the image library
+(sharp): PNG, JPEG, WebP, AVIF, GIF, TIFF and SVG. An object of any other content type is served
+unchanged, and the parameters are ignored. An `image/*` object that sharp cannot decode (an empty
+file, or a format it does not read) answers `400` with "The source image is invalid or
+unsupported for rendering".
+
+## Limits
+
+| Resource | Limit |
+|----------|-------|
+| Max output dimensions | 4096 x 4096 pixels (larger values are clamped) |

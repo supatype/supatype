@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -91,6 +91,13 @@
       <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
@@ -179,8 +186,9 @@
 
 <h3>useMutation and useFunction</h3>
 <p><code>useMutation(table, operation)</code> takes <code>"insert"</code>, <code>"update"</code>, <code>"delete"</code> or <code>"upsert"</code> and returns <code>mutate</code>, <code>loading</code> and <code>error</code>. <code>mutate(data, { filter, publish })</code> takes the rows to write; <code>filter</code> picks the rows for an update or delete, and <code>publish: true</code> publishes the drafts an update saves. It does not ask for the written rows back, so call <code>refetch</code> on your query afterwards.</p>
+<p><code>mutate</code> resolves with <code>{ data, error, count }</code>. There are no <code>onMutate</code>, <code>onSuccess</code> or <code>onError</code> callbacks, so an optimistic update and its rollback are yours to write.</p>
 <p><code>useFunction(name)</code> returns <code>invoke</code>, <code>data</code>, <code>error</code> and <code>loading</code>. <code>invoke(body, { method, headers })</code> calls <code>supatype.functions.invoke</code>. See <a href="/docs/functions.html#call">Functions: Call a function</a>.</p>
-<p><code>useAuth()</code> returns the user, the session and the sign-in methods. See <a href="/docs/auth.html">Auth</a>.</p>
+<p><code>useAuth()</code> returns <code>user</code>, <code>session</code>, <code>loading</code>, <code>error</code>, <code>signUp</code>, <code>signIn</code> (email and password), <code>signInWithOAuth</code>, <code>signInWithOtp</code> and <code>signOut</code>, and re-renders when the session changes. For anything else, such as MFA or a password reset, call <code>useSupatype().auth</code>. See <a href="/docs/auth.html">Auth</a>.</p>
 
 <h3>Live preview</h3>
 <p>Studio can show your app in a pane beside the edit form and stream the unsaved values into it as the editor types. Tell Studio where a record's page lives in <code>supatype.config.ts</code>:</p>
@@ -193,8 +201,9 @@
 <p>On that page, <code>useLivePreview</code> returns the live values while Studio is sending them and your own data otherwise:</p>
 <div class="cb"><div class="cb-bar"><span>src/PostPreview.tsx</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { useLivePreview, <span class="t">RichText</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"@supatype/client"</span>
 
-<span class="k">export</span> <span class="k">function</span> <span class="t">PostPreview</span>({ post }: { post: <span class="t">Post</span> }) {
+<span class="k">export</span> <span class="k">function</span> <span class="t">PostPreview</span>({ post }: { post: <span class="t">TableRow</span>&lt;<span class="s">"post"</span>&gt; }) {
   <span class="k">const</span> { data, isPreview } = useLivePreview({ initialData: post })
   <span class="k">return</span> (
     &lt;article&gt;

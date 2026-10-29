@@ -1107,6 +1107,39 @@ importers:
         specifier: ^3.5.0
         version: 3.5.30(typescript@5.9.3)
 
+  tests/docs-code-blocks:
+    devDependencies:
+      '@supatype/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@supatype/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@supatype/react':
+        specifier: workspace:*
+        version: link:../../packages/react
+      '@supatype/react-auth':
+        specifier: workspace:*
+        version: link:../../packages/react-auth
+      '@supatype/react-native':
+        specifier: workspace:*
+        version: link:../../packages/react-native
+      '@supatype/react-native-auth':
+        specifier: workspace:*
+        version: link:../../packages/react-native-auth
+      '@supatype/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      '@types/node':
+        specifier: ^22
+        version: 22.19.13
+      '@types/react':
+        specifier: ^18
+        version: 18.3.28
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   tests/e2e:
     devDependencies:
       '@playwright/test':

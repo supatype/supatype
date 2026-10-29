@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -92,6 +92,13 @@
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
     </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
@@ -115,21 +122,29 @@
     <div class="step"><span class="step-num">1</span><h3>Install the CLI</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> npm install -g @supatype/cli</pre></div>
-    <p>The first run downloads the binaries it needs into <code>~/.supatype/cache/</code>.</p>
+    <p>The CLI needs Node.js 22 or later. For a machine without Node, the <a href="/docs/cli.html#usage">CLI</a> page has a standalone binary. The first run downloads the binaries it needs into <code>~/.supatype/cache/</code>.</p>
 
     <div class="step"><span class="step-num">2</span><h3>Create a project</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> mkdir my-app &amp;&amp; cd my-app
 <span class="pr">$</span> supatype init</pre></div>
-    <p><code>supatype init</code> writes <code>package.json</code>, <code>supatype.config.ts</code>, a starter schema and <code>public/</code>, installs dependencies with your package manager and writes the API keys to <code>.env</code>. Run <code>npm install</code> or <code>supatype keys --write</code> yourself only if you passed <code>--no-install</code> or <code>--no-keys</code>.</p>
+    <p><code>supatype init</code> writes <code>package.json</code>, <code>supatype.config.ts</code>, a starter schema and <code>public/</code>, installs dependencies with your package manager and writes the API keys to <code>.env</code>. Run <code>npm install</code> or <code>supatype keys --write</code> yourself only if you passed <code>--no-install</code> or <code>--no-keys</code>. Pass <code>-y</code> to take every default without being asked.</p>
+    <p>It also writes <code>seed.ts</code> and an empty <code>seeds/</code> for <a href="/docs/seeding.html">seeding</a>. <code>package.json</code> lists <code>@supatype/cli</code> and <code>@supatype/types</code> as dev dependencies, because they run only at build time. The passwords and the JWT secret in <code>.env</code> are random for each project.</p>
 
     <div class="step"><span class="step-num">3</span><h3>Start the stack</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> supatype dev</pre></div>
     <p><code>supatype dev</code> applies your schema when it starts, then watches it: each save migrates the database and regenerates the typed client. It keeps running, so use a second terminal for other commands. <code>supatype push</code> applies the schema to another database, such as a server you deploy to.</p>
     <p>It stops with its stack when the process that started it exits, as it does on Ctrl+C: a script that is killed, or a cancelled CI job, leaves nothing running. To leave a stack running with nothing attached, use <code>supatype self-host compose up -d</code>.</p>
+    <p>A script that starts <code>dev</code> in the background should <code>exec</code> it, so the process ID the script holds is <code>dev</code> itself and stopping it stops the stack cleanly:</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>(cd my-app &amp;&amp; <span class="k">exec</span> npx supatype dev) &amp;
+DEV_PID=$!
+<span class="c"># ... run your tests ...</span>
+kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></pre></div>
     <p>If <code>dev</code> itself is killed (its process ended, or its window closed before it finished stopping), the stack can be left running. The next <code>supatype dev</code> finds it and offers to stop it, and <code>supatype self-host compose down</code> stops it now.</p>
     <p>The gateway serves REST at <code>/rest/v1/</code>, auth at <code>/auth/v1/</code>, storage and realtime. With Docker it listens on <code>http://localhost:&lt;gateway-port&gt;</code>: init picks a free port per project and writes the URL to <code>.env</code> as <code>API_EXTERNAL_URL</code> (the port alone is <code>SUPATYPE_KONG_PORT</code>). With Native it listens on <code>http://localhost:54321</code>.</p>
+    <p>For direct SQL, Docker publishes Postgres on <code>127.0.0.1</code> at <code>SUPATYPE_DEV_DB_PORT</code> (54329 unless set), and <code>dev</code> points <code>DATABASE_URL</code> in <code>.env</code> at it. Native Postgres listens on port 5432 and checks passwords: connect as <code>postgres</code> with <code>POSTGRES_PASSWORD</code> from <code>.env</code>, or run <code>supatype pg psql</code>, which passes it for you.</p>
 
     <div class="step"><span class="step-num">4</span><h3>Sign in to Studio</h3></div>
     <p>When the stack is up, <code>supatype dev</code> prints a <strong>Services running</strong> panel with each address. With Docker, Studio is at <code>/studio/</code> on the gateway: <code>http://localhost:&lt;gateway-port&gt;/studio/</code>.</p>
@@ -157,9 +172,10 @@
   access: { read: <span class="t">Public</span>; create: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;; update: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt;; delete: <span class="t">Owner</span>&lt;<span class="s">"author_id"</span>&gt; }
 }&gt;</pre></div>
     <p>Merge the new names into the file's existing <code>import type</code> line. The table is <code>post</code>. See <a href="/docs/schema.html">Schema</a> for field types, relations and access rules.</p>
+    <p>A change that would lose data, such as dropping a column, is never applied silently: <code>dev</code> asks first. To rename a column or table rather than drop it, see <a href="/docs/schema.html#renames">Renames</a>.</p>
 
     <div class="step"><span class="step-num">7</span><h3>Query it</h3></div>
-    <p>Create the client once, from the generated file, with the URL and key <code>init</code> wrote to <code>.env</code>:</p>
+    <p>Install the client first with <code>npm install @supatype/client</code>: the generated file builds on it. Then create the client once, from the generated file, with the URL and key <code>init</code> wrote to <code>.env</code>:</p>
     <div class="cb"><div class="cb-bar"><span>src/supatype.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
@@ -216,6 +232,7 @@
       <p>Only the gateway is published on every interface, at <code>SUPATYPE_KONG_PORT</code>, or on ports 80 and 443 once HTTPS is on. Postgres (<code>SUPATYPE_DB_PORT</code>, default 5432), the API server (<code>SUPATYPE_SERVER_PORT</code>, default 9999) and SeaweedFS (<code>SUPATYPE_SEAWEEDFS_PORT</code>, default 8333) bind <code>127.0.0.1</code>, so they are reachable from the server itself and nowhere else. To reach them from other machines, set <code>SUPATYPE_PUBLISH_ADDRESS=0.0.0.0</code> (or one interface's address) in <code>.env</code> and run <code>supatype self-host compose up -d</code>. Put a firewall in front first. <code>supatype init</code> lists these variables, commented out, in <code>.env</code>.</p>
     </div>
     <p>Images come from Docker Hub at <code>:latest</code>: <code>supatype/postgres:17-latest</code>, <code>supatype/server</code> (which includes realtime), <code>supatype/storage</code>, <code>supatype/studio</code>, <code>supatype/schema-engine</code>, <code>supatype/functions-worker</code> and <code>supatype/control-plane</code>. Pin versions with <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> if you need to.</p>
+    <p>To run on a Postgres you already have, such as RDS or Cloud SQL, set <code>database: { external: { url: process.env.DATABASE_URL! } }</code> in <code>supatype.config.ts</code>. The stack then starts no <code>db</code> service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in <code>supatype/postgres</code>. Realtime needs <code>wal_level = logical</code>, a free replication slot, the <code>wal2json</code> plugin and a role with <code>REPLICATION</code>. <code>supatype db check --connection "$DATABASE_URL"</code> reports what a database lacks, and <code>--emit</code> prints the SQL that fixes what it can.</p>
     <p>Every function is handed two addresses. <code>ctx.url</code> is for calling the API from inside the function. Under Docker it is <code>http://kong:8000</code>, which no browser can open. <code>ctx.publicUrl</code> is the project's public address, <code>API_EXTERNAL_URL</code> in <code>.env</code>, for links you give to people.</p>
     <p>Functions get no database connection by default. Setting <code>SUPATYPE_FUNCTIONS_DB_URL</code> in <code>.env</code> hands every function that URL as <code>ctx.dbUrl</code>: a raw Postgres connection as whichever role it names, which bypasses row rules and field masking. Point it at a least-privilege role granted only what your functions need, never the admin URL, for example <code>postgresql://functions_reader:&lt;password&gt;@db:5432/my-app</code>.</p>
 
@@ -244,6 +261,7 @@
       <tbody>
         <tr><td><code>supatype.config.ts</code></td><td>Schema path, app routing, version pins</td><td>Yes</td></tr>
         <tr><td><code>supatype.local.config.ts</code></td><td>Overrides for your machine, such as the dev proxy</td><td>No</td></tr>
+        <tr><td><code>supatype/renames.json</code></td><td>Renames recorded with <code>supatype rename</code></td><td>Yes</td></tr>
         <tr><td><code>.env</code></td><td><code>DATABASE_URL</code>, JWT keys, <code>API_EXTERNAL_URL</code></td><td>No</td></tr>
       </tbody>
     </table></div>

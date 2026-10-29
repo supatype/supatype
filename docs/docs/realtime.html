@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -92,6 +92,13 @@
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
     </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
@@ -115,23 +122,23 @@
       <thead><tr><th scope="col">Event</th><th scope="col"><code>new</code></th><th scope="col"><code>old</code></th></tr></thead>
       <tbody>
         <tr><td><code>INSERT</code></td><td>the whole row</td><td><code>null</code></td></tr>
-        <tr><td><code>UPDATE</code></td><td>the whole row</td><td>the primary key only</td></tr>
-        <tr><td><code>DELETE</code></td><td><code>null</code></td><td>the primary key only</td></tr>
+        <tr><td><code>UPDATE</code></td><td>the whole row</td><td>the whole row as it was</td></tr>
+        <tr><td><code>DELETE</code></td><td><code>null</code></td><td>the whole row as it was</td></tr>
       </tbody>
     </table></div>
-    <p><code>old</code> is typed as a row, but it holds only the key columns. Use it to find the row you already have, not to read the previous values.</p>
+    <p>Every table Supatype manages has <code>REPLICA IDENTITY FULL</code>, so the write-ahead log carries the whole previous row. A table set up outside Supatype keeps Postgres's default identity, and its <code>old</code> can hold only the key.</p>
     <p>Values arrive with the same types as a REST read. A <code>BigInt</code> column becomes a native <code>bigint</code>, and <code>Decimal</code> and <code>Money</code> stay exact strings.</p>
 
     <h2 id="access">Read access</h2>
     <p>Realtime follows the same <a href="/docs/schema.html#access">access rules</a> as the REST API. For each change and each subscriber, the service checks with the subscriber's token, inside Postgres:</p>
     <ul>
-      <li>Insert and update: the row is selected again, by its <code>id</code> column, as the subscriber. If the <code>read</code> rule hides it, the change is not sent. The check sees the row as it is at that moment, so a row deleted straight after it was inserted is not sent either.</li>
+      <li>Insert and update: the row is selected again, by its primary key, as the subscriber. If the <code>read</code> rule hides it, the change is not sent. The check sees the row as it is at that moment, so a row deleted straight after it was inserted is not sent either. With the Native provider or your own Postgres, the <code>read</code> rule is applied to the row in the change instead.</li>
+      <li>Delete: the <code>read</code> rule is applied to the deleted row, as the subscriber, so a subscriber only hears of deletes of rows they could read. A delete on a table without <code>REPLICA IDENTITY FULL</code>, or without a Supatype <code>read</code> rule, is not sent.</li>
       <li>Field rules: a column the subscriber may not read under a <a href="/docs/schema.html#field-rules">field rule</a> arrives as <code>null</code>, in both <code>new</code> and <code>old</code>. A filter on such a column is matched against the masked value, so it cannot be used to test a hidden value.</li>
       <li>Service role: sees every change unmasked.</li>
       <li>No token: receives no changes.</li>
     </ul>
-    <div class="callout warn"><span class="callout-label">WARNING</span><p>Deletes are checked more loosely. The row is gone, so there is nothing to select. A subscriber receives every delete on a table their role may read at all, even deletes of rows their <code>read</code> rule would hide. Field masking still applies, and <code>old</code> holds only the primary key, so what this reveals is the key of each deleted row. If that matters, do not use a guessable key, or do not subscribe untrusted users to deletes on that table.</p></div>
-    <p>The row check looks for a column called <code>id</code>. On a table without one it uses the first column of the row.</p>
+    <p>The row check uses the table's primary key. Inserts and updates on a table without one are not sent.</p>
 
     <h2 id="subscribe">Subscribe</h2>
     <p><code>from(table).subscribe()</code> is the shortest path, shown on the <a href="/docs/client.html#realtime">client page</a>. The callback's rows are typed from your schema.</p>
@@ -160,9 +167,10 @@ sub.unsubscribe()</pre></div>
     <h3>Filters</h3>
     <p>A filter is checked on the server, so changes that do not match never reach the client. Several conditions joined with commas must all match. The operators are <code>eq</code>, <code>neq</code>, <code>gt</code>, <code>gte</code>, <code>lt</code> and <code>lte</code>.</p>
     <ul>
-      <li>Values are compared as text. <code>eq</code> and <code>neq</code> behave as you expect. <code>gt</code> and <code>lt</code> on numbers do not: <code>"10"</code> sorts before <code>"9"</code>.</li>
+      <li>Values are compared by the column's type, as Postgres would compare them, so <code>salary=gt.100000</code> compares numbers. A column of a type the service does not recognise is compared as text.</li>
+      <li>A null value, or one that cannot be read as the column's type, matches nothing.</li>
       <li>An operator not in that list is ignored, and the filter then matches every change.</li>
-      <li>A delete is matched on <code>old</code>, which holds only the primary key. A filter on any other column matches no deletes.</li>
+      <li>A delete is matched on <code>old</code>, the row as it was.</li>
     </ul>
     <h3>Channels</h3>
     <p><code>supatype.realtime.channel(name)</code> is the lower-level form, for when you want the channel's status or want to mix changes with <a href="#broadcast">broadcast and presence</a>:</p>
@@ -173,7 +181,7 @@ sub.unsubscribe()</pre></div>
     showComment(change.new)
   })
   .subscribe((status) =&gt; console.log(status))</pre></div>
-    <p>Status is <code>SUBSCRIBING</code>, <code>SUBSCRIBED</code>, <code>CHANNEL_ERROR</code>, <code>TIMED_OUT</code> or <code>CLOSED</code>. Pass <code>table</code> explicitly. Without it the channel name is read as <code>schema:table</code>.</p>
+    <p>Status is <code>SUBSCRIBING</code>, <code>SUBSCRIBED</code>, <code>CHANNEL_ERROR</code>, <code>TIMED_OUT</code> or <code>CLOSED</code>. <code>CHANNEL_ERROR</code> means the server refused a request on the socket, such as a join. <code>TIMED_OUT</code> means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass <code>table</code> explicitly. Without it the channel name is read as <code>schema:table</code>.</p>
     <p>A channel carries one table subscription. If you call <code>.on("postgres_changes", ...)</code> more than once on a channel, the first call's table, event and filter are what the server registers. Use one channel per table.</p>
 
     <h2 id="broadcast">Broadcast and presence</h2>
@@ -190,7 +198,8 @@ sub.unsubscribe()</pre></div>
 room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y: <span class="s">48</span> })</pre></div>
     <ul>
       <li>Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.</li>
-      <li>A presence entry is the payload you pass to <code>track</code>, plus <code>user_id</code> from the token.</li>
+      <li>A presence entry is the payload you pass to <code>track</code>, plus <code>user_id</code> from the token. The server writes <code>user_id</code> last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the <code>user_id</code> <code>anonymous</code>.</li>
+      <li>Calling <code>track</code> again announces the new payload as a fresh join, so keep your own map of members keyed by <code>user_id</code>.</li>
       <li>A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.</li>
       <li>A client leaves on <code>untrack()</code>, on unsubscribe and when its socket closes.</li>
       <li>Messages sent while the socket is not open are dropped, so send after <code>SUBSCRIBED</code>.</li>
@@ -200,22 +209,26 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
     <h2 id="hooks">Framework hooks</h2>
     <p><code>@supatype/react</code> exports <code>useSubscription</code>. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing.</p>
     <div class="cb"><div class="cb-bar"><span>tsx</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="k">import</span> { useSubscription } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<pre><span class="k">import</span> { useState } <span class="k">from</span> <span class="s">"react"</span>
+<span class="k">import</span> { useSubscription } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"@supatype/client"</span>
 
 <span class="k">function</span> <span class="t">Comments</span>({ postId }: { postId: string }) {
-  <span class="k">const</span> { status } = useSubscription(<span class="s">`comments:${postId}`</span>, {
+  <span class="k">const</span> [comments, setComments] = useState&lt;<span class="t">TableRow</span>&lt;<span class="s">"comment"</span>&gt;[]&gt;([])
+  <span class="k">const</span> { status } = useSubscription&lt;<span class="t">TableRow</span>&lt;<span class="s">"comment"</span>&gt;&gt;(<span class="s">`comments:${postId}`</span>, {
     table: <span class="s">"comment"</span>,
     event: <span class="s">"INSERT"</span>,
     filter: <span class="s">`post_id=eq.${postId}`</span>,
-    callback: (change) =&gt; addComment(change.new),
+    callback: ({ new: row }) =&gt; { <span class="k">if</span> (row) setComments((list) =&gt; [...list, row]) },
   })
-  <span class="k">return</span> &lt;p&gt;{status}&lt;/p&gt;
+  <span class="k">return</span> &lt;p&gt;{status}: {comments.length} new&lt;/p&gt;
 }</pre></div>
     <p>It needs <code>SupatypeProvider</code> above it, which takes your client as <code>client</code>. Give each use its own channel name: two hooks with the same name share a channel.</p>
-    <p><code>@supatype/vue</code> has <code>useSubscription(table, { event, filter })</code>, and <code>@supatype/svelte</code> and <code>@supatype/solid</code> have <code>createSubscription(table, { event, filter })</code>. These watch the <code>public</code> schema and return <code>data</code>, <code>error</code> and <code>status</code>. <code>data</code> starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same <code>id</code>, deletes remove it. They do not load the rows that already exist, so pair them with a query.</p>
+    <p><code>@supatype/vue</code> has <code>useSubscription(table, { event, filter })</code>, and <code>@supatype/svelte</code> and <code>@supatype/solid</code> have <code>createSubscription(table, { event, filter })</code>. These watch the <code>public</code> schema and return <code>data</code>, <code>error</code> and <code>status</code>, which is <code>"connecting"</code>, <code>"connected"</code>, <code>"disconnected"</code> or <code>"error"</code>. <code>data</code> starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same <code>id</code>, deletes remove it. They do not load the rows that already exist, so pair them with a query.</p>
 
     <h2 id="connection">Connection and auth</h2>
     <p>The client opens the socket at <code>/realtime/v1</code> on your project URL when the first channel subscribes, and closes it when the last one unsubscribes. It sends the current session's token, or the anon key when nobody is signed in.</p>
+    <p><code>supatype.realtime.removeChannel(name)</code> leaves a channel by name. <code>supatype.realtime.disconnect()</code> closes the socket whatever is still subscribed, and reports <code>CLOSED</code> to every channel still registered.</p>
     <p>When someone signs in, signs out or a different user signs in, the client reconnects with the new token and joins every channel again. Access is checked as the new identity from then on. A token refresh for the same user does not reconnect, so no changes are missed.</p>
     <p>If the socket drops, the client retries after 1, 2, 4 seconds and so on, doubling each time, for up to 10 attempts. Channels report <code>SUBSCRIBING</code> while it retries and <code>TIMED_OUT</code> once it gives up. Changes made while the socket was down are not replayed, so refetch after a reconnect if you need the gaps filled.</p>
 

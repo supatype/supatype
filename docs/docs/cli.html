@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -92,6 +92,13 @@
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
     </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html" aria-current="page">CLI</a></li>
     </ul></div>
@@ -114,7 +121,14 @@
 <pre><span class="pr">$</span> npm install -g @supatype/cli
 <span class="pr">$</span> supatype --help
 <span class="pr">$</span> supatype push --help</pre></div>
+    <p>The npm package needs Node.js 22 or later. It is the install to use on Windows.</p>
+    <p>On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> curl -fsSL https://supatype.com/install.sh | bash
+<span class="pr">$</span> brew install supatype/tap/supatype</pre></div>
+    <p>The script installs one binary to <code>~/.supatype/bin</code> and adds that directory to your shell profile. It checks the release signature with <code>openssl</code> before installing. Where <code>openssl</code> is missing or cannot check ed25519 signatures, as with the LibreSSL macOS ships, it says so and checks only the SHA256. On Alpine it installs the musl build, which needs <code>apk add libstdc++ libgcc</code>. The components <code>dev</code> downloads are built for glibc only, so run local stacks on a glibc image. <code>supatype self-update</code> updates a standalone install.</p>
     <p>Run commands from the project directory, where <code>supatype.config.ts</code> is. Every command also takes <code>--project-name &lt;name&gt;</code>, which names the project for this run over <code>supatype.config.ts</code>. <code>supatype --version</code> prints the CLI version.</p>
+    <p><code>--project-name</code> is the same as setting <code>SUPATYPE_PROJECT_NAME</code>, and it writes no file. The Compose project, the native database and the state directory under <code>~/.supatype/projects/</code> all follow it. Use it to run two stacks of one project side by side, each with its own <code>SUPATYPE_KONG_PORT</code>. The name may use lower case letters, digits, <code>-</code> and <code>_</code>, and must start with a letter or digit.</p>
     <p>Many commands that reach a database take <code>--connection &lt;url&gt;</code> to override the config, and <code>--env &lt;name&gt;</code> to pick an environment when the project is linked.</p>
     <div class="callout">
       <span class="callout-label">CLOUD</span>
@@ -130,7 +144,7 @@
         <tr><td><code>keys</code></td><td>Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET</td><td><code>--write</code>, <code>--force</code>, <code>--secret &lt;secret&gt;</code>, <code>--exp-years &lt;years&gt;</code> (default 10)</td></tr>
         <tr><td><code>status</code></td><td>Show linked target status or local stack services</td><td><code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>logs</code></td><td>Tail logs from the local stack</td><td><code>--service &lt;name&gt;</code>, <code>--since &lt;duration&gt;</code> (default 5m), <code>-f, --follow</code></td></tr>
-        <tr><td><code>app add [dir]</code></td><td>Configure app routing: --static for a built site, or proxy to a dev server</td><td><code>--static</code>, <code>--port &lt;port&gt;</code> (default 3000), <code>--upstream &lt;url&gt;</code></td></tr>
+        <tr><td><code>app add [dir]</code></td><td>Configure app routing: <code>--static</code> for a built site, or proxy to a dev server</td><td><code>--static</code>, <code>--port &lt;port&gt;</code> (default 3000), <code>--upstream &lt;url&gt;</code></td></tr>
         <tr><td><code>app remove</code></td><td>Set app.mode=none in supatype.config.ts</td><td></td></tr>
         <tr><td><code>admin create-user</code></td><td>Create an admin user for the admin panel</td><td><code>--email</code>, <code>--password</code> (asked for if left out), <code>--role</code> (default <code>admin</code>)</td></tr>
         <tr><td><code>admin set-role</code></td><td>Change an existing user's admin role</td><td><code>--email</code> and <code>--role</code>, both required</td></tr>
@@ -142,27 +156,31 @@
       </tbody>
     </table></div>
     <p><code>--role</code> is <code>admin</code>, <code>developer</code>, <code>editor</code> or <code>viewer</code>. See <a href="/docs/studio-roles.html#grant">Studio roles</a>. The first-run steps are in <a href="/docs/#local-dev">Local development</a>.</p>
+    <p><code>keys</code> prints the keys unless you pass <code>--write</code>, which fills blank keys in <code>.env</code>. Add <code>--force</code> to replace keys already there.</p>
+    <p><code>dev</code> and <code>self-host compose up</code> refuse a <code>JWT_SECRET</code> shorter than 32 characters before starting anything, because the REST API cannot start with one. <code>init</code> generates a 64-character secret. To replace a short one, generate a longer secret (for example with <code>openssl rand -base64 48</code>), put it in <code>.env</code> as <code>JWT_SECRET</code>, then run <code>supatype keys --write --force</code> to sign new keys with it.</p>
 
     <h2 id="schema">Schema and database</h2>
     <div class="tbl"><table>
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
-        <tr><td><code>push</code></td><td>Push schema to the database: diff, prompt for destructive changes, apply migration, generate types</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--overwrite-drift</code></td></tr>
-        <tr><td><code>diff</code></td><td>Show planned schema changes without applying them (dry run)</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
-        <tr><td><code>generate</code></td><td>Regenerate TypeScript types without running a migration</td><td><code>--connection &lt;url&gt;</code></td></tr>
-        <tr><td><code>migrate</code></td><td>Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With --record the file also records the migration as a push does</td><td><code>-o, --output &lt;file&gt;</code>, <code>--record</code>, <code>--force</code></td></tr>
+        <tr><td><code>push</code></td><td>Push schema to the database: diff, prompt for destructive changes, apply migration, generate types</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--direct</code> (alias <code>--local</code>), <code>--overwrite-drift</code></td></tr>
+        <tr><td><code>diff</code></td><td>Show planned schema changes without applying them (dry run)</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--direct</code></td></tr>
+        <tr><td><code>generate</code></td><td>Regenerate TypeScript types without running a migration</td><td></td></tr>
+        <tr><td><code>migrate</code></td><td>Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With <code>--record</code> the file also records the migration as a push does</td><td><code>-o, --output &lt;file&gt;</code>, <code>--record</code>, <code>--force</code></td></tr>
         <tr><td><code>migrations list</code></td><td>List applied migrations with schema snapshot metadata</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>rollback</code></td><td>Roll back the last applied migration</td><td><code>--sync-schema</code>, <code>--no-sync-schema</code></td></tr>
         <tr><td><code>reset</code></td><td>Drop all managed tables and re-apply the schema from scratch (destructive)</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code></td></tr>
         <tr><td><code>rename [from] [to]</code></td><td>Record a rename in supatype/renames.json, so every push applies it as a rename and keeps the data: <code>supatype rename member.name member.title</code>, or <code>supatype rename member members</code> for a table</td><td><code>--prune</code></td></tr>
         <tr><td><code>doctor</code></td><td>Report schema drift between schema/index.ts and the live database</td><td><code>--strict</code>, <code>--rebaseline</code>, <code>--accept-access-drift</code>, <code>--yes</code></td></tr>
-        <tr><td><code>adopt</code></td><td>Hand Supatype the objects a push refuses because their names are taken; take objects back with --release, and hand them back with --reclaim</td><td><code>--release &lt;object...&gt;</code>, <code>--reclaim &lt;object...&gt;</code>, <code>--key &lt;object...&gt;</code>, <code>--adopt-none</code>, <code>--yes</code></td></tr>
+        <tr><td><code>adopt</code></td><td>Hand Supatype the objects a push refuses because their names are taken; take objects back with <code>--release</code>, and hand them back with <code>--reclaim</code></td><td><code>--release &lt;object...&gt;</code>, <code>--reclaim &lt;object...&gt;</code>, <code>--key &lt;object...&gt;</code>, <code>--adopt-none</code>, <code>--yes</code></td></tr>
         <tr><td><code>pull</code></td><td>Scaffold schema/index.ts from live database introspection (draft, review before push)</td><td><code>--connection &lt;url&gt;</code>, <code>--out &lt;path&gt;</code>, <code>--dry-run</code></td></tr>
         <tr><td><code>introspect</code></td><td>Introspect the live Postgres database (JSON or summary)</td><td><code>--json</code>, <code>--out &lt;path&gt;</code></td></tr>
         <tr><td><code>db check</code></td><td>Check whether a database meets Supatype's requirements (for external Postgres)</td><td><code>--connection &lt;url&gt;</code>, <code>--schema &lt;name&gt;</code>, <code>--emit</code>, <code>--fix</code>, <code>--authenticator-password &lt;password&gt;</code></td></tr>
         <tr><td><code>types check</code></td><td>Validate generated client augmentation wiring</td><td></td></tr>
       </tbody>
     </table></div>
+    <p><code>--direct</code> skips the control plane of a linked project and runs the schema engine on this machine. <code>generate</code> reads only the schema, so it needs no database. <code>pull</code> prints its draft unless you pass <code>--out</code>. <code>migrations list</code> shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.</p>
+    <p>A push never guesses a rename. A column that disappears while a new one appears is a drop and an add, and the drop loses data. In a terminal the push asks whether you meant a rename and records a yes in <code>supatype/renames.json</code>. Anywhere else it refuses and prints the <code>supatype rename</code> command that records it.</p>
     <p>An object passed to <code>adopt</code> is named as <code>doctor</code> names it: <code>kind:table.name</code>, or <code>kind:name</code> for a table. Studio shows the result under <a href="/docs/studio.html#database">Schema objects</a>.</p>
     <div class="callout warn">
       <span class="callout-label">PULL</span>
@@ -189,7 +207,7 @@
         <tr><td><code>functions new &lt;name&gt;</code></td><td>Scaffold a new edge function</td><td></td></tr>
         <tr><td><code>functions serve</code></td><td>Start a local Deno server that serves all functions with hot reload</td><td><code>--port &lt;port&gt;</code> (default 54321), <code>--env-file &lt;path&gt;</code> (default <code>.env.local</code>)</td></tr>
         <tr><td><code>functions invoke &lt;name&gt;</code></td><td>Invoke a local or deployed function</td><td><code>--data &lt;json&gt;</code>, <code>--auth</code>, <code>--local</code></td></tr>
-        <tr><td><code>functions deploy</code></td><td>Deploy all functions (or --only &lt;name&gt; for one) to the linked project</td><td><code>--only &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--dry-run</code></td></tr>
+        <tr><td><code>functions deploy</code></td><td>Deploy all functions (or <code>--only &lt;name&gt;</code> for one) to the linked project</td><td><code>--only &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--dry-run</code></td></tr>
         <tr><td><code>functions list</code> <strong>Cloud</strong></td><td>List all deployed functions for the linked project</td><td></td></tr>
         <tr><td><code>functions delete &lt;name&gt;</code> <strong>Cloud</strong></td><td>Remove a deployed function</td><td></td></tr>
         <tr><td><code>functions logs &lt;name&gt;</code> <strong>Cloud</strong></td><td>Tail logs for a deployed function</td><td><code>--since &lt;duration&gt;</code> (default 1h)</td></tr>
@@ -198,7 +216,7 @@
         <tr><td><code>hooks list</code></td><td>Show the hooks the schema declares and whether each one can run</td><td></td></tr>
       </tbody>
     </table></div>
-    <p><code>functions deploy</code> deploys to a self-hosted Compose stack when the project has one, and to Supatype Cloud otherwise. On a self-hosted stack, read function logs in Studio. See <a href="/docs/functions.html">Functions</a>.</p>
+    <p>On an unlinked project with a self-hosted Compose stack, <code>functions deploy</code> uploads nothing: the worker serves <code>functions/</code> from disk, so it lists the functions and prints the command that restarts the worker. Otherwise it deploys to the linked project, or to Supatype Cloud. On a self-hosted stack, read function logs in Studio. See <a href="/docs/functions.html">Functions</a>.</p>
 
     <h2 id="self-host">Self-host and deploy</h2>
     <div class="tbl"><table>
@@ -206,7 +224,7 @@
       <tbody>
         <tr><td><code>self-host compose render</code></td><td>Render deterministic self-host compose artifacts</td><td></td></tr>
         <tr><td><code>self-host compose up</code></td><td>Render and start compose services</td><td><code>-d, --detach</code> (on by default)</td></tr>
-        <tr><td><code>self-host compose down</code></td><td>Stop compose services (volumes are kept unless --volumes)</td><td><code>--volumes</code>, <code>-y, --yes</code></td></tr>
+        <tr><td><code>self-host compose down</code></td><td>Stop compose services (volumes are kept unless <code>--volumes</code>)</td><td><code>--volumes</code>, <code>-y, --yes</code></td></tr>
         <tr><td><code>self-host compose restart &lt;service&gt;</code></td><td>Recreate one service with the current config and .env, leaving the others running</td><td></td></tr>
         <tr><td><code>self-host compose status</code></td><td>Show compose service status</td><td></td></tr>
         <tr><td><code>self-host compose logs</code></td><td>Tail compose logs</td><td><code>--service &lt;name&gt;</code>, <code>-f, --follow</code></td></tr>
@@ -214,12 +232,14 @@
         <tr><td><code>link</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json)</td><td><code>--url &lt;url&gt;</code>, <code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--fix-gitignore</code></td></tr>
         <tr><td><code>envs list</code></td><td>List linked environments</td><td></td></tr>
         <tr><td><code>envs use &lt;name&gt;</code></td><td>Set the default environment</td><td></td></tr>
-        <tr><td><code>deploy</code></td><td>Deploy schema and app, Supatype Cloud by default when linked (<code>supatype link</code>); pass --local for engine + your database</td><td><code>--schema-only</code>, <code>--app-only</code>, <code>--skip-build</code>, <code>--yes</code>, <code>--overwrite-drift</code></td></tr>
+        <tr><td><code>deploy</code></td><td>Deploy schema and app, Supatype Cloud by default when linked (<code>supatype link</code>); pass <code>--local</code> for engine + your database</td><td><code>--env &lt;name&gt;</code> (default <code>production</code>), <code>--schema-only</code>, <code>--app-only</code>, <code>--skip-build</code>, <code>--preview</code>, <code>--yes</code>, <code>--overwrite-drift</code></td></tr>
         <tr><td><code>deploy rollback</code></td><td>Roll back to the previous static site deployment</td><td><code>--to &lt;id&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>deploy status</code></td><td>Show current deployment status</td><td><code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>deploy logs [version]</code></td><td>Show build logs for a deployment</td><td><code>--env &lt;name&gt;</code></td></tr>
       </tbody>
     </table></div>
+    <p>Every <code>self-host compose</code> command renders <code>.supatype/self-host/docker-compose.yml</code> again before it runs. The file names each bind mount by its absolute path on this machine, and names its Compose project <code>supatype-</code> plus <code>project.name</code>. So <code>docker compose -f .supatype/self-host/docker-compose.yml</code> run by hand reaches the same stack, and a project moved to another folder is picked up by the next command.</p>
+    <p>A render keeps the stack in the mode it runs in. While <code>supatype dev</code> runs for the project, commands such as <code>push</code>, <code>update</code> and <code>self-host compose</code> render dev mode. Otherwise they use the mode of the running <code>server</code> container, and standalone when none is running. So a push to a production stack leaves it standalone.</p>
     <p>For a self-hosted stack, <code>link --url</code> takes the stack's gateway URL and <code>--token</code> its <code>SERVICE_ROLE_KEY</code>. The full walkthrough is in <a href="/docs/#self-host">Self-host</a> and <a href="/deploy-vm-github-actions.html">Deploy to a VM with GitHub Actions</a>.</p>
 
     <h2 id="cloud">Supatype Cloud</h2>
@@ -248,7 +268,7 @@
       <tbody>
         <tr><td><code>self-update</code></td><td>Update the supatype CLI (npm or standalone CDN binary)</td><td><code>--force</code></td></tr>
         <tr><td><code>update</code></td><td>Download the latest component binaries and update versions in supatype.config.ts</td><td><code>--check</code></td></tr>
-        <tr><td><code>engine status</code></td><td>Run the host engine binary's --version and show which binary answered</td><td></td></tr>
+        <tr><td><code>engine status</code></td><td>Run the host engine binary's <code>--version</code> and show which binary answered</td><td></td></tr>
         <tr><td><code>cache list</code></td><td>List cached component binaries and their sizes</td><td><code>--project &lt;path&gt;</code></td></tr>
         <tr><td><code>cache clean [component] [version]</code></td><td>Remove cached binaries not pinned by local project configs</td><td><code>--dry-run</code>, <code>--force</code>, <code>--project &lt;path&gt;</code></td></tr>
         <tr><td><code>migrate-from-v1</code></td><td>Codemod runtime model() schema DSL into RFC v2 Model&lt;&gt; type aliases</td><td><code>--schema &lt;path&gt;</code>, <code>--write</code></td></tr>
@@ -257,7 +277,7 @@
     <p>Binaries are cached in <code>~/.supatype/cache/</code>. <code>cache clean --force</code> removes every cached binary, pinned or not.</p>
 
     <nav class="pn" aria-label="More pages">
-      <a href="/from-prisma.html"><small>PREVIOUS</small><span>Coming from Prisma</span></a>
+      <a href="/postgres/supatype-mask.html"><small>PREVIOUS</small><span>supatype_mask</span></a>
       <a href="/licensing.html" class="next"><small>NEXT</small><span>Licensing</span></a>
     </nav>
   </main>

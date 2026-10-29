@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>pg_guard: Superuser features, without the superuser | Supatype</title>
+  <meta name="description" content="Create extensions, event triggers and publications in Postgres without SUPERUSER. pg_guard delegates each one safely, set entirely in postgresql.conf." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/postgres/pg-guard.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="pg_guard: Superuser features, without the superuser | Supatype" />
+  <meta property="og:description" content="Create extensions, event triggers and publications in Postgres without SUPERUSER. pg_guard delegates each one safely, set entirely in postgresql.conf." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/postgres/pg-guard.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/pg-guard.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Postgres: pg_guard</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html" aria-current="page">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/postgres.html">Postgres</a> / pg_guard</nav>
+    <h1>pg_guard</h1>
+    <p class="intro">Superuser features, without the superuser. pg_guard lets a non-superuser role create extensions, event triggers and publications. It still cannot make itself a superuser.</p>
+    <h2 id="problem">Why pg_guard</h2>
+    <p>Postgres keeps a lot behind SUPERUSER. Event triggers, publications, foreign data wrappers and extensions such as hstore all need it. So teams hand out SUPERUSER, and with it the power to read server files, run programs and change any role.</p>
+    <p>pg_guard adds one privileged role. When that role creates a superuser-only object, pg_guard switches to a configured superuser, creates it, hands ownership back and switches back. Event triggers it creates skip superusers and reserved roles, so they cannot be used to escalate. It cannot create a SUPERUSER role or grant the attribute.</p>
+    <p>Everything lives in postgresql.conf. There are no tables, functions or security labels in your database, so upgrades are simple and a reload applies a change. It is derived from supautils and runs in every supatype/postgres container.</p>
+    <h2 id="example">An example</h2>
+    <div class="cb"><div class="cb-bar"><span>pg_guard.sql</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>-- postgres is not a superuser here. It is a member of
+-- supatype_privileged_role, the image's pg_guard.privileged_role.
+set role postgres;
+select current_setting('is_superuser');  -- off
+
+create extension hstore;                 -- in pg_guard.privileged_extensions
+create publication app_changes for all tables;
+set session_replication_role = replica;  -- in privileged_role_allowed_configs
+
+-- An event trigger. The function must not be superuser-owned.
+create function log_ddl() returns event_trigger
+language plpgsql as $$
+begin
+  raise notice 'ddl by %', current_user;
+end;
+$$;
+create event trigger log_ddl on ddl_command_end
+  execute procedure log_ddl();
+
+create role escalate superuser;
+-- ERROR:  permission denied to create role</pre></div>
+    <h2 id="compare">pg_guard or handing out SUPERUSER</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col"></th><th scope="col">handing out SUPERUSER</th><th scope="col">pg_guard</th></tr></thead>
+      <tbody>
+        <tr><td>Extensions that need a superuser</td><td>Only a superuser can create hstore, postgres_fdw and the like.</td><td>Non-superusers can create, update and drop any extension listed in pg_guard.privileged_extensions. Others behave as normal.</td></tr>
+        <tr><td>Event triggers</td><td>Superuser only. A trigger fires for every role, superusers included.</td><td>The privileged role can create them. They are skipped for superusers and reserved roles.</td></tr>
+        <tr><td>Publications and FDWs</td><td>Superuser only.</td><td>The privileged role creates them and owns them.</td></tr>
+        <tr><td>Becoming a superuser</td><td>The role already is one.</td><td>The privileged role cannot create a SUPERUSER role or add the attribute to one.</td></tr>
+        <tr><td>Roles your services log in as</td><td>Any superuser can alter or drop them, or grant pg_read_server_files.</td><td>Reserved roles cannot be altered or dropped by non-superusers. Reserved memberships cannot be granted.</td></tr>
+        <tr><td>Where the rules live</td><td>Role attributes and grants, set role by role.</td><td>postgresql.conf only. Settings take effect on a reload, with no objects added to the database.</td></tr>
+      </tbody>
+    </table></div>
+    <h2 id="limits">What it does not do</h2>
+    <ul>
+      <li>Event triggers made by the privileged role do not fire when it creates publications, foreign data wrappers or extensions.</li>
+      <li>Those event triggers are skipped for superusers and reserved roles, so they do not see DDL from those roles.</li>
+      <li>It does not restrict superusers. Keep the real superuser for the platform, not for people.</li>
+      <li>It loads per session through session_preload_libraries. A role given its own list without pg_guard runs without it. supatype migrate doctor checks this for authenticator.</li>
+      <li>Extension parameter overrides support the schema parameter only. Custom scripts run before-create and after-create only.</li>
+      <li>Settings are cluster-wide. You cannot give one database a different list.</li>
+      <li>It is not in the cross-compiled linux-arm64 native archive. The Docker image is not affected.</li>
+    </ul>
+    <h2 id="use-it">Use it on its own</h2>
+    <p>pg_guard ships in the <a href="/postgres.html">supatype/postgres</a> image. Use the image as your Postgres, with or without the rest of Supatype.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre># pg_guard is on by default in the image
+docker run -d --name supatype-postgres \
+  -e POSTGRES_PASSWORD=your-password -p 5432:5432 \
+  supatype/postgres:17-latest
+
+# Preloaded for every session, with its settings in their own file:
+#   session_preload_libraries = 'pg_guard'
+#   include = '/etc/postgresql-custom/pg_guard.conf'
+docker exec supatype-postgres \
+  cat /etc/postgresql-custom/pg_guard.conf
+
+# Make one of your roles privileged (as supatype_admin)
+psql -h localhost -U supatype_admin -d postgres \
+  -c &quot;grant supatype_privileged_role to app_admin;&quot;
+
+# After editing pg_guard.conf, reload. No restart needed.
+psql -h localhost -U supatype_admin -d postgres \
+  -c &quot;select pg_reload_conf();&quot;</pre></div>
+    <h2 id="with-supatype">With Supatype</h2>
+    <p>Every Supatype project runs on this image, with migrations, access rules, an API, a typed client and Studio generated from your TypeScript types. <a href="/docs/#local-dev">Run it locally</a> in a few commands. The full reference is the extension's <a href="https://github.com/supatype/postgres/blob/develop/extensions/pg_guard/README.md">README</a>.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/postgres/pg-topics.html"><small>PREVIOUS</small><span>pg_topics</span></a>
+      <a href="/postgres/supatype-mask.html" class="next"><small>NEXT</small><span>supatype_mask</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#problem">Why</a>
+    <a href="#example">An example</a>
+    <a href="#compare">Compared</a>
+    <a href="#limits">Limits</a>
+    <a href="#use-it">Use it on its own</a>
+    <a href="#with-supatype">With Supatype</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js?v=19dd554888"></script>
+</body>
+</html>

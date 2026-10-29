@@ -1,0 +1,143 @@
+---
+title: Anonymous Sign-In
+description: Create temporary authenticated users without email or password, for guest sessions you can convert to permanent accounts later.
+---
+
+Anonymous sign-in creates a real user in `auth.users` and issues a normal session JWT. The user gets a stable `auth.uid()` for the lifetime of the session, but has no email or password until they upgrade.
+
+This is useful for guest checkout, try-before-sign-up flows, and saving progress before account creation.
+
+## Not the same as the anon API key
+
+| | Anonymous sign-in | Anon API key |
+|--|-------------------|--------------|
+| **What it is** | `signInAnonymously()` creates a user + JWT | Public key for unauthenticated API requests |
+| **Postgres role** | `authenticated` (user JWT) | `anon` (no user JWT) |
+| **`auth.uid()`** | Real user ID | `NULL` |
+| **JWT claim** | `is_anonymous: true` | No user session |
+
+Use the **anon key** for public read access with `Public` access rules. Use **anonymous sign-in** when you need a per-visitor user ID and `LoggedIn` access rules without asking for credentials first.
+
+## Enable anonymous sign-in
+
+Anonymous sign-in is **disabled by default**. Enable it on the auth server by adding this to the
+project's `.env` (`supatype.config.ts` has no key for it):
+
+```bash
+SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true
+```
+
+While it is off, `signInAnonymously()` is refused with `422` and the error code
+`anonymous_provider_disabled`. See [Self-hosting configuration](/docs/self-hosting/configuration.html) for the full auth variable reference.
+
+Check whether it is enabled at runtime:
+
+```typescript
+const res = await fetch(`${SUPATYPE_URL}/auth/v1/settings`)
+const settings = await res.json()
+console.log(settings.external?.anonymous_users) // true when enabled
+```
+
+## Sign in anonymously
+
+```typescript
+const { data, error } = await supatype.auth.signInAnonymously()
+
+if (error) {
+  console.error("Anonymous sign-in failed:", error.message)
+  return
+}
+
+console.log("Guest user ID:", data.user?.id)
+console.log("Is anonymous:", data.user?.isAnonymous) // true
+```
+
+Pass optional user metadata (stored in `user_metadata`):
+
+```typescript
+const { data, error } = await supatype.auth.signInAnonymously({
+  options: {
+    data: {
+      display_name: "Guest",
+    },
+  },
+})
+```
+
+If captcha is enabled on your project, pass the verification token:
+
+```typescript
+await supatype.auth.signInAnonymously({
+  options: {
+    captchaToken: tokenFromCaptchaWidget,
+  },
+})
+```
+
+The session is persisted by the client SDK like any other sign-in. If the user clears storage, signs out, or switches devices, the anonymous account cannot be recovered.
+
+## Upgrade to a permanent account
+
+Link an email or phone to convert the anonymous user into a permanent account. The user ID stays the same, so related rows keep their foreign keys.
+
+```typescript
+const { data, error } = await supatype.auth.updateUser({
+  email: "alice@example.com",
+  password: "strongpassword123",
+})
+```
+
+When the auth server auto-confirms emails (the generated stack's default), the email is attached
+straight away. Otherwise a confirmation email is sent, and the email is attached when the user
+follows the link. From then on `user.isAnonymous` is `false`. A password on its own is refused: an
+anonymous user needs an email or phone in the same update. See [Email & Password](/docs/auth/email-password.html) for confirmation and password flows.
+
+## Access rules and RLS
+
+Anonymous users satisfy `LoggedIn`: they have a valid JWT and a non-null `auth.uid()`.
+
+To restrict an action to **permanent** users only, test the `is_anonymous` claim:
+
+```typescript
+import type {
+  Claim, Int, Literal, LoggedIn, Model, Neq, RelatedTo, SupatypeAuthUser, UUID,
+} from "@supatype/types"
+
+export type Order = Model<{
+  id: UUID
+  total: Int
+  buyer: RelatedTo<SupatypeAuthUser>
+}, {
+  tableName: "orders"
+  access: {
+    create: LoggedIn
+    // Only permanent users may delete
+    delete: Neq<Claim<"is_anonymous">, Literal<"true">>
+  }
+}>
+```
+
+`Claim<>` reads the JWT by dotted path and compares as text, so `Literal<"true">` is the string the
+claim serialises to. The token always carries `is_anonymous`, either `true` or `false`, so this
+comparison has a value to work with for every signed-in caller rather than sometimes being null.
+
+The same rule reads on a **permanent-only** operation, and MFA-gating works the same way with the
+`aal` claim; see [MFA](/docs/auth/mfa.html#requiring-mfa-in-access-rules).
+
+## Rate limits and cleanup
+
+Anonymous sign-ins are rate-limited per IP (default **30 per hour**, the auth server's
+`SUPATYPE_RATE_LIMIT_ANONYMOUS_USERS`). Like every per-IP limit, it applies only when the auth
+server can read the caller's IP from the header `SUPATYPE_RATE_LIMIT_HEADER` names, which the
+generated stack does not set. Anonymous users older than **30 days** are deleted only when
+the auth server's database cleanup is also on (`SUPATYPE_DB_CLEANUP_ENABLED=true`). It is off by
+default and the generated stack does not set it, so without it anonymous users stay until you
+remove them.
+
+Consider enabling captcha (`SUPATYPE_SECURITY_CAPTCHA_ENABLED`) on production projects to reduce abuse.
+
+## Next steps
+
+- [Auth overview](/docs/auth.html): how auth fits with your schema
+- [Auth SDK methods](/docs/client.html#auth): the `supatype.auth` reference
+- [Access rules](/docs/schema/access-rules.html): RLS, and `LoggedIn` versus `Public`

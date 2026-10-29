@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -92,6 +92,13 @@
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
     </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
@@ -117,7 +124,7 @@
       <div><h3>Editor</h3><p>Content and files. No schema, SQL or settings.</p></div>
       <div><h3>Viewer</h3><p>Reads content, files, schema and logs. Changes nothing.</p></div>
     </div>
-    <p>Supatype Cloud adds owner and billing roles for the organisation.</p>
+    <p>Supatype Cloud adds owner and billing roles for the organisation. On a self-hosted project those two grant nothing, and the CLI refuses any role but the four above.</p>
     <div class="callout">
       <span class="callout-label">NOTE</span>
       <p>A Studio role is separate from your app. It grants nothing in your own application, and <code>Role&lt;&gt;</code> rules in the schema do not read it.</p>

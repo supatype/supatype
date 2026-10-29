@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -92,6 +92,13 @@
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
     </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
@@ -113,7 +120,7 @@
     <p>Studio is served at <code>/studio/</code> on the project's gateway.</p>
     <ul>
       <li><strong>Local, Docker (the default):</strong> <code>supatype dev</code> prints it in the <strong>Services running</strong> panel as <code>http://localhost:&lt;gateway-port&gt;/studio/</code>. The port is <code>SUPATYPE_KONG_PORT</code> in <code>.env</code>.</li>
-      <li><strong>Self-hosted:</strong> <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;/studio/</code>, behind your reverse proxy. See <a href="/docs/#self-host">Self-host</a>.</li>
+      <li><strong>Self-hosted:</strong> <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;/studio/</code>, or <code>/studio/</code> on your domain once HTTPS is on. See <a href="/docs/#self-host">Self-host</a>.</li>
       <li><strong>Local, Native:</strong> <code>supatype dev</code> does not start Studio with the Native provider.</li>
     </ul>
     <p>Sign in with an email and password. The first admin comes from <code>SUPATYPE_ADMIN_EMAIL</code> and <code>SUPATYPE_ADMIN_PASSWORD</code> in <code>.env</code>, as described in <a href="/docs/#local-dev">Local development</a>. Add more people with <code>supatype admin create-user</code>.</p>
@@ -130,7 +137,7 @@
     <h2 id="content">Editing content</h2>
     <p>Studio reads your schema after each push and builds an editor for every model. There is nothing to configure: add a model, save, and it appears under <strong>Models</strong>.</p>
     <h3>The list</h3>
-    <p>Each model opens on a list of its records. Columns you can sort have sortable headers. Searchable fields get a search box. Tick rows to delete several at once, after a confirmation. <strong>Create Post</strong> (named after the model) opens an empty form.</p>
+    <p>Each model opens on a list of its records. Columns you can sort have sortable headers. Fields wrapped in <code>Searchable&lt;T&gt;</code>, or named in the model's <code>searchable: [...]</code> option, get a search box. Tick rows to delete several at once, after a confirmation. <strong>Create Post</strong> (named after the model) opens an empty form.</p>
     <h3>The record editor</h3>
     <p>Each field gets an input that matches its type: text, numbers, dates, slugs, selects, relations, JSON, code, images, files, rich text and blocks among them. The model's name in Studio comes from <code>label</code> and <code>labelPlural</code> in its options. A form also has <strong>Duplicate</strong> and <strong>Delete</strong>, and Delete asks first.</p>
     <p>A <code>Slug&lt;"title"&gt;</code> field follows the title on a new record. A model with hooks shows "This post has custom logic that runs on save."</p>
@@ -157,8 +164,11 @@
     <p>To render a rich text field in React, pass the stored value to <code>RichText</code> from <code>@supatype/react</code>:</p>
     <div class="cb"><div class="cb-bar"><span>src/PostBody.tsx</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { <span class="t">RichText</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"@supatype/client"</span>
 
-&lt;<span class="t">RichText</span> content={post.body} as=<span class="s">"article"</span> /&gt;</pre></div>
+<span class="k">export function</span> <span class="t">PostBody</span>({ post }: { post: <span class="t">TableRow</span>&lt;<span class="s">"post"</span>&gt; }) {
+  <span class="k">return</span> &lt;<span class="t">RichText</span> content={post.body} as=<span class="s">"article"</span> /&gt;
+}</pre></div>
 
     <h2 id="media">Media and files</h2>
     <p><strong>Media &amp; Storage</strong> lists your buckets. Each bucket has two tabs:</p>
@@ -259,7 +269,7 @@
       <thead><tr><th scope="col">Screen</th><th scope="col">For</th></tr></thead>
       <tbody>
         <tr><td>Dashboard</td><td>Totals and recent activity for users, records, storage and the database</td></tr>
-        <tr><td>Authentication</td><td>Users (including their Studio access), access policies, providers, configuration and email templates. See <a href="/docs/auth.html">Auth</a></td></tr>
+        <tr><td>Authentication</td><td>Users (including their Studio access), access policies, providers, configuration and email templates. Configuration is read-only: change those settings in <code>.env</code> and restart the stack. A template saved under Email Templates is kept in the database until <strong>Reset to default</strong> removes it. See <a href="/docs/auth.html">Auth</a></td></tr>
         <tr><td>Settings</td><td>API keys, CORS origins and database settings</td></tr>
         <tr><td>Realtime</td><td>Channels, clients, a live stream and a broadcast tester, where the deployment's control plane supports the inspector</td></tr>
       </tbody>

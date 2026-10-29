@@ -1,0 +1,260 @@
+---
+title: Hooks
+description: "Run your own TypeScript around a write to validate, rewrite, reject, or react, with handler types generated from your schema."
+---
+
+A hook is an **edge function the API calls around a write**. It can reject the write, rewrite what
+gets stored, or react once it has happened. The handler is ordinary TypeScript, and its argument is
+typed from the model it belongs to.
+
+```typescript
+import type { LoggedIn, Model, Public, Timestamp, UUID } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+  title: string
+  body: string
+  created_at: Timestamp
+}, {
+  tableName: "posts"
+  access: { read: Public; create: LoggedIn; update: LoggedIn }
+  hooks: {
+    beforeChange: "moderate-post"
+    afterChange: "index-post"
+  }
+}>
+```
+
+`supatype push` checks that each named handler exists and fails if not: a hook that never fires
+because of a typo would otherwise leave the write it was meant to guard succeeding, looking normal.
+
+## A hook is not a security boundary
+
+Say this before anything else, because the feature invites the opposite assumption.
+
+Hooks fire for writes **through the API**. Direct SQL, `psql`, seeds and migrations bypass them
+entirely. So a hook cannot enforce an invariant; it can only enforce it for callers who arrived over
+HTTP.
+
+The service-role key is **not** an exception. It changes what Postgres permits, not whether the API
+runs your hooks, so a service-role write over HTTP fires them like any other, including one your own
+hook makes. See [when a hook writes](#when-a-hook-writes).
+
+Invariants belong where every writer meets them:
+
+| You want | Use |
+|---|---|
+| Only the owner may edit | [Access rules](/docs/schema/access-rules.html): RLS, every path |
+| Only some roles may read a column | [Field access](/docs/schema/field-access.html) |
+| A value must be in range, unique, non-null | `Between`, `Unique`, a string-literal union: a real constraint |
+| A value derived from other fields | `Slug<"title">`, `ComputedFrom`: a trigger, applied to every writer |
+
+A hook is for the work that is genuinely application logic: enrichment, notification, indexing, a
+validation the database has no way to express.
+
+## The four hooks
+
+| Hook | When | Can reject | Can change the write |
+|---|---|---|---|
+| `beforeChange` | before an insert or update reaches Postgres | yes | yes |
+| `beforeDelete` | before a delete reaches Postgres | yes | no |
+| `afterChange` | after a successful insert or update | no | no |
+| `afterDelete` | after a successful delete | no | no |
+
+There are no read hooks. A hook on every row of every response is a latency multiplier on the hottest
+path, and hiding data is what [field access](/docs/schema/field-access.html) already does inside Postgres.
+
+## Writing one
+
+```bash
+npx supatype hooks new moderate-post
+npx supatype push          # generates hooks/_supatype/hooks.ts
+```
+
+Hooks live in `hooks/`, next to `functions/` and separate from it: a function is a public endpoint
+anyone with your anon key can invoke, while a hook's route is refused from outside and only the API
+server calls it.
+
+```typescript
+// docs:no-check: hooks/moderate-post/index.ts, typechecked in your project against generated types
+import { hook, type BeforeChange } from "../_supatype/hooks.ts"
+
+const moderate: BeforeChange<"posts"> = async (ctx) => {
+  if (ctx.operation === "insert") {
+    if (ctx.rows.some((row) => row.title.trim() === "")) {
+      return { reject: "A post needs a title" }
+    }
+    return { rows: ctx.rows.map((row) => ({ ...row, title: row.title.trim() })) }
+  }
+
+  if (ctx.patch.title !== undefined && ctx.patch.title.trim() === "") {
+    return { reject: { message: "A post needs a title", status: 422 } }
+  }
+  return {}
+}
+
+export default hook(moderate)
+```
+
+`ctx` is a **discriminated union on `operation`**, which is what makes narrowing pay: an insert has
+`rows` (the model's `Insert` shape), an update has `patch` (its `Update` shape) and `filter`. The
+generated `HookedTable` contains only tables that declare a hook (or a field validator), so
+`BeforeChange<"comments">` is a compile error if `Comment` declares neither.
+
+One handler per directory is the runtime's rule, so a model's whole lifecycle in one place uses the
+multiplexer:
+
+```typescript
+// docs:no-check: hooks/post-hooks/index.ts
+import { hooks, type AfterChange, type BeforeChange } from "../_supatype/hooks.ts"
+
+const moderate: BeforeChange<"posts"> = async (ctx) => ({})
+const reindex: AfterChange<"posts"> = async (ctx) => {
+  await fetch("https://search.example.com/index", {
+    method: "POST",
+    body: JSON.stringify({ table: ctx.table, rows: ctx.rows ?? [] }),
+  })
+}
+
+export default hooks({ beforeChange: moderate, afterChange: reindex })
+```
+
+Point each event at that same name in the schema: `hooks: { beforeChange: "post-hooks", afterChange:
+"post-hooks" }`.
+
+## One call per request, not per row
+
+A REST write is not "a row". `POST` may carry an array. `PATCH /posts?status=eq.draft` is a partial
+patch plus a filter that may match a thousand rows. `DELETE` is a filter alone.
+
+So a hook is called **once per request**, with what the request actually contains, and an update
+therefore gets a patch and a filter rather than rows. The filter is not rewritable: a hook that could
+widen `?id=eq.1` into `?id=gt.0` would turn a one-row update into a table-wide one with nothing in
+the caller's code to suggest it.
+
+## Reading what is about to change
+
+`ctx.previous()` fetches the rows a write will overwrite. Only if you ask: a hook that never looks
+costs nothing:
+
+```typescript
+// docs:no-check: hooks/guard-locked/index.ts
+import { hook, type BeforeChange } from "../_supatype/hooks.ts"
+
+const guard: BeforeChange<"posts"> = async (ctx) => {
+  if (ctx.operation === "insert") return {}
+
+  const { rows, truncated } = await ctx.previous()
+  if (truncated) return { reject: "Refusing to patch more rows than this hook can check" }
+  if (rows.some((row) => row.title.startsWith("[locked]"))) {
+    return { reject: { message: "That post is locked", status: 409 } }
+  }
+  return {}
+}
+
+export default hook(guard)
+```
+
+Two things to know about those rows. They come back **as stored** (no row-level filtering, no field
+masking), which is what makes them useful for validation and means you should not echo them into a
+rejection message, since that message reaches the caller. And they are **capped** (100 by default),
+with `truncated` telling you the cap bit, so you can refuse rather than act on a prefix you did not
+choose.
+
+## Identity
+
+`ctx.user` is **already verified**: the server checked the token's signature before invoking your
+hook. `null` means an anonymous caller. That is not "no token supplied", but no *verified* subject:
+
+```typescript
+// docs:no-check
+if (ctx.user === null) return { reject: { message: "Sign in first", status: 401 } }
+console.log(`${ctx.user.sub} (${ctx.user.role}) is writing to ${ctx.table}`)
+```
+
+That is a real difference from a public [edge function](/docs/functions.html), which has to
+establish identity itself.
+
+Hooks also receive the **service-role key** without being listed in `functions.serviceRole`, because
+they are only reachable by the API server. A public function must opt in.
+
+## Rejecting, and what the caller sees
+
+The **HTTP status is the answer**, so a hook can pick one:
+
+| Your handler returns | The caller gets |
+|---|---|
+| `{}` | the write proceeds |
+| `{ rows: [...] }` / `{ patch: {...} }` | the write proceeds with your version |
+| `{ reject: "message" }` | **422** with that message |
+| `{ reject: { message, status: 409, code } }` | **409**, your message and code |
+
+A rejection is always a `4xx`: a `status` outside that range is answered as **422**, because
+anything else would read as the hook being broken rather than saying no.
+
+A replacement body is substituted and then travels the normal path, with the same token and the same rules. So a hook
+that sets `author_id` to somebody else still fails that row's own policy; nothing is applied with
+elevated privilege.
+
+### When a hook breaks
+
+A `4xx` is your hook saying no. Anything else (a timeout, a crash, an unreachable worker) is your
+hook *not answering*, which is a different thing and governed separately:
+
+```typescript
+hooks: {
+  beforeChange: { function: "moderate-post", timeout: 2000, onUnavailable: "reject" }
+}
+```
+
+`onUnavailable` defaults to `"reject"` before a write and `"log"` after one. Before: a validation hook
+that silently stopped running must not pass writes through, so the caller gets a **503** and the write
+does not happen. After: the write already happened, so there is nothing left to fail.
+
+An `after*` hook's failure never reaches the caller, and it only runs at all for a successful write.
+It sees the written rows only when the caller sent `Prefer: return=representation`, because that is
+the only case where PostgREST returned any.
+
+## When a hook writes
+
+A hook holds the service-role key, and service-role writes still fire hooks. So a `beforeChange` on
+`posts` that writes to `posts` calls itself again: the classic trigger loop, except each hop is a
+fresh HTTP request holding a connection and a function slot.
+
+The chain counts itself. Every hook invocation carries its depth, the worker attaches that depth to any
+request your handler makes back to your stack, and a write arriving **4 hooks deep is refused** with a
+`508` rather than run without its hooks, because a validation hook that quietly stopped running is a
+hole in every check the table declares.
+
+Two consequences worth knowing:
+
+- **Fanning out is fine.** A `beforeChange` on `posts` writing an `audit_log` row whose own hook ships
+  it somewhere is two levels deep and entirely normal. Only a genuine loop reaches the limit.
+- **Writing to your own table needs care.** If a hook must, do it in `afterChange` and make the write
+  idempotent, or move the change into the row you are already returning from `beforeChange`, which
+  costs no extra request at all.
+
+The depth travels as a header the worker attaches for you, so this holds whichever client you write
+with, and it is never sent anywhere but your own stack.
+
+## What a hook costs
+
+A hooked write is **two network hops instead of one**, plus one edge-function invocation. On Supatype
+Cloud that invocation counts against your plan's function limits like any other, and the concurrency
+limit becomes a limit on concurrent writes to hooked tables: 10 on the Free plan. The default 2s
+timeout sits well below the Free plan's 10s function time limit, so a hung hook fails fast instead of
+occupying a slot.
+
+Hooks are worth this on the tables that need them. `hooks` on every model is an easy and expensive
+mistake.
+
+## Checking they will run
+
+```bash
+npx supatype hooks list
+npx supatype doctor
+```
+
+Both list every declared hook and mark one whose handler does not exist. `doctor` also reports the
+other ways a hook can fail to fire: functions switched off in the stack, or a manifest that predates
+your hooks. Each of those failures is otherwise silent: the write simply succeeds unvalidated.

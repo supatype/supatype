@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -92,6 +92,13 @@
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
     </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
@@ -126,7 +133,10 @@
 <pre><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">"@supatype/cli"</span>
 
 <span class="k">export default</span> defineConfig({
-  <span class="c">// ...</span>
+  project: { name: <span class="s">"my-app"</span> },
+  database: { provider: <span class="s">"docker"</span> },
+  server: { mode: <span class="s">"dev"</span> },
+  app: { mode: <span class="s">"none"</span> },
   functions: {
     path: <span class="s">"functions"</span>,
   },
@@ -187,6 +197,7 @@
   <span class="k">return</span> Response.json({ id: user.id, posts: <span class="k">await</span> posts.json() })
 }</pre></div>
 <p>Forwarding the caller's token is the safe default: the database sees the user, not the function, and every <a href="/docs/schema.html">access rule</a> still applies.</p>
+<p>Do not decode the token yourself to read a role. Until its signature is checked, anyone can send a payload that says <code>"role": "admin"</code>. Ask <code>/auth/v1/user</code>, as above, which checks it. <code>supatype.auth.getUser()</code> on a client you create inside a function does not help here: it reads that client's own stored session, not the request's token, so it returns no user.</p>
 
 <h2 id="service-role">Service role</h2>
 <p>A function is a public endpoint. By default it does not receive the service-role key, which reads and writes past every access rule. The worker removes the key from the environment before any function is imported, so <code>Deno.env</code> cannot reach it either.</p>
@@ -236,7 +247,8 @@ $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></di
 <p>The worker reads code once at startup, so restart it after changing a function:</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ docker compose -p supatype-&lt;project&gt; -f .supatype/self-host/docker-compose.yml restart functions-worker</pre></div>
-<p><code>&lt;project&gt;</code> is your project name from <code>supatype.config.ts</code> in lower case, with spaces and other symbols replaced by <code>-</code>. Env file changes do not need a restart.</p>
+<p><code>&lt;project&gt;</code> is your project name from <code>supatype.config.ts</code> in lower case, with spaces and other symbols replaced by <code>-</code>. <code>supatype self-host compose restart functions-worker</code> does the same and finds the project name for you. Env file changes do not need a restart.</p>
+<p>On an unlinked project with a self-host Compose file, <code>supatype functions deploy</code> uploads nothing. It lists the functions it found on disk and prints that restart command.</p>
 <p>The worker gets the anon and service-role keys from the stack. To give functions a database connection, set <code>SUPATYPE_FUNCTIONS_DB_URL</code>; it appears as <code>ctx.dbUrl</code>. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.</p>
 <p>Function logs are JSON lines on the container's output, each with the call's <code>request_id</code>, status and duration:</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>

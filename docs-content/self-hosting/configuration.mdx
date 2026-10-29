@@ -1,0 +1,210 @@
+---
+title: Configuration
+description: Environment variables and configuration options for self-hosted Supatype deployments.
+---
+
+A self-hosted stack reads its settings from two places: `supatype.config.ts`, and `.env` in the
+project root. Every `supatype self-host compose` command renders
+`.supatype/self-host/docker-compose.yml` from both, and Compose substitutes the `.env` values into
+it. Most containers see only the variables the generated file names. The one exception is the
+`server` container: it mounts the project at `/project` and loads `.env` itself, without
+overriding a value Compose already set, so an auth server setting such as
+`SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED` also takes effect there. The services' internal settings (ports between
+containers, PostgREST's roles, the object store's credentials) are fixed in the generated file.
+
+Variables marked **Required** have no default: Compose stops before starting anything and names the
+one that is missing, for example `POSTGRES_PASSWORD is missing from .env`.
+
+## Database
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POSTGRES_PASSWORD` | None | **Required.** Password of the database's superuser, for direct SQL access |
+| `POSTGRES_USER` | `supatype_admin` | The superuser. The bundled `supatype/postgres` image runs as `supatype_admin`, and the CLI refuses any other value |
+| `POSTGRES_DB` | `supatype` | Database name. `supatype init` sets it to the project name |
+| `AUTHENTICATOR_PASSWORD` | None | **Required.** Password of `authenticator`, the role PostgREST connects as. Keep it different from `POSTGRES_PASSWORD`, so rotating yours does not take the REST API down |
+| `SUPATYPE_SQL_EDITOR_PASSWORD` | None | **Required.** Password of `supatype_sql_editor`, the role Studio's SQL editor connects as. It is not a superuser |
+| `DATABASE_URL` | None | The connection string the CLI uses from the host. With [`database.external`](/docs/self-hosting/external-database.html) every service uses it too, and it becomes required |
+| `SUPATYPE_DB_PORT` | `5432` | Host port the database is published on |
+| `SUPATYPE_DB_PUBLIC_HOST` | `server.domain`, else `127.0.0.1` | Host name Studio shows in the database's connection strings |
+| `SUPATYPE_DB_POOLER_URL` | None | A connection pooler's URL, for Studio to show beside the direct one |
+| `SUPATYPE_ALLOW_SECRET_READBACK` | `false` | Lets Studio reveal the database password through the server's admin routes |
+
+`supatype init` generates `POSTGRES_PASSWORD`, `AUTHENTICATOR_PASSWORD` and
+`SUPATYPE_SQL_EDITOR_PASSWORD` for a new project.
+
+## Keys and secrets
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_SECRET` | None | **Required.** Signs every token. At least 32 characters: see [JWT secret length](#jwt-secret-length) |
+| `ANON_KEY` | None | The public API key, a JWT signed with `JWT_SECRET`. `supatype self-host compose up` mints it when it is blank |
+| `SERVICE_ROLE_KEY` | None | The admin API key, minted the same way. Required by the control plane |
+| `SUPATYPE_CONTROL_PLANE_SECRET` | Generated | Shared by the API server and the control plane only. Every `self-host compose` command writes one into `.env` when it is missing |
+
+Access tokens expire after 3600 seconds. The generated file fixes this value; `.env` does not
+change it.
+
+### JWT secret length
+
+PostgREST refuses to start with a JWT secret shorter than 32 characters, and everything else in the
+stack accepts one, so a short secret used to bring the stack up whole except for the REST API. The
+CLI now checks first: `supatype dev` and `supatype self-host compose up` stop before starting
+anything when `JWT_SECRET` is too short, with:
+
+```
+JWT_SECRET in .env is 20 characters, and the REST API needs at least 32.
+```
+
+Generate a longer one, for example with `openssl rand -base64 48`, put it in `.env` as `JWT_SECRET`,
+then run `supatype keys --write --force` to sign `ANON_KEY` and `SERVICE_ROLE_KEY` with it. Without
+`--force`, `--write` only fills keys that are blank and leaves keys signed with the old secret in
+place.
+
+## Public URLs and ports
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_EXTERNAL_URL` | `http://localhost:18473`, or `https://<server.domain>` with TLS on | The API's public address. Emailed links, OAuth redirect URIs and `ctx.publicUrl` in functions are built from it |
+| `SITE_URL` | `http://localhost:3000`, or `https://<server.domain>` with TLS on | Your application's URL, for auth redirects. Its origin is always allowed by CORS |
+| `SUPATYPE_KONG_PORT` | `18473` | Host port of the gateway. With TLS on, the gateway publishes ports 80 and 443 instead |
+| `SUPATYPE_SERVER_PORT` | `9999` | Host port of the API server itself, behind the gateway |
+| `SUPATYPE_SEAWEEDFS_PORT` | `8333` | Host port of the object store behind storage |
+| `SUPATYPE_PUBLISH_ADDRESS` | `127.0.0.1` | Address the database, the API server and the object store are published on. Loopback keeps them off the network; the gateway is the way in |
+
+TLS is on when `supatype.config.ts` sets `server.mode: "standalone"`, a `server.domain` and
+`server.tls.email`. See [Docker setup](/docs/self-hosting/docker.html#step-4-set-up-https).
+
+## Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISABLE_SIGNUP` | `false` | Refuse new sign-ups |
+| `SUPATYPE_MAILER_AUTOCONFIRM` | `true`, or `false` when `auth.email.enableConfirmations` is `true` | Confirm new email addresses without sending a confirmation email |
+
+### Email
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUPATYPE_MAILER_MAILER_PROVIDER` | `console` | `console` writes each message to the server's log and sends nothing. Set `smtp` to deliver through the server below |
+| `SUPATYPE_SMTP_HOST` | None | SMTP server hostname |
+| `SUPATYPE_SMTP_PORT` | `587` | SMTP server port |
+| `SUPATYPE_SMTP_USER` | None | SMTP username |
+| `SUPATYPE_SMTP_PASS` | None | SMTP password |
+| `SUPATYPE_SMTP_ADMIN_EMAIL` | None | The address messages are sent from |
+| `SUPATYPE_SMTP_SENDER_NAME` | None | The name shown beside that address |
+
+With the default provider no email leaves the server, whatever the SMTP variables say. The generated
+file passes only these settings, so on a self-hosted stack use `console` or `smtp`.
+
+### OAuth providers
+
+Declare providers under `auth.providers` in `supatype.config.ts`. The compose file turns each one
+into the `SUPATYPE_EXTERNAL_<PROVIDER>_*` variables the auth server reads, and fills in the redirect
+URI as `API_EXTERNAL_URL` followed by `/auth/v1/callback`:
+
+```typescript
+// docs:no-check (a fragment: the rest of your config stays as it is)
+import { defineConfig, env } from "@supatype/cli"
+
+export default defineConfig({
+  auth: {
+    providers: {
+      github: { clientId: "Iv1.0123456789abcdef", secret: env("GITHUB_SECRET") },
+    },
+  },
+})
+```
+
+The secret is the name of a variable in `.env`, never the value. For each declared provider, a
+`SUPATYPE_EXTERNAL_<PROVIDER>_<SETTING>` variable in `.env` (`_ENABLED`, `_CLIENT_ID`, `_SECRET`,
+`_REDIRECT_URI`, `_URL`, `_SKIP_NONCE_CHECK`, `_EMAIL_OPTIONAL`) overrides what the config gives.
+A provider that is not under `auth.providers` does not reach the server, even when its variables are
+in `.env`. See [OAuth providers](/docs/auth/oauth.html).
+
+## Allowed browser origins (CORS)
+
+Outside dev mode the server's gateway decides CORS for every service behind it. The browser origins
+it allows by default are:
+
+1. the origin of `SITE_URL`,
+2. the origins in `api.corsOrigins` in `supatype.config.ts`,
+3. the origins in `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` (comma-separated).
+
+```typescript
+// docs:no-check (a fragment: the rest of your config stays as it is)
+// supatype.config.ts
+import { defineConfig } from "@supatype/cli"
+
+export default defineConfig({
+  project: { name: "my-project" },
+  server: { mode: "standalone" },
+  api: { corsOrigins: ["https://admin.example.com", "http://localhost:5173"] },
+})
+```
+
+Each `api.corsOrigins` entry is `scheme://host[:port]` with an `http` or `https` scheme, or `*`.
+Anything else (a path, a query, another scheme) stops the config from loading with
+`api.corsOrigins must be an array of origins (scheme://host[:port]) or "*"`. The generated compose
+file passes the config's origins to the server ahead of `SUPATYPE_CORS_ALLOW_ORIGINS`, so
+re-render it (any `supatype self-host compose` command does) after changing them.
+
+Owners, admins and developers can also change the list in Studio, on the **Settings > CORS** tab,
+which shows each origin and where it comes from. A list saved there is kept in the project's
+database (`auth.cors_origins`), survives a restart, reaches every server replica within ten
+seconds, and replaces the default until someone presses **Reset to default**. Viewers can read it.
+
+| | |
+|---|---|
+| Site URL | Always allowed, whatever list is saved |
+| Any other origin | Refused: a preflight gets `403`, and other responses carry no CORS headers |
+| `*` | Allows every origin, and only when you write it in one of the places above. It is never a default |
+| Dev mode | Unchanged: `supatype dev` allows every origin, whatever the list says |
+
+Before this, a standalone server with no `SUPATYPE_CORS_ALLOW_ORIGINS` allowed every origin. If a
+production web app on another origin calls your API, add its origin before upgrading.
+
+## Functions
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUPATYPE_FUNCTIONS_DB_URL` | None | A Postgres URL handed to every function as `ctx.dbUrl`. It bypasses access rules and field masking, so name a least-privilege role, never the admin URL |
+| `STRIPE_SECRET_KEY` | None | Passed to the functions worker |
+| `STRIPE_WEBHOOK_SECRET` | None | Passed to the functions worker |
+
+## Realtime
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REALTIME_LOG_LEVEL` | `info` | `debug` also logs each change a subscriber's access rules withheld |
+
+Realtime runs unless `database.external.realtime` is `false`.
+
+## Images
+
+Each service's image can be replaced from `.env`: `SUPATYPE_POSTGRES_IMAGE`, `SUPATYPE_SERVER_IMAGE`,
+`SUPATYPE_STORAGE_IMAGE`, `SUPATYPE_FUNCTIONS_WORKER_IMAGE`, `SUPATYPE_REALTIME_IMAGE`,
+`SUPATYPE_CONTROL_PLANE_IMAGE`, `SUPATYPE_STUDIO_IMAGE`, `SUPATYPE_ENGINE_IMAGE`,
+`SUPATYPE_SEAWEEDFS_IMAGE` and `SUPATYPE_VALKEY_IMAGE`. Left unset, each service runs the image the
+generated file names, which is the `latest` tag for Supatype's own services. A `versions` pin for
+`engine` or `server` in `supatype.config.ts` writes `SUPATYPE_ENGINE_IMAGE` or
+`SUPATYPE_SERVER_IMAGE` into `.env` for you.
+
+## Generating keys
+
+`supatype keys` signs `ANON_KEY` and `SERVICE_ROLE_KEY` with the `JWT_SECRET` in `.env` (or the one
+you pass with `--secret`) and prints them:
+
+```bash
+npx @supatype/cli keys
+```
+
+| Flag | Effect |
+|------|--------|
+| `--write` | Write the keys into `.env` instead of printing them. Only blank keys are filled |
+| `--force` | With `--write`, replace keys that already hold a value |
+| `--exp-years <years>` | How long the keys are valid, in years. Default `10` |
+| `--secret <secret>` | Sign with this secret instead of `JWT_SECRET` |
+
+The command does not create `JWT_SECRET`: `supatype init` generates one, or use
+`openssl rand -base64 48`. Use different secrets in every environment.

@@ -1,0 +1,16 @@
+{
+  // Types the stand-ins and fixtures for the lint and for editors. The samples themselves are
+  // checked by scripts/check-docs-code-blocks.mjs, with the tsconfig it writes into .blocks/.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["../../ts-reset.d.ts", "stubs.d.ts", "schema.d.ts", "fixtures"]
+}

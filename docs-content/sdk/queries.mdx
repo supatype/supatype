@@ -1,0 +1,208 @@
+---
+title: Queries
+description: Read data from your database with select, filters, ordering, pagination, and relation fetching.
+---
+
+## Basic select
+
+Fetch all rows from a table:
+
+```typescript
+const { data, error } = await supatype.from("posts").select("*")
+```
+
+Select specific columns:
+
+```typescript
+const { data } = await supatype.from("posts").select("title, slug, created_at")
+```
+
+With generated types, `data` is typed from the select string: `"title, slug, created_at"` gives rows
+with just those three columns, and a column or relation the schema does not have becomes a type
+error where you use it. A select string only known at run time is typed as the whole row. For a
+shape the string cannot describe, pass it as a type argument:
+
+```typescript
+const { data } = await supatype
+  .from("posts")
+  .select<{ title: string; slug: string }>("title, slug")
+```
+
+## Selecting relations
+
+Fetch related data using parentheses syntax (PostgREST resource embedding). Embedded relations are
+typed from the generated schema too: a to-one relation is the related row or `null` (the row alone
+when embedded with `!inner`, as in `author!inner(name)`), and a to-many relation is an array:
+
+```typescript
+const { data } = await supatype
+  .from("posts")
+  .select("title, author(name, email), tags(name)")
+```
+
+Nested relations work too:
+
+```typescript
+const { data } = await supatype
+  .from("posts")
+  .select("title, comments(body, author(name))")
+```
+
+## Filters
+
+Chain filters to narrow results. Filters take the column name as a string and the value is
+converted with `String()`; neither is checked against your schema. Every filter on this page also
+works on `update`, `upsert` and `delete` (see [Mutations](/docs/sdk/mutations.html#filtering-writes)).
+
+### Equality
+
+```typescript
+.eq("status", "published")       // status = 'published'
+.neq("status", "draft")          // status != 'draft'
+.match({ status: "published", lang: "en" })  // one .eq() per entry
+```
+
+### Comparison
+
+```typescript
+.gt("views", 100)                // views > 100
+.gte("views", 100)               // views >= 100
+.lt("views", 1000)               // views < 1000
+.lte("views", 1000)              // views <= 1000
+```
+
+### Pattern matching
+
+```typescript
+.like("title", "%supatype%")     // LIKE (case-sensitive)
+.ilike("title", "%supatype%")    // ILIKE (case-insensitive)
+```
+
+### Containment
+
+```typescript
+.in("status", ["published", "scheduled"])  // IN (...)
+.contains("tags", ["news", "featured"])     // array column: tags @> '{news,featured}'
+.containedBy("tags", ["news", "featured", "sport"])  // array column: tags <@ '{...}'
+.contains("metadata", { featured: true })   // jsonb column: metadata @> '{"featured":true}'
+```
+
+`in` quotes a value that holds a comma or a parenthesis, so a value like `"a, b"` is matched whole
+instead of being split into two.
+
+`contains` and `containedBy` pick the operand's form from the value you pass:
+
+- an **array** is sent as a Postgres array literal (`{news,featured}`), the form an array column
+  such as `text[]` takes. Elements that are empty, spell `null`, or hold spaces, commas, braces,
+  quotes or backslashes are quoted; a JavaScript `null` element is SQL `NULL`;
+- an **object** (or a number or boolean) is sent as JSON, the form a `jsonb` column takes;
+- a **string** is sent exactly as written, for a range or a literal you have already formed.
+
+To match a `jsonb` column that holds an array, pass the JSON yourself:
+`.contains("metadata", JSON.stringify(["a", "b"]))`. A bare array means a Postgres array.
+
+### Between two values
+
+There is no between filter; combine `gte` and `lte`:
+
+```typescript
+.gte("created_at", "2025-01-01")
+.lte("created_at", "2025-12-31")
+```
+
+### Null checks
+
+```typescript
+.is("deleted_at", null)              // IS NULL
+.not("deleted_at", "is", null)       // IS NOT NULL
+```
+
+`.not(column, operator, value)` negates any PostgREST operator, for example `.not("status", "eq", "draft")`.
+
+### Combining filters
+
+```typescript
+// AND: chain multiple filters
+const published = await supatype
+  .from("posts")
+  .select("*")
+  .eq("status", "published")
+  .gt("views", 100)
+
+// OR: use the .or() method with PostgREST filter syntax
+const either = await supatype
+  .from("posts")
+  .select("*")
+  .or("status.eq.published,status.eq.scheduled")
+```
+
+## Ordering
+
+```typescript
+.order("created_at", { ascending: false })
+```
+
+Order by multiple columns:
+
+```typescript
+.order("status", { ascending: true })
+.order("created_at", { ascending: false })
+```
+
+Nulls sort last unless you pass `{ nullsFirst: true }`.
+
+## Pagination
+
+### Limit and range
+
+```typescript
+.limit(10)
+.range(0, 9)   // Rows 0-9 (first page)
+.range(10, 19)  // Rows 10-19 (second page)
+```
+
+`range(from, to)` is inclusive on both ends and is sent as a `Range` header.
+
+### Cursor-based pagination
+
+```typescript
+const { data } = await supatype
+  .from("posts")
+  .select("*")
+  .order("created_at", { ascending: false })
+  .lt("created_at", lastPost.created_at)
+  .limit(10)
+```
+
+## Single row
+
+Fetch exactly one row:
+
+```typescript
+const { data } = await supatype
+  .from("posts")
+  .select("*")
+  .eq("slug", "my-post")
+  .single()
+// data is a single object, not an array
+```
+
+Use `.maybeSingle()` if the row might not exist (returns `null` instead of an error). When
+`.single()` finds no row or more than one, `error.code` is `"PGRST116"` and the message is
+`Cannot coerce the result to a single JSON object`.
+
+## Count
+
+Get total row count without fetching data:
+
+```typescript
+const { count } = await supatype
+  .from("posts")
+  .select("*", { count: "exact", head: true })
+  .eq("status", "published")
+```
+
+Count options: `"exact"`, `"planned"` (faster estimate), `"estimated"`.
+
+`count` is a number only when you ask for one with the `count` option. On any other read it is
+`null`, never `NaN`, so test it with `count !== null` before using it.

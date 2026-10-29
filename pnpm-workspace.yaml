@@ -6,3 +6,4 @@ packages:
   - "examples/*/apps/*"
   - "tests/integration"
   - "tests/e2e"
+  - "tests/docs-code-blocks"

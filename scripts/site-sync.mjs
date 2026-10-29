@@ -1,15 +1,18 @@
 // Keeps the parts every page of the static site in docs/ shares in step, from one definition:
 // the header, skip link and footer, the docs sidebar, the phone menu label, the previous/next
-// links, the link preview and feed tags, the site.css and site.js links, sitemap.xml, and the docs
-// half of llms-full.txt. The home page keeps its own header and footer, and gets only the head tags.
+// links, the link preview and feed tags, the site.css and site.js links, sitemap.xml, the docs
+// half of llms-full.txt, and docs-content/: every docs page and guide as Starlight Markdown, which
+// the cloud docs app builds from. The home page keeps its own header and footer, and gets only the
+// head tags.
 // Run after adding a page, changing a title or description, or editing site.css or site.js.
 // --check changes nothing and exits non-zero when a page is out of step:
 //   node scripts/site-sync.mjs [--check]
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs"
+import { dirname } from "node:path"
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { fileURLToPath } from "node:url"
-import { pageMarkdown, site } from "./site-markdown.mjs"
+import { generatedMarker, pageMarkdown, pageStarlight, sentence, site } from "./site-markdown.mjs"
 
 const repo = fileURLToPath(new URL("../", import.meta.url))
 const docs = `${repo}docs/`
@@ -30,6 +33,10 @@ const sidebar = [
     ["VM + GitHub Actions", "/deploy-vm-github-actions.html"],
     ["Coming from Supabase", "/from-supabase.html"], ["Coming from Prisma", "/from-prisma.html"],
   ]],
+  ["POSTGRES", "Docs", [
+    ["The image", "/postgres.html"], ["pg_keyspace", "/postgres/pg-keyspace.html"], ["pg_topics", "/postgres/pg-topics.html"],
+    ["pg_guard", "/postgres/pg-guard.html"], ["supatype_mask", "/postgres/supatype-mask.html"],
+  ]],
   ["REFERENCE", "Docs", [["CLI", "/docs/cli.html"]]],
   ["MORE", null, [["Licensing", "/licensing.html"], ["Privacy", "/privacy.html", { llms: false }], ["Changelog", "/changelog.html"], ["llms.txt", "/llms.txt"]]],
 ]
@@ -41,7 +48,6 @@ const pageUrls = ["/docs/", ...sidebarLinks.map((link) => link.href).filter((hre
 
 const fileOf = (url) => (url.endsWith("/") ? `${url.slice(1)}index.html` : url.slice(1))
 const imageOf = (url) => (url === "/" ? "home" : url === "/docs/" ? "docs" : url.split("/").pop().replace(".html", ""))
-const sentence = (label) => label[0] + label.slice(1).toLowerCase()
 
 function match(html, pattern, what, file) {
   const found = html.match(pattern)
@@ -231,10 +237,43 @@ function llmsFullTxt(current, synced) {
   return `${summary}\n\n${docsHeading}\n\n${intro}\n\n${sections.join("\n\n")}\n`
 }
 
+// docs-content/ holds the docs pages and guides. The www pages (Licensing, Changelog, Privacy)
+// stay out, and so do the Postgres pages: the docs app builds those from the READMEs in
+// supatype/postgres. The guides move under guides/ there, as /docs/guides/ in the docs app.
+// Generated pages are .md and start with generatedMarker; a page written by hand there (the cloud
+// docs' own sub-pages are .mdx) is never touched, whatever its extension.
+const contentDir = `${repo}docs-content/`
+function contentFile(url) {
+  if (url === "/docs/") return "index.md"
+  if (url.startsWith("/docs/")) return url.slice("/docs/".length).replace(/\.html$/, ".md")
+  return sidebarEntry(url).header === "Guides" ? `guides${url.replace(/\.html$/, ".md")}` : null
+}
+
+// Every generated file docs-content/ holds now, so a page gone from the sidebar goes too. Only a
+// file whose front matter carries generatedMarker counts, so a hand-written .md file stays.
+function existingContent(dir = contentDir, prefix = "") {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return existingContent(`${dir}${entry.name}/`, `${prefix}${entry.name}/`)
+    const generated = entry.name.endsWith(".md") && readPath(`${dir}${entry.name}`).startsWith(`---\n${generatedMarker}\n`)
+    return generated ? [`${prefix}${entry.name}`] : []
+  })
+}
+
+function docsContent(synced) {
+  const wanted = pageUrls.map((url) => [contentFile(url), url]).filter(([file]) => file)
+  const written = wanted.map(([file, url]) => [`docs-content/${file}`, readOptional(contentDir + file), pageStarlight(synced[url], url)])
+  const names = new Set(wanted.map(([file]) => file))
+  const stale = existingContent().filter((file) => !names.has(file)).map((file) => [`docs-content/${file}`, readOptional(contentDir + file), null])
+  return [...written, ...stale]
+}
+
 const check = process.argv.includes("--check")
 // Git keeps these files with LF endings, but a Windows checkout may write CRLF. Reading as LF
 // keeps --check from calling every page out of step there.
-const read = (file) => readFileSync(docs + file, "utf8").replace(/\r\n/g, "\n")
+const readPath = (path) => readFileSync(path, "utf8").replace(/\r\n/g, "\n")
+const read = (file) => readPath(docs + file)
+const readOptional = (path) => (existsSync(path) ? readPath(path) : null)
 // site.css and site.js, each with a hash of its contents and the pattern for its link on a page.
 const assets = ["site.css", "site.js"].map((name) => ({
   name,
@@ -246,18 +285,26 @@ const headings = Object.fromEntries(pageUrls.map((url) => [url, match(pages[url]
 const synced = Object.fromEntries(Object.entries(pages).map(([url, html]) => [url, syncedPage(html, url, headings)]))
 const home = read("index.html")
 const llmsFull = read("llms-full.txt")
+// Each result is a path from the repo root, what the file holds now (null if missing) and what it
+// should hold (null to delete it).
 const results = [
-  ...Object.keys(pages).map((url) => [fileOf(url), pages[url], synced[url]]),
-  ["index.html", home, withHead(home, "/", "index.html")],
-  ["llms-full.txt", llmsFull, llmsFullTxt(llmsFull, synced)],
-  ["sitemap.xml", read("sitemap.xml"), sitemapXml()],
+  ...Object.keys(pages).map((url) => [`docs/${fileOf(url)}`, pages[url], synced[url]]),
+  ["docs/index.html", home, withHead(home, "/", "index.html")],
+  ["docs/llms-full.txt", llmsFull, llmsFullTxt(llmsFull, synced)],
+  ["docs/sitemap.xml", read("sitemap.xml"), sitemapXml()],
+  ...docsContent(synced),
 ]
 // A squash merge gives the sitemap's pages a new date with no change to them, so --check compares
 // the sitemap's pages and not its dates. A plain run still writes the dates.
 const withoutDates = (xml) => xml.replace(/<lastmod>[^<]*<\/lastmod>/g, "")
-const inStep = (file, before, after) => (check && file === "sitemap.xml" ? withoutDates(before) === withoutDates(after) : before === after)
+const inStep = (file, before, after) => (check && file === "docs/sitemap.xml" ? withoutDates(before) === withoutDates(after) : before === after)
 const changed = results.filter(([file, before, after]) => !inStep(file, before, after))
-if (!check) changed.forEach(([file, , after]) => writeFileSync(docs + file, after))
-changed.forEach(([file]) => console.log(`${check ? "out of step" : "updated"}: docs/${file}`))
+function save(file, after) {
+  if (after === null) return rmSync(repo + file)
+  mkdirSync(dirname(repo + file), { recursive: true })
+  writeFileSync(repo + file, after)
+}
+if (!check) changed.forEach(([file, , after]) => save(file, after))
+changed.forEach(([file]) => console.log(`${check ? "out of step" : "updated"}: ${file}`))
 console.log(`${results.length} files, ${changed.length} ${check ? "out of step" : "updated"}.`)
 if (check && changed.length > 0) process.exit(1)

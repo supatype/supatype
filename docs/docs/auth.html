@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=8ab59ee7a6" />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
 </head>
 <body class="docs-page">
 
@@ -92,6 +92,13 @@
       <li><a href="/from-supabase.html">Coming from Supabase</a></li>
       <li><a href="/from-prisma.html">Coming from Prisma</a></li>
     </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
     </ul></div>
@@ -132,10 +139,17 @@
       </tbody>
     </table></div>
     <p>Password reset is <code>resetPasswordForEmail</code>, and <code>updateUser</code> changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise <code>SUPATYPE_PASSWORD_MIN_LENGTH</code>.</p>
+    <p><code>signUp</code> takes <code>options.data</code> for user metadata, which comes back on <code>user.userMetadata</code>.</p>
+    <p><code>signInWithOtp</code> creates the user when they do not exist, unless you pass <code>options.createUser: false</code>. For a phone, pass <code>phone</code> and optionally <code>options.channel</code> (<code>"sms"</code> or <code>"whatsapp"</code>), then call <code>verifyOtp</code> with <code>type: "sms"</code>. <code>resend({ type, email })</code> or <code>resend({ type, phone })</code> sends a confirmation or code again, where <code>type</code> is <code>"signup"</code>, <code>"sms"</code>, <code>"email_change"</code> or <code>"phone_change"</code>.</p>
+    <p>For a password reset, wait for <code>initialize()</code> on the page the link opens, then call <code>updateUser({ password })</code>. A recovery link, or <code>verifyOtp</code> with <code>type: "recovery"</code>, emits <code>PASSWORD_RECOVERY</code> once the session exists.</p>
+    <h3>Auth errors</h3>
+    <p>Auth calls put the auth server's code in <code>error.code</code>, beside <code>message</code> and <code>status</code>. Branch on the code, not the message: <code>invalid_credentials</code>, <code>email_not_confirmed</code>, <code>weak_password</code>, <code>user_already_exists</code>, <code>email_exists</code>, and <code>otp_expired</code> for an expired link. <code>error.code</code> is absent only when the answer carried none, such as a gateway's HTML error page.</p>
     <h3>Multi-factor</h3>
     <p><code>supatype.auth.mfa</code> has <code>enroll</code>, <code>challenge</code>, <code>verify</code>, <code>challengeAndVerify</code> and <code>unenroll</code>. TOTP authenticator apps are on by default. Phone factors are off by default and need an SMS provider.</p>
+    <p><code>enroll({ factorType: "totp" })</code> returns the factor's <code>id</code> and a QR code (<code>totp.qrCode</code>) and URI (<code>totp.uri</code>) to show the user. <code>challengeAndVerify({ factorId, code })</code> is <code>challenge</code> then <code>verify</code> in one call. Call the two separately when the code arrives later, as an SMS does. A verify raises the session to AAL2 and emits <code>MFA_CHALLENGE_VERIFIED</code>. <code>listFactors()</code> returns every factor in <code>all</code> and the verified ones in <code>totp</code> and <code>phone</code>. <code>getAuthenticatorAssuranceLevel()</code> reports the current and next level.</p>
     <h3>Anonymous users</h3>
     <p>An anonymous sign-in creates a real user with a user id and a session. Turn it on with <code>SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true</code>. Because the user has an id, an anonymous user passes <code>LoggedIn</code> and can own rows. The token carries <code>is_anonymous: true</code>.</p>
+    <p><code>signInAnonymously({ options: { data, captchaToken } })</code> takes optional metadata and a captcha token, and the user comes back with <code>isAnonymous: true</code>.</p>
 
     <h2 id="oauth">OAuth providers</h2>
     <p>Each provider is switched on with environment variables named after it. For GitHub:</p>
@@ -146,7 +160,7 @@ SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
 SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
 SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:54321/auth/v1/callback</pre></div>
     <p>The redirect URI is the auth service's callback: <code>/auth/v1/callback</code> on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.</p>
-    <p>Supported provider names: <code>apple</code>, <code>azure</code>, <code>bitbucket</code>, <code>discord</code>, <code>facebook</code>, <code>figma</code>, <code>fly</code>, <code>github</code>, <code>gitlab</code>, <code>google</code>, <code>kakao</code>, <code>keycloak</code>, <code>linkedin_oidc</code>, <code>notion</code>, <code>slack_oidc</code>, <code>snapchat</code>, <code>spotify</code>, <code>twitch</code>, <code>twitter</code>, <code>x</code>, <code>workos</code> and <code>zoom</code>. Upper-case the name for the variable, so <code>linkedin_oidc</code> becomes <code>SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED</code>.</p>
+    <p>Supported provider names: <code>apple</code>, <code>azure</code>, <code>bitbucket</code>, <code>discord</code>, <code>facebook</code>, <code>figma</code>, <code>fly</code>, <code>github</code>, <code>gitlab</code>, <code>google</code>, <code>kakao</code>, <code>keycloak</code>, <code>linkedin_oidc</code>, <code>notion</code>, <code>slack_oidc</code>, <code>snapchat</code>, <code>spotify</code>, <code>twitch</code>, <code>twitter</code>, <code>x</code>, <code>workos</code> and <code>zoom</code>. The auth server also accepts <code>vercel_marketplace</code>, and the older <code>linkedin</code> and <code>slack</code>, which the <code>_oidc</code> versions replace. Upper-case the name for the variable, so <code>linkedin_oidc</code> becomes <code>SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED</code>.</p>
     <h3>The sign-in round trip</h3>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> { data, error } = <span class="k">await</span> supatype.auth.signInWithOAuth({
@@ -157,10 +171,12 @@ SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:54321/auth/v1/callback</p
 window.location.assign(data.url)
 
 <span class="c">// On /auth/callback</span>
-<span class="k">const</span> { error: callbackError } = <span class="k">await</span> supatype.auth.getSessionFromUrl(window.location.href)
+<span class="c">// The client finishes the sign-in in the URL when it starts; initialize() waits for that.</span>
+<span class="k">const</span> { error: callbackError } = <span class="k">await</span> supatype.auth.initialize()
 <span class="k">if</span> (callbackError) console.error(callbackError.message)</pre></div>
     <p><code>signInWithOAuth</code> returns the URL; it does not navigate for you. <code>redirectTo</code> must be on the same host as <code>SITE_URL</code>, a loopback address, or match an entry in <code>SUPATYPE_URI_ALLOW_LIST</code> (comma-separated, globs allowed). Anything else sends the user to <code>SITE_URL</code> instead. An app on another domain, or a mobile deep link, needs an allow list entry.</p>
-    <p>The web default is the implicit flow, which returns tokens in the URL fragment. Pass <code>flowType: "pkce"</code> in the options for a code exchange instead; mobile apps should always use PKCE. <code>getSessionFromUrl</code> handles both.</p>
+    <p>The web default is the implicit flow, which returns tokens in the URL fragment. Pass <code>flowType: "pkce"</code> in the options for a code exchange instead; mobile apps should always use PKCE. The client finishes either from the URL when it starts, and removes the tokens from the address bar; <code>initialize()</code> resolves once it has, with any <code>error</code> the provider sent back. Do not call <code>getSessionFromUrl</code> as well: the URL no longer carries the tokens by then, so it answers with an error.</p>
+    <p><code>exchangeCodeForSession(code)</code> does the PKCE exchange on its own. <code>options.scopes</code> asks the provider for extra scopes.</p>
 
     <h2 id="sessions">Sessions and tokens</h2>
     <p>A session is a short-lived access token and a refresh token.</p>
@@ -168,9 +184,22 @@ window.location.assign(data.url)
       <li>The access token is a JWT signed with <code>JWT_SECRET</code>, valid for one hour. The client sends it as <code>Authorization: Bearer</code> on every request.</li>
       <li>The client refreshes it about a minute before it expires, and again on load if a saved session has already expired. If the refresh fails, the session is cleared rather than kept with a dead token.</li>
       <li>Refresh tokens rotate: each refresh issues a new one.</li>
-      <li><code>signOut</code> ends the session on the server and clears it locally.</li>
+      <li><code>signOut</code> takes no arguments. It ends every session the user has on the server, not just this device's, and clears it locally.</li>
     </ul>
     <p>In the browser the session is saved to <code>localStorage</code> under <code>supatype.auth.session</code> and mirrored to a cookie named <code>st-auth-token</code>, which <code>@supatype/ssr</code> reads on the server. Set <code>auth: { persistSession: false }</code>, <code>storageKey</code> or <code>cookiePrefix</code> on <code>createClient</code> to change this. On React Native, <code>createNativeClient</code> from <code>@supatype/react-native</code> stores the session in <code>expo-secure-store</code> or AsyncStorage.</p>
+    <h3>Auth events</h3>
+    <p><code>onAuthStateChange</code> calls back at once with <code>SIGNED_IN</code> or <code>SIGNED_OUT</code>, then on each of these:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Event</th><th scope="col">When</th></tr></thead>
+      <tbody>
+        <tr><td><code>SIGNED_IN</code></td><td>A session starts while signed out</td></tr>
+        <tr><td><code>SIGNED_OUT</code></td><td>The session is cleared</td></tr>
+        <tr><td><code>TOKEN_REFRESHED</code></td><td>The session is replaced while signed in</td></tr>
+        <tr><td><code>USER_UPDATED</code></td><td><code>updateUser</code> succeeded. The session passed to the callback carries the updated user</td></tr>
+        <tr><td><code>PASSWORD_RECOVERY</code></td><td>A password reset link or code produced a session, after its <code>SIGNED_IN</code></td></tr>
+        <tr><td><code>MFA_CHALLENGE_VERIFIED</code></td><td>An MFA verify raised the session to AAL2</td></tr>
+      </tbody>
+    </table></div>
     <h3>What the token says</h3>
     <div class="tbl"><table>
       <thead><tr><th scope="col">Claim</th><th scope="col">Meaning</th></tr></thead>
@@ -245,7 +274,7 @@ window.location.assign(data.url)
     &lt;/<span class="t">SupatypeProvider</span>&gt;
   )
 }</pre></div>
-    <p>The web forms are plain, unstyled markup: pass <code>className</code> and <code>labels</code> to fit your app. <code>OAuthButton</code> has a default style and an icon for GitHub, Google and Apple, which a <code>className</code> replaces. It sends the browser to the provider; your callback page still calls <code>getSessionFromUrl</code>.</p>
+    <p>The web forms are plain, unstyled markup: pass <code>className</code> and <code>labels</code> to fit your app. <code>OAuthButton</code> has a default style and an icon for GitHub, Google and Apple, which a <code>className</code> replaces. It sends the browser to the provider; the client finishes the sign-in on your callback page by itself, and <code>initialize()</code> tells you how it went.</p>
     <h3>React Native</h3>
     <div class="cb"><div class="cb-bar"><span>App.tsx</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> * <span class="k">as</span> SecureStore <span class="k">from</span> <span class="s">"expo-secure-store"</span>
@@ -266,7 +295,7 @@ window.location.assign(data.url)
   <span class="k">return</span> (
     &lt;<span class="t">SupatypeProvider</span> client={client}&gt;
       &lt;<span class="t">AuthGate</span> fallback={&lt;&gt;&lt;<span class="t">LoginForm</span> /&gt;&lt;<span class="t">OAuthButton</span> provider=<span class="s">"google"</span> redirectTo={redirectTo} webBrowser={WebBrowser} /&gt;&lt;/&gt;}&gt;
-        {<span class="c">/* signed-in app */</span>}
+        &lt;&gt;{<span class="c">/* your signed-in screens */</span>}&lt;/&gt;
       &lt;/<span class="t">AuthGate</span>&gt;
     &lt;/<span class="t">SupatypeProvider</span>&gt;
   )

@@ -1,0 +1,122 @@
+---
+title: Custom Domains
+description: Set up a custom domain for your Supatype Cloud project with automatic SSL.
+---
+
+By default, your Supatype Cloud project is accessible at `https://<project ref>.supatype.com`. You can configure a custom domain to serve your API from your own domain.
+
+Custom domains are available on paid plans; the number each plan includes is in the [plan limits](/docs/cloud/overview.html#plans). The Free plan has none. The allowance belongs to the organisation: every project's domains count towards it, and adding one past it is refused with `403 domain_limit_reached`.
+
+Only the organisation's owners and admins add and remove custom domains. Developers can list them; editor, billing and viewer members cannot.
+
+A custom domain serves your API; it is not an allowed browser origin. To let a web app on another origin call the API, add that origin in Studio under **Settings > CORS** (see [Cloud Overview](/docs/cloud/overview.html#allowed-browser-origins)).
+
+## Setup
+
+### Step 1: Add the domain
+
+Open **Custom Domains** in the Cloud dashboard and enter your domain:
+
+```
+api.your-domain.com
+```
+
+Or from the CLI, in a linked project:
+
+```bash
+npx supatype domains add api.your-domain.com
+```
+
+Either way, the response tells you the CNAME target to use, and the CLI prints the domain's id,
+which `supatype domains verify` and `supatype domains remove` take. `supatype domains list` shows
+every domain of the linked project with its id, status and CNAME target.
+
+A domain belongs to one project only: adding one that is already registered answers
+`409 domain_taken`.
+
+### Step 2: Configure DNS
+
+Add a CNAME record pointing to the target you were given, which is your project's slug under `supatype.com`:
+
+| Type | Name | Value |
+|------|------|-------|
+| CNAME | `api` | `<project slug>.supatype.com` |
+
+Use a subdomain. Verification looks up a CNAME record on the exact name you added, so an apex domain served through CNAME flattening or an ALIAS record does not verify.
+
+### Step 3: Verify
+
+Once the DNS record has propagated, click **Verify** in the dashboard, or run:
+
+```bash
+npx supatype domains verify <domain-id>
+```
+
+Supatype will:
+
+1. Check that the CNAME record points at the target
+2. Request an SSL certificate from Let's Encrypt
+3. Mark the domain `active` once the certificate is issued
+
+If the CNAME is not there yet, verifying answers `422 cname_not_found` and the domain stays
+`pending_verification`. Supatype also checks pending domains by itself for 24 hours after they are
+added, so a record that appears later is picked up without another click.
+
+### Step 4: Update your client
+
+```typescript
+import { createClient } from "@supatype/client"
+
+const supatype = createClient({
+  url: "https://api.your-domain.com",
+  anonKey: "your-anon-key",
+})
+```
+
+The anon key does not change with the domain: it is derived from the project's JWT secret, not its
+hostname.
+
+## SSL certificates
+
+SSL certificates are managed automatically:
+
+- Issued via Let's Encrypt, using an HTTP-01 challenge
+- Renewed automatically, 30 days before expiry
+
+No manual certificate management is required.
+
+## Multiple domains
+
+On plans that allow more than one, you can add several custom domains to a single project. Each domain belongs to the project, not to an environment.
+
+## Removing a custom domain
+
+To remove a custom domain:
+
+1. Click **Remove** next to the domain on the dashboard's **Custom Domains** page, or run
+   `npx supatype domains remove <domain-id>`
+2. Remove the CNAME record from your DNS
+
+Your project will continue to be accessible at the default `<project ref>.supatype.com` URL.
+
+## Cloudflare
+
+If your DNS is on Cloudflare, set the record to **DNS only** (grey cloud), at least until the certificate is issued. With the proxy on, Cloudflare answers with its own addresses instead of the CNAME, so verification cannot see the record.
+
+## Troubleshooting
+
+### DNS not propagating
+
+DNS changes can take up to 48 hours in rare cases. Use a DNS checker to verify:
+
+```bash
+dig api.your-domain.com CNAME
+```
+
+### SSL certificate not issued
+
+Ensure your CNAME record is correctly set and points at the target Supatype gave you. `supatype domains list` shows each domain's status: `provisioning_ssl` while the certificate is requested, then `active`.
+
+### Mixed content warnings
+
+Ensure all your client-side code references the custom domain with `https://`, not `http://`.
