@@ -62,19 +62,20 @@ jobs:
       fail-fast: false
       matrix:
         # `output` must be the CLI's archive name for storage on the platform, and the set must
-        # match RELEASE_ARCHIVES in packages/storage/scripts/release-manifest.mjs. The runners are
-        # realtime's. The archive script renders an image through the packaged service on every
-        # platform its runner can run (linux-amd64, darwin-arm64, windows-amd64); linux-arm64 and
-        # darwin-amd64 are staged across architectures and not run here.
+        # match RELEASE_ARCHIVES in packages/storage/scripts/release-manifest.mjs. Each platform
+        # builds on a runner of its own OS and architecture, because the archive script renders an
+        # image through the packaged service (--self-test) only on the machine's own platform, and a
+        # sharp that cannot load would otherwise ship untested. macos-15-intel is the x86_64 macOS
+        # label: macos-13 was retired on 2025-12-04 and requesting it queues forever.
         include:
           - platform: linux-amd64
             runner: ubuntu-24.04
             output: supatype-storage-linux-amd64.tar.gz
           - platform: linux-arm64
-            runner: ubuntu-24.04
+            runner: ubuntu-24.04-arm
             output: supatype-storage-linux-arm64.tar.gz
           - platform: darwin-amd64
-            runner: macos-14
+            runner: macos-15-intel
             output: supatype-storage-darwin-amd64.tar.gz
           - platform: darwin-arm64
             runner: macos-14
