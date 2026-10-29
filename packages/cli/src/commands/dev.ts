@@ -2,7 +2,7 @@
  * supatype dev: start local Postgres, apply schema, run supatype-server.
  *
  * Runtime provider (top-level `provider` or legacy `database.provider`):
- *   docker: full self-host Compose stack (Kong :18473); see dev-compose.ts (default)
+ *   docker: full self-host Compose stack (Kong on SUPATYPE_KONG_PORT); see dev-compose.ts (default)
  *   native: host Postgres + host server + host engine
  *
  * Edge functions (when a functions/ dir exists): Deno is resolved from the CDN cache
@@ -37,6 +37,7 @@ import {
   nativeDenoPort,
   DENO_PORT_ENV,
   nativeStateRoot,
+  NATIVE_SERVER_PORT,
   REALTIME_PORT_ENV,
   resolveRuntimeProvider,
   schemaPathFromProject,
@@ -236,7 +237,7 @@ export function registerDev(program: Command): void {
       }
 
       const projectName = config.project.name
-      const serverPort = opts.port ?? String(config.server.port ?? 54321)
+      const serverPort = opts.port ?? String(config.server.port ?? NATIVE_SERVER_PORT)
       const postgrestPort = String(config.server.postgrestPort ?? 3001)
       const pgPort = nativeDbPort(config, cwd)
       const realtimePort = String(nativeRealtimePort(config, cwd))

@@ -862,7 +862,7 @@ export function preferredFunctionsPathFromProject(cfg: SupatypeProjectConfig, cw
  * running two (A3-N4, A4-N2); with no port recorded there is no address to give.
  */
 export function serverBaseUrl(cfg: SupatypeProjectConfig, cwd: string = process.cwd()): string | undefined {
-  const port = cfg.server.port ?? 54321
+  const port = cfg.server.port ?? NATIVE_SERVER_PORT
   switch (cfg.server.mode) {
     case "dev":
     case "standalone":
@@ -938,6 +938,9 @@ export function localDSN(cfg: SupatypeProjectConfig, password = "postgres", cwd:
 
 /** Where native Postgres listens when nothing moves it. */
 export const NATIVE_DB_PORT = 5432
+
+/** Where supatype-server listens when `server.port` does not move it. */
+export const NATIVE_SERVER_PORT = 54321
 
 /** Where native realtime listens when nothing moves it. */
 export const NATIVE_REALTIME_PORT = 4000

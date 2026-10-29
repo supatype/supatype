@@ -38,6 +38,7 @@ import {
 import { detectProjectSetup, type DetectedProjectSetup } from "../init-project-detect.js"
 import { SUPATYPE_GITIGNORE_PATHS } from "../gitignore.js"
 import { DEFAULT_CLIENT_PATH, DEFAULT_TYPES_PATH } from "../type-generation.js"
+import { COMPOSE_DEV_KONG_PORT, NATIVE_SERVER_PORT } from "../project-config.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -795,7 +796,7 @@ function scaffoldAppAssets(
     write(rel, content)
   }
 
-  const holding = holdingPageTemplate(opts.projectName)
+  const holding = holdingPageTemplate(opts.projectName, initLocalApiUrl(opts))
   const hasVite = Boolean(opts.app.viteDevUrl)
 
   if (opts.app.mode === "static") {
@@ -953,7 +954,7 @@ function tsConfigTemplate(opts: ScaffoldOptions): string {
   lines.push(`    mode: "${serverMode}",`)
   // The native server listens on server.port. A docker project's API is on the gateway port in
   // .env (SUPATYPE_KONG_PORT), so writing 54321 there only named a port nothing listened on.
-  if (opts.provider === "native") lines.push(`    port: 54321,`)
+  if (opts.provider === "native") lines.push(`    port: ${NATIVE_SERVER_PORT},`)
   if (serverMode === "standalone") {
     lines.push(`    domain: "${opts.domain ?? ""}",  // e.g. "api.example.com" for ACME TLS`)
     if (opts.tlsEmail) {
@@ -1086,7 +1087,18 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;")
 }
 
-function holdingPageTemplate(projectName: string): string {
+/**
+ * Where `supatype dev` answers for this project: the gateway's port for docker, the API server's
+ * for native. One answer for the page `init` writes and the steps it prints, which disagreed: the
+ * page named 18473 whatever port the project was given.
+ */
+function initLocalApiUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort">): string {
+  return opts.provider === "docker"
+    ? `http://localhost:${opts.kongPort ?? COMPOSE_DEV_KONG_PORT}`
+    : `http://localhost:${NATIVE_SERVER_PORT}`
+}
+
+function holdingPageTemplate(projectName: string, apiUrl: string): string {
   const name = escapeHtml(projectName)
   return `<!doctype html>
 <html lang="en">
@@ -1203,7 +1215,7 @@ function holdingPageTemplate(projectName: string): string {
         <a href="${HOLDING_PAGE_GITHUB_URL}" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a href="${HOLDING_PAGE_DISCORD_URL}" target="_blank" rel="noopener noreferrer">Discord</a>
       </nav>
-      <p class="hint">Run <code>supatype dev</code> then open <code>http://localhost:18473/</code></p>
+      <p class="hint">Run <code>supatype dev</code> then open <code>${escapeHtml(apiUrl)}/</code></p>
     </main>
   </body>
 </html>
@@ -1585,10 +1597,7 @@ function initSetupSteps(args: InitStepsArgs): string[] {
  */
 function initDevSteps(result: InitStepsArgs["result"]): string[] {
   const steps: string[] = []
-  const stack =
-    result.provider === "docker"
-      ? `Docker Compose stack, API on http://localhost:${result.kongPort ?? 18473}`
-      : "native binaries, API on http://localhost:54321"
+  const stack = `${result.provider === "docker" ? "Docker Compose stack" : "native binaries"}, API on ${initLocalApiUrl(result)}`
   steps.push("supatype dev          # applies the schema, generates types, and watches both")
   steps.push(`                      # ${stack}`)
   if (result.adminEmail) {

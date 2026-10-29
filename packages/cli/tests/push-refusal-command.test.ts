@@ -31,7 +31,9 @@ vi.mock("../src/preview-config-check.js", () => ({
   modelsWithUnresolvablePreview: () => [],
   unresolvablePreviewMessage: () => "",
 }))
-vi.mock("../src/project-config.js", () => ({
+// Partial: modules this loads read project-config's constants as they load.
+vi.mock("../src/project-config.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/project-config.js")>()),
   hooksPathFromProject: () => "hooks",
   resolveRuntimeProvider: () => "native",
   schemaPathFromProject: () => "schema/index.ts",

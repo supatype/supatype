@@ -115,6 +115,14 @@ describe("runtime contract", () => {
     expect(kong).toContain("- /")
   })
 
+  // With API_EXTERNAL_URL unset, every service was told its public address was on 18473 while Kong
+  // was published on SUPATYPE_KONG_PORT, so auth links named another project's gateway.
+  it("self-host compose falls back to the published Kong port for the public address", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("${API_EXTERNAL_URL:-http://localhost:${SUPATYPE_KONG_PORT:-18473}}")
+    expect(compose).not.toContain("${API_EXTERNAL_URL:-http://localhost:18473}")
+  })
+
   it("self-host compose render is deterministic for same config", () => {
     const first = renderSelfHostCompose({ ...baseConfig, app: { mode: "proxy", upstream: "http://app:3000" } })
     const second = renderSelfHostCompose({ ...baseConfig, app: { mode: "proxy", upstream: "http://app:3000" } })

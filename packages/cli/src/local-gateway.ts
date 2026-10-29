@@ -1,10 +1,5 @@
 import { readComposeEnvInt, readEnvValue } from "./env-file.js"
-
-/**
- * Host port published for Kong in local Docker Compose. Kong still listens on
- * 8000 inside the container; this avoids clashing with other tools on :8000.
- */
-export const LOCAL_KONG_HOST_PORT = 18473
+import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 
 /**
  * The local stack's public address, without a trailing slash: `.env`'s API_EXTERNAL_URL, the value
@@ -17,6 +12,7 @@ export const LOCAL_KONG_HOST_PORT = 18473
 export function localPublicApiUrl(cwd: string): string {
   const external = readEnvValue(cwd, "API_EXTERNAL_URL", "").replace(/\/+$/, "")
   if (external !== "") return external
-  const port = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? LOCAL_KONG_HOST_PORT
+  // The port compose binds when SUPATYPE_KONG_PORT is unset: one definition with every other caller.
+  const port = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
   return `http://localhost:${port}`
 }

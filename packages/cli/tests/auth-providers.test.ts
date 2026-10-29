@@ -48,7 +48,7 @@ describe("auth.providers in the compose stack", () => {
   it("defaults a provider's redirect URI to the gateway's /auth/v1/callback", () => {
     const vars = serverEnv(renderSelfHostCompose(config(github())))
     expect(vars.get("SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI")).toBe(
-      "${SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI:-${API_EXTERNAL_URL:-http://localhost:18473}/auth/v1/callback}",
+      "${SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI:-${API_EXTERNAL_URL:-http://localhost:${SUPATYPE_KONG_PORT:-18473}}/auth/v1/callback}",
     )
   })
 

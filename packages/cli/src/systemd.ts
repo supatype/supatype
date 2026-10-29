@@ -9,7 +9,7 @@
 import { writeFileSync, mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
-import type { SupatypeProjectConfig } from "./project-config.js"
+import { NATIVE_SERVER_PORT, type SupatypeProjectConfig } from "./project-config.js"
 
 export interface SystemdOptions {
   /** Directory where unit files are written. Defaults to .supatype/systemd/. */
@@ -99,7 +99,7 @@ function serverUnit(
   user: string,
   envFile: string,
 ): string {
-  const port = config.server.port ?? 54321
+  const port = config.server.port ?? NATIVE_SERVER_PORT
   const serverBin = `%h/.supatype/cache/server/${config.versions?.server ?? "latest"}/supatype-server`
   const logDir = join(stateDir, "logs")
 

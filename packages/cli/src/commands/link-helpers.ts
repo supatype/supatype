@@ -10,6 +10,7 @@ import {
 } from "../link.js"
 import { ensureSupatypeGitignore, warnIfLinkNotGitignored } from "../gitignore.js"
 import { targetFetch } from "../target-client.js"
+import { localPublicApiUrl } from "../local-gateway.js"
 import { isArrayOf, isShape, isString } from "@supatype/shared"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -188,7 +189,8 @@ export async function runLinkAction(opts: {
           await p.text({
             message: "Kong gateway URL",
             placeholder: "https://api.example.com",
-            defaultValue: "http://localhost:18473",
+            // This project's own gateway, not the first port `dev` tries, which may be another's.
+            defaultValue: localPublicApiUrl(cwd),
           }),
         ).trim()
       }
