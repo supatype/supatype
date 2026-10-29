@@ -25,8 +25,17 @@ export function initDependencyVersionsFallback(): InitDependencyVersions {
   return { cli: version, types: version, client: version }
 }
 
+/**
+ * The registry npm is configured with, as npm and pnpm hand it to scripts, else the public one. A
+ * project behind a mirror installs from the mirror, so its versions are the ones to pin.
+ */
+function npmRegistry(): string {
+  const configured = process.env["npm_config_registry"]?.trim() ?? ""
+  return (configured === "" ? "https://registry.npmjs.org" : configured).replace(/\/+$/, "")
+}
+
 async function fetchNpmPackage(name: string): Promise<NpmRegistryPackage | null> {
-  const url = `https://registry.npmjs.org/${encodeURIComponent(name)}`
+  const url = `${npmRegistry()}/${encodeURIComponent(name)}`
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) })
     if (!resp.ok) return null
