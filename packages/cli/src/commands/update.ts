@@ -136,14 +136,17 @@ interface PlanOptions {
  * config whether or not its binary had arrived.
  */
 async function updateNativeComponents(cwd: string, config: SupatypeProjectConfig, check: boolean): Promise<void> {
-  exitOnFailures(await applyNativeUpdates(cwd, config, check))
+  exitOnFailures(inComponentOrder(await applyNativeUpdates(cwd, config, check)))
 }
 
-/** Everything `update` does for a native project but exit: the components that could not be fetched. */
+/**
+ * Everything `update` does for a native project but exit: the components that could not be fetched,
+ * in the order each step found them.
+ */
 async function applyNativeUpdates(cwd: string, config: SupatypeProjectConfig, check: boolean): Promise<UpdateFailure[]> {
   const platform = currentPlatform()
   const plans = await planNativeUpdates(config, check)
-  const failures = inComponentOrder([...plans.failures, ...(await downloadAll(plans.fetches, platform))])
+  const failures = [...plans.failures, ...(await downloadAll(plans.fetches, platform))]
   if (plans.updates.length === 0) {
     if (failures.length === 0) info(check ? "All pinned components match CDN latest." : "All components are up to date.")
     return failures

@@ -101,12 +101,28 @@ function pinAll(changes: { versions: Record<string, string>; latest: Record<stri
   )
 }
 
+/** The component each line of the failure report names, in the order it names them. */
+async function reportedFailures(): Promise<string[]> {
+  const failure = await runUpdate().then(
+    () => new Error("update succeeded"),
+    (err: unknown) => (err instanceof Error ? err : new Error(String(err))),
+  )
+  return failure.message.split("\n").flatMap((line) => /^(\w+): /.exec(line)?.slice(1) ?? [])
+}
+
 describe("supatype update plans", () => {
   it("skips a component pinned to local, even when the CDN names no latest for it", async () => {
     // The missing latest was checked first, so a local engine build became a failure and exit 1.
     pinAll({ versions: { engine: "local" }, latest: { engine: undefined } })
     await expect(runUpdate()).resolves.toBeUndefined()
     expect(messages.error).toEqual([])
+  })
+
+  it("reports failures in component order, whichever step found them", async () => {
+    // The engine's new version fails to download; the server has no latest on the CDN. The
+    // download failures were appended after the plan's, so the server came first.
+    pinAll({ versions: { engine: "0.1.0" }, latest: { engine: "0.2.0", server: undefined } })
+    expect(await reportedFailures()).toEqual(["engine", "server"])
   })
 })
 
