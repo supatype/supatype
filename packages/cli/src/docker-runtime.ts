@@ -5,6 +5,7 @@
 import { spawnSync } from "node:child_process"
 import { platform } from "node:os"
 import { endDevSession, getActiveDevSession } from "./dev-session.js"
+import { askDocker, DOCKER_PROBE_TIMEOUT_MS, type DockerRunner } from "./docker-exec.js"
 import { isInteractive } from "./ui/interactive.js"
 import { error, plain } from "./ui/messages.js"
 import { p, printLogo } from "./ui/prompts.js"
@@ -30,37 +31,63 @@ function dockerSpawn(args: string[]) {
   })
 }
 
+/** One docker call's result, as both the blocking and the bounded probe read it. */
+interface ProbeAnswer {
+  status: number | null
+  stdout: string
+  stderr: string
+  missing: boolean
+}
+
+const VERSION_ARGS = ["version", "--format", "{{.Client.Version}}"]
+
+function spawnAnswer(args: string[]): ProbeAnswer {
+  const result = dockerSpawn(args)
+  const missing = result.error !== undefined && "code" in result.error && result.error.code === "ENOENT"
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", missing }
+}
+
 /** Returns whether the Docker CLI is on PATH and the daemon accepts connections. */
 export function probeDockerDaemon(): DockerDaemonProbe {
-  const version = dockerSpawn(["version", "--format", "{{.Client.Version}}"])
-  if (version.error && "code" in version.error && version.error.code === "ENOENT") {
-    return { ok: false, reason: "cli_missing" }
+  const version = spawnAnswer(VERSION_ARGS)
+  return verdictFromVersion(version) ?? verdictFromInfo(spawnAnswer(["info"]), version)
+}
+
+/**
+ * {@link probeDockerDaemon} for `init`, which must not wait on Docker: `docker version` and
+ * `docker info` are asked side by side, each given up on after `timeoutMs` (docker-exec.ts). A
+ * daemon that does not answer in that time is reported as such.
+ */
+export async function probeDockerDaemonAsync(runner?: DockerRunner, timeoutMs?: number): Promise<DockerDaemonProbe> {
+  const ask = { shell: process.platform === "win32", ...(runner && { runner }), ...(timeoutMs !== undefined && { timeoutMs }) }
+  const [version, info] = await Promise.all([askDocker(VERSION_ARGS, ask), askDocker(["info"], ask)])
+  if (version.timedOut || info.timedOut) {
+    const seconds = Math.round((timeoutMs ?? DOCKER_PROBE_TIMEOUT_MS) / 1000)
+    return { ok: false, reason: "daemon_unavailable", detail: `Docker did not answer within ${seconds}s` }
   }
+  return verdictFromVersion(version) ?? verdictFromInfo(info, version)
+}
 
-  const clientVersion = (version.stdout ?? "").trim()
-  const versionStderr = (version.stderr ?? "").trim()
-  const versionDetail = `${versionStderr}${version.stdout ?? ""}`.trim()
-
+/** The verdict `docker version` alone gives, or null when it takes `docker info` to tell. */
+function verdictFromVersion(version: ProbeAnswer): DockerDaemonProbe | null {
+  if (version.missing) return { ok: false, reason: "cli_missing" }
+  const versionStderr = version.stderr.trim()
+  const versionDetail = `${versionStderr}${version.stdout}`.trim()
   // No client version: CLI missing or broken.
-  if (!clientVersion) {
-    return {
-      ok: false,
-      reason: "cli_missing",
-      ...(versionDetail ? { detail: versionDetail } : {}),
-    }
+  if (!version.stdout.trim()) {
+    return { ok: false, reason: "cli_missing", ...(versionDetail ? { detail: versionDetail } : {}) }
   }
-
   // Client is present but daemon refused (paused/stopped). `docker info` can hang
   // while paused on Docker Desktop, use the version stderr and skip info.
   if (version.status !== 0 && versionStderr) {
     return { ok: false, reason: "daemon_unavailable", detail: versionStderr }
   }
+  return null
+}
 
-  const info = dockerSpawn(["info"])
+function verdictFromInfo(info: ProbeAnswer, version: ProbeAnswer): DockerDaemonProbe {
   if (info.status === 0) return { ok: true }
-
-  const infoDetail = `${info.stderr ?? ""}${info.stdout ?? ""}`.trim()
-  const detail = infoDetail || versionDetail
+  const detail = `${info.stderr}${info.stdout}`.trim() || `${version.stderr.trim()}${version.stdout}`.trim()
   return { ok: false, reason: "daemon_unavailable", ...(detail ? { detail } : {}) }
 }
 

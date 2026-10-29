@@ -34,10 +34,17 @@ function npmRegistry(): string {
   return (configured === "" ? "https://registry.npmjs.org" : configured).replace(/\/+$/, "")
 }
 
+/**
+ * How long `init` waits on the registry. Its answer only picks between the CLI's own version and
+ * npm's latest, and the fallback is the CLI's own, so a slow registry is not worth a long wait: it
+ * was 10 seconds, all of it before the first file was written.
+ */
+const REGISTRY_TIMEOUT_MS = 3_000
+
 async function fetchNpmPackage(name: string): Promise<NpmRegistryPackage | null> {
   const url = `${npmRegistry()}/${encodeURIComponent(name)}`
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) })
+    const resp = await fetch(url, { signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS) })
     if (!resp.ok) return null
     const meta = await resp.json()
     return isNpmRegistryPackage(meta) ? meta : null
