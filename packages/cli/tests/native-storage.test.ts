@@ -84,7 +84,7 @@ describe("the one-time import of the server's object store", () => {
   it("creates its buckets and uploads its objects with their type and owner, then records it", async () => {
     const root = legacyStore()
     const service = await fakeStorage()
-    await importLegacyNativeStorage({ legacyRoot: root, url: service.url, jwtSecret: "secret" })
+    await importLegacyNativeStorage({ legacyRoot: root, url: service.url, jwtSecret: "secret", cliVersion: "0.7.0" })
     expect(service.received.map((r) => `${r.method} ${r.path}`)).toEqual(["POST /bucket", "POST /object/avatars/me/pic.png"])
     const upload = service.received[1]
     expect(upload).toMatchObject({ contentType: "image/png", body: "png bytes" })
@@ -95,25 +95,101 @@ describe("the one-time import of the server's object store", () => {
 
   it("uploads objects once, and still creates the buckets a push declared since", async () => {
     const root = legacyStore()
-    await importLegacyNativeStorage({ legacyRoot: root, url: (await fakeStorage()).url, jwtSecret: "secret" })
+    await importLegacyNativeStorage({ legacyRoot: root, url: (await fakeStorage()).url, jwtSecret: "secret", cliVersion: "0.7.0" })
     const again = await fakeStorage()
-    await importLegacyNativeStorage({ legacyRoot: root, url: again.url, jwtSecret: "secret" })
+    await importLegacyNativeStorage({ legacyRoot: root, url: again.url, jwtSecret: "secret", cliVersion: "0.7.0" })
     expect(again.received.map((r) => r.path)).toEqual(["/bucket"])
   })
 
   it("counts an object the service already holds as imported", async () => {
     const root = legacyStore()
     const service = await fakeStorage((path) => (path.startsWith("/object/") ? 409 : 200))
-    await importLegacyNativeStorage({ legacyRoot: root, url: service.url, jwtSecret: "secret" })
+    await importLegacyNativeStorage({ legacyRoot: root, url: service.url, jwtSecret: "secret", cliVersion: "0.7.0" })
     expect(existsSync(join(root, IMPORTED_MARKER))).toBe(true)
   })
 
   it("fails, records nothing and leaves the store as it was, when an object is refused", async () => {
     const root = legacyStore()
     const service = await fakeStorage((path) => (path.startsWith("/object/") ? 500 : 200))
-    await expect(importLegacyNativeStorage({ legacyRoot: root, url: service.url, jwtSecret: "secret" })).rejects.toThrow(/avatars\/me\/pic.png/)
+    await expect(importLegacyNativeStorage({ legacyRoot: root, url: service.url, jwtSecret: "secret", cliVersion: "0.7.0" })).rejects.toThrow(/avatars\/me\/pic.png/)
     expect(existsSync(join(root, IMPORTED_MARKER))).toBe(false)
     expect(existsSync(join(root, "avatars", "me", "pic.png"))).toBe(true)
+  })
+})
+
+/** Runs the import as CLI `cliVersion` would, against a fresh stand-in service answering `status`. */
+async function importAs(root: string, cliVersion: string, status?: (path: string) => number): Promise<Received[]> {
+  const service = await fakeStorage(status)
+  await importLegacyNativeStorage({ legacyRoot: root, url: service.url, jwtSecret: "secret", cliVersion })
+  return service.received
+}
+
+const oldStoreKept = (root: string): boolean =>
+  existsSync(join(root, "avatars", "me", "pic.png")) && existsSync(join(root, ".supatype", "buckets.json"))
+
+describe("the old store, after the import", () => {
+  it("is kept by the release that imported it", async () => {
+    const root = legacyStore()
+    await importAs(root, "0.7.0")
+    await importAs(root, "0.7.0")
+    expect(oldStoreKept(root)).toBe(true)
+  })
+
+  it("is removed by a later release, objects imported again first, saying what went", async () => {
+    const root = legacyStore()
+    await importAs(root, "0.7.0")
+    const log = vi.spyOn(console, "log")
+    const received = await importAs(root, "0.8.0")
+    expect(received.map((r) => r.path)).toContain("/object/avatars/me/pic.png")
+    expect(existsSync(join(root, "avatars"))).toBe(false)
+    expect(existsSync(join(root, ".supatype", "buckets.json"))).toBe(false)
+    expect(log.mock.calls.flat().join("\n")).toMatch(/Removed the server's old object store, imported into the storage service by v0\.7\.0/)
+    expect(parseJsonAs(readFileSync(join(root, IMPORTED_MARKER), "utf8"), isJsonObject)).toMatchObject({ old_store_removed: true })
+  })
+
+  it("is kept by a source build, which has no release to compare", async () => {
+    const root = legacyStore()
+    await importAs(root, "0.7.0")
+    await importAs(root, "")
+    expect(oldStoreKept(root)).toBe(true)
+  })
+
+  it("is kept when the import was made by a source build", async () => {
+    const root = legacyStore()
+    await importAs(root, "")
+    await importAs(root, "0.8.0")
+    expect(oldStoreKept(root)).toBe(true)
+  })
+
+  it("is kept by an older release", async () => {
+    const root = legacyStore()
+    await importAs(root, "0.8.0")
+    await importAs(root, "0.7.0")
+    expect(oldStoreKept(root)).toBe(true)
+  })
+
+  it("is kept when there is no marker: the later release imports instead", async () => {
+    const root = legacyStore()
+    expect((await importAs(root, "0.8.0")).map((r) => r.path)).toContain("/object/avatars/me/pic.png")
+    expect(oldStoreKept(root)).toBe(true)
+  })
+
+  it.each([
+    ["partial", JSON.stringify({ imported_at: "2026-10-29T00:00:00Z" })],
+    ["incomplete", JSON.stringify({ complete: false, cli_version: "0.7.0" })],
+    ["unreadable", "{ not json"],
+  ])("is kept when the marker is %s, which is no marker", async (_kind, text) => {
+    const root = legacyStore()
+    writeFileSync(join(root, IMPORTED_MARKER), text)
+    await importAs(root, "0.8.0")
+    expect(oldStoreKept(root)).toBe(true)
+  })
+
+  it("is kept when importing it again first fails", async () => {
+    const root = legacyStore()
+    await importAs(root, "0.7.0")
+    await expect(importAs(root, "0.8.0", (path) => (path.startsWith("/object/") ? 500 : 200))).rejects.toThrow(/not imported/)
+    expect(oldStoreKept(root)).toBe(true)
   })
 })
 

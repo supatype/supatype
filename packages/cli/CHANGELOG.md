@@ -128,7 +128,8 @@
   server's built-in object store, so bucket rules, `maxSize`, `accept`, `access_mode`, caller rules
   and image transforms are the ones a deployment enforces. Its objects live under
   `~/.supatype/projects/<project>/storage-service/`; on the first start, the buckets and objects the
-  server's store held are imported, and the old files are left where they were. The service comes
+  server's store held are imported, and the old files stay for one release: the next CLI release
+  imports anything new in them, then removes them and says which. The service comes
   from a per-platform archive on the CDN (`storage/v<version>/`, signed like every component), or
   `overrides.storage`; its port is `SUPATYPE_STORAGE_PORT` (default 8002). When it cannot start, dev
   says so and the server's store answers as before.

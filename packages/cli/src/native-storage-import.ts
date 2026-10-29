@@ -7,14 +7,17 @@
  * Buckets are sent on every start, since `buckets.json` is also where a push records the buckets a
  * schema declares before the service is up; one that exists already is left as it is. Objects are
  * uploaded once, through the service's own API, so they land in its tables and on its disk exactly
- * as an upload would. An object already there is kept. Nothing under `storage/` is changed or
- * removed: the import is recorded only when every object made it, and until then the server's store
- * keeps answering, so a failed import loses nothing and the next start tries again.
+ * as an upload would. An object already there is kept. The import is recorded, with the CLI release
+ * that made it, only when every object made it; until then the server's store keeps answering, so a
+ * failed import loses nothing and the next start tries again. The old store is removed by a later
+ * CLI release, never by the one that imported, so a project keeps its old files for one release.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { isArrayOf, isJsonObject, isOneOf, isShape, isString, nullable, optional, isBoolean, isNumber, type Guard } from "@supatype/shared"
+import { compareVersions } from "./engine-floor.js"
 import { readJsonFile } from "./json-file.js"
+import { isReleaseVersion } from "./release-images.js"
 import { signJwt } from "./jwt.js"
 import { provisionBuckets, type BucketSpec } from "./storage-provision.js"
 
@@ -24,6 +27,8 @@ export interface LegacyStorageImport {
   /** The storage service, as native dev reaches it. */
   url: string
   jwtSecret: string
+  /** The running CLI's release version, "" for a source build (EMBEDDED_CLI_VERSION). */
+  cliVersion: string
 }
 
 /** Written under the legacy root once every object is in the service. */
@@ -44,16 +49,67 @@ const isSidecar = isShape({ name: isString, content_type: optional(isString), ow
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * The marker: which CLI release imported the store, that the import finished, and whether the old
+ * store has been removed since. Anything else in its place (an older marker, a partial or
+ * unreadable file) is no marker: the import runs again, and nothing is removed.
+ */
+const isImportMarker = isShape({ complete: isBoolean, cli_version: isString, old_store_removed: optional(isBoolean) })
+type ImportMarker = { complete: boolean; cli_version: string; old_store_removed?: boolean | undefined }
+
 export async function importLegacyNativeStorage(job: LegacyStorageImport): Promise<void> {
   if (!existsSync(job.legacyRoot)) return
   await importBuckets(job)
-  const marker = join(job.legacyRoot, IMPORTED_MARKER)
-  if (existsSync(marker)) return
+  const marker = readJsonFile(join(job.legacyRoot, IMPORTED_MARKER), isImportMarker)
+  if (marker?.complete !== true) {
+    await importAllObjects(job)
+    writeMarker(job.legacyRoot, { complete: true, cli_version: job.cliVersion })
+    return
+  }
+  if (marker.old_store_removed !== true && oldStoreIsDue(marker.cli_version, job.cliVersion)) {
+    await removeOldStore(job, marker)
+  }
+}
+
+/** Uploads every object the old store holds; throws, naming the first few, when any did not make it. */
+async function importAllObjects(job: LegacyStorageImport): Promise<void> {
   const failed = await importObjects(job)
   if (failed.length > 0) {
     throw new Error(`${failed.length} object(s) not imported: ${failed.slice(0, 5).join("; ")}`)
   }
-  writeFileSync(marker, `${JSON.stringify({ imported_at: new Date().toISOString() })}\n`)
+}
+
+function writeMarker(legacyRoot: string, marker: ImportMarker): void {
+  const recorded = { ...marker, recorded_at: new Date().toISOString() }
+  writeFileSync(join(legacyRoot, IMPORTED_MARKER), `${JSON.stringify(recorded)}\n`)
+}
+
+/**
+ * Whether the old store may go: the import was made by a CLI release, and this is a later release.
+ * Not a source build on either side (no version to compare), and never the release that imported,
+ * so a project keeps its old files for one whole release in which to go back.
+ */
+export function oldStoreIsDue(importedBy: string, running: string): boolean {
+  return isReleaseVersion(importedBy) && isReleaseVersion(running) && compareVersions(running, importedBy) > 0
+}
+
+/**
+ * Removes the old store's buckets and buckets.json, saying what went, and records it so it happens
+ * once. Objects are imported again first, so anything the server's store took while the service
+ * was down since the import is in the service before its files go; when any is not, nothing goes.
+ */
+async function removeOldStore(job: LegacyStorageImport, marker: ImportMarker): Promise<void> {
+  await importAllObjects(job)
+  const removed = readdirSync(job.legacyRoot)
+    .filter((entry) => entry !== ".supatype")
+    .map((entry) => join(job.legacyRoot, entry))
+  removed.push(join(job.legacyRoot, ".supatype", "buckets.json"))
+  for (const path of removed) rmSync(path, { recursive: true, force: true })
+  console.log(
+    `[supatype] Removed the server's old object store, imported into the storage service by v${marker.cli_version}:\n` +
+      removed.map((path) => `  ${path}`).join("\n"),
+  )
+  writeMarker(job.legacyRoot, { ...marker, old_store_removed: true })
 }
 
 /** Every bucket `buckets.json` names, created in the service unless it is there already. */

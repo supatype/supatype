@@ -9,6 +9,7 @@
  */
 import { join } from "node:path"
 import { isJsonObject } from "@supatype/shared"
+import { EMBEDDED_CLI_VERSION } from "./cli-version-embedded.js"
 import { errorMessage } from "./error-message.js"
 import { keepsObjectsLocally, localStorageEnv, serverStoreRoot } from "./local-storage.js"
 import { importLegacyNativeStorage } from "./native-storage-import.js"
@@ -136,7 +137,7 @@ export async function startNativeStorage(
     const proc = await startAndWait(await resolveLaunch(opts.config, opts.cwd), opts, url)
     // Until everything the server's store held is in the service, the server's store keeps
     // answering, so nothing a developer stored there goes missing while an import fails.
-    await importLegacyNativeStorage({ legacyRoot: serverStoreRoot(opts.stateRoot), url, jwtSecret: opts.jwtSecret })
+    await importLegacyNativeStorage({ legacyRoot: serverStoreRoot(opts.stateRoot), url, jwtSecret: opts.jwtSecret, cliVersion: EMBEDDED_CLI_VERSION })
       .catch(async (err: unknown) => {
         await proc.stop()
         throw new Error(`could not import the server's object store: ${errorMessage(err)}`)
