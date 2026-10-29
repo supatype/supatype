@@ -242,15 +242,16 @@ export function registerDev(program: Command): void {
       const pgPort = nativeDbPort(config, cwd)
       const realtimePort = String(nativeRealtimePort(config, cwd))
       const denoPort = nativeDenoPort(cwd)
+      // Edge functions run only when a functions dir exists, so Deno's port matters only then.
+      const functionsDir = functionsPathCandidatesFromProject(config, cwd).find((dir) => existsSync(dir))
 
       if (provider !== "docker") {
-        const hasFunctions = functionsPathCandidatesFromProject(config, cwd).some((dir) => existsSync(dir))
         await assertNativeDevPortsFree({
           postgres: pgPort,
           server: Number(serverPort),
           postgrest: Number(postgrestPort),
           realtime: Number(realtimePort),
-          ...(hasFunctions && { deno: denoPort }),
+          ...(functionsDir !== undefined && { deno: denoPort }),
         })
         // Before anything is generated: a missing password would otherwise be replaced in .env
         // with a new one the existing cluster has never heard of.
@@ -443,29 +444,27 @@ export function registerDev(program: Command): void {
       // Native Postgres builds don't include PostGIS, skip geo fields rather than failing.
       const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
-      await runSchemaPush(cwd, engineBin, schemaPath, dbURL, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
-        reportDevPushFailure,
-      )
+      // The first push and every one the schema watch makes.
+      const schemaPush: NativeSchemaPush = {
+        cwd, engineBin, schemaPath, dbURL, adminConfigPath, storagePath: localStoragePath, skipFieldKinds, config, overwriteDrift,
+      }
+      await runSchemaPush(schemaPush).catch(reportDevPushFailure)
 
       const { ensureFirstAdminUser } = await import("./admin.js")
       await ensureFirstAdminUser(dbURL, { cwd })
 
       // ── 10. Spawn supatype-server ─────────────────────────────────────────
 
-      // Resolve edge functions config: only enable Deno if a functions dir exists.
-      const functionsDir = functionsPathCandidatesFromProject(config, cwd).find(dir => existsSync(dir))
-      const hasFunctionsDir = functionsDir !== undefined
+      // Edge functions config, from the functions dir found before the port check.
       /** Always set when a functions dir exists so Studio admin API can list functions; Deno runtime is separate. */
-      const denoFunctionsDir = hasFunctionsDir ? functionsDir : ""
-      const functionRoutes = hasFunctionsDir && functionsDir !== undefined
-        ? discoverFunctionsOrExit(functionsDir)
-        : []
-      const denoServeScriptAbs = hasFunctionsDir && functionsDir !== undefined
+      const denoFunctionsDir = functionsDir ?? ""
+      const functionRoutes = functionsDir !== undefined ? discoverFunctionsOrExit(functionsDir) : []
+      const denoServeScriptAbs = functionsDir !== undefined
         ? (writeDevFunctionsRouter(cwd, functionsDir, functionRoutes) ?? "")
         : ""
 
       let denoBinPath: string | undefined
-      if (hasFunctionsDir) {
+      if (functionsDir !== undefined) {
         console.log(`[supatype] Edge functions enabled (${functionsDir})`)
         try {
           denoBinPath = await ensureBinary("deno", config)
@@ -519,8 +518,10 @@ export function registerDev(program: Command): void {
         ? { addr: nativeKeyspaceAddr, containerName: null, started: false }
         : ensureValkeySidecar(projectName)
 
+      // `.env` and `.env.local`, read once for everything the server's environment takes from them.
+      const dotEnv = loadDotEnv(cwd)
       // What an env("NAME") in auth.providers resolves against: the shell over .env, as for the config.
-      const providerEnvironment = { ...loadDotEnv(cwd), ...process.env }
+      const providerEnvironment = { ...dotEnv, ...process.env }
       warnMissingAuthProviderSecrets(config, providerEnvironment)
       const serverEnv: Record<string, string> = {
         ...nativeServerCoreEnv({
@@ -583,7 +584,7 @@ export function registerDev(program: Command): void {
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
         // A blank mailer value init scaffolded into .env does not erase the config's.
-        ...withoutBlankMailerOverrides(loadDotEnv(cwd), mailerProviderEnv(config.email)),
+        ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email)),
         // After .env: auth.email.enableConfirmations, unless the developer set their own value.
         ...nativeMailerAutoconfirmEnv(cwd, config),
       }
@@ -727,9 +728,7 @@ export function registerDev(program: Command): void {
             JSON.stringify((await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast) !== _lastReadAst,
           push: (why) => {
             console.log(`\n[supatype] ${why}, checking schema...`)
-            runSchemaPush(cwd, engineBin, schemaPath, dbURL, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
-              reportDevPushFailure,
-            )
+            runSchemaPush(schemaPush).catch(reportDevPushFailure)
           },
         })
         // Deno reloads the router on change, but only lists the functions found at start.
@@ -867,19 +866,24 @@ async function buildNativeAst(
   return { ast: filtered, adapted }
 }
 
-/** One push of native dev (provider `native`): the schema on disk, then what describes it. Exported for tests. */
-export async function runSchemaPush(
-  cwd: string,
-  engineBin: string,
-  schemaPath: string,
-  dbURL: string,
-  adminConfigPath?: string,
-  storagePath?: string,
-  skipFieldKinds?: ReadonlySet<string>,
-  config?: import("../project-config.js").SupatypeProjectConfig,
+/** What one native dev push reads and writes: the same for the first push and every one after. */
+export interface NativeSchemaPush {
+  cwd: string
+  engineBin: string
+  schemaPath: string
+  dbURL: string
+  adminConfigPath?: string | undefined
+  storagePath?: string | undefined
+  skipFieldKinds?: ReadonlySet<string> | undefined
+  config?: SupatypeProjectConfig | undefined
   /** `dev --overwrite-drift`: put back access changed outside Supatype on every push. */
-  overwriteDrift = false,
-): Promise<void> {
+  overwriteDrift?: boolean | undefined
+}
+
+/** One push of native dev (provider `native`): the schema on disk, then what describes it. Exported for tests. */
+export async function runSchemaPush(push: NativeSchemaPush): Promise<void> {
+  const { cwd, engineBin, schemaPath, dbURL, adminConfigPath, storagePath, skipFieldKinds, config } = push
+  const overwriteDrift = push.overwriteDrift ?? false
   const read = await readNativeSchema(cwd, schemaPath, config, skipFieldKinds)
   const astJson = JSON.stringify(read)
   _lastReadAst = astJson
