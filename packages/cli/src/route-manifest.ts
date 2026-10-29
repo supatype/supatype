@@ -1,14 +1,31 @@
 import { existsSync, writeFileSync } from "node:fs"
 import { readJsonObjectFile } from "./json-file.js"
 
-/** Merge fields into `.supatype/manifest.json` (creates file if missing). */
+/** How {@link patchRouteManifest} treats a manifest it cannot read. */
+export interface PatchRouteManifestOptions {
+  /** Leave an unreadable or non-object manifest for the server to report, rather than start it again. */
+  keepMalformed?: boolean
+}
+
+/**
+ * Merge fields into `.supatype/manifest.json` (creates file if missing). An undefined field drops the
+ * key: JSON has no undefined.
+ *
+ * Written only when a value changes. Every compose render and every native dev start patches it,
+ * and rewrote it each time though nothing in it had changed.
+ */
 export function patchRouteManifest(
   manifestPath: string,
   patch: Record<string, unknown>,
+  opts: PatchRouteManifestOptions = {},
 ): void {
+  const exists = existsSync(manifestPath)
+  const current = exists ? readJsonObjectFile(manifestPath) : undefined
+  if (exists && current === undefined && opts.keepMalformed === true) return
   // Unreadable or not an object, the manifest starts again from the patch.
-  const manifest = (existsSync(manifestPath) ? readJsonObjectFile(manifestPath) : undefined) ?? {}
-  writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, ...patch }, null, 2)}\n`, "utf8")
+  const next = JSON.stringify({ ...current, ...patch }, null, 2)
+  if (current !== undefined && next === JSON.stringify(current, null, 2)) return
+  writeFileSync(manifestPath, `${next}\n`, "utf8")
 }
 
 /**
