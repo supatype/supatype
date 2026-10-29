@@ -17,20 +17,18 @@ import { ensureBinary } from "../ensure-binary.js"
 import {
   FUNCTIONS_SERVE_PORT,
   functionsPathCandidatesFromProject,
+  hooksPathFromProject,
   preferredFunctionsPathFromProject,
   serviceRoleRoutes,
-  type SupatypeProjectConfig,
 } from "../project-config.js"
+import { discoverFunctionsOrExit, functionNameProblem, type DiscoveredFunctionRoute } from "../functions-discovery.js"
 import {
-  discoverFunctionsOrExit,
-  functionNameProblem,
-  functionsServeFiles,
-  generateFunctionsRouterSource,
-  removeOnExit,
-  sweepStaleServeFiles,
-  writeServiceRoleKeyFileUntilExit,
-  type DiscoveredFunctionRoute,
-} from "../functions-router-gen.js"
+  functionsServeDenoArgs,
+  functionsWorkerEnv,
+  installFunctionsWorker,
+  type FunctionsWorkerProject,
+} from "../functions-worker-files.js"
+import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
 import { loadProjectLink } from "../link.js"
 import { resolveCloudAccessToken } from "../cloud-credentials.js"
 import { resolveTarget } from "../resolve-target.js"
@@ -249,8 +247,8 @@ function discoverFunctions(cwd: string): DiscoveredFunctionRoute[] {
 async function serve(cwd: string, opts: { port: string; host: string; envFile: string }): Promise<void> {
   const config = loadConfig(cwd)
   const functionsDir = resolveFunctionsDir(cwd, "read")
-  const routes = discoverServeRoutes(cwd, functionsDir)
-  const routerPath = writeServeFiles(cwd, functionsDir, routes)
+  listServeFunctions(cwd, functionsDir)
+  const project: FunctionsWorkerProject = { cwd, config, functionsDir, keyPath: writeServeKeyFile(cwd) }
 
   const envArgs = denoEnvFileArgs(resolveEnvFilePath(cwd, functionsDir, opts.envFile))
 
@@ -266,10 +264,12 @@ async function serve(cwd: string, opts: { port: string; host: string; envFile: s
     process.exit(1)
   }
 
+  // The functions and hooks directories are watched too, so a function added while it serves is found.
+  const watchDirs = [functionsDir, hooksPathFromProject(config, cwd)].filter((dir) => existsSync(dir))
   await runDenoServe(
     denoBin,
-    ["run", "--allow-net", "--allow-env", "--allow-read", "--watch", ...envArgs, routerPath],
-    { cwd, env: denoServeEnv(cwd, functionsDir, config, opts) },
+    functionsServeDenoArgs(installFunctionsWorker(), watchDirs, envArgs),
+    { cwd, env: denoServeEnv(project, opts) },
   )
 }
 
@@ -285,7 +285,7 @@ export function denoEnvFileArgs(envFilePath: string): string[] {
 /**
  * Runs the serve's Deno until it stops, then ends the command, with an error when it failed. It
  * exits on a clean stop too, in the same turn: a Ctrl+C heard once the stop listeners are gone
- * would kill the CLI without the `exit` that removes the key and router files.
+ * would kill the CLI without the `exit` that removes the key file.
  */
 async function runDenoServe(denoBin: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): Promise<void> {
   let status: number
@@ -300,7 +300,7 @@ async function runDenoServe(denoBin: string, args: string[], opts: { cwd: string
 }
 
 /** The functions under `functionsDir`, listed for the terminal, ending the command when there are none. */
-function discoverServeRoutes(cwd: string, functionsDir: string): DiscoveredFunctionRoute[] {
+function listServeFunctions(cwd: string, functionsDir: string): void {
   const routes = discoverFunctionsOrExit(functionsDir)
   if (routes.length === 0) {
     error(`No functions found in ${relativeFunctionsDir(cwd, functionsDir)}/`)
@@ -312,24 +312,21 @@ function discoverServeRoutes(cwd: string, functionsDir: string): DiscoveredFunct
     plain(`  /${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
   }
   plain()
-  return routes
 }
 
 /**
- * Writes this serve's Deno router and, when the shell gave a key, its key file, both removed when
- * the serve stops. The router reads the key from that file, as it still can after a --watch
- * reload, and grants it only to the routes SUPATYPE_SERVICE_ROLE_ROUTES names, as the deployed
- * worker does. Files of serves killed outright are swept first. Returns the router's path.
+ * Writes this serve's key file when the shell gave a key, removed when the serve stops, and returns
+ * its path. The worker reads the key from that file, as it still can after a --watch reload, and
+ * grants it only to the routes SUPATYPE_SERVICE_ROLE_ROUTES names. Key files of serves killed
+ * outright are swept first.
  */
-function writeServeFiles(cwd: string, functionsDir: string, routes: DiscoveredFunctionRoute[]): string {
-  sweepStaleServeFiles(cwd, functionsDir)
-  const { routerPath, keyPath } = functionsServeFiles(cwd, functionsDir)
+function writeServeKeyFile(cwd: string): string | undefined {
+  sweepStaleServeKeyFiles(cwd)
   const serviceRoleKey = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? ""
-  const serviceRoleKeyPath = serviceRoleKey !== "" ? keyPath : undefined
-  if (serviceRoleKeyPath !== undefined) writeServiceRoleKeyFileUntilExit(serviceRoleKeyPath, serviceRoleKey)
-  writeFileSync(routerPath, generateFunctionsRouterSource(routerPath, routes, serviceRoleKeyPath), "utf8")
-  removeOnExit(routerPath)
-  return routerPath
+  if (serviceRoleKey === "") return undefined
+  const keyPath = functionsServeKeyPath(cwd)
+  writeServiceRoleKeyFileUntilExit(keyPath, serviceRoleKey)
+  return keyPath
 }
 
 /**
@@ -354,30 +351,22 @@ export interface ServeListen {
 }
 
 /**
- * The environment the serve's Deno runs with: this shell's, plus where it serves from, uncoloured.
- * Handlers reach the project's API where it answers (resolve-api-url.ts): the native server for a
- * native project, never a gateway a Docker run left in `.env`.
+ * The environment the serve's Deno runs with: this shell's, uncoloured, plus the worker's for
+ * `project`, listening where `listen` says. Handlers reach the project's API where it answers
+ * (resolve-api-url.ts): the native server for a native project, never a gateway a Docker run left
+ * in `.env`.
  */
-export function denoServeEnv(
-  cwd: string,
-  functionsDir: string,
-  config: SupatypeProjectConfig,
-  listen: ServeListen,
-): NodeJS.ProcessEnv {
-  const apiUrl = resolveProjectApiUrl(cwd, config)
+export function denoServeEnv(project: FunctionsWorkerProject, listen: ServeListen): NodeJS.ProcessEnv {
+  const apiUrl = resolveProjectApiUrl(project.cwd, project.config)
   return {
     ...process.env,
     ...DENO_ENV,
     PORT: listen.port,
-    // The router listens on 127.0.0.1 without it (functions-router-gen.ts).
     SUPATYPE_FUNCTIONS_HOST: unbracketedHost(listen.host),
-    SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
-    SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
     SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? apiUrl,
     SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? apiUrl,
     SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
-    // The router grants the key only to these routes, as the deployed worker does.
-    SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
+    ...functionsWorkerEnv(project),
   }
 }
 

@@ -24,19 +24,19 @@ describe("functions serve's env file", () => {
     expect(denoEnvFileArgs(join(tmpdir(), "supatype-no-such-dir", ".env.local"))).toEqual([])
   })
 
-  it.skipIf(!denoAvailable)("reaches the script Deno runs, which is still the router", () => {
+  it.skipIf(!denoAvailable)("reaches the script Deno runs, which is still the worker", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-serve-env-"))
     dirs.push(dir)
     const envFile = join(dir, ".env.local")
     writeFileSync(envFile, "FROM_ENV_FILE=loaded\n")
-    const script = join(dir, "router.ts")
-    writeFileSync(script, `console.log("router saw " + Deno.env.get("FROM_ENV_FILE"))\n`)
+    const script = join(dir, "worker.ts")
+    writeFileSync(script, `console.log("worker saw " + Deno.env.get("FROM_ENV_FILE"))\n`)
     const run = spawnSync("deno", ["run", "--allow-env", "--allow-read", ...denoEnvFileArgs(envFile), script], {
       encoding: "utf8",
       shell: process.platform === "win32",
       timeout: 60_000,
     })
-    expect(`${run.stdout}${run.stderr}`).toContain("router saw loaded")
+    expect(`${run.stdout}${run.stderr}`).toContain("worker saw loaded")
     expect(run.status).toBe(0)
   }, 70_000)
 })

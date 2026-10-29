@@ -10,7 +10,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
-import { discoverTsFunctionsInDir } from "../src/functions-router-gen.js"
+import { discoverTsFunctionsInDir } from "../src/functions-discovery.js"
 import { errorMessage } from "../src/error-message.js"
 
 const CLI_BIN = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/supatype.js")
