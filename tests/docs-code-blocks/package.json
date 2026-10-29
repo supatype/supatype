@@ -1,0 +1,19 @@
+{
+  "name": "supatype-docs-code-blocks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Where scripts/check-docs-code-blocks.mjs writes the docs' code samples to typecheck them, so they resolve our packages the way a reader's project does",
+  "devDependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
+    "@supatype/react": "workspace:*",
+    "@supatype/react-auth": "workspace:*",
+    "@supatype/react-native": "workspace:*",
+    "@supatype/react-native-auth": "workspace:*",
+    "@supatype/types": "workspace:*",
+    "@types/node": "^22",
+    "@types/react": "^18",
+    "typescript": "^5"
+  }
+}

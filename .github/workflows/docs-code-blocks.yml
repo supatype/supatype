@@ -1,0 +1,67 @@
+name: Docs code blocks
+
+# Typechecks every TypeScript block in the docs pages (docs-content/) against this repo's own
+# packages, and fails on any reference to an API that no longer exists
+# (scripts/check-docs-code-blocks.mjs).
+#
+# It exists because the docs described a `@supatype/schema` builder API for months after it was
+# deleted. It ran in supatype-cloud until the pages moved here, where it now runs on both sides of
+# the problem: a PR that edits a docs page, and a PR that changes a package the pages import.
+# docs-content/ is generated from docs/ by scripts/site-sync.mjs, so docs/ counts too.
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "docs-content/**"
+      - "packages/**"
+      - "scripts/check-docs-code-blocks.mjs"
+      - "tests/docs-code-blocks/**"
+      - ".github/workflows/docs-code-blocks.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "docs-content/**"
+      - "packages/**"
+      - "scripts/check-docs-code-blocks.mjs"
+      - "tests/docs-code-blocks/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-code-blocks-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Docs code blocks typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Only the packages the docs import, with what they depend on. The check reads their
+      # dist/*.d.ts, so they must be built, and in dependency order.
+      - name: Build the packages the docs import
+        run: >-
+          pnpm turbo run build
+          --filter=@supatype/types --filter=@supatype/client --filter=@supatype/react
+          --filter=@supatype/react-auth --filter=@supatype/react-native
+          --filter=@supatype/react-native-auth --filter=@supatype/cli
+
+      - name: Check code blocks
+        run: node scripts/check-docs-code-blocks.mjs
