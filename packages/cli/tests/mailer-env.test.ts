@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { AUTH_VERIFY_PATH, mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides, withSmtpPortFallback } from "../src/mailer-env.js"
+import { AUTH_VERIFY_PATH, mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides } from "../src/mailer-env.js"
 import { nativeAuthMailerEnv } from "../src/native-dev-env.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
@@ -128,31 +128,5 @@ describe("withoutBlankMailerOverrides", () => {
       { SUPATYPE_RESEND_API_KEY: "re_env", SUPATYPE_RESEND_FROM: "", OTHER: "" },
     )
     expect(env).toMatchObject({ SUPATYPE_RESEND_API_KEY: "re_env", SUPATYPE_RESEND_FROM: "", OTHER: "" })
-  })
-})
-
-/**
- * The server reads the project's `.env` itself and takes each name its environment leaves unset, so
- * a blank `SUPATYPE_SMTP_PORT=` there reached it as "" whatever native dev passed, and `migrate`
- * stopped with `converting '' to type int`. The compose file always wrote `${SUPATYPE_SMTP_PORT:-587}`.
- */
-describe("withSmtpPortFallback", () => {
-  const BASE = { SUPATYPE_JWT_SECRET: "s" }
-
-  it("gives the server 587 for a blank SUPATYPE_SMTP_PORT in .env", () => {
-    expect(withSmtpPortFallback(BASE, { SUPATYPE_SMTP_PORT: "" }, {})).toEqual({ ...BASE, SUPATYPE_SMTP_PORT: "587" })
-  })
-
-  it("gives the server 587 for a blank one in the shell, which keeps .env's from being read", () => {
-    expect(withSmtpPortFallback(BASE, { SUPATYPE_SMTP_PORT: "2525" }, { SUPATYPE_SMTP_PORT: " " })).toEqual({
-      ...BASE,
-      SUPATYPE_SMTP_PORT: "587",
-    })
-  })
-
-  it("leaves a port that is set alone, and adds nothing when none is set anywhere", () => {
-    expect(withSmtpPortFallback(BASE, { SUPATYPE_SMTP_PORT: "2525" }, {})).toEqual(BASE)
-    expect(withSmtpPortFallback({ SUPATYPE_SMTP_PORT: "465" }, { SUPATYPE_SMTP_PORT: "" }, {})).toEqual({ SUPATYPE_SMTP_PORT: "465" })
-    expect(withSmtpPortFallback(BASE, {}, {})).toEqual(BASE)
   })
 })

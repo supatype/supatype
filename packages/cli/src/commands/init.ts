@@ -1391,7 +1391,6 @@ SUPATYPE_SMTP_PASS=
 SUPATYPE_SMTP_SENDER_NAME=${projectName}`
     case "console":
     default:
-      // Commented out: an empty SUPATYPE_SMTP_PORT is not a number, and the server refuses it.
       return `# SMTP: unused while email.provider is console, which logs each email instead of sending it.
 # Email confirmation is auth.email.enableConfirmations in supatype.config.ts.
 # SUPATYPE_SMTP_HOST=

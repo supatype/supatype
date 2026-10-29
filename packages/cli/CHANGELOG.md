@@ -64,10 +64,6 @@
   that had made a function with it was affected.
 * **dev:** native dev's port-in-use message says which port to move ("Move this project's database
   port with ..."). It read "Move this project's with ...".
-* **dev:** a blank `SUPATYPE_SMTP_PORT=` in `.env` no longer stops native dev at "Running auth
-  migrations...". The server reads `.env` itself, took the blank as the port and refused it
-  (`converting '' to type int`). Native dev now gives it 587 for a blank port, as the compose file
-  always has.
 * **dev, functions serve, functions worker:** a function that fails to load answers its own route
   with a 500, `function_load_failed` and why, and every other function keeps serving. A module that
   threw on import, did not parse, or exported no handler stopped the router (or the deployed
