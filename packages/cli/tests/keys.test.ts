@@ -5,9 +5,9 @@
  */
 import { afterEach, beforeEach, describe, it, expect } from "vitest"
 import { spawnSync } from "node:child_process"
-import { resolve, dirname } from "node:path"
+import { delimiter, resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { isJsonObject, isNumber } from "@supatype/shared"
@@ -326,12 +326,31 @@ describe("supatype init with a shell JWT_SECRET it cannot use", () => {
     try {
       const { exitCode, stdout, stderr } = runCli(["init", "acme", "-y", "--no-install"], {
         cwd: parent,
-        env: { JWT_SECRET: "short" },
+        env: { ...initWithoutDockerOrNetwork(), JWT_SECRET: "short" },
       })
       expect(exitCode).toBe(0)
       expect((stdout + stderr).match(/JWT_SECRET environment variable/g)).toHaveLength(1)
     } finally {
-      rmSync(parent, { recursive: true, force: true })
+      // Retried: on Windows a process init started can still hold the directory for a moment
+      // after the CLI exits, and the cleanup then failed the test with EBUSY under a loaded suite.
+      rmSync(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     }
   })
 })
+
+/**
+ * What `init -y` asks of the machine, answered at once. It asked Docker which ports other stacks
+ * hold (`docker ps`, `docker inspect`), whether the daemon runs (`docker version`, `docker info`)
+ * and the npm registry for package versions: measured at 8 to 14 seconds a Docker call in a loaded
+ * suite, which timed the test out while it passed alone in 5. None of it is what the test checks.
+ * The shell's Kong port is taken as given, the registry is one that refuses at once (the versions
+ * fall back to the CLI's own), and with no Docker on PATH the daemon check ends at the first call.
+ */
+function initWithoutDockerOrNetwork(): NodeJS.ProcessEnv {
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH"
+  const withoutDocker = (process.env[pathKey] ?? "")
+    .split(delimiter)
+    .filter((dir) => !["docker", "docker.exe"].some((bin) => existsSync(join(dir, bin))))
+    .join(delimiter)
+  return { [pathKey]: withoutDocker, SUPATYPE_KONG_PORT: "18999", npm_config_registry: "http://127.0.0.1:1" }
+}
