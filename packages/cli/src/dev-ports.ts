@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process"
 import { CLACK_CANCEL, isCancel, p } from "./ui/clack.js"
 import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 import { isPortInUse } from "./postgres-ctl.js"
-import { readComposeEnvInt, readEnvInt, upsertEnvFile } from "./env-file.js"
+import { readComposeEnvInt, shellEnvInt, upsertEnvFile } from "./env-file.js"
 import { isInteractive } from "./ui/interactive.js"
 import { fatalError } from "./ui/fatal.js"
 import { COMPOSE_DEV_DB_PORT, hostComposeDbUrl } from "./host-database.js"
@@ -173,13 +173,15 @@ export async function findNextFreePort(start: number, reserved: ReadonlySet<numb
  * another.
  */
 export function readPersistedKongPort(cwd: string, env: NodeJS.ProcessEnv = process.env): number | null {
-  return kongPortFromEnvironment(env) ?? readEnvInt(cwd, "SUPATYPE_KONG_PORT")
+  return readComposeEnvInt(cwd, KONG_PORT_ENV, env)
 }
+
+/** The variable compose reads Kong's host port from. */
+const KONG_PORT_ENV = "SUPATYPE_KONG_PORT"
 
 /** `SUPATYPE_KONG_PORT` from the shell environment, when it is set to a usable port. */
 function kongPortFromEnvironment(env: NodeJS.ProcessEnv): number | null {
-  const port = Number(env["SUPATYPE_KONG_PORT"]?.trim())
-  return isValidHostPort(port) ? port : null
+  return shellEnvInt(KONG_PORT_ENV, env)
 }
 
 function persistKongPort(cwd: string, port: number): void {

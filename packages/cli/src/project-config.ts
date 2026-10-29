@@ -979,8 +979,8 @@ export const NATIVE_DENO_PORT = 8001
 export const DENO_PORT_ENV = "SUPATYPE_DENO_PORT"
 
 /** The port native dev's Deno listens on: `SUPATYPE_DENO_PORT` (exported, then `.env`), then 8001. */
-export function nativeDenoPort(cwd: string = process.cwd()): number {
-  return readComposeEnvInt(cwd, DENO_PORT_ENV) ?? NATIVE_DENO_PORT
+export function nativeDenoPort(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): number {
+  return readComposeEnvInt(cwd, DENO_PORT_ENV, env) ?? NATIVE_DENO_PORT
 }
 
 /**

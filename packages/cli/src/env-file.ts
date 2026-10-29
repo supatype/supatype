@@ -248,11 +248,16 @@ export function readEnvInt(cwd: string, key: string): number | null {
  * A port as `docker compose --env-file .env` resolves it: the caller's environment first, then
  * `.env`. The CLI waits on the port compose binds, so it has to read it the way compose does: an
  * exported SUPATYPE_KONG_PORT used to be bound by compose while dev and push waited on the one in
- * `.env`.
+ * `.env`. The one rule for a port the shell can override: a shell value that is not a port is
+ * passed over for `.env`'s. `env` is the shell, given by tests.
  */
-export function readComposeEnvInt(cwd: string, key: string): number | null {
-  const shell = process.env[key]?.trim()
-  return shell ? portNumber(shell) : readEnvInt(cwd, key)
+export function readComposeEnvInt(cwd: string, key: string, env: NodeJS.ProcessEnv = process.env): number | null {
+  return shellEnvInt(key, env) ?? readEnvInt(cwd, key)
+}
+
+/** `key` from the shell (`env`) as a port, or null when it is unset, blank or not a port. */
+export function shellEnvInt(key: string, env: NodeJS.ProcessEnv = process.env): number | null {
+  return portNumber(env[key]?.trim() ?? "")
 }
 
 function portNumber(raw: string): number | null {

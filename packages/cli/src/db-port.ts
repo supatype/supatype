@@ -19,7 +19,7 @@
  * The variable compose binds for the stack's layout is the source of truth: `SUPATYPE_DB_PORT` for
  * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it.
  */
-import { readEnvFile, upsertEnvFile } from "./env-file.js"
+import { readComposeEnvInt, readEnvFile, shellEnvInt, upsertEnvFile } from "./env-file.js"
 import { setInShell } from "./shell-ports.js"
 
 /** The `.env` key that moves the published Postgres port for a self-host stack. */
@@ -135,10 +135,10 @@ export function syncDatabaseUrlPort(
   devLocal: boolean,
   shell: NodeJS.ProcessEnv = process.env,
 ): DbPortSync | null {
-  const { envKey } = composeDbPublish(devLocal)
-  if (setInShell(shell, envKey)) return syncRunDatabaseUrl(cwd, devLocal, shell)
-  const env = readEnvFile(cwd)
-  const moved = movedDatabaseUrl(env["DATABASE_URL"], publishedDbPort(env, devLocal))
+  const { envKey, defaultPort } = composeDbPublish(devLocal)
+  const port = readComposeEnvInt(cwd, envKey, shell) ?? defaultPort
+  if (shellEnvInt(envKey, shell) !== null) return syncRunDatabaseUrl(cwd, envKey, port, shell)
+  const moved = movedDatabaseUrl(readEnvFile(cwd)["DATABASE_URL"], port)
   if (moved === null) return null
   upsertEnvFile(cwd, { DATABASE_URL: moved.url })
   return { from: moved.from, to: moved.to, envKey }
@@ -151,12 +151,17 @@ export function syncDatabaseUrlPort(
  * the CLI's own connections read ahead of `.env`, and `.env` keeps its own. A `DATABASE_URL` the
  * shell sets, or this run already set from the same port, is left as it is.
  */
-function syncRunDatabaseUrl(cwd: string, devLocal: boolean, shell: NodeJS.ProcessEnv): DbPortSync | null {
+function syncRunDatabaseUrl(
+  cwd: string,
+  envKey: DbPortSync["envKey"],
+  port: number,
+  shell: NodeJS.ProcessEnv,
+): DbPortSync | null {
   if (setInShell(shell, "DATABASE_URL")) return null
-  const moved = movedDatabaseUrl(readEnvFile(cwd)["DATABASE_URL"], publishedDbPort(shell, devLocal))
+  const moved = movedDatabaseUrl(readEnvFile(cwd)["DATABASE_URL"], port)
   if (moved === null) return null
   shell["DATABASE_URL"] = moved.url
-  return { from: moved.from, to: moved.to, envKey: composeDbPublish(devLocal).envKey, runOnly: true }
+  return { from: moved.from, to: moved.to, envKey, runOnly: true }
 }
 
 /** `value` with its port set to `port`, when it names this machine on a different port. */

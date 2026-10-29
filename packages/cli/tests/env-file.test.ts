@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { hasEnvValue, MANAGED_MARKER, readEnvFile, readEnvInt, readEnvValue, upsertEnvFile } from "../src/env-file.js"
+import { hasEnvValue, MANAGED_MARKER, readComposeEnvInt, readEnvFile, readEnvInt, readEnvValue, upsertEnvFile } from "../src/env-file.js"
 
 /**
  * `.env` is a file operators edit by hand, and the CLI rewrites it on every compose run.
@@ -190,5 +190,20 @@ describe("upsertEnvFile with a key assigned more than once", () => {
     write("export A=1\n")
     upsertEnvFile(dir, { A: "2" })
     expect(read()).toBe("A=2\n")
+  })
+})
+
+/**
+ * Every port the shell can override (Kong, the database, Deno) is read through this one rule, so a
+ * value that is not a port is passed over the same way for each of them.
+ */
+describe("readComposeEnvInt", () => {
+  it("takes the shell's port over .env's, and .env's when the shell's is blank or not a port", () => {
+    write("SUPATYPE_KONG_PORT=18474\n")
+    expect(readComposeEnvInt(dir, "SUPATYPE_KONG_PORT", {})).toBe(18474)
+    expect(readComposeEnvInt(dir, "SUPATYPE_KONG_PORT", { SUPATYPE_KONG_PORT: " 18490 " })).toBe(18490)
+    expect(readComposeEnvInt(dir, "SUPATYPE_KONG_PORT", { SUPATYPE_KONG_PORT: " " })).toBe(18474)
+    expect(readComposeEnvInt(dir, "SUPATYPE_KONG_PORT", { SUPATYPE_KONG_PORT: "not a port" })).toBe(18474)
+    expect(readComposeEnvInt(dir, "SUPATYPE_DENO_PORT", {})).toBeNull()
   })
 })
