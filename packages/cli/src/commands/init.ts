@@ -14,7 +14,7 @@ import {
 } from "../local-secrets.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
-import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
+import { probeDockerDaemonAsync, reportDockerUnavailable, type DockerDaemonProbe } from "../docker-runtime.js"
 import { loadConfig } from "../config.js"
 import {
   ensureComponentBinaries,
@@ -203,6 +203,7 @@ export function registerInit(program: Command): void {
       const modeTarget = productionTargetFromMode(opts.mode)
 
       let result: WizardResult
+      let asked: InitQuestions
       if (interactive) {
         await runInteractiveInit({
           name,
@@ -219,10 +220,8 @@ export function registerInit(program: Command): void {
           install: true,
           generateKeys: true,
         }
-        if (result.provider === "docker") {
-          const { chooseInitKongPort } = await import("../dev-ports.js")
-          result.kongPort = await chooseInitKongPort()
-        }
+        asked = startInitQuestions(result.provider)
+        if (asked.kongPort) result.kongPort = await asked.kongPort
         if (!opts.admin && opts.adminEmail && opts.adminPassword) {
           result.adminEmail = opts.adminEmail
           result.adminPassword = opts.adminPassword
@@ -243,7 +242,7 @@ export function registerInit(program: Command): void {
 
       if (name) mkdirSync(dir, { recursive: true })
 
-      const deps = await resolveDependencyVersions()
+      const deps = await asked.deps
 
       scaffold(dir, result, deps)
 
@@ -267,7 +266,7 @@ export function registerInit(program: Command): void {
         process.exit(1)
       }
 
-      warnDockerUnavailableForProvider(result.provider)
+      await warnDockerUnavailableForProvider(result.provider, asked.daemon)
 
       printNextSteps({
         name,
@@ -365,7 +364,7 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
       process.exit(1)
     }
 
-    warnDockerUnavailableForProvider(result.provider)
+    await warnDockerUnavailableForProvider(result.provider)
 
     p.outro(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
     printNextSteps({
@@ -1540,12 +1539,37 @@ export function mergeGitignoreTemplate(existingContent: string): string {
 
 // ─── Next steps ────────────────────────────────────────────────────────────--
 
-function warnDockerUnavailableForProvider(provider: ScaffoldOptions["provider"]): void {
+/** Say so when a Docker project's Docker is not running: from `started` when init already asked. */
+async function warnDockerUnavailableForProvider(
+  provider: ScaffoldOptions["provider"],
+  started?: Promise<DockerDaemonProbe>,
+): Promise<void> {
   if (provider !== "docker") return
-  const probe = probeDockerDaemon()
+  const probe = await (started ?? probeDockerDaemonAsync())
   if (probe.ok) return
   reportDockerUnavailable(probe)
   plain()
+}
+
+/** What `init -y` asks of the machine, all asked at once (see startInitQuestions). */
+interface InitQuestions {
+  /** The Kong port, for a Docker project. */
+  kongPort?: Promise<number>
+  /** Whether Docker runs, for a Docker project. */
+  daemon?: Promise<DockerDaemonProbe>
+  deps: Promise<InitDependencyVersions>
+}
+
+/**
+ * Start everything `init -y` asks of Docker and the npm registry, side by side and each with a short
+ * limit (docker-exec.ts). They ran one after another with none: 16 to 27 seconds on a developer
+ * machine, past 58 on a loaded one. A native project asks Docker nothing.
+ */
+function startInitQuestions(provider: ScaffoldOptions["provider"]): InitQuestions {
+  const deps = resolveDependencyVersions()
+  if (provider !== "docker") return { deps }
+  const kongPort = import("../dev-ports.js").then(({ chooseInitKongPort }) => chooseInitKongPort())
+  return { kongPort, daemon: probeDockerDaemonAsync(), deps }
 }
 
 /** What `init` did and was asked for, which decides the steps it prints. */

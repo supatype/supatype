@@ -44,24 +44,24 @@ describe("ports init will not hand out", () => {
     asked = []
   })
 
-  it("include every port a stopped Supatype stack is configured with", () => {
-    expect([...reservedComposePorts(reader())].sort()).toEqual([18473, 54329])
+  it("include every port a stopped Supatype stack is configured with", async () => {
+    expect([...(await reservedComposePorts(reader()))].sort()).toEqual([18473, 54329])
   })
 
-  it("leave out projects that are not Supatype's", () => {
+  it("leave out projects that are not Supatype's", async () => {
     const seen = reader({
       portBindings: (ids) => {
         asked.push([...ids])
         return reader().portBindings(ids)
       },
     })
-    reservedComposePorts(seen)
+    await reservedComposePorts(seen)
     expect(asked).toEqual([["a1", "b2"]])
   })
 
-  it("are none when Docker cannot be asked", () => {
-    expect(reservedComposePorts(reader({ listContainers: () => null })).size).toBe(0)
-    expect(reservedComposePorts(reader({ portBindings: () => null })).size).toBe(0)
+  it("are none when Docker cannot be asked", async () => {
+    expect((await reservedComposePorts(reader({ listContainers: () => null }))).size).toBe(0)
+    expect((await reservedComposePorts(reader({ portBindings: () => null }))).size).toBe(0)
   })
 })
 
