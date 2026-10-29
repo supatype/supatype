@@ -25,6 +25,7 @@ import { localStorageEnv } from "../local-storage.js"
 import {
   composeProjectName,
   exitComposeFailed,
+  noteUnpinnedImages,
   runDockerCompose,
   selfHostComposePaths,
   writeSelfHostCompose,
@@ -85,6 +86,7 @@ export function registerSelfHost(program: Command): void {
       }
       // Before the spinner, so the warning is not drawn over.
       warnProjectAuthProviderSecrets(cwd, config)
+      noteUnpinnedImages(cwd)
       const renderOptions = composeRenderOptions(cwd, config.project.name)
       // As a push does: a stack started here and never pushed kept whatever DATABASE_URL .env had,
       // which after a `supatype dev` was the dev database, so seed and admin reached that one.

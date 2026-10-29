@@ -59,6 +59,36 @@ export function releaseImages(version: string = EMBEDDED_CLI_VERSION): Record<Re
 /** The images this CLI runs when nothing names one. */
 export const RELEASE_IMAGES = releaseImages()
 
+/** The variable that names each in-repo image in place of the CLI's own. */
+const IN_REPO_IMAGE_ENV: Readonly<Record<InRepoImage, string>> = {
+  studio: "SUPATYPE_STUDIO_IMAGE",
+  storage: "SUPATYPE_STORAGE_IMAGE",
+  realtime: "SUPATYPE_REALTIME_IMAGE",
+  "functions-worker": "SUPATYPE_FUNCTIONS_WORKER_IMAGE",
+  "control-plane": "SUPATYPE_CONTROL_PLANE_IMAGE",
+}
+
+/**
+ * What to say when a CLI that is not a release runs in-repo images from `:latest`, naming those
+ * nothing in `env` (`.env` under the shell, as compose reads them) overrides; undefined otherwise.
+ * A released CLI runs the images of its own version and has nothing to say. A source build has no
+ * version of its own published, so `:latest` is intended there, and it used to run without a word.
+ */
+export function unpinnedImagesNote(
+  env: Readonly<Record<string, string | undefined>>,
+  version: string = EMBEDDED_CLI_VERSION,
+): string | undefined {
+  if (isReleaseVersion(version)) return undefined
+  const names = Object.entries(IN_REPO_IMAGE_ENV)
+    .filter(([, key]) => (env[key]?.trim() ?? "") === "")
+    .map(([name]) => name)
+  if (names.length === 0) return undefined
+  return (
+    `This CLI is not a release build, so ${names.join(", ")} run from :latest; a released CLI runs ` +
+    "the images of its own version. Name one with its SUPATYPE_*_IMAGE in .env to choose it."
+  )
+}
+
 /** A pinned component's version as the CDN and `versions` spell it: the tag without its `v`. */
 export function pinnedComponentVersion(component: PinnedComponent): string {
   return PINNED_IMAGES[component].tag.replace(/^v/, "")
