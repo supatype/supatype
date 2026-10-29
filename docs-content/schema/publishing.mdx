@@ -1,0 +1,319 @@
+---
+title: Publishing, drafts and versions
+description: Keep a published version live while you edit the next one, preview the edit, and restore from history.
+---
+
+A published post stays live while you work on the next version of it. You can preview that pending
+edit, publish one translation before another, schedule when it goes live, and go back through the
+history to any earlier version.
+
+Add `versions` to a model and you get all of it:
+
+```typescript
+import type { Lte, Model, Now, Optional, RichText, Role, Timestamp, UUID } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+  title: string
+  body: RichText
+  published_at: Optional<Timestamp>
+}, {
+  tableName: "posts"
+  versions: { drafts: true, keep: 20 }
+  access: { read: Lte<"published_at", Now>, update: Role<"editor"> }
+}>
+```
+
+`versions: true` is shorthand for the same thing with the default retention.
+
+## Where your content lives
+
+Your table keeps exactly the meaning it has always had: **one row per record, holding what is
+published**. Snapshots live in a companion table, `posts_versions`, and one of them may be a newer
+draft.
+
+| State | The `posts` row | The newest version |
+|---|---|---|
+| Never published | exists, `published_at IS NULL` | a draft |
+| Published, nothing pending | the live content | published |
+| Published with an edit waiting | **still the live content** | a draft |
+
+That third row is the point, and it is why a `status` column cannot do this. A single row holds one
+copy of the content, so editing it either destroys what is live or hides your edit. There is nowhere
+for "published" and "next" to both exist.
+
+Because your table is still an ordinary table, everything you already have on it keeps working:
+constraints, foreign keys, indexes, access rules, realtime subscriptions. A relation can point at a
+record that has never been published, and an access rule like `Lte<"published_at", Now>` already says
+"only published".
+
+## Editing writes a draft
+
+Once a model has `versions`, saving records a draft and **the live row does not move**. Publishing is
+a separate act.
+
+In Studio that is the publish bar above the editor. From your own code it is two calls:
+
+```typescript
+// Save. Nothing changes for your readers.
+await supatype.rpc("create_draft", {
+  model_table: "posts",
+  record_id: postId,
+  data: { title: "A better title" },
+}, { schema: "supatype" })
+
+// Now they see it.
+await supatype.rpc("publish", { model_table: "posts", record_id: postId }, { schema: "supatype" })
+```
+
+The `schema` option is not optional: these functions live in the `supatype` schema, and PostgREST
+looks in the default one unless you say otherwise.
+
+**They run as you.** The access rule that governs editing a record governs drafting, publishing,
+scheduling and restoring it, so there is one set of rules rather than one for your app and another
+for the admin UI. If your `update` rule refuses the edit, it refuses the publish.
+
+## Creating a record
+
+Create records through the client's `insert`, or call `create_record` yourself:
+
+```typescript
+// The generated client sends this through create_record for you.
+const { data } = await supatype.from("posts").insert({ title: "First cut" }).select().single()
+
+// The same thing, by hand.
+await supatype.rpc("create_record", {
+  model_table: "posts",
+  data: { title: "First cut" },
+}, { schema: "supatype" })
+```
+
+Either way the record starts as its first draft, exactly as Studio creates one. Its live row exists,
+holding no translation yet, and version 1 holds what you wrote.
+
+**Why a plain insert can fail here.** A new record is unpublished, so a read rule like
+`Lte<"published_at", Now>` hides it. A `POST /rest/v1/posts` that asks for the row back
+(`Prefer: return=representation`) is refused with `42501 new row violates row-level security
+policy`: Postgres checks the returned row against your read rule as it inserts it, before anything
+has made the row visible to you. `create_record` inserts without reading back, then writes version 1,
+and from then on the record is visible to whoever created it.
+
+The client knows which models keep drafts from the generated `supatype/client.ts`, so import
+`createClient` from there. Its `insert` creates one record through `create_record` and returns the
+row read back from the draft view, in the shape an insert returns. `upsert` is left a plain write,
+since `create_record` cannot say what a conflict should do. A raw REST caller refused this way gets a
+`hint` naming `supatype.create_record` and `supatype.create_records`.
+
+### Creating several records at once
+
+An `insert` of several rows goes through `create_records`, which creates every record in one call,
+**all or none**: if the database refuses any of them (your create rule, a constraint, a missing
+required field), none is created. The rows come back in the order you sent them, with your select
+applied:
+
+```typescript
+const { data } = await supatype
+  .from("posts")
+  .insert([{ title: "Part one" }, { title: "Part two" }])
+  .select("id, title")
+
+// The same thing, by hand: a JSON array of what create_record takes.
+await supatype.rpc("create_records", {
+  model_table: "posts",
+  data: [{ title: "Part one" }, { title: "Part two" }],
+}, { schema: "supatype" })
+```
+
+Each record is created exactly as `create_record` creates one, under the same rules, and
+`create_records` answers with `create_record`'s answer for each, in order. One `create_record` call
+per row would not be all or nothing, which is why the batch is its own function.
+
+### Publishing as you create
+
+Pass `published_at` and the record is published the moment it is created, on purpose: it lets an
+import or an automation create content that is live straight away.
+
+```typescript
+await supatype.from("posts").insert({ title: "Live now", published_at: new Date().toISOString() })
+```
+
+The live row gets the `published_at` you sent, so a read rule comparing it shows the record to your
+readers at once. Created through `create_record`, as the client creates it, the live row carries the
+non-localized fields, and a localized field's translations wait in the draft until you publish them,
+as they do for every edit. Leave `published_at` out to create a draft that nobody else sees until you
+publish it.
+
+## Reading the pending draft
+
+`.draft()` reads the newest version instead of what is published:
+
+```typescript
+const { data } = await supatype.from("posts").draft().select("id, title, body")
+```
+
+Same table name, same row type, one extra call. In React:
+
+```typescript
+const { data: preview } = useQuery("posts", { draft: true })
+```
+
+**A draft is not covered by your read rule.** It is visible to whoever created it, to your project's
+Studio roles, and to anyone holding a preview link. Someone entitled to read published content is not
+thereby entitled to read what you have not published.
+
+### Two kinds of preview, and they are different
+
+| | What it shows | How |
+|---|---|---|
+| `useLivePreview` | **unsaved keystrokes**, streamed from an open Studio tab into your app in an iframe | `postMessage` |
+| `.draft()` | the **saved** draft, from the database | `Accept-Profile: draft` |
+
+They answer different questions. Live preview is for watching a form as somebody types in it. A draft
+read is for looking at what has been saved but not published, from anywhere, including from a build.
+
+### Live preview only listens to Studio
+
+A live preview message repaints your page with whatever it carries, so `useLivePreview` applies one
+only when it comes from the window framing your page, at an origin Studio is served from. By default
+that is the origin of your `<SupatypeProvider>` client's URL, because a self-hosted Studio is served
+at `/studio/` on your API URL. A message from anywhere else is ignored, with a console warning naming
+its origin.
+
+On Cloud, Studio is served from the platform at `https://studio.supatype.com`, not from your API URL,
+so say so with `studioOrigin`:
+
+```tsx
+const { data, isPreview } = useLivePreview({
+  initialData: post,
+  model: "post",
+  studioOrigin: "https://studio.supatype.com",
+})
+```
+
+`studioOrigin` takes a URL or an origin, or a list of them when Studio is reachable at more than one.
+Without it, and without a provider to take the URL from, every preview message is ignored.
+
+## Sharing a preview with someone who has no account
+
+The person a draft most needs showing to is often a client or a reviewer with no login. Studio's
+**Share a preview** button mints a short-lived link:
+
+```
+POST /admin/preview-links
+{ "scope": "record", "model": "posts", "recordId": "…", "ttl": 3600 }
+```
+
+The link is the whole of their credential. It carries no subject, so holding it makes them nobody
+rather than making them you, and it names the one record it covers. It expires (fifteen minutes by
+default, a week at most), and each link can be revoked on its own from the same panel.
+`POST /admin/preview-links/revoke` withdraws every outstanding link at once.
+
+A project-wide link, covering every unpublished draft, can be minted by `admin` and `developer` only,
+and lives a day at most. Handing someone a URL is a different authority from editing content.
+
+### Opening the link in your app
+
+The address Studio hands out is the model's `admin.livePreview` address with `preview=<code>` added.
+The code is not a token: your page passes it to the client, which exchanges it at
+`POST /preview-links/resolve` for a token that lives about a minute and reads the draft with it.
+
+```typescript
+import { createClient } from "@supatype/client"
+
+const params = new URLSearchParams(location.search)
+const supatype = createClient({
+  url: "https://api.example.com",
+  anonKey: "<anon key>",
+  previewCode: params.get("preview") ?? "",
+})
+const { data } = await supatype.from("posts").draft().select("*").eq("id", params.get("id") ?? "")
+```
+
+Nothing on your side signs or verifies anything, so no secret belongs in your app, and a revoked link
+stops working at the next exchange. A page that runs in the browser on another origin needs that
+origin in the project's [allowed browser origins](/docs/self-hosting/configuration.html#allowed-browser-origins-cors)
+(on Cloud, **Settings > CORS**). Keep the page `noindex`, and send no referrer from it: its address
+holds the code.
+
+## Publishing one language at a time
+
+A localized field is one column holding every locale, so publishing can move one of them and leave
+the rest exactly as they were:
+
+```typescript
+// English goes live. The French translation stays in draft.
+await supatype.rpc("publish", {
+  model_table: "posts",
+  record_id: postId,
+  locales: ["en"],
+}, { schema: "supatype" })
+```
+
+The unpublished translation is **absent** from what your readers get, not hidden from them: the value
+was never written to the live row. `published_at` is set while any locale is live and cleared when the
+last one is withdrawn, so a rule comparing it still means "this record is published somewhere".
+
+Your non-localized fields (a slug, a cover image) go live with whichever locale you publish. They
+belong to no language, so the alternative would be that fixing a typo in a slug required publishing
+every translation.
+
+## Scheduling
+
+```typescript
+await supatype.rpc("schedule_publish", {
+  model_table: "posts",
+  record_id: postId,
+  at: "2026-10-01T09:00:00Z",
+  locales: ["en"],
+}, { schema: "supatype" })
+```
+
+This is a real scheduler, and it is worth knowing why. Without versions you could schedule by setting
+a future `published_at`, because the access rule compared it against `now()` and the row simply stayed
+hidden until it arrived. That works only while the content is already in the row. Once publishing
+means copying a draft in, something has to do the copying.
+
+That something is `pg_cron`, which ships in the `supatype/postgres` image. **On a database without
+it, everything else works and only the timer is missing**: a scheduled publish waits until something
+calls `_supatype.run_due_publishes()`, which you can drive from a cron of your own or a worker.
+
+## History and restoring
+
+Every version records who saved it, so "who changed this" is answerable without an audit log.
+
+```typescript
+// Bring version 3 back as a new draft. Nothing goes live.
+await supatype.rpc("restore_version", {
+  model_table: "posts",
+  record_id: postId,
+  version: 3,
+}, { schema: "supatype" })
+```
+
+Restoring is an editing act. It lands where an edit lands, and it goes live when you publish it. To
+publish an old version outright, restore it and then publish. Studio's **Publish this version**
+button on the history page does both.
+
+History is not unbounded: `keep` bounds it, twenty by default, and pruning never removes the newest
+version or one that is currently live.
+
+## Two things it will not do
+
+**A model cannot have both `versions` and `access.fields`.** A version snapshot is opaque JSON, so
+per-column masking cannot see inside it and a masked value would sit in plain sight in the history.
+Push refuses the pair and names the models. A project can have a masked model and a versioned model;
+one model cannot be both.
+
+**A draft's uploads are referenced only from the snapshot.** If you write your own cleanup for
+unreferenced storage objects, read the version data as well as the live rows, or publishing a draft
+will find its images gone.
+
+## Turning it off
+
+Removing `versions` from a model stops recording history and drops the snapshot table, which is a
+destructive change: `supatype push` asks before applying it, and a non-interactive push needs
+`--yes`. Losing a history should take a deliberate act.
+
+`versions: { drafts: false }` is the other half of the feature on its own: every write is recorded,
+nothing is withheld from readers, and writes go straight to the table as they always did. That is the
+audit-trail case rather than the editorial one.

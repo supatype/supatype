@@ -1,0 +1,172 @@
+---
+title: Configuration
+description: Environment variables and configuration options for self-hosted Supatype deployments.
+---
+
+All Supatype services are configured via environment variables. This reference covers every setting for a self-hosted deployment.
+
+## Database (PostgreSQL)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POSTGRES_PASSWORD` | None | **Required.** Database superuser password |
+| `POSTGRES_HOST` | `db` | Database hostname |
+| `POSTGRES_PORT` | `5432` | Database port |
+| `POSTGRES_DB` | `postgres` | Database name |
+
+## Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_SECRET` | None | **Required.** Secret for signing JWTs. At least 32 characters: see [JWT secret length](#jwt-secret-length) |
+| `JWT_EXPIRY` | `3600` | Access token expiry in seconds |
+| `SITE_URL` | None | **Required.** Your application URL for redirects |
+| `DISABLE_SIGNUP` | `false` | Disable new user registration |
+| `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED` | `false` | Allow `signInAnonymously()` guest sessions |
+| `MAILER_AUTOCONFIRM` | `false` | Skip email confirmation |
+| `MAILER_SECURE_EMAIL_CHANGE_ENABLED` | `true` | Require confirmation for email changes |
+
+### SMTP
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SMTP_HOST` | None | SMTP server hostname |
+| `SMTP_PORT` | `587` | SMTP server port |
+| `SMTP_USER` | None | SMTP username |
+| `SMTP_PASS` | None | SMTP password |
+| `SMTP_FROM` | `noreply@example.com` | Sender email address |
+| `SMTP_ADMIN_EMAIL` | None | Admin notification email |
+
+### OAuth providers
+
+| Variable | Description |
+|----------|-------------|
+| `SUPATYPE_EXTERNAL_GITHUB_ENABLED` | Enable GitHub OAuth (`true`/`false`) |
+| `SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID` | GitHub OAuth Client ID |
+| `SUPATYPE_EXTERNAL_GITHUB_SECRET` | GitHub OAuth Client Secret |
+| `SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI` | Callback URL: your API URL followed by `/auth/v1/callback`. Set it for every enabled provider; without it the provider returns users to a path that answers 404 |
+| `SUPATYPE_EXTERNAL_GOOGLE_ENABLED` | Enable Google OAuth |
+| `SUPATYPE_EXTERNAL_GOOGLE_CLIENT_ID` | Google OAuth Client ID |
+| `SUPATYPE_EXTERNAL_GOOGLE_SECRET` | Google OAuth Client Secret |
+| `SUPATYPE_EXTERNAL_APPLE_ENABLED` | Enable Apple OAuth |
+| `SUPATYPE_EXTERNAL_APPLE_CLIENT_ID` | Apple Services ID |
+| `SUPATYPE_EXTERNAL_APPLE_SECRET` | Apple Client Secret |
+
+The same variables exist for every provider the auth server supports: replace `GITHUB` with `GOOGLE`, `APPLE`, `AZURE`, `DISCORD`, `GITLAB` and so on, and give each its own `_REDIRECT_URI`. See [OAuth providers](/docs/auth/oauth.html).
+
+### JWT secret length
+
+PostgREST refuses to start with a JWT secret shorter than 32 characters, and everything else in the
+stack accepts one, so a short secret used to bring the stack up whole except for the REST API. The
+CLI now checks first: `supatype dev` and `supatype self-host compose up` stop before starting
+anything when `JWT_SECRET` is too short, with:
+
+```
+JWT_SECRET in .env is 20 characters, and the REST API needs at least 32.
+```
+
+Generate a longer one, for example with `openssl rand -base64 48`, put it in `.env` as `JWT_SECRET`,
+then run `supatype keys --write --force` to sign `ANON_KEY` and `SERVICE_ROLE_KEY` with it. Without
+`--force`, `--write` only fills keys that are blank and leaves keys signed with the old secret in
+place.
+
+## Allowed browser origins (CORS)
+
+Outside dev mode the server's gateway decides CORS for every service behind it. The browser origins
+it allows by default are:
+
+1. the origin of `SITE_URL`,
+2. the origins in `api.corsOrigins` in `supatype.config.ts`,
+3. the origins in `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` (comma-separated).
+
+```typescript
+// docs:no-check (a fragment: the rest of your config stays as it is)
+// supatype.config.ts
+import { defineConfig } from "@supatype/cli"
+
+export default defineConfig({
+  project: { name: "my-project" },
+  server: { mode: "standalone" },
+  api: { corsOrigins: ["https://admin.example.com", "http://localhost:5173"] },
+})
+```
+
+Each `api.corsOrigins` entry is `scheme://host[:port]` with an `http` or `https` scheme, or `*`.
+Anything else (a path, a query, another scheme) stops the config from loading with
+`api.corsOrigins must be an array of origins (scheme://host[:port]) or "*"`. The generated compose
+file passes the config's origins to the server ahead of `SUPATYPE_CORS_ALLOW_ORIGINS`, so
+re-render it (any `supatype self-host compose` command does) after changing them.
+
+Owners and admins can also change the list in Studio, on the **Settings > CORS** tab, which shows
+each origin and where it comes from. A list saved there is kept in the project's database
+(`auth.cors_origins`), survives a restart, reaches every server replica within ten seconds, and
+replaces the default until someone presses **Reset to default**. Other Studio roles that see the
+schema can read it.
+
+| | |
+|---|---|
+| Site URL | Always allowed, whatever list is saved |
+| Any other origin | Refused: a preflight gets `403`, and other responses carry no CORS headers |
+| `*` | Allows every origin, and only when you write it in one of the places above. It is never a default |
+| Dev mode | Unchanged: `supatype dev` allows every origin, whatever the list says |
+
+Before this, a standalone server with no `SUPATYPE_CORS_ALLOW_ORIGINS` allowed every origin. If a
+production web app on another origin calls your API, add its origin before upgrading.
+
+## API Gateway (Kong)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KONG_HTTP_PORT` | `8000` | Public API port |
+| `KONG_HTTPS_PORT` | `8443` | Public API HTTPS port |
+| `ANON_KEY` | None | **Required.** Public anonymous API key |
+| `SERVICE_ROLE_KEY` | None | **Required.** Service role API key (admin access) |
+
+## PostgREST
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PGRST_DB_SCHEMAS` | `public,storage,graphql_public` | Exposed schemas |
+| `PGRST_DB_ANON_ROLE` | `anon` | Anonymous role name |
+| `PGRST_DB_MAX_ROWS` | `1000` | Max rows returned per request |
+| `PGRST_JWT_SECRET` | Same as `JWT_SECRET` | JWT verification secret |
+
+## Storage
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORAGE_BACKEND` | `file` | Storage backend (`file`, `s3`) |
+| `STORAGE_FILE_PATH` | `/var/lib/storage` | Local file storage path |
+| `STORAGE_S3_BUCKET` | None | S3 bucket name (when using S3 backend) |
+| `STORAGE_S3_REGION` | None | S3 region |
+| `STORAGE_S3_ENDPOINT` | None | S3 endpoint (for S3-compatible services) |
+| `STORAGE_S3_ACCESS_KEY` | None | S3 access key |
+| `STORAGE_S3_SECRET_KEY` | None | S3 secret key |
+| `FILE_SIZE_LIMIT` | `52428800` | Max upload size in bytes (default 50 MB) |
+| `IMAGE_TRANSFORMATION_ENABLED` | `true` | Enable image transforms |
+
+## Realtime
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REALTIME_PORT` | `4000` | Realtime WebSocket port |
+| `REALTIME_MAX_CHANNELS` | `100` | Max concurrent channels per connection |
+| `REALTIME_DB_HOST` | `db` | Database host for change detection |
+
+## Studio (Admin Panel)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STUDIO_PORT` | `3100` | Admin panel port |
+| `STUDIO_PG_META_PORT` | `8080` | Postgres meta API port |
+| `SUPATYPE_PUBLIC_URL` | None | Public URL for the API |
+
+## Generating keys
+
+Use the CLI to generate secure keys:
+
+```bash
+npx @supatype/cli keys generate
+```
+
+This outputs a `JWT_SECRET`, `ANON_KEY`, and `SERVICE_ROLE_KEY` ready to paste into your `.env` file. Never reuse keys across environments.

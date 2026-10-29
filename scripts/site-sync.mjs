@@ -235,19 +235,22 @@ function llmsFullTxt(current, synced) {
 }
 
 // docs-content/ holds the docs pages and guides; www pages (Licensing, Changelog, Privacy) stay out.
-// The guides move under guides/ there, as /docs/guides/ in the docs app.
+// The guides move under guides/ there, as /docs/guides/ in the docs app. Generated pages are .md;
+// pages written by hand there (the cloud docs' own sub-pages) are .mdx, and this never touches them.
 const contentDir = `${repo}docs-content/`
 function contentFile(url) {
   if (url === "/docs/") return "index.md"
-  if (url.startsWith("/docs/")) return url.slice("/docs/".length).replace(/.html$/, ".md")
-  return sidebarEntry(url).header === "Guides" ? `guides${url.replace(/.html$/, ".md")}` : null
+  if (url.startsWith("/docs/")) return url.slice("/docs/".length).replace(/\.html$/, ".md")
+  return sidebarEntry(url).header === "Guides" ? `guides${url.replace(/\.html$/, ".md")}` : null
 }
 
-// Every file docs-content/ holds now, so a page that is gone from the sidebar is removed there too.
+// Every generated (.md) file docs-content/ holds now, so a page gone from the sidebar goes too.
 function existingContent(dir = contentDir, prefix = "") {
   if (!existsSync(dir)) return []
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
-    entry.isDirectory() ? existingContent(`${dir}${entry.name}/`, `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`])
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return existingContent(`${dir}${entry.name}/`, `${prefix}${entry.name}/`)
+    return entry.name.endsWith(".md") ? [`${prefix}${entry.name}`] : []
+  })
 }
 
 function docsContent(synced) {

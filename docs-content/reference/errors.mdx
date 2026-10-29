@@ -1,0 +1,223 @@
+---
+title: Error Codes
+description: "Reference of Supatype error codes: database, auth, storage, realtime, and client errors."
+---
+
+Each service reports errors in its own shape. The REST API (PostgREST) answers with:
+
+```json
+{
+  "code": "ERROR_CODE",
+  "message": "Human-readable error description",
+  "details": "Additional context (if available)",
+  "hint": "Suggestion for fixing the error (if available)"
+}
+```
+
+The auth server answers with `{ "code": <HTTP status>, "error_code": "...", "msg": "..." }`, and the
+storage service with `{ "error": "..." }` and an HTTP status. The client SDK turns all of them into
+one `SupatypeError` (see [Client SDK errors](#client-sdk-errors)).
+
+## Database errors (PostgreSQL)
+
+These errors originate from PostgreSQL and are returned by the REST API.
+
+| Code | Name | Description |
+|------|------|-------------|
+| `23505` | `unique_violation` | A row with the same unique key already exists |
+| `23503` | `foreign_key_violation` | Referenced row does not exist in the parent table |
+| `23502` | `not_null_violation` | A required (NOT NULL) column was not provided |
+| `23514` | `check_violation` | A CHECK constraint was violated |
+| `42501` | `insufficient_privilege` | RLS policy denied the operation |
+| `42P01` | `undefined_table` | A table named inside a function or view does not exist (a table requested directly is `PGRST205`) |
+| `42703` | `undefined_column` | The requested column does not exist |
+| `22P02` | `invalid_text_representation` | Invalid value for the column type (e.g., text in an integer column) |
+| `57014` | `query_canceled` | Query was canceled (timeout) |
+
+## PostgREST errors
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `PGRST000` | 503 | Could not connect to the database |
+| `PGRST001` | 503 | Could not connect to the database due to an internal error |
+| `PGRST002` | 503 | Could not load the schema cache, for example while an exposed schema does not exist yet |
+| `PGRST003` | 504 | Timed out waiting for a connection from the pool |
+| `PGRST100` | 400 | Invalid query string, such as bad filter syntax |
+| `PGRST102` | 400 | Invalid request body |
+| `PGRST106` | 406 | Schema not found in the exposed schemas |
+| `PGRST116` | 406 | `.single()` got no rows or more than one |
+| `PGRST200` | 400 | No relationship found for an embedded resource |
+| `PGRST204` | 400 | A column named in the request is not in the schema cache |
+| `PGRST205` | 404 | The requested table is not in the schema cache |
+| `PGRST301` | 401 | JWT could not be decoded or verified: a bad signature, a malformed token, or an empty one |
+| `PGRST302` | 401 | Anonymous request when anonymous access is disabled |
+| `PGRST303` | 401 | JWT claims were rejected, an expired token among them |
+
+## Auth errors
+
+The auth server sends a machine-readable `error_code` with each error. The common ones:
+
+| Code | Description |
+|------|-------------|
+| `invalid_credentials` | Wrong email or password |
+| `email_not_confirmed` | The user has not confirmed their email |
+| `user_already_exists` | A user with this email or phone already exists |
+| `email_exists` | The email address is already in use |
+| `weak_password` | The password does not meet the requirements |
+| `email_address_invalid` | The email address is not valid |
+| `validation_failed` | A parameter is missing or malformed |
+| `signup_disabled` | Sign-ups are turned off |
+| `provider_disabled` | The requested OAuth provider is not enabled |
+| `over_request_rate_limit` | Rate limit exceeded for this action |
+| `over_email_send_rate_limit` | Too many emails sent |
+| `refresh_token_not_found` | The refresh token is invalid |
+| `refresh_token_already_used` | The refresh token has already been used |
+| `session_not_found` | The session no longer exists |
+| `session_expired` | The session has expired |
+| `insufficient_aal` | The action needs an `aal2` (MFA-verified) session |
+| `mfa_factor_not_found` | The MFA factor does not exist |
+| `mfa_challenge_expired` | The MFA challenge has expired |
+| `mfa_verification_failed` | The MFA code is incorrect |
+
+| `otp_expired` | The email link or one-time code has expired |
+| `invalid_grant` | The OAuth token endpoint refused the grant, such as a refresh token already used |
+
+Every auth method in the client (sign-up, every sign-in, `verifyOtp`, `resend`,
+`resetPasswordForEmail`, `updateUser`, `getUser`, `refreshSession` and the MFA methods) copies the
+code into `error.code`: `error_code` from the API's `{ code, error_code, msg }` body, or `error`
+from the OAuth token endpoint's `{ error, error_description }` body. The numeric `code` in the
+first shape is only the HTTP status again, and is in `error.status`. An error that comes back in
+a redirect URL (an expired email link) is read by `getSessionFromUrl` the same way.
+
+## Storage errors
+
+The storage service has no error codes of its own: the HTTP status and the message say what went wrong.
+
+| HTTP Status | Meaning |
+|-------------|---------|
+| 400 | Malformed request (for example, a missing signed-URL token) |
+| 401 | Sign in to perform this action |
+| 403 | Not permitted by the bucket's access rules, a private bucket read through its public URL, or an invalid or expired signed URL |
+| 404 | The bucket or the object does not exist |
+| 409 | An object already exists at this path (pass `upsert: true`), or a bucket with this name already exists |
+| 413 | The file exceeds the size limit |
+| 415 | The file type is not allowed for this bucket |
+| 507 | The project's storage quota is full |
+
+## Realtime errors
+
+A channel reports trouble through the status passed to its `subscribe` callback:
+
+| Status | Description |
+|--------|-------------|
+| `CHANNEL_ERROR` | The server answered with an error, such as a refused subscription, or a broadcast or `track` sent before joining |
+| `TIMED_OUT` | The connection dropped and the client gave up reconnecting (after 10 attempts) |
+| `CLOSED` | `supatype.realtime.disconnect()` closed the socket |
+
+## Client SDK errors
+
+The client SDK returns every error as a `SupatypeError` object:
+
+```typescript
+import { createClient } from "@supatype/client"
+
+const supatype = createClient({ url: "http://localhost:18473", anonKey: "<anon-key>" })
+
+const { data, error } = await supatype.from("posts").select("*")
+
+if (error) {
+  console.error(error.code)    // "42501"
+  console.error(error.message) // "new row violates row-level security..."
+  console.error(error.status)  // HTTP status code (e.g., 403)
+  console.error(error.field)   // The column a field validator refused, when one did
+}
+```
+
+For a REST error, `code` is the PostgreSQL or PostgREST code above, exactly as PostgREST 14 sends
+it: a database error keeps its bare SQLSTATE (`23505`, never `PGRST23505`). The PostgREST
+`details` and `hint` are not carried over. When `.single()` gets no row or more than one, `code`
+is `PGRST116` and `message` is `Cannot coerce the result to a single JSON object`, whether
+PostgREST or the client noticed.
+
+The client exports the codes it knows as constants, so a comparison is checked by the compiler:
+
+```typescript
+import { PostgrestErrorCodes } from "@supatype/client"
+
+declare const error: { code?: string | undefined } | null
+
+if (error?.code === PostgrestErrorCodes.UNIQUE_VIOLATION) {
+  // "23505"
+}
+```
+
+| Constant | Code | When |
+|----------|------|------|
+| `JWT_INVALID` | `PGRST301` | The token could not be decoded or verified |
+| `JWT_EXPIRED` | `PGRST303` | The token's claims were rejected, an expired token among them |
+| `PERMISSION_DENIED` | `42501` | Row-level security or a missing grant refused the operation |
+| `NOT_FOUND`, `MULTIPLE_ROWS` | `PGRST116` | `.single()` got no row, or more than one |
+| `SCHEMA_CACHE_MISS` | `PGRST204` | The request named a column the schema cache does not have |
+| `UNDEFINED_TABLE` | `PGRST205` | The table is not in the schema cache |
+| `FK_VIOLATION` | `23503` | Foreign key violation |
+| `UNIQUE_VIOLATION` | `23505` | Unique constraint violation |
+| `NOT_NULL_VIOLATION` | `23502` | Not-null constraint violation |
+| `CHECK_VIOLATION` | `23514` | Check constraint violation |
+| `INVALID_INPUT` | `22P02` | Invalid input syntax for the column type |
+| `UNDEFINED_COLUMN` | `42703` | Undefined column |
+
+A request that got no answer at all has one of the client's own codes:
+
+| Code | Meaning |
+|------|---------|
+| `NETWORK_TIMEOUT` | No response within the client's `timeout` (30000 ms by default) |
+| `NETWORK_CONNECTION_REFUSED` | The server refused the connection |
+| `NETWORK_DNS_FAILURE` | The host name did not resolve |
+| `NETWORK_ERROR` | Any other failure before a response |
+| `RATE_LIMITED` | A read was still answered 429 after the last retry; `status` is 429 |
+
+See [Timeouts and retries](/docs/client.html#timeouts-and-retries) for which requests are retried.
+
+## Handling errors
+
+### In application code
+
+```typescript
+const { data, error } = await supatype.from("posts").insert({ title: "Test" }).select()
+
+if (error) {
+  switch (error.code) {
+    case "23505":
+      showNotification("A post with this title already exists")
+      break
+    case "42501":
+      showNotification("You do not have permission to create posts")
+      break
+    default:
+      showNotification("Something went wrong. Please try again.")
+      console.error(error)
+  }
+  return
+}
+```
+
+### In React
+
+```tsx
+import { useMutation } from "@supatype/react"
+
+export function CreatePost() {
+  const { mutate, error } = useMutation("posts", "insert")
+
+  return (
+    <>
+      <button onClick={() => void mutate({ title: "Hello" })}>Create</button>
+      {error?.code === "23505" && <p>This title is already taken.</p>}
+      {error?.code === "42501" && <p>You are not allowed to create posts.</p>}
+      {error && !["23505", "42501"].includes(error.code ?? "") && (
+        <p>An unexpected error occurred.</p>
+      )}
+    </>
+  )
+}
+```

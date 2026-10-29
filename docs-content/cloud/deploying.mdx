@@ -1,0 +1,163 @@
+---
+title: Deploying to Cloud
+description: "Deploy your Supatype project to Supatype Cloud, from local development to production."
+---
+
+## Prerequisites
+
+- A Supatype Cloud account
+- The Supatype CLI installed
+- A local Supatype project
+
+## Step 1: Log in
+
+```bash
+npx @supatype/cli login
+```
+
+This prompts for your Cloud account email and password. Once logged in, the CLI stores a refreshable session locally.
+
+## Step 2: Link your project
+
+Link your local project to a Cloud project by its slug:
+
+```bash
+# Create a new Cloud project (prints its slug)
+npx @supatype/cli projects create my-project
+
+# Link to it, or to an existing Cloud project
+npx @supatype/cli link --project <project-slug>
+```
+
+`supatype projects list` shows the slugs of the projects you can access.
+
+## Step 3: Deploy
+
+```bash
+npx supatype deploy
+```
+
+This command:
+
+1. Diffs your local schema against the Cloud database
+2. Applies the changes
+3. Builds and deploys your static site, when the project has an app configured
+4. Prints the deployment URL
+
+Edge functions are not part of `deploy`; ship them with `supatype functions deploy`.
+
+### Who can deploy
+
+Your role in the project's organisation decides. Owners, admins and developers can push the schema,
+deploy, roll back and delete static site deployments, deploy and delete functions and hooks, and set
+function secrets. Viewers can read function and deployment logs. Editor and billing members can do
+none of these, and a refused request answers "Only the organisation's owners, admins and developers
+can deploy code or set its secrets". API keys and custom domains stay with owners and admins. See
+[Studio Roles](/docs/studio-roles.html).
+
+### Deploy to a specific environment
+
+```bash
+npx supatype deploy --env staging
+npx supatype deploy --env production
+```
+
+The environment must exist first (see [Environments](/docs/cloud/environments.html)).
+
+### Deploy only part of the project
+
+```bash
+npx supatype deploy --schema-only   # push the schema, skip the app
+npx supatype deploy --app-only      # deploy the static site, skip the schema
+```
+
+## CI/CD deployment
+
+### GitHub Actions
+
+In CI, `supatype login` reads the account from `SUPATYPE_EMAIL` and `SUPATYPE_PASSWORD` instead of prompting:
+
+```yaml
+name: Deploy to Supatype Cloud
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx supatype login
+        env:
+          SUPATYPE_EMAIL: ${{ secrets.SUPATYPE_EMAIL }}
+          SUPATYPE_PASSWORD: ${{ secrets.SUPATYPE_PASSWORD }}
+      - run: npx supatype link --project ${{ vars.SUPATYPE_PROJECT }}
+      - run: npx supatype deploy --yes
+```
+
+### Preview deployments
+
+For pull requests, deploy to the project's preview environment:
+
+```yaml
+on:
+  pull_request:
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx supatype login
+        env:
+          SUPATYPE_EMAIL: ${{ secrets.SUPATYPE_EMAIL }}
+          SUPATYPE_PASSWORD: ${{ secrets.SUPATYPE_PASSWORD }}
+      - run: npx supatype link --project ${{ vars.SUPATYPE_PROJECT }}
+      - run: npx supatype deploy --env preview --yes
+```
+
+## Rollback
+
+If a deployment causes issues, roll the static site back to the previous deployment:
+
+```bash
+npx supatype deploy rollback
+```
+
+Or roll back to a specific deployment:
+
+```bash
+npx supatype deploy rollback --to <deployment-id>
+```
+
+The deployment id is returned when you deploy, or from `supatype deploy status`. Omit `--to` to roll back to the immediately previous version. Rollback restores the site, not the database schema.
+
+## Deployment status and logs
+
+```bash
+npx supatype deploy status
+npx supatype deploy logs
+```
+
+## Environment variables
+
+Set environment variables for your project's edge functions:
+
+```bash
+npx supatype functions env set MY_API_KEY=sk-123456
+```
+
+List environment variables:
+
+```bash
+npx supatype functions env list
+```

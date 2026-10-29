@@ -1,0 +1,281 @@
+---
+title: Field Access
+description: Restrict individual columns with per-field read and write rules, enforced inside Postgres by a planner rewrite where the extension is available, and by generated views everywhere else.
+---
+
+Table [access rules](/docs/schema/access-rules.html) decide who may read or write a **row**.
+Field rules narrow that to a single **column**: a table anyone may read, with one column
+only its owner sees.
+
+```typescript
+import type {
+  Model, UUID, Public, Owner, RelatedTo, Role, SupatypeAuthUser,
+} from "@supatype/types"
+
+export type Employee = Model<
+  {
+    id: UUID
+    name: string
+    salary: number
+    user: RelatedTo<SupatypeAuthUser>
+  },
+  {
+    tableName: "employees"
+    access: {
+      read: Public
+      create: Role<"admin">
+      update: Owner<"user_id">
+      fields: {
+        salary: {
+          read: Owner<"user_id">
+          write: Role<"admin">
+        }
+      }
+    }
+  }
+>
+```
+
+`fields` takes the **same rule language** as the table rules, including `Owner<>`,
+`Role<>`, `Any`/`All`/`Not`, comparisons and membership tests. Each column takes `read`,
+`write`, or both. A column you do not mention is as accessible as its table.
+
+Relations are named by their **column**, not the relation: `fields: { author_id: … }`, since
+`author` is not a column.
+
+## What a caller who cannot read the column sees
+
+`null`. Not an error, and not a missing key.
+
+This is deliberate and it is the reason field access is not built on column privileges.
+`GET /employees` with no `select` parameter sends `SELECT employees.*`, which names every
+column, so a revoked column makes PostgREST answer **403 for the whole table** rather than
+returning a row with one column withheld. Every unrestricted field would disappear along
+with the restricted one.
+
+So the column stays in the result and its value is replaced. Every reference is rewritten,
+not just the ones you select: `WHERE salary > 100000` is an oracle a dozen requests can
+binary-search, so filters, `ORDER BY`, `GROUP BY`, `HAVING`, join conditions and subqueries
+are all masked too.
+
+### Telling a masked null from a real one
+
+On the wire, a masked column is indistinguishable from a column that is genuinely empty.
+REST responses carry a header naming the restricted columns:
+
+```http
+X-Supatype-Masked-Fields: salary=row, ssn=identity
+```
+
+- `identity`: the verdict is the same for every row in the response, so a `null` in that
+  column is explicable by masking across the whole result set.
+- `row`: the rule reads the row, so only *some* nulls are masked values.
+
+The client surfaces it on the result:
+
+```typescript
+const { data, meta } = await supatype.from("employees").select()
+
+meta?.maskedFields // [{ column: "salary", scope: "row" }]
+```
+
+**Advisory only.** It describes the schema's restrictions, not a decision about you.
+Enforcement is in the database; ignoring or tampering with the header changes nothing about
+what you can read. An absent header means "not stated", never "nothing is masked".
+
+## Writes
+
+A write rule is checked per row, and there are three outcomes on `UPDATE`:
+
+| Situation | Result |
+|---|---|
+| Caller may write the column | the submitted value is accepted |
+| Caller cannot **read** the column | the stored value is preserved, silently |
+| Caller can read it but not write it | `42501`, rejected |
+
+The middle row is the case this design exists for. A client `GET`s a row, `salary` comes
+back `null` because it is masked, the user edits the name, and the client `PATCH`es the whole
+object back, including `salary: null`. Without the preserve branch the real salary is gone,
+silently, with a `200`. Collapsing those two rows into one either destroys data or breaks
+every whole-object client.
+
+### Write implies read
+
+A field's `write` rule is compiled **conjoined with its `read` rule**, so a rule that grants
+write without read cannot be expressed. Otherwise a caller could hold write permission on a
+column they cannot see, and round-trip away a value they were never shown.
+
+### INSERT is judged against the row being stored
+
+There is no stored row on `INSERT`, so a field's write rule (or its read rule, when it has no
+write rule) is judged against the row the statement stores, defaults included, as a Postgres RLS
+`WITH CHECK` judges a new row. A rule that reads the row (`Owner<"user_id">`, `OwnerFrom`, a
+membership) therefore works on create, and a value a default fills in (`owner_id DEFAULT
+auth.uid()`, a `gen_random_uuid()` key, an identity or serial key) is what the rule reads. Each
+default is evaluated once per row, so nothing is drawn from a sequence twice.
+
+For each masked field, the insert either writes it or it does not:
+
+| What the insert sends | Result |
+|---|---|
+| Nothing (the field is left out), `NULL`, or `DEFAULT` | not a write: the column takes its default (`NULL` if there is none), and the rule is not judged |
+| A value equal to the column's default | not a write either: stored, and the rule is not judged |
+| A value the caller may write | stored |
+| A value the caller may not write | the whole insert is refused with `42501`, naming the table and column |
+
+The refusal reads `column "<table>"."<col>" cannot be written by this role` under tier 1, and
+`permission denied for column <col> of relation <table>` under tier 2. `service_role` is exempt:
+no rule is judged for it.
+
+A value equal to the default counts as no write because PostgREST's `Prefer: missing=default` sends
+the default for a key a row leaves out of a bulk insert. So an admin-only `verified: Default<boolean,
+false>` is accepted from anyone when it is left out or sent as `false`, and `verified: true` from a
+non-admin is refused. A volatile default (`gen_random_uuid()`, a sequence) never equals a value
+sent, so a value sent for such a column is always judged.
+
+So a create form should not send a value the caller may not set: leave the field out, or send
+`null`, and let the default fill it.
+
+`UPDATE` is unchanged: the three outcomes in the table above still apply.
+
+Two details:
+
+- **`service_role` sending `NULL`** for a masked column that has a default gets the default under
+  tier 2, because the view's trigger cannot tell a `NULL` it was sent from a column left out. Under
+  tier 1 it stores the `NULL`. No other caller sees a difference between the tiers.
+- **A `BEFORE INSERT` trigger** of your own on the table (one that fills a slug, say) runs after the
+  rules are judged, under both tiers, so a rule does not see what such a trigger changes.
+
+Before 0.7.0 these rules were judged against an empty row, so a rule that read the row never passed
+on insert and the value was silently replaced by the default; see
+[Upgrading to 0.7.0](/docs/reference/upgrading-0-7.html).
+
+`supatype diff` refuses a schema where a field can provably never be set on insert: a column that is
+required, has no default, and either has a write rule that denies every caller (`Private`), or a
+write rule narrower than a `Public` create rule. That would otherwise surface as a not-null
+violation naming the constraint instead of the rule. A required column whose write rule reads the
+row is not refused, since the caller creating their own row can satisfy it.
+
+## Behaviour by statement
+
+| Statement | Result |
+|---|---|
+| `SELECT`, any reference | masked to `null` per row |
+| `WHERE`, `ORDER BY`, `GROUP BY`, joins, subqueries | masked, so a filter cannot be used as an oracle |
+| `sum(salary)` and other aggregates | **rejected** per unreadable row |
+| `UPDATE` | accept / preserve / reject, per the table above |
+| `INSERT` | judged against the row being stored: stored if allowed, the column default if the field is left out, `NULL`, `DEFAULT` or the default's own value, refused with `42501` otherwise |
+| `COPY employees TO` | rewritten through the planner, so masked |
+| `COPY employees FROM` | refused |
+| `MERGE` | refused |
+| whole-row reference (`to_jsonb(t)`, `SELECT t FROM t`, a computed column `f(t)`) | the row with each masked column masked, as a column-by-column select would see it |
+| whole-row reference inside an aggregate (`jsonb_agg(t)`) | **rejected** per unreadable row, like `sum(salary)` |
+
+An aggregate **errors rather than undercounting**. Masking its input to `null` would make
+`sum()` skip the rows you may not read and return a smaller number with nothing to indicate
+it, and a wrong answer is worse than an error. A caller entitled to every row still gets a
+correct total.
+
+## How they are enforced
+
+Two mechanisms, chosen for you from what the database can do. You write the same rules either
+way.
+
+**Tier 1: the `supatype_mask` extension.** A planner rewrite: references to a masked column
+are replaced before the query runs. Used wherever the extension is present: the
+`supatype/postgres` image (self-hosted Compose, Supatype Cloud, and `supatype dev` with Docker,
+the default), and a native `supatype dev` whose Postgres build carries the library.
+
+**Tier 2: generated views.** The same masking expression, carried in a view definition in an
+`api` schema. Used on a database that cannot load an extension (most managed Postgres, since
+`supatype_mask` needs `shared_preload_libraries` and a restart). Under tier 2, PostgREST is
+pointed at `api` rather than your managed schema, and the API roles hold their privileges on
+the views rather than on the tables behind them. That second part matters: a client chooses
+its schema per request, so exposing both would make the mask optional.
+
+There is **no partial mode** in either. A push never applies a schema whose restrictions do
+not exist.
+
+### One privilege both tiers need
+
+The rules compile to predicate functions that read the caller's JWT through the engine's claim
+readers in the `_supatype` schema, and unlike a row-level policy they are called **from the
+query**, which runs as the caller. So `anon` and `authenticated` need `USAGE` on `_supatype`.
+
+Every push grants it, so on a database Supatype set up you will never meet this. If `_supatype`
+belongs to a role the push cannot grant as, the grant is silently a no-op, so a push declaring
+`access.fields` checks for it and **refuses**, naming the schema's owner, because applying it
+would leave every masked read failing with `42501 permission denied for schema` rather than
+returning a masked value. `supatype db check` reports the same finding before you push, and the
+fix is one statement run by the owner of the schema:
+
+```sql
+GRANT USAGE ON SCHEMA _supatype TO anon, authenticated, service_role;
+```
+
+Who owns `auth` does not matter here: no generated predicate calls into it.
+
+### The one difference
+
+An aggregate over a column you may not read behaves differently:
+
+| | `SELECT sum(salary)` as a caller who cannot read it |
+| --- | --- |
+| Tier 1 | Errors: `column "employees"."salary" is masked for this role and cannot be aggregated` |
+| Tier 2 | Returns the sum of the rows the caller *can* read |
+
+A view expression cannot tell a projection from an aggregate, and a masked column must come
+back as `NULL` rather than an error so that `SELECT *` keeps working. The tier-2 answer is a
+smaller number than the true total, which is the outcome tier 1 exists to prevent.
+
+It is unreachable through the API: PostgREST ships with aggregates disabled and Supatype never
+enables them, so only direct SQL against the `api` views can see it. `supatype db check` tells
+you which tier a database will use.
+
+## What Studio shows
+
+Studio reads the same per-column verdicts from `/studio/session` and renders three states: a
+lock where a value was withheld, a disabled input where a column is readable but not
+writable, and no field at all on a create form where no caller could supply one.
+
+It **never hides a value that came back**. An administrator acts elevated, and whichever tier is in
+use lets a rule that admits them through, so restricted columns reach them in full: the cell marks
+them as access-controlled rather than blanking them. All of it fails open: if the verdicts cannot be
+read, the interface behaves as it did before and the database still refuses what it should.
+
+## Realtime
+
+WAL records are not query results, so nothing in the planner filters them. The realtime
+service evaluates the same generated `can_read_*` predicates against the change record, in
+the subscriber's own transaction, and masks the payload before delivery.
+
+A consequence worth knowing: a filter on a masked column matches nothing for a subscriber who
+cannot read it, because the value it would compare against is `null`.
+
+## Limits
+
+- **Exempt roles see everything.** `service_role` and superusers, by design: that is what
+  makes seeds, migrations and server-side code work. The table **owner is not exempt**:
+  ownership has nothing to do with whether a caller should read a column.
+- **A masked column cannot use its index.** The comparison is against an expression, not the
+  stored value, so a filter on a masked column is a sequential scan by construction. Do not
+  restrict a column you filter large tables on.
+- **Error messages can still infer.** A unique constraint or a non-leakproof operator applied
+  to the *predicate's* inputs may disclose something through a failure. References to the
+  masked column itself are safe: the substitution happens before any operator sees a value.
+- **Postgres 17 or later.** The rewrite touches planner internals that are not stable across
+  major versions.
+- **Masking is not a substitute for not storing the data.** It controls who can read a column
+  through the API. Anything with database-level access (a backup, a superuser, logical
+  replication configured outside Supatype) is outside its reach.
+
+## When to use a separate table instead
+
+A column restricted only for *some* callers still costs a predicate call per row per read,
+loses its index, and cannot be aggregated by those callers. If a column is restricted from
+nearly everyone and queried often, a separate table with its own access rules is faster and
+simpler, and it is the only option on a Postgres that cannot load the extension.
+
+Field rules are the better answer when the column belongs with its row: one `employees` row
+with a `salary` its owner and admins can see beats an `employee_salaries` table joined on
+every request.

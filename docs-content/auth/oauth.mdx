@@ -1,0 +1,167 @@
+---
+title: OAuth Providers
+description: Set up OAuth sign-in with GitHub, Google, Apple, and other providers.
+---
+
+Supatype supports sign-in with third-party OAuth providers. Users are redirected to the provider, authenticate there, and are redirected back to your app with a session.
+
+## Supported providers
+
+| Provider | Key | Notes |
+|----------|-----|-------|
+| GitHub | `github` | Scopes: `read:user`, `user:email` |
+| Google | `google` | Scopes: `openid`, `email`, `profile` |
+| Apple | `apple` | Requires Apple Developer account |
+| Discord | `discord` | Scopes: `identify`, `email` |
+| Twitter | `twitter` | Uses OAuth 2.0 |
+| GitLab | `gitlab` | Self-hosted GitLab supported |
+| Bitbucket | `bitbucket` | |
+| Azure AD | `azure` | Microsoft work/school accounts |
+| Slack | `slack` | |
+
+## Setup
+
+### 1. Create an OAuth app with the provider
+
+Each provider requires you to register an OAuth application and obtain a **Client ID** and **Client Secret**.
+
+**Callback URL.** Register your project's API URL followed by `/auth/v1/callback` in the provider's OAuth app settings, and use the same URL as the redirect URI below:
+
+```
+<API URL>/auth/v1/callback
+```
+
+- **Local development (Docker):** `http://localhost:<gateway port>/auth/v1/callback`. The gateway port is `SUPATYPE_KONG_PORT` in `.env` (18473 unless `init` picked another).
+- **Self-host:** your public API URL, the `API_EXTERNAL_URL` in the stack's `.env`, for example `https://api.example.com/auth/v1/callback`.
+- **Supatype Cloud:** your project's API URL, shown in Studio, followed by `/auth/v1/callback`.
+
+### 2. Configure the provider
+
+**Supatype Cloud:** add the Client ID and Secret for GitHub, Google or Apple in Studio's auth settings.
+
+**Local development and self-host:** declare the provider in `supatype.config.ts`. `supatype dev` and `supatype self-host compose` turn it into the `SUPATYPE_EXTERNAL_<PROVIDER>_*` variables the auth server reads:
+
+```typescript
+// docs:no-check (a fragment: the rest of your config stays as it is)
+import { defineConfig, env } from "@supatype/cli"
+
+export default defineConfig({
+  auth: {
+    providers: {
+      github: { clientId: "Iv1.0123456789abcdef", secret: env("GITHUB_SECRET") },
+      google: { clientId: env("GOOGLE_CLIENT_ID"), secret: env("GOOGLE_SECRET") },
+    },
+  },
+})
+```
+
+```bash
+# .env
+GITHUB_SECRET=...
+GOOGLE_CLIENT_ID=...
+GOOGLE_SECRET=...
+```
+
+- **Secrets are `env("NAME")` only.** A literal `secret` is rejected: the config is committed, and the generated compose file names the variable rather than holding the value.
+- **The redirect URI defaults** to your public API URL followed by `/auth/v1/callback`. Set `redirectUri` only when the public URL differs, and register the same URL with the provider.
+- **Other fields:** `enabled` (default `true`), `url` for self-hosted providers (GitHub Enterprise, GitLab, Keycloak, WorkOS), `skipNonceCheck`, `emailOptional`.
+- **Provider names** are the ones `signInWithOAuth({ provider })` takes: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin`, `linkedin_oidc`, `notion`, `slack`, `slack_oidc`, `snapchat`, `spotify`, `twitch`, `twitter`, `vercel_marketplace`, `workos`, `x`, `zoom`.
+- `supatype dev` warns when an enabled provider's secret is set nowhere.
+
+**`.env` wins over the config.** A `SUPATYPE_EXTERNAL_<PROVIDER>_*` value in `.env` overrides what the config would write, so a project configured through `.env` alone keeps working. A provider configured only in `.env` gets no default redirect URI: set its own `SUPATYPE_EXTERNAL_<PROVIDER>_REDIRECT_URI`, or the provider sends users back to a path that answers 404:
+
+```bash
+SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
+SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
+SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
+SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18473/auth/v1/callback
+```
+
+### 3. Trigger the OAuth flow
+
+```typescript
+const { data, error } = await supatype.auth.signInWithOAuth({
+  provider: "github",
+  options: {
+    redirectTo: "https://myapp.com/auth/callback",
+    scopes: "read:user user:email",
+  },
+})
+
+// Redirect the user to the provider
+window.location.href = data.url
+```
+
+### 4. Handle the callback
+
+The provider sends the user back to your `redirectTo` URL with the session in it. The client does
+not read the URL on its own, so call `getSessionFromUrl` on your callback page:
+
+```typescript
+// On /auth/callback
+// Reads the tokens from the URL hash (or exchanges ?code= when you used flowType: "pkce")
+const { data: { session }, error } = await supatype.auth.getSessionFromUrl(window.location.href)
+
+if (session) {
+  // User is signed in
+  router.push("/dashboard")
+}
+```
+
+## Provider-specific setup
+
+### GitHub
+
+1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+2. Create a new OAuth App
+3. Set the callback URL to your Supatype callback URL
+4. Copy the Client ID and Client Secret
+
+### Google
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. Create an OAuth 2.0 Client ID
+3. Add your callback URL to Authorized redirect URIs
+4. Copy the Client ID and Client Secret
+
+### Apple
+
+1. Go to [Apple Developer Portal](https://developer.apple.com/)
+2. Register a Services ID
+3. Configure Sign in with Apple with your callback URL
+4. Generate a client secret key
+
+## Custom OAuth and OIDC providers
+
+A provider not in the list above (an internal identity provider, a GitHub Enterprise or Keycloak
+you would rather not configure through the built-in key) can be registered as a **custom provider**
+at runtime, without a restart. The auth server must have `SUPATYPE_CUSTOM_OAUTH_ENABLED=true`
+(`SUPATYPE_CUSTOM_OAUTH_MAX_PROVIDERS` caps how many; `0` is no cap). Providers are managed with the
+service role key through the admin API:
+
+| Request | Does |
+|---|---|
+| `GET /auth/v1/admin/custom-providers` | lists them (`?type=oauth2` or `?type=oidc` to filter) |
+| `POST /auth/v1/admin/custom-providers` | registers one |
+| `GET`, `PUT`, `DELETE /auth/v1/admin/custom-providers/custom:<name>` | reads, changes or removes one |
+
+A provider's `identifier` must start with `custom:` (`custom:acme`), and `provider_type` is
+`oauth2` (give `authorization_url`, `token_url` and `userinfo_url`) or `oidc` (give `issuer`, and
+optionally `discovery_url`). Both take `name`, `client_id`, `client_secret` and `scopes`. Sign in
+with it by its identifier: `signInWithOAuth({ provider: "custom:acme" })`.
+
+**Callback URL.** A custom provider sends the browser back to the same path as the built-in ones,
+so register this with the identity provider:
+
+```
+<API URL>/auth/v1/callback
+```
+
+The auth server builds it from its external URL (`API_EXTERNAL_URL` on self-host), adding
+`/auth/v1` unless the URL already ends with it. Before 0.7.0 a custom provider was given
+`<API URL>/callback`, which is not an auth route, so sign-in ended in a 404: if you registered that
+URL with an identity provider, change it to the one above.
+
+## Linking accounts
+
+If a user signs in with OAuth and an account with the same email already exists (from email/password sign-up), the auth server links the new identity to that account automatically, provided the provider reports the email as verified (or the server auto-confirms emails, which is the default). Linking happens on every such sign-in, and `supatype.config.ts` has no key to turn it off. The user's `identities` list then holds one entry per provider.

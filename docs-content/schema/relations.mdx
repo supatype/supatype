@@ -1,0 +1,148 @@
+---
+title: Relations
+description: "Define typed relationships between models: RelatedTo, HasMany, HasOne and ManyToMany."
+---
+
+A relation is a field whose type names another model. Which side holds the foreign key is decided
+by which relation type you use, not by a separate declaration.
+
+| Type | Cardinality | Column created |
+|---|---|---|
+| `RelatedTo<T>` | many-to-one | `<field>_id` on this table, with a foreign key |
+| `HasMany<T>` | one-to-many | none, it is the inverse of a `RelatedTo` on the other model |
+| `HasOne<T>` | one-to-one | none, it is the inverse of a `RelatedTo` on the other model |
+| `ManyToMany<T>` | many-to-many | none, a junction table is created instead |
+
+## RelatedTo
+
+The side that holds the key. The column is named from the **field**, not the target model, so two
+relations to the same model get separate columns:
+
+```typescript
+import type { Model, RelatedTo, UUID } from "@supatype/types"
+
+export type Profile = Model<{ id: UUID; display_name: string }>
+
+export type Post = Model<{
+  id: UUID
+  title: string
+  author: RelatedTo<Profile>     // author_id
+  reviewer: RelatedTo<Profile>   // reviewer_id
+}>
+```
+
+### Options
+
+```typescript
+import type { Model, RelatedTo, UUID } from "@supatype/types"
+
+export type Profile = Model<{ id: UUID; display_name: string }>
+
+export type Post = Model<{
+  id: UUID
+  author: RelatedTo<Profile, { required: true; onDelete: "cascade" }>
+}>
+```
+
+| Option | Effect |
+|---|---|
+| `required: true` | `NOT NULL` on the foreign key column |
+| `onDelete` | `"cascade"`, `"setNull"`, `"restrict"`, `"noAction"`; `"restrict"` when omitted |
+| `onUpdate` | `"cascade"`, `"setNull"`, `"restrict"`, `"noAction"`; `"cascade"` when omitted |
+| `through` | `ManyToMany` only: names the junction table instead of deriving it |
+
+`onDelete` and `onUpdate` become the foreign key's `ON DELETE` and `ON UPDATE`: what happens to
+this row when the row it points at is deleted, or its key changes. Before 0.7.0 `onUpdate` was
+accepted by the type and ignored, and every key was `ON UPDATE CASCADE`. Leaving it out still gives
+`CASCADE`, so a project that never set it sees no change. A relation that does set it gets a plan
+on its next push that replaces the key with one carrying the declared action; on a table with
+rows the new key is added without blocking writes.
+
+## HasMany
+
+The inverse of a `RelatedTo` elsewhere. It adds no column: it describes a relationship the other
+model's foreign key already establishes, so the API and Studio know it is there.
+
+```typescript
+import type { HasMany, Model, RelatedTo, UUID } from "@supatype/types"
+
+export type Comment = Model<{ id: UUID; body: string; post: RelatedTo<Post> }>
+
+export type Post = Model<{
+  id: UUID
+  title: string
+  comments: HasMany<Comment>   // resolved through comments.post_id
+}>
+```
+
+## HasOne
+
+The one-to-one inverse. The other model holds the foreign key; this side names the relationship:
+
+```typescript
+import type { HasOne, Model, RelatedTo, UUID } from "@supatype/types"
+
+export type Settings = Model<{ id: UUID; theme: string; post: RelatedTo<Post> }>
+export type Post = Model<{ id: UUID; title: string; settings: HasOne<Settings> }>
+```
+
+Two models naming each other like this (and equally, a `RelatedTo` in both directions) failed to
+compile up to and including `@supatype/types` 0.1.6, with
+`TS2589: Type instantiation is excessively deep and possibly infinite`. Reading a model's fields
+meant expanding the model each relation pointed at, and a one-to-one pair points back. Since 0.1.7
+a one-to-one relation holds its target behind a property TypeScript does not expand, so the pair
+compiles. Collections were never affected, because an array is decidable without expanding its
+element.
+
+If you are pinned to 0.1.6 or earlier, declare only the owning side: `Settings.post: RelatedTo<Post>`
+still gives you the `post_id` column, the foreign key, and the embed in both directions, since
+PostgREST resolves embeds from the foreign key rather than from the inverse declaration.
+
+## ManyToMany
+
+Generates a junction table holding both foreign keys:
+
+```typescript
+import type { ManyToMany, Model, UUID } from "@supatype/types"
+
+export type Tag = Model<{ id: UUID; name: string }>
+
+export type Post = Model<{
+  id: UUID
+  title: string
+  tags: ManyToMany<Tag>
+}>
+```
+
+Declare it on one side only. The junction table's name is derived from the two models (or taken
+from `through`), and `supatype diff` prints it before anything reaches the database. It is worth a
+look, because that table is one you may want to query or grant on directly. Its two key columns
+are `<model>_id` for each side, together the primary key, and each foreign key is
+`ON DELETE CASCADE`, so deleting either row removes the link.
+
+Junction tables take no `access` of their own: their policies are the intersection of the two
+models they join, and a rule that reads row data (such as `Owner`) cannot be carried over, so that
+operation is denied. See [Access Rules](/docs/schema/access-rules.html#many-to-many-junction-tables).
+
+## Querying relations
+
+Embed a relation with PostgREST's nested select syntax, naming the foreign key column and aliasing
+the result:
+
+```typescript
+import { createClient } from "@supatype/client"
+
+const supatype = createClient({
+  url: process.env.PUBLIC_SUPATYPE_URL!,
+  anonKey: process.env.ANON_KEY!,
+})
+
+const { data } = await supatype
+  .from("posts")
+  .select<{ title: string; author: { display_name: string } }>("title, author:author_id(display_name)")
+```
+
+The result shape is a **type argument you supply**, not something inferred from the column string.
+A select of plain columns is typed from the generated table type, but `"title, author:author_id(…)"`
+is a string at the type level: nothing parses it, so an embedded relation's shape is yours to
+state. Getting it wrong is not caught by the compiler; it is caught by the response not matching.

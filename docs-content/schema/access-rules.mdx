@@ -1,0 +1,315 @@
+---
+title: Access Rules
+description: Control who can read and write data using schema-defined access rules compiled to PostgreSQL RLS.
+---
+
+Access rules define who can perform operations on your data. They are declared as
+**types** on a model and compiled to PostgreSQL Row-Level Security (RLS) policies.
+
+## Default is deny
+
+A model with **no `access` block** gets RLS enabled with no policies at all:
+`anon` and `authenticated` are denied every operation. `service_role` bypasses
+RLS, so server-side code, seeds and admin tooling keep working.
+
+Nothing is reachable from a client until you declare it. `supatype diff` lists
+any model it had to deny this way.
+
+## Built-in rules
+
+| Rule | Who can access |
+|------|---------------|
+| `Public` | Anyone, including anonymous users |
+| `Private` | Nobody through the API (`service_role` only) |
+| `LoggedIn` | Any signed-in user |
+| `Owner<"field">` | The user whose id is in that field's column |
+| `OwnerFrom<"relation">` | The same rule, named by the relation instead of its column |
+| `Role<"name">` | Users whose application role is `name` (see [below](#role-and-the-jwt)) |
+
+Ownership is only expressible where the model actually holds a user id, so the field
+`Owner<…>` accepts is not any column. It must be one of:
+
+- `"id"`, for a model whose rows are the users themselves (an `id: SupatypeAuthUserId`);
+- a field declared `UUID` or `SupatypeAuthUserId`, such as `author_id: SupatypeAuthUserId`;
+- a relation that holds its key on this model, named by its column (`Owner<"author_id">`
+  for `author: RelatedTo<…>`) or by the relation (`OwnerFrom<"author">`).
+
+Anything else (a `string` column, a `HasMany`, a field that does not exist) is a type error
+in your editor when the rule stands on its own, and is refused when the schema is read
+wherever it appears, with the list of fields that would qualify. A plain `UUID` owner is accepted with a warning, since nothing says it holds
+a user id; `SupatypeAuthUserId` says so.
+
+A relation owner must lead to a user. `author: RelatedTo<SupatypeAuthUser>` compares the
+caller with `author_id` directly. A relation to one of your own models works when that
+model is itself owned by an `Owner` rule (or is keyed by a `SupatypeAuthUserId`): the
+policy follows the relation one step and checks the caller against that model's owner.
+Ownership is followed through **one relation only**; a chain of two is refused.
+
+Declare rules per operation: `read`, `create`, `update`, `delete`. An operation
+you leave out is denied. To restrict an individual column rather than a row, see
+[Field Access](/docs/schema/field-access.html).
+
+```typescript
+import type {
+  Model, UUID, Public, LoggedIn, OwnerFrom, RelatedTo, Role, SupatypeAuthUser,
+} from "@supatype/types"
+
+export type Post = Model<
+  {
+    id: UUID
+    title: string
+    author: RelatedTo<SupatypeAuthUser>
+  },
+  {
+    tableName: "posts"
+    access: {
+      read: Public
+      create: LoggedIn
+      update: OwnerFrom<"author">
+      delete: Role<"admin">
+    }
+  }
+>
+```
+
+## Sharing rules between models
+
+`access` is read from the type system, so it can be a type alias, which is the usual way
+to apply one policy set across many models:
+
+```typescript
+// file: shared.ts
+import type { Public, Role } from "@supatype/types"
+
+export type PublicReadAdminWrite = {
+  read: Public
+  create: Role<"admin">
+  update: Role<"admin">
+  delete: Role<"admin">
+}
+
+// file: schema.ts
+import type { Model, UUID } from "@supatype/types"
+import type { PublicReadAdminWrite } from "./shared.js"
+
+export type Article = Model<{ id: UUID; title: string }, {
+  tableName: "articles"
+  access: PublicReadAdminWrite
+}>
+```
+
+Intersections work too: `access: PublicRead & AdminWrite`.
+
+## Combining rules
+
+The built-ins are single shapes, and the commonest real requirement ("an admin, or
+the owner") is not one of them. Three combinators compose any rules, including
+nested ones:
+
+| Combinator | Meaning |
+|---|---|
+| `Any<[A, B]>` | either rule matches (`OR`) |
+| `All<[A, B]>` | both rules match (`AND`) |
+| `Not<A>` | the rule does not match |
+
+```typescript
+access: {
+  read: Any<[Role<"admin">, Owner<"author_id">]>
+  delete: All<[Role<"editor">, Not<Role<"suspended">>]>
+}
+```
+
+An empty `Any<[]>` is rejected when the schema is read, rather than compiled to a
+policy that grants nothing, and so is an empty `All<[]>`, which would grant everything.
+
+## Writing predicates
+
+Beyond the named rules, a rule can be a comparison. This is the same language field
+rules use, so anything here works in [Field Access](/docs/schema/field-access.html) too.
+
+### Operands
+
+A **bare string is a column** on the model the rule is attached to. Everything else
+is explicit:
+
+| Operand | Compiles to |
+|---|---|
+| `"published_at"` | the column of that name |
+| `AuthUid` | `_supatype.jwt_uid()`: the signed-in user's id |
+| `AuthRole` | `_supatype.jwt_role()`: the caller's application role |
+| `Claim<"app_metadata.tier">` | `_supatype.jwt_claim_text('app_metadata.tier')`: a JWT claim, by dotted path |
+| `Literal<"published">` | a constant |
+
+The `_supatype` functions are the engine's own readers of the request's JWT. Generated
+rules call them rather than `auth.uid()` and `auth.role()`, because the auth server's
+migrations replace those; `auth.uid()` and friends still exist, as aliases of the same
+readers, for policies you write by hand. The caller's id and role are wrapped in a scalar
+subquery so Postgres evaluates them once per query, not once per row.
+
+Literals are explicit precisely because bare strings are columns:
+`Eq<"status", Literal<"published">>` cannot be misread as a comparison between two
+columns. A missing claim is SQL `NULL`, so comparing against a claim that is absent
+denies rather than erroring.
+
+A claim is read as text, as Postgres prints it (`jsonb ->>`): a numeric claim of `10` is `"10"`,
+every digit in plain decimal. Studio, which works out the same verdicts to decide what to show,
+reads it the same way. Before 0.7.0 Studio trimmed trailing zeros from a whole number, so a claim of
+`10` matched a literal `1` there, and Studio could show as allowed what the policy refused.
+
+### Comparisons
+
+`Eq`, `Neq`, `Gt`, `Gte`, `Lt`, `Lte`, `Like`: each takes a left and a right
+operand. `IsNull<…>` and `NotNull<…>` take one.
+
+```typescript
+access: {
+  read: All<[
+    Eq<"status", Literal<"published">>,
+    IsNull<"deleted_at">,
+  ]>
+}
+```
+
+Null tests are separate from `Eq` because SQL null comparison is not equality:
+`col = NULL` is null, never true, so writing it that way would silently deny
+everything.
+
+### Time
+
+| Operand | Compiles to |
+|---|---|
+| `Now` | `now()`: transaction start |
+| `StartOf<"week">` | `date_trunc('week', now())` |
+| `Ago<30, "days">` | `now() - INTERVAL '30 days'` |
+| `FromNow<7, "days">` | `now() + INTERVAL '7 days'` |
+| `After<StartOf<"day">, { days: 30, hours: 9 }>` | `date_trunc('day', now()) + INTERVAL '30 days 9 hours'` |
+| `Before<Now, { weeks: 2 }>` | `now() - INTERVAL '2 weeks'` |
+
+Units are `seconds`, `minutes`, `hours`, `days`, `weeks`, `months`, `years`;
+`StartOf` takes `day`, `week`, `month` or `year`. `After` and `Before` measure from
+`Now` or a `StartOf`, and take any mix of units.
+
+Scheduled publishing needs no cron and no worker: the policy re-evaluates on every
+query, so the row starts matching the moment its timestamp passes:
+
+```typescript
+access: { read: Any<[Lte<"published_at", Now>, Role<"editor">]> }
+```
+
+There is deliberately no literal-timestamp operand. "Publish at 09:00 next Tuesday"
+is *data*: the row carries `published_at`, and the rule above is the same for every
+row.
+
+### Membership
+
+`Rows<>` names rows of another table, narrowed by a rule evaluated against **that**
+table. `In<>` tests this row's column against them:
+
+```typescript
+type MySites = Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>
+
+access: { read: In<"site_id", MySites> }
+```
+
+`In<>` compiles to a semi-join (`EXISTS`), not `IN (SELECT …)`, so the planner stops
+at the first match per row instead of materialising the set. Because the join column
+is named in `Rows<>`, the engine emits the index for it: the classic RLS performance
+trap is a membership subquery scanning an unindexed join table once per row tested.
+
+Sources are `Rows<>`, a `Claim<>` holding an array, or a fixed `Values<>` set:
+
+```typescript
+access: { read: In<"status", Values<["draft", "review"]>> }
+```
+
+`Exists<>` asks whether the source set is non-empty, independent of any column.
+That is a different question from `In<>`, and the one that makes a guarded rule mean
+what it says:
+
+```typescript
+// An editor *who has sites* may see their sites, or unassigned rows.
+// Without Exists<>, an editor with no sites still matches the unassigned branch.
+All<[
+  Role<"editor">,
+  Exists<MySites>,
+  Any<[In<"site_id", MySites>, IsNull<"site_id">]>,
+]>
+```
+
+A note on type-checking: the named rules stay bound to your model's fields, so
+`Owner<"athor_id">` is still a typo your editor catches. Column names *inside* a
+composition are checked by Postgres when the policy is created, not by the editor:
+TypeScript cannot thread field names through arbitrarily nested rules without hitting
+instantiation-depth limits.
+
+## Splitting `update`
+
+`update` accepts either a plain rule or the two halves Postgres actually has:
+
+```typescript
+access: {
+  update: {
+    using: Owner<"author_id">                       // which rows may be modified
+    check: Eq<"author_id", AuthUid>                 // what they may become
+  }
+}
+```
+
+`using` picks the existing rows, `check` constrains the result, which is what stops
+an owner reassigning a row to somebody else. A plain rule is used for both.
+
+Rules are **types, not values**. `export const rules = { read: Public } as const`
+cannot work, because `Public` is a type and not something you can put in an
+object. An `access` block that cannot be resolved, or a rule name that is not
+recognised, fails the push: it never silently falls back to "no rules".
+
+## Generated RLS
+
+The `Post` model above compiles to (whitespace condensed):
+
+```sql
+ALTER TABLE "public"."posts" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "posts_select" ON "public"."posts" FOR SELECT USING (TRUE);
+CREATE POLICY "posts_insert" ON "public"."posts" FOR INSERT
+  WITH CHECK ((SELECT _supatype.jwt_uid()) IS NOT NULL);
+CREATE POLICY "posts_update" ON "public"."posts" FOR UPDATE
+  USING ((SELECT _supatype.jwt_uid()) = "author_id")
+  WITH CHECK ((SELECT _supatype.jwt_uid()) = "author_id");
+CREATE POLICY "posts_delete" ON "public"."posts" FOR DELETE
+  USING ((SELECT _supatype.jwt_role()) = 'admin');
+```
+
+Policies are named `{table}_{select|insert|update|delete}`, and pushes are
+idempotent: an unchanged rule leaves its policy untouched.
+
+## Many-to-many junction tables
+
+Junction tables are generated for you, so they take no `access` of their own.
+Their policies are derived from **both** parent models:
+
+- readable when both endpoints are readable
+- writable when both endpoints are writable
+
+The stricter rule wins, and role sets intersect to the roles both parents accept.
+A `Game` with `read: Public` linked to a `Car` with `read: Role<"admin">` gives a
+junction readable only by `admin`.
+
+Only `Public`, `Private`, `LoggedIn` and `Role<>` can be intersected this way. A rule
+that may depend on row data (`Owner`, `OwnerFrom`, a comparison, a membership test, or
+any `Any`/`All`/`Not` composition) cannot be evaluated against a junction row, because
+the junction has none of the parent's columns. That operation is denied, and
+`supatype diff` warns and names the junction.
+
+## `Role<>` and the JWT
+
+`Role<"admin">` compiles to `(SELECT _supatype.jwt_role()) = 'admin'`. That reader
+takes the role from the JWT's `app_metadata.role` claim first, and falls back to the
+top-level `role` claim, then to `anon`.
+
+The top-level claim is the one PostgREST uses to pick the Postgres role it runs the
+request as, so it can only ever be `anon`, `authenticated` or `service_role`.
+Application roles such as `admin` or `editor` belong in `app_metadata`, which only the
+Auth admin API can write (never `user_metadata`, which users can edit themselves). A
+role set there needs no matching Postgres role: the request still runs as
+`authenticated`, and the policy reads the application role from the claim.

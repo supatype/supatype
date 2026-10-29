@@ -1,0 +1,80 @@
+---
+title: Environments
+description: Manage production, staging, and preview environments for your Supatype Cloud project.
+---
+
+Supatype Cloud supports multiple environments per project, and there are exactly three: `production`, `staging` and `preview`. Each environment is a **full compose-shaped stack** (own Postgres, PostgREST, storage, realtime, and `supatype-server` with in-process auth), the same shape as self-host compose. Edge functions run in production only; staging and preview stacks have no functions worker.
+
+Staging and preview use a free-tier Postgres profile and are **paused after 24 hours without activity**. Continuous human traffic keeps them running (same cost idea as a second project).
+
+## Environment types
+
+### Production
+
+Your live environment. Serves real user traffic, at `https://<project ref>.supatype.com`.
+
+### Staging
+
+A separate stack for testing before production.
+
+- Own database and API host (`https://<project ref>-staging.supatype.com`)
+- Sleeps when idle; bots do not count as activity
+- Ideal for QA and integration testing
+
+### Preview
+
+A short-lived stack for pull requests or feature branches.
+
+- Expires 7 days after it is created; a project has one preview environment at a time
+- Fresh database; its own URL (`https://<project ref>-preview.supatype.com`)
+
+## Creating environments
+
+Every paid plan offers all three environments, so staging and preview are available on Pro and every
+plan above it. The Free plan has production only. Asking for one more environment than the plan
+allows is refused with `403 environment_limit_reached`. Only the organisation's owners and admins
+create environments.
+
+Create one from the Cloud dashboard (Project settings → Environments), from the CLI in a linked project:
+
+```bash
+npx supatype envs create staging
+```
+
+or with the control-plane API:
+
+```http
+POST /api/v1/projects/{slug}/environments
+{ "name": "staging" }
+```
+
+The name must be `staging` or `preview`.
+
+## Resetting an environment's database password
+
+Each environment has its own database and its own owning role, so a password reset applies to one
+environment and leaves the others alone. Owners and admins can reset it from the CLI in a linked
+project:
+
+```bash
+npx supatype db reset-password --env staging
+```
+
+`--env` defaults to `production`. The CLI prints the new password. The reset stores the new password
+everywhere the platform holds it (Studio, `supatype push`, the environment's services, which restart
+with it), and ends every database session that logged in with the old one. The REST API keeps serving
+throughout: it connects with its own credential, which the reset does not change.
+
+The same reset is available to the control-plane API:
+
+```http
+POST /api/v1/projects/{slug}/environments/{name}/reset-db-password
+```
+
+It answers `404` for an environment that does not exist.
+
+## Isolation
+
+Auth users, schemas, and secrets are **not** shared with production. Deleting staging removes its namespace; production is untouched.
+
+Legacy shared-schema staging (`{ref}_stg*` on the production Postgres) is deprecated: tear down leftovers after migrating to full stacks.

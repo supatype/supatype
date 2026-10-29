@@ -1,0 +1,147 @@
+---
+title: File Uploads
+description: Upload files to Supatype Storage from the browser or a server.
+---
+
+## Browser upload
+
+Upload a file from an HTML file input:
+
+```typescript
+const fileInput = document.getElementById("file-input") as HTMLInputElement
+const file = fileInput.files?.[0]
+
+if (file) {
+  const { data, error } = await supatype.storage
+    .from("avatars")
+    .upload(`user-${userId}/${file.name}`, file, {
+      contentType: file.type,
+      upsert: false,
+    })
+
+  if (error) {
+    console.error("Upload failed:", error.message)
+  } else {
+    console.log("Uploaded to:", data?.path)
+  }
+}
+```
+
+## Upload with React
+
+```tsx
+function AvatarUpload({ userId }: { userId: string }) {
+  const [uploading, setUploading] = useState(false)
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    const { data, error } = await supatype.storage
+      .from("avatars")
+      .upload(`${userId}/avatar.${file.name.split(".").pop()}`, file, {
+        upsert: true,
+      })
+    setUploading(false)
+
+    if (error) {
+      alert("Upload failed: " + error.message)
+    }
+  }
+
+  return (
+    <label>
+      {uploading ? "Uploading..." : "Choose avatar"}
+      <input
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={handleUpload}
+        disabled={uploading}
+        hidden
+      />
+    </label>
+  )
+}
+```
+
+## Upload from Node.js / server
+
+`upload` takes a `Blob`, `File` or `ArrayBuffer`, so wrap a Node `Buffer` in a `Blob`:
+
+```typescript
+import { readFile } from "fs/promises"
+
+const fileBuffer = await readFile("./report.pdf")
+const { data, error } = await supatype.storage
+  .from("documents")
+  .upload("reports/q1-2025.pdf", new Blob([fileBuffer]), {
+    contentType: "application/pdf",
+  })
+```
+
+## Upload options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `contentType` | `string` | The file's own type, else inferred from the path's extension | MIME type of the file |
+| `upsert` | `boolean` | `false` | Overwrite if the file already exists. Without it, uploading to a path that is taken fails with `409` |
+
+## Large files
+
+Each upload is a single request: the storage service reads the whole body and stores it in one
+piece. There are no multipart or resumable uploads, so a dropped connection means uploading the file
+again. The size ceiling is the bucket's `fileSizeLimit` (or `maxSize` in the schema) when it sets
+one, and otherwise the service-wide maximum, 50 MB by default; a larger file is refused with `413`.
+
+## Organizing files
+
+Use folder paths to organize files within a bucket:
+
+```
+avatars/
+  user-abc/avatar.png
+  user-def/avatar.png
+documents/
+  user-abc/
+    reports/q1.pdf
+    reports/q2.pdf
+  user-def/
+    invoices/jan.pdf
+```
+
+Folders are only part of the path; access is not decided by them. Each object records the user who
+uploaded it in its `owner` column, and a bucket rule of `BucketOwner` compares the caller with that
+column, so "users may only delete their own files" is a rule on the bucket rather than a folder
+convention:
+
+```typescript
+import type { Bucket, BucketLoggedIn, BucketOwner } from "@supatype/types"
+
+export type Documents = Bucket<"documents", {
+  accessMode: "private"
+  access: { read: BucketOwner; create: BucketLoggedIn; delete: BucketOwner }
+}>
+```
+
+## File size limits
+
+Set per-bucket file size limits when creating the bucket (a service role key is required):
+
+```typescript
+await supatype.storage.createBucket("avatars", {
+  fileSizeLimit: 2 * 1024 * 1024, // 2 MB max
+})
+```
+
+## Allowed MIME types
+
+Restrict which file types can be uploaded:
+
+```typescript
+await supatype.storage.createBucket("images", {
+  allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+})
+```
+
+Attempting to upload a file with a disallowed MIME type returns `415`. Wildcards such as `image/*` are accepted.

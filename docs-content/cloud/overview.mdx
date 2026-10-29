@@ -1,0 +1,138 @@
+---
+title: Cloud Overview
+description: "Supatype Cloud: managed hosting with environments, custom domains and usage dashboards."
+---
+
+import { PLANS, TIER_ORDER, formatCount, formatSize } from "../../../lib/plans"
+
+export const limitRows = [
+  ["Projects", (l) => formatCount(l.projects)],
+  ["Members", (l) => formatCount(l.members)],
+  ["Database", (l) => formatSize(l.databaseMb)],
+  ["File storage", (l) => formatSize(l.storageMb)],
+  ["Bandwidth (per month)", (l) => formatSize(l.egressMb)],
+  ["Monthly active users", (l) => formatCount(l.monthlyActiveUsers)],
+  ["Realtime connections (each project)", (l) => formatCount(l.realtimeConnections)],
+  ["Function invocations (per month)", (l) => formatCount(l.functionInvocations)],
+  ["Environments per project", (l) => formatCount(l.environmentsPerProject)],
+  ["Custom domains", (l) => formatCount(l.customDomains)],
+]
+
+Supatype Cloud is the managed hosting platform for Supatype projects. It handles infrastructure and monitoring so you can focus on building your application.
+
+## What you get
+
+| Feature | Description |
+|---------|-------------|
+| Managed PostgreSQL | Dedicated database per project. Managed backups and point-in-time recovery are coming soon |
+| Realtime | Included on every plan |
+| SSL/TLS | Automatic HTTPS with managed certificates |
+| Custom domains | Use your own domain with automatic SSL (paid plans) |
+| Environments | Production on every plan; staging and preview as well on every paid plan |
+| Monitoring | Usage dashboard and a slow query log |
+| Logs | API request logs with filtering |
+
+Projects run in the EU, in Hetzner's Falkenstein data centre in Germany.
+
+## Plans
+
+<table>
+  <thead>
+    <tr>
+      <th>Limit</th>
+      {TIER_ORDER.map((tier) => <th>{PLANS[tier].name}</th>)}
+    </tr>
+  </thead>
+  <tbody>
+    {limitRows.map(([label, value]) => (
+      <tr>
+        <td>{label}</td>
+        {TIER_ORDER.map((tier) => <td>{value(PLANS[tier].limits)}</td>)}
+      </tr>
+    ))}
+  </tbody>
+</table>
+
+The table is rendered from the same plan definitions the control plane enforces and the
+[pricing page](https://supatype.com/pricing) shows, so the three cannot disagree.
+
+Most limits belong to the organisation, not to one project: the projects in an organisation share its
+database, file storage, bandwidth, monthly active users, function invocations and custom domains, and
+any one project may use all of it. Two limits are per project: environments, and realtime
+connections, which each project's realtime server applies on its own. On Free, the project count is
+across every free organisation one person owns.
+
+Projects, members, environments and custom domains are hard limits: creating one more is refused
+with `403` and an error code (`project_limit_reached`, `member_limit_reached`,
+`environment_limit_reached`, `domain_limit_reached`; `free_limit_reached` and `free_tier_no_invites`
+on Free). Realtime connections are capped per project. The other figures are shown in the usage
+dashboard and are not blocked or billed yet: overage billing is coming soon.
+
+The database figure is your own data. Supatype's caching keeps its rows in a separate `supacache` schema,
+and those are subtracted before your usage is measured: your cache is never billed as your data.
+
+## Getting started
+
+### 1. Create a Cloud account
+
+Sign up at [accounts.supatype.com](https://accounts.supatype.com/signup).
+
+### 2. Create a project
+
+```bash
+npx @supatype/cli login
+npx @supatype/cli projects create my-project
+```
+
+Or create the project from the Cloud dashboard. Either way, link your local project to it by its
+slug:
+
+```bash
+npx @supatype/cli link --project <project-slug>
+```
+
+### 3. Deploy
+
+```bash
+npx supatype deploy
+```
+
+This pushes your schema to the linked project and, when the project has an app configured, builds
+and deploys its static site. Edge functions are deployed separately with
+`supatype functions deploy`.
+
+Your API is served at `https://<project ref>.supatype.com`.
+
+## Dashboard
+
+The Cloud dashboard at [studio.supatype.com](https://studio.supatype.com) provides:
+
+- **Database explorer**: browse tables and edit rows
+- **Auth management**: create, invite and manage users, their sessions and MFA factors, see the auth
+  configuration (read-only) and edit the email templates
+- **Storage browser**: view and manage files and buckets
+- **API logs**: request logs with filtering
+- **SQL editor**: run queries directly against your database (owners, admins and developers)
+- **Settings**: project configuration, API keys, allowed browser origins (CORS), auth providers, billing
+
+## Members and roles
+
+An organisation's members hold one of six roles: `owner`, `admin`, `developer`, `editor`, `billing`
+or `viewer`. The role applies to every project in the organisation, and a project's own Studio
+membership can only narrow it for that project. The role that used to be called `member` is now
+`developer`; existing members and pending invitations were moved over. See
+[Studio Roles](/docs/studio-roles.html).
+
+## Allowed browser origins
+
+Each project's gateway decides which browser origins may call its API. The project's own URL and
+Cloud Studio are always allowed. Owners and admins add more origins, or reset the list, in Studio
+under **Settings > CORS**; the list is kept in the project's database. `api.corsOrigins` in
+`supatype.config.ts` is read by self-hosted stacks only, so on Cloud use the CORS tab.
+
+## Next steps
+
+- [Deploying](/docs/cloud/deploying.html): deploy your project to Cloud
+- [Custom Domains](/docs/cloud/custom-domains.html): set up a custom domain
+- [Environments](/docs/cloud/environments.html): manage production, staging, and preview
+- [Studio Roles](/docs/studio-roles.html): what each member role may do

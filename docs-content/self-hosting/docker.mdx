@@ -1,0 +1,292 @@
+---
+title: Docker Setup
+description: "Deploy Supatype with Docker Compose, step by step from zero to running."
+---
+
+This guide walks you through deploying Supatype on a server using Docker Compose. The CLI renders
+the Compose file from your project's `supatype.config.ts` and runs it for you, so the server holds a
+checkout of your project rather than a hand-maintained stack.
+
+## Prerequisites
+
+- A server with Docker 20.10+ and Docker Compose v2
+- Node.js 22 or later, for the Supatype CLI
+- A domain name (optional but recommended for production)
+- At least 4 GB RAM
+
+## Step 1: Get the project onto the server
+
+Install the CLI and clone your project (or create one with `supatype init`):
+
+```bash
+npm install -g @supatype/cli
+git clone git@github.com:YOUR_USER/my-app.git /opt/my-app
+cd /opt/my-app
+npm install
+```
+
+Render the Compose stack:
+
+```bash
+supatype self-host compose render
+```
+
+This writes the generated files under `.supatype/self-host/`:
+
+```
+.supatype/self-host/
+├── docker-compose.yml
+├── kong.yml
+└── s3.json
+```
+
+Do not edit them by hand: every `self-host compose` command writes them again from your config
+before it runs. Database, storage and cache data live in Docker volumes, not in this directory.
+
+`docker-compose.yml` names every bind mount by its absolute path on this machine and names its
+Compose project (`supatype-` plus `project.name`), so a `docker compose` command run against it by
+hand reaches the same stack with the same files. If you move the project to another folder, the
+next `self-host compose` command writes the new paths.
+
+## Step 2: Configure environment
+
+Create `.env` in the project root on the server and never commit it. `supatype init` generates one
+with fresh secrets; on a server, use new values of your own:
+
+```bash
+# Database
+DATABASE_URL=postgresql://supatype_admin:CHANGE_ME@localhost:5432/my-app
+POSTGRES_USER=supatype_admin
+POSTGRES_PASSWORD=CHANGE_ME
+POSTGRES_DB=my-app
+AUTHENTICATOR_PASSWORD=a-different-long-random-string
+
+# JWT: the API keys are derived from this secret
+JWT_SECRET=your-super-secret-jwt-key-at-least-32-characters
+ANON_KEY=
+SERVICE_ROLE_KEY=
+
+# Public URLs
+API_EXTERNAL_URL=https://api.your-domain.com
+SITE_URL=https://your-domain.com
+
+# SMTP for auth emails
+SUPATYPE_MAILER_MAILER_PROVIDER=smtp
+SUPATYPE_SMTP_HOST=smtp.sendgrid.net
+SUPATYPE_SMTP_PORT=587
+SUPATYPE_SMTP_USER=apikey
+SUPATYPE_SMTP_PASS=your-smtp-password
+SUPATYPE_SMTP_ADMIN_EMAIL=noreply@your-domain.com
+```
+
+Generate the API keys from `JWT_SECRET` and write them into `.env`:
+
+```bash
+supatype keys --write
+```
+
+`supatype self-host compose up` also fills in blank keys on its own, and `render` adds
+`SUPATYPE_CONTROL_PLANE_SECRET` when it is missing.
+
+`JWT_SECRET` must be at least 32 characters, because PostgREST will not start with a shorter one.
+`supatype self-host compose up` checks it first and stops with
+`JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` Generate one with
+`openssl rand -base64 48`, then run `supatype keys --write --force` to sign new keys with it.
+
+To configure OAuth sign-in, list the providers under `auth.providers` in `supatype.config.ts` and
+put their secrets in `.env`; `render` and `up` warn about an enabled provider whose secret is set
+nowhere. See [OAuth providers](/docs/auth/oauth.html).
+
+## Step 3: Start the services
+
+```bash
+supatype self-host compose up -d
+supatype push
+```
+
+`push` applies your schema to the new database. Until the first push, every `/rest/v1/` request
+answers `503` with `PGRST002`: PostgREST will not serve until the schemas it exposes exist. That is
+expected, not a fault. After the push PostgREST can take about 30 seconds to notice, so `push`
+waits (at most 40 seconds, printing one line) until REST stops answering `503`. If it gives up, the
+schema is still applied, and `supatype self-host compose logs --service postgrest` shows why REST
+is not serving.
+
+Then check the services:
+
+```bash
+supatype self-host compose status
+```
+
+The stack runs `db`, `postgrest`, `server` (the API gateway service, including auth), `storage`,
+`seaweedfs` (the object store behind storage), `functions-worker`, `control-plane`,
+`schema-engine`, `studio` and `kong`, plus `realtime` unless realtime is turned off, and `valkey` if
+you chose `cache: { provider: "valkey" }`.
+
+Kong publishes the API on port **18473** (`SUPATYPE_KONG_PORT` in `.env` changes it), with Studio
+at `/studio/`: open `http://YOUR_SERVER_IP:18473/studio/`.
+
+## Step 4: Set up HTTPS
+
+The stack can serve HTTPS itself. Set a domain and an ACME email in `supatype.config.ts`, and Kong
+publishes ports 80 and 443 and obtains a Let's Encrypt certificate:
+
+```typescript
+// supatype.config.ts (excerpt)
+server: {
+  mode: "standalone",
+  domain: "api.your-domain.com",
+  tls: { email: "you@your-domain.com" },
+},
+```
+
+Then run `supatype self-host compose up -d` again.
+
+Or keep HTTP on 18473 and put your own reverse proxy in front. Here is an example with Caddy:
+
+```
+# Caddyfile
+api.your-domain.com {
+  reverse_proxy localhost:18473
+}
+```
+
+Or with nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.your-domain.com;
+
+    ssl_certificate /etc/letsencrypt/live/api.your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.your-domain.com/privkey.pem;
+
+    location / {
+        proxy_pass http://localhost:18473;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+Studio is served by the same gateway, at `https://api.your-domain.com/studio/`; it needs no
+domain of its own.
+
+## Step 5: Connect your project
+
+Link your local Supatype project to the self-hosted instance:
+
+```bash
+# In your project directory
+supatype link --url https://api.your-domain.com --token <SERVICE_ROLE_KEY>
+```
+
+## Step 6: Deploy on every push
+
+A GitHub Action can SSH in and run the same commands you ran by hand:
+
+```yaml
+name: Deploy
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            git pull
+            npm install
+            supatype self-host compose up -d
+            supatype push
+```
+
+The repository secrets it needs:
+
+- `VM_HOST`: public IP or hostname of the server
+- `VM_USER`: SSH user
+- `VM_SSH_KEY`: a private key that can log in as `VM_USER`
+- `DEPLOY_PATH`: the project checkout on the server, such as `/opt/my-app`
+
+`.env` stays on the server and out of the repository, so `git pull` never touches it.
+
+## Backups
+
+The database is published on the host at port 5432 (`SUPATYPE_DB_PORT` changes it), so a nightly
+`pg_dump` can read `DATABASE_URL` from the project's `.env`. The port is bound on every interface,
+so keep it closed in your firewall.
+
+```bash
+# Add to crontab
+0 2 * * * cd /opt/my-app && set -a && . ./.env && pg_dump "$DATABASE_URL" | gzip > /backups/supatype-$(date +\%Y\%m\%d).sql.gz
+```
+
+## Updating
+
+Pull the latest images, restart the stack, and apply any schema changes the new versions expect:
+
+```bash
+supatype update
+supatype self-host compose up -d
+supatype push
+```
+
+The `push` is the step people miss. The images ship code, but grants, policies, functions and
+buckets are generated from your schema and reach the database only through `push`, so treat an
+upgrade as finished only after it runs.
+
+Commands that render the Compose file keep the stack in the mode its `server` container is running
+in, so `push`, `diff`, `adopt` and `update` against a production stack leave it standalone and
+leave `.env` alone. Dev mode is used only while a `supatype dev` session for the project is
+running.
+
+## Restarting one service
+
+After changing `.env` or `supatype.config.ts`, recreate the service it affects and leave the rest
+running:
+
+```bash
+supatype self-host compose restart server
+supatype self-host compose restart functions-worker   # after editing functions/
+```
+
+This renders the file again and recreates the container, so the change reaches it. Compose's own
+`docker compose restart` keeps the container as it was created, so it would not pick up a changed
+`.env`.
+
+## Troubleshooting
+
+Check service logs:
+
+```bash
+supatype self-host compose logs --service postgrest   # PostgREST logs
+supatype self-host compose logs --service server      # API server and auth logs
+supatype self-host compose logs --service db          # PostgreSQL logs
+```
+
+Stop the stack (data is kept):
+
+```bash
+supatype self-host compose down
+```
+
+Reset the database (destroys all data). The CLI has no command for this, so call Docker Compose on
+the generated file, which names its own project:
+
+```bash
+supatype self-host compose render
+docker compose -f .supatype/self-host/docker-compose.yml --env-file .env down -v
+supatype self-host compose up -d
+supatype push
+```

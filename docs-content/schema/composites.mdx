@@ -1,0 +1,112 @@
+---
+title: Composites
+description: "Reusable field groups (Timestamps, SoftDelete, Publishable) and how to write your own."
+---
+
+A composite is a reusable group of fields. Since a model's fields are a type, a composite is just
+a type you intersect in, either directly or through the `With…` helpers that do the intersection
+for you.
+
+| Composite | Wrapper | Adds |
+|---|---|---|
+| `Timestamps` | `WithTimestamps<F>` | `created_at`, `updated_at`, both `TIMESTAMPTZ NOT NULL DEFAULT now()` |
+| `SoftDelete` | `WithSoftDelete<F>` | `deleted_at TIMESTAMPTZ`, nullable |
+| `Publishable` | `WithPublishable<F>` | `published_at TIMESTAMPTZ`, nullable |
+
+## Timestamps
+
+```typescript
+import type { Model, UUID, WithTimestamps } from "@supatype/types"
+
+export type Post = Model<WithTimestamps<{
+  id: UUID
+  title: string
+}>, { tableName: "posts" }>
+```
+
+A trigger sets `updated_at` to `now()` on every update, whoever writes the row.
+
+The wrapper is not the only trigger. Declaring `created_at` and `updated_at` yourself, or setting
+`timestamps: true` in the model's meta, turns on the same behaviour, so an existing table you
+adopt is recognised rather than duplicated.
+
+## SoftDelete
+
+```typescript
+import type { Model, UUID, WithSoftDelete } from "@supatype/types"
+
+export type Post = Model<WithSoftDelete<{
+  id: UUID
+  title: string
+}>, { tableName: "posts" }>
+```
+
+`deleted_at` null means "not deleted". Supatype also creates an index on the column, since every
+query that respects soft deletion filters on it.
+
+Recognised the same three ways: the wrapper, a `deleted_at` field you declare, or
+`softDelete: true` in the meta.
+
+## Publishable
+
+```typescript
+import type { Model, UUID, WithPublishable } from "@supatype/types"
+
+export type Post = Model<WithPublishable<{
+  id: UUID
+  title: string
+}>, { tableName: "posts" }>
+```
+
+**One column, `published_at`.** It does not add a status enum or a scheduling column, because a
+publishing *workflow* is a separate feature rather than something a field group should assume. If
+what you want is drafts, a version history and a publish button, that is
+[`versions`](/docs/schema/publishing.html) and this composite is not it: `Publishable` gives you a column
+to put a date in.
+
+Declare the rest as ordinary fields when you want them:
+
+```typescript
+import type { Model, Optional, Timestamp, UUID, WithPublishable } from "@supatype/types"
+
+export type Article = Model<WithPublishable<{
+  id: UUID
+  title: string
+  status: "draft" | "published" | "scheduled" | "archived"
+  scheduled_at: Optional<Timestamp>
+}>, { tableName: "articles" }>
+```
+
+That `status` union becomes a Postgres `TEXT` column with a `CHECK` constraint listing exactly
+those four values.
+
+Studio shows a publish control for a model that declares [`versions`](/docs/schema/publishing.html), not
+for one using this composite. A model with `published_at` and no `versions` gets an ordinary date
+input, which is what it is.
+
+## Writing your own
+
+Any type whose properties are fields will do. Intersect it, or wrap it the way the built-ins do:
+
+```typescript
+import type { ImageAsset, Bucket, MaxLength, Model, Optional, UUID } from "@supatype/types"
+
+type OgImages = Bucket<"og-images", { accessMode: "public" }>
+
+type Seo = {
+  metaTitle: Optional<MaxLength<string, 60>>
+  metaDescription: Optional<MaxLength<string, 160>>
+  ogImage: Optional<ImageAsset<OgImages>>
+}
+
+/** Same shape as `WithTimestamps<…>`, for your own group. */
+type WithSeo<F extends Record<string, unknown>> = F & Seo
+
+export type Page = Model<WithSeo<{
+  id: UUID
+  title: string
+}>, { tableName: "pages" }>
+```
+
+Both forms work: `Model<{ … } & Seo>` is equivalent, and the wrapper only earns its keep when you
+use the group often enough that naming it reads better.

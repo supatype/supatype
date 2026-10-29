@@ -1,0 +1,247 @@
+---
+title: API Reference
+description: "REST and GraphQL API reference for Supatype: endpoints, authentication, filtering, and response formats."
+---
+
+Supatype auto-generates both REST and GraphQL APIs from your schema. Both APIs respect your access rules (RLS policies) and return fully typed responses.
+
+## Base URL
+
+```
+https://<project-ref>.supatype.com/rest/v1     # REST API
+https://<project-ref>.supatype.com/graphql/v1   # GraphQL API
+```
+
+For local development with `supatype dev` (Docker, the default), the gateway port is the project's
+`SUPATYPE_KONG_PORT` in `.env`, 18473 unless that port was taken:
+
+```
+http://localhost:18473/rest/v1
+http://localhost:18473/graphql/v1
+```
+
+With the native runtime (`provider: "native"`), the server listens on `server.port`, 54321 by
+default: `http://localhost:54321/rest/v1`. A self-hosted stack publishes the same gateway on port
+18473, or on 80/443 with HTTPS enabled.
+
+## Authentication
+
+Requests to `/rest/v1`, `/storage/v1`, `/realtime/v1` and `/functions/v1` must carry a project API
+key, in an `apikey` header (or as the `Authorization` bearer token), and optionally a user's JWT in
+the `Authorization` header:
+
+```bash
+curl "https://<project-ref>.supatype.com/rest/v1/posts" \
+  -H "apikey: <anon-key>" \
+  -H "Authorization: Bearer <user-jwt>"
+```
+
+| Header | Purpose |
+|--------|---------|
+| `apikey` | Identifies the project (anon key or service role key) |
+| `Authorization: Bearer <jwt>` | Authenticates the user for RLS |
+
+Using the service role key bypasses RLS entirely. Only use it server-side.
+
+Tokens are signed with the project's JWT secret, which must be at least 32 characters: PostgREST
+14 will not start with a shorter one. On a local or self-hosted stack, `supatype dev` and
+`supatype self-host compose up` check `JWT_SECRET` in `.env` before starting anything and stop with
+`JWT_SECRET in .env is 20 characters, and the REST API needs at least 32.` (with your length). Put a
+longer secret in `.env` (for example from `openssl rand -base64 48`), then run
+`supatype keys --write --force` to sign `ANON_KEY` and `SERVICE_ROLE_KEY` with it. Without
+`--force`, `--write` fills only blank keys and leaves keys signed with the old secret in place.
+
+## REST API
+
+The REST API is powered by PostgREST. It exposes each table as an HTTP resource.
+
+### Read rows
+
+```
+GET /rest/v1/posts?select=title,slug,author(name)
+```
+
+### Filter
+
+```
+GET /rest/v1/posts?status=eq.published&views=gt.100
+```
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `eq` | Equal | `?status=eq.published` |
+| `neq` | Not equal | `?status=neq.draft` |
+| `gt` | Greater than | `?views=gt.100` |
+| `gte` | Greater than or equal | `?views=gte.100` |
+| `lt` | Less than | `?views=lt.1000` |
+| `lte` | Less than or equal | `?views=lte.1000` |
+| `like` | LIKE (case-sensitive) | `?title=like.*supatype*` |
+| `ilike` | ILIKE (case-insensitive) | `?title=ilike.*supatype*` |
+| `in` | IN | `?status=in.(published,scheduled)` |
+| `is` | IS (null, true, false) | `?deleted_at=is.null` |
+| `cs` | Contains (array, range or jsonb) | `?tags=cs.{news,featured}` |
+| `cd` | Contained by (array, range or jsonb) | `?tags=cd.{news,featured,sport}` |
+| `not` | Negates the operator after it | `?status=not.eq.draft` |
+| `or` | Any of a list of conditions | `?or=(status.eq.published,views.gt.100)` |
+
+The same filters narrow an update (`PATCH`) or a delete (`DELETE`). The REST API is PostgREST
+14.18 on every stack (dev, self-host and Cloud), so an `or` filter on a write works even when the
+`select` you ask back leaves out the filtered column.
+
+### Order
+
+```
+GET /rest/v1/posts?order=created_at.desc
+```
+
+### Pagination
+
+```
+GET /rest/v1/posts?limit=10&offset=20
+```
+
+Or use the `Range` header:
+
+```bash
+curl "https://<project-ref>.supatype.com/rest/v1/posts" \
+  -H "Range: 0-9"
+```
+
+### Insert
+
+```bash
+curl -X POST "https://<project-ref>.supatype.com/rest/v1/posts" \
+  -H "apikey: <anon-key>" \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -H "Prefer: return=representation" \
+  -d '{"title": "Hello", "body": "World"}'
+```
+
+### Update
+
+```bash
+curl -X PATCH "https://<project-ref>.supatype.com/rest/v1/posts?id=eq.123" \
+  -H "apikey: <anon-key>" \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -H "Prefer: return=representation" \
+  -d '{"status": "published"}'
+```
+
+### Delete
+
+```bash
+curl -X DELETE "https://<project-ref>.supatype.com/rest/v1/posts?id=eq.123" \
+  -H "apikey: <anon-key>" \
+  -H "Authorization: Bearer <jwt>"
+```
+
+### RPC (Remote Procedure Call)
+
+Call PostgreSQL functions:
+
+```bash
+curl -X POST "https://<project-ref>.supatype.com/rest/v1/rpc/search_posts" \
+  -H "apikey: <anon-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "supatype"}'
+```
+
+## GraphQL API
+
+Supatype auto-generates a GraphQL schema from your database tables. A GraphQL request runs as
+the caller, with the `apikey` and `Authorization` headers it was sent with, so row-level security
+and column grants apply exactly as they do on the REST API.
+
+### Query
+
+```graphql
+query {
+  postsCollection(
+    filter: { status: { eq: "published" } }
+    orderBy: [{ created_at: DescNullsLast }]
+    first: 10
+  ) {
+    edges {
+      node {
+        id
+        title
+        slug
+        author {
+          name
+          email
+        }
+        tags {
+          edges {
+            node { name }
+          }
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+```
+
+### Mutation
+
+```graphql
+mutation {
+  insertIntoPostsCollection(objects: [{ title: "New Post", body: "Content" }]) {
+    records {
+      id
+      title
+      created_at
+    }
+  }
+}
+```
+
+### GraphQL endpoint
+
+```bash
+curl -X POST "https://<project-ref>.supatype.com/graphql/v1" \
+  -H "apikey: <anon-key>" \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ postsCollection(first: 5) { edges { node { title } } } }"}'
+```
+
+## Response format
+
+### REST
+
+Successful responses return the data directly as a JSON array or object:
+
+```json
+[
+  { "id": 1, "title": "Hello", "status": "published" },
+  { "id": 2, "title": "World", "status": "draft" }
+]
+```
+
+Errors return:
+
+```json
+{
+  "code": "PGRST303",
+  "message": "JWT expired",
+  "details": null,
+  "hint": null
+}
+```
+
+### Count header
+
+Request a row count with the `Prefer` header:
+
+```bash
+curl "https://<project-ref>.supatype.com/rest/v1/posts" \
+  -H "Prefer: count=exact"
+```
+
+The total count is returned in the `Content-Range` header: `Content-Range: 0-9/42`.
