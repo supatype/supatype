@@ -9,10 +9,21 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
-import { runDockerCompose, writeSelfHostCompose, composePullNeedsIgnoreFailures, composeProjectName, exitComposeFailed } from "../self-host-compose.js"
+import { runDockerCompose, writeSelfHostCompose, composeProjectName } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { syncComposeImagePins } from "../dev-compose.js"
-import { download, currentPlatform, fetchAllLatestVersions, pinnedVersion, type Component, type PlatformId } from "../binary-cache.js"
+import { composeServiceImages, dockerHasImage, type ServiceImage } from "../compose-services.js"
+import { imagePullAdvice, pullServiceImages } from "../compose-image-pull.js"
+import {
+  download,
+  currentPlatform,
+  fetchAllLatestVersions,
+  isCachedBinaryReady,
+  pinnedVersion,
+  ReleaseVerificationError,
+  type Component,
+  type PlatformId,
+} from "../binary-cache.js"
 import { defaultComponentVersion } from "../release-images.js"
 import { error, info, plain } from "../ui/messages.js"
 import { fatalError } from "../ui/fatal.js"
@@ -61,26 +72,46 @@ export function registerUpdate(program: Command): void {
           info("Docker provider: run `supatype update` without --check to pull the compose images.")
           return
         }
-        const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
-        syncComposeImagePins(cwd, config)
-        info("Pulling self-host compose images...")
-        const pullArgs = ["pull"]
-        if (composePullNeedsIgnoreFailures(config, cwd)) {
-          pullArgs.push("--ignore-pull-failures")
-        }
-        const brand = { intro: "Update components" }
-        const project = composeProjectName(config.project.name)
-        const status = runDockerCompose(paths.composePath, pullArgs, cwd, project, { brand })
-        if (status !== 0) {
-          exitComposeFailed(status, "Could not pull Compose images.", brand)
-        }
-        info("Compose images updated.")
-        pushReminder()
+        updateComposeImages(cwd, config)
         return
       }
 
       await updateNativeComponents(cwd, config, opts.check)
     })
+}
+
+const UPDATE_BRAND = { intro: "Update components" }
+
+/**
+ * Pull a Docker project's images, and exit 1 naming every one that could not be pulled, as a
+ * native project's downloads do. An image built on this machine, under a tag no registry has, is
+ * kept and said to be.
+ */
+function updateComposeImages(cwd: string, config: SupatypeProjectConfig): void {
+  const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
+  syncComposeImagePins(cwd, config)
+  const project = composeProjectName(config.project.name)
+  const images = composeServiceImages({ composePath: paths.composePath, projectRoot: cwd, projectName: project })
+  info("Pulling self-host compose images...")
+  const pulls = pullServiceImages(images, {
+    pull: (services, quiet) =>
+      runDockerCompose(paths.composePath, ["pull", ...services], cwd, project, { brand: UPDATE_BRAND, quiet }),
+    hasLocal: dockerHasImage,
+  })
+  for (const { service, image } of pulls.keptLocal) {
+    info(`${service}: ${image} is not on its registry; kept the image on this machine.`)
+  }
+  exitOnFailures(pulls.failed.map(imagePullFailure))
+  info("Compose images updated.")
+  pushReminder()
+}
+
+function imagePullFailure(one: ServiceImage): ReportedFailure {
+  return {
+    name: `${one.service} (${one.image})`,
+    reason: "docker compose could not pull it; its error is printed above",
+    advice: imagePullAdvice(one),
+  }
 }
 
 /** The components a native project runs, in the order `update` fetches them. */
@@ -97,7 +128,19 @@ interface ComponentUpdate {
 interface UpdateFailure {
   component: Component
   reason: string
+  /** What to do about it, which depends on why it failed. */
+  advice: string
 }
+
+/** One thing `update` could not update, as the failure report names it. */
+interface ReportedFailure {
+  name: string
+  reason: string
+  advice: string
+}
+
+/** The advice for a download that failed for no reason the CLI can name more closely. */
+const CDN_ADVICE = "Run `supatype update` again once the CDN is reachable."
 
 /** One version of one component to download. */
 interface DownloadTarget {
@@ -207,15 +250,24 @@ function missingLatest(component: Component): ComponentPlan {
     return null
   }
   error(`No latest version for ${component} on CDN`)
-  return { kind: "failure", failure: { component, reason: "the CDN names no latest version" } }
+  const advice = `Pin ${component} under versions in supatype.config.ts, or run \`supatype update\` again after its next release.`
+  return { kind: "failure", failure: { component, reason: "the CDN names no latest version", advice } }
 }
 
 /**
- * Download every target at once, then say how each went in the order given, so the output reads
- * the same however the downloads finish. The failures, in that order.
+ * Download every target not already cached at once, then say how each went in the order given, so
+ * the output reads the same however the downloads finish. The failures, in that order.
+ *
+ * A cached one is said to be and left alone. It used to go through `download` like the rest, which
+ * said "already cached", and then this said "downloaded" as well.
  */
 async function downloadAll(targets: readonly DownloadTarget[], platform: PlatformId): Promise<UpdateFailure[]> {
-  const attempts = targets.map((target) => {
+  const missing = targets.filter(({ component, version }) => {
+    if (!isCachedBinaryReady(component, version, platform)) return true
+    info(`${component} v${version} already cached.`)
+    return false
+  })
+  const attempts = missing.map((target) => {
     info(`Downloading ${target.component} v${target.version}...`)
     return { target, done: download(target.component, target.version, platform) }
   })
@@ -235,24 +287,38 @@ async function reportDownload({ component, version }: DownloadTarget, done: Prom
   } catch (err) {
     const reason = errorMessage(err)
     error(`Failed: ${component} v${version}: ${reason}`)
-    return { component, reason }
+    return { component, reason, advice: downloadAdvice(err) }
   }
   info(`${component} v${version} downloaded.`)
   return null
 }
 
-/** `failures` in the order `update` fetches components, whichever step found each. */
-function inComponentOrder(failures: readonly UpdateFailure[]): UpdateFailure[] {
-  return [...failures].sort((a, b) => NATIVE_COMPONENTS.indexOf(a.component) - NATIVE_COMPONENTS.indexOf(b.component))
+/**
+ * What to do about a failed download. A release that cannot be verified says what it needs; it
+ * used to get "once the CDN is reachable" like everything else, with the CDN reachable and the
+ * release key what was missing.
+ */
+function downloadAdvice(err: unknown): string {
+  for (let cause: unknown = err; cause instanceof Error; cause = cause.cause) {
+    if (cause instanceof ReleaseVerificationError) return cause.advice
+  }
+  return CDN_ADVICE
 }
 
-/** Exit 1 naming each component that could not be fetched; nothing when there are none. */
-function exitOnFailures(failures: readonly UpdateFailure[]): void {
+/** `failures` in the order `update` fetches components, whichever step found each, as reported. */
+function inComponentOrder(failures: readonly UpdateFailure[]): ReportedFailure[] {
+  return [...failures]
+    .sort((a, b) => NATIVE_COMPONENTS.indexOf(a.component) - NATIVE_COMPONENTS.indexOf(b.component))
+    .map(({ component, reason, advice }) => ({ name: component, reason, advice }))
+}
+
+/** Exit 1 naming each thing that could not be updated, then what to do; nothing when there are none. */
+function exitOnFailures(failures: readonly ReportedFailure[]): void {
   if (failures.length === 0) return
   fatalError(
     `${failures.length} component(s) could not be updated.`,
-    [...failures.map(({ component, reason }) => `${component}: ${reason}`), "Run `supatype update` again once the CDN is reachable."],
-    { brand: { intro: "Update components" } },
+    [...failures.map(({ name, reason }) => `${name}: ${reason}`), ...new Set(failures.map(({ advice }) => advice))],
+    { brand: UPDATE_BRAND },
   )
 }
 

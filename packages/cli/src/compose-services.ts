@@ -174,3 +174,37 @@ export function composeServiceNames(ctx: ComposeContext): string[] {
     .filter((line) => line !== "")
     .sort()
 }
+
+/** One compose service and the image it runs. */
+export interface ServiceImage {
+  service: string
+  image: string
+}
+
+/**
+ * Each service the compose file defines and the image it runs, as compose resolves the file, `.env`
+ * included. Throws when compose cannot read the file: an empty list would read as nothing to pull.
+ */
+export function composeServiceImages(ctx: ComposeContext): ServiceImage[] {
+  const result = spawnSync("docker", [...composeArgs(ctx), "config", "--format", "json"], {
+    encoding: "utf8",
+    timeout: 30_000,
+  })
+  if (result.status !== 0) {
+    const said = (result.stderr ?? "").trim() || result.error?.message || `exit ${result.status}`
+    throw new Error(`docker compose could not read ${ctx.composePath}: ${said}`)
+  }
+  const parsed: unknown = JSON.parse(result.stdout)
+  const services = isJsonObject(parsed) ? parsed["services"] : undefined
+  if (!isJsonObject(services)) return []
+  return Object.entries(services)
+    .flatMap(([service, spec]) =>
+      isJsonObject(spec) && typeof spec["image"] === "string" ? [{ service, image: spec["image"] }] : [],
+    )
+    .sort((a, b) => a.service.localeCompare(b.service))
+}
+
+/** Whether Docker has `image` on this machine. */
+export function dockerHasImage(image: string): boolean {
+  return spawnSync("docker", ["image", "inspect", image], { stdio: "ignore", timeout: 15_000 }).status === 0
+}

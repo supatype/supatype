@@ -430,19 +430,8 @@ export async function download(
   const dir = cachePath(component, version)
   mkdirSync(dir, { recursive: true })
 
-  const name = binaryName(component, version, platform)
-  const destPath = join(dir, name)
-
-  if (existsSync(destPath)) {
-    if (cachedArtifactLooksValid(component, destPath)) {
-      console.log(`[supatype] ${component} v${version} already cached.`)
-      return destPath
-    }
-    console.warn(
-      `[supatype] ${component} v${version} cache invalid, re-downloading (${destPath}).`,
-    )
-    unlinkSync(destPath)
-  }
+  const destPath = join(dir, binaryName(component, version, platform))
+  if (keepCachedArtifact(component, version, destPath)) return destPath
 
   await acquireDownloadSlot(component, version, platform)
   if (isCachedBinaryReady(component, version, platform)) {
@@ -451,27 +440,52 @@ export async function download(
 
   console.log(`[supatype] Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
 
-  const tmpPath = destPath + ".tmp"
   let manifest: string
   try {
-    manifest = await fetchVerifiedArtifact(component, version, platform, destPath, tmpPath)
+    manifest = await fetchIntoCache(component, version, platform, destPath)
   } catch (err) {
-    // Never leave a partial binary or an empty version directory behind: a stale
-    // empty dir makes the next resolve look fine while silently lacking a binary.
+    // Never leave an empty version directory behind: a stale empty dir makes the next resolve
+    // look fine while silently lacking a binary. Only now, with the lock released: its file is in
+    // this directory, and removing the directory before it was gone failed every time.
+    try { rmdirSync(dir) } catch { /* not empty, or already removed */ }
+    throw err
+  }
+
+  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version, platform), dir)
+  return destPath
+}
+
+/** True when `destPath` is a valid cached artifact; an invalid one is deleted for the download to replace. */
+function keepCachedArtifact(component: Component, version: string, destPath: string): boolean {
+  if (!existsSync(destPath)) return false
+  if (cachedArtifactLooksValid(component, destPath)) {
+    console.log(`[supatype] ${component} v${version} already cached.`)
+    return true
+  }
+  console.warn(`[supatype] ${component} v${version} cache invalid, re-downloading (${destPath}).`)
+  unlinkSync(destPath)
+  return false
+}
+
+/**
+ * Fetch and verify `destPath`, holding the download lock, and release it whatever happens. On
+ * failure no partial binary is left, and the error keeps the one it wraps as its `cause`, so a
+ * caller can tell a release it cannot verify ({@link ReleaseVerificationError}) from a CDN it
+ * could not reach.
+ */
+async function fetchIntoCache(component: Component, version: string, platform: PlatformId, destPath: string): Promise<string> {
+  const tmpPath = destPath + ".tmp"
+  try {
+    return await fetchVerifiedArtifact(component, version, platform, destPath, tmpPath)
+  } catch (err) {
     try { if (existsSync(destPath)) unlinkSync(destPath) } catch { /* ignore */ }
-    try { rmdirSync(dir) } catch { /* dir not empty or already removed */ }
-    throw new Error(
-      `Failed to download ${component} v${version} from ${CDN_BASE}: ${errorMessage(err)}`,
-    )
+    throw new Error(`Failed to download ${component} v${version} from ${CDN_BASE}: ${errorMessage(err)}`, { cause: err })
   } finally {
     releaseDownloadLock(component, version)
     if (existsSync(tmpPath)) {
       try { unlinkSync(tmpPath) } catch { /* ignore */ }
     }
   }
-
-  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version, platform), dir)
-  return destPath
 }
 
 /**
@@ -570,6 +584,20 @@ export async function fetchChecksums(
 }
 
 /**
+ * A release this CLI cannot verify, for a reason no retry changes: retried, it cost four seconds
+ * and three identical messages. `advice` is what to do instead of waiting for the CDN.
+ */
+export class ReleaseVerificationError extends Error {
+  constructor(
+    message: string,
+    readonly advice: string,
+  ) {
+    super(message)
+    this.name = "ReleaseVerificationError"
+  }
+}
+
+/**
  * The checksums manifest, its signature verified, as text. One release's manifest covers every file
  * in it, the engine's LICENSE included, so a caller that needs two entries fetches it once.
  */
@@ -592,11 +620,12 @@ async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string):
       )
       return checksumsText
     }
-    throw new Error(
+    throw new ReleaseVerificationError(
       "No minisign public key configured, so cannot verify release authenticity.\n" +
         "Published @supatype/cli builds embed the key automatically; if you are building " +
         "from source, set SUPATYPE_RELEASE_PUBLIC_KEY to the release public key, or set " +
         "SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1 to download with SHA256-only verification (unsafe).",
+      "Set SUPATYPE_RELEASE_PUBLIC_KEY to the release public key, then run `supatype update` again.",
     )
   }
 
@@ -938,7 +967,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     try {
       return await fn()
     } catch (err) {
-      if (i === attempts) throw err
+      if (i === attempts || err instanceof ReleaseVerificationError) throw err
       const delay = Math.pow(3, i - 1) * 1_000 // 1 s, 3 s, 9 s
       console.error(
         `[supatype] Download attempt ${i}/${attempts} failed: ${errorMessage(err)}. ` +

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
 import { buildKongDeclarative } from "../src/kong-config.js"
-import { composeDockerImageEnv, composeHostPath, composePullNeedsIgnoreFailures, hasLocalVersionPins, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
+import { composeDockerImageEnv, composeHostPath, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
 import { updateAppConfigInProject, updateServerConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
@@ -273,40 +273,6 @@ describe("runtime contract", () => {
     expect(isRegistryPullableImageRef("supatype/server:keepsake-local")).toBe(false)
   })
 
-  it("composePullNeedsIgnoreFailures is false for semver pins only", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "supatype-pull-"))
-    try {
-      writeFileSync(
-        join(cwd, ".env"),
-        "SUPATYPE_ENGINE_IMAGE=supatype/schema-engine:v0.4.2\n",
-        "utf8",
-      )
-      expect(hasLocalVersionPins(baseConfig)).toBe(false)
-      expect(composePullNeedsIgnoreFailures(baseConfig, cwd)).toBe(false)
-    } finally {
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("composePullNeedsIgnoreFailures is true for versions.local or custom tags", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "supatype-pull-local-"))
-    try {
-      writeFileSync(
-        join(cwd, ".env"),
-        "SUPATYPE_CONTROL_PLANE_IMAGE=supatype/control-plane:local\n",
-        "utf8",
-      )
-      expect(
-        composePullNeedsIgnoreFailures(
-          { ...baseConfig, versions: { engine: "local" } },
-          cwd,
-        ),
-      ).toBe(true)
-      expect(composePullNeedsIgnoreFailures(baseConfig, cwd)).toBe(true)
-    } finally {
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
 
   // Where the project, kong.yml and s3.json are mounted from is pinned in
   // self-host-compose-mounts.test.ts: absolute host paths, so a hand-run compose agrees (SA3).
