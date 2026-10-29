@@ -42,7 +42,7 @@ import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-funct
 import { watchDevSchema } from "./dev-schema-watch.js"
 import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "./db-port.js"
 import { offerToSaveShellDbPort } from "./db-port-offer.js"
-import { CLI_DATABASE_URL } from "./database-url-owner.js"
+import { CLI_DATABASE_URL, cliMayWriteDatabaseUrl, warnIfHandWrittenUrlSilent } from "./database-url-owner.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
@@ -367,8 +367,8 @@ export function upsertDevComposeEnv(
     updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
     // User and database from the project, not hardcoded, same reason as
     // `seedMissingDatabaseIdentity`: a project not named "supatype" had this URL pointing at a
-    // database that does not exist.
-    updates.DATABASE_URL = hostComposeDbUrl(cwd, devDbPort)
+    // database that does not exist. Only over a URL the CLI wrote: a hand-written one always wins.
+    if (cliMayWriteDatabaseUrl(cwd)) updates.DATABASE_URL = hostComposeDbUrl(cwd, devDbPort)
   }
   // `SUPATYPE_SERVER_IMAGE` is written here, not passed in, and it is deliberately *not* marked
   // managed. The managed marker means "this value came from `versions` in the config and is mine to
@@ -1668,6 +1668,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await startComposeDatabase(config, paths, cwd, project, devBrand, 180_000, endDevSession)
   // Settle before DDL: pg_isready can pass slightly before the instance is stable.
   await new Promise((r) => setTimeout(r, 3000))
+  // With the stack's database up, so a hand-written URL naming it is not reported as silent.
+  await warnIfHandWrittenUrlSilent(cwd)
 
   if (!usesExternalDatabase(config)) {
     reconcileAuthenticatorPassword(paths, cwd, project)

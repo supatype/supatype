@@ -10,6 +10,7 @@
  */
 import { databaseUrlPortMove, DEV_DB_PORT_ENV, shellOnlyPort, writeDatabaseUrlPort } from "./db-port.js"
 import { setInShell } from "./shell-ports.js"
+import { cliMayWriteDatabaseUrl } from "./database-url-owner.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 
@@ -32,11 +33,12 @@ interface ShellOnlyDbPort {
 
 /**
  * The shell's dev database port, when `.env` does not hold it and `.env`'s `DATABASE_URL` names this
- * machine on another port. Not when the shell sets `DATABASE_URL` too: that one is the shell's.
+ * machine on another port. Not when the shell sets `DATABASE_URL` too: that one is the shell's. Not
+ * for a hand-written URL in `.env` either: that one is the person's, and always wins.
  */
 function shellOnlyDbPort(cwd: string, shell: NodeJS.ProcessEnv): ShellOnlyDbPort | null {
   const port = shellOnlyPort(cwd, DEV_DB_PORT_ENV, shell)
-  if (port === null || setInShell(shell, "DATABASE_URL")) return null
+  if (port === null || setInShell(shell, "DATABASE_URL") || !cliMayWriteDatabaseUrl(cwd)) return null
   const move = databaseUrlPortMove(cwd, port)
   return move === null ? null : { port, from: move.from }
 }
