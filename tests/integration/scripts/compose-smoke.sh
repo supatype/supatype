@@ -42,7 +42,8 @@ node "$SCRIPT_DIR/ensure-compose-env.mjs"
 
 # Defaults match the compose file a CLI built from this checkout renders: the server pinned in
 # release/images.json, and :latest for the images built in this repository, since a checkout that is
-# not a release has no images of its own version (CI builds those four and names them). Override via
+# not a release has no images of its own version (CI builds them from the checkout and names them, see
+# scripts/ci-images.sh). Override via
 # SUPATYPE_*_IMAGE. Postgres and the engine are left to the compose file, which pins them.
 export SUPATYPE_STORAGE_IMAGE="${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}"
 export SUPATYPE_STUDIO_IMAGE="${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}"

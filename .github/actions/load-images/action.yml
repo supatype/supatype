@@ -1,0 +1,19 @@
+name: Run this checkout's images
+description: >
+  Loads Studio, storage, realtime, functions-worker and the control plane, built from this checkout
+  by the `images` job, and sets SUPATYPE_*_IMAGE to them for the rest of the job
+  (scripts/ci-images.sh). The engine, server and Postgres stay at their release/images.json pins.
+  Fails the job when the images are missing, rather than leaving the stack on :latest. Run it after
+  the Docker Hub mirror step, which restarts the daemon, and on macOS after Colima starts.
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: ci-images
+        path: ${{ runner.temp }}/ci-images
+
+    - shell: bash
+      env:
+        DIR: ${{ runner.temp }}/ci-images
+      run: bash scripts/ci-images.sh load "$DIR" >>"$GITHUB_ENV"

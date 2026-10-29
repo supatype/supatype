@@ -27,13 +27,127 @@ env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
+  # The five images this repository ships (Studio, storage, realtime, functions-worker and the
+  # control plane), built once from this checkout and handed to every live-stack job below, which
+  # loads them with ./.github/actions/load-images. A CLI built from source runs these five at
+  # :latest when nothing names them, which is the last release and not this commit, so jobs here
+  # passed or failed for code the commit did not contain. The engine, server and Postgres are built
+  # in other repositories and run at their release/images.json pins, as a release ships them.
+  images:
+    name: this checkout's service images
+    runs-on: ubuntu-22.04
+    # 45: until the pin is an engine release, the engine the control plane copies is built from
+    # source here (scripts/pin.sh engine-image).
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pulls Docker Hub images through mirror.gcr.io, which no rate limit applies to. Needs no
+      # secrets, so it runs for forks too; restarts the daemon, so it comes before any container.
+      # It also moves the daemon to the containerd image store, which is what lets the builds
+      # below export their layer cache to GitHub's cache without a separate builder.
+      - name: Use the Docker Hub mirror
+        run: bash scripts/ci-docker-mirror.sh
+
+      # Continues anonymously when Docker Hub is unavailable; fails on rejected credentials.
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        run: bash scripts/ci-dockerhub-login.sh
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The storage image copies a prebuilt dist/, as ci.yml and release.yml build it.
+      - name: Build the storage package
+        run: pnpm --filter @supatype/storage build
+
+      # The control plane copies its engine out of the pinned one (scripts/pin.sh), never :latest.
+      - name: Use the pinned engine
+        uses: ./.github/actions/pinned-engine
+        with:
+          github-token: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+
+      # The layer cache only saves time: ignore-error keeps a failure of GitHub's cache service
+      # from failing a build that itself succeeded.
+      - name: Build Studio
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/studio/Dockerfile
+          tags: supatype/studio:ci
+          load: true
+          cache-from: type=gha,scope=ci-image-studio
+          cache-to: type=gha,mode=max,scope=ci-image-studio,ignore-error=true
+
+      - name: Build storage
+        uses: docker/build-push-action@v5
+        with:
+          context: packages/storage
+          tags: supatype/storage:ci
+          load: true
+          cache-from: type=gha,scope=ci-image-storage
+          cache-to: type=gha,mode=max,scope=ci-image-storage,ignore-error=true
+
+      - name: Build realtime
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/realtime/Dockerfile
+          tags: supatype/realtime:ci
+          load: true
+          cache-from: type=gha,scope=ci-image-realtime
+          cache-to: type=gha,mode=max,scope=ci-image-realtime,ignore-error=true
+
+      - name: Build functions-worker
+        uses: docker/build-push-action@v5
+        with:
+          context: packages/functions-worker
+          tags: supatype/functions-worker:ci
+          load: true
+          cache-from: type=gha,scope=ci-image-functions-worker
+          cache-to: type=gha,mode=max,scope=ci-image-functions-worker,ignore-error=true
+
+      - name: Build the control plane
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/self-host-control/Dockerfile
+          build-args: |
+            ENGINE_IMAGE=${{ env.SUPATYPE_ENGINE_IMAGE }}
+          tags: supatype/control-plane:ci
+          load: true
+          cache-from: type=gha,scope=ci-image-control-plane
+          cache-to: type=gha,mode=max,scope=ci-image-control-plane,ignore-error=true
+
+      - name: Save the images
+        run: bash scripts/ci-images.sh save "$RUNNER_TEMP/ci-images"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-images
+          path: ${{ runner.temp }}/ci-images/
+          retention-days: 1
+          if-no-files-found: error
+
   # Exercises `supatype dev` (Docker compose) + @supatype/client.
   # Sibling images (postgres/engine/server) come from Docker Hub at the tags release/images.json
-  # pins; realtime + control-plane are built from this monorepo.
+  # pins; the five built in this repository are the images job's.
   # macOS native is disabled until native Postgres ships contrib extensions (pgcrypto).
   dev-integration:
     name: supatype dev (docker)
     if: github.event_name != 'schedule'
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
@@ -41,14 +155,7 @@ jobs:
       # SUPATYPE_ENGINE_IMAGE is the pinned engine, set by the "Use the pinned engine" step.
       # SUPATYPE_POSTGRES_IMAGE and SUPATYPE_SERVER_IMAGE are left unset, so integration-test.sh
       # runs the pinned ones (`scripts/pin.sh image`), the images a release of this commit ships.
-      SUPATYPE_REALTIME_IMAGE: supatype/realtime:ci-dev
-      SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci-dev
-      # Built from this checkout, below, rather than pulled. The published tag broke on a
-      # `COPY deno.json main.ts ./` that left out the modules main.ts imports, and this job pulling
-      # it meant five edge-function tests started failing here on a change that touched none of
-      # them, while the Dockerfile fix sitting in the same tree went unused. The `edge-functions`
-      # jobs already build it; a job that invokes functions should test the worker it ships.
-      SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
+      # The other five are set by the "Use this checkout's images" step.
 
     steps:
       - uses: actions/checkout@v4
@@ -87,8 +194,7 @@ jobs:
         run: pnpm build
 
       # The engine this checkout is built against (scripts/pin.sh), not :latest. Type
-      # generation and the push run in it, and the control plane integration-test.sh builds copies
-      # its licence and notices out of it, which :latest (the last release) predates.
+      # generation and the push run in it.
       - name: Use the pinned engine
         uses: ./.github/actions/pinned-engine
         with:
@@ -113,12 +219,17 @@ jobs:
         env:
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
-      - name: Build functions-worker from source
-        run: |
-          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
+      # Built from this checkout rather than pulled. The published functions-worker broke on a
+      # `COPY deno.json main.ts ./` that left out the modules main.ts imports, and this job pulling
+      # it meant five edge-function tests started failing here on a change that touched none of
+      # them, while the Dockerfile fix sitting in the same tree went unused.
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
+      # --skip-docker-build: the script otherwise builds realtime, functions-worker and the control
+      # plane a second time over the images just loaded.
       - name: Run supatype dev integration tests
-        run: bash tests/integration/scripts/integration-test.sh --skip-build
+        run: bash tests/integration/scripts/integration-test.sh --skip-build --skip-docker-build
         env:
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
@@ -135,13 +246,13 @@ jobs:
           retention-days: 3
           if-no-files-found: warn
 
-  # Exercises published Docker images via `supatype self-host compose` (Linux only).
+  # Exercises the Docker images via `supatype self-host compose` (Linux only).
   compose-smoke:
     name: self-host compose (images)
     if: github.event_name != 'schedule'
+    needs: images
     runs-on: ubuntu-22.04
-    # 45, not 20: until the pin is an engine release the engine is built from source here.
-    timeout-minutes: 45
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -172,42 +283,18 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
-      # The engine the control plane copies, with its licence and notices, is the pinned one
-      # (`scripts/pin.sh engine-image`): the release image when the engine pin in release/images.json
-      # is an engine release, otherwise a build of the pinned commit. Not :latest, which can predate
-      # both files.
-      - name: Build control-plane image for compose smoke
-        env:
-          OWNER: ${{ github.repository_owner }}
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
-        run: |
-          set -euo pipefail
-          engine="$(bash scripts/pin.sh engine-image)"
-          docker build \
-            --build-arg ENGINE_IMAGE="$engine" \
-            -t supatype/control-plane:ci \
-            -f packages/self-host-control/Dockerfile \
-            .
-
       # The caching and header-buffer assertions below test packages/studio/nginx.conf, so the
       # image under test has to be built from this checkout. Pulling supatype/studio:latest tested
       # whatever was last published instead: the config in that image is fourteen lines with no
       # Cache-Control at all, so the assertions could not pass however correct the repo was, and a
-      # future change to nginx.conf would pass or fail for reasons unconnected to the change.
-      # Root context, not the package directory: the Dockerfile copies the lockfile and
-      # packages/client alongside packages/studio.
-      - name: Build Studio image for compose smoke
-        run: |
-          docker build \
-            -t supatype/studio:ci \
-            -f packages/studio/Dockerfile \
-            .
+      # future change to nginx.conf would pass or fail for reasons unconnected to the change. The
+      # control plane copies the pinned engine, with its licence and notices, which :latest can
+      # predate. Both are the images job's builds, with storage, realtime and functions-worker.
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
       - name: Run compose image smoke test
         run: bash tests/integration/scripts/compose-smoke.sh
-        env:
-          SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci
-          SUPATYPE_STUDIO_IMAGE: supatype/studio:ci
 
       - name: Upload compose logs on failure
         if: failure()
@@ -244,6 +331,7 @@ jobs:
   # wrong base path, or a sign-in form wired to nothing.
   studio-ui-e2e:
     name: studio UI (browser)
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
@@ -291,33 +379,13 @@ jobs:
       # The browser tests drive this checkout's Studio and the services from this repository it
       # talks to, so the stack has to run those builds. Without this it pulled each one at :latest,
       # the last published release, and the tests failed on any control the release did not have
-      # yet. Server, realtime and Postgres come from their own repositories and stay at :latest.
-      # Studio builds from the root (its Dockerfile copies the lockfile and packages/client), and
-      # storage from its own directory with the dist/ that `pnpm build` wrote above. The control
-      # plane copies the pinned engine, as in the compose smoke job.
-      - name: Build this repository's service images
-        env:
-          OWNER: ${{ github.repository_owner }}
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
-        run: |
-          set -euo pipefail
-          docker build -t supatype/studio:ci -f packages/studio/Dockerfile .
-          docker build -t supatype/storage:ci packages/storage
-          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
-          engine="$(bash scripts/pin.sh engine-image)"
-          docker build \
-            --build-arg ENGINE_IMAGE="$engine" \
-            -t supatype/control-plane:ci \
-            -f packages/self-host-control/Dockerfile \
-            .
+      # yet. Realtime is one of them (packages/realtime), and stayed at :latest while the other
+      # four were built here. The engine, server and Postgres run their pins.
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
       - name: Run the Studio UI e2e
         run: bash tests/integration/scripts/studio-ui-e2e.sh
-        env:
-          SUPATYPE_STUDIO_IMAGE: supatype/studio:ci
-          SUPATYPE_STORAGE_IMAGE: supatype/storage:ci
-          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
-          SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci
 
       - name: Upload the Playwright report on failure
         if: failure()
@@ -460,6 +528,7 @@ jobs:
 
   realtime-e2e:
     name: realtime (live stack)
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -492,6 +561,10 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
+      # The script runs the realtime image it is given rather than building its own.
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
+
       - name: Run the realtime e2e
         run: bash tests/integration/scripts/realtime-e2e.sh
 
@@ -508,10 +581,12 @@ jobs:
   # the auth runner was invoked by no workflow, and the storage and realtime harnesses by nothing
   # at all. Two of the bugs they cover reached a release through that gap.
   #
-  # The storage and realtime images are built from the checkout by the script, because both
-  # suites assert behaviour that does not exist in the published tag until a release goes out.
+  # The storage and realtime images are the images job's builds of this checkout, because both
+  # suites assert behaviour that does not exist in the published tag until a release goes out. The
+  # script runs the images it is given and builds its own only when given none.
   data-plane-e2e:
     name: auth, storage and realtime (live stack)
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 30
 
@@ -544,6 +619,9 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
+
       - name: Run the data plane e2e
         run: bash tests/integration/scripts/data-plane-e2e.sh
 
@@ -560,6 +638,7 @@ jobs:
     name: field validation (live stack)
     # Both releases it waited for have shipped: the server carries per-field validators and the
     # engine carries the constraint generator. Verified green against published images.
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
@@ -601,12 +680,11 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
-      # Built here, not pulled: the published worker predates the `hooks/` route prefix, so it
-      # serves no hook at all and would resolve `hooks/<name>` to a function literally called
+      # This checkout's worker, not the published one: that predates the `hooks/` route prefix, so
+      # it serves no hook at all and would resolve `hooks/<name>` to a function literally called
       # "hooks". The worker is in this repository, so this half needs no release to be testable.
-      - name: Build functions-worker from source
-        run: |
-          docker build             -t supatype/functions-worker:ci             -f packages/functions-worker/Dockerfile             packages/functions-worker
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
       # The constraint names asserted below are the pinned engine's (scripts/pin.sh).
       # :latest, the last release, names them `<table>_check_<n>`.
@@ -617,8 +695,6 @@ jobs:
 
       - name: Run the validation e2e
         run: bash tests/integration/scripts/validation-e2e.sh
-        env:
-          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
 
       - name: Upload stack logs on failure
         if: failure()
@@ -634,6 +710,7 @@ jobs:
     name: kitchen sink (live stack)
     # All four images it waited for are published. Verified green against them: 10/10 browser
     # tests and the whole of verify.ts, from destroyed volumes.
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
@@ -673,12 +750,11 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
-      # Built here, not pulled: the example declares a per-field validator, and the published worker
-      # predates the `hooks/` route prefix, so it would serve no hook at all. Same reason the
-      # validation job builds it.
-      - name: Build functions-worker from source
-        run: |
-          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
+      # This checkout's worker, not the published one: the example declares a per-field validator,
+      # and the published worker predates the `hooks/` route prefix, so it would serve no hook at
+      # all. Same reason as the validation job.
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
       # This suite drives a browser, and the runner ships none. Only the Studio job installed one,
       # so every spec here failed on a missing executable rather than on anything it asserts.
@@ -689,8 +765,6 @@ jobs:
 
       - name: Run the kitchen sink e2e
         run: bash tests/integration/scripts/kitchen-sink-e2e.sh
-        env:
-          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
 
       - name: Upload stack logs on failure
         if: failure()
@@ -707,6 +781,7 @@ jobs:
     name: static app (live stack)
     # The server carrying static mode and its fallback route is published, so this runs everywhere
     # now. Verified green against it.
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
@@ -745,6 +820,9 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
+
       - name: Run the supabucks e2e
         run: bash tests/integration/scripts/supabucks-e2e.sh
 
@@ -764,6 +842,7 @@ jobs:
   # release train, so a pull request could break masking and nothing here would say so.
   masking-e2e:
     name: masking matrix (live stack, both tiers)
+    needs: images
     runs-on: ubuntu-22.04
     # Two fresh stacks, one per tier, each pushed and driven through the whole matrix.
     timeout-minutes: 45
@@ -810,6 +889,12 @@ jobs:
         with:
           github-token: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
 
+      # Realtime is one of the channels under test, and with only the engine set the stack ran it,
+      # and the other images built in this repository, at :latest: the last release, so a pull
+      # request that broke realtime masking would stay green, and one that fixed it would stay red.
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
+
       # No Chromium step: every spec is an HTTP or WebSocket client (masking/playwright.config.ts).
       - name: Run the masking matrix
         run: bash tests/integration/scripts/masking-e2e.sh
@@ -830,6 +915,7 @@ jobs:
     name: server-rendered app (live stack)
     # Both conditions hold now: the published worker serves `greet`, and the rendered compose maps
     # host.docker.internal to the host gateway so `app.mode = "proxy"` resolves on a Linux runner.
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
@@ -868,6 +954,9 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
+
       - name: Run the blog e2e
         run: bash tests/integration/scripts/blog-e2e.sh
 
@@ -886,6 +975,7 @@ jobs:
   # same scripts against its candidate images (scripts/release-train/suites.sh).
   edge-kit-e2e:
     name: edge functions showcase (live stack)
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
@@ -921,16 +1011,13 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
-      # Built here, not pulled: the functions take their configuration as a second argument, and
-      # the gate on the service-role key is the worker's. Same reason the kitchen sink builds it.
-      - name: Build functions-worker from source
-        run: |
-          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
+      # This checkout's worker, not the published one: the functions take their configuration as a
+      # second argument, and the gate on the service-role key is the worker's.
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
       - name: Run the edge kit e2e
         run: bash tests/integration/scripts/edge-kit-e2e.sh
-        env:
-          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
 
       - name: Upload stack logs on failure
         if: failure()
@@ -945,6 +1032,7 @@ jobs:
 
   framework-parity-e2e:
     name: Vue, Svelte and Solid parity (live stack)
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
@@ -977,17 +1065,14 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
-      - name: Build functions-worker from source
-        run: |
-          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
       - name: Install Chromium
         run: pnpm --filter supatype-e2e exec playwright install --with-deps chromium
 
       - name: Run the framework parity e2e
         run: bash tests/integration/scripts/framework-parity-e2e.sh
-        env:
-          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
 
       - name: Upload stack logs on failure
         if: failure()
@@ -1002,6 +1087,7 @@ jobs:
 
   expo-auth-e2e:
     name: Expo native auth on web (live stack)
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
@@ -1036,6 +1122,9 @@ jobs:
 
       - name: Install Chromium
         run: pnpm --filter supatype-e2e exec playwright install --with-deps chromium
+
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
       - name: Run the expo-auth e2e
         run: bash tests/integration/scripts/expo-auth-e2e.sh
@@ -1078,6 +1167,7 @@ jobs:
   #   bash tests/integration/scripts/field-conformance.sh
   field-conformance:
     name: field conformance (live stack)
+    needs: images
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
@@ -1122,6 +1212,9 @@ jobs:
         with:
           github-token: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
 
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
+
       - name: Every field kind, against a real database
         run: bash tests/integration/scripts/field-conformance.sh
 
@@ -1137,6 +1230,7 @@ jobs:
   zero-to-running:
     name: "zero to running: workspace CLI (${{ matrix.os }})"
     if: github.event_name != 'schedule'
+    needs: images
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -1213,6 +1307,11 @@ jobs:
         run: node tests/integration/scripts/ci-prefetch-binaries.mjs
         env:
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+      # The workspace CLI, so the stack it starts is this checkout's too. The script pulls only an
+      # image that is not already local, and these are; on macOS they load into Colima's daemon.
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
 
       - name: Run the zero-to-running soak
         run: bash tests/integration/scripts/zero-to-running.sh
