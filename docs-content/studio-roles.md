@@ -1,6 +1,13 @@
 ---
 title: "Studio roles"
 description: "What admins, developers, editors and viewers can do in Supatype Studio, full access and Studio mode, field masking, Send as, drafts and publishing, and how to give someone a role."
+head:
+  - tag: title
+    content: "Studio roles and permissions | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/studio-roles.png"
 ---
 
 Everyone who signs in to Studio has a Studio role. The role decides which screens they see and what they may change.
@@ -19,7 +26,7 @@ A self-hosted project has four Studio roles:
 
 **Viewer**: Reads content, files, schema and logs. Changes nothing.
 
-Supatype Cloud adds owner and billing roles for the organisation.
+Supatype Cloud adds owner and billing roles for the organisation. On a self-hosted project those two grant nothing, and the CLI refuses any role but the four above.
 
 :::note
 A Studio role is separate from your app. It grants nothing in your own application, and `Role<>` rules in the schema do not read it.

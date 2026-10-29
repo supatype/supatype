@@ -1,6 +1,13 @@
 ---
 title: "Storage"
 description: "Supatype storage: declare buckets in the schema, file and image fields, bucket access rules, uploads, signed URLs, image transforms, limits and where files are kept."
+head:
+  - tag: title
+    content: "File storage with access rules and image transforms | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/storage.png"
 ---
 
 Declare buckets in your schema, point file and image fields at them, and upload through the client. Who may read, upload, overwrite and delete is decided by Postgres from the bucket's rules.
@@ -96,6 +103,8 @@ const { data, error } = await supatype.storage.from("attachments").upload(`${use
 if (error) console.error(error.status, error.message)
 ```
 
+`file` may be a `File`, a `Blob` or an `ArrayBuffer`. On success `data` is `{ path }`.
+
 Without `contentType` the client uses the `File`'s own type. If that is missing or generic, the service guesses from the extension (`.png`, `.pdf`, `.mp4` and other common types). The type is checked against `accept` before anything is stored.
 
 With `upsert: true` an existing file at that path is replaced if the `update` rule allows it. The new bytes are stored alongside the old ones and swapped in when the row commits, so a reader never sees a half-written file.
@@ -131,9 +140,13 @@ const { data: files } = await bucket.list(`${userId}/`, { limit: 50, offset: 0 }
 
 `list` returns up to 100 entries unless you pass `limit`. Each entry has `name`, `size`, `mimetype`, the owner and timestamps.
 
+The first argument to `list` is a folder. Folders inside it come first, then files, each in name order, and there is no sort option. Pass `search` to match names without regard to case. The result also carries `count`, the number of matching entries in all.
+
+Every file the service serves carries `Cache-Control: public, max-age=3600`. There is no setting per upload.
+
 Public and private buckets differ in CORS too. A public bucket answers any origin. A private bucket sends no `Access-Control-Allow-Origin`, so read its files from a browser with a signed URL or `download`.
 
-`storage.listBuckets()` and `storage.createBucket()` need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead.
+`storage.listBuckets()` and `storage.createBucket(name, { public, fileSizeLimit, allowedMimeTypes })` need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead. The client has no call to change or delete a bucket. To change one, edit its declaration and push.
 
 <h2 id="transforms">Image transforms</h2>
 

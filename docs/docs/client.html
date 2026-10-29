@@ -120,6 +120,20 @@
 })</pre></div>
     <p>Every page in these docs imports the client from this one file. <code>supatype init</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
     <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
+    <p><code>createClient</code> takes these options as well as <code>url</code> and <code>anonKey</code>:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Option</th><th scope="col">What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>serviceRoleKey</code></td><td>Bypasses row-level security. Use it only on a server or in a trusted tool, and never ship it to a browser.</td></tr>
+        <tr><td><code>headers</code></td><td>Headers sent with every request. Pass a function to have it read on each request.</td></tr>
+        <tr><td><code>auth.storageKey</code></td><td>Key the session is saved under. Default <code>"supatype.auth.session"</code>.</td></tr>
+        <tr><td><code>auth.storage</code></td><td>Your own session store with <code>getItem</code>, <code>setItem</code> and <code>removeItem</code>, such as AsyncStorage in React Native.</td></tr>
+        <tr><td><code>auth.cookiePrefix</code></td><td>Prefix of the auth cookie <code>@supatype/ssr</code> reads. Default <code>"st"</code>.</td></tr>
+        <tr><td><code>timeout</code>, <code>retry</code></td><td>See <a href="#timeouts-and-retries">Timeouts and retries</a>.</td></tr>
+        <tr><td><code>initialSession</code></td><td>A session to start with. <code>@supatype/ssr</code> uses it to hand a cookie session to the client.</td></tr>
+        <tr><td><code>queryCache</code></td><td>The in-memory cache for <code>.cache()</code> reads. Default: one shared cache.</td></tr>
+      </tbody>
+    </table></div>
 
     <h2 id="types">Generated types</h2>
     <p><code>supatype dev</code>, <code>supatype push</code> and <code>supatype generate</code> write these files. Do not edit them.</p>
@@ -131,7 +145,7 @@
         <tr><td><code>types/database.ts</code></td><td>The <code>Database</code> type, for code that wants the raw shapes</td></tr>
       </tbody>
     </table></div>
-    <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types.</p>
+    <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: <code>createClient&lt;MyDatabase&gt;({ ... })</code>.</p>
 
     <h2 id="read">Read rows</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -252,7 +266,8 @@ sub.unsubscribe()</pre></div>
 <pre><span class="k">const</span> { data: reply, error: fnError } = <span class="k">await</span> supatype.functions.invoke(<span class="s">"hello"</span>, { body: { name: <span class="s">"Alex"</span> } })
 <span class="k">if</span> (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)</pre></div>
-    <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed.</p>
+    <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed. <code>invoke</code> also takes <code>method</code> (default <code>POST</code>), <code>headers</code> and <code>idempotent</code>.</p>
+    <p><code>supatype.rpc(name, params, options)</code> calls a Postgres function. Its options are <code>count</code>, <code>head</code>, <code>schema</code> for a function outside the default schema, and <code>idempotent</code>.</p>
 
     <h2 id="graphql">GraphQL</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -272,11 +287,11 @@ console.log(reply)</pre></div>
 
     <h2 id="errors">Errors</h2>
     <p>Queries, <code>rpc</code>, <code>functions.invoke</code>, auth and most storage calls return <code>{ data, error }</code>. Check <code>error</code> before using <code>data</code>.</p>
-    <p><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>. Do not test it with <code>instanceof</code>.</p>
+    <p><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>. Do not test it with <code>instanceof</code>. When a field validator refused the write, <code>field</code> names the column, so you can mark that input.</p>
     <p>An insert an access rule refuses returns code <code>42501</code>. An update or delete that the rules hide matches no rows and returns no error. <code>single()</code> with no row returns <code>PGRST116</code>.</p>
     <div class="callout warn">
       <span class="callout-label">NETWORK FAILURES</span>
-      <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code such as <code>NETWORK_TIMEOUT</code>. Auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail.</p>
+      <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code: <code>NETWORK_TIMEOUT</code>, <code>NETWORK_CONNECTION_REFUSED</code>, <code>NETWORK_DNS_FAILURE</code> or <code>NETWORK_ERROR</code>. A read still answered 429 after its last retry has code <code>RATE_LIMITED</code>. Auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail.</p>
     </div>
 
     <h2 id="timeouts-and-retries">Timeouts and retries</h2>

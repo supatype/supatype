@@ -1,6 +1,13 @@
 ---
 title: "Seeding"
 description: "Fill a Supatype database with fixture data: seed files, the generated builder, create and upsert, nested children, rich text, relations, database defaults, users and supatype seed."
+head:
+  - tag: title
+    content: "Seeding a Postgres database from TypeScript | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/seeding.png"
 ---
 
 A seed file describes the rows you want. Supatype checks it against your schema, orders the writes by foreign key and applies them in one transaction.

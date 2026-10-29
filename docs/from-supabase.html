@@ -203,6 +203,10 @@
 </ul>
 
 <h2 id="existing-database">Bringing an existing database</h2>
+<p>To bring the data too, dump only your own schema, usually <code>public</code>. Supabase's own schemas, such as <code>auth</code> and <code>storage</code>, are not yours to restore over Supatype's. The CLI has no restore command, so load the dump with <code>psql</code>. <code>supatype dev</code> points <code>DATABASE_URL</code> in <code>.env</code> at the local database. Rows with a foreign key to <code>auth.users</code> need their users to exist first, so move users before those rows.</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> pg_dump -h db.yourproject.supabase.co -U postgres -d postgres --schema=public --no-owner --no-privileges -f supabase-dump.sql
+<span class="pr">$</span> psql "$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" -f supabase-dump.sql</pre></div>
 <p><code>supatype pull</code> reads a live database and drafts <code>schema/index.ts</code> from it. It prints the draft unless you pass <code>--out</code>.</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> supatype pull --connection "postgres://..." --out schema/index.ts
@@ -233,7 +237,25 @@
   <li><strong>Function entry points.</strong> The handler shape differs, so each function's entry needs a small rewrite. The code inside, being Deno, mostly stays.</li>
   <li><strong>Function names and bodies in the client are not typed</strong>, unlike tables.</li>
 </ul>
-<div class="callout"><span class="callout-label">NOT COVERED HERE</span><p>This page does not cover moving auth users or stored files between the two. Plan those as their own step.</p></div>
+
+<h2 id="users-and-files">Users and files</h2>
+<p>There is no command to import auth users or stored files. Plan each as its own step.</p>
+<p>For users, either ask them to sign up again, or copy their rows. Supatype's auth server descends from the same code as Supabase Auth and keeps the same bcrypt hashes in <code>auth.users.encrypted_password</code>, so copied rows keep their passwords. The two <code>auth</code> schemas are not guaranteed to match column for column. Copy the columns you need, at least <code>id</code>, <code>email</code>, <code>encrypted_password</code>, <code>email_confirmed_at</code> and <code>raw_user_meta_data</code>, and try it on a copy first. This path is not a supported tool.</p>
+<p>For files, declare each bucket in your schema and push. Then download each file from Supabase and upload it with a client that holds the service role key, from a one-off script on a server:</p>
+<div class="cb"><div class="cb-bar"><span>scripts/copy-files.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
+
+<span class="k">const</span> supatype = createClient({
+  url: process.env.PUBLIC_SUPATYPE_URL!,
+  anonKey: process.env.ANON_KEY!,
+  serviceRoleKey: process.env.SERVICE_ROLE_KEY!,
+})
+
+<span class="k">export async function</span> copyFile(sourceUrl: string, path: string): <span class="t">Promise</span>&lt;void&gt; {
+  <span class="k">const</span> res = <span class="k">await</span> fetch(sourceUrl)
+  <span class="k">const</span> { error } = <span class="k">await</span> supatype.storage.from(<span class="s">"avatars"</span>).upload(path, <span class="k">await</span> res.blob(), { upsert: <span class="k">true</span> })
+  <span class="k">if</span> (error) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(<span class="s">`${path}: ${error.message}`</span>)
+}</pre></div>
 
     <nav class="pn" aria-label="More pages">
       <a href="/deploy-vm-github-actions.html"><small>PREVIOUS</small><span>Deploy to a VM with GitHub Actions</span></a>
@@ -249,6 +271,7 @@
     <a href="#client-differences">Client differences</a>
     <a href="#existing-database">Existing database</a>
     <a href="#not-carried">What does not carry over</a>
+    <a href="#users-and-files">Users and files</a>
   </nav>
 </div>
 

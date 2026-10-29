@@ -1,6 +1,13 @@
 ---
 title: "Auth"
 description: "Sign users in with email, magic links, phone codes or OAuth, manage sessions, tie tokens to access rules, and use the pre-built React and React Native UI."
+head:
+  - tag: title
+    content: "Auth for Postgres: email, magic links, phone and OAuth | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/auth.png"
 ---
 
 Auth is built into the Supatype server. It signs users in, issues the tokens every request carries, and those tokens are what your schema's access rules check.
@@ -34,13 +41,27 @@ Each method below is a call on `supatype.auth`. The [client page](/docs/client.h
 
 Password reset is `resetPasswordForEmail`, and `updateUser` changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise `SUPATYPE_PASSWORD_MIN_LENGTH`.
 
+`signUp` takes `options.data` for user metadata, which comes back on `user.userMetadata`.
+
+`signInWithOtp` creates the user when they do not exist, unless you pass `options.createUser: false`. For a phone, pass `phone` and optionally `options.channel` (`"sms"` or `"whatsapp"`), then call `verifyOtp` with `type: "sms"`. `resend({ type, email })` or `resend({ type, phone })` sends a confirmation or code again, where `type` is `"signup"`, `"sms"`, `"email_change"` or `"phone_change"`.
+
+For a password reset, wait for `initialize()` on the page the link opens, then call `updateUser({ password })`. A recovery link, or `verifyOtp` with `type: "recovery"`, emits `PASSWORD_RECOVERY` once the session exists.
+
+### Auth errors
+
+Auth calls put the auth server's code in `error.code`, beside `message` and `status`. Branch on the code, not the message: `invalid_credentials`, `email_not_confirmed`, `weak_password`, `user_already_exists`, `email_exists`, and `otp_expired` for an expired link. `error.code` is absent only when the answer carried none, such as a gateway's HTML error page.
+
 ### Multi-factor
 
 `supatype.auth.mfa` has `enroll`, `challenge`, `verify`, `challengeAndVerify` and `unenroll`. TOTP authenticator apps are on by default. Phone factors are off by default and need an SMS provider.
 
+`enroll({ factorType: "totp" })` returns the factor's `id` and a QR code (`totp.qrCode`) and URI (`totp.uri`) to show the user. `challengeAndVerify({ factorId, code })` is `challenge` then `verify` in one call. Call the two separately when the code arrives later, as an SMS does. A verify raises the session to AAL2 and emits `MFA_CHALLENGE_VERIFIED`. `listFactors()` returns every factor in `all` and the verified ones in `totp` and `phone`. `getAuthenticatorAssuranceLevel()` reports the current and next level.
+
 ### Anonymous users
 
 An anonymous sign-in creates a real user with a user id and a session. Turn it on with `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true`. Because the user has an id, an anonymous user passes `LoggedIn` and can own rows. The token carries `is_anonymous: true`.
+
+`signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`.
 
 <h2 id="oauth">OAuth providers</h2>
 
@@ -56,7 +77,7 @@ SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:54321/auth/v1/callback
 
 The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.
 
-Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin_oidc`, `notion`, `slack_oidc`, `snapchat`, `spotify`, `twitch`, `twitter`, `x`, `workos` and `zoom`. Upper-case the name for the variable, so `linkedin_oidc` becomes `SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED`.
+Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin_oidc`, `notion`, `slack_oidc`, `snapchat`, `spotify`, `twitch`, `twitter`, `x`, `workos` and `zoom`. The auth server also accepts `vercel_marketplace`, and the older `linkedin` and `slack`, which the `_oidc` versions replace. Upper-case the name for the variable, so `linkedin_oidc` becomes `SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED`.
 
 ### The sign-in round trip
 
@@ -69,13 +90,16 @@ if (error) throw new Error(error.message)
 window.location.assign(data.url)
 
 // On /auth/callback
-const { error: callbackError } = await supatype.auth.getSessionFromUrl(window.location.href)
+// The client finishes the sign-in in the URL when it starts; initialize() waits for that.
+const { error: callbackError } = await supatype.auth.initialize()
 if (callbackError) console.error(callbackError.message)
 ```
 
 `signInWithOAuth` returns the URL; it does not navigate for you. `redirectTo` must be on the same host as `SITE_URL`, a loopback address, or match an entry in `SUPATYPE_URI_ALLOW_LIST` (comma-separated, globs allowed). Anything else sends the user to `SITE_URL` instead. An app on another domain, or a mobile deep link, needs an allow list entry.
 
-The web default is the implicit flow, which returns tokens in the URL fragment. Pass `flowType: "pkce"` in the options for a code exchange instead; mobile apps should always use PKCE. `getSessionFromUrl` handles both.
+The web default is the implicit flow, which returns tokens in the URL fragment. Pass `flowType: "pkce"` in the options for a code exchange instead; mobile apps should always use PKCE. The client finishes either from the URL when it starts, and removes the tokens from the address bar; `initialize()` resolves once it has, with any `error` the provider sent back. Do not call `getSessionFromUrl` as well: the URL no longer carries the tokens by then, so it answers with an error.
+
+`exchangeCodeForSession(code)` does the PKCE exchange on its own. `options.scopes` asks the provider for extra scopes.
 
 <h2 id="sessions">Sessions and tokens</h2>
 
@@ -84,9 +108,22 @@ A session is a short-lived access token and a refresh token.
 - The access token is a JWT signed with `JWT_SECRET`, valid for one hour. The client sends it as `Authorization: Bearer` on every request.
 - The client refreshes it about a minute before it expires, and again on load if a saved session has already expired. If the refresh fails, the session is cleared rather than kept with a dead token.
 - Refresh tokens rotate: each refresh issues a new one.
-- `signOut` ends the session on the server and clears it locally.
+- `signOut` takes no arguments. It ends every session the user has on the server, not just this device's, and clears it locally.
 
 In the browser the session is saved to `localStorage` under `supatype.auth.session` and mirrored to a cookie named `st-auth-token`, which `@supatype/ssr` reads on the server. Set `auth: { persistSession: false }`, `storageKey` or `cookiePrefix` on `createClient` to change this. On React Native, `createNativeClient` from `@supatype/react-native` stores the session in `expo-secure-store` or AsyncStorage.
+
+### Auth events
+
+`onAuthStateChange` calls back at once with `SIGNED_IN` or `SIGNED_OUT`, then on each of these:
+
+| Event | When |
+| --- | --- |
+| `SIGNED_IN` | A session starts while signed out |
+| `SIGNED_OUT` | The session is cleared |
+| `TOKEN_REFRESHED` | The session is replaced while signed in |
+| `USER_UPDATED` | `updateUser` succeeded. The session passed to the callback carries the updated user |
+| `PASSWORD_RECOVERY` | A password reset link or code produced a session, after its `SIGNED_IN` |
+| `MFA_CHALLENGE_VERIFIED` | An MFA verify raised the session to AAL2 |
 
 ### What the token says
 
@@ -170,7 +207,7 @@ export function SignIn() {
 }
 ```
 
-The web forms are plain, unstyled markup: pass `className` and `labels` to fit your app. `OAuthButton` has a default style and an icon for GitHub, Google and Apple, which a `className` replaces. It sends the browser to the provider; your callback page still calls `getSessionFromUrl`.
+The web forms are plain, unstyled markup: pass `className` and `labels` to fit your app. `OAuthButton` has a default style and an icon for GitHub, Google and Apple, which a `className` replaces. It sends the browser to the provider; the client finishes the sign-in on your callback page by itself, and `initialize()` tells you how it went.
 
 ### React Native
 

@@ -1,6 +1,13 @@
 ---
 title: "CLI"
 description: "Every supatype command with its subcommands and most useful flags: local development, schema and database, seeds, functions, self-host and Supatype Cloud."
+head:
+  - tag: title
+    content: "CLI | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/cli.png"
 ---
 
 Every `supatype` command, grouped by what it is for. Descriptions are the ones `supatype --help` prints.
@@ -15,7 +22,20 @@ $ supatype --help
 $ supatype push --help
 ```
 
+The npm package needs Node.js 22 or later. It is the install to use on Windows.
+
+On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:
+
+```sh
+$ curl -fsSL https://supatype.com/install.sh | bash
+$ brew install supatype/tap/supatype
+```
+
+The script installs one binary to `~/.supatype/bin` and adds that directory to your shell profile. It checks the release signature with `openssl` before installing. Where `openssl` is missing or cannot check ed25519 signatures, as with the LibreSSL macOS ships, it says so and checks only the SHA256. On Alpine it installs the musl build, which needs `apk add libstdc++ libgcc`. The components `dev` downloads are built for glibc only, so run local stacks on a glibc image. `supatype self-update` updates a standalone install.
+
 Run commands from the project directory, where `supatype.config.ts` is. Every command also takes `--project-name <name>`, which names the project for this run over `supatype.config.ts`. `supatype --version` prints the CLI version.
+
+`--project-name` is the same as setting `SUPATYPE_PROJECT_NAME`, and it writes no file. The Compose project, the native database and the state directory under `~/.supatype/projects/` all follow it. Use it to run two stacks of one project side by side, each with its own `SUPATYPE_KONG_PORT`. The name may use lower case letters, digits, `-` and `_`, and must start with a letter or digit.
 
 Many commands that reach a database take `--connection <url>` to override the config, and `--env <name>` to pick an environment when the project is linked.
 
@@ -44,13 +64,17 @@ Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything 
 
 `--role` is `admin`, `developer`, `editor` or `viewer`. See [Studio roles](/docs/studio-roles.html#grant). The first-run steps are in [Local development](/docs/#local-dev).
 
+`keys` prints the keys unless you pass `--write`, which fills blank keys in `.env`. Add `--force` to replace keys already there.
+
+`dev` and `self-host compose up` refuse a `JWT_SECRET` shorter than 32 characters before starting anything, because the REST API cannot start with one. `init` generates a 64-character secret. To replace a short one, generate a longer secret (for example with `openssl rand -base64 48`), put it in `.env` as `JWT_SECRET`, then run `supatype keys --write --force` to sign new keys with it.
+
 <h2 id="schema">Schema and database</h2>
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--overwrite-drift` |
-| `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>` |
-| `generate` | Regenerate TypeScript types without running a migration | `--connection <url>` |
+| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift` |
+| `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>`, `--direct` |
+| `generate` | Regenerate TypeScript types without running a migration |  |
 | `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With --record the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
 | `migrations list` | List applied migrations with schema snapshot metadata | `--connection <url>`, `--env <name>` |
 | `rollback` | Roll back the last applied migration | `--sync-schema`, `--no-sync-schema` |
@@ -62,6 +86,10 @@ Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything 
 | `introspect` | Introspect the live Postgres database (JSON or summary) | `--json`, `--out <path>` |
 | `db check` | Check whether a database meets Supatype's requirements (for external Postgres) | `--connection <url>`, `--schema <name>`, `--emit`, `--fix`, `--authenticator-password <password>` |
 | `types check` | Validate generated client augmentation wiring |  |
+
+`--direct` skips the control plane of a linked project and runs the schema engine on this machine. `generate` reads only the schema, so it needs no database. `pull` prints its draft unless you pass `--out`. `migrations list` shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.
+
+A push never guesses a rename. A column that disappears while a new one appears is a drop and an add, and the drop loses data. In a terminal the push asks whether you meant a rename and records a yes in `supatype/renames.json`. Anywhere else it refuses and prints the `supatype rename` command that records it.
 
 An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or `kind:name` for a table. Studio shows the result under [Schema objects](/docs/studio.html#database).
 
@@ -96,7 +124,7 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `hooks new <name>` | Scaffold a hook handler |  |
 | `hooks list` | Show the hooks the schema declares and whether each one can run |  |
 
-`functions deploy` deploys to a self-hosted Compose stack when the project has one, and to Supatype Cloud otherwise. On a self-hosted stack, read function logs in Studio. See [Functions](/docs/functions.html).
+On an unlinked project with a self-hosted Compose stack, `functions deploy` uploads nothing: the worker serves `functions/` from disk, so it lists the functions and prints the command that restarts the worker. Otherwise it deploys to the linked project, or to Supatype Cloud. On a self-hosted stack, read function logs in Studio. See [Functions](/docs/functions.html).
 
 <h2 id="self-host">Self-host and deploy</h2>
 
@@ -112,10 +140,14 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
 | `envs list` | List linked environments |  |
 | `envs use <name>` | Set the default environment |  |
-| `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database | `--schema-only`, `--app-only`, `--skip-build`, `--yes`, `--overwrite-drift` |
+| `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database | `--env <name>` (default `production`), `--schema-only`, `--app-only`, `--skip-build`, `--preview`, `--yes`, `--overwrite-drift` |
 | `deploy rollback` | Roll back to the previous static site deployment | `--to <id>`, `--env <name>` |
 | `deploy status` | Show current deployment status | `--env <name>` |
 | `deploy logs [version]` | Show build logs for a deployment | `--env <name>` |
+
+Every `self-host compose` command renders `.supatype/self-host/docker-compose.yml` again before it runs. The file names each bind mount by its absolute path on this machine, and names its Compose project `supatype-` plus `project.name`. So `docker compose -f .supatype/self-host/docker-compose.yml` run by hand reaches the same stack, and a project moved to another folder is picked up by the next command.
+
+A render keeps the stack in the mode it runs in. While `supatype dev` runs for the project, commands such as `push`, `update` and `self-host compose` render dev mode. Otherwise they use the mode of the running `server` container, and standalone when none is running. So a push to a production stack leaves it standalone.
 
 For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The full walkthrough is in [Self-host](/docs/#self-host) and [Deploy to a VM with GitHub Actions](/docs/guides/deploy-vm-github-actions.html).
 

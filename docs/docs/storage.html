@@ -186,6 +186,7 @@
   upsert: <span class="k">false</span>,
 })
 <span class="k">if</span> (error) console.error(error.status, error.message)</pre></div>
+    <p><code>file</code> may be a <code>File</code>, a <code>Blob</code> or an <code>ArrayBuffer</code>. On success <code>data</code> is <code>{ path }</code>.</p>
     <p>Without <code>contentType</code> the client uses the <code>File</code>'s own type. If that is missing or generic, the service guesses from the extension (<code>.png</code>, <code>.pdf</code>, <code>.mp4</code> and other common types). The type is checked against <code>accept</code> before anything is stored.</p>
     <p>With <code>upsert: true</code> an existing file at that path is replaced if the <code>update</code> rule allows it. The new bytes are stored alongside the old ones and swapped in when the row commits, so a reader never sees a half-written file.</p>
     <div class="tbl"><table>
@@ -218,8 +219,10 @@
 <span class="k">const</span> { data: link } = <span class="k">await</span> bucket.createSignedUrl(<span class="s">`${userId}/slides.pdf`</span>, <span class="s">3600</span>)
 <span class="k">const</span> { data: files } = <span class="k">await</span> bucket.list(<span class="s">`${userId}/`</span>, { limit: <span class="s">50</span>, offset: <span class="s">0</span> })</pre></div>
     <p><code>list</code> returns up to 100 entries unless you pass <code>limit</code>. Each entry has <code>name</code>, <code>size</code>, <code>mimetype</code>, the owner and timestamps.</p>
+    <p>The first argument to <code>list</code> is a folder. Folders inside it come first, then files, each in name order, and there is no sort option. Pass <code>search</code> to match names without regard to case. The result also carries <code>count</code>, the number of matching entries in all.</p>
+    <p>Every file the service serves carries <code>Cache-Control: public, max-age=3600</code>. There is no setting per upload.</p>
     <p>Public and private buckets differ in CORS too. A public bucket answers any origin. A private bucket sends no <code>Access-Control-Allow-Origin</code>, so read its files from a browser with a signed URL or <code>download</code>.</p>
-    <p><code>storage.listBuckets()</code> and <code>storage.createBucket()</code> need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead.</p>
+    <p><code>storage.listBuckets()</code> and <code>storage.createBucket(name, { public, fileSizeLimit, allowedMimeTypes })</code> need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead. The client has no call to change or delete a bucket. To change one, edit its declaration and push.</p>
 
     <h2 id="transforms">Image transforms</h2>
     <p><code>getPublicUrl</code> and <code>download</code> take a <code>transform</code> option. The service resizes and re-encodes the image on each request.</p>

@@ -1,6 +1,13 @@
 ---
 title: "Studio"
 description: "Supatype Studio: content editors built from your models, rich text, media, drafts, versions, live preview, API docs, a GraphQL explorer, a SQL runner and migration history."
+head:
+  - tag: title
+    content: "Studio | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/studio.png"
 ---
 
 Studio is the admin app that ships with every Supatype stack. It builds content editors from your models and gives developers the API docs, a SQL runner and the database history in one place.
@@ -12,7 +19,7 @@ Pre-1.0: APIs and config may change between releases.
 Studio is served at `/studio/` on the project's gateway.
 
 - **Local, Docker (the default):** `supatype dev` prints it in the **Services running** panel as `http://localhost:<gateway-port>/studio/`. The port is `SUPATYPE_KONG_PORT` in `.env`.
-- **Self-hosted:** `http://<your-host>:<gateway-port>/studio/`, behind your reverse proxy. See [Self-host](/docs/#self-host).
+- **Self-hosted:** `http://<your-host>:<gateway-port>/studio/`, or `/studio/` on your domain once HTTPS is on. See [Self-host](/docs/#self-host).
 - **Local, Native:** `supatype dev` does not start Studio with the Native provider.
 
 Sign in with an email and password. The first admin comes from `SUPATYPE_ADMIN_EMAIL` and `SUPATYPE_ADMIN_PASSWORD` in `.env`, as described in [Local development](/docs/#local-dev). Add more people with `supatype admin create-user`.
@@ -39,7 +46,7 @@ Studio reads your schema after each push and builds an editor for every model. T
 
 ### The list
 
-Each model opens on a list of its records. Columns you can sort have sortable headers. Searchable fields get a search box. Tick rows to delete several at once, after a confirmation. **Create Post** (named after the model) opens an empty form.
+Each model opens on a list of its records. Columns you can sort have sortable headers. Fields wrapped in `Searchable<T>`, or named in the model's `searchable: [...]` option, get a search box. Tick rows to delete several at once, after a confirmation. **Create Post** (named after the model) opens an empty form.
 
 ### The record editor
 
@@ -203,7 +210,7 @@ Under Observability, API request logs are not recorded yet. Auth, storage, realt
 | Screen | For |
 | --- | --- |
 | Dashboard | Totals and recent activity for users, records, storage and the database |
-| Authentication | Users (including their Studio access), access policies, providers, configuration and email templates. See [Auth](/docs/auth.html) |
+| Authentication | Users (including their Studio access), access policies, providers, configuration and email templates. Configuration is read-only: change those settings in `.env` and restart the stack. A template saved under Email Templates is kept in the database until **Reset to default** removes it. See [Auth](/docs/auth.html) |
 | Settings | API keys, CORS origins and database settings |
 | Realtime | Channels, clients, a live stream and a broadcast tester, where the deployment's control plane supports the inspector |
 

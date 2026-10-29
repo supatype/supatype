@@ -1,6 +1,13 @@
 ---
 title: "Get started"
 description: "Run Supatype locally, self-host it with Docker Compose, deploy changes and upgrade Supatype components."
+head:
+  - tag: title
+    content: "Get started with Supatype: local development and self-hosting"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/docs.png"
 ---
 
 Run the stack on your machine, self-host it with Docker Compose, ship changes and upgrade Supatype components.
@@ -17,7 +24,7 @@ Install the CLI, scaffold a project, and run the full stack on your machine. Sup
 $ npm install -g @supatype/cli
 ```
 
-The first run downloads the binaries it needs into `~/.supatype/cache/`.
+The CLI needs Node.js 22 or later. For a machine without Node, the [CLI](/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
 
 ### 2. Create a project
 
@@ -26,7 +33,9 @@ $ mkdir my-app && cd my-app
 $ supatype init
 ```
 
-`supatype init` writes `package.json`, `supatype.config.ts`, a starter schema and `public/`, installs dependencies with your package manager and writes the API keys to `.env`. Run `npm install` or `supatype keys --write` yourself only if you passed `--no-install` or `--no-keys`.
+`supatype init` writes `package.json`, `supatype.config.ts`, a starter schema and `public/`, installs dependencies with your package manager and writes the API keys to `.env`. Run `npm install` or `supatype keys --write` yourself only if you passed `--no-install` or `--no-keys`. Pass `-y` to take every default without being asked.
+
+It also writes `seed.ts` and an empty `seeds/` for [seeding](/docs/seeding.html). `package.json` lists `@supatype/cli` and `@supatype/types` as dev dependencies, because they run only at build time. The passwords and the JWT secret in `.env` are random for each project.
 
 ### 3. Start the stack
 
@@ -38,9 +47,20 @@ $ supatype dev
 
 It stops with its stack when the process that started it exits, as it does on Ctrl+C: a script that is killed, or a cancelled CI job, leaves nothing running. To leave a stack running with nothing attached, use `supatype self-host compose up -d`.
 
+A script that starts `dev` in the background should `exec` it, so the process ID the script holds is `dev` itself and stopping it stops the stack cleanly:
+
+```sh
+(cd my-app && exec npx supatype dev) &
+DEV_PID=$!
+# ... run your tests ...
+kill "$DEV_PID"; wait "$DEV_PID"
+```
+
 If `dev` itself is killed (its process ended, or its window closed before it finished stopping), the stack can be left running. The next `supatype dev` finds it and offers to stop it, and `supatype self-host compose down` stops it now.
 
 The gateway serves REST at `/rest/v1/`, auth at `/auth/v1/`, storage and realtime. With Docker it listens on `http://localhost:<gateway-port>`: init picks a free port per project and writes the URL to `.env` as `API_EXTERNAL_URL` (the port alone is `SUPATYPE_KONG_PORT`). With Native it listens on `http://localhost:54321`.
+
+For direct SQL, Docker publishes Postgres on `127.0.0.1` at `SUPATYPE_DEV_DB_PORT` (54329 unless set), and `dev` points `DATABASE_URL` in `.env` at it. Native Postgres listens on port 5432 and checks passwords: connect as `postgres` with `POSTGRES_PASSWORD` from `.env`, or run `supatype pg psql`, which passes it for you.
 
 ### 4. Sign in to Studio
 
@@ -75,9 +95,11 @@ export type Post = Model<{
 
 Merge the new names into the file's existing `import type` line. The table is `post`. See [Schema](/docs/schema.html) for field types, relations and access rules.
 
+A change that would lose data, such as dropping a column, is never applied silently: `dev` asks first. To rename a column or table rather than drop it, see [Renames](/docs/schema.html#renames).
+
 ### 7. Query it
 
-Create the client once, from the generated file, with the URL and key `init` wrote to `.env`:
+Install the client first with `npm install @supatype/client`: the generated file builds on it. Then create the client once, from the generated file, with the URL and key `init` wrote to `.env`:
 
 ```ts title="src/supatype.ts"
 import { createClient } from "../supatype/generated/client"
@@ -155,6 +177,8 @@ Only the gateway is published on every interface, at `SUPATYPE_KONG_PORT`, or on
 
 Images come from Docker Hub at `:latest`: `supatype/postgres:17-latest`, `supatype/server` (which includes realtime), `supatype/storage`, `supatype/studio`, `supatype/schema-engine`, `supatype/functions-worker` and `supatype/control-plane`. Pin versions with `SUPATYPE_*_IMAGE` in `.env` if you need to.
 
+To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: { external: { url: process.env.DATABASE_URL! } }` in `supatype.config.ts`. The stack then starts no `db` service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in `supatype/postgres`. Realtime needs `wal_level = logical`, a free replication slot, the `wal2json` plugin and a role with `REPLICATION`. `supatype db check --connection "$DATABASE_URL"` reports what a database lacks, and `--emit` prints the SQL that fixes what it can.
+
 Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8000`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
 
 Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names, which bypasses row rules and field masking. Point it at a least-privilege role granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/my-app`.
@@ -196,6 +220,7 @@ Local and self-hosted environments read the same committed config. What differs 
 | --- | --- | --- |
 | `supatype.config.ts` | Schema path, app routing, version pins | Yes |
 | `supatype.local.config.ts` | Overrides for your machine, such as the dev proxy | No |
+| `supatype/renames.json` | Renames recorded with `supatype rename` | Yes |
 | `.env` | `DATABASE_URL`, JWT keys, `API_EXTERNAL_URL` | No |
 
 ### What to run when something changes

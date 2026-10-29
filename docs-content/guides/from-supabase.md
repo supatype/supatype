@@ -1,6 +1,13 @@
 ---
 title: "Coming from Supabase"
 description: "How Supabase tables, RLS policies, supabase-js, storage, auth, realtime and functions map to Supatype, with a before and after example and how to adopt existing tables."
+head:
+  - tag: title
+    content: "Supabase alternative: moving from Supabase to Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/from-supabase.png"
 ---
 
 Supatype runs on Postgres with row level security, a REST and GraphQL API, auth, storage, realtime and functions, so most of what you know carries over. The difference is where it starts: you write TypeScript types and access rules, and Supatype writes the SQL, the policies and the client types from them.
@@ -113,6 +120,13 @@ The query builder reads the same way. The differences are in the setup: `createC
 
 <h2 id="existing-database">Bringing an existing database</h2>
 
+To bring the data too, dump only your own schema, usually `public`. Supabase's own schemas, such as `auth` and `storage`, are not yours to restore over Supatype's. The CLI has no restore command, so load the dump with `psql`. `supatype dev` points `DATABASE_URL` in `.env` at the local database. Rows with a foreign key to `auth.users` need their users to exist first, so move users before those rows.
+
+```sh
+$ pg_dump -h db.yourproject.supabase.co -U postgres -d postgres --schema=public --no-owner --no-privileges -f supabase-dump.sql
+$ psql "$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" -f supabase-dump.sql
+```
+
 `supatype pull` reads a live database and drafts `schema/index.ts` from it. It prints the draft unless you pass `--out`.
 
 ```sh
@@ -150,6 +164,26 @@ $ supatype push
 - **Function entry points.** The handler shape differs, so each function's entry needs a small rewrite. The code inside, being Deno, mostly stays.
 - **Function names and bodies in the client are not typed**, unlike tables.
 
-:::note[Not covered here]
-This page does not cover moving auth users or stored files between the two. Plan those as their own step.
-:::
+<h2 id="users-and-files">Users and files</h2>
+
+There is no command to import auth users or stored files. Plan each as its own step.
+
+For users, either ask them to sign up again, or copy their rows. Supatype's auth server descends from the same code as Supabase Auth and keeps the same bcrypt hashes in `auth.users.encrypted_password`, so copied rows keep their passwords. The two `auth` schemas are not guaranteed to match column for column. Copy the columns you need, at least `id`, `email`, `encrypted_password`, `email_confirmed_at` and `raw_user_meta_data`, and try it on a copy first. This path is not a supported tool.
+
+For files, declare each bucket in your schema and push. Then download each file from Supabase and upload it with a client that holds the service role key, from a one-off script on a server:
+
+```ts title="scripts/copy-files.ts"
+import { createClient } from "../supatype/generated/client"
+
+const supatype = createClient({
+  url: process.env.PUBLIC_SUPATYPE_URL!,
+  anonKey: process.env.ANON_KEY!,
+  serviceRoleKey: process.env.SERVICE_ROLE_KEY!,
+})
+
+export async function copyFile(sourceUrl: string, path: string): Promise<void> {
+  const res = await fetch(sourceUrl)
+  const { error } = await supatype.storage.from("avatars").upload(path, await res.blob(), { upsert: true })
+  if (error) throw new Error(`${path}: ${error.message}`)
+}
+```

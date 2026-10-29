@@ -132,7 +132,7 @@ Install the CLI, scaffold a project, and run the full stack on your machine. Sup
 $ npm install -g @supatype/cli
 ```
 
-The first run downloads the binaries it needs into `~/.supatype/cache/`.
+The CLI needs Node.js 22 or later. For a machine without Node, the [CLI](https://www.supatype.com/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
 
 #### 2. Create a project
 
@@ -141,7 +141,9 @@ $ mkdir my-app && cd my-app
 $ supatype init
 ```
 
-`supatype init` writes `package.json`, `supatype.config.ts`, a starter schema and `public/`, installs dependencies with your package manager and writes the API keys to `.env`. Run `npm install` or `supatype keys --write` yourself only if you passed `--no-install` or `--no-keys`.
+`supatype init` writes `package.json`, `supatype.config.ts`, a starter schema and `public/`, installs dependencies with your package manager and writes the API keys to `.env`. Run `npm install` or `supatype keys --write` yourself only if you passed `--no-install` or `--no-keys`. Pass `-y` to take every default without being asked.
+
+It also writes `seed.ts` and an empty `seeds/` for [seeding](https://www.supatype.com/docs/seeding.html). `package.json` lists `@supatype/cli` and `@supatype/types` as dev dependencies, because they run only at build time. The passwords and the JWT secret in `.env` are random for each project.
 
 #### 3. Start the stack
 
@@ -153,9 +155,20 @@ $ supatype dev
 
 It stops with its stack when the process that started it exits, as it does on Ctrl+C: a script that is killed, or a cancelled CI job, leaves nothing running. To leave a stack running with nothing attached, use `supatype self-host compose up -d`.
 
+A script that starts `dev` in the background should `exec` it, so the process ID the script holds is `dev` itself and stopping it stops the stack cleanly:
+
+```sh
+(cd my-app && exec npx supatype dev) &
+DEV_PID=$!
+# ... run your tests ...
+kill "$DEV_PID"; wait "$DEV_PID"
+```
+
 If `dev` itself is killed (its process ended, or its window closed before it finished stopping), the stack can be left running. The next `supatype dev` finds it and offers to stop it, and `supatype self-host compose down` stops it now.
 
 The gateway serves REST at `/rest/v1/`, auth at `/auth/v1/`, storage and realtime. With Docker it listens on `http://localhost:<gateway-port>`: init picks a free port per project and writes the URL to `.env` as `API_EXTERNAL_URL` (the port alone is `SUPATYPE_KONG_PORT`). With Native it listens on `http://localhost:54321`.
+
+For direct SQL, Docker publishes Postgres on `127.0.0.1` at `SUPATYPE_DEV_DB_PORT` (54329 unless set), and `dev` points `DATABASE_URL` in `.env` at it. Native Postgres listens on port 5432 and checks passwords: connect as `postgres` with `POSTGRES_PASSWORD` from `.env`, or run `supatype pg psql`, which passes it for you.
 
 #### 4. Sign in to Studio
 
@@ -192,9 +205,11 @@ export type Post = Model<{
 
 Merge the new names into the file's existing `import type` line. The table is `post`. See [Schema](https://www.supatype.com/docs/schema.html) for field types, relations and access rules.
 
+A change that would lose data, such as dropping a column, is never applied silently: `dev` asks first. To rename a column or table rather than drop it, see [Renames](https://www.supatype.com/docs/schema.html#renames).
+
 #### 7. Query it
 
-Create the client once, from the generated file, with the URL and key `init` wrote to `.env`:
+Install the client first with `npm install @supatype/client`: the generated file builds on it. Then create the client once, from the generated file, with the URL and key `init` wrote to `.env`:
 
 `src/supatype.ts`:
 
@@ -272,6 +287,8 @@ The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYP
 
 Images come from Docker Hub at `:latest`: `supatype/postgres:17-latest`, `supatype/server` (which includes realtime), `supatype/storage`, `supatype/studio`, `supatype/schema-engine`, `supatype/functions-worker` and `supatype/control-plane`. Pin versions with `SUPATYPE_*_IMAGE` in `.env` if you need to.
 
+To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: { external: { url: process.env.DATABASE_URL! } }` in `supatype.config.ts`. The stack then starts no `db` service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in `supatype/postgres`. Realtime needs `wal_level = logical`, a free replication slot, the `wal2json` plugin and a role with `REPLICATION`. `supatype db check --connection "$DATABASE_URL"` reports what a database lacks, and `--emit` prints the SQL that fixes what it can.
+
 Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8000`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
 
 Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names, which bypasses row rules and field masking. Point it at a least-privilege role granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/my-app`.
@@ -311,6 +328,7 @@ Local and self-hosted environments read the same committed config. What differs 
 | --- | --- | --- |
 | `supatype.config.ts` | Schema path, app routing, version pins | Yes |
 | `supatype.local.config.ts` | Overrides for your machine, such as the dev proxy | No |
+| `supatype/renames.json` | Renames recorded with `supatype rename` | Yes |
 | `.env` | `DATABASE_URL`, JWT keys, `API_EXTERNAL_URL` | No |
 
 #### What to run when something changes
@@ -406,6 +424,8 @@ Pre-1.0: APIs and config may change between releases.
 
 Each exported `Model<>` type is a table. Import the types from `@supatype/types`.
 
+Nothing in `schema/index.ts` runs. The CLI reads it as type declarations, so a model is an `export type`, never an `export const`, and there is no builder function to call.
+
 `schema/index.ts`:
 
 ```ts
@@ -444,11 +464,20 @@ Every field is required (`NOT NULL`) unless you wrap it in `Optional<>`. Use `Op
 | `"news" \| "guide"` | an enum of those values |
 | `string[]` | an array |
 | `JSON<T>` | JSONB, typed as `T` in the client |
+| `Vector<1536>` | a pgvector embedding with that many dimensions |
 | `RichText`, `Blocks<T>`, `Slug<"title">` | content fields, see [below](https://www.supatype.com/docs/schema.html#content) |
 | `ImageAsset<Bucket>`, `FileAsset` | a file in a storage bucket |
 | `SupatypeAuthUserId` | the id of a sign-in user, see [below](https://www.supatype.com/docs/schema.html#owners) |
 
 Wrap a field to add more: `Unique<T>`, `Indexed<T>`, `Default<T, value>`, `MaxLength<T, n>`, `Between<T, min, max>`.
+
+Three wrappers shape a field in Studio. `EditorReadOnly<T>` is shown but not editable there, and the API can still write it. `Computed<T>` is filled by the database and read-only in Studio. `ComputedFrom<string, "title">` is prefilled from the fields it names on a new record, until the editor changes it.
+
+For translated content, declare the locales once, such as `export type Locales = LocaleConfig<["en", "fr"], "en">`, and wrap a field in `Localized<T>`. It is stored as JSONB keyed by locale: `{ "en": "Hello", "fr": "Bonjour" }`. `LocalizedModel<>` localizes a model's text fields for you, and `NotLocalized<T>` opts one back out. There is no locale setting in `supatype.config.ts`.
+
+Wrap the fields in `WithTimestamps<{ ... }>` to add `created_at` and `updated_at`, which the database fills in.
+
+With the Native provider, `supatype dev` stores `Vector<>` and `Geo` fields as JSONB, because its Postgres has no pgvector or PostGIS. Use Docker to work with them locally.
 
 ### Relations
 
@@ -689,6 +718,19 @@ Every page in these docs imports the client from this one file. `supatype init` 
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 
+`createClient` takes these options as well as `url` and `anonKey`:
+
+| Option | What it does |
+| --- | --- |
+| `serviceRoleKey` | Bypasses row-level security. Use it only on a server or in a trusted tool, and never ship it to a browser. |
+| `headers` | Headers sent with every request. Pass a function to have it read on each request. |
+| `auth.storageKey` | Key the session is saved under. Default `"supatype.auth.session"`. |
+| `auth.storage` | Your own session store with `getItem`, `setItem` and `removeItem`, such as AsyncStorage in React Native. |
+| `auth.cookiePrefix` | Prefix of the auth cookie `@supatype/ssr` reads. Default `"st"`. |
+| `timeout`, `retry` | See [Timeouts and retries](https://www.supatype.com/docs/client.html#timeouts-and-retries). |
+| `initialSession` | A session to start with. `@supatype/ssr` uses it to hand a cookie session to the client. |
+| `queryCache` | The in-memory cache for `.cache()` reads. Default: one shared cache. |
+
 ### Generated types
 
 `supatype dev`, `supatype push` and `supatype generate` write these files. Do not edit them.
@@ -699,7 +741,7 @@ The session is saved and restored by default. Pass `auth: { persistSession: fals
 | `supatype/generated/index.d.ts` | Row, insert and update types for each table |
 | `types/database.ts` | The `Database` type, for code that wants the raw shapes |
 
-Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `createClient` with no type argument picks up the generated types.
+Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `createClient` with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: `createClient<MyDatabase>({ ... })`.
 
 ### Read rows
 
@@ -870,7 +912,9 @@ if (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)
 ```
 
-The call goes to `/functions/v1/hello` with the user's token. A JSON response is parsed. Function names and bodies are not typed.
+The call goes to `/functions/v1/hello` with the user's token. A JSON response is parsed. Function names and bodies are not typed. `invoke` also takes `method` (default `POST`), `headers` and `idempotent`.
+
+`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`.
 
 ### GraphQL
 
@@ -900,11 +944,11 @@ Using another GraphQL client? `readGraphqlSchema` reads the `data` of an introsp
 
 Queries, `rpc`, `functions.invoke`, auth and most storage calls return `{ data, error }`. Check `error` before using `data`.
 
-`error` is a plain object with `message` and, when known, `code`, `status`, `details` and `hint`. Do not test it with `instanceof`.
+`error` is a plain object with `message` and, when known, `code`, `status`, `details` and `hint`. Do not test it with `instanceof`. When a field validator refused the write, `field` names the column, so you can mark that input.
 
 An insert an access rule refuses returns code `42501`. An update or delete that the rules hide matches no rows and returns no error. `single()` with no row returns `PGRST116`.
 
-> **NETWORK FAILURES:** A network failure on a query, `rpc` or function call comes back as `error` with a code such as `NETWORK_TIMEOUT`. Auth and storage calls throw instead, so wrap them in `try` when the network may fail.
+> **NETWORK FAILURES:** A network failure on a query, `rpc` or function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Auth and storage calls throw instead, so wrap them in `try` when the network may fail.
 
 ### Timeouts and retries
 
@@ -1022,9 +1066,11 @@ For anything `filter` cannot say, such as ranges or embeds with conditions, use 
 
 `useMutation(table, operation)` takes `"insert"`, `"update"`, `"delete"` or `"upsert"` and returns `mutate`, `loading` and `error`. `mutate(data, { filter, publish })` takes the rows to write; `filter` picks the rows for an update or delete, and `publish: true` publishes the drafts an update saves. It does not ask for the written rows back, so call `refetch` on your query afterwards.
 
+`mutate` resolves with `{ data, error, count }`. There are no `onMutate`, `onSuccess` or `onError` callbacks, so an optimistic update and its rollback are yours to write.
+
 `useFunction(name)` returns `invoke`, `data`, `error` and `loading`. `invoke(body, { method, headers })` calls `supatype.functions.invoke`. See [Functions: Call a function](https://www.supatype.com/docs/functions.html#call).
 
-`useAuth()` returns the user, the session and the sign-in methods. See [Auth](https://www.supatype.com/docs/auth.html).
+`useAuth()` returns `user`, `session`, `loading`, `error`, `signUp`, `signIn` (email and password), `signInWithOAuth`, `signInWithOtp` and `signOut`, and re-renders when the session changes. For anything else, such as MFA or a password reset, call `useSupatype().auth`. See [Auth](https://www.supatype.com/docs/auth.html).
 
 #### Live preview
 
@@ -1303,13 +1349,27 @@ Each method below is a call on `supatype.auth`. The [client page](https://www.su
 
 Password reset is `resetPasswordForEmail`, and `updateUser` changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise `SUPATYPE_PASSWORD_MIN_LENGTH`.
 
+`signUp` takes `options.data` for user metadata, which comes back on `user.userMetadata`.
+
+`signInWithOtp` creates the user when they do not exist, unless you pass `options.createUser: false`. For a phone, pass `phone` and optionally `options.channel` (`"sms"` or `"whatsapp"`), then call `verifyOtp` with `type: "sms"`. `resend({ type, email })` or `resend({ type, phone })` sends a confirmation or code again, where `type` is `"signup"`, `"sms"`, `"email_change"` or `"phone_change"`.
+
+For a password reset, wait for `initialize()` on the page the link opens, then call `updateUser({ password })`. A recovery link, or `verifyOtp` with `type: "recovery"`, emits `PASSWORD_RECOVERY` once the session exists.
+
+#### Auth errors
+
+Auth calls put the auth server's code in `error.code`, beside `message` and `status`. Branch on the code, not the message: `invalid_credentials`, `email_not_confirmed`, `weak_password`, `user_already_exists`, `email_exists`, and `otp_expired` for an expired link. `error.code` is absent only when the answer carried none, such as a gateway's HTML error page.
+
 #### Multi-factor
 
 `supatype.auth.mfa` has `enroll`, `challenge`, `verify`, `challengeAndVerify` and `unenroll`. TOTP authenticator apps are on by default. Phone factors are off by default and need an SMS provider.
 
+`enroll({ factorType: "totp" })` returns the factor's `id` and a QR code (`totp.qrCode`) and URI (`totp.uri`) to show the user. `challengeAndVerify({ factorId, code })` is `challenge` then `verify` in one call. Call the two separately when the code arrives later, as an SMS does. A verify raises the session to AAL2 and emits `MFA_CHALLENGE_VERIFIED`. `listFactors()` returns every factor in `all` and the verified ones in `totp` and `phone`. `getAuthenticatorAssuranceLevel()` reports the current and next level.
+
 #### Anonymous users
 
 An anonymous sign-in creates a real user with a user id and a session. Turn it on with `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true`. Because the user has an id, an anonymous user passes `LoggedIn` and can own rows. The token carries `is_anonymous: true`.
+
+`signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`.
 
 ### OAuth providers
 
@@ -1327,7 +1387,7 @@ SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:54321/auth/v1/callback
 
 The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.
 
-Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin_oidc`, `notion`, `slack_oidc`, `snapchat`, `spotify`, `twitch`, `twitter`, `x`, `workos` and `zoom`. Upper-case the name for the variable, so `linkedin_oidc` becomes `SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED`.
+Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin_oidc`, `notion`, `slack_oidc`, `snapchat`, `spotify`, `twitch`, `twitter`, `x`, `workos` and `zoom`. The auth server also accepts `vercel_marketplace`, and the older `linkedin` and `slack`, which the `_oidc` versions replace. Upper-case the name for the variable, so `linkedin_oidc` becomes `SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED`.
 
 #### The sign-in round trip
 
@@ -1342,13 +1402,16 @@ if (error) throw new Error(error.message)
 window.location.assign(data.url)
 
 // On /auth/callback
-const { error: callbackError } = await supatype.auth.getSessionFromUrl(window.location.href)
+// The client finishes the sign-in in the URL when it starts; initialize() waits for that.
+const { error: callbackError } = await supatype.auth.initialize()
 if (callbackError) console.error(callbackError.message)
 ```
 
 `signInWithOAuth` returns the URL; it does not navigate for you. `redirectTo` must be on the same host as `SITE_URL`, a loopback address, or match an entry in `SUPATYPE_URI_ALLOW_LIST` (comma-separated, globs allowed). Anything else sends the user to `SITE_URL` instead. An app on another domain, or a mobile deep link, needs an allow list entry.
 
-The web default is the implicit flow, which returns tokens in the URL fragment. Pass `flowType: "pkce"` in the options for a code exchange instead; mobile apps should always use PKCE. `getSessionFromUrl` handles both.
+The web default is the implicit flow, which returns tokens in the URL fragment. Pass `flowType: "pkce"` in the options for a code exchange instead; mobile apps should always use PKCE. The client finishes either from the URL when it starts, and removes the tokens from the address bar; `initialize()` resolves once it has, with any `error` the provider sent back. Do not call `getSessionFromUrl` as well: the URL no longer carries the tokens by then, so it answers with an error.
+
+`exchangeCodeForSession(code)` does the PKCE exchange on its own. `options.scopes` asks the provider for extra scopes.
 
 ### Sessions and tokens
 
@@ -1357,9 +1420,22 @@ A session is a short-lived access token and a refresh token.
 - The access token is a JWT signed with `JWT_SECRET`, valid for one hour. The client sends it as `Authorization: Bearer` on every request.
 - The client refreshes it about a minute before it expires, and again on load if a saved session has already expired. If the refresh fails, the session is cleared rather than kept with a dead token.
 - Refresh tokens rotate: each refresh issues a new one.
-- `signOut` ends the session on the server and clears it locally.
+- `signOut` takes no arguments. It ends every session the user has on the server, not just this device's, and clears it locally.
 
 In the browser the session is saved to `localStorage` under `supatype.auth.session` and mirrored to a cookie named `st-auth-token`, which `@supatype/ssr` reads on the server. Set `auth: { persistSession: false }`, `storageKey` or `cookiePrefix` on `createClient` to change this. On React Native, `createNativeClient` from `@supatype/react-native` stores the session in `expo-secure-store` or AsyncStorage.
+
+#### Auth events
+
+`onAuthStateChange` calls back at once with `SIGNED_IN` or `SIGNED_OUT`, then on each of these:
+
+| Event | When |
+| --- | --- |
+| `SIGNED_IN` | A session starts while signed out |
+| `SIGNED_OUT` | The session is cleared |
+| `TOKEN_REFRESHED` | The session is replaced while signed in |
+| `USER_UPDATED` | `updateUser` succeeded. The session passed to the callback carries the updated user |
+| `PASSWORD_RECOVERY` | A password reset link or code produced a session, after its `SIGNED_IN` |
+| `MFA_CHALLENGE_VERIFIED` | An MFA verify raised the session to AAL2 |
 
 #### What the token says
 
@@ -1447,7 +1523,7 @@ export function SignIn() {
 }
 ```
 
-The web forms are plain, unstyled markup: pass `className` and `labels` to fit your app. `OAuthButton` has a default style and an icon for GitHub, Google and Apple, which a `className` replaces. It sends the browser to the provider; your callback page still calls `getSessionFromUrl`.
+The web forms are plain, unstyled markup: pass `className` and `labels` to fit your app. `OAuthButton` has a default style and an icon for GitHub, Google and Apple, which a `className` replaces. It sends the browser to the provider; the client finishes the sign-in on your callback page by itself, and `initialize()` tells you how it went.
 
 #### React Native
 
@@ -1625,6 +1701,8 @@ const { data, error } = await supatype.storage.from("attachments").upload(`${use
 if (error) console.error(error.status, error.message)
 ```
 
+`file` may be a `File`, a `Blob` or an `ArrayBuffer`. On success `data` is `{ path }`.
+
 Without `contentType` the client uses the `File`'s own type. If that is missing or generic, the service guesses from the extension (`.png`, `.pdf`, `.mp4` and other common types). The type is checked against `accept` before anything is stored.
 
 With `upsert: true` an existing file at that path is replaced if the `update` rule allows it. The new bytes are stored alongside the old ones and swapped in when the row commits, so a reader never sees a half-written file.
@@ -1662,9 +1740,13 @@ const { data: files } = await bucket.list(`${userId}/`, { limit: 50, offset: 0 }
 
 `list` returns up to 100 entries unless you pass `limit`. Each entry has `name`, `size`, `mimetype`, the owner and timestamps.
 
+The first argument to `list` is a folder. Folders inside it come first, then files, each in name order, and there is no sort option. Pass `search` to match names without regard to case. The result also carries `count`, the number of matching entries in all.
+
+Every file the service serves carries `Cache-Control: public, max-age=3600`. There is no setting per upload.
+
 Public and private buckets differ in CORS too. A public bucket answers any origin. A private bucket sends no `Access-Control-Allow-Origin`, so read its files from a browser with a signed URL or `download`.
 
-`storage.listBuckets()` and `storage.createBucket()` need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead.
+`storage.listBuckets()` and `storage.createBucket(name, { public, fileSizeLimit, allowedMimeTypes })` need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead. The client has no call to change or delete a bucket. To change one, edit its declaration and push.
 
 ### Image transforms
 
@@ -1741,10 +1823,10 @@ The realtime service reads changes from Postgres logical replication, so every c
 | Event | `new` | `old` |
 | --- | --- | --- |
 | `INSERT` | the whole row | `null` |
-| `UPDATE` | the whole row | the primary key only |
-| `DELETE` | `null` | the primary key only |
+| `UPDATE` | the whole row | the whole row as it was |
+| `DELETE` | `null` | the whole row as it was |
 
-`old` is typed as a row, but it holds only the key columns. Use it to find the row you already have, not to read the previous values.
+Every table Supatype manages has `REPLICA IDENTITY FULL`, so the write-ahead log carries the whole previous row. A table set up outside Supatype keeps Postgres's default identity, and its `old` can hold only the key.
 
 Values arrive with the same types as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings.
 
@@ -1752,14 +1834,13 @@ Values arrive with the same types as a REST read. A `BigInt` column becomes a na
 
 Realtime follows the same [access rules](https://www.supatype.com/docs/schema.html#access) as the REST API. For each change and each subscriber, the service checks with the subscriber's token, inside Postgres:
 
-- Insert and update: the row is selected again, by its `id` column, as the subscriber. If the `read` rule hides it, the change is not sent. The check sees the row as it is at that moment, so a row deleted straight after it was inserted is not sent either.
+- Insert and update: the row is selected again, by its primary key, as the subscriber. If the `read` rule hides it, the change is not sent. The check sees the row as it is at that moment, so a row deleted straight after it was inserted is not sent either. With the Native provider or your own Postgres, the `read` rule is applied to the row in the change instead.
+- Delete: the `read` rule is applied to the deleted row, as the subscriber, so a subscriber only hears of deletes of rows they could read. A delete on a table without `REPLICA IDENTITY FULL`, or without a Supatype `read` rule, is not sent.
 - Field rules: a column the subscriber may not read under a [field rule](https://www.supatype.com/docs/schema.html#field-rules) arrives as `null`, in both `new` and `old`. A filter on such a column is matched against the masked value, so it cannot be used to test a hidden value.
 - Service role: sees every change unmasked.
 - No token: receives no changes.
 
-> **WARNING:** Deletes are checked more loosely. The row is gone, so there is nothing to select. A subscriber receives every delete on a table their role may read at all, even deletes of rows their `read` rule would hide. Field masking still applies, and `old` holds only the primary key, so what this reveals is the key of each deleted row. If that matters, do not use a guessable key, or do not subscribe untrusted users to deletes on that table.
-
-The row check looks for a column called `id`. On a table without one it uses the first column of the row.
+The row check uses the table's primary key. Inserts and updates on a table without one are not sent.
 
 ### Subscribe
 
@@ -1795,9 +1876,10 @@ Each call opens its own channel, so two components watching the same table do no
 
 A filter is checked on the server, so changes that do not match never reach the client. Several conditions joined with commas must all match. The operators are `eq`, `neq`, `gt`, `gte`, `lt` and `lte`.
 
-- Values are compared as text. `eq` and `neq` behave as you expect. `gt` and `lt` on numbers do not: `"10"` sorts before `"9"`.
+- Values are compared by the column's type, as Postgres would compare them, so `salary=gt.100000` compares numbers. A column of a type the service does not recognise is compared as text.
+- A null value, or one that cannot be read as the column's type, matches nothing.
 - An operator not in that list is ignored, and the filter then matches every change.
-- A delete is matched on `old`, which holds only the primary key. A filter on any other column matches no deletes.
+- A delete is matched on `old`, the row as it was.
 
 #### Channels
 
@@ -1814,7 +1896,7 @@ const channel = supatype.realtime
   .subscribe((status) => console.log(status))
 ```
 
-Status is `SUBSCRIBING`, `SUBSCRIBED`, `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED`. Pass `table` explicitly. Without it the channel name is read as `schema:table`.
+Status is `SUBSCRIBING`, `SUBSCRIBED`, `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED`. `CHANNEL_ERROR` means the server refused a request on the socket, such as a join. `TIMED_OUT` means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass `table` explicitly. Without it the channel name is read as `schema:table`.
 
 A channel carries one table subscription. If you call `.on("postgres_changes", ...)` more than once on a channel, the first call's table, event and filter are what the server registers. Use one channel per table.
 
@@ -1837,7 +1919,8 @@ room.broadcast("move", { x: 120, y: 48 })
 ```
 
 - Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.
-- A presence entry is the payload you pass to `track`, plus `user_id` from the token.
+- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`.
+- Calling `track` again announces the new payload as a fresh join, so keep your own map of members keyed by `user_id`.
 - A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.
 - A client leaves on `untrack()`, on unsubscribe and when its socket closes.
 - Messages sent while the socket is not open are dropped, so send after `SUBSCRIBED`.
@@ -1866,11 +1949,13 @@ function Comments({ postId }: { postId: string }) {
 
 It needs `SupatypeProvider` above it, which takes your client as `client`. Give each use its own channel name: two hooks with the same name share a channel.
 
-`@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`. `data` starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same `id`, deletes remove it. They do not load the rows that already exist, so pair them with a query.
+`@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`, which is `"connecting"`, `"connected"`, `"disconnected"` or `"error"`. `data` starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same `id`, deletes remove it. They do not load the rows that already exist, so pair them with a query.
 
 ### Connection and auth
 
 The client opens the socket at `/realtime/v1` on your project URL when the first channel subscribes, and closes it when the last one unsubscribes. It sends the current session's token, or the anon key when nobody is signed in.
+
+`supatype.realtime.removeChannel(name)` leaves a channel by name. `supatype.realtime.disconnect()` closes the socket whatever is still subscribed, and reports `CLOSED` to every channel still registered.
 
 When someone signs in, signs out or a different user signs in, the client reconnects with the new token and joins every channel again. Access is checked as the new identity from then on. A token refresh for the same user does not reconnect, so no changes are missed.
 
@@ -2011,6 +2096,8 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
 
 Forwarding the caller's token is the safe default: the database sees the user, not the function, and every [access rule](https://www.supatype.com/docs/schema.html) still applies.
 
+Do not decode the token yourself to read a role. Until its signature is checked, anyone can send a payload that says `"role": "admin"`. Ask `/auth/v1/user`, as above, which checks it. `supatype.auth.getUser()` on a client you create inside a function does not help here: it reads that client's own stored session, not the request's token, so it returns no user.
+
 ### Service role
 
 A function is a public endpoint. By default it does not receive the service-role key, which reads and writes past every access rule. The worker removes the key from the environment before any function is imported, so `Deno.env` cannot reach it either.
@@ -2091,7 +2178,9 @@ The worker reads code once at startup, so restart it after changing a function:
 $ docker compose -p supatype-<project> -f .supatype/self-host/docker-compose.yml restart functions-worker
 ```
 
-`<project>` is your project name from `supatype.config.ts` in lower case, with spaces and other symbols replaced by `-`. Env file changes do not need a restart.
+`<project>` is your project name from `supatype.config.ts` in lower case, with spaces and other symbols replaced by `-`. `supatype self-host compose restart functions-worker` does the same and finds the project name for you. Env file changes do not need a restart.
+
+On an unlinked project with a self-host Compose file, `supatype functions deploy` uploads nothing. It lists the functions it found on disk and prints that restart command.
 
 The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.
 
@@ -2424,7 +2513,7 @@ Pre-1.0: APIs and config may change between releases.
 Studio is served at `/studio/` on the project's gateway.
 
 - **Local, Docker (the default):** `supatype dev` prints it in the **Services running** panel as `http://localhost:<gateway-port>/studio/`. The port is `SUPATYPE_KONG_PORT` in `.env`.
-- **Self-hosted:** `http://<your-host>:<gateway-port>/studio/`, behind your reverse proxy. See [Self-host](https://www.supatype.com/docs/#self-host).
+- **Self-hosted:** `http://<your-host>:<gateway-port>/studio/`, or `/studio/` on your domain once HTTPS is on. See [Self-host](https://www.supatype.com/docs/#self-host).
 - **Local, Native:** `supatype dev` does not start Studio with the Native provider.
 
 Sign in with an email and password. The first admin comes from `SUPATYPE_ADMIN_EMAIL` and `SUPATYPE_ADMIN_PASSWORD` in `.env`, as described in [Local development](https://www.supatype.com/docs/#local-dev). Add more people with `supatype admin create-user`.
@@ -2453,7 +2542,7 @@ Studio reads your schema after each push and builds an editor for every model. T
 
 #### The list
 
-Each model opens on a list of its records. Columns you can sort have sortable headers. Searchable fields get a search box. Tick rows to delete several at once, after a confirmation. **Create Post** (named after the model) opens an empty form.
+Each model opens on a list of its records. Columns you can sort have sortable headers. Fields wrapped in `Searchable<T>`, or named in the model's `searchable: [...]` option, get a search box. Tick rows to delete several at once, after a confirmation. **Create Post** (named after the model) opens an empty form.
 
 #### The record editor
 
@@ -2619,7 +2708,7 @@ The same page has an **Invoke** tab to call a function, and **Environment Variab
 | Screen | For |
 | --- | --- |
 | Dashboard | Totals and recent activity for users, records, storage and the database |
-| Authentication | Users (including their Studio access), access policies, providers, configuration and email templates. See [Auth](https://www.supatype.com/docs/auth.html) |
+| Authentication | Users (including their Studio access), access policies, providers, configuration and email templates. Configuration is read-only: change those settings in `.env` and restart the stack. A template saved under Email Templates is kept in the database until **Reset to default** removes it. See [Auth](https://www.supatype.com/docs/auth.html) |
 | Settings | API keys, CORS origins and database settings |
 | Realtime | Channels, clients, a live stream and a broadcast tester, where the deployment's control plane supports the inspector |
 
@@ -2649,7 +2738,7 @@ A self-hosted project has four Studio roles:
 
 **Viewer**: Reads content, files, schema and logs. Changes nothing.
 
-Supatype Cloud adds owner and billing roles for the organisation.
+Supatype Cloud adds owner and billing roles for the organisation. On a self-hosted project those two grant nothing, and the CLI refuses any role but the four above.
 
 > **NOTE:** A Studio role is separate from your app. It grants nothing in your own application, and `Role<>` rules in the schema do not read it.
 
@@ -3070,6 +3159,13 @@ The query builder reads the same way. The differences are in the setup: `createC
 
 ### Bringing an existing database
 
+To bring the data too, dump only your own schema, usually `public`. Supabase's own schemas, such as `auth` and `storage`, are not yours to restore over Supatype's. The CLI has no restore command, so load the dump with `psql`. `supatype dev` points `DATABASE_URL` in `.env` at the local database. Rows with a foreign key to `auth.users` need their users to exist first, so move users before those rows.
+
+```sh
+$ pg_dump -h db.yourproject.supabase.co -U postgres -d postgres --schema=public --no-owner --no-privileges -f supabase-dump.sql
+$ psql "$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" -f supabase-dump.sql
+```
+
 `supatype pull` reads a live database and drafts `schema/index.ts` from it. It prints the draft unless you pass `--out`.
 
 ```sh
@@ -3107,7 +3203,31 @@ $ supatype push
 - **Function entry points.** The handler shape differs, so each function's entry needs a small rewrite. The code inside, being Deno, mostly stays.
 - **Function names and bodies in the client are not typed**, unlike tables.
 
-> **NOT COVERED HERE:** This page does not cover moving auth users or stored files between the two. Plan those as their own step.
+### Users and files
+
+There is no command to import auth users or stored files. Plan each as its own step.
+
+For users, either ask them to sign up again, or copy their rows. Supatype's auth server descends from the same code as Supabase Auth and keeps the same bcrypt hashes in `auth.users.encrypted_password`, so copied rows keep their passwords. The two `auth` schemas are not guaranteed to match column for column. Copy the columns you need, at least `id`, `email`, `encrypted_password`, `email_confirmed_at` and `raw_user_meta_data`, and try it on a copy first. This path is not a supported tool.
+
+For files, declare each bucket in your schema and push. Then download each file from Supabase and upload it with a client that holds the service role key, from a one-off script on a server:
+
+`scripts/copy-files.ts`:
+
+```ts
+import { createClient } from "../supatype/generated/client"
+
+const supatype = createClient({
+  url: process.env.PUBLIC_SUPATYPE_URL!,
+  anonKey: process.env.ANON_KEY!,
+  serviceRoleKey: process.env.SERVICE_ROLE_KEY!,
+})
+
+export async function copyFile(sourceUrl: string, path: string): Promise<void> {
+  const res = await fetch(sourceUrl)
+  const { error } = await supatype.storage.from("avatars").upload(path, await res.blob(), { upsert: true })
+  if (error) throw new Error(`${path}: ${error.message}`)
+}
+```
 
 ## Coming from Prisma
 
@@ -3281,7 +3401,20 @@ $ supatype --help
 $ supatype push --help
 ```
 
+The npm package needs Node.js 22 or later. It is the install to use on Windows.
+
+On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:
+
+```sh
+$ curl -fsSL https://supatype.com/install.sh | bash
+$ brew install supatype/tap/supatype
+```
+
+The script installs one binary to `~/.supatype/bin` and adds that directory to your shell profile. It checks the release signature with `openssl` before installing. Where `openssl` is missing or cannot check ed25519 signatures, as with the LibreSSL macOS ships, it says so and checks only the SHA256. On Alpine it installs the musl build, which needs `apk add libstdc++ libgcc`. The components `dev` downloads are built for glibc only, so run local stacks on a glibc image. `supatype self-update` updates a standalone install.
+
 Run commands from the project directory, where `supatype.config.ts` is. Every command also takes `--project-name <name>`, which names the project for this run over `supatype.config.ts`. `supatype --version` prints the CLI version.
+
+`--project-name` is the same as setting `SUPATYPE_PROJECT_NAME`, and it writes no file. The Compose project, the native database and the state directory under `~/.supatype/projects/` all follow it. Use it to run two stacks of one project side by side, each with its own `SUPATYPE_KONG_PORT`. The name may use lower case letters, digits, `-` and `_`, and must start with a letter or digit.
 
 Many commands that reach a database take `--connection <url>` to override the config, and `--env <name>` to pick an environment when the project is linked.
 
@@ -3308,13 +3441,17 @@ Many commands that reach a database take `--connection <url>` to override the co
 
 `--role` is `admin`, `developer`, `editor` or `viewer`. See [Studio roles](https://www.supatype.com/docs/studio-roles.html#grant). The first-run steps are in [Local development](https://www.supatype.com/docs/#local-dev).
 
+`keys` prints the keys unless you pass `--write`, which fills blank keys in `.env`. Add `--force` to replace keys already there.
+
+`dev` and `self-host compose up` refuse a `JWT_SECRET` shorter than 32 characters before starting anything, because the REST API cannot start with one. `init` generates a 64-character secret. To replace a short one, generate a longer secret (for example with `openssl rand -base64 48`), put it in `.env` as `JWT_SECRET`, then run `supatype keys --write --force` to sign new keys with it.
+
 ### Schema and database
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--overwrite-drift` |
-| `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>` |
-| `generate` | Regenerate TypeScript types without running a migration | `--connection <url>` |
+| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift` |
+| `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>`, `--direct` |
+| `generate` | Regenerate TypeScript types without running a migration |  |
 | `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With --record the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
 | `migrations list` | List applied migrations with schema snapshot metadata | `--connection <url>`, `--env <name>` |
 | `rollback` | Roll back the last applied migration | `--sync-schema`, `--no-sync-schema` |
@@ -3326,6 +3463,10 @@ Many commands that reach a database take `--connection <url>` to override the co
 | `introspect` | Introspect the live Postgres database (JSON or summary) | `--json`, `--out <path>` |
 | `db check` | Check whether a database meets Supatype's requirements (for external Postgres) | `--connection <url>`, `--schema <name>`, `--emit`, `--fix`, `--authenticator-password <password>` |
 | `types check` | Validate generated client augmentation wiring |  |
+
+`--direct` skips the control plane of a linked project and runs the schema engine on this machine. `generate` reads only the schema, so it needs no database. `pull` prints its draft unless you pass `--out`. `migrations list` shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.
+
+A push never guesses a rename. A column that disappears while a new one appears is a drop and an add, and the drop loses data. In a terminal the push asks whether you meant a rename and records a yes in `supatype/renames.json`. Anywhere else it refuses and prints the `supatype rename` command that records it.
 
 An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or `kind:name` for a table. Studio shows the result under [Schema objects](https://www.supatype.com/docs/studio.html#database).
 
@@ -3358,7 +3499,7 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `hooks new <name>` | Scaffold a hook handler |  |
 | `hooks list` | Show the hooks the schema declares and whether each one can run |  |
 
-`functions deploy` deploys to a self-hosted Compose stack when the project has one, and to Supatype Cloud otherwise. On a self-hosted stack, read function logs in Studio. See [Functions](https://www.supatype.com/docs/functions.html).
+On an unlinked project with a self-hosted Compose stack, `functions deploy` uploads nothing: the worker serves `functions/` from disk, so it lists the functions and prints the command that restarts the worker. Otherwise it deploys to the linked project, or to Supatype Cloud. On a self-hosted stack, read function logs in Studio. See [Functions](https://www.supatype.com/docs/functions.html).
 
 ### Self-host and deploy
 
@@ -3374,10 +3515,14 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
 | `envs list` | List linked environments |  |
 | `envs use <name>` | Set the default environment |  |
-| `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database | `--schema-only`, `--app-only`, `--skip-build`, `--yes`, `--overwrite-drift` |
+| `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database | `--env <name>` (default `production`), `--schema-only`, `--app-only`, `--skip-build`, `--preview`, `--yes`, `--overwrite-drift` |
 | `deploy rollback` | Roll back to the previous static site deployment | `--to <id>`, `--env <name>` |
 | `deploy status` | Show current deployment status | `--env <name>` |
 | `deploy logs [version]` | Show build logs for a deployment | `--env <name>` |
+
+Every `self-host compose` command renders `.supatype/self-host/docker-compose.yml` again before it runs. The file names each bind mount by its absolute path on this machine, and names its Compose project `supatype-` plus `project.name`. So `docker compose -f .supatype/self-host/docker-compose.yml` run by hand reaches the same stack, and a project moved to another folder is picked up by the next command.
+
+A render keeps the stack in the mode it runs in. While `supatype dev` runs for the project, commands such as `push`, `update` and `self-host compose` render dev mode. Otherwise they use the mode of the running `server` container, and standalone when none is running. So a push to a production stack leaves it standalone.
 
 For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The full walkthrough is in [Self-host](https://www.supatype.com/docs/#self-host) and [Deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html).
 

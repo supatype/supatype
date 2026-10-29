@@ -144,10 +144,21 @@ export function pageMarkdown(html, url) {
   return [`## ${title}`, `Source: ${site}${url}`, ...text].join("\n\n")
 }
 
-// A Starlight page: front matter with the page's title and description, then its blocks.
+// A Starlight page: front matter with the page's title and description, then its blocks. The
+// live page's own <title> (written for search) and link preview image go in as head tags, which
+// take the place of the ones Starlight would make.
 export function pageStarlight(html, url) {
   const { title, text } = article(html, url, styles.starlight)
-  const description = decode(html.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? "")
-  const front = ["---", `title: ${JSON.stringify(title)}`, `description: ${JSON.stringify(description)}`, "---"].join("\n")
+  const meta = (pattern) => decode(html.match(pattern)?.[1] ?? "")
+  const description = meta(/<meta name="description" content="([^"]*)"/)
+  const head = [
+    ["title", null, meta(/<title>([^<]*)<\/title>/)],
+    ["meta", "og:image", meta(/<meta property="og:image" content="([^"]*)"/)],
+  ].filter(([, , value]) => value)
+  const headLines = head.flatMap(([tag, property, value]) => [
+    `  - tag: ${tag}`,
+    ...(property ? [`    attrs:`, `      property: ${JSON.stringify(property)}`, `      content: ${JSON.stringify(value)}`] : [`    content: ${JSON.stringify(value)}`]),
+  ])
+  const front = ["---", `title: ${JSON.stringify(title)}`, `description: ${JSON.stringify(description)}`, ...(headLines.length ? ["head:", ...headLines] : []), "---"].join("\n")
   return `${front}\n\n${text.join("\n\n")}\n`
 }

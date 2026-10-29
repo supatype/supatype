@@ -1,6 +1,13 @@
 ---
 title: "Functions"
 description: "Write TypeScript functions that run on Deno at /functions/v1, read the caller's token, keep secrets in env files and self-host on the functions worker."
+head:
+  - tag: title
+    content: "Edge functions and model hooks in TypeScript on Deno | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/functions.png"
 ---
 
 A function is a TypeScript file in `functions/` that runs on Deno and answers HTTP at `/functions/v1/<name>`. It receives a standard `Request` and returns a standard `Response`.
@@ -103,6 +110,8 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
 
 Forwarding the caller's token is the safe default: the database sees the user, not the function, and every [access rule](/docs/schema.html) still applies.
 
+Do not decode the token yourself to read a role. Until its signature is checked, anyone can send a payload that says `"role": "admin"`. Ask `/auth/v1/user`, as above, which checks it. `supatype.auth.getUser()` on a client you create inside a function does not help here: it reads that client's own stored session, not the request's token, so it returns no user.
+
 <h2 id="service-role">Service role</h2>
 
 A function is a public endpoint. By default it does not receive the service-role key, which reads and writes past every access rule. The worker removes the key from the environment before any function is imported, so `Deno.env` cannot reach it either.
@@ -179,7 +188,9 @@ The worker reads code once at startup, so restart it after changing a function:
 $ docker compose -p supatype-<project> -f .supatype/self-host/docker-compose.yml restart functions-worker
 ```
 
-`<project>` is your project name from `supatype.config.ts` in lower case, with spaces and other symbols replaced by `-`. Env file changes do not need a restart.
+`<project>` is your project name from `supatype.config.ts` in lower case, with spaces and other symbols replaced by `-`. `supatype self-host compose restart functions-worker` does the same and finds the project name for you. Env file changes do not need a restart.
+
+On an unlinked project with a self-host Compose file, `supatype functions deploy` uploads nothing. It lists the functions it found on disk and prints that restart command.
 
 The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.
 

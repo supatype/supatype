@@ -1,6 +1,13 @@
 ---
 title: "Realtime"
 description: "Supatype realtime: subscribe to table changes that respect read access and field rules, filters, broadcast and presence, React and Vue hooks, config and limits."
+head:
+  - tag: title
+    content: "Realtime Postgres changes that respect access rules | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/realtime.png"
 ---
 
 Subscribe to inserts, updates and deletes on your tables over a WebSocket. Each change is checked against the subscriber's read access before it is sent.
@@ -14,10 +21,10 @@ The realtime service reads changes from Postgres logical replication, so every c
 | Event | `new` | `old` |
 | --- | --- | --- |
 | `INSERT` | the whole row | `null` |
-| `UPDATE` | the whole row | the primary key only |
-| `DELETE` | `null` | the primary key only |
+| `UPDATE` | the whole row | the whole row as it was |
+| `DELETE` | `null` | the whole row as it was |
 
-`old` is typed as a row, but it holds only the key columns. Use it to find the row you already have, not to read the previous values.
+Every table Supatype manages has `REPLICA IDENTITY FULL`, so the write-ahead log carries the whole previous row. A table set up outside Supatype keeps Postgres's default identity, and its `old` can hold only the key.
 
 Values arrive with the same types as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings.
 
@@ -25,16 +32,13 @@ Values arrive with the same types as a REST read. A `BigInt` column becomes a na
 
 Realtime follows the same [access rules](/docs/schema.html#access) as the REST API. For each change and each subscriber, the service checks with the subscriber's token, inside Postgres:
 
-- Insert and update: the row is selected again, by its `id` column, as the subscriber. If the `read` rule hides it, the change is not sent. The check sees the row as it is at that moment, so a row deleted straight after it was inserted is not sent either.
+- Insert and update: the row is selected again, by its primary key, as the subscriber. If the `read` rule hides it, the change is not sent. The check sees the row as it is at that moment, so a row deleted straight after it was inserted is not sent either. With the Native provider or your own Postgres, the `read` rule is applied to the row in the change instead.
+- Delete: the `read` rule is applied to the deleted row, as the subscriber, so a subscriber only hears of deletes of rows they could read. A delete on a table without `REPLICA IDENTITY FULL`, or without a Supatype `read` rule, is not sent.
 - Field rules: a column the subscriber may not read under a [field rule](/docs/schema.html#field-rules) arrives as `null`, in both `new` and `old`. A filter on such a column is matched against the masked value, so it cannot be used to test a hidden value.
 - Service role: sees every change unmasked.
 - No token: receives no changes.
 
-:::caution
-Deletes are checked more loosely. The row is gone, so there is nothing to select. A subscriber receives every delete on a table their role may read at all, even deletes of rows their `read` rule would hide. Field masking still applies, and `old` holds only the primary key, so what this reveals is the key of each deleted row. If that matters, do not use a guessable key, or do not subscribe untrusted users to deletes on that table.
-:::
-
-The row check looks for a column called `id`. On a table without one it uses the first column of the row.
+The row check uses the table's primary key. Inserts and updates on a table without one are not sent.
 
 <h2 id="subscribe">Subscribe</h2>
 
@@ -68,9 +72,10 @@ Each call opens its own channel, so two components watching the same table do no
 
 A filter is checked on the server, so changes that do not match never reach the client. Several conditions joined with commas must all match. The operators are `eq`, `neq`, `gt`, `gte`, `lt` and `lte`.
 
-- Values are compared as text. `eq` and `neq` behave as you expect. `gt` and `lt` on numbers do not: `"10"` sorts before `"9"`.
+- Values are compared by the column's type, as Postgres would compare them, so `salary=gt.100000` compares numbers. A column of a type the service does not recognise is compared as text.
+- A null value, or one that cannot be read as the column's type, matches nothing.
 - An operator not in that list is ignored, and the filter then matches every change.
-- A delete is matched on `old`, which holds only the primary key. A filter on any other column matches no deletes.
+- A delete is matched on `old`, the row as it was.
 
 ### Channels
 
@@ -85,7 +90,7 @@ const channel = supatype.realtime
   .subscribe((status) => console.log(status))
 ```
 
-Status is `SUBSCRIBING`, `SUBSCRIBED`, `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED`. Pass `table` explicitly. Without it the channel name is read as `schema:table`.
+Status is `SUBSCRIBING`, `SUBSCRIBED`, `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED`. `CHANNEL_ERROR` means the server refused a request on the socket, such as a join. `TIMED_OUT` means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass `table` explicitly. Without it the channel name is read as `schema:table`.
 
 A channel carries one table subscription. If you call `.on("postgres_changes", ...)` more than once on a channel, the first call's table, event and filter are what the server registers. Use one channel per table.
 
@@ -106,7 +111,8 @@ room.broadcast("move", { x: 120, y: 48 })
 ```
 
 - Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.
-- A presence entry is the payload you pass to `track`, plus `user_id` from the token.
+- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`.
+- Calling `track` again announces the new payload as a fresh join, so keep your own map of members keyed by `user_id`.
 - A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.
 - A client leaves on `untrack()`, on unsubscribe and when its socket closes.
 - Messages sent while the socket is not open are dropped, so send after `SUBSCRIBED`.
@@ -135,11 +141,13 @@ function Comments({ postId }: { postId: string }) {
 
 It needs `SupatypeProvider` above it, which takes your client as `client`. Give each use its own channel name: two hooks with the same name share a channel.
 
-`@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`. `data` starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same `id`, deletes remove it. They do not load the rows that already exist, so pair them with a query.
+`@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`, which is `"connecting"`, `"connected"`, `"disconnected"` or `"error"`. `data` starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same `id`, deletes remove it. They do not load the rows that already exist, so pair them with a query.
 
 <h2 id="connection">Connection and auth</h2>
 
 The client opens the socket at `/realtime/v1` on your project URL when the first channel subscribes, and closes it when the last one unsubscribes. It sends the current session's token, or the anon key when nobody is signed in.
+
+`supatype.realtime.removeChannel(name)` leaves a channel by name. `supatype.realtime.disconnect()` closes the socket whatever is still subscribed, and reports `CLOSED` to every channel still registered.
 
 When someone signs in, signs out or a different user signs in, the client reconnects with the new token and joins every channel again. Access is checked as the new identity from then on. A token refresh for the same user does not reconnect, so no changes are missed.
 

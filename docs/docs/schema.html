@@ -111,6 +111,7 @@
 
     <h2 id="models">Models</h2>
     <p>Each exported <code>Model&lt;&gt;</code> type is a table. Import the types from <code>@supatype/types</code>.</p>
+    <p>Nothing in <code>schema/index.ts</code> runs. The CLI reads it as type declarations, so a model is an <code>export type</code>, never an <code>export const</code>, and there is no builder function to call.</p>
     <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> <span class="k">type</span> { <span class="t">Model</span>, <span class="t">UUID</span>, <span class="t">Optional</span>, <span class="t">Public</span>, <span class="t">LoggedIn</span> } <span class="k">from</span> <span class="s">"@supatype/types"</span>
 
@@ -141,12 +142,17 @@
         <tr><td><code>"news" | "guide"</code></td><td>an enum of those values</td></tr>
         <tr><td><code>string[]</code></td><td>an array</td></tr>
         <tr><td><code>JSON&lt;T&gt;</code></td><td>JSONB, typed as <code>T</code> in the client</td></tr>
+        <tr><td><code>Vector&lt;1536&gt;</code></td><td>a pgvector embedding with that many dimensions</td></tr>
         <tr><td><code>RichText</code>, <code>Blocks&lt;T&gt;</code>, <code>Slug&lt;"title"&gt;</code></td><td>content fields, see <a href="#content">below</a></td></tr>
         <tr><td><code>ImageAsset&lt;Bucket&gt;</code>, <code>FileAsset</code></td><td>a file in a storage bucket</td></tr>
         <tr><td><code>SupatypeAuthUserId</code></td><td>the id of a sign-in user, see <a href="#owners">below</a></td></tr>
       </tbody>
     </table></div>
     <p>Wrap a field to add more: <code>Unique&lt;T&gt;</code>, <code>Indexed&lt;T&gt;</code>, <code>Default&lt;T, value&gt;</code>, <code>MaxLength&lt;T, n&gt;</code>, <code>Between&lt;T, min, max&gt;</code>.</p>
+    <p>Three wrappers shape a field in Studio. <code>EditorReadOnly&lt;T&gt;</code> is shown but not editable there, and the API can still write it. <code>Computed&lt;T&gt;</code> is filled by the database and read-only in Studio. <code>ComputedFrom&lt;string, "title"&gt;</code> is prefilled from the fields it names on a new record, until the editor changes it.</p>
+    <p>For translated content, declare the locales once, such as <code>export type Locales = LocaleConfig&lt;["en", "fr"], "en"&gt;</code>, and wrap a field in <code>Localized&lt;T&gt;</code>. It is stored as JSONB keyed by locale: <code>{ "en": "Hello", "fr": "Bonjour" }</code>. <code>LocalizedModel&lt;&gt;</code> localizes a model's text fields for you, and <code>NotLocalized&lt;T&gt;</code> opts one back out. There is no locale setting in <code>supatype.config.ts</code>.</p>
+    <p>Wrap the fields in <code>WithTimestamps&lt;{ ... }&gt;</code> to add <code>created_at</code> and <code>updated_at</code>, which the database fills in.</p>
+    <p>With the Native provider, <code>supatype dev</code> stores <code>Vector&lt;&gt;</code> and <code>Geo</code> fields as JSONB, because its Postgres has no pgvector or PostGIS. Use Docker to work with them locally.</p>
 
     <h2 id="relations">Relations</h2>
     <p><code>RelatedTo&lt;Model&gt;</code> adds a foreign key column named after the field plus <code>_id</code>. The field <code>author</code> becomes the column <code>author_id</code>. The column can be null unless you pass <code>{ required: true }</code>.</p>

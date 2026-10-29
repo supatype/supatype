@@ -1,6 +1,13 @@
 ---
 title: "Client"
 description: "Use the typed @supatype/client: generated types, queries, filters, relations, drafts and publishing, auth, storage, realtime, functions and errors."
+head:
+  - tag: title
+    content: "Typed Postgres client: queries, auth, storage, realtime | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/client.png"
 ---
 
 `@supatype/client` talks to your project's REST, auth, storage, realtime and functions. Its types come from your schema, so a wrong table or column fails the build.
@@ -24,6 +31,19 @@ Every page in these docs imports the client from this one file. `supatype init` 
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 
+`createClient` takes these options as well as `url` and `anonKey`:
+
+| Option | What it does |
+| --- | --- |
+| `serviceRoleKey` | Bypasses row-level security. Use it only on a server or in a trusted tool, and never ship it to a browser. |
+| `headers` | Headers sent with every request. Pass a function to have it read on each request. |
+| `auth.storageKey` | Key the session is saved under. Default `"supatype.auth.session"`. |
+| `auth.storage` | Your own session store with `getItem`, `setItem` and `removeItem`, such as AsyncStorage in React Native. |
+| `auth.cookiePrefix` | Prefix of the auth cookie `@supatype/ssr` reads. Default `"st"`. |
+| `timeout`, `retry` | See [Timeouts and retries](#timeouts-and-retries). |
+| `initialSession` | A session to start with. `@supatype/ssr` uses it to hand a cookie session to the client. |
+| `queryCache` | The in-memory cache for `.cache()` reads. Default: one shared cache. |
+
 <h2 id="types">Generated types</h2>
 
 `supatype dev`, `supatype push` and `supatype generate` write these files. Do not edit them.
@@ -34,7 +54,7 @@ The session is saved and restored by default. Pass `auth: { persistSession: fals
 | `supatype/generated/index.d.ts` | Row, insert and update types for each table |
 | `types/database.ts` | The `Database` type, for code that wants the raw shapes |
 
-Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `createClient` with no type argument picks up the generated types.
+Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `createClient` with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: `createClient<MyDatabase>({ ... })`.
 
 <h2 id="read">Read rows</h2>
 
@@ -187,7 +207,9 @@ if (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)
 ```
 
-The call goes to `/functions/v1/hello` with the user's token. A JSON response is parsed. Function names and bodies are not typed.
+The call goes to `/functions/v1/hello` with the user's token. A JSON response is parsed. Function names and bodies are not typed. `invoke` also takes `method` (default `POST`), `headers` and `idempotent`.
+
+`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`.
 
 <h2 id="graphql">GraphQL</h2>
 
@@ -215,12 +237,12 @@ Using another GraphQL client? `readGraphqlSchema` reads the `data` of an introsp
 
 Queries, `rpc`, `functions.invoke`, auth and most storage calls return `{ data, error }`. Check `error` before using `data`.
 
-`error` is a plain object with `message` and, when known, `code`, `status`, `details` and `hint`. Do not test it with `instanceof`.
+`error` is a plain object with `message` and, when known, `code`, `status`, `details` and `hint`. Do not test it with `instanceof`. When a field validator refused the write, `field` names the column, so you can mark that input.
 
 An insert an access rule refuses returns code `42501`. An update or delete that the rules hide matches no rows and returns no error. `single()` with no row returns `PGRST116`.
 
 :::note[Network failures]
-A network failure on a query, `rpc` or function call comes back as `error` with a code such as `NETWORK_TIMEOUT`. Auth and storage calls throw instead, so wrap them in `try` when the network may fail.
+A network failure on a query, `rpc` or function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Auth and storage calls throw instead, so wrap them in `try` when the network may fail.
 :::
 
 <h2 id="timeouts-and-retries">Timeouts and retries</h2>

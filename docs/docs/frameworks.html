@@ -179,8 +179,9 @@
 
 <h3>useMutation and useFunction</h3>
 <p><code>useMutation(table, operation)</code> takes <code>"insert"</code>, <code>"update"</code>, <code>"delete"</code> or <code>"upsert"</code> and returns <code>mutate</code>, <code>loading</code> and <code>error</code>. <code>mutate(data, { filter, publish })</code> takes the rows to write; <code>filter</code> picks the rows for an update or delete, and <code>publish: true</code> publishes the drafts an update saves. It does not ask for the written rows back, so call <code>refetch</code> on your query afterwards.</p>
+<p><code>mutate</code> resolves with <code>{ data, error, count }</code>. There are no <code>onMutate</code>, <code>onSuccess</code> or <code>onError</code> callbacks, so an optimistic update and its rollback are yours to write.</p>
 <p><code>useFunction(name)</code> returns <code>invoke</code>, <code>data</code>, <code>error</code> and <code>loading</code>. <code>invoke(body, { method, headers })</code> calls <code>supatype.functions.invoke</code>. See <a href="/docs/functions.html#call">Functions: Call a function</a>.</p>
-<p><code>useAuth()</code> returns the user, the session and the sign-in methods. See <a href="/docs/auth.html">Auth</a>.</p>
+<p><code>useAuth()</code> returns <code>user</code>, <code>session</code>, <code>loading</code>, <code>error</code>, <code>signUp</code>, <code>signIn</code> (email and password), <code>signInWithOAuth</code>, <code>signInWithOtp</code> and <code>signOut</code>, and re-renders when the session changes. For anything else, such as MFA or a password reset, call <code>useSupatype().auth</code>. See <a href="/docs/auth.html">Auth</a>.</p>
 
 <h3>Live preview</h3>
 <p>Studio can show your app in a pane beside the edit form and stream the unsaved values into it as the editor types. Tell Studio where a record's page lives in <code>supatype.config.ts</code>:</p>

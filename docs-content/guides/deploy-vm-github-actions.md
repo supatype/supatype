@@ -1,6 +1,13 @@
 ---
 title: "Deploy to a VM with GitHub Actions"
 description: "End-to-end example: scaffold a Supatype project locally, self-host on a VM with Docker Compose, and deploy updates via GitHub Actions over SSH."
+head:
+  - tag: title
+    content: "Deploy to a VM with GitHub Actions | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/deploy-vm-github-actions.png"
 ---
 
 Create a project on your laptop, push it to GitHub, run the stack on a VM with Docker Compose, and ship schema and frontend changes on every push to `main`.

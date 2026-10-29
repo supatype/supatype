@@ -1,6 +1,13 @@
 ---
 title: "Coming from Prisma"
 description: "How schema.prisma, prisma migrate and Prisma Client map to Supatype types, push and the typed client, what Supatype adds, and what does not carry over."
+head:
+  - tag: title
+    content: "Prisma alternative: moving from Prisma to Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/from-prisma.png"
 ---
 
 Prisma gives you tables, migrations and a typed client from one schema file. Supatype does the same from TypeScript types, then goes on to access rules, an API, an admin UI, auth and storage, which with Prisma you write yourself.

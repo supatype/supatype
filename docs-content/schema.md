@@ -1,6 +1,13 @@
 ---
 title: "Schema"
 description: "Write Supatype models in TypeScript: field types, relations, access rules, field rules, drafts, slugs, rich text, blocks, storage buckets, renames and what a push refuses."
+head:
+  - tag: title
+    content: "Schema: TypeScript models, access rules and migrations | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/schema.png"
 ---
 
 Your schema is a set of TypeScript types in `schema/index.ts`. Supatype builds the tables, access rules, APIs and the typed client from it.
@@ -10,6 +17,8 @@ Pre-1.0: APIs and config may change between releases.
 <h2 id="models">Models</h2>
 
 Each exported `Model<>` type is a table. Import the types from `@supatype/types`.
+
+Nothing in `schema/index.ts` runs. The CLI reads it as type declarations, so a model is an `export type`, never an `export const`, and there is no builder function to call.
 
 ```ts title="schema/index.ts"
 import type { Model, UUID, Optional, Public, LoggedIn } from "@supatype/types"
@@ -47,11 +56,20 @@ Every field is required (`NOT NULL`) unless you wrap it in `Optional<>`. Use `Op
 | `"news" \| "guide"` | an enum of those values |
 | `string[]` | an array |
 | `JSON<T>` | JSONB, typed as `T` in the client |
+| `Vector<1536>` | a pgvector embedding with that many dimensions |
 | `RichText`, `Blocks<T>`, `Slug<"title">` | content fields, see [below](#content) |
 | `ImageAsset<Bucket>`, `FileAsset` | a file in a storage bucket |
 | `SupatypeAuthUserId` | the id of a sign-in user, see [below](#owners) |
 
 Wrap a field to add more: `Unique<T>`, `Indexed<T>`, `Default<T, value>`, `MaxLength<T, n>`, `Between<T, min, max>`.
+
+Three wrappers shape a field in Studio. `EditorReadOnly<T>` is shown but not editable there, and the API can still write it. `Computed<T>` is filled by the database and read-only in Studio. `ComputedFrom<string, "title">` is prefilled from the fields it names on a new record, until the editor changes it.
+
+For translated content, declare the locales once, such as `export type Locales = LocaleConfig<["en", "fr"], "en">`, and wrap a field in `Localized<T>`. It is stored as JSONB keyed by locale: `{ "en": "Hello", "fr": "Bonjour" }`. `LocalizedModel<>` localizes a model's text fields for you, and `NotLocalized<T>` opts one back out. There is no locale setting in `supatype.config.ts`.
+
+Wrap the fields in `WithTimestamps<{ ... }>` to add `created_at` and `updated_at`, which the database fills in.
+
+With the Native provider, `supatype dev` stores `Vector<>` and `Geo` fields as JSONB, because its Postgres has no pgvector or PostGIS. Use Docker to work with them locally.
 
 <h2 id="relations">Relations</h2>
 

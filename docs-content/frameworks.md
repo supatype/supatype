@@ -1,6 +1,13 @@
 ---
 title: "Frameworks"
 description: "Use Supatype from React, Vue, Svelte, Solid, React Native and Next.js server code: providers, query and mutation hooks, live preview, and cookie-based server clients."
+head:
+  - tag: title
+    content: "Frameworks | Supatype"
+  - tag: meta
+    attrs:
+      property: "og:image"
+      content: "https://www.supatype.com/og/frameworks.png"
 ---
 
 Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, and a server helper for Next.js. Each one wraps the client you already create, so everything on the [Client](/docs/client.html) page still applies.
@@ -87,9 +94,11 @@ For anything `filter` cannot say, such as ranges or embeds with conditions, use 
 
 `useMutation(table, operation)` takes `"insert"`, `"update"`, `"delete"` or `"upsert"` and returns `mutate`, `loading` and `error`. `mutate(data, { filter, publish })` takes the rows to write; `filter` picks the rows for an update or delete, and `publish: true` publishes the drafts an update saves. It does not ask for the written rows back, so call `refetch` on your query afterwards.
 
+`mutate` resolves with `{ data, error, count }`. There are no `onMutate`, `onSuccess` or `onError` callbacks, so an optimistic update and its rollback are yours to write.
+
 `useFunction(name)` returns `invoke`, `data`, `error` and `loading`. `invoke(body, { method, headers })` calls `supatype.functions.invoke`. See [Functions: Call a function](/docs/functions.html#call).
 
-`useAuth()` returns the user, the session and the sign-in methods. See [Auth](/docs/auth.html).
+`useAuth()` returns `user`, `session`, `loading`, `error`, `signUp`, `signIn` (email and password), `signInWithOAuth`, `signInWithOtp` and `signOut`, and re-renders when the session changes. For anything else, such as MFA or a password reset, call `useSupatype().auth`. See [Auth](/docs/auth.html).
 
 ### Live preview
 
