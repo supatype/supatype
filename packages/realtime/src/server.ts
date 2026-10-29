@@ -27,9 +27,9 @@ import type { BroadcastInput } from "./admin/broadcast.js"
 import type {
   ClientMessage,
   ServerMessage,
+  SubscribeMessage,
   Subscription,
   WalChange,
-  ChangeEvent,
   PresenceEntry,
   PresenceTrackMessage,
   BroadcastMessage,
@@ -47,6 +47,14 @@ interface SubscriberEntry {
   clientId: string
   client: ConnectedClient
   subscription: Subscription
+}
+
+/**
+ * The `ref` a reply echoes: the one its request carried, or none. A request without one is
+ * answered exactly as it was before refs existed, so an older client sees no new field.
+ */
+function withRef(ref: string | undefined): { ref?: string } {
+  return ref === undefined ? {} : { ref }
 }
 
 /** Schemas whose changes a shared instance never forwards: platform and service internals. */
@@ -407,8 +415,8 @@ export class RealtimeServer {
    * channel as about the whole socket, so a refusal without one put every healthy channel the
    * client had into CHANNEL_ERROR.
    */
-  private refuse(client: ConnectedClient, channel: string, message: string): void {
-    this.send(client.ws, { type: "system", status: "error", message, channel })
+  private refuse(client: ConnectedClient, channel: string, message: string, ref?: string | undefined): void {
+    this.send(client.ws, { type: "system", status: "error", message, channel, ...withRef(ref) })
   }
 
   private handleUnsubscribe(clientId: string, client: ConnectedClient, channel: string): void {
@@ -429,28 +437,10 @@ export class RealtimeServer {
     }
   }
 
-  private handleSubscribe(
-    clientId: string,
-    client: ConnectedClient,
-    msg: {
-      channel: string
-      event?: ChangeEvent | "*" | undefined
-      table?: string | undefined
-      schema?: string | undefined
-      filter?: Record<string, string> | undefined
-    },
-  ): void {
-    if (this.env.secureChannels && !client.claims) {
-      this.refuse(client, msg.channel, "authenticate before subscribing")
-      return
-    }
-
-    // Refused rather than stored. A condition the matcher cannot read used to be skipped, which
-    // widened the subscription to every row the other conditions let through.
-    const unreadable = unreadableCondition(msg.filter ?? {})
-    if (unreadable !== null) {
-      const message = `invalid filter ${unreadable}: expected column=op.value with op one of eq, neq, gt, gte, lt, lte`
-      this.refuse(client, msg.channel, message)
+  private handleSubscribe(clientId: string, client: ConnectedClient, msg: SubscribeMessage): void {
+    const refusal = this.subscribeRefusal(client, msg.filter)
+    if (refusal !== null) {
+      this.refuse(client, msg.channel, refusal, msg.ref)
       return
     }
 
@@ -471,8 +461,18 @@ export class RealtimeServer {
     }
 
     this.channels.subscribe(clientId, subscription)
-    this.send(client.ws, { type: "system", status: "ok", message: `subscribed to ${msg.channel}` })
+    this.send(client.ws, { type: "system", status: "ok", message: `subscribed to ${msg.channel}`, ...withRef(msg.ref) })
     this.sendPresenceState(client, msg.channel)
+  }
+
+  /** Why a join is refused, or null when it is accepted. */
+  private subscribeRefusal(client: ConnectedClient, filter: Record<string, string> | undefined): string | null {
+    if (this.env.secureChannels && !client.claims) return "authenticate before subscribing"
+    // Refused rather than stored. A condition the matcher cannot read used to be skipped, which
+    // widened the subscription to every row the other conditions let through.
+    const unreadable = unreadableCondition(filter ?? {})
+    if (unreadable === null) return null
+    return `invalid filter ${unreadable}: expected column=op.value with op one of eq, neq, gt, gte, lt, lte`
   }
 
   /**

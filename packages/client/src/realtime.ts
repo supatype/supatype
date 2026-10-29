@@ -139,6 +139,8 @@ interface ServerSystemMessage {
   message: string
   /** The channel a refusal is about; an error without one is about the socket. */
   channel?: string
+  /** The `ref` of the join this answers. A server that predates refs sends none. */
+  ref?: string
 }
 
 type ServerMessage = ServerChangeMessage | ServerPresenceMessage | ServerBroadcastMessage | ServerSystemMessage
@@ -175,12 +177,16 @@ const isSystemMessage: Guard<ServerSystemMessage> = isShape({
   status: isOneOf(["ok", "error"]),
   message: isString,
   channel: optional(isString),
+  ref: optional(isString),
 })
 
 /** A frame from the realtime service (packages/realtime/src/types.ts) in one of the four shapes. */
 function isServerMessage(value: unknown): value is ServerMessage {
   return isChangeMessage(value) || isPresenceMessage(value) || isBroadcastMessage(value) || isSystemMessage(value)
 }
+
+/** How the server's acknowledgement of a join begins; the channel name follows. */
+const SUBSCRIBED_TO = "subscribed to "
 
 // ─── Realtime client ─────────────────────────────────────────────────────────
 
@@ -205,6 +211,8 @@ export class RealtimeClient {
    * the next one, so the two cannot disagree.
    */
   private attempt: Promise<void> | null = null
+  /** The last `ref` a join was sent with. Unique for the life of the client, across sockets. */
+  private lastRef = 0
 
   /**
    * `auth` is either a headers provider or a fixed set of headers: the same pair `QueryBuilder` and
@@ -307,6 +315,7 @@ export class RealtimeClient {
       state.joinSent = false
       state.joined = undefined
       state.joining = undefined
+      state.joinRef = undefined
       this.forgetMembers(state)
     }
   }
@@ -455,6 +464,7 @@ export class RealtimeClient {
         joinSent: false,
         joined: undefined,
         joining: undefined,
+        joinRef: undefined,
         members: [],
       }
       this.channels.set(name, state)
@@ -588,31 +598,42 @@ export class RealtimeClient {
   }
 
   private handleSystem(msg: ServerSystemMessage): void {
-    // When server confirms subscription
-    if (msg.status === "ok" && msg.message.startsWith("subscribed to ")) {
-      const channel = msg.message.replace("subscribed to ", "")
-      const state = this.channels.get(channel)
-      if (state) {
-        state.subscribed = true
-        if (state.joining !== undefined) state.joined = state.joining
-        state.joining = undefined
-        notifyHandles(state, "SUBSCRIBED")
-      }
+    if (msg.status === "ok" && msg.message.startsWith(SUBSCRIBED_TO)) {
+      const state = this.answeredJoin(msg.message.slice(SUBSCRIBED_TO.length), msg.ref)
+      if (state !== undefined) acknowledgeJoin(state)
     }
+    if (msg.status === "error") this.handleRefusal(msg)
+  }
 
-    if (msg.status === "error") {
-      // A refusal names its channel and fails that one alone: one bad filter used to put every
-      // healthy channel on the socket into CHANNEL_ERROR. An error naming none, from an older
-      // server or about the socket itself, still reaches them all. A named channel this client
-      // has since left is told nothing.
-      const affected = msg.channel === undefined ? [...this.channels.values()] : [this.channels.get(msg.channel)]
-      for (const state of affected) {
-        if (state === undefined) continue
-        // A refused join registered nothing on the server, so a channel not yet confirmed may
-        // join again on this socket. Marked as sent, a retry after authenticating sent nothing.
-        if (!state.subscribed) state.joinSent = false
-        notifyHandles(state, "CHANNEL_ERROR")
-      }
+  /**
+   * The channel whose pending join a reply answers, or undefined when it answers none.
+   *
+   * A reply carrying a ref answers the join sent with that ref and no other. Read by channel name
+   * alone, a join's reply settled whichever join on that name was pending when it arrived, so two
+   * joins close together (a rejoin, or a leave and a new join) each took the other's answer. A
+   * server that predates refs sends none, and its replies are still read by name.
+   */
+  private answeredJoin(channel: string, ref: string | undefined): ChannelState | undefined {
+    const state = this.channels.get(channel)
+    if (state === undefined || ref === undefined) return state
+    return state.joinRef === ref ? state : undefined
+  }
+
+  /**
+   * A refusal names its channel and fails that one alone: one bad filter used to put every healthy
+   * channel on the socket into CHANNEL_ERROR. An error naming none, from an older server or about
+   * the socket itself, still reaches them all. A named channel this client has since left, or one
+   * whose refused join it has since replaced, is told nothing.
+   */
+  private handleRefusal(msg: ServerSystemMessage): void {
+    const affected = msg.channel === undefined ? [...this.channels.values()] : [this.answeredJoin(msg.channel, msg.ref)]
+    for (const state of affected) {
+      if (state === undefined) continue
+      // A refused join registered nothing on the server, so a channel not yet confirmed may
+      // join again on this socket. Marked as sent, a retry after authenticating sent nothing.
+      if (!state.subscribed) state.joinSent = false
+      if (msg.ref !== undefined) state.joinRef = undefined
+      notifyHandles(state, "CHANNEL_ERROR")
     }
   }
 
@@ -681,34 +702,8 @@ export class RealtimeClient {
     // A first join's rows are its own from the start. A join sent again on this socket replaces one
     // the server delivers for until it acknowledges this one, so the old target stays until then.
     state.joined ??= target
-    const filter: Record<string, string> = {}
-    if (target.filter) {
-      // Parse PostgREST filter format "column=eq.value" into { column: "eq.value" }
-      for (const part of target.filter.split(",")) {
-        const eqIdx = part.indexOf("=")
-        if (eqIdx > 0) {
-          filter[part.slice(0, eqIdx)] = part.slice(eqIdx + 1)
-        }
-      }
-    }
-
-    // `table` and `schema` travel with the subscription, rather than being inferred from the
-    // channel name at the other end.
-    //
-    // They were resolved here and then dropped, and the server falls back to reading the channel
-    // name as `schema:table`. So a subscription worked only when the channel happened to be named
-    // after its table, as `from(table).subscribe()` names its own. Anything else -- a channel
-    // called `lobby-chat` carrying `table: "chat_message"`, which is what `useSubscription` exists
-    // to let you write -- registered against a table no change can match. The socket reported
-    // SUBSCRIBED and delivered nothing, which is indistinguishable from a quiet table.
-    this.sendMessage({
-      type: "subscribe",
-      channel: state.name,
-      event: target.event,
-      table: target.table,
-      schema: target.schema,
-      filter: Object.keys(filter).length > 0 ? filter : undefined,
-    })
+    state.joinRef = String(++this.lastRef)
+    this.sendMessage(subscribeFrame(state.name, target, state.joinRef))
   }
 
   /**
@@ -784,6 +779,11 @@ interface ChannelState {
   joined: JoinTarget | undefined
   /** The join sent on the current socket and not yet acknowledged. */
   joining: JoinTarget | undefined
+  /**
+   * The `ref` the join awaiting its reply was sent with, and the only reply that may settle it. A
+   * reply carrying any other ref answers a join since replaced or left, and is not this one's.
+   */
+  joinRef: string | undefined
   /** Who the current socket has said is tracked on this channel, one entry per tracking socket. */
   members: PresenceEntry[]
 }
@@ -811,6 +811,51 @@ function sameJoin(listener: JoinTarget, join: JoinTarget): boolean {
 /** Every handle's row listeners, oldest handle first: the first of them is what the join registers. */
 function pgListenersOf(state: ChannelState): PgListener[] {
   return [...state.handles].flatMap((handle) => handle.pgListeners)
+}
+
+/**
+ * The frame that joins `channel` for `target`, carrying `ref` for the server to echo on its reply.
+ *
+ * `table` and `schema` travel with the subscription, rather than being inferred from the channel
+ * name at the other end.
+ *
+ * They were resolved here and then dropped, and the server falls back to reading the channel name
+ * as `schema:table`. So a subscription worked only when the channel happened to be named after its
+ * table, as `from(table).subscribe()` names its own. Anything else, such as a channel called
+ * `lobby-chat` carrying `table: "chat_message"` (which is what `useSubscription` exists to let you
+ * write), registered against a table no change can match. The socket reported SUBSCRIBED and
+ * delivered nothing, which is indistinguishable from a quiet table.
+ */
+function subscribeFrame(channel: string, target: JoinTarget, ref: string): Record<string, unknown> {
+  return {
+    type: "subscribe",
+    channel,
+    event: target.event,
+    table: target.table,
+    schema: target.schema,
+    filter: filterFrame(target.filter),
+    ref,
+  }
+}
+
+/** A PostgREST filter, `column=eq.value,...`, as the subscribe frame carries it, or undefined for none. */
+function filterFrame(filter: string | undefined): Record<string, string> | undefined {
+  if (!filter) return undefined
+  const parsed: Record<string, string> = {}
+  for (const part of filter.split(",")) {
+    const eqIdx = part.indexOf("=")
+    if (eqIdx > 0) parsed[part.slice(0, eqIdx)] = part.slice(eqIdx + 1)
+  }
+  return Object.keys(parsed).length > 0 ? parsed : undefined
+}
+
+/** The server took the join `state` was waiting on: from now on its rows are that join's. */
+function acknowledgeJoin(state: ChannelState): void {
+  state.subscribed = true
+  if (state.joining !== undefined) state.joined = state.joining
+  state.joining = undefined
+  state.joinRef = undefined
+  notifyHandles(state, "SUBSCRIBED")
 }
 
 /** Tell each handle on a channel its status. */
