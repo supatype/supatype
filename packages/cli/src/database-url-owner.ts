@@ -12,11 +12,22 @@
  * POSTGRES_PASSWORD, its database and a host on this machine, on any port.
  */
 import { envValueOwner, readEnvFile, upsertEnvFile } from "./env-file.js"
-import { DEFAULT_DB_PORT, isLocalDatabaseUrl } from "./db-port.js"
+import { databaseUrlSyncMessage, DEFAULT_DB_PORT, isLocalDatabaseUrl, syncDatabaseUrlPort } from "./db-port.js"
 import { connectSucceeds } from "./postgres-ctl.js"
 import { BUNDLED_DB_USER } from "./local-secrets.js"
 
 const DATABASE_URL = "DATABASE_URL"
+
+/**
+ * Point a CLI-written DATABASE_URL at the port the stack publishes Postgres on, for a dev
+ * (`devLocal`) or a self-host stack, and say so. A hand-written URL, an external database's
+ * typically, is left as it is, for this run as well: it always wins.
+ */
+export function syncStackDatabaseUrl(cwd: string, devLocal: boolean): void {
+  if (!cliMayWriteDatabaseUrl(cwd)) return
+  const dbPort = syncDatabaseUrlPort(cwd, devLocal)
+  if (dbPort !== null) console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
+}
 
 /** Upsert options that write `DATABASE_URL` as the CLI's. */
 export const CLI_DATABASE_URL = { managed: [DATABASE_URL] } as const

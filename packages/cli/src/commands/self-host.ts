@@ -31,7 +31,7 @@ import {
   writeSelfHostCompose,
 } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
-import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "../db-port.js"
+import { syncStackDatabaseUrl, warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
 import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -89,9 +89,9 @@ export function registerSelfHost(program: Command): void {
       noteUnpinnedImages(cwd)
       const renderOptions = composeRenderOptions(cwd, config.project.name)
       // As a push does: a stack started here and never pushed kept whatever DATABASE_URL .env had,
-      // which after a `supatype dev` was the dev database, so seed and admin reached that one.
-      const dbPort = syncDatabaseUrlPort(cwd, renderOptions.devLocal)
-      if (dbPort !== null) console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
+      // which after a `supatype dev` was the dev database, so seed and admin reached that one. Only a
+      // URL the CLI wrote: an operator's own, an external database's typically, always wins.
+      syncStackDatabaseUrl(cwd, renderOptions.devLocal)
       const status = await withSpinner("Starting self-host Compose stack", async () => {
         const out = writeSelfHostCompose(cwd, config, renderOptions)
         return runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND })
@@ -99,6 +99,7 @@ export function registerSelfHost(program: Command): void {
       if (status !== 0) {
         exitComposeFailed(status, "Could not start the self-host Compose stack.", SELF_HOST_BRAND)
       }
+      await warnIfHandWrittenUrlSilent(cwd)
     })
 
   composeCmd
