@@ -9,11 +9,12 @@
 
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
-import { mailerProviderEnv, mailerUrlPathsEnv } from "./mailer-env.js"
+import { nativeMailerAutoconfirmEnv } from "./mailer-autoconfirm.js"
+import { mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides } from "./mailer-env.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
-import { postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
+import { DENO_PORT_ENV, postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
 
 /** Inputs to the outer layer of supatype-server's environment on the native path. */
 export interface NativeServerCoreInput {
@@ -96,5 +97,28 @@ export function nativeAuthMailerEnv(email: SupatypeProjectConfig["email"], serve
     ...mailerUrlPathsEnv(),
     ...mailerProviderEnv(email),
     ...nativeSendEmailHookEnv(email, serverPort),
+  }
+}
+
+/** What {@link nativeServerDotEnvLayer} lays over the server's environment. */
+export interface NativeDotEnvLayerInput {
+  /** `.env` then `.env.local`, the later file winning. */
+  dotEnv: Record<string, string>
+  config: SupatypeProjectConfig
+  cwd: string
+  /** The Deno port dev checked was free. */
+  denoPort: number
+}
+
+/** The last layer of supatype-server's environment on the native path: `.env` and what follows it. */
+export function nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }: NativeDotEnvLayerInput): Record<string, string> {
+  return {
+    // A blank mailer value init scaffolded into .env does not erase the config's.
+    ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email)),
+    // After .env: auth.email.enableConfirmations, unless the developer set their own value.
+    ...nativeMailerAutoconfirmEnv(cwd, config),
+    // Last, so the port dev checked is the port Deno gets: a value in .env or .env.local, blank
+    // included, would otherwise replace it.
+    [DENO_PORT_ENV]: String(denoPort),
   }
 }
