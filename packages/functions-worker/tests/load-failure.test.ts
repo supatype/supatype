@@ -11,6 +11,7 @@ const FUNCTIONS = {
   empty: "export const other = 1\n",
   syntax: "export default (\n",
   throws: 'throw new Error("boom-at-import")\n',
+  missing: 'import "./not-here.ts"\nexport default () => new Response("unreachable")\n',
   hello: 'export default () => new Response("hello ok")\n',
 }
 
@@ -33,6 +34,9 @@ Deno.test("a function that failed to load answers 500 with why, and the others s
       empty: /^Function "empty" failed to load: .*neither a default export nor a named "handler"/s,
       syntax: /^Function "syntax" failed to load: /,
       throws: /^Function "throws" failed to load: .*boom-at-import/s,
+      // Deno colours the importing file's location in this message, piped or not, and a JSON body
+      // carried the escape codes to every client.
+      missing: /^Function "missing" failed to load: Module not found [^\u001b]*$/s,
     }
     for (const [name, pattern] of Object.entries(failures)) {
       const { status, body } = await call(worker.origin, name)

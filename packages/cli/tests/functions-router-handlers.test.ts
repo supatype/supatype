@@ -207,6 +207,9 @@ async function loadFailureAnswer(base: string, name: string): Promise<{ status: 
   return { status: res.status, contentType: res.headers.get("content-type"), body: await res.json() }
 }
 
+/** A function importing a file that is not there, which Deno reports with terminal colour codes. */
+const MISSING_IMPORT = `import "./not-here.ts"\nexport default () => new Response("unreachable")\n`
+
 /** What a function reports about the key: whether its module body saw it, and what ctx gave it. */
 const REPORTS_KEY = `
 const seenAtImport = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null
@@ -244,6 +247,7 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
         empty: `export const other = 1\n`,
         syntax: `export default (\n`,
         throws: `throw new Error("boom-at-import")\n`,
+        missing: MISSING_IMPORT,
         hello: `export default () => new Response("hello ok")\n`,
       }),
       {},
@@ -253,6 +257,8 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
       empty: /"empty" failed to load: .*neither a default export nor a named "handler"/s,
       syntax: /"syntax" failed to load: /,
       throws: /"throws" failed to load: .*boom-at-import/s,
+      // Deno colours the importing file's location in this message, piped or not (local test N5).
+      missing: /^Function "missing" failed to load: Module not found [^\u001b]*$/s,
     }
     for (const [name, message] of Object.entries(failures)) {
       const res = await fetch(`${base}/functions/v1/${name}`)
@@ -268,13 +274,14 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
     const routerPath = project({
       empty: `export const other = 1\n`,
       throws: `throw new Error("boom-at-import")\n`,
+      missing: MISSING_IMPORT,
     })
     const functionsRoot = join(dirname(dirname(routerPath)), "functions")
     const [router, worker] = await Promise.all([
       serve(routerPath, {}),
       serve(WORKER_MAIN, { SUPATYPE_FUNCTIONS_ROOT: functionsRoot }),
     ])
-    for (const name of ["empty", "throws"]) {
+    for (const name of ["empty", "throws", "missing"]) {
       const fromRouter = await loadFailureAnswer(router, name)
       expect(fromRouter).toEqual(await loadFailureAnswer(worker, name))
       expect(fromRouter).toMatchObject({

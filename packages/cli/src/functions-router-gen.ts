@@ -190,16 +190,21 @@ function exportedHandler(mod: Record<string, unknown>): Handler {
   return handler as Handler
 }
 
+/** Terminal escape codes. Deno colours a missing module's location in its message, piped or not. */
+const TERMINAL_ESCAPES = /\\u001b\\[[0-9;?]*[A-Za-z]/g
+
 /**
  * The handler \`load\` imports, or, when it cannot be loaded, one that answers its route with a 500
  * saying why. One module that failed to import, or exported no handler, used to stop the router
- * starting, so every function answered 502 where only that one was broken.
+ * starting, so every function answered 502 where only that one was broken. The message goes out
+ * as JSON, so the escape codes come out of it: a client has no terminal to colour.
  */
 async function loadHandler(name: string, load: () => Promise<Record<string, unknown>>): Promise<Handler> {
   try {
     return exportedHandler(await load())
   } catch (err) {
-    const message = 'Function "' + name + '" failed to load: ' + (err instanceof Error ? err.message : String(err))
+    const reason = (err instanceof Error ? err.message : String(err)).replace(TERMINAL_ESCAPES, "")
+    const message = 'Function "' + name + '" failed to load: ' + reason
     console.error("[supatype] " + message)
     const body = JSON.stringify({ error: "function_load_failed", message })
     return () => new Response(body, { status: 500, headers: { "Content-Type": "application/json" } })
