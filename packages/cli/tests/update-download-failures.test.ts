@@ -48,6 +48,7 @@ vi.mock("../src/ui/fatal.js", () => ({
 }))
 
 const { registerUpdate } = await import("../src/commands/update.js")
+const { download } = await import("../src/binary-cache.js")
 
 async function runUpdate(): Promise<void> {
   const program = new Command().exitOverride()
@@ -88,5 +89,36 @@ describe("supatype update when downloads fail", () => {
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
+  })
+})
+
+describe("supatype update downloads", () => {
+  it("fetches every component at once and reports them in a fixed order however they finish", async () => {
+    // One at a time, a slow CDN cost the sum of every download. Started together, they finish in any
+    // order, and the report still has to read the same on every run.
+    const events: string[] = []
+    const finishLast = ["engine", "server", "postgres", "deno", "realtime"]
+    vi.mocked(download).mockImplementation(async (component) => {
+      events.push(`start ${component}`)
+      await new Promise((resolve) => setTimeout(resolve, 10 * (finishLast.length - finishLast.indexOf(component))))
+      events.push(`end ${component}`)
+      throw new Error(`${component} answered 404`)
+    })
+    try {
+      await expect(runUpdate()).rejects.toThrow(/could not be updated/)
+    } finally {
+      vi.mocked(download).mockImplementation(async () => {
+        throw new Error("CDN answered 404")
+      })
+    }
+    const started = events.filter((event) => event.startsWith("start ")).map((event) => event.slice("start ".length))
+    expect(started.length).toBeGreaterThan(1)
+    // Every download began before the first one ended.
+    expect(events.slice(0, started.length).every((event) => event.startsWith("start "))).toBe(true)
+    // The last to finish is reported first, as it is the first fetched.
+    const ended = events.filter((event) => event.startsWith("end ")).map((event) => event.slice("end ".length))
+    expect(ended).not.toEqual(started)
+    const reported = messages.error.flatMap((message) => /^Failed: (\w+) /.exec(message)?.slice(1) ?? [])
+    expect(reported).toEqual(started)
   })
 })
