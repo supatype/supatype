@@ -188,8 +188,10 @@ function planComponent(component: Component, config: SupatypeProjectConfig, { la
     plain(`  ${component}  (unpinned) → ${target}, ${latest ?? "nothing"} is the latest on the CDN`)
     return null
   }
+  // A local build is the developer's own, so whatever the CDN has, or lacks, does not apply to it.
+  if (current === "local") return null
   if (!latest) return missingLatest(component)
-  if (!current || current === "local" || current === latest) return null
+  if (!current || current === latest) return null
   return { kind: "update", update: { component, from: current, to: latest } }
 }
 

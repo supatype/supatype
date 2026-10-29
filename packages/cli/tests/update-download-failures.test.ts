@@ -92,6 +92,24 @@ describe("supatype update when downloads fail", () => {
   })
 })
 
+/** Every native component pinned to 1.0.0 with the CDN naming the same, then `changes` applied. */
+function pinAll(changes: { versions: Record<string, string>; latest: Record<string, string | undefined> }): void {
+  const base = { engine: "1.0.0", server: "1.0.0", postgres: "1.0.0", deno: "1.0.0", realtime: "1.0.0" }
+  project.versions = { ...base, ...changes.versions }
+  project.latest = Object.fromEntries(
+    Object.entries({ ...base, ...changes.latest }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  )
+}
+
+describe("supatype update plans", () => {
+  it("skips a component pinned to local, even when the CDN names no latest for it", async () => {
+    // The missing latest was checked first, so a local engine build became a failure and exit 1.
+    pinAll({ versions: { engine: "local" }, latest: { engine: undefined } })
+    await expect(runUpdate()).resolves.toBeUndefined()
+    expect(messages.error).toEqual([])
+  })
+})
+
 describe("supatype update downloads", () => {
   it("fetches every component at once and reports them in a fixed order however they finish", async () => {
     // One at a time, a slow CDN cost the sum of every download. Started together, they finish in any
