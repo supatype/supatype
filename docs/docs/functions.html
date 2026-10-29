@@ -133,7 +133,10 @@
 <pre><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">"@supatype/cli"</span>
 
 <span class="k">export default</span> defineConfig({
-  <span class="c">// ...</span>
+  project: { name: <span class="s">"my-app"</span> },
+  database: { provider: <span class="s">"docker"</span> },
+  server: { mode: <span class="s">"dev"</span> },
+  app: { mode: <span class="s">"none"</span> },
   functions: {
     path: <span class="s">"functions"</span>,
   },

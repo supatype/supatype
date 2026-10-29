@@ -298,7 +298,7 @@ console.log(reply)</pre></div>
     <p>An insert an access rule refuses returns code <code>42501</code>. An update or delete that the rules hide matches no rows and returns no error. <code>single()</code> with no row returns <code>PGRST116</code>.</p>
     <div class="callout warn">
       <span class="callout-label">NETWORK FAILURES</span>
-      <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code: <code>NETWORK_TIMEOUT</code>, <code>NETWORK_CONNECTION_REFUSED</code>, <code>NETWORK_DNS_FAILURE</code> or <code>NETWORK_ERROR</code>. A read still answered 429 after its last retry has code <code>RATE_LIMITED</code>. Auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail.</p>
+      <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code: <code>NETWORK_TIMEOUT</code>, <code>NETWORK_CONNECTION_REFUSED</code>, <code>NETWORK_DNS_FAILURE</code> or <code>NETWORK_ERROR</code>. A read still answered 429 after its last retry has code <code>RATE_LIMITED</code>. Most auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail. Three return the failure as <code>error</code> like a query: <code>storage.listBuckets</code>, <code>storage.createBucket</code> and <code>auth.refreshSession</code>. <code>auth.signOut</code> ignores a network failure and clears the session on this device anyway.</p>
     </div>
 
     <h2 id="timeouts-and-retries">Timeouts and retries</h2>

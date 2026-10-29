@@ -12,7 +12,7 @@ import { dirname } from "node:path"
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { fileURLToPath } from "node:url"
-import { pageMarkdown, pageStarlight, site } from "./site-markdown.mjs"
+import { generatedMarker, pageMarkdown, pageStarlight, sentence, site } from "./site-markdown.mjs"
 
 const repo = fileURLToPath(new URL("../", import.meta.url))
 const docs = `${repo}docs/`
@@ -48,7 +48,6 @@ const pageUrls = ["/docs/", ...sidebarLinks.map((link) => link.href).filter((hre
 
 const fileOf = (url) => (url.endsWith("/") ? `${url.slice(1)}index.html` : url.slice(1))
 const imageOf = (url) => (url === "/" ? "home" : url === "/docs/" ? "docs" : url.split("/").pop().replace(".html", ""))
-const sentence = (label) => label[0] + label.slice(1).toLowerCase()
 
 function match(html, pattern, what, file) {
   const found = html.match(pattern)
@@ -238,9 +237,11 @@ function llmsFullTxt(current, synced) {
   return `${summary}\n\n${docsHeading}\n\n${intro}\n\n${sections.join("\n\n")}\n`
 }
 
-// docs-content/ holds the docs pages and guides; www pages (Licensing, Changelog, Privacy) stay out.
-// The guides move under guides/ there, as /docs/guides/ in the docs app. Generated pages are .md;
-// pages written by hand there (the cloud docs' own sub-pages) are .mdx, and this never touches them.
+// docs-content/ holds the docs pages and guides. The www pages (Licensing, Changelog, Privacy)
+// stay out, and so do the Postgres pages: the docs app builds those from the READMEs in
+// supatype/postgres. The guides move under guides/ there, as /docs/guides/ in the docs app.
+// Generated pages are .md and start with generatedMarker; a page written by hand there (the cloud
+// docs' own sub-pages are .mdx) is never touched, whatever its extension.
 const contentDir = `${repo}docs-content/`
 function contentFile(url) {
   if (url === "/docs/") return "index.md"
@@ -248,12 +249,14 @@ function contentFile(url) {
   return sidebarEntry(url).header === "Guides" ? `guides${url.replace(/\.html$/, ".md")}` : null
 }
 
-// Every generated (.md) file docs-content/ holds now, so a page gone from the sidebar goes too.
+// Every generated file docs-content/ holds now, so a page gone from the sidebar goes too. Only a
+// file whose front matter carries generatedMarker counts, so a hand-written .md file stays.
 function existingContent(dir = contentDir, prefix = "") {
   if (!existsSync(dir)) return []
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     if (entry.isDirectory()) return existingContent(`${dir}${entry.name}/`, `${prefix}${entry.name}/`)
-    return entry.name.endsWith(".md") ? [`${prefix}${entry.name}`] : []
+    const generated = entry.name.endsWith(".md") && readPath(`${dir}${entry.name}`).startsWith(`---\n${generatedMarker}\n`)
+    return generated ? [`${prefix}${entry.name}`] : []
   })
 }
 

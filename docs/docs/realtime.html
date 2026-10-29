@@ -209,16 +209,19 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
     <h2 id="hooks">Framework hooks</h2>
     <p><code>@supatype/react</code> exports <code>useSubscription</code>. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing.</p>
     <div class="cb"><div class="cb-bar"><span>tsx</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="k">import</span> { useSubscription } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<pre><span class="k">import</span> { useState } <span class="k">from</span> <span class="s">"react"</span>
+<span class="k">import</span> { useSubscription } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"@supatype/client"</span>
 
 <span class="k">function</span> <span class="t">Comments</span>({ postId }: { postId: string }) {
-  <span class="k">const</span> { status } = useSubscription(<span class="s">`comments:${postId}`</span>, {
+  <span class="k">const</span> [comments, setComments] = useState&lt;<span class="t">TableRow</span>&lt;<span class="s">"comment"</span>&gt;[]&gt;([])
+  <span class="k">const</span> { status } = useSubscription&lt;<span class="t">TableRow</span>&lt;<span class="s">"comment"</span>&gt;&gt;(<span class="s">`comments:${postId}`</span>, {
     table: <span class="s">"comment"</span>,
     event: <span class="s">"INSERT"</span>,
     filter: <span class="s">`post_id=eq.${postId}`</span>,
-    callback: (change) =&gt; addComment(change.new),
+    callback: ({ new: row }) =&gt; { <span class="k">if</span> (row) setComments((list) =&gt; [...list, row]) },
   })
-  <span class="k">return</span> &lt;p&gt;{status}&lt;/p&gt;
+  <span class="k">return</span> &lt;p&gt;{status}: {comments.length} new&lt;/p&gt;
 }</pre></div>
     <p>It needs <code>SupatypeProvider</code> above it, which takes your client as <code>client</code>. Give each use its own channel name: two hooks with the same name share a channel.</p>
     <p><code>@supatype/vue</code> has <code>useSubscription(table, { event, filter })</code>, and <code>@supatype/svelte</code> and <code>@supatype/solid</code> have <code>createSubscription(table, { event, filter })</code>. These watch the <code>public</code> schema and return <code>data</code>, <code>error</code> and <code>status</code>, which is <code>"connecting"</code>, <code>"connected"</code>, <code>"disconnected"</code> or <code>"error"</code>. <code>data</code> starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same <code>id</code>, deletes remove it. They do not load the rows that already exist, so pair them with a query.</p>

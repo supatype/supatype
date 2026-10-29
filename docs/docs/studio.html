@@ -164,8 +164,11 @@
     <p>To render a rich text field in React, pass the stored value to <code>RichText</code> from <code>@supatype/react</code>:</p>
     <div class="cb"><div class="cb-bar"><span>src/PostBody.tsx</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { <span class="t">RichText</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"@supatype/client"</span>
 
-&lt;<span class="t">RichText</span> content={post.body} as=<span class="s">"article"</span> /&gt;</pre></div>
+<span class="k">export function</span> <span class="t">PostBody</span>({ post }: { post: <span class="t">TableRow</span>&lt;<span class="s">"post"</span>&gt; }) {
+  <span class="k">return</span> &lt;<span class="t">RichText</span> content={post.body} as=<span class="s">"article"</span> /&gt;
+}</pre></div>
 
     <h2 id="media">Media and files</h2>
     <p><strong>Media &amp; Storage</strong> lists your buckets. Each bucket has two tabs:</p>

@@ -260,6 +260,8 @@
 
 <span class="k">export async function</span> copyFile(sourceUrl: string, path: string): <span class="t">Promise</span>&lt;void&gt; {
   <span class="k">const</span> res = <span class="k">await</span> fetch(sourceUrl)
+  <span class="c">// An expired link or a private bucket answers with an error page, which must not become the file.</span>
+  <span class="k">if</span> (!res.ok) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(<span class="s">`${path}: the source answered ${res.status}`</span>)
   <span class="k">const</span> { error } = <span class="k">await</span> supatype.storage.from(<span class="s">"avatars"</span>).upload(path, <span class="k">await</span> res.blob(), { upsert: <span class="k">true</span> })
   <span class="k">if</span> (error) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(<span class="s">`${path}: ${error.message}`</span>)
 }</pre></div>

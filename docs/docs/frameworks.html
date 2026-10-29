@@ -201,8 +201,9 @@
 <p>On that page, <code>useLivePreview</code> returns the live values while Studio is sending them and your own data otherwise:</p>
 <div class="cb"><div class="cb-bar"><span>src/PostPreview.tsx</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { useLivePreview, <span class="t">RichText</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"@supatype/client"</span>
 
-<span class="k">export</span> <span class="k">function</span> <span class="t">PostPreview</span>({ post }: { post: <span class="t">Post</span> }) {
+<span class="k">export</span> <span class="k">function</span> <span class="t">PostPreview</span>({ post }: { post: <span class="t">TableRow</span>&lt;<span class="s">"post"</span>&gt; }) {
   <span class="k">const</span> { data, isPreview } = useLivePreview({ initialData: post })
   <span class="k">return</span> (
     &lt;article&gt;

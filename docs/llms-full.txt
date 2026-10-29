@@ -948,7 +948,7 @@ Queries, `rpc`, `functions.invoke`, auth and most storage calls return `{ data, 
 
 An insert an access rule refuses returns code `42501`. An update or delete that the rules hide matches no rows and returns no error. `single()` with no row returns `PGRST116`.
 
-> **NETWORK FAILURES:** A network failure on a query, `rpc` or function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Auth and storage calls throw instead, so wrap them in `try` when the network may fail.
+> **NETWORK FAILURES:** A network failure on a query, `rpc` or function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Most auth and storage calls throw instead, so wrap them in `try` when the network may fail. Three return the failure as `error` like a query: `storage.listBuckets`, `storage.createBucket` and `auth.refreshSession`. `auth.signOut` ignores a network failure and clears the session on this device anyway.
 
 ### Timeouts and retries
 
@@ -1093,8 +1093,9 @@ On that page, `useLivePreview` returns the live values while Studio is sending t
 
 ```tsx
 import { useLivePreview, RichText } from "@supatype/react"
+import type { TableRow } from "@supatype/client"
 
-export function PostPreview({ post }: { post: Post }) {
+export function PostPreview({ post }: { post: TableRow<"post"> }) {
   const { data, isPreview } = useLivePreview({ initialData: post })
   return (
     <article>
@@ -1548,7 +1549,7 @@ export default function App() {
   return (
     <SupatypeProvider client={client}>
       <AuthGate fallback={<><LoginForm /><OAuthButton provider="google" redirectTo={redirectTo} webBrowser={WebBrowser} /></>}>
-        {/* signed-in app */}
+        <>{/* your signed-in screens */}</>
       </AuthGate>
     </SupatypeProvider>
   )
@@ -1934,16 +1935,19 @@ room.broadcast("move", { x: 120, y: 48 })
 `tsx`:
 
 ```tsx
+import { useState } from "react"
 import { useSubscription } from "@supatype/react"
+import type { TableRow } from "@supatype/client"
 
 function Comments({ postId }: { postId: string }) {
-  const { status } = useSubscription(`comments:${postId}`, {
+  const [comments, setComments] = useState<TableRow<"comment">[]>([])
+  const { status } = useSubscription<TableRow<"comment">>(`comments:${postId}`, {
     table: "comment",
     event: "INSERT",
     filter: `post_id=eq.${postId}`,
-    callback: (change) => addComment(change.new),
+    callback: ({ new: row }) => { if (row) setComments((list) => [...list, row]) },
   })
-  return <p>{status}</p>
+  return <p>{status}: {comments.length} new</p>
 }
 ```
 
@@ -2014,7 +2018,10 @@ To use another directory, set `functions.path` in `supatype.config.ts`. It resol
 import { defineConfig } from "@supatype/cli"
 
 export default defineConfig({
-  // ...
+  project: { name: "my-app" },
+  database: { provider: "docker" },
+  server: { mode: "dev" },
+  app: { mode: "none" },
   functions: {
     path: "functions",
   },
@@ -2581,8 +2588,11 @@ To render a rich text field in React, pass the stored value to `RichText` from `
 
 ```tsx
 import { RichText } from "@supatype/react"
+import type { TableRow } from "@supatype/client"
 
-<RichText content={post.body} as="article" />
+export function PostBody({ post }: { post: TableRow<"post"> }) {
+  return <RichText content={post.body} as="article" />
+}
 ```
 
 ### Media and files
@@ -3224,6 +3234,8 @@ const supatype = createClient({
 
 export async function copyFile(sourceUrl: string, path: string): Promise<void> {
   const res = await fetch(sourceUrl)
+  // An expired link or a private bucket answers with an error page, which must not become the file.
+  if (!res.ok) throw new Error(`${path}: the source answered ${res.status}`)
   const { error } = await supatype.storage.from("avatars").upload(path, await res.blob(), { upsert: true })
   if (error) throw new Error(`${path}: ${error.message}`)
 }
@@ -3621,7 +3633,7 @@ Not in the supatype/postgres image yet. Build it from source in the supatype/pos
 
 `postgresql.conf`:
 
-```ts
+```ini
 # Add pg_topics to your existing shared_preload_libraries list.
 shared_preload_libraries = 'pg_topics'
 pg_topics.databases = 'app'
@@ -3865,7 +3877,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 | `keys` | Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET | `--write`, `--force`, `--secret <secret>`, `--exp-years <years>` (default 10) |
 | `status` | Show linked target status or local stack services | `--env <name>` |
 | `logs` | Tail logs from the local stack | `--service <name>`, `--since <duration>` (default 5m), `-f, --follow` |
-| `app add [dir]` | Configure app routing: --static for a built site, or proxy to a dev server | `--static`, `--port <port>` (default 3000), `--upstream <url>` |
+| `app add [dir]` | Configure app routing: `--static` for a built site, or proxy to a dev server | `--static`, `--port <port>` (default 3000), `--upstream <url>` |
 | `app remove` | Set app.mode=none in supatype.config.ts |  |
 | `admin create-user` | Create an admin user for the admin panel | `--email`, `--password` (asked for if left out), `--role` (default `admin`) |
 | `admin set-role` | Change an existing user's admin role | `--email` and `--role`, both required |
@@ -3888,13 +3900,13 @@ Many commands that reach a database take `--connection <url>` to override the co
 | `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift` |
 | `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>`, `--direct` |
 | `generate` | Regenerate TypeScript types without running a migration |  |
-| `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With --record the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
+| `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
 | `migrations list` | List applied migrations with schema snapshot metadata | `--connection <url>`, `--env <name>` |
 | `rollback` | Roll back the last applied migration | `--sync-schema`, `--no-sync-schema` |
 | `reset` | Drop all managed tables and re-apply the schema from scratch (destructive) | `--yes`, `--connection <url>` |
 | `rename [from] [to]` | Record a rename in supatype/renames.json, so every push applies it as a rename and keeps the data: `supatype rename member.name member.title`, or `supatype rename member members` for a table | `--prune` |
 | `doctor` | Report schema drift between schema/index.ts and the live database | `--strict`, `--rebaseline`, `--accept-access-drift`, `--yes` |
-| `adopt` | Hand Supatype the objects a push refuses because their names are taken; take objects back with --release, and hand them back with --reclaim | `--release <object...>`, `--reclaim <object...>`, `--key <object...>`, `--adopt-none`, `--yes` |
+| `adopt` | Hand Supatype the objects a push refuses because their names are taken; take objects back with `--release`, and hand them back with `--reclaim` | `--release <object...>`, `--reclaim <object...>`, `--key <object...>`, `--adopt-none`, `--yes` |
 | `pull` | Scaffold schema/index.ts from live database introspection (draft, review before push) | `--connection <url>`, `--out <path>`, `--dry-run` |
 | `introspect` | Introspect the live Postgres database (JSON or summary) | `--json`, `--out <path>` |
 | `db check` | Check whether a database meets Supatype's requirements (for external Postgres) | `--connection <url>`, `--schema <name>`, `--emit`, `--fix`, `--authenticator-password <password>` |
@@ -3927,7 +3939,7 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `functions new <name>` | Scaffold a new edge function |  |
 | `functions serve` | Start a local Deno server that serves all functions with hot reload | `--port <port>` (default 54321), `--env-file <path>` (default `.env.local`) |
 | `functions invoke <name>` | Invoke a local or deployed function | `--data <json>`, `--auth`, `--local` |
-| `functions deploy` | Deploy all functions (or --only <name> for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
+| `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
 | `functions delete <name>` **Cloud** | Remove a deployed function |  |
 | `functions logs <name>` **Cloud** | Tail logs for a deployed function | `--since <duration>` (default 1h) |
@@ -3943,7 +3955,7 @@ On an unlinked project with a self-hosted Compose stack, `functions deploy` uplo
 | --- | --- | --- |
 | `self-host compose render` | Render deterministic self-host compose artifacts |  |
 | `self-host compose up` | Render and start compose services | `-d, --detach` (on by default) |
-| `self-host compose down` | Stop compose services (volumes are kept unless --volumes) | `--volumes`, `-y, --yes` |
+| `self-host compose down` | Stop compose services (volumes are kept unless `--volumes`) | `--volumes`, `-y, --yes` |
 | `self-host compose restart <service>` | Recreate one service with the current config and .env, leaving the others running |  |
 | `self-host compose status` | Show compose service status |  |
 | `self-host compose logs` | Tail compose logs | `--service <name>`, `-f, --follow` |
@@ -3951,7 +3963,7 @@ On an unlinked project with a self-hosted Compose stack, `functions deploy` uplo
 | `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
 | `envs list` | List linked environments |  |
 | `envs use <name>` | Set the default environment |  |
-| `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database | `--env <name>` (default `production`), `--schema-only`, `--app-only`, `--skip-build`, `--preview`, `--yes`, `--overwrite-drift` |
+| `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass `--local` for engine + your database | `--env <name>` (default `production`), `--schema-only`, `--app-only`, `--skip-build`, `--preview`, `--yes`, `--overwrite-drift` |
 | `deploy rollback` | Roll back to the previous static site deployment | `--to <id>`, `--env <name>` |
 | `deploy status` | Show current deployment status | `--env <name>` |
 | `deploy logs [version]` | Show build logs for a deployment | `--env <name>` |
@@ -3987,7 +3999,7 @@ All of these need Supatype Cloud, which is coming soon.
 | --- | --- | --- |
 | `self-update` | Update the supatype CLI (npm or standalone CDN binary) | `--force` |
 | `update` | Download the latest component binaries and update versions in supatype.config.ts | `--check` |
-| `engine status` | Run the host engine binary's --version and show which binary answered |  |
+| `engine status` | Run the host engine binary's `--version` and show which binary answered |  |
 | `cache list` | List cached component binaries and their sizes | `--project <path>` |
 | `cache clean [component] [version]` | Remove cached binaries not pinned by local project configs | `--dry-run`, `--force`, `--project <path>` |
 | `migrate-from-v1` | Codemod runtime model() schema DSL into RFC v2 Model<> type aliases | `--schema <path>`, `--write` |
