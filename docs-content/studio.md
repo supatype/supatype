@@ -1,0 +1,214 @@
+---
+title: "Studio"
+description: "Supatype Studio: content editors built from your models, rich text, media, drafts, versions, live preview, API docs, a GraphQL explorer, a SQL runner and migration history."
+---
+
+Studio is the admin app that ships with every Supatype stack. It builds content editors from your models and gives developers the API docs, a SQL runner and the database history in one place.
+
+Pre-1.0: APIs and config may change between releases.
+
+<h2 id="open">Open Studio</h2>
+
+Studio is served at `/studio/` on the project's gateway.
+
+- **Local, Docker (the default):** `supatype dev` prints it in the **Services running** panel as `http://localhost:<gateway-port>/studio/`. The port is `SUPATYPE_KONG_PORT` in `.env`.
+- **Self-hosted:** `http://<your-host>:<gateway-port>/studio/`, behind your reverse proxy. See [Self-host](/docs/#self-host).
+- **Local, Native:** `supatype dev` does not start Studio with the Native provider.
+
+Sign in with an email and password. The first admin comes from `SUPATYPE_ADMIN_EMAIL` and `SUPATYPE_ADMIN_PASSWORD` in `.env`, as described in [Local development](/docs/#local-dev). Add more people with `supatype admin create-user`.
+
+Studio also offers every OAuth provider the project has enabled. To offer only some, name them in `supatype.config.ts`:
+
+```ts title="supatype.config.ts"
+studio: { auth: { providers: ["github"] } }
+```
+
+Signing in is not enough on its own. Every person also needs a [Studio role](/docs/studio-roles.html).
+
+<h2 id="layout">Finding your way</h2>
+
+The sidebar holds the dashboard, Models, Database, Media & Storage, Authentication, Edge Functions, Realtime and Observability, plus Settings. Entries marked as coming soon open a placeholder page and do nothing yet.
+
+**Jump to** in the top bar searches pages, users and records.
+
+If the newest schema push was refused or failed, a notice shows above every screen. It says that nothing was applied and links to that push in the migration history. It goes away once a push applies.
+
+<h2 id="content">Editing content</h2>
+
+Studio reads your schema after each push and builds an editor for every model. There is nothing to configure: add a model, save, and it appears under **Models**.
+
+### The list
+
+Each model opens on a list of its records. Columns you can sort have sortable headers. Searchable fields get a search box. Tick rows to delete several at once, after a confirmation. **Create Post** (named after the model) opens an empty form.
+
+### The record editor
+
+Each field gets an input that matches its type: text, numbers, dates, slugs, selects, relations, JSON, code, images, files, rich text and blocks among them. The model's name in Studio comes from `label` and `labelPlural` in its options. A form also has **Duplicate** and **Delete**, and Delete asks first.
+
+A `Slug<"title">` field follows the title on a new record. A model with hooks shows "This post has custom logic that runs on save."
+
+A singleton model (`singleton: true`) is listed under **Globals** and opens straight into its one record.
+
+If the project has more than one locale, a language switcher appears in the top bar on content screens.
+
+### Model tabs
+
+Each model has tabs beside the editor:
+
+| Tab | Shows |
+| --- | --- |
+| Schema | The model's fields as the database has them |
+| Rules | Field bounds, constraints and indexes, as the database enforces them |
+| Data | A table browser for the model's table, with filters, inline edits and a record inspector |
+| API | REST examples for this model |
+| GraphQL | GraphQL examples for this model |
+| Cache | The model's cached REST responses |
+
+Editors do not see Schema or Rules. Cache is for admins and developers.
+
+<h2 id="rich-text">Rich text and blocks</h2>
+
+A `RichText` field opens a rich text editor with a toolbar for bold, italic, underline, strikethrough, headings 1 to 3, paragraphs, bullet lists and numbered lists. The field stores a Lexical document.
+
+A `Blocks<T>` field is a list of sections. An editor adds a block by type, fills in its fields, and can move or duplicate it. See [Slugs, rich text and blocks](/docs/schema.html#content) for how they are declared and stored.
+
+To render a rich text field in React, pass the stored value to `RichText` from `@supatype/react`:
+
+```tsx title="src/PostBody.tsx"
+import { RichText } from "@supatype/react"
+
+<RichText content={post.body} as="article" />
+```
+
+<h2 id="media">Media and files</h2>
+
+**Media & Storage** lists your buckets. Each bucket has two tabs:
+
+- **Files:** browse folders, upload files (or drop them on the page), create folders, and download or delete files. **Details** shows a file's size, type, owner, dates and its public URL.
+- **Policies:** the bucket's access rules. Who can read or change them is on [Studio roles](/docs/studio-roles.html#matrix).
+
+Declare buckets in your schema with `Bucket<>` so they are versioned with everything else. Studio can create one by hand, but warns first and recommends the schema instead. See [Storage](/docs/storage.html).
+
+An image field in the record editor takes a dropped file, an **Upload**, or **Select from bucket**, which browses the bucket the field names. A localized image field uploads one image per locale.
+
+<h2 id="drafts">Drafts and publishing</h2>
+
+On a model with `versions: { drafts: true }` (see [Drafts and versions](/docs/schema.html#drafts)), the editor's side panel holds the publishing controls:
+
+- **Save draft** saves without changing what readers see. On a new record the first save creates it.
+- **Publish** makes the saved draft live, saving any unsaved edits first.
+- The menu beside Publish has **Schedule publish...** (and **Change schedule...** or **Cancel schedule** once one is set), **Discard changes**, which returns the draft to the published version, and **Unpublish**, which keeps the content as a draft.
+
+A status badge shows Draft, Published, Scheduled or Partly published, and "Changed" when there are edits since publishing. With several locales a record can be published, and unpublished, per language.
+
+A draft may leave a required field empty. Studio asks before saving it, and it cannot be published until the field is filled.
+
+Who sees drafts and the publish controls is set by `publishing.draft_visibility`. See [Drafts and publishing](/docs/studio-roles.html#drafts) in Studio roles, which also covers saving drafts from the Data tab.
+
+<h2 id="versions">Version history</h2>
+
+A model with `versions` keeps a history of each record. On a model with drafts, open it with **History** in the publishing panel. Each version shows when it was saved, by whom, and its state: Live, Scheduled, Pending draft or Superseded. Select a version to compare its fields with the newest one.
+
+- **Restore as draft** brings the version back as the current draft. Nothing goes live until it is published.
+- **Publish this version** restores it and publishes it in one step.
+
+A model without `versions` says so, and keeps no history.
+
+<h2 id="preview">Live preview and preview links</h2>
+
+Tell Studio where each model renders in your app with `admin.livePreview`, keyed by model name. Field names in braces are filled from the record:
+
+```ts title="supatype.config.ts"
+admin: {
+  livePreview: {
+    Post: { urlPattern: "/preview/{slug}" },
+  },
+},
+```
+
+A path is enough when the same stack serves your app (`app.mode` is `static` or `proxy`). With `app.mode: "none"` give a full URL. `supatype push` refuses a path in that mode.
+
+### Live preview
+
+With this set, the editor gets a **Live preview** button. It opens your page in a side panel and sends the unsaved form values to it on every change. Read them with `useLivePreview`:
+
+```tsx title="src/PostPreview.tsx"
+import { useLivePreview } from "@supatype/react"
+
+export function PostPreview({ post }: { post: { title: string } }) {
+  const { data, isPreview } = useLivePreview({ initialData: post, model: "Post" })
+  return <h1>{data.title}{isPreview && " (preview)"}</h1>
+}
+```
+
+`model` is the schema's model name, as in `admin.livePreview`. The hook only accepts messages from the window that frames the page, at Studio's origin. By default that is the origin of the client in `SupatypeProvider`. If Studio is served somewhere else, pass `studioOrigin`.
+
+### Share a preview
+
+On a saved record, **Share a preview** makes a link for someone without an account. Choose how long it lives: 15 minutes, 1 hour, 1 day or 7 days. The link is your preview URL with a `preview` query parameter. Studio lists the links it has made, and each can be revoked.
+
+On the preview page, create a client with that code as `previewCode` and read the draft with `.draft()`. The code is the client's whole credential: it cannot be combined with `serviceRoleKey`. See [Drafts and publishing](/docs/client.html#drafts) in Client.
+
+<h2 id="api">API docs</h2>
+
+**Settings > API > REST** opens the REST docs. They are built from your models plus the auth and storage endpoints. Each endpoint lists its parameters, an example body and response, and a curl example. Filter by category or table, or search.
+
+**Try it** sends a real request and shows the response headers and body. It asks who to send as: yourself, anonymous, the service role or a pasted token. See [Send as](/docs/studio-roles.html#send-as).
+
+The REST section also has Settings and Cache tabs for admins and developers.
+
+<h2 id="graphql">GraphQL explorer</h2>
+
+The GraphQL page sends queries to `POST /graphql/v1`. Pick a model to start from a list query, edit it, and press **Run**. It uses the same Send as choice as Try it. Each model's GraphQL tab has examples for that model.
+
+<h2 id="sql">SQL runner</h2>
+
+**Database > SQL Runner** runs SQL against the project. Press **Run Query**, or Ctrl+Enter (Cmd+Enter on a Mac).
+
+- Each run opens a result tab with its time. Export a result as CSV or JSON.
+- Statements that drop, empty or overwrite data (`DROP`, `TRUNCATE`, `DELETE`, `UPDATE`, and an `ALTER` that drops something or turns off row level security) ask first and name what they change.
+- `EXPLAIN (FORMAT JSON)` draws the plan as a tree.
+- Query History lists earlier runs in this session.
+
+:::note[Full access]
+Queries run as `supatype_sql_editor`, which has the rights of the role that owns your tables. Row level security does not apply and masked columns show in full. It is not a superuser. Every query is recorded. Only admins and developers can open it.
+:::
+
+<h2 id="database">Database, migrations and schema objects</h2>
+
+Editors do not see the Database pages. The SQL runner is for admins and developers only.
+
+| Page | Shows |
+| --- | --- |
+| Overview | A diagram of your tables and their relations |
+| Tables, Views, Triggers, Indexes, Constraints, Types, Roles, Extensions | The database's objects of that kind |
+| Migrations | Every push: its status, number of changes, when it was applied, who pushed it and the engine version. Open one to see its schema changes and its SQL. Filter by status and date, or search by name or id |
+| Schema objects | Every object Supatype manages, from the managed-object ledger, with its status (managed, adopted or released) and a link to the migration that last changed it |
+| Seeds | Each recorded `supatype seed` run: file, status, rows written, time and duration |
+
+Adopted and released objects come from [supatype adopt](/docs/cli.html#schema). Seed runs are covered in [Seeding](/docs/seeding.html#run).
+
+<h2 id="logs">Logs</h2>
+
+Function logs are on the **Edge Functions** page. Pick a function and open its **Logs** tab. Live tail is on by default. Turn it off to read recent logs by time range, with optional auto-refresh. A deployment that runs functions inside the server process has no worker to tail, so Studio shows recent logs instead.
+
+The same page has an **Invoke** tab to call a function, and **Environment Variables**. See [Functions](/docs/functions.html).
+
+:::note
+Under Observability, API request logs are not recorded yet. Auth, storage, realtime and Postgres logs are coming soon.
+:::
+
+<h2 id="other">Other screens</h2>
+
+| Screen | For |
+| --- | --- |
+| Dashboard | Totals and recent activity for users, records, storage and the database |
+| Authentication | Users (including their Studio access), access policies, providers, configuration and email templates. See [Auth](/docs/auth.html) |
+| Settings | API keys, CORS origins and database settings |
+| Realtime | Channels, clients, a live stream and a broadcast tester, where the deployment's control plane supports the inspector |
+
+<h2 id="roles">Roles</h2>
+
+What each person can see and change in Studio depends on their Studio role: admin, developer, editor or viewer. Admins and developers work with full access. Editors and viewers work within the role's limits, and field masks still apply to them.
+
+The full table, field masking, Send as and how to give someone a role are on [Studio roles](/docs/studio-roles.html).

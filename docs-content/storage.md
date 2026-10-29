@@ -1,0 +1,198 @@
+---
+title: "Storage"
+description: "Supatype storage: declare buckets in the schema, file and image fields, bucket access rules, uploads, signed URLs, image transforms, limits and where files are kept."
+---
+
+Declare buckets in your schema, point file and image fields at them, and upload through the client. Who may read, upload, overwrite and delete is decided by Postgres from the bucket's rules.
+
+Pre-1.0: APIs and config may change between releases.
+
+<h2 id="buckets">Declare a bucket</h2>
+
+A bucket is a type alias for `Bucket<"id", { ... }>` in your schema. The [schema page](/docs/schema.html#buckets) has the short version. Every key in the second argument is optional.
+
+```ts title="schema/index.ts"
+import type { Bucket, BucketLoggedIn, BucketOwner, BucketRole } from "@supatype/types"
+
+export type Attachments = Bucket<"attachments", {
+  accessMode: "private"
+  accept: ["application/pdf", "image/*"]
+  maxSize: "20MB"
+  access: {
+    read: BucketOwner
+    create: BucketLoggedIn
+    update: BucketOwner
+    delete: BucketRole<"admin">
+  }
+}>
+```
+
+| Key | What it does |
+| --- | --- |
+| `accessMode` | `"public"`, `"private"` or `"custom"`. Defaults to `"private"`. Only `"public"` serves files on a public URL. `"custom"` reads like `"private"` and is for buckets that set `s3BucketPolicy`. |
+| `maxSize` | Largest file accepted, written as `"500KB"`, `"20MB"` or `"1GB"`. Units are B, KB, MB and GB, counted in 1024s. Anything else fails the push. |
+| `accept` | Content types the bucket takes. Exact types such as `"image/png"`, or a wildcard such as `"image/*"`. Leave it out to accept any type. |
+| `access` | The `read`, `create`, `update` and `delete` rules, covered [below](#access). Any other key fails the push. |
+| `s3BucketPolicy` | A raw S3 bucket policy as a JSON string, applied to the object store bucket in place of the default. |
+
+`supatype push` and `supatype dev` register each bucket and write its settings. Changing `maxSize`, `accept` or `accessMode` and pushing again updates the bucket. Declaring the same bucket id twice with different settings fails the push.
+
+<h2 id="fields">File and image fields</h2>
+
+`ImageAsset<Bucket>` and `FileAsset<Bucket>` are fields that point at a file in a bucket. The column is JSONB holding the bucket and the path, and the generated type is `StorageReference`:
+
+``` title="supatype/generated"
+export type StorageReference = {
+  bucket: string
+  path: string
+}
+```
+
+The field stores a reference, not the file. Upload the file first, then write its path to the row:
+
+``` title="typescript"
+const path = `${userId}/${file.name}`
+const { error: uploadError } = await supatype.storage.from("attachments").upload(path, file)
+if (uploadError) throw new Error(uploadError.message)
+
+await supatype.from("post").update({ attachment: { bucket: "attachments", path } }).eq("id", postId)
+```
+
+- Always name the bucket. Without one, `ImageAsset` points at a bucket called `images` and `FileAsset` at one called `assets`, and neither exists unless you declare it.
+- `ImageAsset<Covers, { localized: true }>` stores one reference per locale instead of one.
+- Deleting a row does not delete its file, and deleting a file does not clear the field.
+
+<h2 id="access">Access rules</h2>
+
+Each rule becomes a row level security policy on the table that records every stored file. The storage service runs each upload, overwrite, delete and list as the caller, so Postgres decides, the same way it does for your models.
+
+| Rule | Who passes |
+| --- | --- |
+| `BucketPublic` | Everyone, including the anon key |
+| `BucketLoggedIn` | Any signed-in user |
+| `BucketOwner` | The user who uploaded the file. An overwrite keeps the original owner. |
+| `BucketRole<"admin">` | Users whose `app_metadata.role` is `admin`, the same check as `Role` on a model |
+| `BucketPrivate` | Nobody but the service role |
+
+- A rule you leave out is refused, and the push prints a warning naming it.
+- `update` and `delete` need a `read` rule beside them. Postgres only lets a caller change rows it can read, so without one they match nothing. The push warns about this too, even on a public bucket.
+- `accessMode: "public"` serves files on the public URL without asking the `read` rule. Writes still go through `create`, `update` and `delete`.
+- `list` returns only the files the caller may read. `remove` deletes only the files the caller may delete, leaves the rest in place and returns just the ones it removed.
+- A refused write answers 401 to the anon key, because signing in might change the answer, and 403 to a signed-in user.
+
+:::note
+A bucket with no `access` of its own takes the access rules of each model that has a file or image field pointing at it. Owner rules then compare the caller with the file's uploader. Declare `access` on the bucket to keep its rules in one place.
+:::
+
+<h2 id="upload">Upload</h2>
+
+The [client page](/docs/client.html#storage) shows the basic calls. `upload` sends the file in one request with the caller's token.
+
+``` title="typescript"
+const { data, error } = await supatype.storage.from("attachments").upload(`${userId}/slides.pdf`, file, {
+  contentType: "application/pdf",
+  upsert: false,
+})
+if (error) console.error(error.status, error.message)
+```
+
+Without `contentType` the client uses the `File`'s own type. If that is missing or generic, the service guesses from the extension (`.png`, `.pdf`, `.mp4` and other common types). The type is checked against `accept` before anything is stored.
+
+With `upsert: true` an existing file at that path is replaced if the `update` rule allows it. The new bytes are stored alongside the old ones and swapped in when the row commits, so a reader never sees a half-written file.
+
+| Status | Why |
+| --- | --- |
+| 401, 403 | The bucket's `create` rule (or `update`, for an overwrite) refused the caller |
+| 404 | No bucket with that id |
+| 409 | A file already exists at that path and `upsert` was not set |
+| 413 | The file is larger than the bucket's `maxSize`, or the service limit when there is none |
+| 415 | The content type is not in `accept`. The body lists the allowed types. |
+| 507 | The upload would take the project past its total storage quota |
+
+<h2 id="urls">Download and URLs</h2>
+
+There are three ways to read a file. All three go through the storage service, which looks up the file's current version, so a URL keeps working after the file is overwritten.
+
+| Method | Path | Who can use it |
+| --- | --- | --- |
+| `getPublicUrl(path)` | `/storage/v1/object/public/…` | Anyone, only on a bucket with `accessMode: "public"`. Builds the URL locally with no request. |
+| `download(path)` | `/storage/v1/object/authenticated/…` | The caller, if the `read` rule allows. Returns a `Blob`. |
+| `createSignedUrl(path, seconds)` | `/storage/v1/object/sign/…?token=` | Anyone holding the link until it expires |
+
+A signed URL is only issued to a caller the `read` rule allows, and only for a file that exists. The expiry must be between 1 second and 7 days. The token is signed by the storage service and covers one bucket and one path. `createSignedUrls(paths, seconds)` signs several paths and reports an error per path.
+
+``` title="typescript"
+const bucket = supatype.storage.from("attachments")
+
+const { data: blob } = await bucket.download(`${userId}/slides.pdf`)
+const { data: link } = await bucket.createSignedUrl(`${userId}/slides.pdf`, 3600)
+const { data: files } = await bucket.list(`${userId}/`, { limit: 50, offset: 0 })
+```
+
+`list` returns up to 100 entries unless you pass `limit`. Each entry has `name`, `size`, `mimetype`, the owner and timestamps.
+
+Public and private buckets differ in CORS too. A public bucket answers any origin. A private bucket sends no `Access-Control-Allow-Origin`, so read its files from a browser with a signed URL or `download`.
+
+`storage.listBuckets()` and `storage.createBucket()` need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead.
+
+<h2 id="transforms">Image transforms</h2>
+
+`getPublicUrl` and `download` take a `transform` option. The service resizes and re-encodes the image on each request.
+
+``` title="typescript"
+const { data: { publicUrl } } = supatype.storage.from("covers").getPublicUrl(post.cover.path, {
+  transform: { width: 800, height: 450, resize: "cover", format: "avif", quality: 70 },
+})
+```
+
+| Option | Values | Default |
+| --- | --- | --- |
+| `width`, `height` | 1 to 4096 pixels | the original size |
+| `resize` | `cover`, `contain`, `fill`, `inside`, `outside` | `cover` |
+| `format` | `webp`, `avif`, `png`, `jpeg` | `webp` |
+| `quality` | 1 to 100 | 80 |
+
+- A transform runs only when `width`, `height`, `format` or `quality` is set. `resize` on its own does nothing.
+- Any transform re-encodes the image, as WebP unless you set `format`.
+- Images are never enlarged past their original size.
+- Files whose type is not `image/*` are served unchanged.
+- The same query parameters (`width`, `height`, `resize`, `format`, `quality`) work when appended to a signed URL.
+- Transformed responses carry `Cache-Control: public, max-age=3600` by default. Put a CDN in front if the same sizes are requested often.
+
+<h2 id="limits">Limits and config</h2>
+
+The storage service reads these environment variables. The self-host compose file sets the database, JWT and object store ones for you. The rest keep their defaults unless you set them on the `storage` service.
+
+| Variable | Default | What it controls |
+| --- | --- | --- |
+| `TIER_MAX_UPLOAD_SIZE` | 52428800 (50 MB) | Largest file, in bytes, for a bucket with no `maxSize`. A bucket's `maxSize` always wins. |
+| `STORAGE_QUOTA` | 1073741824 (1 GB) | Total bytes across every bucket. An upload past it gets 507. |
+| `MAX_SIGNED_URL_EXPIRY` | 604800 (7 days) | Longest signed URL, in seconds |
+| `DEFAULT_SIGNED_URL_EXPIRY` | 3600 | Expiry when a signing request names none |
+| `SIGNED_URL_SECRET` | the JWT secret | Key that signs URL tokens. Changing it invalidates every signed URL. |
+| `TRANSFORM_CACHE_TTL` | 3600 | `max-age`, in seconds, on transformed images |
+| `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE` | the local SeaweedFS | Where the bytes are kept |
+
+:::caution
+The 1 GB quota applies to self-hosted projects too, because the compose file does not set `STORAGE_QUOTA`. Raise it on the `storage` service if you expect to store more.
+:::
+
+The service reads each upload fully into memory before storing it, so very large files cost memory on the storage container while they upload.
+
+<h2 id="where">Where files live</h2>
+
+File metadata is a row in the `storage` schema of your project's Postgres. The bytes go to an S3-compatible object store, each upload under its own versioned key. Read files through the storage API, not the object store, because the key is not the path you uploaded to.
+
+| Where you run | Where the bytes go |
+| --- | --- |
+| `supatype dev` (Docker, the default for new projects) | A SeaweedFS container, in the `storage-data` Docker volume. Its port is not published to your machine. `supatype dev --reset-db` keeps it. |
+| `supatype dev` with `provider: "native"` | Plain files under `~/.supatype/projects/<name>/storage`, served by `supatype-server` |
+| `supatype self-host compose up` | A SeaweedFS service in the stack, in the `storage-data` volume. Its S3 port, 8333, is published (`SUPATYPE_SEAWEEDFS_PORT` changes it) and needs the stack's credentials. There is no anonymous access. |
+
+:::caution
+The native dev store is a stand-in. It checks that a bucket is public before serving a public URL, and that a request carries a token, but it does not apply bucket access rules, `maxSize` or `accept`, and it ignores transforms. Use the Docker provider to test storage rules before you deploy.
+:::
+
+Back up the `storage-data` volume along with the database. A database dump holds the file records but not the bytes.
+
+Removing a bucket from the schema drops its policies on the next push. The bucket and its files stay where they are.
