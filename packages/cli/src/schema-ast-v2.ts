@@ -230,7 +230,8 @@ export interface ModelAstV2 {
 
 export interface ExtractedStorageBucketAst {
   id: string
-  public: boolean
+  /** Left out, with `accessMode`, when the schema names no visibility: a push keeps the live one. */
+  public?: boolean
   accessMode?: "public" | "private" | "custom"
   allowedMimeTypes?: string[]
   fileSizeLimit?: number

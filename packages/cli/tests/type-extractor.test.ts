@@ -340,6 +340,34 @@ export type Post = Model<{
     expect(hero).toMatchObject({ kind: "image", bucket: "covers", accessMode: "public" })
   })
 
+  // A push rewrites a bucket's visibility only when the schema names it, so a bucket made public at
+  // runtime stays public. The extractor sent `accessMode: "private"` and `public: false` for every
+  // bucket that named no mode, which named it private and undid the runtime change on every push.
+  it("leaves a bucket's visibility out when the schema names none", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-bucket-undeclared-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, ImageAsset, Bucket } from "@supatype/types"
+
+export type uploads = Bucket<"uploads", { maxSize: "1MB" }>
+
+export type Post = Model<{
+  id: UUID
+  photo: ImageAsset<uploads>
+}>
+`,
+      "utf8",
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const b = ast?.storageBuckets?.find((x) => x.id === "uploads")
+    expect(b).toEqual({ id: "uploads", fileSizeLimit: 1024 * 1024 })
+    // The field still reads as private, as the storage service treats a bucket with no mode.
+    expect(ast?.models[0]?.fields["photo"]).toMatchObject({ bucket: "uploads", accessMode: "private" })
+  })
+
   // A bucket has the same four operations a model has, each its own rule. `update` used to be
   // skipped without a word, so an overwrite rule the author wrote was simply never enforced.
   function bucketWithAccess(access: string): string {

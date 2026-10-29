@@ -1374,13 +1374,12 @@ function buildExtractedBucketAst(
   id: string,
   parsed: Partial<ParsedBucketLiteral>,
 ): ExtractedStorageBucketAst {
-  const mode = parsed.accessMode ?? "private"
-  const pub = mode === "public"
-
+  // Visibility only when the schema names it: a push leaves an unnamed one as the live bucket has
+  // it, and a filled-in `private` named it, undoing a runtime change on every push.
+  const mode = parsed.accessMode
   const row: ExtractedStorageBucketAst = {
     id,
-    public: pub,
-    accessMode: mode,
+    ...(mode !== undefined && { public: mode === "public", accessMode: mode }),
     ...(parsed.allowedMimeTypes !== undefined && parsed.allowedMimeTypes.length > 0
       ? { allowedMimeTypes: parsed.allowedMimeTypes }
       : {}),
@@ -1567,10 +1566,12 @@ function attachStorageFieldMeta(
   bucketsById: Map<string, ExtractedStorageBucketAst>,
 ): ParsedField {
   const cfg = bucketsById.get(bucketId)
-  if (cfg?.accessMode !== undefined) {
+  if (cfg !== undefined) {
+    // A bucket that names no mode reads as private, as the storage service treats one; only the
+    // bucket entry leaves it out, so a push keeps the live bucket's visibility.
     return {
       ...field,
-      kernel: { ...field.kernel, accessMode: cfg.accessMode },
+      kernel: { ...field.kernel, accessMode: cfg.accessMode ?? "private" },
     }
   }
   return field
