@@ -9,6 +9,9 @@
   `storage.*` tables either way, so every rule, limit and transform is the same code on both. Names
   are stored so that no filesystem can confuse two (case, `..`, Windows-reserved characters,
   trailing dots) or reach outside the directory.
+* **release:** the service ships as a per-platform archive for native `supatype dev`: the service
+  packaged with Node, and sharp's prebuilt libvips beside it (`scripts/build-release-archive.mjs`).
+  `--self-test` renders one image through sharp and exits, which the archive build runs.
 
 ### Bug Fixes
 

@@ -17,7 +17,7 @@
  * of this.
  */
 import { EMBEDDED_CLI_VERSION } from "./cli-version-embedded.js"
-import type { Component } from "./components.js"
+import { RELEASE_VERSIONED_COMPONENTS, type Component } from "./components.js"
 import { PINNED_IMAGES } from "./generated/release-images.js"
 
 export type PinnedComponent = keyof typeof PINNED_IMAGES
@@ -96,11 +96,11 @@ export function pinnedComponentVersion(component: PinnedComponent): string {
 
 /**
  * The binary version `supatype dev` downloads for a component the project does not pin, or
- * undefined to ask the CDN for its latest (Deno, which has its own pin, and realtime in a build
- * that is not a release, whose own version was never published).
+ * undefined to ask the CDN for its latest (Deno, which has its own pin, and realtime or storage in
+ * a build that is not a release, whose own version was never published).
  */
 export function defaultComponentVersion(component: Component, version: string = EMBEDDED_CLI_VERSION): string | undefined {
   if (isPinnedComponent(component)) return pinnedComponentVersion(component)
-  if (component === "realtime" && isReleaseVersion(version)) return version
+  if (RELEASE_VERSIONED_COMPONENTS.has(component) && isReleaseVersion(version)) return version
   return undefined
 }

@@ -183,7 +183,8 @@ jobs:
 
   # Everything a release CLI runs at its own version: the images
   # (supatype/{storage,realtime,functions-worker,studio,control-plane}:<version>,
-  # packages/cli/src/generated/release-images.ts) and the realtime binaries it downloads. A CLI
+  # packages/cli/src/generated/release-images.ts) and the realtime binaries and storage archives
+  # it downloads. A CLI
   # that reaches users before these are published, or after one of them failed, fails every
   # `supatype dev` with "manifest unknown". This is the one list of them: every job that puts the
   # CLI in front of users (cli-publish, npm, homebrew-formula) needs this job, and so does
@@ -191,10 +192,10 @@ jobs:
   # steps skip what is already published.
   artifacts-published:
     name: every image and binary the CLI runs is published
-    needs: [realtime, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
+    needs: [realtime, storage, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
     runs-on: ubuntu-latest
     steps:
-      - run: echo "realtime binaries and all five images are published"
+      - run: echo "realtime binaries, storage archives and all five images are published"
 
   # The CDN publish of the binaries the cli job built and ran. It moves cli/latest.json, which
   # install.sh and `supatype self-update` resolve, so it waits for artifacts-published.
@@ -217,6 +218,15 @@ jobs:
   realtime:
     needs: prepare
     uses: ./.github/workflows/realtime-release.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+    secrets: inherit
+
+  # The storage service's per-platform archives `supatype dev` runs natively, published like
+  # realtime's binaries and for the same reason before npm.
+  storage:
+    needs: prepare
+    uses: ./.github/workflows/storage-release.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
     secrets: inherit

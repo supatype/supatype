@@ -92,6 +92,7 @@ export function describeActiveOverrides(config: SupatypeProjectConfig): string[]
   add("postgres_dir", o.postgres_dir)
   add("deno", o.deno)
   add("realtime", o.realtime)
+  add("storage", o.storage)
   add("studio", o.studio)
   add("postgrest", o.postgrest)
   return lines
@@ -148,15 +149,6 @@ export function postgresArchiveTag(version: string): string {
   return version.split(".")[0]!
 }
 
-// CDN path templates per component.
-const CDN_PATHS: Record<Component, (version: string, platform: PlatformId) => string> = {
-  engine:   (v, p) => `/engine/v${v}/supatype-engine-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-  server:   (v, p) => `/server/v${v}/supatype-server-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-  postgres: (v, p) => `/postgres/v${v}/supatype-pg-${postgresArchiveTag(v)}-${p.os}-${p.arch}${p.os === "windows" ? ".zip" : ".tar.gz"}`,
-  deno:     (v, p) => `/deno/v${v}/deno-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-  realtime: (v, p) => `/realtime/v${v}/supatype-realtime-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-}
-
 // Checksums file path (one per version directory, covers all platform binaries).
 const checksumsDirPath = (component: Component, version: string): string =>
   `/${component}/v${version}/checksums.sha256`
@@ -195,6 +187,7 @@ function binaryName(component: Component, version: string, platform: PlatformId)
     case "postgres": return `supatype-pg-${postgresArchiveTag(version)}-${platform.os}-${platform.arch}${win ? ".zip" : ".tar.gz"}`
     case "deno":     return `deno-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
     case "realtime": return `supatype-realtime-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
+    case "storage":  return `supatype-storage-${platform.os}-${platform.arch}${win ? ".zip" : ".tar.gz"}`
   }
 }
 
@@ -441,7 +434,7 @@ export async function download(
 
   console.log(`[supatype] Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
   const manifest = await fetchLeavingNoEmptyDir(component, version, platform, { dir, destPath })
-  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version, platform), dir)
+  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version), dir)
   return { path: destPath, fetched: true }
 }
 
@@ -505,11 +498,11 @@ async function fetchIntoCache(component: Component, version: string, platform: P
 }
 
 /**
- * The release directory on the CDN: from the path template, so a file is fetched under the name the
- * manifest gives it, and a release published under a legacy name is found under that name.
+ * The release directory on the CDN, `<component>/v<version>`: a file is fetched there under the name
+ * the manifest gives it, so a release published under a legacy name is found under that name.
  */
-function releaseDirUrl(component: Component, version: string, platform: PlatformId): string {
-  return `${CDN_BASE}${CDN_PATHS[component](version, platform).replace(/\/[^/]+$/, "")}`
+function releaseDirUrl(component: Component, version: string): string {
+  return `${CDN_BASE}/${component}/v${version}`
 }
 
 /**
@@ -530,7 +523,7 @@ async function fetchVerifiedArtifact(
   const manifest = await withRetry(() => fetchVerifiedChecksums(checksumsUrl, `${checksumsUrl}.minisig`))
   const match = extractChecksum(manifest, archiveNameCandidates(component, version, platform))
 
-  const binaryUrl = `${releaseDirUrl(component, version, platform)}/${match.filename}`
+  const binaryUrl = `${releaseDirUrl(component, version)}/${match.filename}`
   await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
   await verifyChecksum(tmpPath, match.checksum, component)
 
@@ -854,17 +847,16 @@ export function validateArtifactFormat(
 /**
  * Per-component CDN artifact shapes:
  *   engine, server, deno, realtime: native executable (ELF / Mach-O / PE)
- *   postgres (unix)      .tar.gz (gzip)
- *   postgres (windows)   .zip
+ *   postgres, storage (unix)      .tar.gz (gzip)
+ *   postgres, storage (windows)   .zip
  */
 function assertArtifactFormat(
   component: Component,
   filePath: string,
   platform: PlatformId,
 ): void {
-  if (component === "postgres") {
-    if (platform.os === "windows") assertZipArchive(filePath)
-    else assertGzipArchive(filePath)
+  if (component === "postgres" || component === "storage") {
+    assertArchive(filePath, component, platform.os === "windows" ? "zip" : "gzip")
     return
   }
   if (EXECUTABLE_COMPONENTS.has(component)) {
@@ -873,32 +865,19 @@ function assertArtifactFormat(
   }
 }
 
-/** Reject HTML/error pages or corrupt postgres .tar.gz on CDN. */
-function assertGzipArchive(filePath: string): void {
-  const fd = openSync(filePath, "r")
-  try {
-    const magic = Buffer.alloc(2)
-    readSync(fd, magic, 0, 2, 0)
-    if (magic[0] !== 0x1f || magic[1] !== 0x8b) {
-      throw new Error(
-        "Downloaded postgres file is not a gzip archive (bad magic bytes). " +
-          "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
-      )
-    }
-  } finally {
-    closeSync(fd)
-  }
-}
+/** The first bytes of each archive format a component ships in. */
+const ARCHIVE_MAGIC = { gzip: [0x1f, 0x8b], zip: [0x50, 0x4b] } as const
 
-/** Reject corrupt postgres .zip on CDN (Windows bundles). */
-function assertZipArchive(filePath: string): void {
+/** Reject HTML/error pages or a corrupt archive on CDN: a .tar.gz, or a .zip for Windows. */
+function assertArchive(filePath: string, component: Component, kind: keyof typeof ARCHIVE_MAGIC): void {
+  const expected = ARCHIVE_MAGIC[kind]
   const fd = openSync(filePath, "r")
   try {
-    const magic = Buffer.alloc(4)
-    readSync(fd, magic, 0, 4, 0)
-    if (magic[0] !== 0x50 || magic[1] !== 0x4b) {
+    const magic = Buffer.alloc(expected.length)
+    readSync(fd, magic, 0, expected.length, 0)
+    if (expected.some((byte, i) => magic[i] !== byte)) {
       throw new Error(
-        "Downloaded postgres file is not a zip archive (bad magic bytes). " +
+        `Downloaded ${component} file is not a ${kind} archive (bad magic bytes). ` +
           "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
       )
     }

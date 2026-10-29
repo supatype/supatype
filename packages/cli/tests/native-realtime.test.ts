@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { startNativeRealtime, type NativeRealtimeOptions } from "../src/native-realtime.js"
 import { decodingProblem } from "../src/db-preflight.js"
-import type { RealtimeLaunchSpec } from "../src/realtime-launch.js"
+import type { ComponentLaunchSpec } from "../src/component-launch.js"
 import type { ProcessManager } from "../src/process-manager.js"
 import { isJsonObject } from "@supatype/shared"
 import { parseJsonAs } from "./support/json.js"
@@ -57,14 +57,14 @@ function freePort(): Promise<number> {
 }
 
 /** A stand-in realtime: `body` is the script node runs, with PORT in its environment. */
-function fakeRealtime(body: string): () => Promise<RealtimeLaunchSpec> {
+function fakeRealtime(body: string): () => Promise<ComponentLaunchSpec> {
   const script = join(dir, "fake-realtime.cjs")
   writeFileSync(script, body, "utf8")
   return async () => ({ bin: process.execPath, args: [script] })
 }
 
 /** A realtime answering /health/ready with `status` and `json`, exiting after `lifeMs` when given. */
-function answering(status: number, json: object, lifeMs?: number): () => Promise<RealtimeLaunchSpec> {
+function answering(status: number, json: object, lifeMs?: number): () => Promise<ComponentLaunchSpec> {
   return fakeRealtime(`
 const http = require("node:http")
 const server = http.createServer((req, res) => {
@@ -76,7 +76,7 @@ ${lifeMs === undefined ? "" : `setTimeout(() => process.exit(0), ${lifeMs})`}
 `)
 }
 
-async function start(launch: () => Promise<RealtimeLaunchSpec>): Promise<ProcessManager | null> {
+async function start(launch: () => Promise<ComponentLaunchSpec>): Promise<ProcessManager | null> {
   const proc = await startNativeRealtime(options(), launch)
   if (proc !== null) started.push(proc)
   return proc

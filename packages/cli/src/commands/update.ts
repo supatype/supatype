@@ -25,6 +25,7 @@ import {
   type PlatformId,
 } from "../binary-cache.js"
 import { defaultComponentVersion } from "../release-images.js"
+import { BINARY_COMPONENTS, RELEASE_VERSIONED_COMPONENTS } from "../components.js"
 import { error, info, plain } from "../ui/messages.js"
 import { fatalError } from "../ui/fatal.js"
 
@@ -116,7 +117,7 @@ function imagePullFailure(one: FailedPull): UpdateFailure {
 }
 
 /** The components a native project runs, in the order `update` fetches them. */
-const NATIVE_COMPONENTS: readonly Component[] = ["engine", "server", "postgres", "deno", "realtime"]
+const NATIVE_COMPONENTS: readonly Component[] = BINARY_COMPONENTS
 
 /** A pinned component the CDN has a newer version of. */
 interface ComponentUpdate {
@@ -236,12 +237,12 @@ function planComponent(component: Component, config: SupatypeProjectConfig, { la
   return { kind: "update", update: { component, from: current, to: latest } }
 }
 
-/** A pinned component the CDN names no latest version for: skipped for realtime, a failure otherwise. */
+/** A pinned component the CDN names no latest version for: skipped for realtime and storage, a failure otherwise. */
 function missingLatest(component: Component): ComponentPlan {
-  if (component === "realtime") {
-    // Realtime binaries publish with every stable supatype v* release, but releases from
-    // before that have none, and a prerelease never moves realtime/latest.json.
-    info(`Skipping ${component}: no realtime/latest.json on the CDN (realtime binaries ship with each stable supatype v* release)`)
+  if (RELEASE_VERSIONED_COMPONENTS.has(component)) {
+    // Realtime binaries and storage archives publish with every stable supatype v* release, but
+    // releases from before that have none, and a prerelease never moves <component>/latest.json.
+    info(`Skipping ${component}: no ${component}/latest.json on the CDN (it ships with each stable supatype v* release)`)
     return null
   }
   error(`No latest version for ${component} on CDN`)
