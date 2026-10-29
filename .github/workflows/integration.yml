@@ -911,6 +911,79 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+  # What the site promises about `supatype dev` in a project made by `init`: a new field reaches the
+  # generated types (V-N2), and renaming a field never empties its column (V-N1). Both were open
+  # defects, found by hand and fixed by H6 and H7. Like the masking matrix it ran only in the
+  # release train, so a pull request could bring either back and nothing here would say so.
+  positioning-e2e:
+    name: positioning checks (live stack, init project)
+    needs: images
+    runs-on: ubuntu-22.04
+    # One stack, started once, watched through a field added and a field renamed.
+    timeout-minutes: 30
+    env:
+      # See validation-e2e: built from source, so the embedded key is empty and the host engine
+      # download refuses without this.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pulls Docker Hub images through mirror.gcr.io, which no rate limit applies to. Needs no
+      # secrets, so it runs for forks too; restarts the daemon, so it comes before any container.
+      - name: Use the Docker Hub mirror
+        run: bash scripts/ci-docker-mirror.sh
+
+      # Continues anonymously when Docker Hub is unavailable; fails on rejected credentials.
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        run: bash scripts/ci-dockerhub-login.sh
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # The script refuses a stack whose push did not run a ledger-era engine, and the rename is the
+      # engine's to get right, so the engine is the pinned one.
+      - name: Use the pinned engine
+        uses: ./.github/actions/pinned-engine
+        with:
+          github-token: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+
+      - name: Use this checkout's images
+        uses: ./.github/actions/load-images
+
+      # No Chromium step: the specs edit files, run tsc and query Postgres; none opens a page.
+      # The script fails on any skipped test, as the masking matrix does.
+      - name: Run the positioning checks
+        run: bash tests/integration/scripts/positioning-e2e.sh
+
+      - name: Upload the dev log and report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: positioning-e2e-logs
+          path: |
+            tests/e2e/positioning/.state/*.log
+            tests/e2e/positioning/.state/*/.supatype/**/*.log
+            tests/e2e/positioning/positioning-report.json
+          if-no-files-found: ignore
+          retention-days: 3
+
   blog-e2e:
     name: server-rendered app (live stack)
     # Both conditions hold now: the published worker serves `greet`, and the rendered compose maps
