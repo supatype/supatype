@@ -13,7 +13,7 @@ import { homedir } from "node:os"
 import { spawnSync } from "node:child_process"
 import { gzipSync } from "node:zlib"
 import { loadConfig } from "../config.js"
-import { connectionString } from "../project-config.js"
+import { connectionString, NATIVE_SERVER_PORT } from "../project-config.js"
 import { devPostgresPassword } from "../local-secrets.js"
 import { splitPassword } from "../host-database.js"
 import { fillMissingKeys } from "./keys.js"
@@ -230,7 +230,7 @@ export function registerSelfHost(program: Command): void {
       const config = loadConfig(cwd)
 
       const serverBin = await resolveBinary("server", config)
-      const port = opts.port ?? String(config.server.port ?? 54321)
+      const port = opts.port ?? String(config.server.port ?? NATIVE_SERVER_PORT)
 
       const args = [
         "--port", port,

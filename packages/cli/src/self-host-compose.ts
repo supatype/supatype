@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process"
 import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
 import { fatalError } from "./ui/fatal.js"
 import {
+  COMPOSE_DEV_KONG_PORT,
   postgrestSchemaEnv,
   externalDatabaseUrl,
   hooksPathFromProject,
@@ -57,6 +58,9 @@ export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
   "SUPATYPE_SERVER_IMAGE",
   "SUPATYPE_POSTGRES_IMAGE",
 ] as const
+
+/** Kong's host port as compose interpolates it: `SUPATYPE_KONG_PORT`, else the default `dev` tries first. */
+const KONG_HOST_PORT = `\${SUPATYPE_KONG_PORT:-${COMPOSE_DEV_KONG_PORT}}`
 
 /** Pinned by digest, because the registry this replaced proved a tag can be taken away. */
 const SEAWEEDFS_IMAGE =
@@ -459,7 +463,7 @@ function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean
 }
 
 export interface SelfHostComposeOptions {
-  /** `supatype dev` with provider docker: internal-only db/server; Kong on host :18473. */
+  /** `supatype dev` with provider docker: internal-only db/server; Kong on host SUPATYPE_KONG_PORT. */
   devLocal?: boolean
   /**
    * Whether functions were given a direct database URL that names the stack's `db`
@@ -546,7 +550,8 @@ export function renderSelfHostCompose(
   const tlsEnabled = selfHostTlsEnabled(config, devLocal)
   const domain = config.server.domain?.trim() ?? ""
   // When TLS is on, default external URLs to https://<domain> so auth links/redirects use HTTPS.
-  const externalUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:18473"
+  // Otherwise Kong's published port, which a fixed 18473 was not once SUPATYPE_KONG_PORT moved it.
+  const externalUrlFallback = tlsEnabled ? `https://${domain}` : `http://localhost:${KONG_HOST_PORT}`
   const siteUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:3000"
   // The project's public address, as a compose reference: API_EXTERNAL_URL, which `supatype dev`
   // writes as the gateway's localhost address and a self-host operator sets to their domain. One
@@ -648,7 +653,7 @@ ${seaweedPorts}`
   const kongPorts = tlsEnabled
     ? `      - "80:8000"
       - "443:8443"`
-    : `      - "\${SUPATYPE_KONG_PORT:-18473}:8000"`
+    : `      - "${KONG_HOST_PORT}:8000"`
   // The RESP server the response cache and Kong's ACME certificates use.
   // Either a Valkey sidecar, or pg_keyspace inside the Postgres container --
   // one stateful service instead of two.
