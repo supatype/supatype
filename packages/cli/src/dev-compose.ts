@@ -51,6 +51,7 @@ import {
   composeDockerImageEnv,
   composeProjectName,
   exitComposeFailed,
+  noteUnpinnedImages,
   publishesDbToHost,
   runDockerCompose,
   schemaEngineImageForPush,
@@ -1602,6 +1603,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   warnProjectAuthProviderSecrets(cwd, config)
 
   console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
+  noteUnpinnedImages(cwd)
   const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   if (ensureDevApiConfig(cwd)) {
     console.log("[supatype] API config written to .supatype/api-config.json")

@@ -37,7 +37,7 @@ import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-mask
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
-import { RELEASE_IMAGES } from "./release-images.js"
+import { RELEASE_IMAGES, unpinnedImagesNote } from "./release-images.js"
 import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
@@ -137,6 +137,15 @@ export function isRegistryPullableImageRef(ref: string): boolean {
   if (/^v?\d+\.\d+/.test(tag)) return true
   if (/^\d+-latest$/.test(tag)) return true
   return false
+}
+
+/**
+ * Say, before a stack starts, which in-repo images run from `:latest` because this CLI is not a
+ * release ({@link unpinnedImagesNote}). Read as compose reads them: the shell over `.env`.
+ */
+export function noteUnpinnedImages(cwd: string): void {
+  const note = unpinnedImagesNote({ ...readEnvFile(cwd), ...process.env })
+  if (note !== undefined) console.log(`[supatype] ${note}`)
 }
 
 /**
