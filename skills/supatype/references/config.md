@@ -279,6 +279,17 @@ export default defineConfig({
 
 Requires no Docker. Uses host Postgres on :5432 and supatype-server on `server.port` (default 54321).
 
+The native Postgres is not the Docker image, and some of what the image has is missing:
+
+- **GraphQL:** pg_graphql and `/graphql/v1` are Docker-only; native dev answers `/graphql/v1` with
+  501 `graphql_unavailable`. Use REST, or the Docker provider.
+- **pg_net:** not on Windows. On Linux and macOS it is preloaded, with pg_cron, as in the image.
+- **PostGIS:** not on macOS for now. Geometry fields need Linux, Windows or the Docker provider.
+
+pg_stat_statements, pg_cron, pg_net, plan_filter and safeupdate are preloaded when the downloaded
+archive carries them, so an older archive starts as it did. safeupdate refuses an `UPDATE` or
+`DELETE` with no `WHERE` in every session, as in the image: write `WHERE true` to mean every row.
+
 The native Postgres checks passwords (`scram-sha-256` for local and host connections): the
 superuser `postgres` uses `.env`'s `POSTGRES_PASSWORD` and PostgREST's `authenticator` uses
 `AUTHENTICATOR_PASSWORD`; `dev` and `supatype pg start` generate either into `.env` when missing.

@@ -26,7 +26,13 @@ export interface PgOptions {
   keyspacePort?: number
   /** Database durable keys are written to. Ignored while everything is ephemeral. */
   keyspaceDatabase?: string
+  /** The project's database, where pg_cron and pg_net run their jobs. */
+  database?: string
 }
+
+/** What the server's settings are decided from: the install, the keyspace and the database. */
+type PgSettingsOptions = Pick<PgOptions, "pgBinDir" | "keyspacePort" | "keyspaceDatabase" | "database">
+
 
 /**
  * Native Postgres bundles are built with prefix /usr/local/supatype-pg; dyld/ld
@@ -35,17 +41,43 @@ export interface PgOptions {
 export function pgSpawnEnv(
   pgBinDir: string,
   platform: NodeJS.Platform = process.platform,
+  base: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
 ): NodeJS.ProcessEnv {
   const libDir = join(dirname(pgBinDir), "lib")
-  const env = { ...process.env } as NodeJS.ProcessEnv
+  const env = { ...base }
   if (platform === "darwin") {
     const prev = env.DYLD_LIBRARY_PATH ?? ""
     env.DYLD_LIBRARY_PATH = prev ? `${libDir}:${prev}` : libDir
   } else if (platform === "linux") {
     const prev = env.LD_LIBRARY_PATH ?? ""
     env.LD_LIBRARY_PATH = prev ? `${libDir}:${prev}` : libDir
+    const caBundle = env.SSL_CERT_FILE || env.SSL_CERT_DIR ? undefined : hostCaBundle(exists)
+    if (caBundle !== undefined) env.SSL_CERT_FILE = caBundle
   }
   return env
+}
+
+/** Where the Linux archive's OpenSSL looks for CA certificates: Debian's layout, built in. */
+const BUILT_IN_CA_DIR = "/usr/lib/ssl/certs"
+
+/** The CA bundle each family of distributions keeps, most common first. */
+const HOST_CA_BUNDLES = [
+  "/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu, Alpine, Arch
+  "/etc/pki/tls/certs/ca-bundle.crt", // Fedora, RHEL, CentOS
+  "/etc/ssl/ca-bundle.pem", // openSUSE
+  "/etc/ssl/cert.pem", // Alpine's other path, and the BSDs
+]
+
+/**
+ * The host's CA bundle, for a Linux host without Debian's /usr/lib/ssl. The archive's OpenSSL,
+ * which pg_net's libcurl verifies HTTPS with, looks only there, so on Fedora, RHEL or openSUSE every
+ * request to an https URL failed its certificate check. OpenSSL reads SSL_CERT_FILE ahead of its
+ * built-in paths; one the shell sets is left alone.
+ */
+function hostCaBundle(exists: (path: string) => boolean): string | undefined {
+  if (exists(BUILT_IN_CA_DIR)) return undefined
+  return HOST_CA_BUNDLES.find((path) => exists(path))
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +241,10 @@ export async function firstFreePort(base: number, span: number): Promise<number 
  * Order in `shared_preload_libraries` is load-bearing: pg_keyspace first, then
  * supatype_mask, so the mask stays outermost. pg_keyspace checks this itself
  * and refuses to serve when the order is wrong, deliberately, since RESP
- * would otherwise hand back rows the mask never rewrote.
+ * would otherwise hand back rows the mask never rewrote. The rest sit between
+ * them in the supatype/postgres image's order (PRELOAD_ORDER), each only when
+ * the archive carries it: naming a library Postgres cannot find stops it, and
+ * an archive from before they were bundled has to start as it did.
  *
  * The sizing is the measured dev profile: ~60 MiB of shared memory, against
  * the extension's own defaults of ~689 MiB before rings and row cache. It is
@@ -223,25 +258,56 @@ export async function firstFreePort(base: number, span: number): Promise<number 
  * postgresql.conf, so a cluster created before this takes it at its next start.
  */
 export function pgServerOptions(opts: PgOptions): string {
-  const mask = nativeMaskLibraryPresent(opts.pgBinDir)
-  const keyspace = opts.keyspacePort !== undefined && nativeKeyspaceLibraryPresent(opts.pgBinDir)
+  return `-p ${opts.port} ${pgServerSettings(opts)}`
+}
 
-  const libs = [...(keyspace ? ["pg_keyspace"] : []), ...(mask ? ["supatype_mask"] : [])]
-  const parts = [`-p ${opts.port}`, "-c wal_level=logical"]
+/**
+ * {@link pgServerOptions} without the port: every setting a native Postgres starts with, for a
+ * start that names its port elsewhere (the systemd unit's postgresql.conf).
+ */
+export function pgServerSettings(opts: PgSettingsOptions): string {
+  const libs = preloadedLibraries(opts)
+  // Room for pg_cron's and pg_net's background workers beside Postgres's own, as the image has.
+  const parts = ["-c wal_level=logical", "-c max_worker_processes=16"]
   if (libs.length > 0) parts.push(`-c shared_preload_libraries=${libs.join(",")}`)
-  if (keyspace) {
-    parts.push(
-      `-c pg_keyspace.port=${opts.keyspacePort}`,
-      "-c pg_keyspace.durability=ephemeral",
-      "-c pg_keyspace.keys=50000",
-      "-c pg_keyspace.ring_mb=8",
-      "-c pg_keyspace.rowcache_mb=1",
-    )
-    if (opts.keyspaceDatabase) {
-      parts.push(`-c pg_keyspace.database=${opts.keyspaceDatabase}`)
-    }
-  }
+  if (libs.includes("pg_keyspace")) parts.push(...keyspaceOptions(opts))
+  if (libs.includes("pg_cron")) parts.push(...databaseOption("cron.database_name", opts), "-c cron.use_background_workers=on")
+  if (libs.includes("pg_net")) parts.push(...databaseOption("pg_net.database_name", opts), "-c pg_net.batch_size=200")
   return parts.join(" ")
+}
+
+/** `shared_preload_libraries` in the supatype/postgres image, outermost last. */
+const PRELOAD_ORDER = [
+  "pg_keyspace",
+  "pg_stat_statements",
+  "pg_cron",
+  "pg_net",
+  "plan_filter",
+  "safeupdate",
+  "supatype_mask",
+] as const
+
+/** The libraries to preload: each the archive carries, pg_keyspace only with a port to serve on. */
+function preloadedLibraries(opts: PgSettingsOptions): string[] {
+  return PRELOAD_ORDER.filter(
+    (lib) => nativeLibraryPresent(opts.pgBinDir, lib) && (lib !== "pg_keyspace" || opts.keyspacePort !== undefined),
+  )
+}
+
+/** `name` set to the project's database, which pg_cron and pg_net run their jobs in; none without one. */
+function databaseOption(name: string, opts: PgSettingsOptions): string[] {
+  return opts.database ? [`-c ${name}=${opts.database}`] : []
+}
+
+function keyspaceOptions(opts: PgSettingsOptions): string[] {
+  return [
+    `-c pg_keyspace.port=${opts.keyspacePort}`,
+    "-c pg_keyspace.durability=ephemeral",
+    "-c pg_keyspace.keys=50000",
+    "-c pg_keyspace.ring_mb=8",
+    "-c pg_keyspace.rowcache_mb=1",
+    ...(opts.keyspaceDatabase ? [`-c pg_keyspace.database=${opts.keyspaceDatabase}`] : []),
+  ]
 }
 
 export function start(opts: PgOptions): void {

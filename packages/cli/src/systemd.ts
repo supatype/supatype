@@ -10,6 +10,7 @@ import { writeFileSync, mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { NATIVE_SERVER_PORT, type SupatypeProjectConfig } from "./project-config.js"
+import { pgServerSettings } from "./postgres-ctl.js"
 
 export interface SystemdOptions {
   /** Directory where unit files are written. Defaults to .supatype/systemd/. */
@@ -63,6 +64,9 @@ function postgresUnit(
   const dataDir = config.database.data_dir ?? join(stateDir, "data")
   const logDir = join(stateDir, "logs")
   const pgBinDir = `%h/.supatype/cache/postgres/${config.versions?.postgres ?? "latest"}/bin`
+  // The settings `supatype dev` starts Postgres with, libraries asked of the install the unit runs
+  // (`%h` read as this user's home, the unit's User by default).
+  const settings = pgServerSettings({ pgBinDir: pgBinDir.replace("%h", homedir()), database: config.project.name })
 
   return `[Unit]
 Description=Supatype Postgres (${config.project.name})
@@ -78,6 +82,7 @@ ExecStartPre=/bin/mkdir -p ${logDir}
 ExecStart=${pgBinDir}/pg_ctl start \\
   -D ${dataDir} \\
   -l ${logDir}/postgres.log \\
+  -o "${settings}" \\
   -w \\
   -t 60
 ExecStop=${pgBinDir}/pg_ctl stop -D ${dataDir} -m fast
