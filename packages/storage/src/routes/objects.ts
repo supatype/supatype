@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { RequestContext } from "../server.js"
 import { sendJson, readBody, readJson } from "../server.js"
 import * as db from "../db.js"
-import * as s3 from "../s3.js"
+import * as store from "../object-store.js"
 import { parseTransformParams, transformImage, UnrenderableImageError } from "../transform.js"
 import { config } from "../env.js"
 import { uploadRefusal } from "../middleware/storage-limits.js"
@@ -103,10 +103,10 @@ async function storeAndCommit(
   file: { body: Buffer; contentType: string },
 ): Promise<db.CommittedWrite | undefined> {
   const version = randomUUID()
-  const key = s3.objectKey(write.name, version)
+  const key = store.objectKey(write.name, version)
   let committed: db.CommittedWrite | undefined
   try {
-    await s3.putObject(write.bucketId, key, file.body, file.contentType)
+    await store.putObject(write.bucketId, key, file.body, file.contentType)
     committed = await refusingWhenUngranted(ctx, () => db.commitUploadAs(jwt, write, upsert, version))
   } catch (err) {
     await discard(write.bucketId, [{ name: write.name, version }])
@@ -127,8 +127,8 @@ async function storeAndCommit(
  * request has already happened and nothing reads bytes no row names.
  */
 async function discard(bucketId: string, objects: db.StoredObject[]): Promise<void> {
-  const keys = objects.map((o) => s3.objectKey(o.name, o.version))
-  await s3.deleteObjects(bucketId, keys).catch((err: unknown) => {
+  const keys = objects.map((o) => store.objectKey(o.name, o.version))
+  await store.deleteObjects(bucketId, keys).catch((err: unknown) => {
     console.error(`[storage] could not delete ${keys.length} stored object(s) in ${bucketId}:`, err)
   })
 }
@@ -436,12 +436,12 @@ async function serveObject(ctx: RequestContext, bucketId: string, objectPath: st
     sendJson(ctx.res, 404, { error: "Object not found" })
     return
   }
-  const key = s3.objectKey(stored.name, stored.version)
+  const key = store.objectKey(stored.name, stored.version)
 
   const transformOpts = parseTransformParams(ctx.url.searchParams)
 
   try {
-    const obj = await s3.getObject(bucketId, key)
+    const obj = await store.getObject(bucketId, key)
 
     if (transformOpts && obj.contentType.startsWith("image/")) {
       const transformed = await transformImage(obj.body, transformOpts)

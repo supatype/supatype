@@ -8,7 +8,7 @@ import {
   deleteObjects as deleteS3Objects,
   applyBucketPolicyFromConfig,
   objectKey,
-} from "../s3.js"
+} from "../object-store.js"
 
 import type { BucketAccessMode } from "../db.js"
 import { accessModeOf, nextAccessMode } from "../bucket-access.js"
