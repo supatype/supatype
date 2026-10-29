@@ -33,6 +33,10 @@ const sidebar = [
     ["VM + GitHub Actions", "/deploy-vm-github-actions.html"],
     ["Coming from Supabase", "/from-supabase.html"], ["Coming from Prisma", "/from-prisma.html"],
   ]],
+  ["POSTGRES", "Docs", [
+    ["The image", "/postgres.html"], ["pg_keyspace", "/postgres/pg-keyspace.html"], ["pg_topics", "/postgres/pg-topics.html"],
+    ["pg_guard", "/postgres/pg-guard.html"], ["supatype_mask", "/postgres/supatype-mask.html"],
+  ]],
   ["REFERENCE", "Docs", [["CLI", "/docs/cli.html"]]],
   ["MORE", null, [["Licensing", "/licensing.html"], ["Privacy", "/privacy.html", { llms: false }], ["Changelog", "/changelog.html"], ["llms.txt", "/llms.txt"]]],
 ]

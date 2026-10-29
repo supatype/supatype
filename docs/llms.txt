@@ -44,6 +44,14 @@ Contact: GitHub and Discord, linked from the site. Licensing questions: licensin
 - [Changelog](https://www.supatype.com/changelog.html): What changed in each release
 - [Agent skill](https://github.com/supatype/supatype/tree/main/skills/supatype): Schema, config, CLI and self-host reference for coding agents
 
+## Postgres
+
+- [supatype/postgres](https://www.supatype.com/postgres.html): PostgreSQL 17 with PostGIS, pgvector, pg_cron and more, our own extensions, and safe defaults. The image under every Supatype project, usable on its own
+- [pg_keyspace](https://www.supatype.com/postgres/pg-keyspace.html): A Redis and Valkey compatible cache inside Postgres. Stock Redis clients connect, and SQL reads the same keys
+- [pg_topics](https://www.supatype.com/postgres/pg-topics.html): A Postgres table as a Kafka topic for stock Kafka clients, with publish inside your own transaction. Not in the image yet
+- [pg_guard](https://www.supatype.com/postgres/pg-guard.html): Extensions, event triggers and publications without SUPERUSER
+- [supatype_mask](https://www.supatype.com/postgres/supatype-mask.html): Per-row column masking and write rejection, enforced in the planner
+
 ## Platform capabilities
 
 - [Migrations](https://www.supatype.com/#how-it-works): The Rust schema engine diffs types against the live database, classifies each change as safe, cautious or destructive, applies it in one transaction with a recorded rollback, and never guesses a rename (renames are declared with `supatype rename`)

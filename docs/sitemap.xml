@@ -38,7 +38,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/seeding.html</loc>
-    <lastmod>2026-10-28</lastmod>
+    <lastmod>2026-10-29</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/studio.html</loc>
@@ -50,7 +50,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/deploy-vm-github-actions.html</loc>
-    <lastmod>2026-10-28</lastmod>
+    <lastmod>2026-10-29</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/from-supabase.html</loc>
@@ -58,7 +58,27 @@
   </url>
   <url>
     <loc>https://www.supatype.com/from-prisma.html</loc>
-    <lastmod>2026-10-28</lastmod>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://www.supatype.com/postgres.html</loc>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://www.supatype.com/postgres/pg-keyspace.html</loc>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://www.supatype.com/postgres/pg-topics.html</loc>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://www.supatype.com/postgres/pg-guard.html</loc>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://www.supatype.com/postgres/supatype-mask.html</loc>
+    <lastmod>2026-10-29</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/cli.html</loc>
@@ -66,19 +86,19 @@
   </url>
   <url>
     <loc>https://www.supatype.com/licensing.html</loc>
-    <lastmod>2026-10-28</lastmod>
+    <lastmod>2026-10-29</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/privacy.html</loc>
-    <lastmod>2026-10-28</lastmod>
+    <lastmod>2026-10-29</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/changelog.html</loc>
-    <lastmod>2026-10-28</lastmod>
+    <lastmod>2026-10-29</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/llms.txt</loc>
-    <lastmod>2026-10-28</lastmod>
+    <lastmod>2026-10-29</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/llms-full.txt</loc>

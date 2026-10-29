@@ -399,7 +399,8 @@ textarea.input { resize: vertical; min-height: 88px; }
  * Prose rules sit at zero specificity through :where(), so any single component class inside an
  * article (a callout, a card, the crumbs) wins without an override.
  */
-.doc { flex: 1 1 560px; min-width: 0; max-width: 780px; padding: 40px 0 96px; }
+/* A long unbroken word, such as an error code, wraps rather than widening the page on a phone. */
+.doc { flex: 1 1 560px; min-width: 0; max-width: 780px; padding: 40px 0 96px; overflow-wrap: break-word; }
 .crumbs, .pre-release { font-family: var(--mono); font-size: 13px; color: var(--text-4); }
 .crumbs { --link: var(--text-4); margin: 0 0 16px; }
 .pre-release { margin: 0 0 8px; }

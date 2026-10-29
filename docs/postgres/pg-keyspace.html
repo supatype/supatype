@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>pg_keyspace: Redis, inside your Postgres | Supatype</title>
+  <meta name="description" content="pg_keyspace runs a Redis and Valkey compatible cache inside Postgres. Stock clients connect over RESP and SQL reads the same keys. One service, not two." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/postgres/pg-keyspace.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="pg_keyspace: Redis, inside your Postgres | Supatype" />
+  <meta property="og:description" content="pg_keyspace runs a Redis and Valkey compatible cache inside Postgres. Stock clients connect over RESP and SQL reads the same keys. One service, not two." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/postgres/pg-keyspace.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/pg-keyspace.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Postgres: pg_keyspace</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html" aria-current="page">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/postgres.html">Postgres</a> / pg_keyspace</nav>
+    <h1>pg_keyspace</h1>
+    <p class="intro">Redis, inside your Postgres. pg_keyspace runs a Redis and Valkey compatible server inside Postgres. Your Redis client connects unchanged, and SQL reads the same keys.</p>
+    <h2 id="problem">Why pg_keyspace</h2>
+    <p>Most teams that need a cache run Redis or Valkey beside Postgres. That is a second stateful service to deploy, secure, monitor and back up. It has its own users, its own backups and its own idea of what is current.</p>
+    <p>pg_keyspace moves the cache into Postgres. A background worker speaks the Redis protocol (RESP2 and RESP3) over a shared-memory keyspace. redis-cli, ioredis, redis-py and valkey-go connect without changes. The same bytes are readable from SQL, and a read inside a backend takes about 9 ns.</p>
+    <p>It keeps what you already trust. Redis AUTH maps to a Postgres role, keys can be scoped per tenant, and the wire can use TLS. Durability is a setting per key prefix, from memory only to fsync before the reply. Persisted keys live in ordinary tables, so your Postgres backups and point-in-time recovery cover the cache too.</p>
+    <h2 id="example">An example</h2>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre># Any Redis client works. Here, redis-cli on the RESP port.
+redis-cli -p 6379 SET session:42 '{&quot;user&quot;:&quot;ada&quot;}' EX 3600
+redis-cli -p 6379 HSET user:42 name Ada plan pro
+redis-cli -p 6379 ZADD leaderboard 120 ada 95 grace
+redis-cli -p 6379 ZRANGE leaderboard 0 -1 WITHSCORES
+
+# The same keyspace, read from SQL in the same database.
+psql &quot;$DATABASE_URL&quot; -c &quot;
+  SELECT convert_from(supacache.get('session:42'), 'UTF8');&quot;
+
+# Write from SQL with a 60 second TTL, read it back over RESP.
+psql &quot;$DATABASE_URL&quot; -c &quot;SELECT supacache.set('flag:beta', 'on', 60);&quot;
+redis-cli -p 6379 GET flag:beta            # &quot;on&quot;
+
+# Tell RESP subscribers something from SQL, say from a trigger.
+psql &quot;$DATABASE_URL&quot; -c &quot;
+  SELECT supacache.publish('orders', 'shipped:42');&quot;
+
+# Hit rate, entries and memory, as a normal Postgres view.
+psql &quot;$DATABASE_URL&quot; -c &quot;SELECT * FROM supacache.pg_stat_keyspace;&quot;</pre></div>
+    <h2 id="compare">pg_keyspace or a separate Redis or Valkey cluster</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col"></th><th scope="col">a separate Redis or Valkey cluster</th><th scope="col">pg_keyspace</th></tr></thead>
+      <tbody>
+        <tr><td>What you run</td><td>A separate service or cluster to deploy, patch, secure and monitor.</td><td>A background worker inside the Postgres you already run.</td></tr>
+        <tr><td>Clients</td><td>Any Redis client.</td><td>Stock Redis clients, unmodified, over RESP2 or RESP3, including client-side caching.</td></tr>
+        <tr><td>Cache hit (GET, closed loop)</td><td>About 35 to 39 µs.</td><td>About 34 to 39 µs.</td></tr>
+        <tr><td>Pipelined throughput, one worker</td><td>About 537k to 628k ops/s. Higher on GET.</td><td>About 500k to 556k ops/s. More workers scale it out.</td></tr>
+        <tr><td>SQL access to the same data</td><td>None. It is a separate datastore.</td><td>Yes. supacache.get reads the same shared memory, about 9 ns in a backend.</td></tr>
+        <tr><td>Auth and tenancy</td><td>Redis ACLs, in a separate user store.</td><td>AUTH maps to a Postgres role. Keys and channels are scoped per tenant. TLS can reuse the Postgres certificate.</td></tr>
+        <tr><td>Durability</td><td>RDB snapshots and AOF, set for the whole instance.</td><td>Four tiers, from memory only to a synchronous standby, chosen per key prefix.</td></tr>
+        <tr><td>Backups</td><td>A separate artefact on a separate schedule with a separate restore.</td><td>Persisted keys are Postgres tables, so base backups and point-in-time recovery include them.</td></tr>
+        <tr><td>Monitoring</td><td>A Redis exporter to deploy and wire up.</td><td>pg_stat_keyspace views, granted to pg_monitor. Existing Postgres collectors read them.</td></tr>
+        <tr><td>Command and type surface</td><td>Wider. Adds streams, scripting, HyperLogLog and geo.</td><td>Strings, hashes, lists, sets, sorted sets, bitmaps, Bloom and Cuckoo filters, pub/sub and transactions.</td></tr>
+        <tr><td>Maturity</td><td>Mature and battle-tested, with a large ecosystem.</td><td>New, with a focused feature set.</td></tr>
+      </tbody>
+    </table></div>
+    <h2 id="limits">What it does not do</h2>
+    <ul>
+      <li>No streams, Lua scripting (EVAL) or blocking commands such as BLPOP yet. They are planned with no date, and a client that sends them gets ERR unknown command. Check for both before treating it as a drop-in.</li>
+      <li>FUNCTION and FCALL are declined. HyperLogLog is not planned, and geo is declined in favour of PostGIS.</li>
+      <li>Valkey has a higher raw write ceiling with persistence off. If you need maximum single-node write throughput or mature cluster tooling today, stay on Valkey.</li>
+      <li>It is opt-in. The library has to be preloaded, so turning it on is a restart. Its shared memory is reserved at startup whether or not the cache is full.</li>
+      <li>The default tier is ephemeral, so keys live in memory and are lost on restart. The durable tiers wait for a Postgres commit: a median of 1.04 ms per write against 39 µs for ephemeral in the published benchmark.</li>
+      <li>The replicated tier cannot be mixed with other tiers on one instance. It applies to the whole keyspace or not at all.</li>
+      <li>A streaming standby serves no RESP until it is promoted. On a replica the keyspace is reachable only through SQL.</li>
+      <li>With more than one worker and a persisted tier, clients need their cluster constructor, unless owner recovery addressing is on. Changing the worker count is a restart, and there is no online resharding.</li>
+      <li>The PostgREST row cache is off by default and eventually coherent. After an UPDATE, another session can read the previous row for 200 ms plus decode time by default, and for longer when many databases share the invalidation pool.</li>
+      <li>Pub/sub crosses instances only for channels you opt in, and delivery is at most once. Bloom and Cuckoo filters are reachable over RESP only, with no SQL functions yet.</li>
+    </ul>
+    <h2 id="use-it">Use it on its own</h2>
+    <p>pg_keyspace ships in the <a href="/postgres.html">supatype/postgres</a> image. Use the image as your Postgres, with or without the rest of Supatype.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre># pg_keyspace ships in the image but is not loaded by default.
+# SUPATYPE_KEYSPACE_ENABLED=1 adds it to shared_preload_libraries
+# and creates the extension in POSTGRES_DB on first start.
+docker run -d \
+  --name supatype-postgres \
+  -e POSTGRES_PASSWORD=your-password \
+  -e SUPATYPE_KEYSPACE_ENABLED=1 \
+  -e SUPATYPE_KEYSPACE_DURABILITY=ephemeral \
+  -e SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES='acme:=durable' \
+  -p 5432:5432 \
+  -p 127.0.0.1:6379:6379 \
+  supatype/postgres:17-latest
+
+redis-cli -p 6379 PING                     # PONG
+
+# RESP asks for no password until you set one, so the port above
+# listens on this machine only. Before you open it up:
+#   SELECT supacache.set_credential('app', 'secret', 'app_role', 'app');</pre></div>
+    <h2 id="with-supatype">With Supatype</h2>
+    <p>Every Supatype project runs on this image, with migrations, access rules, an API, a typed client and Studio generated from your TypeScript types. <a href="/docs/#local-dev">Run it locally</a> in a few commands. The full reference is the extension's <a href="https://github.com/supatype/postgres/blob/develop/extensions/pg_keyspace/README.md">README</a>.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/postgres.html"><small>PREVIOUS</small><span>Postgres</span></a>
+      <a href="/postgres/pg-topics.html" class="next"><small>NEXT</small><span>pg_topics</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#problem">Why</a>
+    <a href="#example">An example</a>
+    <a href="#compare">Compared</a>
+    <a href="#limits">Limits</a>
+    <a href="#use-it">Use it on its own</a>
+    <a href="#with-supatype">With Supatype</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js?v=19dd554888"></script>
+</body>
+</html>

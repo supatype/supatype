@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>supatype/postgres: PostgreSQL 17 with our own extensions | Supatype</title>
+  <meta name="description" content="PostgreSQL 17 with PostGIS, pgvector, pg_cron and our own extensions: a Redis-compatible cache, column masking and extension management without SUPERUSER." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/postgres.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="supatype/postgres: PostgreSQL 17 with our own extensions | Supatype" />
+  <meta property="og:description" content="PostgreSQL 17 with PostGIS, pgvector, pg_cron and our own extensions: a Redis-compatible cache, column masking and extension management without SUPERUSER." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/postgres.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/postgres.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Postgres: The image</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html" aria-current="page">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / Postgres</nav>
+    <h1>Postgres</h1>
+    <p class="intro">PostgreSQL 17 with the extensions an app needs, our own extensions, and safe defaults. It is the database under every Supatype project. Use it on its own too. Open source under the PostgreSQL License, for linux/amd64 and linux/arm64.</p>
+    <h2 id="run-it">Run it</h2>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>docker run -d \
+  --name supatype-postgres \
+  -e POSTGRES_PASSWORD=your-password \
+  -p 5432:5432 \
+  supatype/postgres:17-latest</pre></div>
+    <p>The default superuser is <code>supatype_admin</code>, set with <code>POSTGRES_USER</code>.</p>
+    <h2 id="extensions">Our extensions</h2>
+    <ul>
+      <li><a href="/postgres/pg-keyspace.html"><code>pg_keyspace</code></a>: Redis, inside your Postgres.</li>
+      <li><a href="/postgres/pg-topics.html"><code>pg_topics</code></a>: Kafka topics, with no broker to run. Not in the image yet.</li>
+      <li><a href="/postgres/pg-guard.html"><code>pg_guard</code></a>: Superuser features, without the superuser.</li>
+      <li><a href="/postgres/supatype-mask.html"><code>supatype_mask</code></a>: Hide a column per row, not per table.</li>
+    </ul>
+    <h2 id="included">Also included</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Extension</th><th scope="col">What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>PostGIS</code></td><td>Geography and geometry types, and spatial queries.</td></tr>
+        <tr><td><code>pgvector</code></td><td>Vector embeddings and similarity search.</td></tr>
+        <tr><td><code>pg_graphql</code></td><td>A GraphQL API over your schema.</td></tr>
+        <tr><td><code>pg_net</code></td><td>Async HTTP requests from triggers and functions.</td></tr>
+        <tr><td><code>pgjwt</code></td><td>JWT signing and checking in SQL.</td></tr>
+        <tr><td><code>pg_cron</code></td><td>Scheduled jobs inside Postgres.</td></tr>
+        <tr><td><code>pg_safeupdate</code></td><td>Stops UPDATE and DELETE with no WHERE clause.</td></tr>
+        <tr><td><code>pg_plan_filter</code></td><td>Rejects queries over a cost limit.</td></tr>
+        <tr><td><code>wal2json</code></td><td>Logical decoding as JSON, for realtime.</td></tr>
+      </tbody>
+    </table></div>
+    <h2 id="defaults">Safe defaults</h2>
+    <ul>
+      <li>Row level security is on by default.</li>
+      <li>Passwords are stored as scram-sha-256.</li>
+      <li>The ordinary postgres role is not a superuser.</li>
+      <li>A table you make by hand in public is not granted to anon or authenticated until you grant it.</li>
+      <li>pg_guard loads on every connection, so roles can manage extensions without SUPERUSER.</li>
+      <li>A failed migration stops the container, so no client reaches a half-migrated database.</li>
+    </ul>
+    <p>Migrations run on first boot and on every start after, so pulling a newer tag over an existing volume applies what is new. <code>supatype migrate doctor</code> checks that the important ones took effect.</p>
+    <h2 id="tags">Tags</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Tag</th><th scope="col">What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>supatype/postgres:17-latest</code></td><td>The newest PG17 release. Moves only when a release is tagged.</td></tr>
+        <tr><td><code>supatype/postgres:x.y.z</code></td><td>One release, pinned and never changed.</td></tr>
+        <tr><td><code>supatype/postgres:latest</code></td><td>The same image as 17-latest.</td></tr>
+        <tr><td><code>supatype/postgres:develop</code></td><td>The newest build of the develop branch.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Not using Docker? Each release also ships native archives for Linux, macOS and Windows, and the image runs under CloudNativePG. The <a href="https://github.com/supatype/postgres">supatype/postgres repository</a> covers both.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/from-prisma.html"><small>PREVIOUS</small><span>Coming from Prisma</span></a>
+      <a href="/postgres/pg-keyspace.html" class="next"><small>NEXT</small><span>pg_keyspace</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#run-it">Run it</a>
+    <a href="#extensions">Our extensions</a>
+    <a href="#included">Also included</a>
+    <a href="#defaults">Safe defaults</a>
+    <a href="#tags">Tags</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js?v=19dd554888"></script>
+</body>
+</html>

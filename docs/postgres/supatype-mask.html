@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>supatype_mask: Hide a column per row, not per table | Supatype</title>
+  <meta name="description" content="Per-row column masking for Postgres 17+. Reads come back null, unauthorised writes fail, and the planner enforces it for every client, not only your API." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/postgres/supatype-mask.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="supatype_mask: Hide a column per row, not per table | Supatype" />
+  <meta property="og:description" content="Per-row column masking for Postgres 17+. Reads come back null, unauthorised writes fail, and the planner enforces it for every client, not only your API." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/postgres/supatype-mask.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/supatype-mask.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Postgres: supatype_mask</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html" aria-current="page">supatype_mask</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/postgres.html">Postgres</a> / supatype_mask</nav>
+    <h1>supatype_mask</h1>
+    <p class="intro">Hide a column per row, not per table. supatype_mask masks reads and rejects writes on a single column, row by row. The rule is a SQL function you name in a security label, and the planner enforces it on every query.</p>
+    <h2 id="problem">Why supatype_mask</h2>
+    <p>Column privileges are all or nothing. Revoke SELECT on salary and a PostgREST request with no select list asks for every column, so the whole table answers 403 instead of a row with one field hidden. A view can put a CASE where the column was, but Postgres stores the view's column list when you create it. A column added later is invisible until someone re-runs CREATE OR REPLACE VIEW.</p>
+    <p>supatype_mask puts the rule on the column. You label it with a read predicate and a write predicate, and the planner rewrites every reference to that column into a CASE that calls your read predicate. That covers the select list, WHERE, ORDER BY, joins, subqueries, views, COPY TO and whole-row references such as to_jsonb(posts). A filter cannot be used to guess the hidden value.</p>
+    <p>Writes are judged per row too. If a client reads a masked null and sends the whole object back, the real value is kept. A caller who can see the value but may not change it gets a 42501 error. The rules are plain SQL functions, so the C extension stays small and the logic stays where you can read it.</p>
+    <h2 id="example">An example</h2>
+    <div class="cb"><div class="cb-bar"><span>mask.sql</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>-- Readable by the post's author. Called once per row.
+CREATE FUNCTION public.can_read_posts__salary(posts posts) RETURNS boolean
+  LANGUAGE sql STABLE AS $$
+    SELECT author_id = auth.uid() FROM (SELECT ($1).*) AS posts;
+  $$;
+
+-- Writable by HR. No arguments, so it runs once per scan.
+CREATE FUNCTION public.can_write_posts__salary() RETURNS boolean
+  LANGUAGE sql STABLE AS $$ SELECT auth.role() = 'hr' $$;
+
+SECURITY LABEL FOR supatype ON COLUMN public.posts.salary
+  IS 'MASK READ public.can_read_posts__salary WRITE public.can_write_posts__salary';
+
+-- Every reference to posts.salary now plans as:
+--   CASE WHEN public.can_read_posts__salary(posts)
+--        THEN posts.salary ELSE NULL END
+SELECT * FROM posts;                 -- other authors' salary is NULL
+SELECT id FROM posts WHERE salary &gt; 150;  -- filters on the masked value
+SELECT sum(salary) FROM posts;       -- error if any row is unreadable</pre></div>
+    <h2 id="compare">supatype_mask or column GRANTs or a view per role</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col"></th><th scope="col">column GRANTs or a view per role</th><th scope="col">supatype_mask</th></tr></thead>
+      <tbody>
+        <tr><td>A request for every column</td><td>A column REVOKE makes PostgREST answer 403 for the whole table when no select list is given.</td><td>The column is returned, set to null on the rows the caller may not read.</td></tr>
+        <tr><td>Who can see the value</td><td>A GRANT decides per role, for every row in the table.</td><td>A predicate decides per row, for example author_id = auth.uid().</td></tr>
+        <tr><td>Adding a column</td><td>A view stores a fixed column list, so a new column is missing until the view is recreated.</td><td>The label sits on the column and the table is queried directly. Nothing to recreate.</td></tr>
+        <tr><td>Clients the rule reaches</td><td>A view protects the queries that go through the view.</td><td>The rewrite happens in the planner, so psql, PostgREST and anything else on the database get the same answer.</td></tr>
+        <tr><td>Writing back a value you never saw</td><td>A view column built from CASE is read-only, so writes need a separate path and their own checks.</td><td>An unreadable value is kept. A readable value the caller may not change is rejected with an error.</td></tr>
+        <tr><td>Totals over hidden rows</td><td>sum() over a null-masking view adds up only the visible rows and says nothing.</td><td>sum(), max() and window aggregates are rejected per unreadable row, so a total is correct or an error.</td></tr>
+        <tr><td>Switching it off</td><td>Any role with the right privilege can GRANT the column back with one SQL statement.</td><td>No SQL statement disables masking for a role, a database or a session, not even as a superuser. It takes a config edit and a reload, or a restart.</td></tr>
+      </tbody>
+    </table></div>
+    <h2 id="limits">What it does not do</h2>
+    <ul>
+      <li>Postgres 17 or later only. The rewrite depends on planner internals that change between major versions.</li>
+      <li>Logical replication is not filtered. WAL records are not query results, so a subscriber has to apply the same predicates itself.</li>
+      <li>Roles in supatype_mask.exempt_roles and superusers see every column unmasked, by design.</li>
+      <li>A non-leakproof operator applied to the predicate's own inputs can still reveal something through an error message. References to the masked column itself are safe.</li>
+      <li>COPY FROM and MERGE are refused on a table with masked columns.</li>
+      <li>A whole-row predicate runs once per row per masked column. On a full scan with a per-row lookup that can cost around 100 times the unmasked scan. A predicate with no arguments runs once per scan instead.</li>
+      <li>An aggregate over a subquery that masked some rows skips those rows rather than raising an error.</li>
+      <li>The library must be in shared_preload_libraries, which needs a restart. CREATE EXTENSION without the preload does nothing.</li>
+      <li>A predicate declared IMMUTABLE, missing, or not returning boolean masks the column for everyone and logs a WARNING.</li>
+    </ul>
+    <h2 id="use-it">Use it on its own</h2>
+    <p>supatype_mask ships in the <a href="/postgres.html">supatype/postgres</a> image. Use the image as your Postgres, with or without the rest of Supatype.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre># The image preloads supatype_mask and creates the extension on first boot.
+docker run -d --name supatype-postgres \
+  -e POSTGRES_PASSWORD=your-password \
+  -p 5432:5432 \
+  supatype/postgres:17-latest
+
+# Already set in the image's postgresql.conf:
+#   shared_preload_libraries = '..., supatype_mask'
+# and in /etc/postgresql-custom/supatype_mask.conf:
+#   supatype_mask.exempt_roles = 'service_role,supatype_sql_editor'
+
+# In any other database, create the extension yourself:
+docker exec -it supatype-postgres psql -U supatype_admin -d mydb \
+  -c &quot;CREATE EXTENSION IF NOT EXISTS supatype_mask;&quot;</pre></div>
+    <h2 id="with-supatype">With Supatype</h2>
+    <p>Every Supatype project runs on this image, with migrations, access rules, an API, a typed client and Studio generated from your TypeScript types. <a href="/docs/#local-dev">Run it locally</a> in a few commands. The full reference is the extension's <a href="https://github.com/supatype/postgres/blob/develop/extensions/supatype_mask/README.md">README</a>.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/postgres/pg-guard.html"><small>PREVIOUS</small><span>pg_guard</span></a>
+      <a href="/docs/cli.html" class="next"><small>NEXT</small><span>CLI</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#problem">Why</a>
+    <a href="#example">An example</a>
+    <a href="#compare">Compared</a>
+    <a href="#limits">Limits</a>
+    <a href="#use-it">Use it on its own</a>
+    <a href="#with-supatype">With Supatype</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js?v=19dd554888"></script>
+</body>
+</html>
