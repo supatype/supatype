@@ -36,19 +36,32 @@ export function setInShell(env: NodeJS.ProcessEnv, key: string): boolean {
   return (env[key]?.trim() ?? "") !== ""
 }
 
-/** The keys derived from a port the shell set. */
-function runOnlyKeys(env: NodeJS.ProcessEnv): Set<string> {
+/**
+ * True when the shell sets `key` to a value `.env` (`fromFile`) does not hold: the run's value, not
+ * the project's. A shell repeating `.env`'s own value is the project's, and treating it as the
+ * run's kept `.env`'s DATABASE_URL on another port for as long as the export stayed (local test C).
+ */
+export function setForThisRunOnly(env: NodeJS.ProcessEnv, fromFile: Readonly<Record<string, string>>, key: string): boolean {
+  return setInShell(env, key) && env[key]?.trim() !== fromFile[key]?.trim()
+}
+
+/** The keys derived from a port only the shell set. */
+function runOnlyKeys(env: NodeJS.ProcessEnv, fromFile: Readonly<Record<string, string>>): Set<string> {
   return new Set(
-    Object.entries(DERIVED_FROM_PORT).flatMap(([port, keys]) => (setInShell(env, port) ? keys : [])),
+    Object.entries(DERIVED_FROM_PORT).flatMap(([port, keys]) => (setForThisRunOnly(env, fromFile, port) ? keys : [])),
   )
 }
 
-/** Split `updates` into those `.env` keeps and those built from a port only the shell set. */
+/**
+ * Split `updates` into those `.env` keeps and those built from a port only the shell set.
+ * `fromFile` is the project's `.env`, against which a shell's port is told apart from its own.
+ */
 export function splitShellPortUpdates(
   updates: Record<string, string>,
   env: NodeJS.ProcessEnv = process.env,
+  fromFile: Readonly<Record<string, string>> = {},
 ): ShellPortUpdates {
-  const runOnly = runOnlyKeys(env)
+  const runOnly = runOnlyKeys(env, fromFile)
   const split: ShellPortUpdates = { persist: {}, runOnly: {} }
   for (const [key, value] of Object.entries(updates)) {
     if (runOnly.has(key)) split.runOnly[key] = value

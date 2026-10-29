@@ -41,6 +41,7 @@ import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
 import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "./db-port.js"
+import { offerToSaveShellDbPort } from "./db-port-offer.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
@@ -77,7 +78,7 @@ import {
   isObjectAnswer,
 } from "./engine-answers.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
-import { readEnvValue, upsertEnvFile } from "./env-file.js"
+import { readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
 import { warnProjectAuthProviderSecrets } from "./auth-providers.js"
 import {
   devDatabaseIdentity,
@@ -385,8 +386,8 @@ export function upsertDevComposeEnv(
   // write is removed: an operator's own GOTRUE_ variable is theirs, and the server's error names it
   // and its replacement precisely enough to fix by hand.
   const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
-  // A port the shell gave for this run is the run's, not the project's (DR9).
-  const { persist, runOnly } = splitShellPortUpdates(updates)
+  // A port the shell gave for this run is the run's, not the project's (DR9), unless `.env` holds it too.
+  const { persist, runOnly } = splitShellPortUpdates(updates, process.env, readEnvFile(cwd))
   applyForThisRun(runOnly)
   upsertEnvFile(cwd, persist, {
     removeManaged: removeImageKeys,
@@ -1559,6 +1560,18 @@ async function adoptingOnRefusal(
   return adopted === "adopted" ? pushInitialSchema(steps) : outcome
 }
 
+/**
+ * The dev stack's database port, moved off one something else holds, or undefined for an external
+ * database. A port only the shell gives is offered to `.env` before anything else reads the URL
+ * (db-port-offer.ts), so a yes is what the rest of the run sees.
+ */
+async function devStackDbPort(cwd: string, config: SupatypeProjectConfig, project: string): Promise<number | undefined> {
+  if (!publishesDbToHost(config)) return undefined
+  const port = await ensureDevDbPort(cwd, { composeProject: project, mayMove: true })
+  await offerToSaveShellDbPort(cwd)
+  return port
+}
+
 export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, opts: DevComposeOptions): Promise<void> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("runDevCompose requires provider: docker")
@@ -1578,9 +1591,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // `overrides.engine` while the compose file published unconditionally is what left a project
   // with a database on 54329 and a URL still saying 5432.
   // Only dev moves the port off something else that holds it.
-  const devDbPort = publishesDbToHost(config)
-    ? await ensureDevDbPort(cwd, { composeProject: project, mayMove: true })
-    : undefined
+  const devDbPort = await devStackDbPort(cwd, config, project)
 
   const { anonKey, serviceRoleKey } = devApiKeys(cwd)
 
