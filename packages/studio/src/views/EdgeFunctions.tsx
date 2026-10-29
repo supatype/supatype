@@ -20,7 +20,7 @@ import {
   readJson,
   readJsonObject,
 } from "../lib/json.js"
-import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
+import { functionsAdminFetch } from "../lib/functions-admin.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
 
@@ -550,15 +550,7 @@ export function EdgeFunctions(): React.ReactElement {
         : "invoke"
 
   const adminFetch = useCallback(
-    (path: string, init?: RequestInit) =>
-      fetch(`${client.url}/functions/v1/admin${path}`, {
-        ...init,
-        headers: {
-          "Content-Type": "application/json",
-          ...studioAuthHeaders(client),
-          ...init?.headers,
-        },
-      }),
+    (path: string, init?: RequestInit) => functionsAdminFetch(client, path, init),
     [client],
   )
 

@@ -8,7 +8,7 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject, isShape, isString, type Guard } from "../lib/json.js"
-import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
+import { functionsAdminFetch } from "../lib/functions-admin.js"
 import { Button, ListButton, NAV_RAIL } from "./ui.js"
 import { IconList } from "./icons.js"
 import { useInspectorAvailability, type InspectorAvailability } from "../hooks/useInspectorAvailability.js"
@@ -335,15 +335,7 @@ export function SecondaryPanel({
   const capability = useStudioCapability()
 
   const adminFetch = React.useCallback(
-    (adminPath: string, init?: RequestInit) =>
-      fetch(`${client.url}/functions/v1/admin${adminPath}`, {
-        ...init,
-        headers: {
-          "Content-Type": "application/json",
-          ...studioAuthHeaders(client),
-          ...init?.headers,
-        },
-      }),
+    (adminPath: string, init?: RequestInit) => functionsAdminFetch(client, adminPath, init),
     [client],
   )
 
