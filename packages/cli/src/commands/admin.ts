@@ -27,6 +27,7 @@ import { adminPromptDeclined, recordAdminPromptDeclined } from "../admin-prompt-
 import { error, info, plain } from "../ui/messages.js"
 import { promptPassword, promptText } from "../ui/prompts.js"
 import { isInteractive } from "../ui/interactive.js"
+import { errorMessage } from "../error-message.js"
 import {
   getActiveDevSession,
 } from "../dev-session.js"
@@ -186,8 +187,7 @@ export function registerAdmin(program: Command): void {
           }
           info(studioLoginHint(projectStudioUrl(cwd, config, opts.connection)))
         } catch (err) {
-          const message = err instanceof Error ? err.message : "Unknown error"
-          error(`Failed to create admin user: ${message}`)
+          error(`Failed to create admin user: ${errorMessage(err)}`)
           process.exit(1)
         }
       },
@@ -223,9 +223,7 @@ export function registerAdmin(program: Command): void {
           plain(`  Email: ${opts.email.toLowerCase()}`)
           plain(`  Role:  ${opts.role}`)
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Unknown error"
-          error(`Failed to update role: ${message}`)
+          error(`Failed to update role: ${errorMessage(err)}`)
           process.exit(1)
         } finally {
           await pool.end()
@@ -273,9 +271,7 @@ export function registerAdmin(program: Command): void {
         for (const row of rows) plain(memberLine(row))
         plain()
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Unknown error"
-        error(`Failed to list admin users: ${message}`)
+        error(`Failed to list admin users: ${errorMessage(err)}`)
         process.exit(1)
       } finally {
         await pool.end()
@@ -339,8 +335,7 @@ export async function ensureFirstAdminUserForProject(
         merged,
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      error(`Could not ensure first admin user: ${message}`)
+      error(`Could not ensure first admin user: ${errorMessage(err)}`)
     }
     return
   }
@@ -394,8 +389,7 @@ export async function ensureFirstAdminWithQuery(
       cwd,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    error(`Failed to create admin user: ${message}`)
+    error(`Failed to create admin user: ${errorMessage(err)}`)
     return
   }
   clearAdminSeedPassword(cwd)

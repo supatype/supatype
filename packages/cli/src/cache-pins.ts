@@ -7,6 +7,7 @@ import { join, resolve } from "node:path"
 import { BINARY_COMPONENTS, type Component } from "./components.js"
 import { cachePath, cacheRoot, pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { loadConfig } from "./config.js"
+import { errorMessage } from "./error-message.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
 const CONFIG_FILENAMES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"] as const
@@ -131,8 +132,7 @@ export function loadPinnedVersionsForProjects(
     try {
       configs.push({ projectDir, config: loadConfig(projectDir) })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      loadWarnings.push(`${projectDir}: ${message}`)
+      loadWarnings.push(`${projectDir}: ${errorMessage(err)}`)
     }
   }
 

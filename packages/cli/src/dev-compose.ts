@@ -588,7 +588,7 @@ async function waitKongReady(
       lastRealtime = `HTTP ${realtime.status}`
       if (auth.ok && realtime.ok) return
     } catch (err) {
-      lastAuth = lastRealtime = err instanceof Error ? err.message : String(err)
+      lastAuth = lastRealtime = errorMessage(err)
     }
     await new Promise((r) => setTimeout(r, 1000))
   }

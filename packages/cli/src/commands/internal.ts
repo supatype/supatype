@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url"
 import { isJsonObject } from "@supatype/shared"
 import { downloadAll } from "../binary-cache.js"
 import { error, info } from "../ui/messages.js"
+import { errorMessage } from "../error-message.js"
 
 export function registerInternalCommands(program: Command): void {
   program
@@ -19,7 +20,7 @@ export function registerInternalCommands(program: Command): void {
         await downloadAll(undefined, true)
         info("Component prefetch complete.")
       } catch (err) {
-        error(err instanceof Error ? err.message : String(err))
+        error(errorMessage(err))
         process.exit(1)
       }
     })

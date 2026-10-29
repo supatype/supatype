@@ -18,6 +18,7 @@ import { TargetApiError } from "./target-client.js"
 import { formatDriftedObjects, isDriftedObjects, SECURITY_DRIFT, type DriftedObject } from "./diff-output.js"
 import { findJsonLine, type JsonObject } from "./engine-json-line.js"
 import { fatalError } from "./ui/fatal.js"
+import { errorMessage } from "./error-message.js"
 
 /** The `reason` the engine gives a push that declares tables Supatype does not manage. */
 const UNMANAGED_MODEL_TABLES = "unmanaged_model_tables"
@@ -80,7 +81,7 @@ export type PushRefusalKind = PushRefusal["kind"]
 export function engineOutputOf(err: unknown): string {
   if (err instanceof EngineError) return `${err.message}\n${err.stdout}`
   if (err instanceof TargetApiError && err.details !== undefined) return `${err.message}\n${JSON.stringify(err.details)}`
-  return err instanceof Error ? err.message : String(err)
+  return errorMessage(err)
 }
 
 /** What refused the push, or null when the failure is not a refusal the CLI knows. */
@@ -301,7 +302,7 @@ export function reportDevPushFailure(err: unknown): void {
   const refusal = classifyPushRefusal(err)
   if (refusal === null || refusal.kind === "destructive") {
     // A destructive refusal was already shown and asked about (`pushConsentingToDestructive`).
-    console.error("[supatype] Schema push failed:", err instanceof Error ? err.message : String(err))
+    console.error("[supatype] Schema push failed:", errorMessage(err))
     return
   }
   const { headline, hints } = explainRefusal(refusal, DEV_REFUSAL_CONTEXT)

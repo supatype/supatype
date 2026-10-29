@@ -464,7 +464,7 @@ async function deployViaTarget(
       const duration = Date.now() - start
       plain(`  ${fn.name} ✓ deployed (${duration}ms)`)
     } catch (err) {
-      plain(`  ${fn.name} ✗ ${err instanceof Error ? err.message : "unknown error"}`)
+      plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
     }
   }
 
@@ -527,7 +527,7 @@ async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: st
       const duration = Date.now() - start
       plain(`  ${fn.name} ✓ deployed (${duration}ms)`)
     } catch (err) {
-      plain(`  ${fn.name} ✗ ${err instanceof Error ? err.message : "unknown error"}`)
+      plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
     }
   }
 
@@ -650,7 +650,7 @@ async function listFunctions(cwd: string): Promise<void> {
       )
     }
   } catch (err) {
-    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${errorMessage(err)}`)
     process.exit(1)
   }
 }
@@ -690,7 +690,7 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
 
     info(`Function "${name}" deleted. It will return 404 immediately.`)
   } catch (err) {
-    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${errorMessage(err)}`)
     process.exit(1)
   }
 }
@@ -742,7 +742,7 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
       plain(`${ts} [${level}] ${entry.message}`)
     }
   } catch (err) {
-    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${errorMessage(err)}`)
     process.exit(1)
   }
 }
@@ -817,7 +817,7 @@ async function invoke(
       error(`Cannot reach ${url}`)
       error("Is the function server running? Start it with: npx supatype functions serve")
     } else {
-      error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+      error(`Error: ${errorMessage(err)}`)
     }
     process.exit(1)
   }
@@ -883,7 +883,7 @@ async function envList(cwd: string): Promise<void> {
       plain(`  ${key} = ••••••••`)
     }
   } catch (err) {
-    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${errorMessage(err)}`)
     process.exit(1)
   }
 }
@@ -945,7 +945,7 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
 
     info(`Set ${key} for project ${linked.ref}.`)
   } catch (err) {
-    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${errorMessage(err)}`)
     process.exit(1)
   }
 }
@@ -993,7 +993,7 @@ async function envUnset(cwd: string, key: string): Promise<void> {
 
     info(`Removed ${key} for project ${linked.ref}.`)
   } catch (err) {
-    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${errorMessage(err)}`)
     process.exit(1)
   }
 }

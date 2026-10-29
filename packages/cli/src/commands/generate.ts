@@ -4,6 +4,7 @@ import { hooksPathFromProject, schemaPathFromProject } from "../project-config.j
 import { writeHooksModule } from "../model-hooks.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { error, info } from "../ui/messages.js"
+import { errorMessage } from "../error-message.js"
 
 export function registerGenerate(program: Command): void {
   program
@@ -14,7 +15,7 @@ export function registerGenerate(program: Command): void {
       try {
         for (const message of await regenerateTypes(process.cwd())) info(message)
       } catch (err) {
-        error(err instanceof Error ? err.message : String(err))
+        error(errorMessage(err))
         process.exit(1)
       }
     })

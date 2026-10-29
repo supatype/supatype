@@ -12,6 +12,7 @@ import {
 } from "./binary-cache.js"
 import { isDownloadInProgress, waitForComponentDownload } from "./binary-download-lock.js"
 import { currentLibc } from "./cli-artifacts.js"
+import { errorMessage } from "./error-message.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
 /**
@@ -38,7 +39,7 @@ export async function ensureBinary(
   try {
     return await resolveBinary(component, config)
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorMessage(err)
     if (!message.includes("not found in cache")) {
       throw err
     }

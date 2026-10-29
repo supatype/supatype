@@ -300,14 +300,25 @@ interface SeedResult {
     written?: Record<string, number>
     skippedGroups?: string[]
   }>
-  error?: {
-    kind: string
-    message?: string
-    remedy?: string | null
-    file?: string
-    path?: string
-  }
+  error?: SeedFailure
 }
+
+/** Why the engine could not seed, or could not read what was seeded. */
+interface SeedFailure {
+  kind: string
+  message?: string
+  remedy?: string | null
+  file?: string
+  path?: string
+}
+
+const isSeedFailure: Guard<SeedFailure> = isShape({
+  kind: isString,
+  message: optional(isString),
+  remedy: optional(nullable(isString)),
+  file: optional(isString),
+  path: optional(isString),
+})
 
 /**
  * Print what happened to every file, then the outcome.
@@ -330,19 +341,20 @@ const isSeedResult: Guard<SeedResult> = isShape({
       }),
     ),
   ),
-  error: optional(
-    isShape({
-      kind: isString,
-      message: optional(isString),
-      remedy: optional(nullable(isString)),
-      file: optional(isString),
-      path: optional(isString),
-    }),
-  ),
+  error: optional(isSeedFailure),
 })
 
-/** `seed --status`: the latest run of each file, and whether it has changed since. */
-const isSeedStatus = isShape({
+/**
+ * `seed --status`: the latest run of each file, and whether it has changed since. `error` when the
+ * engine could not read them, a database it could not reach included.
+ */
+interface SeedStatus {
+  files?: Array<{ file: string; appliedAt: string; status: string; durationMs: number; drifted: boolean }>
+  error?: SeedFailure
+}
+
+const isSeedStatus: Guard<SeedStatus> = isShape({
+  error: optional(isSeedFailure),
   files: optional(
     isArrayOf(
       isShape({ file: isString, appliedAt: isString, status: isString, durationMs: isNumber, drifted: isBoolean }),
@@ -372,6 +384,11 @@ function report(result: SeedResult, count: number, dsn: string): number {
     return 1
   }
 
+  return reportSeedFailure(failure)
+}
+
+/** Print the engine's failure; its exit code. */
+function reportSeedFailure(failure: SeedFailure): number {
   error(seedFailureText(failure))
   // Nothing ran because nothing could: the environment, not the seed.
   return failure.kind === "connection" || failure.kind === "document" ? 2 : 1
@@ -382,7 +399,7 @@ function report(result: SeedResult, count: number, dsn: string): number {
  * the remedy into the message of some failures (a column the database does not have), so it is
  * added only when the message does not carry it, or it printed twice.
  */
-export function seedFailureText(failure: NonNullable<SeedResult["error"]>): string {
+export function seedFailureText(failure: SeedFailure): string {
   const message = failure.message ?? failure.kind
   const where = [failure.file, failure.path].filter((part) => part !== undefined && part !== "")
   const remedy = failure.remedy ?? undefined
@@ -394,8 +411,16 @@ export function seedFailureText(failure: NonNullable<SeedResult["error"]>): stri
 }
 
 async function reportStatus(dsn: string, engine: ComposeEngine | undefined): Promise<number> {
-  const result = await engineRequest("/seed", { database_url: dsn, status: true }, isSeedStatus, engine)
+  return reportSeedStatus(await engineRequest("/seed", { database_url: dsn, status: true }, isSeedStatus, engine), dsn)
+}
 
+/**
+ * Print what `seed --status` found; its exit code. An engine that could not reach the database
+ * answers with an error beside an empty list, which this used to read as "No seeds have been
+ * applied", exit 0, for a database it never connected to.
+ */
+export function reportSeedStatus(result: SeedStatus, dsn: string): number {
+  if (result.error !== undefined) return reportSeedFailure(result.error)
   const files = result.files ?? []
   if (files.length === 0) {
     info(`No seeds have been applied to ${redact(dsn)}.`)
