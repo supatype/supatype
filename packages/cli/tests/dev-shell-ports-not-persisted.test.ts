@@ -112,4 +112,18 @@ describe("a dev port given only in the shell", () => {
     expect(env(cwd, "SUPATYPE_KONG_PORT")).toBe("18500")
     expect(env(cwd, "API_EXTERNAL_URL")).toBe("http://localhost:18500")
   })
+
+  // Local test C: the shell repeating `.env`'s own port is no throwaway. Treated as one, a project
+  // whose `.env` said 54339 kept a DATABASE_URL on another port for as long as the export stayed.
+  it("writes what it builds from a port the shell repeats from .env", () => {
+    const cwd = project()
+    vi.stubEnv("SUPATYPE_DEV_DB_PORT", "54329")
+    writeFileSync(
+      join(cwd, ".env"),
+      "JWT_SECRET=x\nPOSTGRES_PASSWORD=pw\nSUPATYPE_DEV_DB_PORT=54329\nDATABASE_URL=postgresql://demo:pw@localhost:5432/demo\n",
+      "utf8",
+    )
+    upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18474, 54329)
+    expect(env(cwd, "DATABASE_URL")).toContain(":54329/")
+  })
 })

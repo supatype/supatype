@@ -189,4 +189,14 @@ describe("syncDatabaseUrlPort with a port given in the shell", () => {
     expect(syncDatabaseUrlPort(dir, false)).toBeNull()
     expect(process.env["DATABASE_URL"]).toBeUndefined()
   })
+
+  // Local test C: a port the shell repeats from `.env` is the project's, not a throwaway, so
+  // `DATABASE_URL` in `.env` follows it as it would with no export. Otherwise a developer who keeps
+  // exporting the port they saved never sees `.env`'s URL move, and every other shell reaches 5432.
+  it("moves .env's DATABASE_URL when .env names the same port as the shell", () => {
+    vi.stubEnv("SUPATYPE_DEV_DB_PORT", "54339")
+    writeEnv("SUPATYPE_DEV_DB_PORT=54339\nDATABASE_URL=postgresql://u:p@127.0.0.1:5432/acme\n")
+    expect(syncDatabaseUrlPort(dir, true)).toEqual({ from: "5432", to: "54339", envKey: "SUPATYPE_DEV_DB_PORT" })
+    expect(envText()).toContain("127.0.0.1:54339/acme")
+  })
 })

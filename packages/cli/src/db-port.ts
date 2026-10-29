@@ -20,7 +20,7 @@
  * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it.
  */
 import { readComposeEnvInt, readEnvFile, shellEnvInt, upsertEnvFile } from "./env-file.js"
-import { setInShell } from "./shell-ports.js"
+import { setForThisRunOnly, setInShell } from "./shell-ports.js"
 
 /** The `.env` key that moves the published Postgres port for a self-host stack. */
 export const DB_PORT_ENV = "SUPATYPE_DB_PORT"
@@ -137,11 +137,37 @@ export function syncDatabaseUrlPort(
 ): DbPortSync | null {
   const { envKey, defaultPort } = composeDbPublish(devLocal)
   const port = readComposeEnvInt(cwd, envKey, shell) ?? defaultPort
-  if (shellEnvInt(envKey, shell) !== null) return syncRunDatabaseUrl(cwd, envKey, port, shell)
-  const moved = movedDatabaseUrl(readEnvFile(cwd)["DATABASE_URL"], port)
+  if (shellOnlyPort(cwd, envKey, shell) !== null) return syncRunDatabaseUrl(cwd, envKey, port, shell)
+  const moved = writeDatabaseUrlPort(cwd, port)
+  return moved === null ? null : { ...moved, envKey }
+}
+
+/**
+ * The port the shell gives `envKey` when `.env` does not hold the same one: the run's, not the
+ * project's (DR9). Null when the shell sets none, or repeats `.env`'s own.
+ */
+export function shellOnlyPort(cwd: string, envKey: ComposeDbPublish["envKey"], shell: NodeJS.ProcessEnv): number | null {
+  return setForThisRunOnly(shell, readEnvFile(cwd), envKey) ? shellEnvInt(envKey, shell) : null
+}
+
+/**
+ * Rewrite `.env`'s `DATABASE_URL` to `port`, with `alongside` written in the same pass, when the URL
+ * names this machine on another port. What moved, or null when nothing did.
+ */
+export function writeDatabaseUrlPort(
+  cwd: string,
+  port: number,
+  alongside: Record<string, string> = {},
+): Pick<DbPortSync, "from" | "to"> | null {
+  const moved = databaseUrlPortMove(cwd, port)
   if (moved === null) return null
-  upsertEnvFile(cwd, { DATABASE_URL: moved.url })
-  return { from: moved.from, to: moved.to, envKey }
+  upsertEnvFile(cwd, { ...alongside, DATABASE_URL: moved.url })
+  return { from: moved.from, to: moved.to }
+}
+
+/** How `.env`'s `DATABASE_URL` would change to name `port`, or null when it would not. Writes nothing. */
+export function databaseUrlPortMove(cwd: string, port: number): { url: string; from: string; to: string } | null {
+  return movedDatabaseUrl(readEnvFile(cwd)["DATABASE_URL"], port)
 }
 
 /**
@@ -158,7 +184,7 @@ function syncRunDatabaseUrl(
   shell: NodeJS.ProcessEnv,
 ): DbPortSync | null {
   if (setInShell(shell, "DATABASE_URL")) return null
-  const moved = movedDatabaseUrl(readEnvFile(cwd)["DATABASE_URL"], port)
+  const moved = databaseUrlPortMove(cwd, port)
   if (moved === null) return null
   shell["DATABASE_URL"] = moved.url
   return { from: moved.from, to: moved.to, envKey, runOnly: true }
