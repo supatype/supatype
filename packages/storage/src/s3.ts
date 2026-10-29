@@ -155,17 +155,6 @@ export function publicObjectUrl(bucket: string, key: string): string {
 
 // ─── Object operations ─────────────────────────────────────────────────────────
 
-/**
- * Where an object's bytes are stored: `name/<version>`, a fresh version per upload, or `name` for
- * an object written before versions, whose row has none.
- *
- * Fresh per upload so an overwrite never replaces the bytes being served: the new ones go
- * alongside, the row is switched to them when it commits, and the old ones are deleted after.
- */
-export function objectKey(name: string, version: string | null): string {
-  return version === null ? name : `${name}/${version}`
-}
-
 export async function putObject(
   bucket: string,
   key: string,

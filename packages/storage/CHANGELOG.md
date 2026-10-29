@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Features
+
+* **backend:** `STORAGE_BACKEND=file` with `STORAGE_FILE_PATH` keeps object bytes in a directory on
+  local disk instead of S3, which stays the default. Bucket and object metadata stay in the
+  `storage.*` tables either way, so every rule, limit and transform is the same code on both. Names
+  are stored so that no filesystem can confuse two (case, `..`, Windows-reserved characters,
+  trailing dots) or reach outside the directory.
+
 ### Bug Fixes
 
 * **access:** the public download route and bucket CORS go by `access_mode` alone, as every other
