@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
-import { readComposeEnvInt } from "./env-file.js"
+import { readComposeEnvInt, readDotEnvFiles, shellEnvInt } from "./env-file.js"
 import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
@@ -978,9 +978,13 @@ export const NATIVE_DENO_PORT = 8001
 /** The environment key the server reads the Deno port from. */
 export const DENO_PORT_ENV = "SUPATYPE_DENO_PORT"
 
-/** The port native dev's Deno listens on: `SUPATYPE_DENO_PORT` (exported, then `.env`), then 8001. */
+/**
+ * The port native dev's Deno listens on: `SUPATYPE_DENO_PORT` exported, then from `.env` and
+ * `.env.local` (the files native dev builds the server's environment from), then 8001. A value
+ * that is not a port, blank included, is passed over.
+ */
 export function nativeDenoPort(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): number {
-  return readComposeEnvInt(cwd, DENO_PORT_ENV, env) ?? NATIVE_DENO_PORT
+  return shellEnvInt(DENO_PORT_ENV, env) ?? shellEnvInt(DENO_PORT_ENV, readDotEnvFiles(cwd)) ?? NATIVE_DENO_PORT
 }
 
 /**

@@ -209,6 +209,19 @@ export function readEnvFile(cwd: string): Record<string, string> {
 }
 
 /**
+ * `.env` then `.env.local`, the later file winning, each read through {@link parseEnvText}: what
+ * native dev lays over the server's environment.
+ */
+export function readDotEnvFiles(cwd: string): Record<string, string> {
+  const vars: Record<string, string> = {}
+  for (const name of [".env", ".env.local"]) {
+    const envPath = join(cwd, name)
+    if (existsSync(envPath)) Object.assign(vars, parseEnvText(readFileSync(envPath, "utf8")))
+  }
+  return vars
+}
+
+/**
  * `.env`'s text, or null when there is none, without the byte order mark Windows tools write.
  * Left in, it hid the first key from the single-key readers below.
  */
@@ -255,7 +268,7 @@ export function readComposeEnvInt(cwd: string, key: string, env: NodeJS.ProcessE
   return shellEnvInt(key, env) ?? readEnvInt(cwd, key)
 }
 
-/** `key` from the shell (`env`) as a port, or null when it is unset, blank or not a port. */
+/** `key` from `env` (the shell unless given) as a port, or null when it is unset, blank or not a port. */
 export function shellEnvInt(key: string, env: NodeJS.ProcessEnv = process.env): number | null {
   return portNumber(env[key]?.trim() ?? "")
 }

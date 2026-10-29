@@ -20,7 +20,7 @@ import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, relative, resolve } from "node:path"
-import { hasEnvValue, parseEnvText } from "../env-file.js"
+import { hasEnvValue, readDotEnvFiles } from "../env-file.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
@@ -92,14 +92,13 @@ import { startNativeRealtime } from "../native-realtime.js"
 import { recordNativeFunctions } from "../route-manifest.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
-import { nativeMailerAutoconfirmEnv } from "../mailer-autoconfirm.js"
-import { mailerProviderEnv, withoutBlankMailerOverrides } from "../mailer-env.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
 import {
   nativeAuthMailerEnv,
   nativeDevRolesSql,
   nativePostgrestSchemaEnv,
   nativeServerCoreEnv,
+  nativeServerDotEnvLayer,
 } from "../native-dev-env.js"
 import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
 import { nativeKeyspaceAddr as nativeKeyspaceAddrFor, nativeKeyspacePort } from "../native-keyspace.js"
@@ -519,7 +518,7 @@ export function registerDev(program: Command): void {
         : ensureValkeySidecar(projectName)
 
       // `.env` and `.env.local`, read once for everything the server's environment takes from them.
-      const dotEnv = loadDotEnv(cwd)
+      const dotEnv = readDotEnvFiles(cwd)
       // What an env("NAME") in auth.providers resolves against: the shell over .env, as for the config.
       const providerEnvironment = { ...dotEnv, ...process.env }
       warnMissingAuthProviderSecrets(config, providerEnvironment)
@@ -535,8 +534,6 @@ export function registerDev(program: Command): void {
           databaseUrl: dbURL,
         }),
         SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
-        // The port checked above, so one set only in .env reaches the server as well.
-        [DENO_PORT_ENV]: String(denoPort),
         ...(denoFunctionsDir !== "" ? { SUPATYPE_SHARED_ENV_FILE: resolve(denoFunctionsDir, ".env.local") } : {}),
         ...(denoBinPath !== undefined ? { SUPATYPE_DENO_PATH: denoBinPath } : {}),
         ...(denoServeScriptAbs !== ""
@@ -583,10 +580,7 @@ export function registerDev(program: Command): void {
         ...(config.storage?.provider !== "s3" ? localStorageEnv(stateRoot) : {}),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
-        // A blank mailer value init scaffolded into .env does not erase the config's.
-        ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email)),
-        // After .env: auth.email.enableConfirmations, unless the developer set their own value.
-        ...nativeMailerAutoconfirmEnv(cwd, config),
+        ...nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }),
       }
 
       const serverProc = new ProcessManager(serverBin, [], {
@@ -1343,14 +1337,4 @@ function runAuthMigrations(
         (detail ? `:\n${detail}` : ""),
     )
   }
-}
-
-/** `.env` then `.env.local`, the later file winning, each read through the one dotenv parser. */
-function loadDotEnv(cwd: string): Record<string, string> {
-  const candidates = [resolve(cwd, ".env"), resolve(cwd, ".env.local")]
-  const vars: Record<string, string> = {}
-  for (const envPath of candidates) {
-    if (existsSync(envPath)) Object.assign(vars, parseEnvText(readFileSync(envPath, "utf8")))
-  }
-  return vars
 }

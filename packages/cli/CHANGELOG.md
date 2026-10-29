@@ -220,7 +220,9 @@
 * **dev:** native dev checks the port functions run on (8001, or `SUPATYPE_DENO_PORT`) before it
   starts, as it does Postgres, the server, PostgREST and realtime, and stops naming the variable
   that moves it. With the port taken, Deno failed after the stack was up and every function
-  answered 502. A `SUPATYPE_DENO_PORT` in `.env` now reaches the server, not only an exported one.
+  answered 502. The port checked is the port the server gets: an exported `SUPATYPE_DENO_PORT`,
+  else the one in `.env.local` or `.env`, else 8001. A blank `SUPATYPE_DENO_PORT=` in `.env` leaves
+  8001 rather than reaching the server as an empty port.
 * **update:** `supatype update` exits 1 naming each component it could not fetch. A run where every
   download failed ended on "All components are up to date." with exit 0, and a pinned version was
   written into `supatype.config.ts` even when its download had failed.
