@@ -89,7 +89,7 @@ import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js
 import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
-import { recordNativeFunctions } from "../route-manifest.js"
+import { recordNativeRoutes } from "../route-manifest.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
@@ -499,8 +499,8 @@ export function registerDev(program: Command): void {
 
       writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
 
-      // After the push, failed or not: init's manifest names the compose worker.
-      recordNativeFunctions(manifestPath, denoBinPath !== undefined)
+      // After the push, failed or not: init's manifest names the compose stack's services.
+      recordNativeRoutes(manifestPath, denoBinPath !== undefined)
 
       const realtimeProc = await startNativeRealtime({
         config, cwd, manifestPath, pidDir, url: realtimeUrl, port: realtimePort,
@@ -949,7 +949,7 @@ interface NativeArtifactPaths {
 /**
  * The buckets, Studio's admin config and the types, from the AST applied. The server's route
  * manifest is not among them: it names where each service is, nothing from the schema, and native
- * dev writes it as it starts them (native-realtime.ts, recordNativeFunctions).
+ * dev writes it as it starts them (native-realtime.ts, recordNativeRoutes).
  */
 async function writeNativeSchemaArtifacts(
   paths: NativeArtifactPaths,

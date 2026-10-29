@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { isJsonObject } from "@supatype/shared"
-import { recordNativeFunctions } from "../src/route-manifest.js"
+import { recordNativeRoutes } from "../src/route-manifest.js"
 import { parseJsonAs } from "./support/json.js"
 
 /**
@@ -36,23 +36,40 @@ function manifestFromInit(): string {
   return path
 }
 
+function patchManifest(path: string, fields: Record<string, unknown>): void {
+  writeFileSync(path, JSON.stringify({ ...read(path), ...fields }), "utf8")
+}
+
 function read(path: string): Record<string, unknown> {
   return parseJsonAs(readFileSync(path, "utf8"), isJsonObject)
 }
 
-describe("recordNativeFunctions", () => {
+describe("recordNativeRoutes", () => {
   it("drops the compose worker so the server routes to the Deno it runs itself", () => {
     const path = manifestFromInit()
-    recordNativeFunctions(path, true)
+    recordNativeRoutes(path, true)
     const manifest = read(path)
     expect(manifest).not.toHaveProperty("functions_worker_url")
     expect(manifest["functions_enabled"]).toBe(true)
     expect(manifest["schema"]).toBe("public")
   })
 
+  // Local test N2: init's manifest kept `postgrest_url: http://postgrest:3000`, which the server reads
+  // ahead of SUPATYPE_POSTGREST_URL, so native dev answered every /rest/v1 call 502 with "lookup
+  // postgrest: no such host". No address of a compose service may outlive the switch to native.
+  it("drops every service address a Docker stack wrote", () => {
+    const path = manifestFromInit()
+    patchManifest(path, { graphql_url: "http://postgrest:3000", function_worker_urls: { a: "http://fn-a:8001" } })
+    recordNativeRoutes(path, true)
+    const manifest = read(path)
+    const urls = Object.entries(manifest).filter(([key]) => key.endsWith("_url") || key.endsWith("_urls"))
+    expect(urls).toEqual([])
+    expect(manifest["schema"]).toBe("public")
+  })
+
   it("switches functions off when native dev runs no Deno", () => {
     const path = manifestFromInit()
-    recordNativeFunctions(path, false)
+    recordNativeRoutes(path, false)
     const manifest = read(path)
     expect(manifest).not.toHaveProperty("functions_worker_url")
     expect(manifest["functions_enabled"]).toBe(false)
