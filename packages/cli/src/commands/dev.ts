@@ -91,6 +91,7 @@ import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
 import { recordNativeRoutes } from "../route-manifest.js"
+import { reconcileNativeDatabaseUrl } from "../database-url-owner.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
@@ -364,6 +365,8 @@ export function registerDev(program: Command): void {
           console.log("[supatype] This Postgres trusted every local connection; it now checks passwords.")
         }
         dbURL = localDSN(config, pgPassword, cwd)
+        // A DATABASE_URL the CLI wrote, for Docker perhaps, now names this database (N1).
+        await reconcileNativeDatabaseUrl(cwd, dbURL)
         postgrestDbURL = `postgres://authenticator:${encodeURIComponent(authenticatorPassword)}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         stopPostgres = () => pgStop(pgOpts)
 

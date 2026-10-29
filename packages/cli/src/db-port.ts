@@ -19,7 +19,7 @@
  * The variable compose binds for the stack's layout is the source of truth: `SUPATYPE_DB_PORT` for
  * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it.
  */
-import { readComposeEnvInt, readEnvFile, shellEnvInt, upsertEnvFile } from "./env-file.js"
+import { envValueOwner, readComposeEnvInt, readEnvFile, shellEnvInt, upsertEnvFile } from "./env-file.js"
 import { setForThisRunOnly, setInShell } from "./shell-ports.js"
 
 /** The `.env` key that moves the published Postgres port for a self-host stack. */
@@ -152,7 +152,8 @@ export function shellOnlyPort(cwd: string, envKey: ComposeDbPublish["envKey"], s
 
 /**
  * Rewrite `.env`'s `DATABASE_URL` to `port`, with `alongside` written in the same pass, when the URL
- * names this machine on another port. What moved, or null when nothing did.
+ * names this machine on another port. What moved, or null when nothing did. Whoever wrote the URL
+ * still has it: a marked one stays marked as the CLI's, a hand-written one stays unmarked.
  */
 export function writeDatabaseUrlPort(
   cwd: string,
@@ -161,7 +162,8 @@ export function writeDatabaseUrlPort(
 ): Pick<DbPortSync, "from" | "to"> | null {
   const moved = databaseUrlPortMove(cwd, port)
   if (moved === null) return null
-  upsertEnvFile(cwd, { ...alongside, DATABASE_URL: moved.url })
+  const managed = envValueOwner(cwd, "DATABASE_URL") === "cli" ? ["DATABASE_URL"] : []
+  upsertEnvFile(cwd, { ...alongside, DATABASE_URL: moved.url }, { managed })
   return { from: moved.from, to: moved.to }
 }
 

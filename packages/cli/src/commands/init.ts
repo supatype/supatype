@@ -39,6 +39,7 @@ import { detectProjectSetup, type DetectedProjectSetup } from "../init-project-d
 import { SUPATYPE_GITIGNORE_PATHS } from "../gitignore.js"
 import { DEFAULT_CLIENT_PATH, DEFAULT_TYPES_PATH } from "../type-generation.js"
 import { COMPOSE_DEV_KONG_PORT, NATIVE_SERVER_PORT } from "../project-config.js"
+import { MANAGED_MARKER } from "../env-file.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -1304,7 +1305,9 @@ function envTemplate(opts: ScaffoldOptions): string {
   // only because `supatype dev` no longer overwrites them on every run (see local-secrets.ts).
   const postgresPassword = randomBytes(24).toString("base64url")
 
-  sections.push(`DATABASE_URL=postgresql://supatype_admin:${encodeURIComponent(postgresPassword)}@localhost:5432/${opts.projectName}
+  // Marked as the CLI's, so it follows the provider the project runs (database-url-owner.ts).
+  sections.push(`${MANAGED_MARKER}
+DATABASE_URL=postgresql://supatype_admin:${encodeURIComponent(postgresPassword)}@localhost:5432/${opts.projectName}
 POSTGRES_USER=supatype_admin
 POSTGRES_PASSWORD=${postgresPassword}
 POSTGRES_DB=${opts.projectName}
