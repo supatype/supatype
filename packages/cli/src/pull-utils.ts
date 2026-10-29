@@ -32,8 +32,12 @@ export interface DbConstraintState {
   name: string
   constraintType: string
   columns: string[]
+  /** The referenced table's schema. Absent from engines older than 0.7.0, which did not report it. */
+  foreignSchema?: string | null
   foreignTable?: string | null
   foreignColumns?: string[] | null
+  /** A foreign key's delete rule, as Postgres names it: `NO ACTION`, `RESTRICT`, `CASCADE`, ... */
+  onDelete?: string | null
   comment?: string | null
 }
 
@@ -61,7 +65,8 @@ export interface ColumnInfo {
   isPrimary: boolean
   isUnique: boolean
   hasDefault: boolean
-  references?: { table: string; column: string }
+  /** The column's single-column foreign key, when the engine reported the referenced schema. */
+  references?: { schema: string; table: string; column: string; onDelete: string | null }
   /** `ALWAYS` or `BY DEFAULT` when the column is an identity column. */
   identity?: string
   /** The expression when the column is a stored generated one. */
@@ -154,8 +159,11 @@ export function pgTypeToModelField(col: ColumnInfo): string {
   const optional = col.nullable ? "Optional<" : ""
   const optionalClose = col.nullable ? ">" : ""
 
-  // A uuid id is drafted as UUID. It is SupatypeAuthUserId only when it references auth.users, and
-  // that cannot be told yet: the engine reports a foreign key's table but not its schema.
+  // A uuid is a user's id when its foreign key names auth.users(id) (#19). Only then: drafting every
+  // uuid `id` as one declared each table's key to be a user's id.
+  if (type.includes("uuid") && referencesAuthUser(col)) {
+    return authUserIdField(col)
+  }
   if (name === "id" && type.includes("uuid")) {
     return `id: UUID`
   }
@@ -205,6 +213,53 @@ export function pgTypeToModelField(col: ColumnInfo): string {
   return `${name}: string /* TODO: ${col.pgType} */`
 }
 
+function referencesAuthUser(col: ColumnInfo): boolean {
+  const ref = col.references
+  return ref !== undefined && ref.schema === "auth" && ref.table === "users" && ref.column === "id"
+}
+
+/** The `AuthUserOnDelete` of each Postgres delete rule SupatypeAuthUserId can declare. */
+const AUTH_USER_ON_DELETE: Readonly<Record<string, string>> = {
+  CASCADE: "cascade",
+  RESTRICT: "restrict",
+  "SET NULL": "setNull",
+}
+
+/**
+ * The SupatypeAuthUserId field for a column keyed to auth.users(id). Its `onDelete` is what declares
+ * the foreign key: left out, the field has none. A rule the type cannot declare (`NO ACTION`,
+ * `SET DEFAULT`) is drafted without it and says so, because a push would then drop the key.
+ */
+function authUserIdField(col: ColumnInfo): string {
+  const rule = col.references?.onDelete ?? "NO ACTION"
+  const onDelete = AUTH_USER_ON_DELETE[rule]
+  const type = onDelete === undefined ? "SupatypeAuthUserId" : `SupatypeAuthUserId<{ onDelete: "${onDelete}" }>`
+  const field = `${col.name}: ${col.nullable ? `Optional<${type}>` : type}`
+  if (onDelete !== undefined) return field
+  return (
+    `${field} // TODO: the database key is ON DELETE ${rule}, which SupatypeAuthUserId cannot declare. ` +
+    'Without onDelete it declares no foreign key, so a push drops it: choose "restrict", "cascade" or "setNull".'
+  )
+}
+
+/**
+ * Each column of `table` with a single-column foreign key, keyed by column. Only keys whose schema
+ * the engine reported: an engine older than 0.7.0 names the table alone, and a `users` table in
+ * `auth` cannot be told from any other.
+ */
+function singleColumnForeignKeys(
+  table: string,
+  constraints: DbConstraintState[] | undefined,
+): Map<string, NonNullable<ColumnInfo["references"]>> {
+  const out = new Map<string, NonNullable<ColumnInfo["references"]>>()
+  for (const c of constraints ?? []) {
+    if (c.table !== table || c.constraintType !== "foreignKey" || c.columns.length !== 1) continue
+    if (typeof c.foreignSchema !== "string" || typeof c.foreignTable !== "string" || c.foreignColumns?.length !== 1) continue
+    out.set(c.columns[0]!, { schema: c.foreignSchema, table: c.foreignTable, column: c.foreignColumns[0]!, onDelete: c.onDelete ?? null })
+  }
+  return out
+}
+
 /** Convert snake_case table name to PascalCase model export name. */
 export function toModelName(s: string): string {
   return s
@@ -232,6 +287,7 @@ export function databaseStateToSchemaScaffold(
 
     const modelName = toModelName(table.name)
     const uniques = singleColumnUniques(table.name, constraints)
+    const foreignKeys = singleColumnForeignKeys(table.name, constraints)
     const modelIndexes = compositeIndexes(table.name, indexes)
 
     const fieldLines: string[] = []
@@ -240,6 +296,8 @@ export function databaseStateToSchemaScaffold(
       const info = introspectColumnToColumnInfo(col, opts)
       info.isPrimary = col.name === "id"
       info.isUnique = uniques.get(col.name) ?? false
+      const references = foreignKeys.get(col.name)
+      if (references !== undefined) info.references = references
       fieldLines.push(`  ${pgTypeToModelField(info)}`)
     }
 
