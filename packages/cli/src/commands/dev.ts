@@ -105,7 +105,7 @@ import {
 import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
 import { nativeKeyspaceAddr as nativeKeyspaceAddrFor, nativeKeyspacePort } from "../native-keyspace.js"
 import {
-  initdb,
+  ensureCluster,
   start as pgStart,
   stop as pgStop,
   waitReady as pgWaitReady,
@@ -355,8 +355,7 @@ export function registerDev(program: Command): void {
             : {}),
         }
 
-        console.log("[supatype] Initialising Postgres data directory...")
-        initdb(pgOpts, pgPassword)
+        ensureCluster(pgOpts, pgPassword)
         console.log("[supatype] Starting Postgres...")
         pgStart(pgOpts)
         await pgWaitReady(pgOpts, 15_000)
