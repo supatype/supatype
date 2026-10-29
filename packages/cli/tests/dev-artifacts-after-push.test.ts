@@ -95,6 +95,31 @@ vi.mock("../src/schema-sources.js", async (importOriginal) => ({
 
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: () => false }))
 
+// No stack runs for these projects, and none may be asked about. Each push asked the real Docker
+// for a running `supatype-demo` server (`docker ps`) about once a test: a second or more apiece on
+// a loaded machine, and an answer that depended on what that machine happened to be running.
+const NO_STACK = { devSessionLocked: () => false, runningServerMode: () => undefined }
+vi.mock("../src/compose-render-mode.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/compose-render-mode.js")>()
+  return {
+    ...actual,
+    runningStackMode: (cwd: string, name: string) => actual.runningStackMode(cwd, name, NO_STACK),
+    composeRenderMode: (cwd: string, name: string) => actual.composeRenderMode(cwd, name, NO_STACK),
+    composeRenderOptions: (cwd: string, name: string) => actual.composeRenderOptions(cwd, name, NO_STACK),
+  }
+})
+
+// Every test imports dev-compose afresh (see loadPush), and the first import transforms its whole
+// module graph: 6 to 7 seconds alone, past 22 in a loaded suite, all charged to whichever test ran
+// first, which then hit the 30 second timeout. Loaded once here, while the file is collected and no
+// test's clock runs, the transforms are cached and each test's import only evaluates the modules.
+await Promise.all([
+  import("../src/dev-compose.js"),
+  import("../src/destructive-consent.js"),
+  import("../src/drift-consent.js"),
+  import("../src/dev-initial-push.js"),
+])
+
 const ADMIN = ".supatype/admin-config.json"
 const TYPES = "types/database.ts"
 const CLIENT = "supatype/generated/index.d.ts"
