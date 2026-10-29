@@ -67,12 +67,15 @@ jobs:
             runner: ubuntu-24.04
             pkg_target: node22-linux-x64
             output: supatype-realtime-linux-amd64
+          # Each platform on a runner of its own OS and architecture, as storage's archives are
+          # built, rather than packaged across architectures on another (macos-15-intel is the
+          # x86_64 macOS label; macos-13 was retired on 2025-12-04).
           - platform: linux-arm64
-            runner: ubuntu-24.04
+            runner: ubuntu-24.04-arm
             pkg_target: node22-linux-arm64
             output: supatype-realtime-linux-arm64
           - platform: darwin-amd64
-            runner: macos-14
+            runner: macos-15-intel
             pkg_target: node22-macos-x64
             output: supatype-realtime-darwin-amd64
           - platform: darwin-arm64
