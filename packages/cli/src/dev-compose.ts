@@ -40,9 +40,13 @@ import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
-import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "./db-port.js"
 import { offerToSaveShellDbPort } from "./db-port-offer.js"
-import { CLI_DATABASE_URL, cliMayWriteDatabaseUrl, warnIfHandWrittenUrlSilent } from "./database-url-owner.js"
+import {
+  CLI_DATABASE_URL,
+  cliMayWriteDatabaseUrl,
+  syncStackDatabaseUrl,
+  warnIfHandWrittenUrlSilent,
+} from "./database-url-owner.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
@@ -719,11 +723,10 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
  * on `npm run seed` with ECONNREFUSED against a port nothing was listening on. The layout is the
  * stack's own (dev while a dev session holds it, otherwise self-host), so a self-host push in a
  * project that once ran dev keeps the self-host port, and the message names the variable it read.
+ * A hand-written URL is left as it is, for this run too: it always wins (syncStackDatabaseUrl).
  */
 function syncDatabaseUrlToStack(cwd: string, config: SupatypeProjectConfig): void {
-  const dbPort = syncDatabaseUrlPort(cwd, composeRenderMode(cwd, config.project.name) === "dev")
-  if (dbPort === null) return
-  console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
+  syncStackDatabaseUrl(cwd, composeRenderMode(cwd, config.project.name) === "dev")
 }
 
 /**

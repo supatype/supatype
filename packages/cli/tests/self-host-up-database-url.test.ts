@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { runCommand, tempProject } from "./support/command-run.js"
+import { MANAGED_MARKER } from "../src/env-file.js"
 
 /**
  * B5 follow-up: a self-host push points DATABASE_URL at the self-host port, but a stack started
@@ -29,8 +30,10 @@ import { registerSelfHost } from "../src/commands/self-host.js"
 
 let project: { dir: string; remove: () => void }
 
+// Marked as the CLI's: a hand-written URL is never moved (database-url-owner-selfhost.test.ts).
 const env = (url: string) =>
   [
+    MANAGED_MARKER,
     `DATABASE_URL=${url}`,
     "SUPATYPE_DEV_DB_PORT=54329",
     "SUPATYPE_DB_PORT=54390",
