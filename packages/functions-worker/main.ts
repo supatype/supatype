@@ -209,7 +209,8 @@ async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, H
 /**
  * The route's handler, or, when its module fails to import or exports no handler, one that answers
  * the route with a 500 saying why. The first such module used to stop the worker starting, so one
- * broken function took every function in the project down with it.
+ * broken function took every function in the project down with it. The message goes out as JSON,
+ * so the escape codes come out of it: a client has no terminal to colour.
  */
 async function loadHandler(route: DiscoveredRoute): Promise<Handler> {
   try {
@@ -219,11 +220,17 @@ async function loadHandler(route: DiscoveredRoute): Promise<Handler> {
     if (!isHandler(handler)) throw new Error('it has neither a default export nor a named "handler" export')
     return handler
   } catch (err) {
-    const message = `Function "${route.name}" failed to load: ${errorText(err)}`
+    const message = `Function "${route.name}" failed to load: ${errorText(err).replace(TERMINAL_ESCAPES, "")}`
     log("error", message, { function: route.name })
     return () => jsonError("function_load_failed", message, 500)
   }
 }
+
+/**
+ * Terminal escape codes. Deno colours a missing module's location in its message, piped or not.
+ * The generated local router strips the same set (packages/cli/src/functions-router-gen.ts).
+ */
+const TERMINAL_ESCAPES = /\u001b\[[0-9;?]*[A-Za-z]/g
 
 /** What a thrown value says: an Error's message, anything else as a string. */
 function errorText(err: unknown): string {
