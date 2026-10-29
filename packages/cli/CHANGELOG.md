@@ -124,6 +124,15 @@
   parser, so `KEY="value"` is `value`, an inline ` # comment` is dropped and `export KEY=` is read,
   as the CLI and compose read a `.env`. The worker kept the quotes and the comment.
 
+* **dev (native):** runs the storage service (packages/storage) on this machine instead of the
+  server's built-in object store, so bucket rules, `maxSize`, `accept`, `access_mode`, caller rules
+  and image transforms are the ones a deployment enforces. Its objects live under
+  `~/.supatype/projects/<project>/storage-service/`; on the first start, the buckets and objects the
+  server's store held are imported, and the old files are left where they were. The service comes
+  from a per-platform archive on the CDN (`storage/v<version>/`, signed like every component), or
+  `overrides.storage`; its port is `SUPATYPE_STORAGE_PORT` (default 8002). When it cannot start, dev
+  says so and the server's store answers as before.
+
 * **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
   server and the control plane were all told `/project/functions` whatever the config said, so a
   project keeping its functions elsewhere had every one answer 404; hooks were likewise fixed at

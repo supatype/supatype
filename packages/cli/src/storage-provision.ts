@@ -82,44 +82,51 @@ export async function provisionBucketsFromAst(
  * @param storageApiUrl  Base URL of the storage API, e.g. "http://localhost:18473/storage/v1"
  * @param serviceRoleKey  A service_role JWT for the storage server
  * @param buckets  Buckets to provision (from the resolved AST)
+ * @returns The ids of the buckets that are not there: the API was unreachable or refused them.
  */
 export async function provisionBuckets(
   storageApiUrl: string,
   serviceRoleKey: string,
-  buckets: BucketSpec[],
-): Promise<void> {
+  buckets: readonly BucketSpec[],
+): Promise<string[]> {
   const base = storageApiUrl.replace(/\/$/, "")
-  const headers = {
-    "Authorization": `Bearer ${serviceRoleKey}`,
-    "Content-Type": "application/json",
-  }
-
+  const failed: string[] = []
   for (const bucket of buckets) {
-    const body = JSON.stringify({
-      id: bucket.id,
-      name: bucket.id,
-      ...(bucket.public !== undefined && { public: bucket.public }),
-      ...(bucket.allowed_mime_types != null && { allowed_mime_types: bucket.allowed_mime_types }),
-      ...(bucket.file_size_limit != null && { file_size_limit: bucket.file_size_limit }),
-      ...(bucket.access_mode != null && { access_mode: bucket.access_mode }),
-      ...(bucket.s3_bucket_policy != null &&
-        bucket.s3_bucket_policy !== "" && { s3_bucket_policy: bucket.s3_bucket_policy }),
-    })
-
-    const res = await fetch(`${base}/bucket`, { method: "POST", headers, body })
-      .catch(() => null)
-
-    if (res === null) {
-      console.warn(`[storage] Storage API unreachable, skipped bucket "${bucket.id}"`)
-      continue
-    }
-    if (res.status === 409) continue // already exists, fine
-    if (!res.ok) {
-      console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${await responseFailureText(res)}`)
-      continue
-    }
-    console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
+    if (!(await provisionBucket(base, serviceRoleKey, bucket))) failed.push(bucket.id)
   }
+  return failed
+}
+
+/** The create request's body for `bucket`, leaving out what it does not set. */
+function bucketRequestBody(bucket: BucketSpec): string {
+  return JSON.stringify({
+    id: bucket.id,
+    name: bucket.id,
+    ...(bucket.public !== undefined && { public: bucket.public }),
+    ...(bucket.allowed_mime_types != null && { allowed_mime_types: bucket.allowed_mime_types }),
+    ...(bucket.file_size_limit != null && { file_size_limit: bucket.file_size_limit }),
+    ...(bucket.access_mode != null && { access_mode: bucket.access_mode }),
+    ...(bucket.s3_bucket_policy != null &&
+      bucket.s3_bucket_policy !== "" && { s3_bucket_policy: bucket.s3_bucket_policy }),
+  })
+}
+
+/** Creates `bucket`; true when it is there afterwards (created, or there already), with why when not. */
+async function provisionBucket(base: string, serviceRoleKey: string, bucket: BucketSpec): Promise<boolean> {
+  const headers = { "Authorization": `Bearer ${serviceRoleKey}`, "Content-Type": "application/json" }
+  const res = await fetch(`${base}/bucket`, { method: "POST", headers, body: bucketRequestBody(bucket) })
+    .catch(() => null)
+  if (res === null) {
+    console.warn(`[storage] Storage API unreachable, skipped bucket "${bucket.id}"`)
+    return false
+  }
+  if (res.status === 409) return true // already exists, fine
+  if (!res.ok) {
+    console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${await responseFailureText(res)}`)
+    return false
+  }
+  console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
+  return true
 }
 
 /**

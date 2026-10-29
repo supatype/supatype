@@ -73,16 +73,18 @@ describe("provisionBuckets", () => {
 
     await expect(
       provisionBuckets("http://localhost:54321/storage/v1", "key", [{ id: "photos", public: false }]),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual([])
   })
 
   it("warns and continues when the storage API is unreachable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")))
 
-    await provisionBuckets("http://localhost:54321/storage/v1", "key", [{ id: "photos", public: false }])
+    const failed = await provisionBuckets("http://localhost:54321/storage/v1", "key", [{ id: "photos", public: false }])
 
     expect(warn).toHaveBeenCalledWith('[storage] Storage API unreachable, skipped bucket "photos"')
+    // Named, so a caller that needs every bucket (native dev's import) can tell it did not happen.
+    expect(failed).toEqual(["photos"])
   })
 
   // Local test round 3, N3: a 502 with an empty body printed `Failed to provision bucket "big": `.

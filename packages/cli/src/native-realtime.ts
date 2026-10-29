@@ -3,7 +3,8 @@ import { isJsonObject } from "@supatype/shared"
 import { ProcessManager } from "./process-manager.js"
 import { errorMessage } from "./error-message.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
-import { resolveRealtimeLaunch, type RealtimeLaunchSpec } from "./realtime-launch.js"
+import type { ComponentLaunchSpec } from "./component-launch.js"
+import { resolveRealtimeLaunch } from "./realtime-launch.js"
 import { patchRouteManifest } from "./route-manifest.js"
 import { logicalDecodingProblem } from "./db-preflight.js"
 
@@ -21,7 +22,7 @@ export interface NativeRealtimeOptions {
   readyTimeoutMs?: number
 }
 
-type ResolveLaunch = (config: SupatypeProjectConfig, cwd: string) => Promise<RealtimeLaunchSpec>
+type ResolveLaunch = (config: SupatypeProjectConfig, cwd: string) => Promise<ComponentLaunchSpec>
 
 /** Why the database cannot give realtime logical decoding, or undefined (db-preflight.ts). */
 type CheckDecoding = (databaseUrl: string) => Promise<string | undefined>
@@ -38,7 +39,7 @@ type RealtimeState =
 const READY_TIMEOUT_MS = 15_000
 const READY_POLL_MS = 250
 
-function spawnRealtime(launch: RealtimeLaunchSpec, opts: NativeRealtimeOptions, onExit: () => void): ProcessManager {
+function spawnRealtime(launch: ComponentLaunchSpec, opts: NativeRealtimeOptions, onExit: () => void): ProcessManager {
   const proc = new ProcessManager(launch.bin, launch.args, {
     label: "realtime",
     pidDir: opts.pidDir,

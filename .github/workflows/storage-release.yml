@@ -1,0 +1,204 @@
+# Publish the storage service's per-platform archives to releases.supatype.com/storage/
+#
+# Same shape as every other component the CLI downloads (engine, server, postgres, deno, realtime):
+# the archives, a checksums.sha256 covering all of them, its minisign signature, then latest.json.
+# An archive rather than a lone binary, as postgres ships: the service is packaged with Node by pkg,
+# and sharp's native addon and prebuilt libvips sit beside it as files, which no single executable
+# can hold (packages/storage/scripts/build-release-archive.mjs).
+# The CLI refuses a release without a signed checksums manifest, and published paths are
+# immutable, so a version that goes out unsigned can never be fixed, only superseded. Nothing is
+# uploaded until every binary is built and the manifest is signed, and latest.json goes last so it
+# never advertises a version whose files are not all readable yet.
+name: Storage release
+
+# Called by release.yml on a v* tag, so the storage archives carry the same version as the CLI,
+# the npm packages and the supatype/storage image, as realtime's binaries do. The dispatch is for
+# re-running a release by hand, with the same version the tag carried.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version to publish, without a leading v (e.g. 0.1.8)
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without a leading v (e.g. 0.1.8)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Resolved once and handed to every job. Always from the caller: release.yml derives it from
+  # the tag, so the tag is the single source of the version here as it is for the CLI.
+  version:
+    name: Version is a version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve the release version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Refusing to publish '${VERSION}': not a semantic version." \
+              "Push a v1.2.3 tag, or dispatch with version=1.2.3."
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "publishing storage v${VERSION}"
+
+  build:
+    name: ${{ matrix.platform }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # `output` must be the CLI's archive name for storage on the platform, and the set must
+        # match RELEASE_ARCHIVES in packages/storage/scripts/release-manifest.mjs. The runners are
+        # realtime's. The archive script renders an image through the packaged service on every
+        # platform its runner can run (linux-amd64, darwin-arm64, windows-amd64); linux-arm64 and
+        # darwin-amd64 are staged across architectures and not run here.
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+            output: supatype-storage-linux-amd64.tar.gz
+          - platform: linux-arm64
+            runner: ubuntu-24.04
+            output: supatype-storage-linux-arm64.tar.gz
+          - platform: darwin-amd64
+            runner: macos-14
+            output: supatype-storage-darwin-amd64.tar.gz
+          - platform: darwin-arm64
+            runner: macos-14
+            output: supatype-storage-darwin-arm64.tar.gz
+          - platform: windows-amd64
+            runner: windows-latest
+            output: supatype-storage-windows-amd64.zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and build storage
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter "@supatype/storage..." build
+
+      - name: Package the archive
+        run: node packages/storage/scripts/build-release-archive.mjs ${{ matrix.platform }} release
+
+      - name: Upload archive (for the sign-and-publish job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-${{ matrix.platform }}
+          path: release/${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-and-publish:
+    name: Sign & publish
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: storage-*
+          merge-multiple: true
+          path: release
+
+      # Refuses a missing platform rather than signing a manifest without it.
+      - name: Generate checksums.sha256 and latest.json
+        run: node packages/storage/scripts/release-manifest.mjs release "${VERSION}" latest.json
+
+      - name: Install minisign
+        run: sudo apt-get install -y minisign
+
+      - name: Sign checksums.sha256
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd release
+          printf '%s' "$MINISIGN_PRIVATE_KEY" > /tmp/minisign.key
+          echo "$MINISIGN_PASSWORD" | minisign \
+            -S -s /tmp/minisign.key \
+            -m checksums.sha256 \
+            -t "supatype storage releases v${VERSION}"
+          rm -f /tmp/minisign.key
+          test -s checksums.sha256.minisig
+
+      - name: Publish to the CDN
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+          # Hetzner needs path addressing and s3v4, and refuses instance metadata lookups.
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: "10"
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.addressing_style path >/dev/null
+          aws configure set default.s3.signature_version s3v4 >/dev/null
+
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          EP="${EP%/}"
+          BUCKET="${{ secrets.CDN_BUCKET }}"
+          BASE="s3://${BUCKET}/storage/v${VERSION}"
+          CACHE_IMMUTABLE="public, max-age=31536000, immutable"
+
+          # An immutable prefix is never rewritten: a client may already hold an archive and a
+          # manifest from it, and replacing either is how the postgres checksum skew happened.
+          # A rerun of the release keeps what is published and carries on, so the jobs after
+          # this one (npm, the GitHub release) can still finish the version.
+          if aws s3 ls "${BASE}/checksums.sha256.minisig" --endpoint-url "${EP}" >/dev/null 2>&1; then
+            echo "::warning::storage/v${VERSION}/ is already published. Keeping it and uploading nothing."
+            exit 0
+          fi
+
+          # Archives first, then the manifest that names them, then its signature.
+          for f in release/supatype-storage-* release/checksums.sha256 release/checksums.sha256.minisig; do
+            aws s3 cp "${f}" "${BASE}/$(basename "${f}")" \
+              --endpoint-url "${EP}" \
+              --cache-control "${CACHE_IMMUTABLE}" \
+              --no-progress
+          done
+
+      # A prerelease publishes its archives but must not become `latest`: the CLI resolves an
+      # unpinned storage through this file, so moving it to an rc would ship one to everyone.
+      - name: Update storage/latest.json
+        if: ${{ !contains(needs.version.outputs.version, '-') }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.addressing_style path >/dev/null
+          aws configure set default.s3.signature_version s3v4 >/dev/null
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          aws s3 cp latest.json "s3://${{ secrets.CDN_BUCKET }}/storage/latest.json" \
+            --endpoint-url "${EP%/}" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --no-progress

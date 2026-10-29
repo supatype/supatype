@@ -20,10 +20,12 @@ import { archiveNameCandidates, currentPlatform, download, fetchLatestVersion, t
  * realtime-release.yml published the realtime binaries with no checksums.sha256 and no minisign
  * signature, and the CLI refuses any component release without both, so the first realtime release
  * would have put binaries on the CDN that no CLI could install. Published paths are immutable, so
- * that version could never have been repaired. These run the workflow's manifest script and the
- * same minisign signing command on dummy binaries, then install through the CLI's own download.
+ * that version could never have been repaired. These run each workflow's manifest script and the
+ * same minisign signing command on dummy artifacts, then install through the CLI's own download:
+ * realtime's binaries, and storage's archives (storage-release.yml), which follow the same contract.
  */
-const SCRIPT = resolve(dirname(fileURLToPath(import.meta.url)), "../../realtime/scripts/release-manifest.mjs")
+type Released = "realtime" | "storage"
+const PACKAGES = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const VERSION = "0.7.0"
 const PASSWORD = "throwaway"
 const PLATFORM: PlatformId = currentPlatform()
@@ -39,6 +41,8 @@ const MAGIC: Record<PlatformId["os"], number[]> = {
   windows: [0x4d, 0x5a, 0x90, 0x00],
   darwin: [0xcf, 0xfa, 0xed, 0xfe],
 }
+/** The first bytes the CLI checks a storage archive for: a zip on Windows, gzip elsewhere. */
+const ARCHIVE_MAGIC = (os: PlatformId["os"]): number[] => (os === "windows" ? [0x50, 0x4b, 0x03, 0x04] : [0x1f, 0x8b, 0x08, 0x00])
 
 const hasMinisign = spawnSync("minisign", ["-v"]).status === 0
 /**
@@ -48,11 +52,15 @@ const hasMinisign = spawnSync("minisign", ["-v"]).status === 0
  */
 const ciValue = (process.env.CI ?? "").toLowerCase()
 const inCI = ciValue !== "" && ciValue !== "false" && ciValue !== "0"
-const nameFor = (p: PlatformId): string => archiveNameCandidates("realtime", VERSION, p)[0]!
-const binaryFor = (p: PlatformId): Buffer => Buffer.concat([Buffer.from(MAGIC[p.os]), Buffer.from(nameFor(p).padEnd(124, "."))])
 
 let work = ""
 const releaseDir = (): string => join(work, "release")
+
+/** The component the running suite releases; each describe below runs once for each. */
+let component: Released = "realtime"
+const nameFor = (p: PlatformId): string => archiveNameCandidates(component, VERSION, p)[0]!
+const magicFor = (p: PlatformId): number[] => (component === "storage" ? ARCHIVE_MAGIC(p.os) : MAGIC[p.os])
+const binaryFor = (p: PlatformId): Buffer => Buffer.concat([Buffer.from(magicFor(p)), Buffer.from(nameFor(p).padEnd(124, "."))])
 
 function writeBinaries(platforms: PlatformId[]): void {
   mkdirSync(releaseDir(), { recursive: true })
@@ -61,7 +69,8 @@ function writeBinaries(platforms: PlatformId[]): void {
 
 /** The workflow's "Generate checksums.sha256 and latest.json" step. */
 function runManifestScript(): { status: number | null; stderr: string } {
-  const r = spawnSync(process.execPath, [SCRIPT, releaseDir(), VERSION, join(work, "latest.json")], { encoding: "utf8" })
+  const script = join(PACKAGES, component, "scripts", "release-manifest.mjs")
+  const r = spawnSync(process.execPath, [script, releaseDir(), VERSION, join(work, "latest.json")], { encoding: "utf8" })
   return { status: r.status, stderr: r.stderr }
 }
 
@@ -82,24 +91,24 @@ const publicKey = (name: string): string => readFileSync(join(keys, `${name}.pub
 
 /** The workflow's "Sign checksums.sha256" step, with the password on stdin as CI passes it. */
 function signChecksums(keyName: string): void {
-  const args = ["-S", "-s", join(keys, `${keyName}.key`), "-m", "checksums.sha256", "-t", `supatype realtime releases v${VERSION}`]
+  const args = ["-S", "-s", join(keys, `${keyName}.key`), "-m", "checksums.sha256", "-t", `supatype ${component} releases v${VERSION}`]
   minisign(args, `${PASSWORD}\n`, releaseDir())
 }
 
-/** Serve the release directory as releases.supatype.com/realtime/, and latest.json beside it. */
+/** Serve the release directory as releases.supatype.com/<component>/, and latest.json beside it. */
 function serveRelease(): void {
   vi.stubGlobal("fetch", async (input: string | URL) => {
     const url = String(input)
-    const file = url.endsWith("/realtime/latest.json")
+    const file = url.endsWith(`/${component}/latest.json`)
       ? join(work, "latest.json")
       : join(releaseDir(), url.slice(url.lastIndexOf("/") + 1))
-    if (!url.includes(`/realtime/`) || !existsSync(file)) return new Response("not found", { status: 404 })
+    if (!url.includes(`/${component}/`) || !existsSync(file)) return new Response("not found", { status: 404 })
     return new Response(readFileSync(file))
   })
 }
 
 beforeEach(() => {
-  work = join(tmpdir(), `supatype-realtime-release-${process.pid}-${Date.now()}`)
+  work = join(tmpdir(), `supatype-component-release-${process.pid}-${Date.now()}`)
   fakeHome = join(work, "home")
   mkdirSync(fakeHome, { recursive: true })
   vi.stubEnv("SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS", "")
@@ -116,7 +125,11 @@ afterEach(() => {
   fakeHome = ""
 })
 
-describe("realtime release manifest", () => {
+describe.each(["realtime", "storage"] as const)("%s release manifest", (released) => {
+  beforeEach(() => {
+    component = released
+  })
+
   it("covers exactly the binary the CLI asks for on every platform, in sha256sum's format", () => {
     writeBinaries(ALL_PLATFORMS)
     expect(runManifestScript().status).toBe(0)
@@ -134,16 +147,16 @@ describe("realtime release manifest", () => {
     expect(latest).toEqual({
       version: VERSION,
       date: new Date().toISOString().slice(0, 10),
-      checksums_url: `https://releases.supatype.com/realtime/v${VERSION}/checksums.sha256`,
+      checksums_url: `https://releases.supatype.com/${component}/v${VERSION}/checksums.sha256`,
     })
-    await expect(fetchLatestVersion("realtime")).resolves.toBe(VERSION)
+    await expect(fetchLatestVersion(component)).resolves.toBe(VERSION)
   })
 
   it("refuses to write a manifest when a platform's binary is missing", () => {
     writeBinaries(ALL_PLATFORMS.filter((p) => p.os !== "windows"))
     const result = runManifestScript()
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("supatype-realtime-windows-amd64.exe")
+    expect(result.stderr).toContain(nameFor({ os: "windows", arch: "amd64" }))
     expect(existsSync(join(releaseDir(), "checksums.sha256"))).toBe(false)
   })
 })
@@ -158,9 +171,13 @@ if (inCI && !hasMinisign) {
   })
 }
 
-describe.skipIf(!hasMinisign)("installing a realtime release through the CLI", () => {
+describe.skipIf(!hasMinisign).each(["realtime", "storage"] as const)("installing a %s release through the CLI", (released) => {
+  beforeEach(() => {
+    component = released
+  })
+
   beforeAll(() => {
-    keys = join(tmpdir(), `supatype-realtime-release-keys-${process.pid}-${Date.now()}`)
+    keys = join(tmpdir(), `supatype-${released}-release-keys-${process.pid}-${Date.now()}`)
     mkdirSync(keys, { recursive: true })
     generateKey("release")
     generateKey("intruder")
@@ -171,14 +188,14 @@ describe.skipIf(!hasMinisign)("installing a realtime release through the CLI", (
   it("refuses a release published as the old workflow did: binaries, no checksums", async () => {
     writeBinaries(ALL_PLATFORMS)
     vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", publicKey("release"))
-    await expect(download("realtime", VERSION, PLATFORM)).rejects.toThrow(/Failed to fetch checksums/)
+    await expect(download(component, VERSION, PLATFORM)).rejects.toThrow(/Failed to fetch checksums/)
   })
 
   it("refuses checksums that were never signed", async () => {
     writeBinaries(ALL_PLATFORMS)
     expect(runManifestScript().status).toBe(0)
     vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", publicKey("release"))
-    await expect(download("realtime", VERSION, PLATFORM)).rejects.toThrow(/checksum signature/)
+    await expect(download(component, VERSION, PLATFORM)).rejects.toThrow(/checksum signature/)
   })
 
   it("refuses checksums signed by a key other than the release key", async () => {
@@ -186,7 +203,7 @@ describe.skipIf(!hasMinisign)("installing a realtime release through the CLI", (
     expect(runManifestScript().status).toBe(0)
     signChecksums("intruder")
     vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", publicKey("release"))
-    await expect(download("realtime", VERSION, PLATFORM)).rejects.toThrow(/key ID mismatch/)
+    await expect(download(component, VERSION, PLATFORM)).rejects.toThrow(/key ID mismatch/)
   })
 
   it("installs the binary when the manifest is generated and signed as the workflow does", async () => {
@@ -195,7 +212,7 @@ describe.skipIf(!hasMinisign)("installing a realtime release through the CLI", (
     vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", publicKey("release"))
     signChecksums("release")
 
-    const { path: installed } = await download("realtime", VERSION, PLATFORM)
+    const { path: installed } = await download(component, VERSION, PLATFORM)
     expect(readFileSync(installed)).toEqual(binaryFor(PLATFORM))
   })
 })

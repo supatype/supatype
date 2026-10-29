@@ -24,7 +24,14 @@ import { hasEnvValue, readDotEnvFiles } from "../env-file.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
-import { isParsedBuckets, nativeBucketRow, withPublicFromMode, type ParsedStorageBucket } from "../storage-provision.js"
+import {
+  bucketSpecsFromAst,
+  isParsedBuckets,
+  nativeBucketRow,
+  provisionBuckets,
+  withPublicFromMode,
+  type ParsedStorageBucket,
+} from "../storage-provision.js"
 import { readJsonFile } from "../json-file.js"
 import { isArrayOf, isJsonObject } from "@supatype/shared"
 import {
@@ -37,6 +44,8 @@ import {
   nativeDbPort,
   nativeRealtimePort,
   nativeDenoPort,
+  nativeStoragePort,
+  STORAGE_PORT_ENV,
   DENO_PORT_ENV,
   nativeStateRoot,
   nativeServerPort,
@@ -80,7 +89,6 @@ import { ProcessManager } from "../process-manager.js"
 import { POSTGREST_VERSION, postgrestArchiveName, postgrestArchiveUrl } from "../postgrest-release.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { localStorageEnv } from "../local-storage.js"
 import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } from "../dev-session.js"
 import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
@@ -89,6 +97,9 @@ import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
 import { recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
+import { extractArchive } from "../archive-extract.js"
+import { serverStorageEnv, startNativeStorage } from "../native-storage.js"
+import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
@@ -129,9 +140,11 @@ interface NativeDevPorts {
   realtime: number
   /** Where the server starts Deno, checked only for a project with functions: nothing binds it otherwise. */
   deno?: number
+  /** Where the storage service listens, checked only when native dev runs it. */
+  storage?: number
 }
 
-const NATIVE_SERVICES = ["postgres", "server", "postgrest", "realtime", "deno"] as const satisfies readonly (keyof NativeDevPorts)[]
+const NATIVE_SERVICES = ["postgres", "server", "postgrest", "realtime", "deno", "storage"] as const satisfies readonly (keyof NativeDevPorts)[]
 
 export const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; move: string }> = {
   postgres: {
@@ -153,6 +166,10 @@ export const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; m
   deno: {
     holder: "Another Deno process, or any app on this port, may be running.",
     move: `Move this project's functions port with ${DENO_PORT_ENV} in .env.`,
+  },
+  storage: {
+    holder: "Another storage service, or any app on this port, may be running.",
+    move: `Move this project's storage port with ${STORAGE_PORT_ENV} in .env.`,
   },
 }
 
@@ -240,6 +257,7 @@ export function registerDev(program: Command): void {
       const pgPort = nativeDbPort(config, cwd)
       const realtimePort = String(nativeRealtimePort(config, cwd))
       const denoPort = nativeDenoPort(cwd)
+      const storagePort = nativeStoragePort(cwd)
       // Edge functions and model hooks run only when their directory exists, so Deno's port matters
       // only then.
       const functionsDir = functionsPathCandidatesFromProject(config, cwd).find((dir) => existsSync(dir))
@@ -253,6 +271,7 @@ export function registerDev(program: Command): void {
           postgrest: Number(postgrestPort),
           realtime: Number(realtimePort),
           ...(runsWorker && { deno: denoPort }),
+          ...(keepsObjectsLocally(config) && { storage: storagePort }),
         })
         // Before anything is generated: a missing password would otherwise be replaced in .env
         // with a new one the existing cluster has never heard of.
@@ -444,7 +463,7 @@ export function registerDev(program: Command): void {
       const adminConfigPath = join(supatypeDir, "admin-config.json")
       mkdirSync(supatypeDir, { recursive: true })
 
-      const localStoragePath = config.storage?.provider !== "s3" ? join(stateRoot, "storage") : undefined
+      const localStoragePath = keepsObjectsLocally(config) ? serverStoreRoot(stateRoot) : undefined
       // Native Postgres builds don't include PostGIS, skip geo fields rather than failing.
       const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
@@ -513,6 +532,13 @@ export function registerDev(program: Command): void {
         config, cwd, manifestPath, pidDir, url: realtimeUrl, port: realtimePort,
         databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
       })
+      const nativeStorage = keepsObjectsLocally(config)
+        ? await startNativeStorage({
+          config, cwd, manifestPath, pidDir, stateRoot, port: storagePort, databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
+        })
+        : null
+      // Later pushes create the buckets a schema declares in the service as well as in buckets.json.
+      if (nativeStorage !== null) schemaPush.storageApi = { url: nativeStorage.url, serviceRoleKey }
 
       // Postgres serves RESP itself when the archive had pg_keyspace and the port came up.
       const nativeKeyspaceAddr = await nativeKeyspaceAddrFor(keyspacePort)
@@ -584,7 +610,7 @@ export function registerDev(program: Command): void {
         ...nativeAuthMailerEnv(config.email, serverPort),
         SUPATYPE_LOG_LEVEL: "info",
         SUPATYPE_DISABLE_SIGNUP: "false",
-        ...(config.storage?.provider !== "s3" ? localStorageEnv(stateRoot) : {}),
+        ...serverStorageEnv(nativeStorage, config, stateRoot),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
         ...nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }),
@@ -709,6 +735,7 @@ export function registerDev(program: Command): void {
         await Promise.all([
           serverProc.stop(),
           realtimeProc?.stop(),
+          nativeStorage?.proc.stop(),
           postgrestProc?.stop(),
           studioProc?.stop(),
           appProc?.stop(),
@@ -879,11 +906,19 @@ export interface NativeSchemaPush {
   config?: SupatypeProjectConfig | undefined
   /** `dev --overwrite-drift`: put back access changed outside Supatype on every push. */
   overwriteDrift?: boolean | undefined
+  /** The storage service, once native dev runs it: declared buckets are created there too. */
+  storageApi?: StorageApi | undefined
+}
+
+/** The storage service's address and the key that may create buckets in it. */
+interface StorageApi {
+  url: string
+  serviceRoleKey: string
 }
 
 /** One push of native dev (provider `native`): the schema on disk, then what describes it. Exported for tests. */
 export async function runSchemaPush(push: NativeSchemaPush): Promise<void> {
-  const { cwd, engineBin, schemaPath, dbURL, adminConfigPath, storagePath, skipFieldKinds, config } = push
+  const { cwd, engineBin, schemaPath, dbURL, adminConfigPath, storagePath, skipFieldKinds, config, storageApi } = push
   const overwriteDrift = push.overwriteDrift ?? false
   const read = await readNativeSchema(cwd, schemaPath, config, skipFieldKinds)
   const astJson = JSON.stringify(read)
@@ -903,7 +938,7 @@ export async function runSchemaPush(push: NativeSchemaPush): Promise<void> {
   const pgSchemaName = config ? pgSchema(config) : "public"
   const ast = await applyNativeSchema(cwd, { ast: read, rebuild }, { dbURL, pgSchema: pgSchemaName, overwriteDrift })
   writeFileSync(astPath, JSON.stringify(ast))
-  await writeNativeSchemaArtifacts({ cwd, engineBin, astPath, adminConfigPath, storagePath }, ast, config)
+  await writeNativeSchemaArtifacts({ cwd, engineBin, astPath, adminConfigPath, storagePath, storageApi }, ast, config)
 }
 
 /** The schema on disk as native dev pushes it, saying which fields were stood in for by JSONB. */
@@ -951,6 +986,7 @@ interface NativeArtifactPaths {
   astPath: string
   adminConfigPath?: string | undefined
   storagePath?: string | undefined
+  storageApi?: StorageApi | undefined
 }
 
 /**
@@ -964,21 +1000,39 @@ async function writeNativeSchemaArtifacts(
   config: import("../project-config.js").SupatypeProjectConfig | undefined,
 ): Promise<void> {
   const { cwd, engineBin, astPath } = paths
-  if (paths.storagePath) provisionDeclaredBuckets(engineBin, cwd, astPath, paths.storagePath)
+  if (paths.storagePath) await provisionDeclaredBuckets(engineBin, cwd, astPath, paths)
   if (paths.adminConfigPath) await writeNativeAdminConfig(paths, paths.adminConfigPath, ast, config)
   await writeNativeTypes(cwd, ast, config)
 }
 
-/** Create the storage buckets the schema declares, as the engine resolves them. */
-function provisionDeclaredBuckets(engineBin: string, cwd: string, astPath: string, storagePath: string): void {
+/** The storage buckets the schema declares, as the engine resolves them; none when it cannot say. */
+function declaredBuckets(engineBin: string, cwd: string, astPath: string): ParsedStorageBucket[] {
   const parseResult = spawnSync(engineBin, ["parse", "-i", astPath], { cwd, stdio: "pipe", encoding: "utf8" })
-  if (parseResult.status !== 0 || !parseResult.stdout) return
+  if (parseResult.status !== 0 || !parseResult.stdout) return []
   try {
     const resolvedAst: unknown = JSON.parse(parseResult.stdout)
-    if (isParsedBuckets(resolvedAst) && resolvedAst.storageBuckets && resolvedAst.storageBuckets.length > 0) {
-      provisionStorageBuckets(resolvedAst.storageBuckets, storagePath)
-    }
-  } catch { /* ignore parse errors */ }
+    return isParsedBuckets(resolvedAst) ? resolvedAst.storageBuckets ?? [] : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Create the storage buckets the schema declares: in buckets.json, which the server's store reads
+ * and the storage service imports when it starts, and in the service itself once it runs.
+ */
+async function provisionDeclaredBuckets(
+  engineBin: string,
+  cwd: string,
+  astPath: string,
+  paths: { storagePath?: string | undefined; storageApi?: StorageApi | undefined },
+): Promise<void> {
+  const buckets = declaredBuckets(engineBin, cwd, astPath)
+  if (buckets.length === 0 || paths.storagePath === undefined) return
+  provisionStorageBuckets(buckets, paths.storagePath)
+  if (paths.storageApi) {
+    await provisionBuckets(paths.storageApi.url, paths.storageApi.serviceRoleKey, bucketSpecsFromAst({ storageBuckets: buckets }))
+  }
 }
 
 /** Studio's admin config, which the engine writes to stdout, with the project's roles merged in. */
@@ -1103,22 +1157,7 @@ async function extractPostgresArchive(
     )
   }
 
-  mkdirSync(extractDir, { recursive: true })
-
-  // On Windows, Git Bash tar is typically first in PATH and chokes on drive-letter
-  // paths (C:\...). Use PowerShell's Expand-Archive instead, which handles Windows
-  // paths natively. On Linux/macOS, use tar as normal.
-  const result = platform.os === "windows"
-    ? spawnSync(
-        "powershell.exe",
-        ["-NoProfile", "-Command", `Expand-Archive -Path '${archivePath}' -DestinationPath '${extractDir}' -Force`],
-        { stdio: "inherit" },
-      )
-    : spawnSync("tar", ["-xzf", archivePath, "-C", extractDir], { stdio: "inherit" })
-
-  if (result.status !== 0) {
-    throw new Error(`Failed to extract Postgres archive: ${archivePath}`)
-  }
+  extractArchive(archivePath, extractDir)
 }
 
 // ---------------------------------------------------------------------------
