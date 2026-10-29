@@ -103,5 +103,8 @@ passes, Playwright reports "expected to fail, but passed", and the run is red
 until the id is removed from the test. Each id is an entry in
 Pre-Launch-Verification-Register.
 
-Both runners count a skipped test as a failure. Both are also suites of the
-release train (`scripts/release-train.sh`, `.github/workflows/release-train.yml`).
+Both runners count a skipped test as a failure. Both run on every pull request
+and push to main (`masking-e2e` and `positioning-e2e` in
+`.github/workflows/integration.yml`), against this checkout's images and the
+pinned engine, server and Postgres. Both are also suites of the release train
+(`scripts/release-train.sh`, `.github/workflows/release-train.yml`).
