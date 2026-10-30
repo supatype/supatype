@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Command } from "commander"
@@ -63,7 +63,9 @@ async function compose(...args: string[]): Promise<void> {
 const render = (): Promise<void> => compose("render")
 
 beforeEach(() => {
-  projectDir = join(tmpdir(), `supatype-selfhost-urlsafe-${process.pid}-${Date.now()}`)
+  // The real path: the commands find the project from process.cwd(), which reports it resolved.
+  // On macOS tmpdir() is under /var, a symlink to /private/var, so the two spellings never matched.
+  projectDir = join(realpathSync(tmpdir()), `supatype-selfhost-urlsafe-${process.pid}-${Date.now()}`)
   mkdirSync(projectDir, { recursive: true })
   originalCwd = process.cwd()
   process.chdir(projectDir)
