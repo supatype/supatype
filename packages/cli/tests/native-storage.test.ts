@@ -283,6 +283,19 @@ describe("the import of the server's object store", () => {
 
   // Review of round 3c: the refused buckets were recorded only once every object went, so while the
   // objects failed, the bucket warning came again on every start.
+  // Review: a bucket refused, then taken at a start whose objects then failed. That start recorded
+  // the new refusals at once, so the next start no longer knew the bucket had just been taken, and
+  // its objects, unchanged since, were never sent.
+  it("sends a newly taken bucket's objects at the next start when the start that took it failed", async () => {
+    const { root, status } = storeWithBadBucket(400)
+    await importAs(root, "0.7.0", status)
+    expect(markerOf(root)).toMatchObject({ skipped_buckets: [{ id: "bad" }] })
+    const objectsFail = (path: string): number => (path.startsWith("/object/") ? 500 : 200)
+    await expect(importAs(root, "0.7.0", objectsFail)).rejects.toThrow(/not imported/)
+    expect(uploadsIn(await importAs(root, "0.7.0"))).toEqual(["/object/bad/kept.png"])
+    expect(markerOf(root)).toMatchObject({ skipped_buckets: [], pending_buckets: [] })
+  })
+
   it("records a refused bucket though the objects then fail, and warns of it once", async () => {
     const { root, status } = storeWithBadBucket(400)
     const objectsFail = (path: string, sent: string): number => (path.startsWith("/object/avatars/") ? 500 : status(path, sent))
