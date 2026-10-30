@@ -319,26 +319,28 @@ function patchConfigVersions(cwd: string, updates: readonly ComponentUpdate[]): 
   }
 
   let text = readFileSync(configPath, "utf8")
-  for (const { component, to } of updates) {
-    const key = component
-    if (text.includes(`${key}:`)) {
-      text = text.replace(
-        new RegExp(`(${key}\\s*:\\s*['"])[^'"]*(['"])`),
-        `$1${to}$2`,
-      )
-    } else if (text.includes("versions:")) {
-      text = text.replace(
-        /(versions:\s*\{[^}]*)(\})/,
-        `$1,\n    ${key}: "${to}"$2`,
-      )
-    } else {
-      text = text.replace(
-        /(\n)(\s*)(email:|schema:|storage:)/,
-        `$1$2versions: {\n$2  ${key}: "${to}",\n$2},\n$2$3`,
-      )
-    }
-  }
+  for (const { component, to } of updates) text = withPinnedVersion(text, component, to)
 
   writeFileSync(configPath, text, "utf8")
   info(`${basename(configPath)} updated.`)
+}
+
+/** `text`, the config file's source, with `versions.<key>` set to `to`, adding the block when there is none. */
+function withPinnedVersion(text: string, key: string, to: string): string {
+  if (text.includes(`${key}:`)) {
+    return text.replace(
+      new RegExp(`(${key}\\s*:\\s*['"])[^'"]*(['"])`),
+      `$1${to}$2`,
+    )
+  } else if (text.includes("versions:")) {
+    return text.replace(
+      /(versions:\s*\{[^}]*)(\})/,
+      `$1,\n    ${key}: "${to}"$2`,
+    )
+  } else {
+    return text.replace(
+      /(\n)(\s*)(email:|schema:|storage:)/,
+      `$1$2versions: {\n$2  ${key}: "${to}",\n$2},\n$2$3`,
+    )
+  }
 }

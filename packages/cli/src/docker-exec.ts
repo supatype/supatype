@@ -15,6 +15,8 @@
  * the daemon pulling anyway.
  */
 import { execFile, spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process"
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 
 /** What one `docker` call answered. */
 export interface DockerAnswer {
@@ -65,6 +67,34 @@ export type DockerRunner = (
   call: DockerCall & { shell: boolean; timeoutMs: DockerLimit },
 ) => Promise<DockerAnswer>
 
+/** What to run for `docker`: the program, and whether it needs a shell. */
+export interface DockerProgram {
+  file: string
+  shell: boolean
+}
+
+/**
+ * The program a call runs. On Windows a call asks for a shell because Docker Desktop's `docker`
+ * was found only that way, but at a limit the shell is what gets killed, and docker.exe ran on
+ * holding what it had open. When docker.exe is on PATH it is run directly, so the limit ends it;
+ * the shell is kept only when it is not (a shim that only the shell finds).
+ */
+export function dockerProgram(
+  shell: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): DockerProgram {
+  if (!shell || platform !== "win32") return { file: "docker", shell }
+  const found = windowsPath(env).map((dir) => join(dir, "docker.exe")).find((path) => existsSync(path))
+  return found === undefined ? { file: "docker", shell: true } : { file: found, shell: false }
+}
+
+/** The directories on Windows' PATH, which the environment may spell `Path`. */
+function windowsPath(env: NodeJS.ProcessEnv): string[] {
+  const value = Object.entries(env).find(([key]) => key.toUpperCase() === "PATH")?.[1] ?? ""
+  return value.split(";").map((dir) => dir.trim().replace(/^"|"$/g, "")).filter((dir) => dir !== "")
+}
+
 /** The errno code a spawn failed with, when it did. */
 function errnoCode(err: Error | null | undefined): string | undefined {
   return err !== null && err !== undefined && "code" in err && typeof err.code === "string" ? err.code : undefined
@@ -77,8 +107,9 @@ function callPlace(call: DockerCall): { cwd?: string; env?: NodeJS.ProcessEnv } 
 
 const runDocker: DockerRunner = (args, call) =>
   new Promise((resolve) => {
-    const options = { encoding: "utf8" as const, windowsHide: true, shell: call.shell, maxBuffer: 64 * 1024 * 1024, ...callPlace(call) }
-    const child = execFile("docker", [...args], options, (err, stdout, stderr) => {
+    const program = dockerProgram(call.shell, call.env)
+    const options = { encoding: "utf8" as const, windowsHide: true, shell: program.shell, maxBuffer: 64 * 1024 * 1024, ...callPlace(call) }
+    const child = execFile(program.file, [...args], options, (err, stdout, stderr) => {
       if (timer !== undefined) clearTimeout(timer)
       const code = err !== null && "code" in err ? err.code : undefined
       resolve({
@@ -131,13 +162,14 @@ export type DockerStdio = "pipe" | "inherit" | "ignore"
 
 /** {@link askDocker} for a caller that cannot wait on a promise; the limit is required. */
 export function askDockerSync(args: readonly string[], call: DockerCall & { timeoutMs: DockerLimit; stdio?: DockerStdio }): DockerAnswer {
-  const result = spawnSync("docker", [...args], {
+  const program = dockerProgram(call.shell === true, call.env)
+  const result = spawnSync(program.file, [...args], {
     encoding: "utf8",
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
     stdio: call.stdio ?? "pipe",
     ...callPlace(call),
-    ...(call.shell === true && { shell: true }),
+    ...(program.shell && { shell: true }),
     ...(call.input !== undefined && { input: call.input }),
     ...(call.timeoutMs !== NO_DOCKER_LIMIT && { timeout: call.timeoutMs, killSignal: "SIGKILL" as const }),
   })

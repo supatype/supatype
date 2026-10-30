@@ -148,48 +148,60 @@ export async function dockerPgWaitReady(
 ): Promise<void> {
   const name = containerName(projectName)
   const deadline = Date.now() + timeoutMs
-  let servingWithoutAnonMs = 0
-  let lastPsqlDetail = ""
-
+  const wait: InitWait = { servingWithoutAnonMs: 0, lastPsqlDetail: "" }
   while (Date.now() < deadline) {
-    const health = await dockerPgHealthStatus(name)
-    const logs = await dockerPgLogsTail(name)
-    const serving =
-      health === "healthy" ||
-      dockerPgPostInitServing(logs) ||
-      (await dockerPgExecReady(name))
-
-    if (serving && !migrateStillRunning(logs)) {
-      if (await dockerPgHasAnonRole(name, projectName, password)) return
-
-      const probe = await dockerPgPsql(name, projectName, ANON_ROLE_SQL, password)
-      lastPsqlDetail = [
-        probe.status !== 0 ? `psql exit ${probe.status}` : "",
-        probe.stderr.trim(),
-        probe.stdout.trim() ? `stdout=${probe.stdout.trim()}` : "",
-      ]
-        .filter(Boolean)
-        .join("; ")
-
-      const reusedVolume =
-        logs.includes("database system is ready to accept connections") &&
-        !logs.includes("PostgreSQL init process complete")
-
-      if (reusedVolume) {
-        servingWithoutAnonMs += 500
-        if (servingWithoutAnonMs >= 5_000) throw staleVolumeError(name)
-      } else {
-        servingWithoutAnonMs = 0
-      }
-    } else {
-      servingWithoutAnonMs = 0
-    }
-
+    if (await initFinished(name, projectName, password, wait)) return
     await sleep(500)
   }
+  throw await initTimeoutError(name, timeoutMs, wait.lastPsqlDetail)
+}
 
+/** What {@link dockerPgWaitReady} carries between polls. */
+interface InitWait {
+  /** How long a reused volume has served without the API roles. */
+  servingWithoutAnonMs: number
+  /** What the last anon-role probe said, for the timeout's message. */
+  lastPsqlDetail: string
+}
+
+/** One poll: true once Postgres serves with the API roles; throws for a volume that never gets them. */
+async function initFinished(name: string, projectName: string, password: string, wait: InitWait): Promise<boolean> {
+  const health = await dockerPgHealthStatus(name)
+  const logs = await dockerPgLogsTail(name)
+  const serving = health === "healthy" || dockerPgPostInitServing(logs) || (await dockerPgExecReady(name))
+  if (!serving || migrateStillRunning(logs)) {
+    wait.servingWithoutAnonMs = 0
+    return false
+  }
+  if (await dockerPgHasAnonRole(name, projectName, password)) return true
+  wait.lastPsqlDetail = anonProbeDetail(await dockerPgPsql(name, projectName, ANON_ROLE_SQL, password))
+  const reusedVolume =
+    logs.includes("database system is ready to accept connections") &&
+    !logs.includes("PostgreSQL init process complete")
+  if (!reusedVolume) {
+    wait.servingWithoutAnonMs = 0
+    return false
+  }
+  wait.servingWithoutAnonMs += 500
+  if (wait.servingWithoutAnonMs >= 5_000) throw staleVolumeError(name)
+  return false
+}
+
+/** What an anon-role probe said, in one line. */
+function anonProbeDetail(probe: { status: number | null; stdout: string; stderr: string }): string {
+  return [
+    probe.status !== 0 ? `psql exit ${probe.status}` : "",
+    probe.stderr.trim(),
+    probe.stdout.trim() ? `stdout=${probe.stdout.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join("; ")
+}
+
+/** Image init did not finish in time: what is known, and the volume to remove after an upgrade. */
+async function initTimeoutError(name: string, timeoutMs: number, lastPsqlDetail: string): Promise<Error> {
   const logs = await dockerPgLogsTail(name, 80)
-  throw new Error(
+  return new Error(
     `Docker Postgres "${name}" did not finish image init within ${timeoutMs}ms.\n` +
       "  API roles (anon, authenticated, service_role) are created by the supatype/postgres\n" +
       "  entrypoint (99-supatype-migrate.sh), not by the CLI.\n" +
