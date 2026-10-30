@@ -13,7 +13,7 @@
  * A list of services in the source is a list that goes stale the next time the
  * stack changes shape. `docker compose ps` cannot.
  */
-import { isJsonObject } from "@supatype/shared"
+import { isJsonObject, parseJsonObject } from "@supatype/shared"
 import { existsSync } from "node:fs"
 import { loadConfig } from "./config.js"
 import { askDocker, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
@@ -185,8 +185,11 @@ export async function composeServiceImages(ctx: ComposeContext): Promise<Service
   if (result.status !== 0) {
     throw new Error(`docker compose could not read ${ctx.composePath}: ${spawnFailureText({ ...result, stdout: "" })}`)
   }
-  const parsed: unknown = JSON.parse(result.stdout)
-  const services = isJsonObject(parsed) ? parsed["services"] : undefined
+  const parsed = parseJsonObject(result.stdout)
+  if (!parsed.ok) {
+    throw new Error(`docker compose config for ${ctx.composePath} answered with something that is not JSON (${parsed.error})`)
+  }
+  const services = parsed.value["services"]
   if (!isJsonObject(services)) return []
   return Object.entries(services)
     .flatMap(([service, spec]) =>

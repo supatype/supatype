@@ -113,3 +113,25 @@ describe("native dev and .env's DATABASE_URL", () => {
     expect(readFileSync(join(dir, ".env"), "utf8")).toContain("DATABASE_URL=postgresql://me:secret@localhost:6000/mine")
   })
 })
+
+// Pre-push review: a password with a `%` that is not an escape made decodeURIComponent throw, and
+// reading whose `.env` URL it was threw with it. A URL the CLI cannot read is not one it wrote.
+describe("a DATABASE_URL whose password does not decode", () => {
+  it("is yours, and reading it does not throw", () => {
+    writeEnv(["DATABASE_URL=postgresql://supatype_admin:100%zz@localhost:5432/acme"])
+    expect(databaseUrlOwner(dir)).toBe("you")
+  })
+})
+
+// Pre-push review: the warning told a developer to remove a URL to another machine because this
+// one could not reach it, which says nothing about the database (a VPN down, a firewall). Only a
+// URL to this machine is checked; one elsewhere is theirs to reach.
+describe("a hand-written DATABASE_URL to another machine", () => {
+  it("is not warned about, nor told to be removed", async () => {
+    const said: string[] = []
+    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
+    writeEnv(["DATABASE_URL=postgresql://me:secret@db.invalid:5432/mine"])
+    await reconcileNativeDatabaseUrl(dir, nativeDsn())
+    expect(said).toEqual([])
+  })
+})

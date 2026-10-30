@@ -428,12 +428,7 @@ export async function download(
   version: string,
   platform: PlatformId,
 ): Promise<Downloaded> {
-  if (version === VERSION_PIN_LOCAL) {
-    throw new Error(
-      `cannot download CDN binary when version is "${VERSION_PIN_LOCAL}": set overrides.${component === "postgres" ? "postgres_dir" : component} or pin a semver`,
-    )
-  }
-
+  assertDownloadableVersion(component, version)
   const dir = cachePath(component, version)
   mkdirSync(dir, { recursive: true })
 
@@ -445,20 +440,35 @@ export async function download(
   if (isCachedBinaryReady(component, version, platform)) return { path: destPath, fetched: false }
 
   console.log(`[supatype] Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
+  const manifest = await fetchLeavingNoEmptyDir(component, version, platform, { dir, destPath })
+  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version, platform), dir)
+  return { path: destPath, fetched: true }
+}
 
-  let manifest: string
+/** Refuse `local`, which names an override rather than a release the CDN has. */
+function assertDownloadableVersion(component: Component, version: string): void {
+  if (version !== VERSION_PIN_LOCAL) return
+  throw new Error(
+    `cannot download CDN binary when version is "${VERSION_PIN_LOCAL}": set overrides.${component === "postgres" ? "postgres_dir" : component} or pin a semver`,
+  )
+}
+
+/** {@link fetchIntoCache}, removing the version directory again when the fetch fails. */
+async function fetchLeavingNoEmptyDir(
+  component: Component,
+  version: string,
+  platform: PlatformId,
+  where: { dir: string; destPath: string },
+): Promise<string> {
   try {
-    manifest = await fetchIntoCache(component, version, platform, destPath)
+    return await fetchIntoCache(component, version, platform, where.destPath)
   } catch (err) {
     // Never leave an empty version directory behind: a stale empty dir makes the next resolve
     // look fine while silently lacking a binary. Only now, with the lock released: its file is in
     // this directory, and removing the directory before it was gone failed every time.
-    try { rmdirSync(dir) } catch { /* not empty, or already removed */ }
+    try { rmdirSync(where.dir) } catch { /* not empty, or already removed */ }
     throw err
   }
-
-  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version, platform), dir)
-  return { path: destPath, fetched: true }
 }
 
 /** True when `destPath` is a valid cached artifact; an invalid one is deleted for the download to replace. */

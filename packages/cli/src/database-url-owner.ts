@@ -20,7 +20,15 @@
  * self-host stack started, goes through {@link writeCliDatabaseUrl}, which applies the rule.
  */
 import { DATABASE_URL_MARKER, readEnvSnapshot, shellEnvInt, upsertEnvFile } from "./env-file.js"
-import { composeDbPublish, databaseUrlHostPort, databaseUrlWithPort, DEV_DB_PORT_ENV, publishedDbPort, type DbPortSync } from "./db-port.js"
+import {
+  composeDbPublish,
+  databaseUrlHostPort,
+  databaseUrlWithPort,
+  DEV_DB_PORT_ENV,
+  localDatabaseUrl,
+  publishedDbPort,
+  type DbPortSync,
+} from "./db-port.js"
 import { setForThisRunOnly, setInShell } from "./shell-ports.js"
 import { connectSucceeds } from "./postgres-ctl.js"
 import { devDatabaseIdentityOf, isDevDatabaseUrl } from "./local-secrets.js"
@@ -140,10 +148,13 @@ export async function reconcileNativeDatabaseUrl(
 
 /**
  * Warn, naming host and port but never the password, when `.env` holds a DATABASE_URL that is
- * yours and nothing answers where it points: every host command (push, seed, admin) will use it.
+ * yours, names this machine, and nothing answers where it points: every host command (push, seed,
+ * admin) will use it. A URL to another machine is not checked: this machine failing to reach it (a
+ * VPN down, a firewall) says nothing about the database, and it is not the CLI's to tell them to
+ * remove.
  */
 export async function warnIfHandWrittenUrlSilent(cwd: string, state: DatabaseUrlState = databaseUrlState(cwd)): Promise<void> {
-  if (state.owner !== "you") return
+  if (state.owner !== "you" || localDatabaseUrl(state.url) === null) return
   const where = databaseUrlHostPort(state.url)
   if (where === undefined || (await connectSucceeds(where.port, 1_000, where.host))) return
   console.warn(

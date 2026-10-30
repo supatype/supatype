@@ -62,8 +62,12 @@ export function probeDockerDaemon(): DockerDaemonProbe {
 export async function probeDockerDaemonAsync(runner?: DockerRunner, timeoutMs?: number): Promise<DockerDaemonProbe> {
   const ask = { shell: process.platform === "win32", ...(runner && { runner }), ...(timeoutMs !== undefined && { timeoutMs }) }
   const [version, info] = await Promise.all([askDocker(VERSION_ARGS, ask), askDocker(["info"], ask)])
-  if (version.timedOut || info.timedOut) return silentDaemon(timeoutMs ?? DOCKER_PROBE_TIMEOUT_MS)
-  return verdictFromVersion(version) ?? verdictFromInfo(info, version)
+  const silent = silentDaemon(timeoutMs ?? DOCKER_PROBE_TIMEOUT_MS)
+  if (version.timedOut) return silent
+  // `version` first: a paused Docker Desktop says so there, while its `info` hangs.
+  const early = verdictFromVersion(version)
+  if (early !== null) return early
+  return info.timedOut ? silent : verdictFromInfo(info, version)
 }
 
 /** The verdict `docker version` alone gives, or null when it takes `docker info` to tell. */

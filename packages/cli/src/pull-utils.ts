@@ -138,18 +138,23 @@ function compositeIndexes(
 
 /** Map a Postgres column to a Model<> field type string (draft). */
 export function pgTypeToModelField(col: ColumnInfo): string {
-  const name = col.name
   const type = col.pgType.toLowerCase()
-  // How the database fills it, declared as such (identity-contract): an identity column numbered by
-  // the database, a generated one computed from the row.
-  if (col.identity !== undefined && /int[248]|smallint|integer|bigint/.test(type)) {
-    const byDefault = col.identity === "BY DEFAULT"
-    if (type.includes("int2") || type.includes("smallint")) {
-      return `${name}: SmallInt<{ identity: "${byDefault ? "by-default" : "always"}" }>`
-    }
-    const width = type.includes("int8") || type.includes("bigint") ? "bigint" : "number"
-    return `${name}: Identity<${width}${byDefault ? ', "by-default"' : ""}>`
-  }
+  return databaseFilledField(col, type) ?? namedField(col, type) ?? typedField(col, type) ?? scalarField(col, type)
+}
+
+/** `Optional<` and `>` round a nullable column's type, nothing round another. */
+function optionalWrap(col: ColumnInfo): { optional: string; optionalClose: string } {
+  return { optional: col.nullable ? "Optional<" : "", optionalClose: col.nullable ? ">" : "" }
+}
+
+/**
+ * How the database fills it, declared as such (identity-contract): an identity column numbered by
+ * the database, a serial, a generated one computed from the row; or one the engine cannot declare.
+ */
+function databaseFilledField(col: ColumnInfo, type: string): string | undefined {
+  const name = col.name
+  const identity = identityField(col, type)
+  if (identity !== undefined) return identity
   if (col.serial === true && /int[48]|integer|bigint/.test(type)) {
     return `${name}: AutoIncrement<${type.includes("int8") || type.includes("bigint") ? "bigint" : "number"}>`
   }
@@ -165,9 +170,26 @@ export function pgTypeToModelField(col: ColumnInfo): string {
     const field = `Generated<${inner}, ${JSON.stringify(generated)}>`
     return `${name}: ${col.nullable ? `Optional<${field}>` : field}`
   }
-  const optional = col.nullable ? "Optional<" : ""
-  const optionalClose = col.nullable ? ">" : ""
+  return undefined
+}
 
+/** An identity column, at its width. */
+function identityField(col: ColumnInfo, type: string): string | undefined {
+  const name = col.name
+  if (col.identity !== undefined && /int[248]|smallint|integer|bigint/.test(type)) {
+    const byDefault = col.identity === "BY DEFAULT"
+    if (type.includes("int2") || type.includes("smallint")) {
+      return `${name}: SmallInt<{ identity: "${byDefault ? "by-default" : "always"}" }>`
+    }
+    const width = type.includes("int8") || type.includes("bigint") ? "bigint" : "number"
+    return `${name}: Identity<${width}${byDefault ? ', "by-default"' : ""}>`
+  }
+  return undefined
+}
+
+/** A column its name decides: a user's id, the key, a relation, the timestamps. */
+function namedField(col: ColumnInfo, type: string): string | undefined {
+  const name = col.name
   // A uuid is a user's id when its foreign key names auth.users(id) (#19). Only then: drafting every
   // uuid `id` as one declared each table's key to be a user's id.
   if (type.includes("uuid") && referencesAuthUser(col)) {
@@ -188,6 +210,13 @@ export function pgTypeToModelField(col: ColumnInfo): string {
   if (name === "deleted_at") {
     return `${name}: Optional<Timestamp>`
   }
+  return undefined
+}
+
+/** A timestamp, uuid, email or slug, with its nullability and uniqueness. */
+function typedField(col: ColumnInfo, type: string): string | undefined {
+  const name = col.name
+  const { optional, optionalClose } = optionalWrap(col)
   if (type.includes("timestamptz") || type.includes("timestamp with time zone")) {
     return `${name}: ${optional}Timestamp${optionalClose}`
   }
@@ -202,6 +231,13 @@ export function pgTypeToModelField(col: ColumnInfo): string {
   if (name === "slug" || name.endsWith("_slug")) {
     return `${name}: Slug<"title">`
   }
+  return undefined
+}
+
+/** A JSON, boolean, integer or text column; any other type is drafted as a string with a TODO. */
+function scalarField(col: ColumnInfo, type: string): string {
+  const name = col.name
+  const { optional, optionalClose } = optionalWrap(col)
   if (type.includes("jsonb")) {
     return `${name}: ${optional}JSON${optionalClose}`
   }

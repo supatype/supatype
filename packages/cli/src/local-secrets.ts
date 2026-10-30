@@ -383,8 +383,20 @@ export function isDevDatabaseUrl(value: string, identity: DevDatabaseIdentity, m
   if (match.port !== undefined && databaseUrlHostPort(value)?.port !== match.port) return false
   return (
     match.credentials !== true ||
-    (decodeURIComponent(url.username) === identity.user && decodeURIComponent(url.password) === identity.password)
+    (decodedOrUndefined(url.username) === identity.user && decodedOrUndefined(url.password) === identity.password)
   )
+}
+
+/**
+ * A URL component percent-decoded, or undefined when it is not valid percent-encoding (a `%` that
+ * starts no escape). The CLI writes what it can decode, so such a URL is the developer's own.
+ */
+function decodedOrUndefined(component: string): string | undefined {
+  try {
+    return decodeURIComponent(component)
+  } catch {
+    return undefined
+  }
 }
 
 /** A connection string to the local database at `hostPort`, `db:5432` inside the network. */

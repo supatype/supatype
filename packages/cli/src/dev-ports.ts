@@ -305,8 +305,15 @@ export async function promptKongPortChoice(
     return fromShell
   }
   const reserved = await reservedComposePorts(reader)
-  const freeDefault = await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved)
+  const port = await askKongPort(await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved))
+  if (await portTaken(port, reserved)) {
+    return promptPortConflictWithoutPersist(port, "init", reserved)
+  }
+  return port
+}
 
+/** Ask for the Kong port, offering `freeDefault`; a cancel ends init. */
+async function askKongPort(freeDefault: number): Promise<number> {
   const value = await p.text({
     message: "Local API gateway port (Kong)",
     defaultValue: String(freeDefault),
@@ -323,11 +330,7 @@ export async function promptKongPortChoice(
     process.exit(0)
   }
 
-  const port = parseHostPortInput(value)!
-  if (await portTaken(port, reserved)) {
-    return promptPortConflictWithoutPersist(port, "init", reserved)
-  }
-  return port
+  return parseHostPortInput(value)!
 }
 
 async function promptPortConflictWithoutPersist(
