@@ -114,7 +114,7 @@ describe("resolvePostgresImage", () => {
     expect(image.keyspace).toBe(false)
   })
 
-  it("leaves an unpinned project on the compose default, which tracks latest", () => {
+  it("leaves an unpinned project on the compose default, the Postgres release this CLI pins", () => {
     const image = resolvePostgresImage(project({}), registry)
     expect(image.ref).toBeUndefined()
     expect(image.keyspace).toBe(true)

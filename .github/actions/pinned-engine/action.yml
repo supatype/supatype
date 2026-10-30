@@ -1,8 +1,9 @@
 name: Use the pinned engine
 description: >
   Sets SUPATYPE_ENGINE_IMAGE for the rest of the job to the engine this checkout is built against
-  (scripts/engine-pin.sh): the release image when .github/schema-engine-commit is an engine release,
-  otherwise a build of the pinned commit. Never :latest, which is whatever was released last.
+  (`scripts/pin.sh engine-image`): the release image when the engine pin in release/images.json is
+  an engine release, otherwise a build of the pinned commit. Never :latest, which is whatever was
+  released last.
 inputs:
   github-token:
     description: Read access to the engine repository while it is private.
@@ -16,5 +17,5 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         set -euo pipefail
-        image="$(bash scripts/engine-pin.sh image)"
+        image="$(bash scripts/pin.sh engine-image)"
         echo "SUPATYPE_ENGINE_IMAGE=$image" >>"$GITHUB_ENV"

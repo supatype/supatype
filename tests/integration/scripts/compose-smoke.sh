@@ -17,6 +17,7 @@ MAX_WAIT=120
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/e2e-project.sh"
+source "$SCRIPT_DIR/lib/pinned-image.sh"
 
 e2e_project_use "$INTEGRATION_DIR" supatype-integration
 # Exported so compose binds the port this script waits on, whatever an old .env says.
@@ -39,10 +40,14 @@ fi
 # Standalone compose requires SERVICE_ROLE_KEY; .env is gitignored so seed it for CI.
 node "$SCRIPT_DIR/ensure-compose-env.mjs"
 
-# Defaults match self-host compose (:latest on Docker Hub). Override via SUPATYPE_*_IMAGE to pin a version.
+# Defaults match the compose file a CLI built from this checkout renders: the server pinned in
+# release/images.json, and :latest for the images built in this repository, since a checkout that is
+# not a release has no images of its own version (CI builds those four and names them). Override via
+# SUPATYPE_*_IMAGE. Postgres and the engine are left to the compose file, which pins them.
 export SUPATYPE_STORAGE_IMAGE="${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}"
 export SUPATYPE_STUDIO_IMAGE="${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}"
-export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:latest}"
+SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-$(pinned_image server)}"
+export SUPATYPE_SERVER_IMAGE
 export SUPATYPE_FUNCTIONS_WORKER_IMAGE="${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}"
 export SUPATYPE_CONTROL_PLANE_IMAGE="${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:latest}"
 

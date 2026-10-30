@@ -27,6 +27,10 @@
 #         schema_engine_sha: ${{ github.sha }}     # the caller's own repository at the tag
 #       secrets: inherit
 #
+# supatype's own release.yml passes the engine, server and Postgres commits release/images.json
+# pins (scripts/pin.sh), so a supatype release trains on exactly the components it ships. A commit
+# left empty builds that repository's default branch head.
+#
 # Secrets (all optional; what each is for):
 #   PRIVATE_REPO_TOKEN   read access to the private repositories (cloud, and schema-engine until it
 #                        is public). Same name cloud's image workflow uses. Without it the train

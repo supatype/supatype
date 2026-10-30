@@ -20,6 +20,7 @@ import { spawnSync } from "node:child_process"
 import { pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { compareVersions } from "./engine-floor.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
+import { pinnedComponentVersion, RELEASE_IMAGES } from "./release-images.js"
 
 const REPOSITORY = "supatype/postgres"
 
@@ -39,7 +40,11 @@ export type TagPresence = "local" | "published" | "missing" | "unknown"
 export type PostgresTagCheck = (ref: string) => TagPresence
 
 export interface PostgresImage {
-  /** The image to run, or undefined for the compose default (`supatype/postgres:latest`). */
+  /**
+   * The image to run, or undefined for the compose default: the Postgres release this CLI pins
+   * (`RELEASE_IMAGES.postgres`). Left undefined rather than written out so `.env` holds no pin the
+   * project never asked for, and a CLI upgrade moves the default with it.
+   */
   ref: string | undefined
   /** Whether that image serves the keyspace when asked to. False when it cannot be known. */
   keyspace: boolean
@@ -95,7 +100,7 @@ export function resolvePostgresImage(config: SupatypeProjectConfig, check: Postg
   const image = config.database?.image?.trim()
   if (image) return configuredImage(image)
   const pin = pinnedVersion("postgres", config)
-  if (pin === undefined) return { ref: undefined, keyspace: true }
+  if (pin === undefined) return { ref: undefined, keyspace: tagHasKeyspaceToggle(pinnedComponentVersion("postgres")) }
   // A machine-local build is named in `.env`, not here, so nothing can be said about it.
   if (pin === VERSION_PIN_LOCAL) return { ref: undefined, keyspace: false }
   return pinnedImage(pin, check)
@@ -151,4 +156,9 @@ export function postgresImageFor(config: SupatypeProjectConfig): PostgresImage {
   if (image.warning) console.warn(`[supatype] ⚠  ${image.warning}`)
   resolved.set(key, image)
   return image
+}
+
+/** The Postgres image a Docker stack runs: the one {@link postgresImageFor} names, or this release's. */
+export function runningPostgresImage(config: SupatypeProjectConfig): string {
+  return postgresImageFor(config).ref ?? RELEASE_IMAGES.postgres
 }
