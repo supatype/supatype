@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { composeHostPath } from "./compose-host-path.js"
 export { composeHostPath } from "./compose-host-path.js"
+import { ENGINE_SERVICE } from "./compose-engine-service.js"
 import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
 import { askDocker, askDockerSync, NO_DOCKER_LIMIT, type DockerAnswer } from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
@@ -276,6 +277,7 @@ function projectMounts(cwd: string) {
   return {
     projectReadOnly: bindMount(root, "/project", true),
     projectWritable: bindMount(root, "/project", false),
+    engineProject: bindMount(root, ENGINE_SERVICE.projectDir, false),
     projectState: bindMount(join(root, ".supatype"), "/project/.supatype", false),
     kong: bindMount(paths.kongPath, "/etc/kong/kong.yml", true),
     seaweed: bindMount(paths.s3ConfigPath, "/etc/seaweedfs/s3.json", true),
@@ -1109,12 +1111,12 @@ ${realtimeDependency}      control-plane:
 
 ${objectStoreBlock}
   schema-engine:
-    image: \${SUPATYPE_ENGINE_IMAGE:-${RELEASE_IMAGES.engine}}
+    image: \${${ENGINE_SERVICE.imageVariable}:-${ENGINE_SERVICE.defaultImage}}
     profiles: ["tools"]
-    entrypoint: ["supatype-engine"]
+    entrypoint: ["${ENGINE_SERVICE.entrypoint}"]
     volumes:
-${mounts.projectWritable}
-    working_dir: /project
+${mounts.engineProject}
+    working_dir: ${ENGINE_SERVICE.projectDir}
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
 ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is

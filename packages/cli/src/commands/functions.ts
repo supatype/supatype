@@ -398,17 +398,12 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
     return
   }
 
-  const link = loadProjectLink(cwd)
-  if (link) {
-    try {
-      const target = resolveTarget(cwd, { env: opts.env })
-      if (target.mode !== "direct" && target.token) {
-        await deployViaTarget(cwd, target, fns)
-        return
-      }
-    } catch {
-      /* fall through to compose/local */
-    }
+  // Ended outside the target's lookup, whose failure falls through to the other paths: a failed
+  // deploy must not be taken for one, and deployed again another way.
+  const target = linkedDeployTarget(cwd, opts.env)
+  if (target !== null) {
+    finishDeploy(fns.length, await deployViaTarget(cwd, target, fns))
+    return
   }
 
   const { selfHostComposePaths } = await import("../self-host-compose.js")
@@ -446,37 +441,49 @@ function deploySelfHosted(
   plain("\nKong → supatype-server → functions-worker (per-project worker).")
 }
 
+/** The linked project's target, when it has a token to deploy with; null to deploy another way. */
+function linkedDeployTarget(cwd: string, env: string | undefined): ReturnType<typeof resolveTarget> | null {
+  if (!loadProjectLink(cwd)) return null
+  try {
+    const target = resolveTarget(cwd, { env })
+    return target.mode !== "direct" && target.token ? target : null
+  } catch {
+    return null
+  }
+}
+
+/** Deploys through the linked target, saying how each went. Returns the names that failed. */
 async function deployViaTarget(
   cwd: string,
   target: ReturnType<typeof resolveTarget>,
   fns: DiscoveredFunctionRoute[],
-): Promise<void> {
+): Promise<string[]> {
   info(`Deploying to ${target.mode} project: ${target.projectRef} (${target.environment})`)
   plain()
-
-  const failed = await deployEach(fns, async (fn, source) => {
+  const serviceRole = serviceRoleRoutesFor(cwd)
+  return deployEach(fns, async (fn, source) => {
     await targetFetch(target.apiBaseUrl, target.apiPrefix, {
       method: "POST",
       path: `/projects/${target.projectRef}/functions/deploy`,
-      body: deployRequestBody(cwd, fn, source),
+      body: deployRequestBody(fn, source, serviceRole),
       token: target.token!,
       orgId: target.orgId,
       environment: target.mode === "cloud" ? target.environment : undefined,
     })
   })
-  finishDeploy(fns.length, failed)
 }
 
 /**
  * One function's deploy request, the same on both paths: they reach the same endpoint, and a project
  * deployed one way must not end up with a different credential surface than the other. The
  * service-role list is sent every deploy and replaced wholesale by the platform: the config file is
- * the whole truth, so a name removed from it must stop being entitled to the service-role key.
+ * the whole truth, so a name removed from it must stop being entitled to the service-role key. It is
+ * read once per deploy, so a broken config stops the deploy once, before anything is sent.
  */
-function deployRequestBody(cwd: string, fn: DiscoveredFunctionRoute, source: string): Record<string, unknown> {
+function deployRequestBody(fn: DiscoveredFunctionRoute, source: string, serviceRole: string[] | undefined): Record<string, unknown> {
   return {
     functions: [{ name: fn.name, source, entrypoint: `${fn.name}/index.ts` }],
-    serviceRole: serviceRoleRoutesFor(cwd),
+    serviceRole,
   }
 }
 
@@ -498,12 +505,12 @@ async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: st
   const apiUrl = getCloudApiUrl(cwd)
   info(`Deploying to project: ${linked.ref}`)
   plain()
-
+  const serviceRole = serviceRoleRoutesFor(cwd)
   const failed = await deployEach(fns, async (fn, source) => {
     const res = await fetch(`${apiUrl}/api/v1/projects/${linked.ref}/functions/deploy`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Org-Id": linked.orgId ?? "" },
-      body: JSON.stringify(deployRequestBody(cwd, fn, source)),
+      body: JSON.stringify(deployRequestBody(fn, source, serviceRole)),
       signal: AbortSignal.timeout(60_000),
     })
     if (!res.ok) throw new Error(await responseFailureText(res))

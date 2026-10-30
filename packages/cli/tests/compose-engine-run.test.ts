@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { SpawnSyncReturns } from "node:child_process"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * Compose interpolates the whole file before it runs one service. A project whose `.env` `dev` has
@@ -20,6 +21,8 @@ vi.mock("node:child_process", async (importOriginal) => ({
 }))
 
 const { spawnComposeEngine } = await import("../src/compose-engine-run.js")
+const { ENGINE_SERVICE } = await import("../src/compose-engine-service.js")
+const { renderSelfHostCompose } = await import("../src/self-host-compose.js")
 
 const COMPOSE = [
   "services:",
@@ -57,24 +60,12 @@ afterEach(() => {
 })
 
 describe("spawnComposeEngine with --no-deps", () => {
-  it("gives compose a value for each required variable .env does not set", () => {
+  it("never reads the compose file, so the secrets .env lacks do not matter", () => {
     const env = spawnEnv(["-T", "--no-deps"])
-    expect(env["JWT_SECRET"]).toMatch(/\S/)
-    expect(env["AUTHENTICATOR_PASSWORD"]).toMatch(/\S/)
-    expect(env["NOT_A_VARIABLE"]).toBeUndefined()
-  })
-
-  it("leaves a variable .env sets for compose to read from .env", () => {
-    writeFileSync(join(cwd, ".env"), "JWT_SECRET=the-project-secret\n")
-    const env = spawnEnv(["--no-deps"])
-    expect(env["JWT_SECRET"]).toBe("")
-    expect(env["AUTHENTICATOR_PASSWORD"]).toMatch(/\S/)
-  })
-
-  it("never hands the values to the engine container", () => {
-    spawnEnv(["--no-deps"])
     const args = spawnSync.mock.calls[0]?.[1] ?? []
+    expect(args).not.toContain("compose")
     expect(args).not.toContain("JWT_SECRET")
+    expect(env["JWT_SECRET"]).toBe("")
   })
 })
 
@@ -107,7 +98,29 @@ describe("spawnComposeEngine for a run that needs no database", () => {
     expect(args.join(" ")).not.toContain("postgres://pw@db/x")
   })
 
-  it("leaves the compose file to name the image when the project does not", () => {
-    expect(run(undefined)).toContain("compose")
+  // Review of round 3c: a project naming no image (versions.engine "local") still ran compose.
+  it("runs the image the compose file would name when the project names none", () => {
+    vi.stubEnv("SUPATYPE_ENGINE_IMAGE", "")
+    const args = run(undefined)
+    expect(args).not.toContain("compose")
+    expect(args).toContain(ENGINE_SERVICE.defaultImage)
+  })
+
+  it("takes the image .env names, as compose would", () => {
+    vi.stubEnv("SUPATYPE_ENGINE_IMAGE", "")
+    writeFileSync(join(cwd, ".env"), "SUPATYPE_ENGINE_IMAGE=supatype/schema-engine:from-env\n")
+    expect(run(undefined)).toContain("supatype/schema-engine:from-env")
+  })
+
+  it("runs the image as the compose file's service describes it", () => {
+    const args = run("supatype/schema-engine:9.9.9")
+    expect(args).toContain(ENGINE_SERVICE.entrypoint)
+    expect(args[args.indexOf("--workdir") + 1]).toBe(ENGINE_SERVICE.projectDir)
+    const compose = renderSelfHostCompose(projectConfig({ provider: "docker" }), cwd)
+    const service = compose.slice(compose.indexOf("  schema-engine:"), compose.indexOf("  kong:"))
+    expect(service).toContain(`entrypoint: ["${ENGINE_SERVICE.entrypoint}"]`)
+    expect(service).toContain(`working_dir: ${ENGINE_SERVICE.projectDir}`)
+    expect(service).toContain(`target: ${ENGINE_SERVICE.projectDir}\n`)
+    expect(service).toContain(`image: \${${ENGINE_SERVICE.imageVariable}:-${ENGINE_SERVICE.defaultImage}}`)
   })
 })

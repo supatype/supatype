@@ -165,6 +165,38 @@ describe("functions deploy to Cloud when a function fails", () => {
     expect(run.exitCode).toBe(1)
   })
 
+  // Review of round 3c: a failed deploy through the linked target ended with process.exit inside the
+  // try that falls back to the other paths, so where exit throws it deployed everything again.
+  it("ends a failed deploy through the linked target, without deploying again another way", async () => {
+    linkAndLogIn()
+    writeFileSync(join(fakeHome, ".supatype", "credentials.json"), JSON.stringify({ apiUrl: "https://api.example.test", accessToken: "saved" }))
+    platformRefusing("bye")
+
+    const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+
+    expect(run.output).toContain("Deploying to cloud project: acme-ref")
+    expect(run.output).toContain("1 of 2 function(s) failed to deploy: bye")
+    expect(run.output).not.toContain("Deploying to project: acme-ref")
+    expect(run.exitCode).toBe(1)
+  })
+
+  // Review of round 3c: the config was loaded once per function, so a broken one failed each in turn.
+  it("reads the service-role list once, and stops at a broken config before sending anything", async () => {
+    linkAndLogIn()
+    const sent: string[] = []
+    vi.stubGlobal("fetch", async (url: string) => {
+      sent.push(url)
+      return new Response("{}", { headers: { "Content-Type": "application/json" } })
+    })
+    writeFileSync(join(project.dir, "supatype.config.ts"), "export default {{ broken\n")
+
+    const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir).catch((err: unknown) => ({ output: String(err), exitCode: 1 }))
+
+    expect(sent).toEqual([])
+    expect(run.output).not.toContain("hello ✗")
+    expect(run.output).not.toContain("bye ✗")
+  })
+
   it("says every function deployed and exits 0 when none failed", async () => {
     linkAndLogIn()
     platformRefusing("none")

@@ -12,7 +12,7 @@ import {
 
 import type { BucketAccessMode } from "../db.js"
 import { accessModeOf, nextAccessMode } from "../bucket-access.js"
-import { bucketIdProblem, bucketSettingsProblem, renameProblem, unknownFieldsProblem } from "../bucket-rules.js"
+import { bucketIdProblem, bucketSettingsProblem, renameProblem, bucketFieldsProblem } from "../bucket-rules.js"
 
 const isAccessMode = isOneOf(["public", "private", "custom"] as const satisfies readonly BucketAccessMode[])
 
@@ -65,7 +65,7 @@ async function createBucketAndPolicy(id: string, body: CreateBucketBody & { name
 
 export async function create(ctx: RequestContext): Promise<void> {
   const body = await readJson(ctx.req, isCreateBucketBody)
-  if (refused(ctx, unknownFieldsProblem(body))) return
+  if (refused(ctx, bucketFieldsProblem(body))) return
 
   if (!body.name) {
     sendJson(ctx.res, 400, { error: "name is required" })
@@ -103,7 +103,7 @@ export async function get(ctx: RequestContext): Promise<void> {
 
 export async function update(ctx: RequestContext): Promise<void> {
   const body = await readJson(ctx.req, isUpdateBucketBody)
-  if (refused(ctx, unknownFieldsProblem(body) ?? bucketSettingsProblem(body))) return
+  if (refused(ctx, bucketFieldsProblem(body) ?? bucketSettingsProblem(body))) return
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)
   if (existing && refused(ctx, renameProblem(existing, body))) return

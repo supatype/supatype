@@ -64,15 +64,36 @@ const BUCKET_FIELDS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Why `body` cannot be a bucket write: it names a field the service does not read, which used to be
- * ignored, so `policy` meant for `s3_bucket_policy` made a bucket without one. Null when it names none.
+ * Fields Supabase's storage client sends for features this service does not have, each taken at the
+ * values that ask for none of the feature, and refused at any other with why. Its createBucket sends
+ * `type` ("STANDARD", or "ANALYTICS" for an Iceberg bucket) and both send `versioning_status`.
  */
-export function unknownFieldsProblem(body: object): string | null {
-  const unknown = Object.keys(body).filter((key) => !BUCKET_FIELDS.has(key))
-  return unknown.length > 0 ? `unknown field(s): ${unknown.join(", ")}` : null
+const CLIENT_FIELDS: Readonly<Record<string, { takes: readonly unknown[]; why: string }>> = {
+  type: { takes: [null, "STANDARD"], why: "this service stores STANDARD buckets" },
+  versioning_status: { takes: [null], why: "this service keeps no object versions" },
 }
 
-/** Why an update naming `id` or `name` cannot be applied to `bucket`: it names another. Null when it does not. */
+/**
+ * Why `body` cannot be a bucket write: it names a field the service does not read, which used to be
+ * ignored, so `policy` meant for `s3_bucket_policy` made a bucket without one, or asks a feature of
+ * {@link CLIENT_FIELDS} the service does not have. Null when it does neither.
+ */
+export function bucketFieldsProblem(body: object): string | null {
+  const fields = Object.entries(body)
+  const unknown = fields.filter(([key]) => !BUCKET_FIELDS.has(key) && !Object.hasOwn(CLIENT_FIELDS, key))
+  if (unknown.length > 0) return `unknown field(s): ${unknown.map(([key]) => key).join(", ")}`
+  for (const [key, value] of fields) {
+    const field = Object.hasOwn(CLIENT_FIELDS, key) ? CLIENT_FIELDS[key] : undefined
+    if (field !== undefined && !field.takes.includes(value)) return `${key} ${JSON.stringify(value)} is not supported: ${field.why}`
+  }
+  return null
+}
+
+/**
+ * Why an update naming `id` or `name` cannot be applied to `bucket`, or null. `id` must be the
+ * bucket's. `name` may be its name or its id: Supabase's storage client sends the id as the name,
+ * and a bucket created with a name of its own still takes that update.
+ */
 export function renameProblem(
   bucket: { id: string; name: string },
   body: { id?: string | undefined; name?: string | undefined },
@@ -80,7 +101,7 @@ export function renameProblem(
   if (body.id !== undefined && body.id !== bucket.id) {
     return `a bucket cannot be renamed: id ${JSON.stringify(body.id)} is not ${JSON.stringify(bucket.id)}`
   }
-  if (body.name !== undefined && body.name !== bucket.name) {
+  if (body.name !== undefined && body.name !== bucket.name && body.name !== bucket.id) {
     return `a bucket cannot be renamed: name ${JSON.stringify(body.name)} is not ${JSON.stringify(bucket.name)}`
   }
   return null

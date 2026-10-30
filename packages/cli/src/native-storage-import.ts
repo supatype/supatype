@@ -16,8 +16,8 @@
  *
  * An object the service refuses (its bucket's type or size rule, say) is skipped, named in one
  * warning and in the marker, and not sent again until its file changes. Only a failure of the
- * service itself (no answer, or a 5xx) fails the import, which records nothing, so the server's
- * store keeps answering and the next start tries again. The old store is removed by a later CLI
+ * service itself (no answer, or a 5xx) fails the import, which records nothing but the buckets the
+ * service refused, so the server's store keeps answering and the next start tries again. The old store is removed by a later CLI
  * release than the one that first imported, so a project keeps its old files for one release.
  */
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
@@ -95,7 +95,7 @@ type ImportMarker = typeof isImportMarker extends Guard<infer T> ? T : never
 export async function importLegacyNativeStorage(job: LegacyStorageImport): Promise<void> {
   if (!existsSync(job.legacyRoot)) return
   const read = readJsonFile(join(job.legacyRoot, IMPORTED_MARKER), isImportMarker)
-  const refusedBuckets = await importBuckets(job, read?.skipped_buckets ?? [])
+  const refusedBuckets = await importBuckets(job, read)
   const prior = read?.complete === true ? read : undefined
   const startedAt = new Date().toISOString()
   // A bucket refused before and taken now: its objects were refused with it, so they go again.
@@ -198,6 +198,10 @@ function removeOldStore(legacyRoot: string, marker: ImportMarker): void {
     const names = kept.map((object) => object.id).join(", ")
     console.log(`[supatype] Kept ${kept.length} object(s) the storage service refused, in ${legacyRoot}: ${names}`)
   }
+  const refused = marker.skipped_buckets ?? []
+  if (refused.length > 0) {
+    console.log(`[supatype] Kept the rows of ${refused.length} bucket(s) the storage service refused, in ${bucketsFile}: ${describeSkips(refused)}`)
+  }
   writeMarker(legacyRoot, { ...marker, old_store_removed: true })
 }
 
@@ -238,11 +242,10 @@ function removeUnkept(path: string, keep: ReadonlySet<string>): string[] {
 
 /**
  * Every bucket `buckets.json` names, created in the service unless it is there already, and the
- * ones it refused. Refused buckets are named in one warning, given only when they differ from
- * `before`, those the last import recorded; their objects are then refused in turn, so they are
- * skipped and kept. Throws when the service itself failed for any.
+ * ones it refused, recorded when they differ from those `read`, the marker, holds. Their objects
+ * are then refused in turn, so they are skipped and kept. Throws when the service itself failed for any.
  */
-async function importBuckets(job: LegacyStorageImport, before: readonly BucketSkip[]): Promise<BucketSkip[]> {
+async function importBuckets(job: LegacyStorageImport, read: ImportMarker | undefined): Promise<BucketSkip[]> {
   const rows: unknown[] = readJsonFile(join(job.legacyRoot, ".supatype", "buckets.json"), isArrayOf(isJsonObject)) ?? []
   const refused: BucketSkip[] = []
   const failed: string[] = []
@@ -252,10 +255,22 @@ async function importBuckets(job: LegacyStorageImport, before: readonly BucketSk
     else if (write.kind === "failed") failed.push(`${bucket.id}: ${write.text}`)
   }
   if (failed.length > 0) throw new Error(`bucket(s) not created in the storage service: ${failed.join("; ")}`)
-  if (refused.length > 0 && !sameRefusals(before, refused)) {
+  if (!sameRefusals(read?.skipped_buckets ?? [], refused)) recordRefusedBuckets(job, read, refused)
+  return refused
+}
+
+/**
+ * Names the refused buckets in one warning, and records them in the marker at once, apart from the
+ * objects' import that follows: when that fails it records nothing, and the warning came again on
+ * every start. A marker not there yet is written as an import not complete, so the next one that
+ * goes through is still the first. The rest of the marker is left as it was.
+ */
+function recordRefusedBuckets(job: LegacyStorageImport, read: ImportMarker | undefined, refused: BucketSkip[]): void {
+  if (refused.length > 0) {
     console.warn(`[supatype] ⚠  The storage service refused ${refused.length} bucket(s) of the server's old store, left there: ${describeSkips(refused)}`)
   }
-  return refused
+  const marker: ImportMarker = { ...(read ?? { complete: false, cli_version: job.cliVersion }), skipped_buckets: refused }
+  writeFileSync(join(job.legacyRoot, IMPORTED_MARKER), `${JSON.stringify(marker)}\n`)
 }
 
 /** Whether `now` refuses the buckets `before` did, for the same reasons, with the same rows. */

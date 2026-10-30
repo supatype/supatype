@@ -281,6 +281,21 @@ describe("the import of the server's object store", () => {
     expect(existsSync(join(root, IMPORTED_MARKER))).toBe(false)
   })
 
+  // Review of round 3c: the refused buckets were recorded only once every object went, so while the
+  // objects failed, the bucket warning came again on every start.
+  it("records a refused bucket though the objects then fail, and warns of it once", async () => {
+    const { root, status } = storeWithBadBucket(400)
+    const objectsFail = (path: string, sent: string): number => (path.startsWith("/object/avatars/") ? 500 : status(path, sent))
+    const warn = vi.spyOn(console, "warn")
+    await expect(importAs(root, "0.7.0", objectsFail)).rejects.toThrow(/not imported/)
+    await expect(importAs(root, "0.7.0", objectsFail)).rejects.toThrow(/not imported/)
+    expect(warn.mock.calls.flat().filter((line) => String(line).includes("bucket(s)"))).toHaveLength(1)
+    expect(markerOf(root)).toMatchObject({ complete: false, skipped_buckets: [{ id: "bad", status: 400 }] })
+    // The import that then goes through is the first: it sends every object.
+    expect(uploadsIn(await importAs(root, "0.7.0", status))).toContain("/object/avatars/me/pic.png")
+    expect(markerOf(root)).toMatchObject({ complete: true, cli_version: "0.7.0" })
+  })
+
   it("fails, records nothing and leaves the store as it was, when the service itself fails", async () => {
     const root = legacyStore()
     const failing = importAs(root, "0.7.0", (path) => (path.startsWith("/object/") ? 500 : 200))
@@ -343,6 +358,18 @@ describe("the old store, after the import", () => {
     const rows = parseJsonAs(readFileSync(join(root, ".supatype", "buckets.json"), "utf8"), isArrayOf(isJsonObject))
     expect(rows.map((row) => row["id"])).toEqual(["bad"])
     expect(existsSync(join(root, "bad", "kept.png"))).toBe(true)
+  })
+
+  // Review of round 3c: the removal named the objects it kept, but not the buckets that stayed out.
+  it("names the buckets the service refused when it removes the store", async () => {
+    const { root, status } = storeWithBadBucket(400)
+    const said = vi.spyOn(console, "log")
+    await importAs(root, "0.7.0", status, () => '{"error":"file_size_limit is out of range"}')
+    await importAs(root, "0.8.0", status, () => '{"error":"file_size_limit is out of range"}')
+    const lines = said.mock.calls.flat().map(String)
+    expect(lines.find((line) => line.includes("bucket(s) the storage service refused"))).toContain(
+      "bad (HTTP 400 Bad Request: file_size_limit is out of range)",
+    )
   })
 
   it("is kept by a source build, which has no release to compare", async () => {
