@@ -1426,7 +1426,7 @@ function parseBucketTypeLiteral(
     }
     if (key === "accept") {
       const types = parseMimeAcceptList(member.type, sourceFile)
-      if (types !== undefined) out.allowedMimeTypes = types
+      if (types !== undefined) out.allowedMimeTypes = acceptedMimeTypes(bucketId, types)
       continue
     }
     if (key === "access") {
@@ -1458,6 +1458,23 @@ function parseSizeStringLiteral(typeNode: ts.TypeNode, sourceFile: ts.SourceFile
 
 function parseJsonStringLiteral(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): string | undefined {
   return parseSizeStringLiteral(typeNode, sourceFile)
+}
+
+/**
+ * A MIME type a bucket can accept: `type/subtype` in RFC 6838's restricted names, or `type/*`. The
+ * storage service's own rule (`packages/storage/src/bucket-rules.ts`), so a type it would refuse at
+ * provisioning stops the schema here instead.
+ */
+export const BUCKET_MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$/i
+
+/** `types`, when each is a MIME type a bucket can accept; throws naming the first that is not. */
+function acceptedMimeTypes(bucketId: string, types: string[]): string[] {
+  const bad = types.find((type) => !BUCKET_MIME_TYPE.test(type))
+  if (bad === undefined) return types
+  throw new Error(
+    `Bucket "${bucketId}": accept holds "${bad}", which is not a MIME type. ` +
+      `Use "type/subtype" or "type/*", such as "image/png" or "image/*".`,
+  )
 }
 
 function parseMimeAcceptList(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): string[] | undefined {

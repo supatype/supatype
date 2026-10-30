@@ -176,7 +176,7 @@ export class RealtimeServer {
     // `main()`: no process either. Now the port opens, `/health/ready` answers 503 with the reason,
     // and replication keeps retrying behind it.
     await new Promise<void>((resolve) => {
-      this.httpServer!.listen(this.env.port, () => {
+      this.httpServer!.listen(this.env.port, this.env.host, () => {
         console.log(`[realtime] WebSocket server listening on port ${this.env.port}${this.env.multiTenant ? " (multi-tenant)" : ""}`)
         resolve()
       })
@@ -210,7 +210,7 @@ export class RealtimeServer {
       multiTenant: this.env.multiTenant,
       broadcast: (input, projectRef) => this.studioBroadcast(input, projectRef),
     })
-    await this.admin.start(adminPort)
+    await this.admin.start(adminPort, this.env.host)
   }
 
   /** Resolves when the initial replication connection has settled, tests await this. */

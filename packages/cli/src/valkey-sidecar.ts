@@ -98,7 +98,11 @@ export async function ensureValkeySidecar(projectName: string, given: Partial<Va
   if (envAddr) return externalValkey(envAddr)
   const name = containerName(projectName)
   await deps.docker(["rm", "-f", name])
-  if (await answersPing(DEFAULT_HOST, deps.existingPort)) return externalValkey(`${DEFAULT_HOST}:${deps.existingPort}`)
+  if (await answersPing(DEFAULT_HOST, deps.existingPort)) {
+    const addr = `${DEFAULT_HOST}:${deps.existingPort}`
+    console.log(`[supatype] Using the Valkey already running at ${addr}.`)
+    return externalValkey(addr)
+  }
   if ((await deps.docker(["info"])).status !== 0) {
     console.warn(
       "[supatype] ⚠  Valkey not available (Docker not running). " +

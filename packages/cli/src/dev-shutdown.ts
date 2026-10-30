@@ -218,11 +218,28 @@ export function stopQuietlyDuringStart<A extends unknown[]>(
     try {
       await action(...args)
     } catch (err) {
-      await new Promise((resolve) => setTimeout(resolve, INTERRUPT_SETTLE_MS))
-      await haltIfStopping()
+      await haltIfInterrupted()
       await drainStartUndo()
       throw err
     }
+  }
+}
+
+/** Waits for a Ctrl+C that may be on its way after a child failed, and never settles if one came. */
+async function haltIfInterrupted(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, INTERRUPT_SETTLE_MS))
+  await haltIfStopping()
+}
+
+/**
+ * `report`, said only when no shutdown began. A push the Ctrl+C also reached fails, and dev catches
+ * that failure itself, so `stopQuietlyDuringStart` never sees it: without this, its message came
+ * before `Stopped during start.`.
+ */
+export function reportUnlessStopping(report: (err: unknown) => void): (err: unknown) => Promise<void> {
+  return async (err) => {
+    await haltIfInterrupted()
+    report(err)
   }
 }
 

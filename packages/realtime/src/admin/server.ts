@@ -52,14 +52,14 @@ export class AdminServer {
 
   constructor(private readonly deps: AdminDeps) {}
 
-  async start(port: number): Promise<void> {
+  async start(port: number, host?: string): Promise<void> {
     const server = createServer((req, res) => {
       void this.handle(req, res)
     })
     this.server = server
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject)
-      server.listen(port, () => {
+      server.listen(port, host, () => {
         console.log(`[realtime] admin API listening on port ${port}`)
         resolve()
       })

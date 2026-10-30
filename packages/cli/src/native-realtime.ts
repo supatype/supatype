@@ -49,6 +49,8 @@ function spawnRealtime(launch: ComponentLaunchSpec, opts: NativeRealtimeOptions,
       DATABASE_URL: opts.databaseUrl,
       JWT_SECRET: opts.jwtSecret,
       PORT: opts.port,
+      // Loopback only, as every other service native dev runs; its container listens on every address.
+      REALTIME_HOST: "127.0.0.1",
       SLOT_NAME: "supatype_realtime",
       PUBLICATION_NAME: "supatype_realtime",
     },

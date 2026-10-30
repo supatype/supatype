@@ -39,6 +39,11 @@ export function parseOptionalPositiveInt(name: string, raw: string | undefined):
 export interface RealtimeEnv {
   port: number
   /**
+   * `REALTIME_HOST`: the address the service and its admin API listen on. Unset means every address,
+   * which is right in its container; native dev names 127.0.0.1, as it does for every other service.
+   */
+  host?: string | undefined
+  /**
    * `ADMIN_PORT`: the port of the internal admin API the Studio inspector reads through the control
    * plane. Unset means no admin listener at all. It is its own listener, never a path on `port`,
    * because the gateway proxies every path under `/realtime/v1` to `port`.
@@ -96,6 +101,7 @@ export function loadEnv(): RealtimeEnv {
 
   return {
     port: Number(process.env["PORT"] ?? "4000"),
+    host: process.env["REALTIME_HOST"]?.trim() || undefined,
     adminPort: parseOptionalPositiveInt("ADMIN_PORT", process.env["ADMIN_PORT"]),
     connectionLimit: parseOptionalPositiveInt("CONNECTION_LIMIT", process.env["CONNECTION_LIMIT"]),
     databaseUrl,

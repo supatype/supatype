@@ -1,5 +1,6 @@
 /**
- * The schema engine run once in a stack's compose `tools` profile.
+ * The schema engine run once in a stack's compose `tools` profile, or, for a run that needs no
+ * database, its image alone.
  */
 
 import { existsSync, readFileSync } from "node:fs"
@@ -7,6 +8,7 @@ import { resolve } from "node:path"
 import { dockerEnv } from "./docker-env.js"
 import { askDockerSync, NO_DOCKER_LIMIT, type DockerAnswer } from "./docker-exec.js"
 import { hasEnvValue } from "./env-file.js"
+import { composeHostPath } from "./compose-host-path.js"
 
 /** Which stack, and the engine image to run in it (none: the compose file's default). */
 export interface ComposeEngineTarget {
@@ -49,7 +51,8 @@ function unsetRequiredVariables(target: ComposeEngineTarget): Record<string, str
 }
 
 /**
- * `docker compose run --rm schema-engine ...engineArgs` in `target`'s `tools` profile.
+ * `docker compose run --rm schema-engine ...engineArgs` in `target`'s `tools` profile. A `--no-deps`
+ * run of a named image runs that image alone (`runEngineImageAlone`).
  *
  * A value in `spawn.secrets`, such as the database URL with its password, never reaches docker's
  * command line, where any local user could read it from the process list.
@@ -60,12 +63,13 @@ export function spawnComposeEngine(
   spawn: ComposeEngineSpawn = {},
 ): DockerAnswer {
   const { cwd, project, composePath, engineImage } = target
+  const runFlags = spawn.runFlags ?? []
+  if (engineImage && runFlags.includes("--no-deps")) return runEngineImageAlone(cwd, engineImage, engineArgs, spawn.secrets ?? {})
   const envFile = resolve(cwd, ".env")
   const args = ["compose", "--progress", "quiet"]
   if (project) args.push("-p", project)
   args.push("--project-directory", cwd, "-f", composePath)
   if (existsSync(envFile)) args.push("--env-file", envFile)
-  const runFlags = spawn.runFlags ?? []
   const interpolation = runFlags.includes("--no-deps") ? unsetRequiredVariables(target) : {}
   const secrets = dockerEnv(spawn.secrets ?? {}, { ...process.env, ...interpolation, COMPOSE_PROGRESS: "quiet" })
   if (engineImage) secrets.env["SUPATYPE_ENGINE_IMAGE"] = engineImage
@@ -73,4 +77,22 @@ export function spawnComposeEngine(
   // No limit: a push applies a schema the person is waiting on, and abandoning the client would
   // leave the `compose run` container applying it anyway. The callers are synchronous (engineRequest).
   return askDockerSync([...args, ...engineArgs], { cwd, env: secrets.env, timeoutMs: NO_DOCKER_LIMIT })
+}
+
+/**
+ * `docker run --rm` of the engine image as the compose service runs it (the project at /project, the
+ * engine as entrypoint), with no network. `compose run --no-deps` still created the project's
+ * network and every volume the file declares, and `generate` on a project whose stack had never run
+ * left them behind (local test round 3c). The source is quoted, so a comma in the path is kept.
+ */
+function runEngineImageAlone(
+  cwd: string,
+  image: string,
+  engineArgs: readonly string[],
+  vars: Record<string, string>,
+): DockerAnswer {
+  const secrets = dockerEnv(vars)
+  const mount = `type=bind,"source=${composeHostPath(cwd).replace(/"/g, '""')}",target=/project`
+  const args = ["run", "--rm", "--network", "none", "--mount", mount, "--workdir", "/project", "--entrypoint", "supatype-engine"]
+  return askDockerSync([...args, ...secrets.args, image, ...engineArgs], { cwd, env: secrets.env, timeoutMs: NO_DOCKER_LIMIT })
 }

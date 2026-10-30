@@ -84,3 +84,30 @@ describe("spawnComposeEngine with its dependencies", () => {
     expect(env["JWT_SECRET"]).toBe("")
   })
 })
+
+/**
+ * Local test round 3c: `generate`'s fallback to the project's engine image ran `compose run
+ * --no-deps`, which still created the project's network and its `_db-data` volume, and left them on
+ * a project whose stack had never run. A run that needs no database runs the image alone.
+ */
+describe("spawnComposeEngine for a run that needs no database", () => {
+  function run(engineImage: string | undefined): readonly string[] {
+    const target = { cwd, project: "p", composePath: join(cwd, "compose.yml"), engineImage }
+    spawnComposeEngine(target, ["generate", "--input", "/project/x.json"], { runFlags: ["-T", "--no-deps"], secrets: { DATABASE_URL: "postgres://pw@db/x" } })
+    return spawnSync.mock.calls[0]?.[1] ?? []
+  }
+
+  it("runs the engine image alone, with no network, the project mounted, and nothing left behind", () => {
+    const args = run("supatype/schema-engine:9.9.9")
+    expect(args).not.toContain("compose")
+    expect(args.slice(0, 4)).toEqual(["run", "--rm", "--network", "none"])
+    expect(args).toContain(`type=bind,"source=${cwd.replace(/\\/g, "/")}",target=/project`)
+    expect(args.slice(-4)).toEqual(["supatype/schema-engine:9.9.9", "generate", "--input", "/project/x.json"])
+    // The secret's value stays off the command line.
+    expect(args.join(" ")).not.toContain("postgres://pw@db/x")
+  })
+
+  it("leaves the compose file to name the image when the project does not", () => {
+    expect(run(undefined)).toContain("compose")
+  })
+})

@@ -454,42 +454,30 @@ async function deployViaTarget(
   info(`Deploying to ${target.mode} project: ${target.projectRef} (${target.environment})`)
   plain()
 
-  for (const fn of fns) {
-    const start = Date.now()
-    const source = readFunctionSource(fn)
+  const failed = await deployEach(fns, async (fn, source) => {
+    await targetFetch(target.apiBaseUrl, target.apiPrefix, {
+      method: "POST",
+      path: `/projects/${target.projectRef}/functions/deploy`,
+      body: deployRequestBody(cwd, fn, source),
+      token: target.token!,
+      orgId: target.orgId,
+      environment: target.mode === "cloud" ? target.environment : undefined,
+    })
+  })
+  finishDeploy(fns.length, failed)
+}
 
-    try {
-      await targetFetch(
-        target.apiBaseUrl,
-        target.apiPrefix,
-        {
-          method: "POST",
-          path: `/projects/${target.projectRef}/functions/deploy`,
-          body: {
-            functions: [{
-              name: fn.name,
-              source,
-              entrypoint: `${fn.name}/index.ts`,
-            }],
-            // Sent every deploy, and replaced wholesale by the platform: the config file is the whole
-            // truth, so a name removed from it must stop being entitled to the service-role key.
-            serviceRole: serviceRoleRoutesFor(cwd),
-          },
-          token: target.token!,
-          orgId: target.orgId,
-          environment: target.mode === "cloud" ? target.environment : undefined,
-        },
-      )
-
-      const duration = Date.now() - start
-      plain(`  ${fn.name} ✓ deployed (${duration}ms)`)
-    } catch (err) {
-      plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
-    }
+/**
+ * One function's deploy request, the same on both paths: they reach the same endpoint, and a project
+ * deployed one way must not end up with a different credential surface than the other. The
+ * service-role list is sent every deploy and replaced wholesale by the platform: the config file is
+ * the whole truth, so a name removed from it must stop being entitled to the service-role key.
+ */
+function deployRequestBody(cwd: string, fn: DiscoveredFunctionRoute, source: string): Record<string, unknown> {
+  return {
+    functions: [{ name: fn.name, source, entrypoint: `${fn.name}/index.ts` }],
+    serviceRole: serviceRoleRoutesFor(cwd),
   }
-
-  info(`Deployed ${fns.length} function(s)`)
-  void cwd
 }
 
 async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: string): Promise<void> {
@@ -511,48 +499,46 @@ async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: st
   info(`Deploying to project: ${linked.ref}`)
   plain()
 
+  const failed = await deployEach(fns, async (fn, source) => {
+    const res = await fetch(`${apiUrl}/api/v1/projects/${linked.ref}/functions/deploy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Org-Id": linked.orgId ?? "" },
+      body: JSON.stringify(deployRequestBody(cwd, fn, source)),
+      signal: AbortSignal.timeout(60_000),
+    })
+    if (!res.ok) throw new Error(await responseFailureText(res))
+  })
+  finishDeploy(fns.length, failed)
+  info(`Invoke: https://${linked.ref}.supatype.dev/functions/v1/<name>`)
+}
+
+/** Deploys each function with `deployOne`, saying how each went. Returns the names that failed. */
+async function deployEach(
+  fns: DiscoveredFunctionRoute[],
+  deployOne: (fn: DiscoveredFunctionRoute, source: string) => Promise<void>,
+): Promise<string[]> {
+  const failed: string[] = []
   for (const fn of fns) {
     const start = Date.now()
-
-    // Read source code
-    const source = readFunctionSource(fn)
-
     try {
-      const res = await fetch(`${apiUrl}/api/v1/projects/${linked.ref}/functions/deploy`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "X-Org-Id": linked.orgId ?? "",
-        },
-        body: JSON.stringify({
-          functions: [{
-            name: fn.name,
-            source,
-            entrypoint: `${fn.name}/index.ts`,
-          }],
-          // Same grants as the target path: both reach the same endpoint, and a project deployed one
-          // way must not end up with a different credential surface than the other.
-          serviceRole: serviceRoleRoutesFor(cwd),
-        }),
-        signal: AbortSignal.timeout(60_000),
-      })
-
-      if (!res.ok) {
-        const reason = await responseFailureText(res)
-        plain(`  ${fn.name} ✗ ${reason}`)
-        continue
-      }
-
-      const duration = Date.now() - start
-      plain(`  ${fn.name} ✓ deployed (${duration}ms)`)
+      await deployOne(fn, readFunctionSource(fn))
+      plain(`  ${fn.name} ✓ deployed (${Date.now() - start}ms)`)
     } catch (err) {
+      failed.push(fn.name)
       plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
     }
   }
+  return failed
+}
 
-  info(`Deployed ${fns.length} function(s)`)
-  info(`Invoke: https://${linked.ref}.supatype.dev/functions/v1/<name>`)
+/** Says how many deployed, or names those that failed and ends non-zero. */
+function finishDeploy(total: number, failed: readonly string[]): void {
+  if (failed.length === 0) {
+    info(`Deployed ${total} function(s)`)
+    return
+  }
+  error(`${failed.length} of ${total} function(s) failed to deploy: ${failed.join(", ")}`)
+  process.exit(1)
 }
 
 /**

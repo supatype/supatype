@@ -115,6 +115,17 @@ describe("startNativeRealtime", () => {
     expect(logs.join("\n")).toContain(`Realtime service: ${options().url}`)
   })
 
+  // Local test round 3c (N18): native realtime listened on every address, 0.0.0.0 and [::].
+  it("tells realtime to listen on 127.0.0.1 only", async () => {
+    const seen = JSON.stringify(join(dir, "realtime-host"))
+    const proc = await start(fakeRealtime(`
+require("node:fs").writeFileSync(${seen}, process.env.REALTIME_HOST ?? "unset")
+require("node:http").createServer((req, res) => res.end("{}")).listen(Number(process.env.PORT), "127.0.0.1")
+`))
+    expect(proc).not.toBeNull()
+    expect(readFileSync(join(dir, "realtime-host"), "utf8")).toBe("127.0.0.1")
+  })
+
   it("disables realtime and says so when the process exits without answering", async () => {
     expect(await start(fakeRealtime("process.exit(0)\n"))).toBeNull()
     expect(manifest()).toEqual({ realtime_enabled: false })
