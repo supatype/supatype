@@ -32,6 +32,89 @@ END $$;
 `
 
 /**
+ * PostgREST's schema-cache event triggers, as the image installs them (supatype-postgres:
+ * 20220126121436_finer-postgrest-triggers.sql and 20220321174452_fix-postgrest-alter-type-event-trigger.sql).
+ * Without them a model added while native dev runs is invisible to REST (PGRST205) until PostgREST
+ * reloads. Idempotent, so an existing data directory gets them at its next start.
+ */
+export const PGRST_WATCH_SQL = `CREATE OR REPLACE FUNCTION extensions.pgrst_ddl_watch() RETURNS event_trigger AS $$
+DECLARE
+  cmd record;
+BEGIN
+  FOR cmd IN SELECT * FROM pg_event_trigger_ddl_commands()
+  LOOP
+    IF cmd.command_tag IN (
+      'CREATE SCHEMA', 'ALTER SCHEMA'
+    , 'CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO', 'ALTER TABLE'
+    , 'CREATE FOREIGN TABLE', 'ALTER FOREIGN TABLE'
+    , 'CREATE VIEW', 'ALTER VIEW'
+    , 'CREATE MATERIALIZED VIEW', 'ALTER MATERIALIZED VIEW'
+    , 'CREATE FUNCTION', 'ALTER FUNCTION'
+    , 'CREATE TRIGGER'
+    , 'CREATE TYPE', 'ALTER TYPE'
+    , 'CREATE RULE'
+    , 'COMMENT'
+    )
+    -- don't notify in case of CREATE TEMP table or other objects created on pg_temp
+    AND cmd.schema_name is distinct from 'pg_temp'
+    THEN
+      NOTIFY pgrst, 'reload schema';
+    END IF;
+  END LOOP;
+END; $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION extensions.pgrst_drop_watch() RETURNS event_trigger AS $$
+DECLARE
+  obj record;
+BEGIN
+  FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects()
+  LOOP
+    IF obj.object_type IN (
+      'schema'
+    , 'table'
+    , 'foreign table'
+    , 'view'
+    , 'materialized view'
+    , 'function'
+    , 'trigger'
+    , 'type'
+    , 'rule'
+    )
+    AND obj.is_temporary IS false -- no pg_temp objects
+    THEN
+      NOTIFY pgrst, 'reload schema';
+    END IF;
+  END LOOP;
+END; $$ LANGUAGE plpgsql;
+
+DROP EVENT TRIGGER IF EXISTS pgrst_ddl_watch;
+CREATE EVENT TRIGGER pgrst_ddl_watch
+  ON ddl_command_end
+  EXECUTE PROCEDURE extensions.pgrst_ddl_watch();
+
+DROP EVENT TRIGGER IF EXISTS pgrst_drop_watch;
+CREATE EVENT TRIGGER pgrst_drop_watch
+  ON sql_drop
+  EXECUTE PROCEDURE extensions.pgrst_drop_watch();
+`
+
+/**
+ * The `postgres` role's search_path, as the image sets it (supatype-postgres,
+ * init-scripts/00000000000003-post-setup.sql), so an extension's types in `extensions` (vector, for
+ * one) resolve by name. The server no longer sets a database-level path. Only when the role has no
+ * path of its own, so one an operator set is kept; every other role keeps Postgres's default.
+ */
+export const POSTGRES_SEARCH_PATH_SQL = `DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT FROM pg_db_role_setting s, unnest(s.setconfig) AS c
+     WHERE s.setdatabase = 0 AND s.setrole = 'postgres'::regrole AND c LIKE 'search_path=%'
+  ) THEN
+    ALTER ROLE postgres SET search_path TO "$user",public,extensions;
+  END IF;
+END $$;
+`
+
+/**
  * The script. `withMask` adds the `supatype_mask` extension, for a Postgres build that bundles it.
  *
  * `authenticator` is created outside the `DO` block because psql does not substitute its
@@ -71,5 +154,5 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticated, service_role;
-${PRIVATE_TABLE_DEFAULTS_SQL}`
+${PRIVATE_TABLE_DEFAULTS_SQL}${PGRST_WATCH_SQL}${POSTGRES_SEARCH_PATH_SQL}`
 }

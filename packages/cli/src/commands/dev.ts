@@ -56,8 +56,7 @@ import {
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
 import { functionsWorkerEnv, installFunctionsWorker, localWorkerRoutesOrExit, writeDevFunctionsEntry } from "../functions-worker-files.js"
-import { devServiceRoleKeyPath, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
-import { signJwt } from "../jwt.js"
+import { devServiceRoleKeyPath } from "../service-role-key-file.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
   ensureNativeAuthenticatorPassword,
@@ -86,34 +85,54 @@ import {
 } from "../engine-ownership-gate.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
-import { POSTGREST_VERSION, postgrestArchiveName, postgrestArchiveUrl } from "../postgrest-release.js"
+import {
+  markPostgrestUnpacked,
+  POSTGREST_VERSION,
+  postgrestArchiveName,
+  postgrestArchiveUrl,
+  postgrestRuntimeRepairDue,
+} from "../postgrest-release.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } from "../dev-session.js"
 import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
-import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
+import {
+  haltIfStopping,
+  pushStartUndo,
+  pushStartUndoLast,
+  registerDevShutdown,
+  stopQuietlyDuringStart,
+  waitForDevShutdown,
+} from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
-import { recordNativeRoutes } from "../route-manifest.js"
+import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { extractArchive } from "../archive-extract.js"
 import { serverStorageEnv, startNativeStorage } from "../native-storage.js"
 import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
+import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
 import {
   nativeAuthMailerEnv,
+  nativeDevApiKeys,
   nativeDevRolesSql,
   nativePostgrestSchemaEnv,
   nativeServerCoreEnv,
   nativeServerDotEnvLayer,
 } from "../native-dev-env.js"
-import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
+import { ensureValkeySidecar, externalValkey, type ValkeySidecarResult } from "../valkey-sidecar.js"
 import { nativeKeyspaceAddr as nativeKeyspaceAddrFor, nativeKeyspacePort } from "../native-keyspace.js"
 import {
   ensureCluster,
+  createdbArgs,
+  databaseEncoding,
+  nonUtf8DatabaseWarning,
+  pgBuild,
+  type PgBuild,
   start as pgStart,
   stop as pgStop,
   waitReady as pgWaitReady,
@@ -221,7 +240,8 @@ export function registerDev(program: Command): void {
       "--overwrite-drift",
       "Every push of this session puts back policies, grants, labels and RLS changed outside Supatype",
     )
-    .action(async (opts: {
+    // Ctrl+C during the start reaches its children too: it ends with one line, not their failure.
+    .action(stopQuietlyDuringStart(async (opts: {
       watch: boolean
       stream?: boolean
       port?: string
@@ -338,7 +358,6 @@ export function registerDev(program: Command): void {
       let dbURL: string
       /** What PostgREST connects as, deliberately not `dbURL`, which is a superuser. */
       let postgrestDbURL: string
-      let stopPostgres: () => void | Promise<void>
       // Checked by the cluster (native-pg-auth.ts): .env's, or generated and written there.
       const pgPassword = ensureNativeSuperuserPassword(cwd)
       // Distinct from pgPassword even locally, so the split the other paths enforce is the
@@ -375,11 +394,17 @@ export function registerDev(program: Command): void {
             : {}),
         }
 
-        ensureCluster(pgOpts, pgPassword)
+        // initdb, and createdb on a first start, need the archive's version and ICU support; asked once.
+        let build: PgBuild | undefined
+        const buildOnce = (): PgBuild => (build ??= pgBuild(pgBinDir))
+        ensureCluster(pgOpts, pgPassword, buildOnce)
         console.log("[supatype] Starting Postgres...")
         pgStart(pgOpts)
+        pushStartUndoLast(() => pgStop(pgOpts, { quiet: true }))
         await pgWaitReady(pgOpts, 15_000)
         console.log("[supatype] Postgres is ready.")
+        // Between start steps: once a Ctrl+C has begun the shutdown, nothing more is started.
+        await haltIfStopping()
         if (requirePasswordAuth(pgOpts, pgPassword)) {
           console.log("[supatype] This Postgres trusted every local connection; it now checks passwords.")
         }
@@ -388,31 +413,11 @@ export function registerDev(program: Command): void {
         // for Docker perhaps, names this database (N1).
         await reconcileNativeDevDatabaseUrl(cwd, dbURL)
         postgrestDbURL = `postgres://authenticator:${encodeURIComponent(authenticatorPassword)}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
-        stopPostgres = () => pgStop(pgOpts)
 
-        // Create project database if it doesn't exist (native only).
         const psqlBin    = join(pgBinDir, process.platform === "win32" ? "psql.exe"    : "psql")
-        const createdbBin = join(pgBinDir, process.platform === "win32" ? "createdb.exe" : "createdb")
         const pgConnArgs = ["-h", "127.0.0.1", "-p", String(pgPort), "-U", "postgres"]
         const pgEnv = pgClientEnv(pgBinDir, pgPassword)
-        const createDbResult = spawnSync(
-          createdbBin,
-          [...pgConnArgs, projectName],
-          { stdio: "pipe", encoding: "utf8", env: pgEnv },
-        )
-        if (createDbResult.status !== 0) {
-          const stderr = createDbResult.stderr ?? ""
-          // A POSTGRES_PASSWORD changed by hand reaches here; a deleted one was stopped earlier.
-          if (isPasswordRejected(stderr)) {
-            const { title, hints } = superuserPasswordMissingMessage(dataDir)
-            throw new Error([title, ...hints].join("\n  "))
-          }
-          if (!stderr.includes("already exists")) {
-            throw new Error(`Failed to create database "${projectName}": ${stderr}`)
-          }
-        } else {
-          console.log(`[supatype] Created database "${projectName}".`)
-        }
+        ensureProjectDatabase({ binDir: pgBinDir, connArgs: pgConnArgs, env: pgEnv, dataDir, name: projectName, build: buildOnce })
 
         // Create roles required by PostgREST and grant them to postgres so
         // PostgREST can SET ROLE when processing requests.
@@ -455,6 +460,7 @@ export function registerDev(program: Command): void {
       console.log("[supatype] Running auth migrations...")
       const migrateEnv = authMigrateEnv(serverPort, dbURL, LOCAL_JWT_SECRET)
       runAuthMigrations(serverBin, migrateEnv)
+      await haltIfStopping()
 
       // ── 9. Engine: apply schema ───────────────────────────────────────────
       const schemaPath = schemaPathFromProject(config, cwd)
@@ -472,6 +478,7 @@ export function registerDev(program: Command): void {
         cwd, engineBin, schemaPath, dbURL, adminConfigPath, storagePath: localStoragePath, skipFieldKinds, config, overwriteDrift,
       }
       await runSchemaPush(schemaPush).catch(reportDevPushFailure)
+      await haltIfStopping()
 
       const { ensureFirstAdminUser } = await import("./admin.js")
       await ensureFirstAdminUser(dbURL, { cwd })
@@ -512,22 +519,19 @@ export function registerDev(program: Command): void {
         }
       }
 
-      const now = Math.floor(Date.now() / 1000)
-      const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-      const anonKey        = signJwt({ ...jwtBase, role: "anon" },         LOCAL_JWT_SECRET)
-      const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
-
-      const realtimeUrl = `http://127.0.0.1:${realtimePort}`
       // The server passes its environment, the key included, on to Deno, but the functions worker
-      // reads the key from this file: a --watch reload evaluates it again in an environment an
+      // reads the key from a file: a --watch reload evaluates it again in an environment an
       // earlier evaluation already took the key out of.
-      writeServiceRoleKeyFileUntilExit(devServiceRoleKeyPath(cwd), serviceRoleKey)
+      const { anonKey, serviceRoleKey } = nativeDevApiKeys(cwd)
+      const realtimeUrl = `http://127.0.0.1:${realtimePort}`
 
       writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
 
       // After the push, failed or not: init's manifest names the compose stack's services.
       recordNativeRoutes(manifestPath, denoBinPath !== undefined)
 
+      // Valkey, or the keyspace Postgres serves, alongside realtime and storage: none needs another.
+      const valkeyStart = nativeValkey(keyspacePort, projectName)
       const realtimeProc = await startNativeRealtime({
         config, cwd, manifestPath, pidDir, url: realtimeUrl, port: realtimePort,
         databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
@@ -539,15 +543,7 @@ export function registerDev(program: Command): void {
         : null
       // Later pushes create the buckets a schema declares in the service as well as in buckets.json.
       if (nativeStorage !== null) schemaPush.storageApi = { url: nativeStorage.url, serviceRoleKey }
-
-      // Postgres serves RESP itself when the archive had pg_keyspace and the port came up.
-      const nativeKeyspaceAddr = await nativeKeyspaceAddrFor(keyspacePort)
-      if (nativeKeyspaceAddr) {
-        console.log(`[supatype] Keyspace served by Postgres (${nativeKeyspaceAddr}).`)
-      }
-      const valkeySidecar = nativeKeyspaceAddr
-        ? { addr: nativeKeyspaceAddr, containerName: null, started: false }
-        : await ensureValkeySidecar(projectName)
+      const valkeySidecar = await valkeyStart
 
       // `.env` and `.env.local`, read once for everything the server's environment takes from them.
       const dotEnv = readDotEnvFiles(cwd)
@@ -573,6 +569,8 @@ export function registerDev(program: Command): void {
             // The server passes its environment on to Deno: the worker's, as compose gives the image,
             // functions.serviceRole included, so a function relying on the key unlisted fails here first.
             ...functionsWorkerEnv({ cwd, config, functionsDir: denoFunctionsDir, keyPath: devServiceRoleKeyPath(cwd) }),
+            // The server reaches the worker on 127.0.0.1; nothing else on the network should.
+            SUPATYPE_FUNCTIONS_HOST: "127.0.0.1",
           }
           : {}),
         SUPATYPE_URL: `http://localhost:${serverPort}`,
@@ -616,6 +614,7 @@ export function registerDev(program: Command): void {
         ...nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }),
       }
 
+      await haltIfStopping()
       const serverProc = new ProcessManager(serverBin, [], {
         label: "server",
         pidDir,
@@ -623,9 +622,11 @@ export function registerDev(program: Command): void {
         env: serverEnv,
       })
       serverProc.start()
+      pushStartUndo(() => serverProc.stop())
 
       // ── 9b. PostgREST ────────────────────────────────────────────────────
       let postgrestProc: ProcessManager | null = null
+      await haltIfStopping()
       const postgrestBin = await resolvePostgrestBin(config.overrides?.postgrest)
       if (postgrestBin) {
         // Windows PostgREST builds are dynamically linked and require libpq/OpenSSL
@@ -686,6 +687,7 @@ export function registerDev(program: Command): void {
           env: postgrestEnv,
         })
         postgrestProc.start()
+        pushStartUndo(() => postgrestProc?.stop())
         }
       }
 
@@ -693,6 +695,7 @@ export function registerDev(program: Command): void {
       const studioPort = STUDIO_DEV_PORT
       let studioProc: ProcessManager | null = null
 
+      await haltIfStopping()
       const studioOverride = config.overrides?.studio
       if (studioOverride) {
         studioProc = startStudioViteDevServer({
@@ -704,9 +707,12 @@ export function registerDev(program: Command): void {
           viteSupatypeUrl: `http://localhost:${studioPort}`,
         })
         studioProc?.start()
+        pushStartUndo(() => studioProc?.stop())
       }
 
+      await haltIfStopping()
       const appProc = startProxyDevApp(cwd, config, pidDir)
+      if (appProc) pushStartUndo(() => appProc.stop())
 
       const links = [
         { label: "API", url: `http://localhost:${serverPort}` },
@@ -730,25 +736,20 @@ export function registerDev(program: Command): void {
       })
 
       // ── Shutdown handler ──────────────────────────────────────────────────
-      registerDevShutdown(async () => {
-        console.log("[supatype] Shutting down...")
-        await Promise.all([
-          serverProc.stop(),
-          realtimeProc?.stop(),
-          nativeStorage?.proc.stop(),
-          postgrestProc?.stop(),
-          studioProc?.stop(),
-          appProc?.stop(),
-        ])
-        await stopValkeySidecar(valkeySidecar.containerName)
-        await stopPostgres()
-      })
+      // Everything the start began is undone after it, the services together and then Postgres
+      // (pushStartUndo, pushStartUndoLast), so the shutdown has nothing of its own to stop.
+      registerDevShutdown(async () => undefined)
 
       // ── 10. Schema watch ──────────────────────────────────────────────────
       if (opts.watch) {
         const schemaDir = resolve(cwd, schemaPath, "..")
         console.log(`[supatype] Watching ${schemaDir} for changes...`)
 
+        // Deno reloads the worker when a file it imported changes, but not for a function added later.
+        const { watchNativeFunctions } = await import("../native-functions-watch.js")
+        const functionsWatch = denoServeScriptAbs === ""
+          ? null
+          : watchNativeFunctions({ cwd, functionsDir, hooksDir, workerMain }, workerRoutes)
         const { watchDevSchema } = await import("../dev-schema-watch.js")
         watchDevSchema({
           dir: schemaDir,
@@ -756,19 +757,15 @@ export function registerDev(program: Command): void {
             JSON.stringify((await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast) !== _lastReadAst,
           push: (why) => {
             console.log(`\n[supatype] ${why}, checking schema...`)
-            runSchemaPush(schemaPush).catch(reportDevPushFailure)
+            // A hook the push declares is served once the worker's routes name it.
+            runSchemaPush(schemaPush).then(() => functionsWatch?.refresh()).catch(reportDevPushFailure)
           },
         })
-        // Deno reloads the worker when a file it imported changes, but not for a function added later.
-        if (denoServeScriptAbs !== "") {
-          const { watchNativeFunctions } = await import("../native-functions-watch.js")
-          watchNativeFunctions({ cwd, functionsDir, hooksDir, workerMain }, workerRoutes)
-        }
       }
 
       // Block until killed.
       await waitForDevShutdown()
-    })
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -990,9 +987,9 @@ interface NativeArtifactPaths {
 }
 
 /**
- * The buckets, Studio's admin config and the types, from the AST applied. The server's route
- * manifest is not among them: it names where each service is, nothing from the schema, and native
- * dev writes it as it starts them (native-realtime.ts, recordNativeRoutes).
+ * The buckets, Studio's admin config, the types, and the hook maps and handler types, from the AST
+ * applied. The rest of the server's route manifest names where each service is, nothing from the
+ * schema, and native dev writes it as it starts them (native-realtime.ts, recordNativeRoutes).
  */
 async function writeNativeSchemaArtifacts(
   paths: NativeArtifactPaths,
@@ -1002,6 +999,7 @@ async function writeNativeSchemaArtifacts(
   const { cwd, engineBin, astPath } = paths
   if (paths.storagePath) await provisionDeclaredBuckets(engineBin, cwd, astPath, paths)
   if (paths.adminConfigPath) await writeNativeAdminConfig(paths, paths.adminConfigPath, ast, config)
+  if (config) writeNativeAppliedAst(cwd, config, ast)
   await writeNativeTypes(cwd, ast, config)
 }
 
@@ -1029,10 +1027,23 @@ async function provisionDeclaredBuckets(
 ): Promise<void> {
   const buckets = declaredBuckets(engineBin, cwd, astPath)
   if (buckets.length === 0 || paths.storagePath === undefined) return
-  provisionStorageBuckets(buckets, paths.storagePath)
-  if (paths.storageApi) {
-    await provisionBuckets(paths.storageApi.url, paths.storageApi.serviceRoleKey, bucketSpecsFromAst({ storageBuckets: buckets }))
-  }
+  await provisionNativeBuckets(buckets, { storagePath: paths.storagePath, storageApi: paths.storageApi })
+}
+
+/**
+ * `buckets` in buckets.json, and in the storage service while it runs, saying how many new ones
+ * are ready: a bucket the service did not take is not, though buckets.json has it. Exported for tests.
+ */
+export async function provisionNativeBuckets(
+  buckets: ParsedStorageBucket[],
+  paths: { storagePath: string; storageApi?: StorageApi | undefined },
+): Promise<void> {
+  const added = provisionStorageBuckets(buckets, paths.storagePath)
+  const failed = paths.storageApi
+    ? await provisionBuckets(paths.storageApi.url, paths.storageApi.serviceRoleKey, bucketSpecsFromAst({ storageBuckets: buckets }))
+    : []
+  const ready = added.filter((id) => !failed.includes(id)).length
+  if (ready > 0) console.log(`[supatype] Storage: provisioned ${ready} bucket(s).`)
 }
 
 /** Studio's admin config, which the engine writes to stdout, with the project's roles merged in. */
@@ -1080,10 +1091,11 @@ async function writeNativeTypes(
   }
 }
 
+/** Writes the declared buckets buckets.json lacks to it, and returns their ids. */
 function provisionStorageBuckets(
   declared: ParsedStorageBucket[],
   storagePath: string,
-): void {
+): string[] {
   const bucketsDir = join(storagePath, ".supatype")
   const bucketsFile = join(bucketsDir, "buckets.json")
   mkdirSync(bucketsDir, { recursive: true })
@@ -1093,17 +1105,17 @@ function provisionStorageBuckets(
   const existing = stored.map(withPublicFromMode)
   const corrected = existing.filter((row, i) => row["public"] !== stored[i]?.["public"]).length
   const existingIds = new Set(existing.map((b) => b["id"]))
-  let added = 0
+  const added: string[] = []
 
   for (const bucket of declared) {
     if (existingIds.has(bucket.id)) continue
     existing.push(nativeBucketRow(bucket, new Date().toISOString()))
     mkdirSync(join(storagePath, bucket.id), { recursive: true })
-    added++
+    added.push(bucket.id)
   }
 
-  if (added > 0 || corrected > 0) writeFileSync(bucketsFile, JSON.stringify(existing, null, 2))
-  if (added > 0) console.log(`[supatype] Storage: provisioned ${added} bucket(s).`)
+  if (added.length > 0 || corrected > 0) writeFileSync(bucketsFile, JSON.stringify(existing, null, 2))
+  return added
 }
 
 // ---------------------------------------------------------------------------
@@ -1187,11 +1199,9 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
   if (existsSync(binPath)) {
     // Backfill DLLs for older cached Windows installs where only postgrest.exe
     // was copied from the release archive.
-    if (platform.os === "windows" && !hasLikelyWindowsRuntimeDlls(cacheDir) && existsSync(archivePath)) {
-      const repaired = repairWindowsPostgrestRuntime(cacheDir, archivePath, binPath)
-      if (!repaired) {
-        console.warn("[supatype] ⚠  PostgREST runtime DLL repair failed; REST API may be unavailable.")
-      }
+    if (platform.os === "windows" && postgrestRuntimeRepairDue(cacheDir, archivePath)) {
+      if (repairWindowsPostgrestRuntime(cacheDir, archivePath, binPath)) markPostgrestUnpacked(cacheDir)
+      else console.warn("[supatype] ⚠  PostgREST runtime DLL repair failed; REST API may be unavailable.")
     }
     return binPath
   }
@@ -1260,17 +1270,9 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
     await chmod(binPath, 0o755)
   }
 
+  markPostgrestUnpacked(cacheDir)
   console.log(`[supatype] PostgREST v${version} ready.`)
   return binPath
-}
-
-function hasLikelyWindowsRuntimeDlls(dir: string): boolean {
-  if (process.platform !== "win32") return true
-  return (
-    existsSync(join(dir, "libpq.dll")) ||
-    existsSync(join(dir, "libpq-5.dll")) ||
-    existsSync(join(dir, "libssl-3-x64.dll"))
-  )
 }
 
 function repairWindowsPostgrestRuntime(cacheDir: string, archivePath: string, binPath: string): boolean {
@@ -1381,4 +1383,65 @@ function runAuthMigrations(
         (detail ? `:\n${detail}` : ""),
     )
   }
+}
+
+/**
+ * The keyspace native Postgres serves, when it answers RESP, else Valkey: one already running, or
+ * the sidecar container.
+ */
+async function nativeValkey(keyspacePort: number | null, projectName: string): Promise<ValkeySidecarResult> {
+  const keyspace = await nativeKeyspaceAddrFor(keyspacePort)
+  if (keyspace === null) return ensureValkeySidecar(projectName)
+  console.log(`[supatype] Keyspace served by Postgres (${keyspace}).`)
+  return externalValkey(keyspace)
+}
+
+/** Where native dev's project database lives, and what creating it needs. */
+interface ProjectDatabase {
+  binDir: string
+  connArgs: string[]
+  env: NodeJS.ProcessEnv
+  dataDir: string
+  name: string
+  build: () => PgBuild
+}
+
+/**
+ * The project database: left as it is when psql can report its encoding (with a warning when an
+ * older CLI made it in another encoding than UTF8), else created, UTF8 as the cluster. One psql
+ * call on every start after the first, where it took createdb, a psql and two version probes.
+ */
+function ensureProjectDatabase(db: ProjectDatabase): void {
+  const psqlBin = join(db.binDir, process.platform === "win32" ? "psql.exe" : "psql")
+  const encoding = databaseEncoding(psqlBin, [...db.connArgs, "-d", db.name], db.env)
+  if (encoding !== null) {
+    const warning = nonUtf8DatabaseWarning(encoding, db.name, db.dataDir)
+    if (warning !== null) console.warn(warning)
+    return
+  }
+  const createdbBin = join(db.binDir, process.platform === "win32" ? "createdb.exe" : "createdb")
+  const created = spawnSync(createdbBin, createdbArgs(db.connArgs, db.name, db.build()), { stdio: "pipe", encoding: "utf8", env: db.env })
+  if (created.status === 0) {
+    console.log(`[supatype] Created database "${db.name}".`)
+    return
+  }
+  const stderr = created.stderr ?? ""
+  // A POSTGRES_PASSWORD changed by hand reaches here; a deleted one was stopped earlier.
+  if (isPasswordRejected(stderr)) {
+    const { title, hints } = superuserPasswordMissingMessage(db.dataDir)
+    throw new Error([title, ...hints].join("\n  "))
+  }
+  if (!stderr.includes("already exists")) throw new Error(`Failed to create database "${db.name}": ${stderr}`)
+}
+
+/**
+ * What push and Docker dev write from an applied AST (applied-ast-artifacts.ts), for native dev,
+ * which has no row-cache container. The manifest is made first when there is none: the hook maps
+ * only go into one that exists, and the first push runs before native dev records its functions,
+ * which sets `functions_enabled` before the server reads it.
+ */
+function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+  const manifestPath = join(cwd, ".supatype", "manifest.json")
+  if (!existsSync(manifestPath)) patchRouteManifest(manifestPath, {})
+  for (const line of writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: false }).lines) console.log(`[supatype] ${line}`)
 }

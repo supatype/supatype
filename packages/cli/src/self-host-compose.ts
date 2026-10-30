@@ -1188,20 +1188,22 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
   patchRouteManifest(manifestPath, {
     schema: "public",
     postgrest_url: "http://postgrest:3000",
-    storage_url: "http://storage:5000",
     ...composeServiceRoutes(config),
   })
 }
 
 /**
- * Where the server finds realtime and functions in this stack, set on every render rather than
- * only into a new file. Native dev shares the manifest and records its own host ports for both, so
- * a project moved from native to Docker kept native's realtime URL and the server proxied every
- * subscription to a port nothing in the stack listened on (502). An older CLI's
- * `functions_enabled: false` is put right by the same write.
+ * Where the server finds each service of this stack, set on every render rather than only into a
+ * new file. Native dev shares the manifest and records its own host ports for realtime, functions
+ * and storage, so a project moved from native to Docker kept native's URLs and the server proxied
+ * every subscription and every /storage/v1 call to a port nothing in the stack listened on (502).
+ * An older CLI's `functions_enabled: false` is put right by the same write.
  */
 function composeServiceRoutes(config: SupatypeProjectConfig): Record<string, unknown> {
   return {
+    // This file always generates a `storage` service, and native dev records its own storage
+    // service on a host port.
+    storage_url: "http://storage:5000",
     // Matches the compose file: a manifest advertising a service that was not generated is how
     // the server ends up proxying subscriptions to a host that does not resolve. Undefined drops
     // the key.

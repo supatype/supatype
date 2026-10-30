@@ -8,6 +8,8 @@
  * backported to 12 or 13.
  */
 
+import { existsSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import type { PlatformId } from "./binary-cache.js"
 
 /** PostgREST version, as its release tags spell it after the `v`. */
@@ -36,4 +38,28 @@ export function postgrestArchiveName(platform: PlatformId, version: string = POS
 /** Where the archive for `platform` is downloaded from. */
 export function postgrestArchiveUrl(platform: PlatformId, version: string = POSTGREST_VERSION): string {
   return `${POSTGREST_RELEASES}/v${version}/${postgrestArchiveName(platform, version)}`
+}
+
+/** Written in the cache directory once its archive has been unpacked there. */
+const UNPACKED_MARKER = ".unpacked"
+
+/** Records that the archive in `cacheDir` was unpacked, so it is not unpacked again. */
+export function markPostgrestUnpacked(cacheDir: string): void {
+  writeFileSync(join(cacheDir, UNPACKED_MARKER), "")
+}
+
+/** Whether a Windows PostgREST cache has the libpq or OpenSSL DLLs a dynamic build needs beside it. */
+function hasWindowsRuntimeDlls(dir: string): boolean {
+  return ["libpq.dll", "libpq-5.dll", "libssl-3-x64.dll"].some((dll) => existsSync(join(dir, dll)))
+}
+
+/**
+ * Whether a cached Windows PostgREST should be unpacked again for the DLLs its archive holds: a
+ * cache an older CLI filled with the exe alone. Once per version: an archive with no DLLs in it,
+ * as 14.x ships, never leaves any beside the exe, and was unpacked on every start. For a Windows
+ * cache only: the caller asks it of nothing else.
+ */
+export function postgrestRuntimeRepairDue(cacheDir: string, archivePath: string): boolean {
+  if (existsSync(join(cacheDir, UNPACKED_MARKER))) return false
+  return !hasWindowsRuntimeDlls(cacheDir) && existsSync(archivePath)
 }

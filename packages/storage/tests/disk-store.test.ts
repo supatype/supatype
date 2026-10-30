@@ -85,6 +85,21 @@ describe("the file backend", () => {
     expect((await disk.getObject("b", "c")).body.toString()).toBe("c")
   })
 
+  // Local test round 3: every object is a folder of versions, so each delete left its folder behind.
+  it("removes the folders a delete leaves empty, up to the bucket and no further", async () => {
+    const { root, disk } = store()
+    await disk.putObject("b", "docs/kept.md/v1", Buffer.from("kept"), "text/markdown")
+    await disk.putObject("b", "docs/deep/gone.md/v1", Buffer.from("gone"), "text/markdown")
+    await disk.putObject("b", "solo.txt/v1", Buffer.from("solo"), "text/plain")
+    await disk.deleteObjects("b", ["docs/deep/gone.md/v1", "solo.txt/v1"])
+    const bucket = readdirSync(root)[0] ?? ""
+    expect(readdirSync(join(root, bucket))).toEqual(["ddocs"])
+    expect(readdirSync(join(root, bucket, "ddocs"))).toEqual(["dkept%2Emd"])
+    await disk.deleteObjects("b", ["docs/kept.md/v1"])
+    expect(readdirSync(root)).toEqual([bucket])
+    expect(readdirSync(join(root, bucket))).toEqual([])
+  })
+
   it("deletes a bucket with everything in it", async () => {
     const { root, disk } = store()
     await disk.ensureBucket("gone")

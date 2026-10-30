@@ -36,4 +36,4 @@ COPY --from=builder /out/package.json ./
 ENV PORT=8080
 ENV SUPATYPE_ENGINE_BIN=supatype-engine
 EXPOSE 8080
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/main.js"]

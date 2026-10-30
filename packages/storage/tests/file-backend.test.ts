@@ -7,7 +7,7 @@
  */
 import { spawnSync } from "node:child_process"
 import { mkdtempSync, readdirSync, rmSync } from "node:fs"
-import type { Server } from "node:http"
+import { request, type Server } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type pg from "pg"
@@ -59,6 +59,29 @@ function call(method: string, path: string, body?: string | Buffer, contentType?
   })
 }
 
+/**
+ * The status of an upload of `sent` bytes to the limited bucket that never sends the rest, or
+ * of a chunked one that never ends; rejects when no answer comes within three seconds.
+ */
+function heldUpload(headers: Record<string, string>, sent: number): Promise<number> {
+  const url = new URL(`${base}/object/${BUCKET}/held.png`)
+  return new Promise((resolve, reject) => {
+    const req = request(url, { method: "POST", headers: { authorization: `Bearer ${SERVICE}`, "content-type": "image/png", ...headers } })
+    const timer = setTimeout(() => {
+      req.destroy()
+      reject(new Error("no answer before the body was complete"))
+    }, 3_000)
+    req.on("response", (res) => {
+      clearTimeout(timer)
+      res.resume()
+      req.destroy()
+      resolve(res.statusCode ?? 0)
+    })
+    req.on("error", () => undefined)
+    req.write(Buffer.alloc(sent))
+  })
+}
+
 /** Every file under the backend's root. */
 function filesOnDisk(): string[] {
   return readdirSync(root, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name))
@@ -80,6 +103,33 @@ describe.skipIf(!dockerAvailable)("the service on the file backend", () => {
   it("refuses a type the bucket does not accept, and a file over its size limit", async () => {
     expect((await call("POST", `/object/${BUCKET}/notes.txt`, "text", "text/plain")).status).toBe(415)
     expect((await call("POST", `/object/${BUCKET}/huge.png`, Buffer.alloc(65 * 1024), "image/png")).status).toBe(413)
+  })
+
+  // Local test round 3: the 413 came only after the whole body was read. Each request here sends
+  // a little and then holds the rest back, so only an answer made before reading it all arrives.
+  it("refuses an oversized upload from its Content-Length, before the body is read", async () => {
+    expect(await heldUpload({ "content-length": String(65 * 1024) }, 1024)).toBe(413)
+  })
+
+  it("refuses a chunked upload once it passes the limit, without reading the rest", async () => {
+    expect(await heldUpload({ "transfer-encoding": "chunked" }, 65 * 1024)).toBe(413)
+  })
+
+  // Local test round 3b: these were stored, and an out-of-range size limit answered 500.
+  it.each([
+    ["an id with a separator", { name: "a/b" }],
+    ["the server store's own directory", { name: ".SUPATYPE" }],
+    ["a 300-character id", { name: "x".repeat(300) }],
+    ["a negative size limit", { name: "neg", file_size_limit: -1 }],
+    ["a size limit out of range", { name: "huge", file_size_limit: 1e20 }],
+    ["a junk MIME type", { name: "junk-mime", allowed_mime_types: ["not a type"] }],
+    ["a junk policy", { name: "junk-policy", s3_bucket_policy: "allow everyone" }],
+  ])("refuses a bucket with %s with 400", async (_why, bucket) => {
+    expect((await call("POST", "/bucket", JSON.stringify(bucket), "application/json")).status).toBe(400)
+  })
+
+  it("refuses an update to a size limit it cannot hold with 400", async () => {
+    expect((await call("PUT", `/bucket/${BUCKET}`, JSON.stringify({ file_size_limit: -5 }), "application/json")).status).toBe(400)
   })
 
   it("deletes the bytes from disk with the object", async () => {

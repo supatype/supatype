@@ -199,13 +199,33 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
   res.end(JSON.stringify(body))
 }
 
+/** The whole request body. */
 export async function readBody(req: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  for await (const chunk of req) {
-    const piece: unknown = chunk
-    chunks.push(Buffer.isBuffer(piece) ? piece : Buffer.from(String(piece)))
-  }
-  return Buffer.concat(chunks)
+  return (await readBodyUpTo(req, -1)) ?? Buffer.alloc(0)
+}
+
+/**
+ * The request body, or null as soon as more than `limit` bytes of it have arrived (-1 for no
+ * limit). The rest is left unread: the caller answers, and the connection closes after it.
+ */
+export function readBodyUpTo(req: IncomingMessage, limit: number): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    const stop = (result: Buffer | null): void => {
+      req.off("data", onData).off("end", onEnd).off("error", reject)
+      resolve(result)
+    }
+    const onData = (chunk: Buffer): void => {
+      size += chunk.length
+      if (limit !== -1 && size > limit) {
+        req.pause()
+        stop(null)
+      } else chunks.push(chunk)
+    }
+    const onEnd = (): void => stop(Buffer.concat(chunks))
+    req.on("data", onData).on("end", onEnd).on("error", reject)
+  })
 }
 
 /** A request body this service cannot read: answered with a 400 that says why. */

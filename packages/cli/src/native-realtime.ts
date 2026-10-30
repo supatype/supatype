@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises"
 import { isJsonObject } from "@supatype/shared"
 import { ProcessManager } from "./process-manager.js"
+import { pushStartUndo } from "./dev-shutdown.js"
 import { errorMessage } from "./error-message.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import type { ComponentLaunchSpec } from "./component-launch.js"
@@ -55,6 +56,8 @@ function spawnRealtime(launch: ComponentLaunchSpec, opts: NativeRealtimeOptions,
     onExit,
   })
   proc.start()
+  // Recorded the moment it is spawned, so a Ctrl+C while dev is still starting stops it too.
+  pushStartUndo(() => proc.stop())
   return proc
 }
 

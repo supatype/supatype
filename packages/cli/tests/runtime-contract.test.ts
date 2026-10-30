@@ -421,10 +421,11 @@ describe("runtime contract", () => {
     }
   })
 
-  it("routes realtime and functions to the stack's own services after native dev ran", () => {
+  it("routes realtime, functions and storage to the stack's own services after native dev ran", () => {
     // Local test D: native dev records its realtime on 127.0.0.1 and drops the worker URL. Docker
     // dev then repaired only the functions flag, so the server proxied every subscription to a
-    // host port nothing in the stack listened on and realtime answered 502.
+    // host port nothing in the stack listened on and realtime answered 502. Round 3 N2: the same
+    // for native's storage service, so every /storage/v1 call answered 502.
     const dir = mkdtempSync(join(tmpdir(), "supatype-native-to-docker-"))
     try {
       mkdirSync(join(dir, ".supatype"), { recursive: true })
@@ -436,6 +437,7 @@ describe("runtime contract", () => {
           realtime_url: "http://127.0.0.1:18493",
           functions_enabled: true,
           functions_worker_url: "http://127.0.0.1:18494",
+          storage_url: "http://127.0.0.1:18495",
         }),
         "utf8",
       )
@@ -447,6 +449,7 @@ describe("runtime contract", () => {
       expect(manifest["realtime_url"]).toBe("http://realtime:4000")
       expect(manifest["functions_enabled"]).toBe(true)
       expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+      expect(manifest["storage_url"]).toBe("http://storage:5000")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

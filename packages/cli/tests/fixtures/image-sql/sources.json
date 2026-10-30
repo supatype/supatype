@@ -1,0 +1,19 @@
+{
+  "about": "SQL native dev copies from the supatype/postgres image (packages/cli/src/native-roles-sql.ts). Each file here is a copy of `source` in the supatype-postgres repo at `commit`, its LF-normalised sha256 recorded; each line is one the CLI copies verbatim. tests/native-image-sql.test.ts checks the CLI against these copies, and scripts/check-image-sql.mjs checks these copies against a supatype-postgres checkout, for either repo's CI.",
+  "repo": "supatype-postgres",
+  "commit": "f85e3de31ce65a130244216e1d47b91eef0e7869",
+  "files": [
+    {
+      "vendored": "20220321174452_fix-postgrest-alter-type-event-trigger.sql",
+      "source": "migrations/db/migrations/20220321174452_fix-postgrest-alter-type-event-trigger.sql",
+      "sha256": "674bfe11a9cb828c55ca7c9e00d4f4edcbcb0003d956d8866c9563810e7f0f0e"
+    }
+  ],
+  "lines": [
+    {
+      "source": "migrations/db/init-scripts/00000000000003-post-setup.sql",
+      "line": 4,
+      "text": "ALTER ROLE postgres SET search_path TO \"$user\",public,extensions;"
+    }
+  ]
+}

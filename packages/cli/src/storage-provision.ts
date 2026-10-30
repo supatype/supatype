@@ -7,7 +7,7 @@
  */
 
 import { isArrayOf, isBoolean, isNumber, isOneOf, isShape, isString, nullable, optional, type Guard } from "@supatype/shared"
-import { responseFailureText } from "./error-message.js"
+import { errorMessage, responseFailureText } from "./error-message.js"
 
 export type { ExtractedStorageBucketAst as SchemaStorageBucketAst } from "./schema-ast-v2.js"
 
@@ -111,21 +111,53 @@ function bucketRequestBody(bucket: BucketSpec): string {
   })
 }
 
+/**
+ * What a write to the storage service came to. 409 is there already; 400, 404, 413, 415 and 422
+ * are the service refusing this write for good; no answer (status null) or anything else (401 or
+ * 403 for a token it would not take, 408, 429, a 5xx) is the service failing, which is retried.
+ */
+export type StorageWrite =
+  | { kind: "created" }
+  | { kind: "held" }
+  | { kind: "refused"; status: number; text: string }
+  | { kind: "failed"; status: number | null; text: string }
+
+/** POSTs `body` to `url` and says what it came to. */
+export async function postToStorage(url: string, headers: Record<string, string>, body: string | Buffer): Promise<StorageWrite> {
+  let res: Response
+  try {
+    res = await fetch(url, { method: "POST", headers, body })
+  } catch (err) {
+    return { kind: "failed", status: null, text: errorMessage(err) }
+  }
+  if (res.ok) return { kind: "created" }
+  if (res.status === 409) return { kind: "held" }
+  // The status and the body, or why there is none: an empty error message gave a blank reason.
+  const text = await responseFailureText(res)
+  return REFUSALS.has(res.status) ? { kind: "refused", status: res.status, text } : { kind: "failed", status: res.status, text }
+}
+
+/** The statuses that refuse a write for good: what was sent is wrong, so sending it again is too. */
+const REFUSALS: ReadonlySet<number> = new Set([400, 404, 413, 415, 422])
+
+/** Creates `bucket` in the service at `base`, saying nothing. */
+export function createBucket(base: string, serviceRoleKey: string, bucket: BucketSpec): Promise<StorageWrite> {
+  const headers = { "Authorization": `Bearer ${serviceRoleKey}`, "Content-Type": "application/json" }
+  return postToStorage(`${base.replace(/\/$/, "")}/bucket`, headers, bucketRequestBody(bucket))
+}
+
 /** Creates `bucket`; true when it is there afterwards (created, or there already), with why when not. */
 async function provisionBucket(base: string, serviceRoleKey: string, bucket: BucketSpec): Promise<boolean> {
-  const headers = { "Authorization": `Bearer ${serviceRoleKey}`, "Content-Type": "application/json" }
-  const res = await fetch(`${base}/bucket`, { method: "POST", headers, body: bucketRequestBody(bucket) })
-    .catch(() => null)
-  if (res === null) {
+  const write = await createBucket(base, serviceRoleKey, bucket)
+  if (write.kind === "failed" && write.status === null) {
     console.warn(`[storage] Storage API unreachable, skipped bucket "${bucket.id}"`)
     return false
   }
-  if (res.status === 409) return true // already exists, fine
-  if (!res.ok) {
-    console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${await responseFailureText(res)}`)
+  if (write.kind === "refused" || write.kind === "failed") {
+    console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${write.text}`)
     return false
   }
-  console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
+  if (write.kind === "created") console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
   return true
 }
 

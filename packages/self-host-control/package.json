@@ -5,10 +5,13 @@
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/server.js",
+  "supatype": {
+    "entry": "dist/main.js"
+  },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server.js",
-    "dev": "tsx src/server.ts",
+    "start": "node dist/main.js",
+    "dev": "tsx src/main.ts",
     "test": "node --import tsx/esm --test tests/*.test.ts",
     "typecheck": "tsc --project tests/tsconfig.json --noEmit"
   },

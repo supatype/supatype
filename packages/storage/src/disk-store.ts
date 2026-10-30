@@ -11,8 +11,8 @@
  * folder of one name never collide. A segment too long for a filesystem name is stored by its hash.
  */
 import { createHash, randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises"
+import { dirname, join, relative } from "node:path"
 
 /** What a stored object reads back as. */
 export interface StoredBytes {
@@ -57,8 +57,7 @@ export class DiskStore {
 
   async putObject(bucket: string, key: string, body: Buffer | Uint8Array, contentType: string): Promise<void> {
     const path = this.objectPath(bucket, key)
-    await mkdir(dirname(path), { recursive: true })
-    await writeAtomically(typePath(path), contentType)
+    await writeInFolder(typePath(path), contentType)
     await writeAtomically(path, body)
   }
 
@@ -79,6 +78,20 @@ export class DiskStore {
       const path = this.objectPath(bucket, key)
       await rm(path, { force: true })
       await rm(typePath(path), { force: true })
+      await this.removeEmptyFolders(dirname(path), this.bucketDir(bucket))
+    }
+  }
+
+  /**
+   * Removes `dir` and each parent below `bucketDir` while it is empty. Every object is a folder of
+   * its versions, so each delete left one behind. A folder that is not empty stops it.
+   */
+  private async removeEmptyFolders(dir: string, bucketDir: string): Promise<void> {
+    let current = dir
+    while (relative(bucketDir, current) !== "" && !relative(bucketDir, current).startsWith("..")) {
+      const removed = await rmdir(current).then(() => true, () => false)
+      if (!removed) return
+      current = dirname(current)
     }
   }
 
@@ -96,6 +109,21 @@ export class DiskStore {
 /** Where an object's content type is kept. Encoded names never hold a `.`, so no object has this name. */
 function typePath(path: string): string {
   return `${path}.type`
+}
+
+/**
+ * {@link writeAtomically}, making the folder first, and again if a delete removed it as empty in
+ * between, which a delete of the folder's last object may do.
+ */
+async function writeInFolder(path: string, data: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  try {
+    await writeAtomically(path, data)
+  } catch (err) {
+    if (!isMissingFile(err)) throw err
+    await mkdir(dirname(path), { recursive: true })
+    await writeAtomically(path, data)
+  }
 }
 
 /** Writes through a temporary file and a rename, so a reader never sees half an object. */

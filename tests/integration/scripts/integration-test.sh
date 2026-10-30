@@ -138,7 +138,7 @@ echo "==> Configuring integration project"
 
 export SUPATYPE_ENGINE="${SUPATYPE_ENGINE:-$(resolve_engine_binary)}"
 export SUPATYPE_SERVER="${SUPATYPE_SERVER:-$(resolve_server_binary)}"
-export SUPATYPE_REALTIME="${SUPATYPE_REALTIME:-$ROOT_DIR/packages/realtime/dist/index.js}"
+export SUPATYPE_REALTIME="${SUPATYPE_REALTIME:-$ROOT_DIR/packages/realtime/dist/main.js}"
 export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-docker}"
 
 # One run per checkout, taken before anything is written into it: overlapping runs share one

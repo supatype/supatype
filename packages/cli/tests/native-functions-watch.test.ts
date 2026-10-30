@@ -73,4 +73,15 @@ describe("native dev functions entry", () => {
     watcher.close()
     expect(watched).toEqual([join(cwd, "functions"), join(cwd, "hooks")])
   })
+
+  // Local test round 3 N4: a hook declared while dev runs is in the manifest once the schema push
+  // writes it, so the worker must serve it then, even from a hooks directory made after dev started,
+  // which no watcher was set on.
+  it("is rewritten on request, with a hook in a directory made after dev started", () => {
+    const watcher = watchNativeFunctions(target(true), ["hello"], () => ({ close: () => undefined }))
+    addHandler("hooks", "audit")
+    watcher.refresh()
+    watcher.close()
+    expect(readFileSync(devFunctionsEntryPath(cwd), "utf8")).toContain("// Routes: hello, hooks/audit")
+  })
 })

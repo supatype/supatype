@@ -242,21 +242,24 @@ async function loadHandler(route: DiscoveredRoute): Promise<Handler> {
     if (!isHandler(handler)) throw new Error('it has neither a default export nor a named "handler" export')
     return handler
   } catch (err) {
-    const message = `Function "${route.name}" failed to load: ${errorText(err).replace(TERMINAL_ESCAPES, "")}`
+    const message = `Function "${route.name}" failed to load: ${errorText(err)}`
     log("error", message, { function: route.name })
     return () => jsonError("function_load_failed", message, 500)
   }
 }
 
 /**
- * Terminal escape codes. Deno colours a missing module's location in its message, piped or not.
- * The generated local router strips the same set (packages/cli/src/functions-router-gen.ts).
+ * Terminal escape codes. Deno colours a missing module's location in its message, piped or not,
+ * and a handler's own error can carry them too.
  */
 const TERMINAL_ESCAPES = /\u001b\[[0-9;?]*[A-Za-z]/g
 
-/** What a thrown value says: an Error's message, anything else as a string. */
+/**
+ * What a thrown value says: an Error's message, anything else as a string, without escape codes,
+ * since it goes out as JSON and a client has no terminal to colour.
+ */
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return (err instanceof Error ? err.message : String(err)).replace(TERMINAL_ESCAPES, "")
 }
 
 /** A JSON error answer, `{ error: code, message, ...extra }`, as every route of the worker gives one. */
@@ -406,7 +409,10 @@ const publicUrl = resolvePublicUrl()
 // `onListen` is supplied so Deno does not print its own "Listening on …" line. That line goes to
 // stderr, which this worker's patched console reports as `level: "error"`, and on cloud `level` is
 // a Loki label, so every startup would appear in the dashboards as an error.
+// Every address in its container; `functions serve` and native dev name 127.0.0.1.
+const hostname = Deno.env.get("SUPATYPE_FUNCTIONS_HOST") ?? "0.0.0.0"
 Deno.serve({
+  hostname,
   port,
   onListen: ({ hostname, port: bound }) => {
     log("info", `functions-worker listening on http://${hostname}:${bound}`)

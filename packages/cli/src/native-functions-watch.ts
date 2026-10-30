@@ -46,24 +46,32 @@ export function refreshNativeFunctionsEntry(target: NativeFunctionsTarget, known
   return routes
 }
 
-/** Watch the functions and hooks directories and reload the worker whenever their routes change. */
+/**
+ * Watch the functions and hooks directories and reload the worker whenever their routes change.
+ * `refresh` checks at once, for the schema watch after a push: a hook the push just declared may
+ * sit in a directory made after dev started, which no watcher was set on.
+ */
 export function watchNativeFunctions(
   target: NativeFunctionsTarget,
   initial: readonly string[],
   watch: WatchFn = fsWatch,
-): { close: () => void } {
+): { close: () => void; refresh: () => void } {
   let known = [...initial]
   let timer: ReturnType<typeof setTimeout> | null = null
+  const refresh = (): void => {
+    known = refreshNativeFunctionsEntry(target, known) ?? known
+  }
   const onChange = (): void => {
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => {
       timer = null
-      known = refreshNativeFunctionsEntry(target, known) ?? known
+      refresh()
     }, DEBOUNCE_MS)
   }
   const dirs = [target.functionsDir, target.hooksDir].filter((dir): dir is string => dir !== undefined && existsSync(dir))
   const watchers = dirs.map((dir) => watch(dir, { recursive: true }, onChange))
   return {
+    refresh,
     close: () => {
       if (timer) clearTimeout(timer)
       for (const watcher of watchers) watcher.close()

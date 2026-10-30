@@ -12,6 +12,9 @@
   is gone from `SeedConfig`. It was validated and never sent: every seed file runs in a transaction
   of its own (all of them in one with `--atomic`), and the engine cannot run one outside it. Any
   other key `config` does not have (a misspelt `runonce`, say) is refused too, rather than ignored.
+* **realtime:** the service's process entry is `dist/main.js`; `dist/index.js` only exports and no
+  longer starts a server, so an `overrides.realtime` naming `packages/realtime/dist/index.js` exits
+  at once. Point it at `packages/realtime/dist/main.js`.
 
 ### Features
 
@@ -127,9 +130,12 @@
 * **dev (native):** runs the storage service (packages/storage) on this machine instead of the
   server's built-in object store, so bucket rules, `maxSize`, `accept`, `access_mode`, caller rules
   and image transforms are the ones a deployment enforces. Its objects live under
-  `~/.supatype/projects/<project>/storage-service/`; on the first start, the buckets and objects the
-  server's store held are imported, and the old files stay for one release: the next CLI release
-  imports anything new in them, then removes them and says which. The service comes
+  `~/.supatype/projects/<project>/storage-service/`; the first start imports the buckets and objects
+  the server's store held, and each later start imports what changed there since, so what the
+  server's store took while the service was down reaches it and an object deleted in the service
+  stays deleted. An object the service refuses is skipped and named once. The old files stay for
+  one release: the next CLI release removes them and says which, keeping and naming the objects the
+  service refused. The service comes
   from a per-platform archive on the CDN (`storage/v<version>/`, signed like every component), or
   `overrides.storage`; its port is `SUPATYPE_STORAGE_PORT` (default 8002). When it cannot start, dev
   says so and the server's store answers as before.

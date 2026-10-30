@@ -3,8 +3,10 @@
  * an executable, or Node on a JavaScript entry.
  */
 import { existsSync } from "node:fs"
-import { dirname, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { isShape, isString } from "@supatype/shared"
+import { readJsonFile } from "./json-file.js"
 
 export interface ComponentLaunchSpec {
   bin: string
@@ -25,8 +27,18 @@ export function launchFromOverride(name: string, override: string, cwd: string):
   return launchFor(resolved)
 }
 
-/** Contributor fallback: Node on `packages/<pkg>/dist/index.js` beside the CLI package, when built. */
+/** The process entry a service's package.json declares (`supatype.entry`): realtime's index.js only exports. */
+const isDeclaredEntry = isShape({ supatype: isShape({ entry: isString }) })
+
+/** `packages/<pkg>/<process entry>` beside the CLI package, as its package.json declares it, else `dist/index.js`. */
+export function monorepoEntry(pkg: string): string {
+  const root = resolve(CLI_PKG_DIR, "..", "..", pkg)
+  const declared = readJsonFile(join(root, "package.json"), isDeclaredEntry)
+  return resolve(root, declared?.supatype.entry ?? "dist/index.js")
+}
+
+/** Contributor fallback: Node on the package's built process entry beside the CLI package, when built. */
 export function monorepoLaunch(pkg: string): ComponentLaunchSpec | null {
-  const entry = resolve(CLI_PKG_DIR, `../../${pkg}/dist/index.js`)
+  const entry = monorepoEntry(pkg)
   return existsSync(entry) ? launchFor(entry) : null
 }

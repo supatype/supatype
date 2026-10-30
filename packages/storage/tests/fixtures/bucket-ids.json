@@ -1,0 +1,17 @@
+{
+  "about": "Bucket ids the storage service (packages/storage/src/bucket-rules.ts) and the server's built-in store (internal/objstore, cleanBucketID and refuseBucketID) judge alike. `refused` is refused by both; `refused_by_service` is refused by the service only, which also caps the length and does not trim. Plain data so the Go store's tests can read the same file.",
+  "accepted": ["avatars", "user-uploads_2", "Photos", "a.b", "x63xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"],
+  "refused": [
+    { "id": "a/b", "why": "a separator" },
+    { "id": "a\\b", "why": "a backslash" },
+    { "id": ".supatype", "why": "the store's own directory" },
+    { "id": ".SUPATYPE", "why": "the store's own directory in another case" },
+    { "id": ".", "why": "a dot segment" },
+    { "id": "..", "why": "a parent segment" },
+    { "id": "", "why": "nothing" }
+  ],
+  "refused_by_service": [
+    { "id": " avatars ", "why": "surrounding space" },
+    { "id": "x64xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "why": "more than 63 characters" }
+  ]
+}

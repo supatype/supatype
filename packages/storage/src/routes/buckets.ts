@@ -12,6 +12,7 @@ import {
 
 import type { BucketAccessMode } from "../db.js"
 import { accessModeOf, nextAccessMode } from "../bucket-access.js"
+import { bucketIdProblem, bucketSettingsProblem } from "../bucket-rules.js"
 
 const isAccessMode = isOneOf(["public", "private", "custom"] as const satisfies readonly BucketAccessMode[])
 
@@ -34,6 +35,30 @@ const isUpdateBucketBody = isShape({
   s3_bucket_policy: optional(nullable(isString)),
 })
 
+/** Answers 400 with `problem` and says so, or does nothing when there is none. */
+function refused(ctx: RequestContext, problem: string | null): boolean {
+  if (problem === null) return false
+  sendJson(ctx.res, 400, { error: problem })
+  return true
+}
+
+type CreateBucketBody = typeof isCreateBucketBody extends (value: unknown) => value is infer T ? T : never
+
+/**
+ * The bucket's row, then its S3 policy. Only once the row exists: a name already taken answers 409
+ * before the policy of the bucket holding it is touched. Public on S3 exactly when the mode says
+ * so, since a custom bucket's rules decide who reads it, and a new private bucket has no policy.
+ */
+async function createBucketAndPolicy(id: string, body: CreateBucketBody & { name: string }): Promise<db.BucketRow> {
+  const accessMode: BucketAccessMode = body.access_mode ?? (body.public ? "public" : "private")
+  await ensureS3Bucket(id)
+  const bucket = await db.createBucket(id, body.name, accessMode, body.file_size_limit, body.allowed_mime_types, body.s3_bucket_policy)
+  if (accessMode === "public" || bucket.s3_bucket_policy) {
+    await applyBucketPolicyFromConfig(id, { public: accessMode === "public", s3BucketPolicy: bucket.s3_bucket_policy })
+  }
+  return bucket
+}
+
 export async function create(ctx: RequestContext): Promise<void> {
   const body = await readJson(ctx.req, isCreateBucketBody)
 
@@ -43,26 +68,9 @@ export async function create(ctx: RequestContext): Promise<void> {
   }
 
   const id = body.id ?? body.name
-  const accessMode: BucketAccessMode = body.access_mode ?? (body.public ? "public" : "private")
+  if (refused(ctx, bucketIdProblem(id) ?? bucketSettingsProblem(body))) return
   try {
-    await ensureS3Bucket(id)
-    const bucket = await db.createBucket(
-      id,
-      body.name,
-      accessMode,
-      body.file_size_limit,
-      body.allowed_mime_types,
-      body.s3_bucket_policy,
-    )
-    // Only once the row exists: a name already taken answers 409 before the policy of the bucket
-    // holding it is touched. Public on S3 exactly when the mode says so, since a custom bucket's
-    // rules decide who reads it, and a new private bucket has no policy to remove.
-    if (accessMode === "public" || bucket.s3_bucket_policy) {
-      await applyBucketPolicyFromConfig(id, {
-        public: accessMode === "public",
-        s3BucketPolicy: bucket.s3_bucket_policy,
-      })
-    }
+    const bucket = await createBucketAndPolicy(id, { ...body, name: body.name })
     sendJson(ctx.res, 200, { name: bucket.name })
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to create bucket"
@@ -90,6 +98,7 @@ export async function get(ctx: RequestContext): Promise<void> {
 
 export async function update(ctx: RequestContext): Promise<void> {
   const body = await readJson(ctx.req, isUpdateBucketBody)
+  if (refused(ctx, bucketSettingsProblem(body))) return
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)
   if (!existing) {

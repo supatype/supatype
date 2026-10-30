@@ -10,6 +10,7 @@
 import { join } from "node:path"
 import { isJsonObject } from "@supatype/shared"
 import { EMBEDDED_CLI_VERSION } from "./cli-version-embedded.js"
+import { pushStartUndo } from "./dev-shutdown.js"
 import { errorMessage } from "./error-message.js"
 import { keepsObjectsLocally, localStorageEnv, serverStoreRoot } from "./local-storage.js"
 import { importLegacyNativeStorage } from "./native-storage-import.js"
@@ -89,18 +90,34 @@ async function reportsReady(url: string): Promise<boolean> {
 /**
  * Resolves once the service reports ready; rejects when it has exited (`crashed`), which it does at
  * once when, say, sharp cannot load, rather than waiting out the timeout, or when the time is up.
+ *
+ * The time counted is the waiting it did: each step adds at most what an ask and a pause can
+ * take, so a stretch in which something else held the event loop does not use up the wait.
  */
-async function waitForStorageReady(url: string, crashed: () => boolean): Promise<void> {
-  const deadline = Date.now() + READY_TIMEOUT_MS
-  while (Date.now() < deadline) {
+export async function waitForStorageReady(
+  url: string,
+  crashed: () => boolean,
+  { timeoutMs = READY_TIMEOUT_MS, now = Date.now }: { timeoutMs?: number; now?: () => number } = {},
+): Promise<void> {
+  for (let waited = 0; waited < timeoutMs; ) {
+    const stepStart = now()
     if (await reportsReady(url)) return
     if (crashed()) throw new Error("the storage service exited before it was ready (its output is above)")
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS))
+    waited += Math.min(now() - stepStart, READY_STEP_MAX_MS)
   }
-  throw new Error(`the storage service did not report ready at ${url}/health within ${READY_TIMEOUT_MS / 1000}s`)
+  throw new Error(`the storage service did not report ready at ${url}/health within ${timeoutMs / 1000}s`)
 }
 
-/** Starts the service and waits for it; stops it again when it never becomes ready. */
+/** How often the wait asks /health, and the most one ask and pause may count: the ask's own limit and the pause. */
+const READY_POLL_MS = 250
+const READY_STEP_MAX_MS = 2_000 + READY_POLL_MS
+
+/**
+ * Starts the service and waits for it; stops it again when it never becomes ready. Its stop is
+ * recorded as an undo of dev's start the moment it is spawned, so a Ctrl+C while it is still
+ * starting stops it too, and ends the wait.
+ */
 async function startAndWait(launch: ComponentLaunchSpec, opts: NativeStorageOptions, url: string): Promise<ProcessManager> {
   let exited = false
   const proc = new ProcessManager(launch.bin, launch.args, {
@@ -114,6 +131,10 @@ async function startAndWait(launch: ComponentLaunchSpec, opts: NativeStorageOpti
     },
   })
   proc.start()
+  pushStartUndo(() => {
+    exited = true
+    return proc.stop()
+  })
   try {
     await waitForStorageReady(url, () => exited)
     return proc
@@ -124,9 +145,9 @@ async function startAndWait(launch: ComponentLaunchSpec, opts: NativeStorageOpti
 }
 
 /**
- * Start the storage service for native dev, import what the server's object store held on the first
- * start, and record the service in the route manifest. Null when it could not be started, with the
- * manifest left pointing nowhere, so the caller falls back to the server's store.
+ * Start the storage service for native dev, import what the server's object store holds and the
+ * service does not, and record the service in the route manifest. Null when it could not be
+ * started, with the manifest left pointing nowhere, so the caller falls back to the server's store.
  */
 export async function startNativeStorage(
   opts: NativeStorageOptions,

@@ -17,6 +17,7 @@
     "clean": "turbo run clean && cargo clean",
     "skills:install": "bash scripts/skills-install.sh",
     "coverage:examples": "node scripts/check-example-coverage.mjs --write",
+    "check:image-sql": "node scripts/check-image-sql.mjs",
     "generate:examples": "bash scripts/regenerate-examples.sh"
   },
   "devDependencies": {
