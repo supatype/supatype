@@ -1,10 +1,18 @@
 name: Run this checkout's images
 description: >
-  Loads Studio, storage, realtime, functions-worker and the control plane, built from this checkout
-  by the `images` job, and sets SUPATYPE_*_IMAGE to them for the rest of the job
-  (scripts/ci-images.sh). The engine, server and Postgres stay at their release/images.json pins.
-  Fails the job when the images are missing, rather than leaving the stack on :latest. Run it after
-  the Docker Hub mirror step, which restarts the daemon, and on macOS after Colima starts.
+  Loads Studio, storage, realtime, functions-worker and, when the `images` job built it, the
+  control plane, built from this checkout by the `images` job, and sets SUPATYPE_*_IMAGE to them
+  for the rest of the job (scripts/ci-images.sh). The engine, server and Postgres stay at their
+  release/images.json pins. Fails the job when an image it should have is missing, rather than
+  leaving the stack on :latest. Run it after the Docker Hub mirror step, which restarts the daemon,
+  and on macOS after Colima starts.
+inputs:
+  control-plane:
+    description: >
+      The images job's control-plane output. `built`: the control plane is loaded like the rest.
+      `unavailable`: it could not be built (its engine needs PRIVATE_REPO_TOKEN, which fork and
+      Dependabot runs do not have), and the stack runs the released control plane.
+    required: true
 runs:
   using: composite
   steps:
@@ -13,7 +21,14 @@ runs:
         name: ci-images
         path: ${{ runner.temp }}/ci-images
 
+    - if: inputs.control-plane == 'unavailable'
+      shell: bash
+      run: >-
+        echo "::warning::The control plane was not built from this checkout: its engine needs
+        PRIVATE_REPO_TOKEN, which this run does not have. The stack runs the released control plane."
+
     - shell: bash
       env:
         DIR: ${{ runner.temp }}/ci-images
-      run: bash scripts/ci-images.sh load "$DIR" >>"$GITHUB_ENV"
+        CONTROL_PLANE: ${{ inputs.control-plane }}
+      run: bash scripts/ci-images.sh load "$DIR" "$CONTROL_PLANE" >>"$GITHUB_ENV"
