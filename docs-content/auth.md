@@ -18,7 +18,7 @@ Auth is built into the Supatype server. It signs users in, issues the tokens eve
 The auth service is part of `supatype-server`, the same process that serves REST, GraphQL, storage and functions. It answers under `/auth/v1` on your project's API URL. It keeps its users, identities and sessions in the `auth` schema of your project's database and runs its own migrations when the server starts.
 
 - `supatype dev` with `database.provider: "docker"` (what `supatype init` writes): the server runs in the Compose stack behind Kong. Your API URL is `API_EXTERNAL_URL` in the project's `.env`.
-- `supatype dev` with `database.provider: "native"`: the server runs as a local process on `server.port`, `54321` by default.
+- `supatype dev` with `database.provider: "native"`: the server runs as a local process on `server.port`, `18471` by default.
 - Self-host: `supatype self-host compose up` runs the same server image. It needs `JWT_SECRET` in `.env` and fills in a blank `ANON_KEY` or `SERVICE_ROLE_KEY` from it. See [Self-hosting](/docs/#self-host).
 
 In local dev, sign-ups are confirmed automatically, so a new user gets a session straight away with no email round trip.
@@ -69,11 +69,11 @@ An anonymous sign-in creates a real user with a user id and a session. Turn it o
 Each provider is switched on with environment variables named after it. For GitHub:
 
 ```ini title=".env"
-# Replace http://localhost:54321 with your API URL (API_EXTERNAL_URL)
+# Replace http://localhost:18471 with your API URL (API_EXTERNAL_URL)
 SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
 SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
 SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
-SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:54321/auth/v1/callback
+SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18471/auth/v1/callback
 ```
 
 The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.

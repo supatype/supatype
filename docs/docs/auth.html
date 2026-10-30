@@ -119,7 +119,7 @@
     <p>The auth service is part of <code>supatype-server</code>, the same process that serves REST, GraphQL, storage and functions. It answers under <code>/auth/v1</code> on your project's API URL. It keeps its users, identities and sessions in the <code>auth</code> schema of your project's database and runs its own migrations when the server starts.</p>
     <ul>
       <li><code>supatype dev</code> with <code>database.provider: "docker"</code> (what <code>supatype init</code> writes): the server runs in the Compose stack behind Kong. Your API URL is <code>API_EXTERNAL_URL</code> in the project's <code>.env</code>.</li>
-      <li><code>supatype dev</code> with <code>database.provider: "native"</code>: the server runs as a local process on <code>server.port</code>, <code>54321</code> by default.</li>
+      <li><code>supatype dev</code> with <code>database.provider: "native"</code>: the server runs as a local process on <code>server.port</code>, <code>18471</code> by default.</li>
       <li>Self-host: <code>supatype self-host compose up</code> runs the same server image. It needs <code>JWT_SECRET</code> in <code>.env</code> and fills in a blank <code>ANON_KEY</code> or <code>SERVICE_ROLE_KEY</code> from it. See <a href="/docs/#self-host">Self-hosting</a>.</li>
     </ul>
     <p>In local dev, sign-ups are confirmed automatically, so a new user gets a session straight away with no email round trip.</p>
@@ -154,11 +154,11 @@
     <h2 id="oauth">OAuth providers</h2>
     <p>Each provider is switched on with environment variables named after it. For GitHub:</p>
     <div class="cb"><div class="cb-bar"><span>.env</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="c"># Replace http://localhost:54321 with your API URL (API_EXTERNAL_URL)</span>
+<pre><span class="c"># Replace http://localhost:18471 with your API URL (API_EXTERNAL_URL)</span>
 SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
 SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
 SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
-SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:54321/auth/v1/callback</pre></div>
+SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18471/auth/v1/callback</pre></div>
     <p>The redirect URI is the auth service's callback: <code>/auth/v1/callback</code> on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.</p>
     <p>Supported provider names: <code>apple</code>, <code>azure</code>, <code>bitbucket</code>, <code>discord</code>, <code>facebook</code>, <code>figma</code>, <code>fly</code>, <code>github</code>, <code>gitlab</code>, <code>google</code>, <code>kakao</code>, <code>keycloak</code>, <code>linkedin_oidc</code>, <code>notion</code>, <code>slack_oidc</code>, <code>snapchat</code>, <code>spotify</code>, <code>twitch</code>, <code>twitter</code>, <code>x</code>, <code>workos</code> and <code>zoom</code>. The auth server also accepts <code>vercel_marketplace</code>, and the older <code>linkedin</code> and <code>slack</code>, which the <code>_oidc</code> versions replace. Upper-case the name for the variable, so <code>linkedin_oidc</code> becomes <code>SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED</code>.</p>
     <h3>The sign-in round trip</h3>

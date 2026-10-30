@@ -115,7 +115,7 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | Command | Description | Useful flags |
 | --- | --- | --- |
 | `functions new <name>` | Scaffold a new edge function |  |
-| `functions serve` | Start a local Deno server that serves all functions with hot reload | `--port <port>` (default 54321), `--env-file <path>` (default `.env.local`) |
+| `functions serve` | Start a local Deno server that serves all functions with hot reload | `--port <port>` (default 18472), `--env-file <path>` (default `.env.local`) |
 | `functions invoke <name>` | Invoke a local or deployed function | `--data <json>`, `--auth`, `--local` |
 | `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |

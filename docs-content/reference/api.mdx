@@ -22,8 +22,8 @@ http://localhost:18473/rest/v1
 http://localhost:18473/graphql/v1
 ```
 
-With the native runtime (`provider: "native"`), the server listens on `server.port`, 54321 by
-default: `http://localhost:54321/rest/v1`. A native Postgres has no pg_graphql, so there
+With the native runtime (`provider: "native"`), the server listens on `server.port`, 18471 by
+default: `http://localhost:18471/rest/v1`. A native Postgres has no pg_graphql, so there
 `/graphql/v1` answers 501 `graphql_unavailable`. A self-hosted stack publishes the same gateway as
 Docker dev on port 18473, or on 80/443 with HTTPS enabled.
 
