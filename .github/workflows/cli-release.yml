@@ -243,7 +243,13 @@ jobs:
 
           # Versioned objects are immutable, matching the component archives. Nothing rewrites
           # this prefix, so a client may cache an archive and its checksum for a year without
-          # them ever disagreeing.
+          # them ever disagreeing. A rerun rebuilds archives with different bytes, so it keeps
+          # what is already published.
+          if aws s3 ls "${PREFIX}/checksums.sha256.minisig" --endpoint-url "${EP}" >/dev/null 2>&1; then
+            echo "::warning::cli/v${CLI_VERSION}/ is already published. Keeping it and uploading nothing."
+            exit 0
+          fi
+
           aws s3 cp artifacts/ "${PREFIX}/" --recursive \
             --endpoint-url "${EP}" --no-progress \
             --cache-control "public, max-age=31536000, immutable"
