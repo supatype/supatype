@@ -14,6 +14,7 @@
 import type { BucketRow } from "../db.js"
 import type { JwtPayload } from "../auth.js"
 import * as db from "../db.js"
+import { servesAnonymously } from "../bucket-access.js"
 
 export type AccessVerdict =
   | { allowed: true }
@@ -34,8 +35,7 @@ export async function checkReadAccess(
   objectPath: string,
   jwt: JwtPayload | null,
 ): Promise<AccessVerdict> {
-  const mode = bucket.access_mode ?? (bucket.public ? "public" : "private")
-  if (mode === "public") return { allowed: true }
+  if (servesAnonymously(bucket)) return { allowed: true }
 
   if (!jwt) {
     return { allowed: false, status: 401, error: "Authentication required to access this file" }

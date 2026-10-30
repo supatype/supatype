@@ -58,6 +58,9 @@
 
 ### Bug Fixes
 
+* **dev:** native dev writes a bucket declared `custom` as not public in the object store's
+  `buckets.json`. It copied `public: true` from the declaration, so the store listed a custom
+  bucket as public, which the store and the storage service never do.
 * **dev:** a blank mailer setting in `.env` no longer erases the one `email` in `supatype.config.ts`
   sets. `init` scaffolds `SUPATYPE_SMTP_HOST=`, `SUPATYPE_RESEND_API_KEY=` and the rest blank, and
   native `dev` applied `.env` over the config, so a project with its SMTP host or Resend key in the
@@ -186,6 +189,10 @@
   `docker network prune` frees the unused ones.
 * **cli:** running the CLI from a monorepo checkout that has not been built says to run
   `pnpm install && pnpm build` at the repository root, rather than a bare "Cannot find module".
+* **self-host, dev:** storage has no quota and no per-file limit unless `.env` sets one.
+  `STORAGE_QUOTA`, `TIER_MAX_UPLOAD_SIZE`, `MAX_UPLOAD_SIZE` (bytes, `-1` for unlimited, the
+  default) and `PROJECT_TIER` now reach the storage service, which on its own applied the free
+  tier's 1 GiB quota and 50 MB file limit to every self-hosted and local project.
 
 
 ## 0.7.0

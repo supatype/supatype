@@ -51,10 +51,9 @@ export function getEffectiveMaxUploadSize(bucket: BucketRow): number {
     return bucket.file_size_limit
   }
 
-  // Tier limit from env (set at deploy time) or from tier lookup
-  const tierLimit = config.tierMaxUploadSize !== -1
-    ? config.tierMaxUploadSize
-    : (TIER_UPLOAD_LIMITS[config.projectTier] ?? config.maxUploadSize)
+  // Tier limit from env (set at deploy time), else from tier lookup. An explicit -1 sets none; it
+  // used to mean "look the tier up", so a self-hosted -1 still got the free tier's 50 MB.
+  const tierLimit = config.tierMaxUploadSize ?? TIER_UPLOAD_LIMITS[config.projectTier] ?? -1
 
   if (tierLimit !== -1) return tierLimit
 
@@ -132,9 +131,8 @@ export function validateContentType(
 export async function validateStorageQuota(
   incomingBytes: number,
 ): Promise<{ status: 507; body: { error: string; usage: number; quota: number } } | null> {
-  const quota = config.storageQuota !== -1
-    ? config.storageQuota
-    : (TIER_STORAGE_QUOTAS[config.projectTier] ?? -1)
+  // An explicit -1 is unlimited; it used to fall back to the tier table, so it never was.
+  const quota = config.storageQuota ?? TIER_STORAGE_QUOTAS[config.projectTier] ?? -1
 
   // -1 means unlimited
   if (quota === -1) return null

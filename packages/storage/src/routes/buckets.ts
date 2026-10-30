@@ -11,6 +11,7 @@ import {
 } from "../s3.js"
 
 import type { BucketAccessMode } from "../db.js"
+import { accessModeOf, nextAccessMode } from "../bucket-access.js"
 
 const isAccessMode = isOneOf(["public", "private", "custom"] as const satisfies readonly BucketAccessMode[])
 
@@ -42,23 +43,26 @@ export async function create(ctx: RequestContext): Promise<void> {
   }
 
   const id = body.id ?? body.name
-  const accessMode: BucketAccessMode =
-    body.access_mode ?? (body.public ? "public" : "private")
+  const accessMode: BucketAccessMode = body.access_mode ?? (body.public ? "public" : "private")
   try {
     await ensureS3Bucket(id)
-    await applyBucketPolicyFromConfig(id, {
-      public: body.public ?? false,
-      ...(body.s3_bucket_policy !== undefined && { s3BucketPolicy: body.s3_bucket_policy }),
-    })
     const bucket = await db.createBucket(
       id,
       body.name,
-      body.public ?? false,
+      accessMode,
       body.file_size_limit,
       body.allowed_mime_types,
-      accessMode,
       body.s3_bucket_policy,
     )
+    // Only once the row exists: a name already taken answers 409 before the policy of the bucket
+    // holding it is touched. Public on S3 exactly when the mode says so, since a custom bucket's
+    // rules decide who reads it, and a new private bucket has no policy to remove.
+    if (accessMode === "public" || bucket.s3_bucket_policy) {
+      await applyBucketPolicyFromConfig(id, {
+        public: accessMode === "public",
+        s3BucketPolicy: bucket.s3_bucket_policy,
+      })
+    }
     sendJson(ctx.res, 200, { name: bucket.name })
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to create bucket"
@@ -88,19 +92,32 @@ export async function update(ctx: RequestContext): Promise<void> {
   const body = await readJson(ctx.req, isUpdateBucketBody)
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)
-  if (body.public !== undefined || body.s3_bucket_policy !== undefined) {
-    const nextPublic = body.public ?? existing?.public ?? false
-    const nextPolicy =
-      body.s3_bucket_policy !== undefined ? body.s3_bucket_policy : existing?.s3_bucket_policy
-    await applyBucketPolicyFromConfig(id, {
-      public: nextPublic,
-      ...(nextPolicy !== undefined && { s3BucketPolicy: nextPolicy }),
-    })
+  if (!existing) {
+    sendJson(ctx.res, 404, { error: "Bucket not found" })
+    return
   }
-  const bucket = await db.updateBucket(id, body)
+  // A public flag moves the mode, which decides every read; setting the flag alone left it where
+  // it was. A row whose stored pair is not yet the mode's is written as well, NULL mode included.
+  const accessMode = nextAccessMode(accessModeOf(existing), body)
+  const isPublic = accessMode === "public"
+  const accessChanged = accessMode !== existing.access_mode || isPublic !== existing.public
+  const namesAccess =
+    body.public !== undefined || body.access_mode !== undefined || body.s3_bucket_policy !== undefined
+  const bucket = await db.updateBucket(id, {
+    ...(body.file_size_limit !== undefined && { file_size_limit: body.file_size_limit }),
+    ...(body.allowed_mime_types !== undefined && { allowed_mime_types: body.allowed_mime_types }),
+    ...(body.s3_bucket_policy !== undefined && { s3_bucket_policy: body.s3_bucket_policy }),
+    ...(accessChanged && { access_mode: accessMode }),
+  })
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
+  }
+  // S3 follows the row once it is written, so a bucket deleted in between is not opened on S3.
+  // A write that names access applies it even when the row already holds it: that is a retry of a
+  // write whose S3 step failed, and the row alone would never send it again.
+  if (accessChanged || namesAccess) {
+    await applyBucketPolicyFromConfig(id, { public: isPublic, s3BucketPolicy: bucket.s3_bucket_policy })
   }
   sendJson(ctx.res, 200, { message: "Successfully updated" })
 }

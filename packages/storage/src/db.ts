@@ -20,7 +20,8 @@ export interface BucketRow {
   public: boolean
   file_size_limit: number | null
   allowed_mime_types: string[] | null
-  access_mode: BucketAccessMode
+  /** NULL when the schema engine wrote a bucket that declares no mode; see accessModeOf. */
+  access_mode: BucketAccessMode | null
   /** Optional raw S3 bucket policy JSON from schema / API. */
   s3_bucket_policy: string | null
   created_at: string
@@ -108,17 +109,18 @@ export async function getTotalStorageUsage(): Promise<number> {
 
 // ─── Bucket CRUD ────────────────────────────────────────────────────────────────
 
+/**
+ * A new bucket in `accessMode`. `public` is written from the mode, true exactly when it is
+ * `public`, so the two never disagree; see bucket-access.ts.
+ */
 export async function createBucket(
   id: string,
   name: string,
-  isPublic: boolean,
+  accessMode: BucketAccessMode,
   fileSizeLimit?: number,
   allowedMimeTypes?: string[],
-  accessMode?: BucketAccessMode,
   s3BucketPolicy?: string | null,
 ): Promise<BucketRow> {
-  const mode: BucketAccessMode =
-    accessMode ?? (isPublic ? "public" : "private")
   const res = await pool.query<BucketRow>(
     `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, access_mode, s3_bucket_policy)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -126,10 +128,10 @@ export async function createBucket(
     [
       id,
       name,
-      isPublic,
+      accessMode === "public",
       fileSizeLimit ?? null,
       allowedMimeTypes ?? null,
-      mode,
+      accessMode,
       s3BucketPolicy ?? null,
     ],
   )
@@ -151,10 +153,10 @@ export async function listBuckets(): Promise<BucketRow[]> {
   return res.rows
 }
 
+/** Changes what `updates` names. A new `access_mode` writes `public` with it, as createBucket does. */
 export async function updateBucket(
   id: string,
   updates: {
-    public?: boolean
     file_size_limit?: number | null
     allowed_mime_types?: string[] | null
     access_mode?: BucketAccessMode
@@ -165,9 +167,9 @@ export async function updateBucket(
   const values: unknown[] = []
   let idx = 1
 
-  if (updates.public !== undefined) {
+  if (updates.access_mode !== undefined) {
     sets.push(`public = $${idx++}`)
-    values.push(updates.public)
+    values.push(updates.access_mode === "public")
   }
   if (updates.file_size_limit !== undefined) {
     sets.push(`file_size_limit = $${idx++}`)
