@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { createClient } from "../src/index.js"
-import type { RealtimePayload } from "../src/realtime.js"
+import type { ChannelStatus, RealtimePayload } from "../src/realtime.js"
 import {
   channelOf,
   createMockWebSocketClass,
@@ -286,5 +286,32 @@ describe("review fixes", () => {
     simulateServerMessage(onlySocket(), changeOn("feed", "INSERT", { id: 1 }))
     expect(posts).toEqual(["posts"])
     expect(comments).toEqual([])
+  })
+})
+
+describe("a refusal that names its channel", () => {
+  it("fails only that channel, leaving the others on the socket subscribed", async () => {
+    // A refused join used to reach every channel on the socket: one bad filter put each healthy,
+    // subscribed channel beside it into CHANNEL_ERROR.
+    const client = newClient()
+    const healthy: ChannelStatus[] = []
+    const refused: ChannelStatus[] = []
+    client.realtime.channel("posts").on("postgres_changes", { event: "*", table: "posts" }, () => {}).subscribe((s) => healthy.push(s))
+    const bad = client.realtime
+      .channel("orders")
+      .on("postgres_changes", { event: "*", table: "orders", filter: "status=like.open" }, () => {})
+    bad.subscribe((s) => refused.push(s))
+    await settle()
+    const ws = onlySocket()
+
+    simulateServerMessage(ws, ack("posts"))
+    simulateServerMessage(ws, { type: "system", status: "error", message: "invalid filter status=like.open", channel: "orders" })
+
+    expect(healthy).toEqual(["SUBSCRIBED"])
+    expect(refused).toEqual(["CHANNEL_ERROR"])
+    // Refused, so it joined nothing and may join again on this socket.
+    bad.subscribe()
+    await settle()
+    expect(framesOfType("subscribe").filter((frame) => frame["channel"] === "orders")).toHaveLength(2)
   })
 })

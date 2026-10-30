@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compareKindOf, matchesFilter, temporalMicros } from "../src/filter-match.js"
+import { compareKindOf, matchesFilter, temporalMicros, unreadableCondition } from "../src/filter-match.js"
 import { parseWal2json } from "../src/replication.js"
 import type { WalChange } from "../src/types.js"
 
@@ -107,6 +107,22 @@ describe("NULL and absent values", () => {
   it("lets a change through when there is no filter or no row", () => {
     expect(matchesFilter(change({ c: 1 }, { c: "integer" }), {})).toBe(true)
     expect(matchesFilter({ ...change({}, {}), newRecord: null }, { c: "eq.1" })).toBe(true)
+  })
+})
+
+describe("conditions the grammar does not know", () => {
+  // These used to be skipped, so `c=like.%x%` beside `d=eq.1` delivered every row where d was 1,
+  // and a filter of nothing but unknown conditions delivered every row of the table.
+  it.each(["like.%x%", "in.(1,2)", "is.null", "5", "eq.", ""])("match nothing, rather than everything (%s)", (condition) => {
+    expect(matches(5, "integer", condition)).toBe(false)
+    const row = change({ c: 5, d: 1 }, { c: "integer", d: "integer" })
+    expect(matchesFilter(row, { d: "eq.1", c: condition })).toBe(false)
+  })
+
+  it("are named by unreadableCondition, the check a subscribe is refused by", () => {
+    expect(unreadableCondition({ a: "eq.1", b: "like.x" })).toBe("b=like.x")
+    expect(unreadableCondition({ a: "eq.1", b: "gte.2" })).toBeNull()
+    expect(unreadableCondition({})).toBeNull()
   })
 })
 
