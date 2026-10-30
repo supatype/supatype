@@ -50,6 +50,18 @@ describe("who wrote DATABASE_URL", () => {
     expect(databaseUrlOwner(dir)).toBe("cli")
   })
 
+  // Local test round 3d: a native project's init wrote the Docker URL, and its first dev rewrote it.
+  it("init writes a native project's own database URL, which dev then leaves as it is", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    scaffold(dir, { ...defaultScaffoldOptions("acme"), provider: "native" })
+    const password = /^POSTGRES_PASSWORD=(.*)$/m.exec(readFileSync(join(dir, ".env"), "utf8"))?.[1] ?? ""
+    const url = /^DATABASE_URL=(.*)$/m.exec(readFileSync(join(dir, ".env"), "utf8"))?.[1]
+    expect(url).toBe(localDSN(native, password, dir))
+    const said = vi.spyOn(console, "log").mockClear()
+    await reconcileNativeDatabaseUrl(dir, localDSN(native, password, dir))
+    expect(said).not.toHaveBeenCalled()
+  })
+
   it("dev marks the URL it writes for the port it chose", async () => {
     writeEnv([])
     await ensureDevDbPort(dir)

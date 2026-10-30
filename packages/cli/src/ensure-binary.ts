@@ -16,6 +16,7 @@ import { assertEngineVersionSupported } from "./engine-floor.js"
 import { isDownloadInProgress, waitForComponentDownload } from "./binary-download-lock.js"
 import { currentLibc } from "./cli-artifacts.js"
 import { errorMessage } from "./error-message.js"
+import { progress } from "./ui/messages.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
 /**
@@ -84,13 +85,13 @@ async function fetchBinary(component: Component, config: SupatypeProjectConfig):
   const platform = currentPlatform()
 
   if (isDownloadInProgress(component, version)) {
-    console.log(`[supatype] Waiting for in-progress ${component} download...`)
+    progress(`Waiting for in-progress ${component} download...`)
     const outcome = await waitForComponentDownload(
       component,
       version,
       () => isCachedBinaryReady(component, version, platform),
       (c) => {
-        console.log(`[supatype] Still waiting for ${c}...`)
+        progress(`Still waiting for ${c}...`)
       },
     )
     if (outcome === "ready") {

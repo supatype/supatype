@@ -47,6 +47,22 @@ export function error(message: string): void {
   console.error(`${SUPATYPE_PREFIX} ${message}`)
 }
 
+/**
+ * A `[supatype]` progress line from work that may run under a spinner, such as a download: in the
+ * active flow's log when one is up, so it does not land in the spinner's line, else printed as it
+ * always was.
+ */
+export function progress(message: string, level: "info" | "warn" = "info"): void {
+  const api = getActiveFlowApi()
+  if (api) {
+    api.log[level](message)
+    return
+  }
+  const line = `${SUPATYPE_PREFIX} ${message}`
+  if (level === "warn") console.warn(line)
+  else writePlain(line)
+}
+
 /** Unprefixed line (tables, diff output, blank lines). */
 export function plain(message = ""): void {
   const api = getActiveFlowApi()

@@ -934,8 +934,12 @@ export const COMPOSE_DEV_KONG_PORT = 18473
  * cluster checks it, so the `postgres` default only reaches a cluster still set up that way.
  */
 export function localDSN(cfg: SupatypeProjectConfig, password = "postgres", cwd: string = process.cwd()): string {
-  const port = nativeDbPort(cfg, cwd)
-  return `postgres://postgres:${encodeURIComponent(password)}@127.0.0.1:${port}/${cfg.project.name}?sslmode=disable`
+  return nativeDatabaseUrl(cfg.project.name, password, nativeDbPort(cfg, cwd))
+}
+
+/** The URL of native Postgres's database `name` on `port`, as its superuser. */
+export function nativeDatabaseUrl(name: string, password: string, port: number): string {
+  return `postgres://postgres:${encodeURIComponent(password)}@127.0.0.1:${port}/${name}?sslmode=disable`
 }
 
 /** Where native Postgres listens when nothing moves it. */

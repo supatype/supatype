@@ -21,6 +21,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { isJsonObject } from "@supatype/shared"
 import { errorMessage } from "./error-message.js"
 import { readJsonObjectFile } from "./json-file.js"
+import { progress } from "./ui/messages.js"
 import {
   closeSync,
   copyFileSync,
@@ -384,11 +385,9 @@ async function acquireDownloadSlot(
     if (tryAcquireDownloadLock(component, version)) return
 
     if (isDownloadInProgress(component, version)) {
-      console.log(
-        `[supatype] ${component} v${version} is downloading in another process, waiting...`,
-      )
+      progress(`${component} v${version} is downloading in another process, waiting...`)
       const outcome = await waitForComponentDownload(component, version, isReady, (c) => {
-        console.log(`[supatype] Still waiting for ${c} download...`)
+        progress(`Still waiting for ${c} download...`)
       })
       if (outcome === "ready") return
       if (outcome === "timeout") {
@@ -432,7 +431,7 @@ export async function download(
   // Another process fetched it while this one waited for the lock.
   if (isCachedBinaryReady(component, version, platform)) return { path: destPath, fetched: false }
 
-  console.log(`[supatype] Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
+  progress(`Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
   const manifest = await fetchLeavingNoEmptyDir(component, version, platform, { dir, destPath })
   if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version), dir)
   return { path: destPath, fetched: true }
@@ -468,10 +467,10 @@ async function fetchLeavingNoEmptyDir(
 function keepCachedArtifact(component: Component, version: string, destPath: string): boolean {
   if (!existsSync(destPath)) return false
   if (cachedArtifactLooksValid(component, destPath)) {
-    console.log(`[supatype] ${component} v${version} already cached.`)
+    progress(`${component} v${version} already cached.`)
     return true
   }
-  console.warn(`[supatype] ${component} v${version} cache invalid, re-downloading (${destPath}).`)
+  progress(`${component} v${version} cache invalid, re-downloading (${destPath}).`, "warn")
   unlinkSync(destPath)
   return false
 }
@@ -553,7 +552,7 @@ async function saveEngineLicense(manifest: string, releaseUrl: string, dir: stri
     console.warn(`[supatype] The engine's ${ENGINE_LICENSE_FILE} was not saved: ${problem}. The engine is licensed under BUSL-1.1.`)
     return
   }
-  console.log(`[supatype] Supatype engine is licensed under BUSL-1.1; see ${target}`)
+  progress(`Supatype engine is licensed under BUSL-1.1; see ${target}`)
 }
 
 /** Download and verify the LICENSE into `target`; the reason it could not be, or undefined. */
