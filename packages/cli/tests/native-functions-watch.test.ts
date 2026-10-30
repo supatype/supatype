@@ -85,3 +85,33 @@ describe("native dev functions entry", () => {
     expect(readFileSync(devFunctionsEntryPath(cwd), "utf8")).toContain("// Routes: hello, hooks/audit")
   })
 })
+
+/**
+ * Local test round 3d (N19): in a project with no functions/ and no hooks/ when dev started, the
+ * first hook or function added while it ran was never served. The worker now always runs, and the
+ * directories are watched for appearing.
+ */
+describe("native dev's functions watch, for a directory made after dev started", () => {
+  type Listener = (event: string, filename: string | null) => void
+
+  it("watches hooks/ once it appears, and rewrites the entry with its hook", () => {
+    vi.useFakeTimers()
+    const listeners = new Map<string, Listener>()
+    const fakeWatch = (dir: string, _options: { recursive: boolean }, listener: Listener): { close: () => void } => {
+      listeners.set(dir, listener)
+      return { close: () => listeners.delete(dir) }
+    }
+    const fresh: NativeFunctionsTarget = { ...target(true), hooksDir: join(cwd, "hooks") }
+    const watcher = watchNativeFunctions(fresh, ["hello"], fakeWatch)
+    expect(listeners.has(join(cwd, "hooks"))).toBe(false)
+
+    addHandler("hooks", "audit")
+    listeners.get(cwd)?.("rename", "hooks")
+    vi.advanceTimersByTime(1_000)
+
+    expect(listeners.has(join(cwd, "hooks"))).toBe(true)
+    expect(readFileSync(devFunctionsEntryPath(cwd), "utf8")).toContain("// Routes: hello, hooks/audit")
+    watcher.close()
+    vi.useRealTimers()
+  })
+})

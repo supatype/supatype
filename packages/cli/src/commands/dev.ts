@@ -19,7 +19,7 @@ import { reportDevPushFailure } from "../push-refusal.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { isAbsolute, join, relative, resolve } from "node:path"
+import { isAbsolute, join, resolve } from "node:path"
 import { hasEnvValue, readDotEnvFiles } from "../env-file.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig } from "../config.js"
@@ -36,9 +36,6 @@ import { readJsonFile } from "../json-file.js"
 import { isArrayOf, isJsonObject } from "@supatype/shared"
 import {
   pgSchema,
-  functionsPathCandidatesFromProject,
-  hooksPathFromProject,
-  preferredFunctionsPathFromProject,
   localDSN,
   nativeDataDir,
   nativeDbPort,
@@ -55,7 +52,7 @@ import {
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
-import { functionsWorkerEnv, installFunctionsWorker, localWorkerRoutesOrExit, writeDevFunctionsEntry } from "../functions-worker-files.js"
+import { functionsWorkerEnv } from "../functions-worker-files.js"
 import { devServiceRoleKeyPath } from "../service-role-key-file.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
@@ -108,6 +105,7 @@ import {
   waitForDevShutdown,
 } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
+import { prepareNativeWorker } from "../native-worker.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { extractArchive } from "../archive-extract.js"
@@ -279,19 +277,15 @@ export function registerDev(program: Command): void {
       const realtimePort = String(nativeRealtimePort(config, cwd))
       const denoPort = nativeDenoPort(cwd)
       const storagePort = nativeStoragePort(cwd)
-      // Edge functions and model hooks run only when their directory exists, so Deno's port matters
-      // only then.
-      const functionsDir = functionsPathCandidatesFromProject(config, cwd).find((dir) => existsSync(dir))
-      const hooksDir = hooksPathFromProject(config, cwd)
-      const runsWorker = functionsDir !== undefined || existsSync(hooksDir)
 
       if (provider !== "docker") {
+        // The functions worker runs on every native dev (native-worker.ts), so Deno's port is checked too.
         await assertNativeDevPortsFree({
           postgres: pgPort,
           server: Number(serverPort),
           postgrest: Number(postgrestPort),
           realtime: Number(realtimePort),
-          ...(runsWorker && { deno: denoPort }),
+          deno: denoPort,
           ...(keepsObjectsLocally(config) && { storage: storagePort }),
         })
         // Before anything is generated: a missing password would otherwise be replaced in .env
@@ -486,39 +480,8 @@ export function registerDev(program: Command): void {
 
       // ── 10. Spawn supatype-server ─────────────────────────────────────────
 
-      // Edge functions config, from the functions dir found before the port check.
-      /** Always set when a functions dir exists so Studio admin API can list functions; Deno runtime is separate. */
-      // A hooks-only project names the functions directory it would have: the server starts Deno
-      // only when it has one, and lists none from a directory that does not exist.
-      const denoFunctionsDir = functionsDir ?? (runsWorker ? preferredFunctionsPathFromProject(config, cwd) : "")
-      const workerRoutes = localWorkerRoutesOrExit(functionsDir, hooksDir)
-      // The functions worker the image runs, from the CLI's copy, behind an entry naming its routes.
-      const workerMain = workerRoutes.length > 0 ? installFunctionsWorker() : ""
-      const denoServeScriptAbs = workerMain !== "" ? writeDevFunctionsEntry(cwd, workerRoutes, workerMain) : ""
-
-      let denoBinPath: string | undefined
-      if (runsWorker) {
-        console.log(`[supatype] Edge functions enabled (${functionsDir ?? hooksDir})`)
-        try {
-          denoBinPath = await ensureBinary("deno", config)
-          const denoVersion = await (await import("../binary-cache.js")).resolveVersionFor("deno", config)
-          console.log(`[supatype] Deno runtime: ${denoBinPath} (v${denoVersion})`)
-          if (workerRoutes.length > 0) {
-            console.log(
-              `[supatype] Edge functions worker: ${relative(cwd, denoServeScriptAbs)} ` +
-                `(${workerRoutes.length} route(s): ${workerRoutes.join(", ")})`,
-            )
-          } else {
-            console.log("[supatype] Edge functions worker not started (no handler files discovered yet)")
-          }
-        } catch (err) {
-          console.warn(
-            `[supatype] ⚠  Found ${functionsDir ?? hooksDir} but could not provision Deno, edge functions will not run.\n` +
-              `  ${errorMessage(err)}\n` +
-              "  (Functions still appear in Studio; invocations need Deno.)",
-          )
-        }
-      }
+      // The functions worker the image runs, from the CLI's copy, on every start (native-worker.ts).
+      const worker = await prepareNativeWorker(cwd, config)
 
       // The server passes its environment, the key included, on to Deno, but the functions worker
       // reads the key from a file: a --watch reload evaluates it again in an environment an
@@ -529,7 +492,7 @@ export function registerDev(program: Command): void {
       writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
 
       // After the push, failed or not: init's manifest names the compose stack's services.
-      recordNativeRoutes(manifestPath, denoBinPath !== undefined)
+      recordNativeRoutes(manifestPath, worker.denoBin !== undefined)
 
       // Valkey, or the keyspace Postgres serves, alongside realtime and storage: none needs another.
       const valkeyStart = nativeValkey(keyspacePort, projectName)
@@ -562,18 +525,14 @@ export function registerDev(program: Command): void {
           pgBinDir,
           databaseUrl: dbURL,
         }),
-        SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
-        ...(denoBinPath !== undefined ? { SUPATYPE_DENO_PATH: denoBinPath } : {}),
-        ...(denoServeScriptAbs !== ""
-          ? {
-            SUPATYPE_DENO_SERVE_SCRIPT: denoServeScriptAbs,
-            // The server passes its environment on to Deno: the worker's, as compose gives the image,
-            // functions.serviceRole included, so a function relying on the key unlisted fails here first.
-            ...functionsWorkerEnv({ cwd, config, functionsDir: denoFunctionsDir, keyPath: devServiceRoleKeyPath(cwd) }),
-            // The server reaches the worker on 127.0.0.1; nothing else on the network should.
-            SUPATYPE_FUNCTIONS_HOST: "127.0.0.1",
-          }
-          : {}),
+        SUPATYPE_DENO_FUNCTIONS_DIR: worker.functionsDir,
+        ...(worker.denoBin !== undefined ? { SUPATYPE_DENO_PATH: worker.denoBin } : {}),
+        SUPATYPE_DENO_SERVE_SCRIPT: worker.entry,
+        // The server passes its environment on to Deno: the worker's, as compose gives the image,
+        // functions.serviceRole included, so a function relying on the key unlisted fails here first.
+        ...functionsWorkerEnv({ cwd, config, functionsDir: worker.functionsDir, keyPath: devServiceRoleKeyPath(cwd) }),
+        // The server reaches the worker on 127.0.0.1; nothing else on the network should.
+        SUPATYPE_FUNCTIONS_HOST: "127.0.0.1",
         SUPATYPE_URL: `http://localhost:${serverPort}`,
         // Natively the server is the gateway, so the address functions call is the one a browser
         // opens. The server passes its environment on to the Deno child that runs them.
@@ -748,9 +707,8 @@ export function registerDev(program: Command): void {
 
         // Deno reloads the worker when a file it imported changes, but not for a function added later.
         const { watchNativeFunctions } = await import("../native-functions-watch.js")
-        const functionsWatch = denoServeScriptAbs === ""
-          ? null
-          : watchNativeFunctions({ cwd, functionsDir, hooksDir, workerMain }, workerRoutes)
+        const { functionsDir, hooksDir, workerMain, routes } = worker
+        const functionsWatch = watchNativeFunctions({ cwd, functionsDir, hooksDir, workerMain }, routes)
         const { watchDevSchema } = await import("../dev-schema-watch.js")
         watchDevSchema({
           dir: schemaDir,
@@ -759,7 +717,7 @@ export function registerDev(program: Command): void {
           push: (why) => {
             console.log(`\n[supatype] ${why}, checking schema...`)
             // A hook the push declares is served once the worker's routes name it.
-            runSchemaPush(schemaPush).then(() => functionsWatch?.refresh()).catch(reportUnlessStopping(reportDevPushFailure))
+            runSchemaPush(schemaPush).then(() => functionsWatch.refresh()).catch(reportUnlessStopping(reportDevPushFailure))
           },
         })
       }
