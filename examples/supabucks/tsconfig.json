@@ -23,7 +23,7 @@
     "src",
     "schema",
     "tests",
-    "seed.ts",
+    "seeds",
     "supatype.config.ts",
     "vite.config.ts",
     "supatype/generated"

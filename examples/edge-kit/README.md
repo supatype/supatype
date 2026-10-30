@@ -32,7 +32,6 @@ cd examples/edge-kit
 cp .env.example .env
 cp functions/.env.local.example functions/.env.local
 pnpm keys
-pnpm push
 ```
 
 Ensure `.env` has `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` (keys / dev write these). Open the **gateway** (`http://localhost:18473`), not Vite’s `:5173` alone, unless Vite’s proxy to Kong is active.
@@ -43,7 +42,9 @@ Ensure `.env` has `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` (keys / dev w
 pnpm dev
 ```
 
-`supatype dev` brings up Kong/Postgres/functions-worker and starts Vite (`app.mode=proxy`, `app.start=vite`). Open the gateway URL from the ready panel.
+`supatype dev` brings up Kong/Postgres/functions-worker, pushes the schema, and starts Vite (`app.mode=proxy`, `app.start=vite`). Open the gateway URL from the ready panel.
+
+There is no separate push step: `dev` pushes the schema when it starts and again on every save, and on its first start it writes the database passwords and the database port into `.env`. `pnpm push` works once `dev` has run; before that `.env` has no `AUTHENTICATOR_PASSWORD` or `SUPATYPE_SQL_EDITOR_PASSWORD` and the push refuses.
 
 ## Manual checklist (Deno types DX)
 
@@ -58,5 +59,5 @@ Step 4 is automated: `bash tests/integration/scripts/edge-kit-e2e.sh` (from the 
 
 - Worker `SUPATYPE_URL` is **`http://kong:8000`** in Compose (server-side calls). Public links use `SITE_URL` / `API_EXTERNAL_URL`.
 - `WEBHOOK_SECRET` defaults to `edge-kit-dev-webhook-secret` in `functions/.env.local.example` (matches the UI signer).
-- Generated types under `supatype/generated/` are placeholders until `pnpm push` regenerates them.
-- Port: server `54420` in `supatype.config.ts` to avoid clashing with other examples.
+- Generated types under `supatype/generated/` are placeholders until `pnpm dev` (or `pnpm push`) regenerates them.
+- Ports: the gateway is on `SUPATYPE_KONG_PORT` (default 18473) and Postgres on `SUPATYPE_DEV_DB_PORT` (default 54329, the port `DATABASE_URL` names). `dev` moves either to the next free port when it is taken, and writes the one it chose into `.env`.

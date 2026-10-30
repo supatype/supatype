@@ -18,7 +18,7 @@ import type { RealtimePayload } from "./realtime.js"
 import { subscribeToTable, type TableSubscribeOptions, type TableSubscription } from "./table-subscription.js"
 import { PostgrestError, transportFailure } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
-import { isJsonObject, readJsonObject, refusalText } from "./json.js"
+import { isJsonObject, isString, readJsonObject, refusalText } from "./json.js"
 import { jwtRole } from "./jwt.js"
 import { createGraphqlRunner } from "./graphql-transport.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
@@ -392,6 +392,22 @@ function isDeclaredReturn<T>(value: unknown): value is T {
 }
 
 /**
+ * The message and machine-readable code on an edge function's error body. A handler may send its
+ * own `code`. The functions worker answers its own failures as `{ error: <code>, message }`, so
+ * `error` is a code when a `message` is beside it. On its own, `error` is a handler's sentence
+ * (`{ error: "Email already taken" }`) and is the message.
+ */
+function functionError(body: Record<string, unknown>, status: number): SupatypeError {
+  const workerCode = isString(body["message"]) ? body["error"] : undefined
+  const code = isString(body["code"]) ? body["code"] : isString(workerCode) ? workerCode : undefined
+  return {
+    message: refusalText(body) ?? `Function returned ${status}`,
+    status,
+    ...(code !== undefined && { code }),
+  }
+}
+
+/**
  * Helper type: extract function names from a database type.
  * Falls back to `string` when Functions is not defined.
  */
@@ -528,15 +544,7 @@ class FunctionsClient {
       )
 
       if (!res.ok) {
-        const body = await readJsonObject(res)
-        return {
-          data: null,
-          error: {
-            message: typeof body["message"] === "string" ? body["message"] : `Function returned ${res.status}`,
-            status: res.status,
-            ...(typeof body["code"] === "string" ? { code: body["code"] } : {}),
-          },
-        }
+        return { data: null, error: functionError(await readJsonObject(res), res.status) }
       }
 
       const contentType = res.headers.get("content-type") ?? ""

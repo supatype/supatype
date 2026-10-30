@@ -25,3 +25,8 @@ export function pluralize(label: string): string {
 export function singularize(label: string): string {
   return pluralizeLib.singular(label)
 }
+
+/** A count and its unit, agreeing: "1 item", "3 items", "1 character of text". */
+export function countOf(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}

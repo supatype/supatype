@@ -3,15 +3,15 @@ import { defineConfig } from "@supatype/cli"
 /**
  * Edge kit: functions-first manual test / demo.
  *
- * Workflow: `pnpm keys` → `pnpm push` → `pnpm dev`
- * Gateway: Kong on SUPATYPE_KONG_PORT (default 18473).
+ * Workflow: `pnpm keys`, then `pnpm dev`, which pushes the schema.
+ * Gateway: Kong on SUPATYPE_KONG_PORT (default 18473). No `server.port`: only native dev reads it.
  * Omit versions so compose uses :latest local images.
  */
 export default defineConfig({
   project: { name: "edge-kit" },
   provider: "docker",
   database: { provider: "docker" },
-  server: { mode: "dev", port: 54420 },
+  server: { mode: "dev" },
   app: {
     mode: "proxy",
     upstream: "http://127.0.0.1:5173",

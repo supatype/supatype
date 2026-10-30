@@ -159,7 +159,13 @@ export async function createSupatypeClient() {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll() { /* session refresh handled in middleware */ },
+        setAll(toSet) {
+          try {
+            toSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options ?? {}))
+          } catch {
+            // A Server Component cannot write cookies; a Route Handler or Server Action can.
+          }
+        },
       },
     },
   )
@@ -187,15 +193,14 @@ export function createSupatypeClient(req: IncomingMessage, res: ServerResponse) 
           }))
         },
         setAll(toSet) {
-          toSet.forEach(({ name, value, options }) => {
-            const attrs = [
-              \`\${name}=\${value}\`,
-              \`Path=\${options?.path ?? '/'}\`,
-              options?.httpOnly ? 'HttpOnly' : '',
-              options?.secure  ? 'Secure'   : '',
-            ].filter(Boolean).join('; ')
-            res.setHeader('Set-Cookie', attrs)
-          })
+          res.setHeader('Set-Cookie', toSet.map(({ name, value, options }) => [
+            \`\${name}=\${encodeURIComponent(value)}\`,
+            \`Path=\${options?.path ?? '/'}\`,
+            options?.maxAge !== undefined ? \`Max-Age=\${options.maxAge}\` : '',
+            options?.sameSite ? \`SameSite=\${options.sameSite}\` : '',
+            options?.httpOnly ? 'HttpOnly' : '',
+            options?.secure  ? 'Secure'   : '',
+          ].filter(Boolean).join('; ')))
         },
       },
     },

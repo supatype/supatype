@@ -1,8 +1,12 @@
 import type { Session, User } from "@supatype/client"
+import type { CookieToSet } from "./types.js"
+
+/** The prefix `@supatype/client` names its session cookie with: `st-auth-token`. */
+export const DEFAULT_COOKIE_PREFIX = "st"
 
 export function parseSessionFromCookies(
   cookies: Array<{ name: string; value: string }>,
-  prefix: string = "st",
+  prefix: string = DEFAULT_COOKIE_PREFIX,
 ): Session | null {
   const candidates = cookies.filter(
     (c) =>
@@ -40,15 +44,21 @@ function parseSessionValue(value: string): Session | null {
   return null
 }
 
+/**
+ * The session a cookie holds. One whose access token has expired is kept when it carries a refresh
+ * token: the client refreshes it before its first request, and the server client writes the new
+ * tokens back through `setAll`.
+ */
 function normalizeSession(r: unknown): Session | null {
   if (!isJsonObject(r)) return null
   if (typeof r["access_token"] !== "string") return null
-  if (isJwtExpired(r["access_token"])) return null
+  const refreshToken = typeof r["refresh_token"] === "string" ? r["refresh_token"] : ""
+  if (isJwtExpired(r["access_token"]) && refreshToken.trim() === "") return null
   return {
     accessToken: r["access_token"],
     tokenType: typeof r["token_type"] === "string" ? r["token_type"] : "bearer",
     expiresIn: typeof r["expires_in"] === "number" ? r["expires_in"] : 3600,
-    refreshToken: typeof r["refresh_token"] === "string" ? r["refresh_token"] : "",
+    refreshToken,
     user: normalizeUser(isJsonObject(r["user"]) ? r["user"] : {}),
     ...(typeof r["expires_at"] === "number" && { expiresAt: r["expires_at"] }),
   }
@@ -79,5 +89,38 @@ function normalizeUser(raw: Record<string, unknown>): User {
     ...(typeof raw["email"] === "string" && { email: raw["email"] }),
     ...(typeof raw["phone"] === "string" && { phone: raw["phone"] }),
     ...(typeof raw["role"] === "string" && { role: raw["role"] }),
+  }
+}
+
+/**
+ * The cookie that holds `session`, named and shaped as `@supatype/client` writes it in the browser
+ * and `parseSessionFromCookies` reads it; a null session clears the cookie.
+ */
+export function sessionCookie(session: Session | null, prefix: string = DEFAULT_COOKIE_PREFIX): CookieToSet {
+  const name = `${prefix}-auth-token`
+  if (session === null) return { name, value: "", options: { path: "/", maxAge: 0 } }
+  const value = JSON.stringify({
+    access_token: session.accessToken,
+    refresh_token: session.refreshToken,
+    token_type: session.tokenType,
+    expires_in: session.expiresIn,
+    ...(session.expiresAt !== undefined && { expires_at: session.expiresAt }),
+    user: serializeUser(session.user),
+  })
+  // The browser client's cookie expires with the access token; one without `expiresAt` lasts the session.
+  const maxAge = session.expiresAt !== undefined ? Math.max(0, session.expiresAt - Math.floor(Date.now() / 1000)) : undefined
+  return { name, value, options: { path: "/", sameSite: "lax", ...(maxAge !== undefined && { maxAge }) } }
+}
+
+function serializeUser(user: User): Record<string, unknown> {
+  return {
+    id: user.id,
+    ...(user.email !== undefined && { email: user.email }),
+    ...(user.phone !== undefined && { phone: user.phone }),
+    ...(user.role !== undefined && { role: user.role }),
+    app_metadata: user.appMetadata,
+    user_metadata: user.userMetadata,
+    created_at: user.createdAt,
+    updated_at: user.updatedAt,
   }
 }

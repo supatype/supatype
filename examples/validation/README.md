@@ -49,28 +49,35 @@ Every one of these is refused, and the error tells you which rule bit:
 ```bash
 set -a; . ./.env; set +a   # ANON_KEY and the rest of .env, from this directory
 API=http://127.0.0.1:18473/rest/v1/product
+ANON_KEY=$(sed -n 's/^ANON_KEY=//p' .env)
 # sign in first; `create` is LoggedIn, not Public
 TOKEN=$(curl -s -X POST "http://127.0.0.1:18473/auth/v1/token?grant_type=password" \
   -H "apikey: $ANON_KEY" -H "Content-Type: application/json" \
-  -d '{"email":"you@example.com","password":"<password>"}' | jq -r .access_token)
+  -d '{"email":"you@example.com","password":"<password>"}' \
+  | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
 
 post() { curl -s -X POST "$API" -H "apikey: $ANON_KEY" -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -H "Prefer: return=minimal" -d "$1"; }
+  -H "Content-Type: application/json" -H "Prefer: return=minimal" -d "$1"; echo; }
+
+# Every name below is at least 3 characters, so `MinLength<3>` passes and the rule named beside
+# each line is the one that refuses it.
 
 # 1. bounds
-post '{"name":"ab","status":"draft"}'                          # MinLength<3>
-post '{"name":"Widget","status":"draft","rating":9}'           # Between<Int,1,5>
+post '{"name":"ab","status":"draft"}'                          # MinLength<3>: product_name_bounds
+post '{"name":"Widget","status":"draft","rating":9}'           # Between<Int,1,5>: product_rating_bounds
 
 # localized: only the `fr` value breaches, and that is the case a scalar check cannot see
-post '{"name":"W1","status":"draft","headline":{"en":"fine","fr":"beaucoup trop long pour tenir dans la limite de soixante caracteres imposee"}}'
+post '{"name":"W11","status":"draft","headline":{"en":"fine","fr":"beaucoup trop long pour tenir dans la limite de soixante caracteres imposee"}}'
 
 # 2. constraints
-post '{"name":"W2","status":"published"}'                      # published needs a sku
-post '{"name":"W3","status":"draft","sku":"nope"}'             # Matches<"^[A-Z]{3}-[0-9]{4}$">
+post '{"name":"W22","status":"published"}'                     # published needs a sku: product_status_eq_or_sku_not_null
+post '{"name":"W33","status":"draft","sku":"nope"}'            # Matches<"^[A-Z]{3}-[0-9]{4}$">: product_sku_format
 
 # 3. validator: total setup minutes, which is a rule about the contents of a JSON array
-post '{"name":"W4","status":"draft","setupItems":[{"label":"prep","minutes":90},{"label":"build","minutes":80}]}'
+post '{"name":"W44","status":"draft","setupItems":[{"label":"prep","minutes":90},{"label":"build","minutes":80}]}'
 ```
+
+Run it from this directory (it reads `ANON_KEY` from `.env`); it needs only `curl` and `sed`.
 
 The last one answers `422` with `{"field":"setupItems","message":"..."}`. That `field` is what lets
 Studio put the message on the right input instead of at the top of the form.
