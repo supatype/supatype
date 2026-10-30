@@ -125,7 +125,7 @@
   url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
-    <p>Every page in these docs imports the client from this one file. <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys --write</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
+    <p>Every page in these docs imports the client from this one file. <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code>, <code>EXPO_PUBLIC_</code> and <code>NEXT_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
     <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
     <p><code>createClient</code> takes these options as well as <code>url</code> and <code>anonKey</code>:</p>
     <div class="tbl"><table>

@@ -49,10 +49,18 @@ describe("targetStatus on the local dev stack", () => {
     expect(seen).toEqual(["Bearer the-stack-key"])
   })
 
-  it("prefers SUPATYPE_SERVICE_ROLE_KEY in .env, as the stack's own readers do", async () => {
-    writeFileSync(join(dir, ".env"), "SUPATYPE_SERVICE_ROLE_KEY=explicit\nSERVICE_ROLE_KEY=other\n", "utf8")
+  // Compose and native dev both start the server with SERVICE_ROLE_KEY. A SUPATYPE_SERVICE_ROLE_KEY
+  // in .env never reaches it, so preferring that one sent a key the stack refused.
+  it("prefers SERVICE_ROLE_KEY in .env, the key the stack is started with", async () => {
+    writeFileSync(join(dir, ".env"), "SUPATYPE_SERVICE_ROLE_KEY=stale\nSERVICE_ROLE_KEY=the-stack-key\n", "utf8")
     await targetStatus(localTarget(), dir)
-    expect(seen).toEqual(["Bearer explicit"])
+    expect(seen).toEqual(["Bearer the-stack-key"])
+  })
+
+  it("never sends a SUPATYPE_SERVICE_ROLE_KEY from .env, which the stack never had", async () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=x\nSUPATYPE_SERVICE_ROLE_KEY=stale\n", "utf8")
+    await expect(targetStatus(localTarget(), dir)).rejects.toThrow(/No service-role key/)
+    expect(seen).toEqual([])
   })
 
   it("keeps a token the target already carries", async () => {

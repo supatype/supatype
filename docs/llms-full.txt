@@ -793,7 +793,7 @@ export const supatype = createClient({
 })
 ```
 
-Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys --write` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. Read them rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_`, `EXPO_PUBLIC_` and `NEXT_PUBLIC_` copies for other frameworks. Read them rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 

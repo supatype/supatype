@@ -53,9 +53,9 @@ else
 fi
 
 # The example pins its gateway port in .env so its URLs are true; follow it rather than assuming.
-# `|| true`: without the key (or the file) grep exits 1, and under `set -euo pipefail` the script
-# would stop here without a word instead of falling back to the default port.
-KONG_PORT="${SUPATYPE_KONG_PORT:-$(grep -m1 '^SUPATYPE_KONG_PORT=' "$EXAMPLE_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)}"
+# `|| true`: without the file env_file_value fails, and under `set -euo pipefail` the script would
+# stop here instead of falling back to the default port.
+KONG_PORT="${SUPATYPE_KONG_PORT:-$(env_file_value "$EXAMPLE_DIR/.env" SUPATYPE_KONG_PORT 2>/dev/null || true)}"
 KONG_PORT="${KONG_PORT:-18473}"
 # IPv4 explicitly: `localhost` resolves to ::1 first on some hosts, where Docker's IPv6 forwarder
 # may accept and then reset.
@@ -134,12 +134,20 @@ echo "==> Bringing the stack up (static mode: the SPA is what / serves)"
 # The owner DSN is deliberate here and only here. This is a disposable CI stack asserting the wiring
 # works; a real project should point this at a role it restricted, since a function holding this
 # bypasses access rules, field masking and model hooks.
-export SUPATYPE_FUNCTIONS_DB_URL="postgresql://supatype_admin:$(grep -m1 '^POSTGRES_PASSWORD=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)@db:5432/kitchen-sink"
+# Read on their own lines and checked: inside `export` or a command's env prefix nothing would
+# stop on a missing file or key, and both URLs would carry an empty password.
+PG_PASSWORD="$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_PASSWORD)"
+PG_DB="$(env_file_value "$EXAMPLE_DIR/.env" POSTGRES_DB)"
+if [[ -z "$PG_PASSWORD" || -z "$PG_DB" ]]; then
+  echo "ERROR: no POSTGRES_PASSWORD or POSTGRES_DB in $EXAMPLE_DIR/.env"
+  exit 1
+fi
+export SUPATYPE_FUNCTIONS_DB_URL="postgresql://supatype_admin:${PG_PASSWORD}@db:5432/${PG_DB}"
 start_stack
 
 echo ""
 echo "==> Seeding"
-(cd "$EXAMPLE_DIR" && DATABASE_URL="postgresql://supatype_admin:$(grep -m1 '^POSTGRES_PASSWORD=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/$(grep -m1 '^POSTGRES_DB=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)?sslmode=disable" npx tsx seed.ts)
+(cd "$EXAMPLE_DIR" && DATABASE_URL="postgresql://supatype_admin:${PG_PASSWORD}@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/${PG_DB}?sslmode=disable" npx tsx seed.ts)
 
 echo ""
 echo "==> What a browser cannot assert"

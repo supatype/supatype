@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -16,8 +16,8 @@ import { verifyJwt } from "../src/jwt.js"
 const SECRET = "a-local-development-secret-at-least-32-chars"
 
 let dir: string
-// A JWT_SECRET in the environment wins over the file's, so the runner's own would decide which
-// secret the keys are signed with, and whether a test without one in the file mints at all.
+// A JWT_SECRET in the environment is warned about when it differs from the file's and written when
+// the file has none, so the runner's own would decide what these tests see.
 const savedSecret = process.env["JWT_SECRET"]
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "selfhost-keys-"))
@@ -40,7 +40,7 @@ describe("filling the self-host keys", () => {
   it("mints both when the template leaves them blank", () => {
     writeFileSync(envPath(), `JWT_SECRET=${SECRET}\nANON_KEY=\nSERVICE_ROLE_KEY=\n`)
 
-    const filled = fillMissingKeys(dir)
+    const { filled } = fillMissingKeys(dir)
 
     expect(filled.sort()).toEqual(["ANON_KEY", "SERVICE_ROLE_KEY"])
     expect(valueOf("ANON_KEY").length).toBeGreaterThan(20)
@@ -69,7 +69,7 @@ describe("filling the self-host keys", () => {
       `JWT_SECRET=${SECRET}\nANON_KEY=an-existing-key-in-use\nSERVICE_ROLE_KEY=\n`,
     )
 
-    const filled = fillMissingKeys(dir)
+    const { filled } = fillMissingKeys(dir)
 
     expect(filled).toEqual(["SERVICE_ROLE_KEY"])
     expect(valueOf("ANON_KEY")).toBe("an-existing-key-in-use")
@@ -80,25 +80,95 @@ describe("filling the self-host keys", () => {
     const before = `JWT_SECRET=${SECRET}\nANON_KEY=key-one\nSERVICE_ROLE_KEY=key-two\n`
     writeFileSync(envPath(), before)
 
-    expect(fillMissingKeys(dir)).toEqual([])
+    expect(fillMissingKeys(dir).filled).toEqual([])
     expect(read()).toBe(before)
   })
 
   it("treats whitespace as blank, since a stray space is not a key", () => {
     writeFileSync(envPath(), `JWT_SECRET=${SECRET}\nANON_KEY=   \nSERVICE_ROLE_KEY=key-two\n`)
 
-    expect(fillMissingKeys(dir)).toEqual(["ANON_KEY"])
+    expect(fillMissingKeys(dir).filled).toEqual(["ANON_KEY"])
     expect(valueOf("ANON_KEY").length).toBeGreaterThan(20)
   })
 
-  it("does nothing without a secret, rather than minting keys nothing can verify", () => {
-    writeFileSync(envPath(), "ANON_KEY=\nSERVICE_ROLE_KEY=\n")
+  it("does nothing when there is no .env to write to", () => {
+    expect(fillMissingKeys(dir).filled).toEqual([])
+  })
+})
 
-    expect(fillMissingKeys(dir)).toEqual([])
-    expect(valueOf("ANON_KEY")).toBe("")
+/**
+ * Compose reads JWT_SECRET from the shell ahead of `.env`, and `.env` is what every later run reads.
+ * Keys minted with a shell secret `.env` does not hold verify on this run and fail on the next one,
+ * so the secret they are signed with is `.env`'s, a different shell one is warned about, and a `.env`
+ * without one gets the secret the keys were signed with.
+ */
+describe("the secret self-host compose up mints the keys with", () => {
+  const OTHER = "a-different-secret-that-is-also-32-chars"
+  let said: string[] = []
+  beforeEach(() => {
+    said = []
+    const capture = (...args: unknown[]): void => void said.push(args.map(String).join(" "))
+    vi.spyOn(console, "log").mockImplementation(capture)
+    vi.spyOn(console, "error").mockImplementation(capture)
+    vi.spyOn(process, "exit").mockImplementation((code?: string | number | null) => {
+      throw new Error(`exit ${String(code)}`)
+    })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it("uses .env's JWT_SECRET when the shell's differs, with one warning and no refusal", () => {
+    writeFileSync(envPath(), `JWT_SECRET=${SECRET}\nANON_KEY=\nSERVICE_ROLE_KEY=\n`)
+    process.env["JWT_SECRET"] = OTHER
+
+    const result = fillMissingKeys(dir)
+
+    expect(valueOf("JWT_SECRET")).toBe(SECRET)
+    expect(verifyJwt(valueOf("ANON_KEY"), SECRET)).not.toBeNull()
+    expect(verifyJwt(valueOf("SERVICE_ROLE_KEY"), SECRET)).not.toBeNull()
+    expect(JSON.stringify(result)).toContain("uses the one in .env")
   })
 
-  it("does nothing when there is no .env to write to", () => {
-    expect(fillMissingKeys(dir)).toEqual([])
+  it("re-signs keys already in .env when it writes a new JWT_SECRET, since they cannot verify against it", () => {
+    writeFileSync(envPath(), "ANON_KEY=signed-with-something-else\nSERVICE_ROLE_KEY=also-old\n")
+
+    const { filled } = fillMissingKeys(dir)
+
+    const secret = valueOf("JWT_SECRET")
+    expect(filled.sort()).toEqual(["ANON_KEY", "SERVICE_ROLE_KEY"])
+    expect(verifyJwt(valueOf("ANON_KEY"), secret)).not.toBeNull()
+    expect(verifyJwt(valueOf("SERVICE_ROLE_KEY"), secret)).not.toBeNull()
+  })
+
+  it.each([
+    ["a short JWT_SECRET in .env", "JWT_SECRET=twenty-chars-secret!\nANON_KEY=\nSERVICE_ROLE_KEY=\n", undefined],
+    ["a short shell JWT_SECRET", "ANON_KEY=\nSERVICE_ROLE_KEY=\n", "twenty-chars-secret!"],
+    ["a shell JWT_SECRET .env cannot hold unquoted", "ANON_KEY=\n", "a-secret-long-enough # but with a comment in it"],
+  ])("refuses %s before writing anything", (_case, before, shell) => {
+    writeFileSync(envPath(), before)
+    if (shell !== undefined) process.env["JWT_SECRET"] = shell
+
+    expect(() => fillMissingKeys(dir)).toThrow("exit 1")
+    expect(read()).toBe(before)
+  })
+
+  it("writes a shell JWT_SECRET into a .env that has none, beside keys signed with it", () => {
+    writeFileSync(envPath(), "ANON_KEY=\nSERVICE_ROLE_KEY=\n")
+    process.env["JWT_SECRET"] = OTHER
+
+    fillMissingKeys(dir)
+
+    expect(valueOf("JWT_SECRET")).toBe(OTHER)
+    expect(verifyJwt(valueOf("ANON_KEY"), OTHER)).not.toBeNull()
+    expect(verifyJwt(valueOf("SERVICE_ROLE_KEY"), OTHER)).not.toBeNull()
+  })
+
+  it("generates a JWT_SECRET into a .env that has none, and signs the keys with it", () => {
+    writeFileSync(envPath(), "ANON_KEY=\nSERVICE_ROLE_KEY=\n")
+
+    fillMissingKeys(dir)
+
+    const secret = valueOf("JWT_SECRET")
+    expect(secret.length).toBeGreaterThanOrEqual(32)
+    expect(verifyJwt(valueOf("ANON_KEY"), secret)).not.toBeNull()
   })
 })

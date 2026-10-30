@@ -6,7 +6,12 @@ import { randomBytes } from "node:crypto"
 import { p, runClackFlow } from "../ui/clack.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
-import { CONTROL_PLANE_SECRET_ENV, generateControlPlaneSecret } from "../local-secrets.js"
+import {
+  CONTROL_PLANE_SECRET_ENV,
+  generateControlPlaneSecret,
+  givenJwtSecret,
+  newJwtSecret,
+} from "../local-secrets.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
@@ -227,7 +232,7 @@ export function registerInit(program: Command): void {
         process.exit(1)
       }
       if (doKeys && !keysGenerated) {
-        error("Could not generate API keys. Check .env has JWT_SECRET, then run `supatype keys`.")
+        error("Could not generate API keys. Check the project has a .env, then run `supatype keys`.")
         process.exit(1)
       }
       if (doInstall && installOk && !binariesReady) {
@@ -325,7 +330,7 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
       process.exit(1)
     }
     if (doKeys && !keysGenerated) {
-      error("Could not generate API keys. Check .env has JWT_SECRET, then run `supatype keys`.")
+      error("Could not generate API keys. Check the project has a .env, then run `supatype keys`.")
       process.exit(1)
     }
     if (doInstall && installOk && !binariesReady) {
@@ -660,11 +665,21 @@ async function ensureInitBinaries(dir: string): Promise<boolean> {
 
 function writeKeys(dir: string): boolean {
   const keys = generateAndWriteKeys(dir)
-  if (!keys) {
-    warn("Could not generate keys (JWT_SECRET missing). Run `supatype keys` manually.")
+  if (!keys.ok) {
+    warn(`Could not write keys: ${keys.reason} Run \`supatype keys\` in the project once that is fixed.`)
     return false
   }
   return true
+}
+
+/**
+ * The new .env's JWT_SECRET: the shell's when one is exported and usable, else a generated one.
+ * Warned about rather than refused when the shell's is unusable, since init is mid-wizard.
+ */
+function initialJwtSecret(): string {
+  const { secret, problem } = newJwtSecret(givenJwtSecret())
+  if (problem !== undefined) warn(`${problem} Generated a JWT_SECRET for .env instead.`)
+  return secret
 }
 
 // ─── Scaffold ──────────────────────────────────────────────────────────────--
@@ -1224,7 +1239,7 @@ function envTemplate(opts: ScaffoldOptions): string {
   // only because `supatype dev` no longer overwrites them on every run (see local-secrets.ts).
   const postgresPassword = randomBytes(24).toString("base64url")
 
-  sections.push(`DATABASE_URL=postgresql://supatype_admin:${postgresPassword}@localhost:5432/${opts.projectName}
+  sections.push(`DATABASE_URL=postgresql://supatype_admin:${encodeURIComponent(postgresPassword)}@localhost:5432/${opts.projectName}
 POSTGRES_USER=supatype_admin
 POSTGRES_PASSWORD=${postgresPassword}
 POSTGRES_DB=${opts.projectName}
@@ -1241,9 +1256,11 @@ AUTHENTICATOR_PASSWORD=${randomBytes(24).toString("base64url")}
 # query typed there runs without superuser rights. Kept apart from both passwords above.
 SUPATYPE_SQL_EDITOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
 
+  // A usable JWT_SECRET exported in the shell goes into the new .env, so tokens the developer
+  // already signed with it keep working. From then on .env's wins over the shell's.
   sections.push(`# JWT: ANON_KEY and SERVICE_ROLE_KEY are derived from this secret.
 # Changing it invalidates every issued token; re-run \`supatype keys\` afterwards.
-JWT_SECRET=${randomBytes(48).toString("base64url")}
+JWT_SECRET=${initialJwtSecret()}
 ANON_KEY=
 SERVICE_ROLE_KEY=`)
 

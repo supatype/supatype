@@ -1,6 +1,6 @@
 # Frontend integration
 
-Reference layout: what `supatype init` writes for a self-hosted production target with a Vite front end (static site + `vite_dev_url`).
+Reference layout: `supatype init --mode standalone` (static site + `vite_dev_url`). Maintainer fixture: **`examples/self-host/`** in the Supatype repo (compose-first, proxy mode).
 
 ## Add dependencies
 
@@ -9,13 +9,20 @@ npm install @supatype/client @supatype/cli @supatype/types
 npm install -D vite @vitejs/plugin-react typescript  # Vite + React example
 ```
 
-Install matching versions from npm (`latest` is the current release):
+Install matching versions from npm:
 
 ```bash
+npm view @supatype/cli dist-tags    # compare latest vs alpha
 npm install @supatype/cli@latest @supatype/client@latest @supatype/types@latest
 ```
 
-Pin all `@supatype/*` packages to the **same version**.
+Use `@alpha` only when the alpha tag is newer than `latest`:
+
+```bash
+npm install @supatype/cli@alpha @supatype/client@alpha @supatype/types@alpha
+```
+
+Pin all `@supatype/*` packages to the **same version**. Use `file:` links only when developing the CLI itself.
 
 ## Self-host + local dev config split
 
@@ -58,7 +65,7 @@ export default { server: { mode: "dev" } } satisfies Partial<SupatypeConfig>
 
 **Do not pin `versions` for Docker** unless you need a specific release. Omit the block so compose uses `:latest` image tags.
 
-With `supatype dev` running, saving the schema applies it and regenerates the types. `supatype generate` regenerates the types alone, without touching a database.
+Run `supatype push` after schema changes to refresh types.
 
 ## Client setup (static / same-origin)
 
@@ -74,7 +81,7 @@ export const supatype = createClient({
 })
 ```
 
-`supatype keys --write` (and `supatype dev`) write `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks.
+`supatype keys` writes `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_`, `EXPO_PUBLIC_` and `NEXT_PUBLIC_` copies for other frameworks.
 
 Call `createClient` with no type argument: the generated client already carries the schema's types.
 `createClient<Database>` loses the drafts typing (`update(..., { publish: true })` stops compiling)
@@ -99,18 +106,13 @@ From `supatype init`:
 {
   "scripts": {
     "dev": "supatype dev",
+    "vite": "vite",
+    "build": "vite build",
     "push": "supatype push",
-    "seed": "supatype seed",
-    "prepare": "supatype generate",
-    "vite": "vite"
+    "seed": "tsx seed.ts"
   }
 }
 ```
-
-`vite` is written only when you give init a Vite dev server URL, and `functions`
-(`supatype functions serve`) only when you ask for the hello-world function. `prepare` runs
-`supatype generate` after every install, so a fresh clone has the generated code it imports. Add
-`"build": "vite build"` yourself for a Vite front end.
 
 ## Local dev workflow (Vite)
 
@@ -155,7 +157,7 @@ npm run build
 supatype self-host compose up -d
 ```
 
-See [self-host.md](self-host.md) for TLS, DNS, and compose.
+See [references/self-host.md](references/self-host.md) and `examples/self-host/README.md` for TLS, DNS, and compose.
 
 ## Query patterns
 
@@ -229,7 +231,7 @@ Access rules in `schema/index.ts` enforce what each role can do.
   a string. Studio's GraphQL tabs show the decoded values. Another GraphQL client can do the same
   with the client's `GRAPHQL_SCHEMA_QUERY`, `readGraphqlSchema` and `decodeGraphqlJsonFields`.
 - **GraphQL relations use the schema's field names** (from 0.7.0, written on each push): a
-  `RelatedTo` field is the to-one field under its declared name, and the far model's `hasMany` or
+  `belongsTo` field is the to-one field under its declared name, and the far model's `hasMany` or
   `hasOne` names the reverse, so `talks: HasMany<Talk>` on `Speaker` is `talks`, not
   `talkCollection` (still a connection, `talks { edges { node { title } } }`). An end the schema
   does not name, an ambiguous reverse (two keys to one model with an inverse naming neither column),
@@ -256,11 +258,12 @@ Supatype ships first-party bindings. Prefer them over wiring the raw client by h
 |---------|-------------------|
 | `@supatype/react` | Provider + hooks: `SupatypeProvider`, `useSupatype`, `useAuth`, `useQuery`, `useMutation`, `useSubscription`, `useFunction`, `useLivePreview`, `RichText` |
 | `@supatype/react-auth` | Prebuilt, accessible auth UI: `LoginForm`, `SignUpForm`, `ForgotPasswordForm`, `UpdatePasswordForm`, `MagicLinkForm`, `OAuthButton` |
-| `@supatype/vue` | Composables: `useAuth`, `useQuery`, `useMutation`, `useSubscription`, `useFunction` |
-| `@supatype/solid` | Primitives: `createAuth`, `createQuery`, `createMutation`, `createSubscription`, `createFunction` |
-| `@supatype/svelte` | Stores: `createAuth`, `createQuery`, `createMutation`, `createSubscription`, `createFunction` |
+| `@supatype/vue` | Composables: `useAuth`, `useQuery`, `useMutation`, `useSubscription` |
+| `@supatype/solid` | Primitives: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
+| `@supatype/svelte` | Stores: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
 | `@supatype/ssr` | Cookie-based client for Server Components, Route Handlers, middleware |
 | `@supatype/ui` | Shared React component library (Tailwind + Radix primitives) |
+| `@supatype/navigation` | Shared `Header` / `Footer` components |
 
 > **Don't reimplement auth forms or auth state by hand.** Use `@supatype/react-auth` for the UI and `@supatype/react`'s `useAuth` for state. Drop to the raw client only for app-specific data access not covered by the hooks.
 

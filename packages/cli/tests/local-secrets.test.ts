@@ -4,7 +4,6 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
   FALLBACK_AUTHENTICATOR_PASSWORD,
-  FALLBACK_JWT_SECRET,
   FALLBACK_POSTGRES_PASSWORD,
   FALLBACK_SQL_EDITOR_PASSWORD,
   devAuthenticatorPassword,
@@ -50,10 +49,9 @@ describe("resolving local secrets", () => {
     expect(devAuthenticatorPassword(dir)).toBe("auth-mine")
   })
 
-  // A project with no `.env` still has to start, so the constants remain, as fallbacks only.
+  // A project with no `.env` still has to start, so the password constants remain, as fallbacks only.
   it("falls back when the project has none", () => {
     const dir = project()
-    expect(devJwtSecret(dir)).toBe(FALLBACK_JWT_SECRET)
     expect(devPostgresPassword(dir)).toBe(FALLBACK_POSTGRES_PASSWORD)
     expect(devAuthenticatorPassword(dir)).toBe(FALLBACK_AUTHENTICATOR_PASSWORD)
   })
@@ -154,5 +152,30 @@ describe("devDatabaseIdentity", () => {
 
   it("falls back to the compose file's database name", () => {
     expect(devDatabaseIdentity(project()).database).toBe("supatype")
+  })
+})
+
+describe("a project with no JWT_SECRET", () => {
+  // The published fallback signed tokens for any project without one, and the docker dev path
+  // wrote it into the same `.env` a self-host deployment reads, so it could reach a server.
+  const published = "super-secret-jwt-token-with-at-least-32-characters-long"
+
+  it("gets a generated secret written to .env, not the published one", () => {
+    const dir = project("POSTGRES_PASSWORD=pg\n")
+    const secret = devJwtSecret(dir)
+    expect(secret).not.toBe(published)
+    expect(secret.length).toBeGreaterThanOrEqual(32)
+    expect(readFileSync(join(dir, ".env"), "utf8")).toContain(`JWT_SECRET=${secret}\n`)
+    expect(devJwtSecret(dir)).toBe(secret)
+  })
+
+  it("keeps the secret a project already has, even the published one", () => {
+    // Replacing it would invalidate every token already issued against it.
+    const dir = project(`JWT_SECRET=${published}\n`)
+    expect(devJwtSecret(dir)).toBe(published)
+  })
+
+  it("is never seeded with the published secret by the dev env write", () => {
+    expect(seedMissingLocalSecrets(project(), bundledConfig())).not.toHaveProperty("JWT_SECRET")
   })
 })

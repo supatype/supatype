@@ -39,6 +39,7 @@ BASE_URL="http://127.0.0.1:${SUPATYPE_KONG_PORT}"
 TIERS="${MASKING_TIERS:-1 2}"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
 
 DEV_PID=""
 stop_stack() {
@@ -50,7 +51,7 @@ trap stop_stack EXIT INT TERM
 
 [[ -f "$MASKING_CLI" ]] || { echo "ERROR: CLI not found at $MASKING_CLI, run 'pnpm build' first" >&2; exit 1; }
 
-env_value() { grep -E "^$1=" "$PROJECT_DIR/.env" | head -1 | cut -d= -f2-; }
+env_value() { env_file_value "$PROJECT_DIR/.env" "$1"; }
 psql_db() {
   docker exec -e PGPASSWORD="$(env_value POSTGRES_PASSWORD)" "${COMPOSE_PROJECT}-db-1" \
     psql -h 127.0.0.1 -U supatype_admin -d "$(env_value POSTGRES_DB)" -X -A -t -q -v ON_ERROR_STOP=1 -c "$1"

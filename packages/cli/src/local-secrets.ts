@@ -13,6 +13,13 @@
 
 import { randomBytes } from "node:crypto"
 import { hasEnvValue, readEnvValue, upsertEnvFile } from "./env-file.js"
+import { verifyJwt } from "./jwt.js"
+import {
+  GIVEN_JWT_SECRET_REMEDY,
+  JWT_SECRET_REMEDY,
+  jwtSecretTooShort,
+  jwtSecretUnwritable,
+} from "./jwt-secret-rules.js"
 import { usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
 
 /**
@@ -48,13 +55,10 @@ export function ensureControlPlaneSecret(cwd: string): void {
   upsertEnvFile(cwd, { [CONTROL_PLANE_SECRET_ENV]: generateControlPlaneSecret() })
 }
 
-/**
- * Fallback JWT signing secret for a project that has none.
- *
- * Published, therefore worthless as a secret, anyone can mint a token for a stack still using
- * it. That is precisely why `init` generates one instead of relying on this.
- */
-export const FALLBACK_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
+/** A new JWT signing secret: 48 random bytes, base64url, so 64 characters. */
+export function generateJwtSecret(): string {
+  return randomBytes(48).toString("base64url")
+}
 
 /** Fallback Postgres superuser password for a project that has none. */
 export const FALLBACK_POSTGRES_PASSWORD = "postgres"
@@ -74,9 +78,143 @@ export const SQL_EDITOR_PASSWORD_ENV = "SUPATYPE_SQL_EDITOR_PASSWORD"
  */
 export const BUNDLED_DB_USER = "supatype_admin"
 
-/** The secret the local stack signs and validates tokens with. */
+/**
+ * The secret the local stack signs and validates tokens with: `.env`'s, or one written there first.
+ *
+ * Generated rather than defaulted. A published fallback let anyone mint a token for a stack using
+ * it, and the docker dev path wrote it into the same `.env` a server reads. A secret a project
+ * already has is kept, whatever it is, because replacing it invalidates every token issued. A
+ * `.env` without one gets the shell's when it is usable, as everywhere else ({@link newJwtSecret}).
+ */
 export function devJwtSecret(cwd: string): string {
-  return readEnvValue(cwd, "JWT_SECRET", FALLBACK_JWT_SECRET)
+  const inFile = readEnvValue(cwd, "JWT_SECRET", "")
+  if (inFile !== "") return inFile
+  const { secret, problem } = newJwtSecret(givenJwtSecret())
+  if (problem !== undefined) console.warn(`[supatype] ${problem} Generated a JWT_SECRET for .env instead.`)
+  upsertEnvFile(cwd, { JWT_SECRET: secret })
+  return secret
+}
+
+/**
+ * The names compose would take from the shell ahead of `--env-file`, where the CLI wants `.env`'s:
+ * the keys in `.env` are signed with its JWT_SECRET, so a different one from the shell would start
+ * the stack verifying with a secret those keys do not match, and refuse every request.
+ */
+export const ENV_FILE_OVER_SHELL = ["JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY"] as const
+
+/** The role a key under each name has to carry. */
+const KEY_ROLES = { ANON_KEY: "anon", SERVICE_ROLE_KEY: "service_role" } as const
+
+/**
+ * The claims of `key` when the stack would accept it as `role`: signed with `secret`, for that role,
+ * and not expiring within `validForSeconds`. Null otherwise. The issuer is not checked, since
+ * nothing in the stack checks it.
+ */
+export function usableKeyClaims(
+  key: string,
+  role: string,
+  secret: string,
+  validForSeconds = 0,
+): Record<string, unknown> | null {
+  const claims = key === "" ? null : verifyJwt(key, secret)
+  if (claims === null || claims["role"] !== role) return null
+  const expiry = claims["exp"]
+  const live = typeof expiry !== "number" || expiry > Math.floor(Date.now() / 1000) + validForSeconds
+  return live ? claims : null
+}
+
+/**
+ * Whether compose runs without the shell's `shellValue` for `name`, so the stack gets `.env`'s.
+ * Always when `.env` defines the name. For a key `.env` leaves blank, only when `.env` holds a
+ * JWT_SECRET and the shell's key is not one the stack would accept under it ({@link usableKeyClaims}):
+ * a usable one is kept, since the compose file requires SERVICE_ROLE_KEY to be set at all.
+ */
+export function envFileOverridesShell(
+  env: Record<string, string>,
+  name: (typeof ENV_FILE_OVER_SHELL)[number],
+  shellValue: string | undefined,
+): boolean {
+  if ((env[name] ?? "") !== "") return true
+  const secret = env["JWT_SECRET"] ?? ""
+  if (name === "JWT_SECRET" || secret === "" || shellValue === undefined || shellValue === "") return false
+  return usableKeyClaims(shellValue, KEY_ROLES[name], secret) === null
+}
+
+/** A JWT secret given to a run rather than read from `.env`, with where it came from. */
+export interface GivenJwtSecret {
+  value: string
+  source: string
+  /** Passed as `--secret`, which is refused rather than overridden when `.env` holds another. */
+  fromFlag: boolean
+}
+
+/** `--secret` when one was passed, else the shell's JWT_SECRET, which compose reads ahead of `.env`. */
+export function givenJwtSecret(flag?: string): GivenJwtSecret | undefined {
+  if (flag !== undefined) return { value: flag, source: "--secret", fromFlag: true }
+  const fromShell = process.env["JWT_SECRET"]
+  if (!fromShell) return undefined
+  return { value: fromShell, source: "the JWT_SECRET environment variable", fromFlag: false }
+}
+
+/**
+ * The secret for a `.env` that has none: `given` when `.env` can hold it and the stack can use it,
+ * else a generated one, with why `given` was passed over. For the callers that carry on regardless
+ * (`init`, `dev`), where a refusal would strand a half-made project or a starting session.
+ */
+export function newJwtSecret(given?: GivenJwtSecret): { secret: string; problem?: string } {
+  if (given === undefined) return { secret: generateJwtSecret() }
+  const problem = jwtSecretUnwritable(given.value, given.source)
+  return problem === null ? { secret: given.value } : { secret: generateJwtSecret(), problem }
+}
+
+/** The JWT_SECRET keys written into `.env` are signed with, or why there is none to use. */
+export type EnvJwtSecret =
+  | {
+      ok: true
+      secret: string
+      /** The JWT_SECRET to upsert beside the keys: empty when `.env` already holds it. */
+      write: Record<string, string>
+      /** Where a newly written secret came from. Its keys have to be signed again. */
+      note?: string
+      /** A given secret differing from `.env`'s, which is not used. */
+      warning?: string
+    }
+  | { ok: false; problem: string; hints: readonly string[] }
+
+/**
+ * The one resolver for the secret that keys written into `.env` are signed with. `.env`'s always
+ * wins, since `.env` is what every later run of the stack reads, and compose is run without the
+ * shell's copy when `.env` has one (self-host-compose.ts). A `given` secret is written into a `.env`
+ * that has none, else one is generated; a `given` one that differs from `.env`'s earns a warning.
+ *
+ * Checked before anything is written, so keys are never signed with a secret the stack then
+ * refuses. A `--secret` that differs from `.env`'s is refused by `keys` before it gets here.
+ */
+export function resolveEnvJwtSecret(env: Record<string, string>, given?: GivenJwtSecret): EnvJwtSecret {
+  const inFile = env["JWT_SECRET"] ?? ""
+  if (inFile === "") return writtenEnvJwtSecret(given)
+  const short = jwtSecretTooShort(inFile)
+  if (short !== null) return { ok: false, problem: short, hints: JWT_SECRET_REMEDY }
+  const warning = ignoredJwtSecretWarning(inFile, given)
+  return { ok: true, secret: inFile, write: {}, ...(warning !== undefined && { warning }) }
+}
+
+/** The one line said when `given` differs from `.env`'s JWT_SECRET, which is used instead. */
+export function ignoredJwtSecretWarning(inFile: string, given: GivenJwtSecret | undefined): string | undefined {
+  if (given === undefined || given.value === inFile) return undefined
+  return `${given.source} differs from the JWT_SECRET in .env, so this run uses the one in .env.`
+}
+
+function writtenEnvJwtSecret(given: GivenJwtSecret | undefined): EnvJwtSecret {
+  const secret = given?.value ?? generateJwtSecret()
+  const problem = given === undefined ? null : jwtSecretUnwritable(secret, given.source)
+  if (problem !== null) return { ok: false, problem, hints: GIVEN_JWT_SECRET_REMEDY }
+  const from =
+    given === undefined ? "Generated a JWT_SECRET in .env" : `Wrote JWT_SECRET into .env from ${given.source}`
+  const note =
+    `${from}, since .env had none, and signed ANON_KEY and SERVICE_ROLE_KEY with it, ` +
+    "replacing any keys .env held."
+  return { ok: true, secret, write: { JWT_SECRET: secret }, note }
 }
 
 /** The password for the Postgres superuser the engine and server connect as. */
@@ -140,10 +278,12 @@ export function devSqlEditorPassword(cwd: string): string {
  * `supatype init` writing them.
  *
  * **Fills with the fallback, does not generate.** Preserving the value such a project has been
- * running with is the point: generating a new `JWT_SECRET` would invalidate tokens already
- * issued, and a new `POSTGRES_PASSWORD` would not match the password baked into an existing
- * Postgres volume, which `initdb` only sets once. New projects get generated values from
+ * running with is the point: a new `POSTGRES_PASSWORD` would not match the password baked into an
+ * existing Postgres volume, which `initdb` only sets once. New projects get generated values from
  * `init`; existing ones keep working and are no worse off than before.
+ *
+ * Not `JWT_SECRET`: {@link devJwtSecret} generates that one, and every caller signs its keys
+ * through it before this runs.
  *
  * `POSTGRES_PASSWORD` only for the bundled database. An external one is reached through the
  * operator's `DATABASE_URL`, and a fallback password beside it describes a credential that does
@@ -154,7 +294,6 @@ export function seedMissingLocalSecrets(
   config: SupatypeProjectConfig,
 ): Record<string, string> {
   const out: Record<string, string> = {}
-  if (!hasEnvValue(cwd, "JWT_SECRET")) out.JWT_SECRET = FALLBACK_JWT_SECRET
   if (!usesExternalDatabase(config) && !hasEnvValue(cwd, "POSTGRES_PASSWORD")) {
     out.POSTGRES_PASSWORD = FALLBACK_POSTGRES_PASSWORD
   }
@@ -221,7 +360,7 @@ export function devDatabaseIdentity(cwd: string): DevDatabaseIdentity {
 /** A connection string to the local database at `hostPort`, `db:5432` inside the network. */
 export function devDatabaseUrl(cwd: string, hostPort: string): string {
   const { user, password, database } = devDatabaseIdentity(cwd)
-  return `postgresql://${user}:${password}@${hostPort}/${database}?sslmode=disable`
+  return `postgresql://${user}:${encodeURIComponent(password)}@${hostPort}/${database}?sslmode=disable`
 }
 
 /**

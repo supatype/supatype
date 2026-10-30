@@ -44,9 +44,8 @@ function parseLines(text: string): EnvLine[] {
       out.push({ text: raw, managed: false })
       continue
     }
-    const eq = raw.indexOf("=")
-    const key = eq > 0 ? raw.slice(0, eq).trim() : undefined
-    const isAssignment = key !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+    const key = splitAssignment(raw)?.key
+    const isAssignment = key !== undefined
     out.push({ ...(isAssignment && { key }), text: raw, managed: isAssignment && markerPending })
     if (!isAssignment && trimmed !== "") markerPending = false
     else if (isAssignment) markerPending = false
@@ -112,6 +111,13 @@ export function upsertEnvFile(
       continue
     }
 
+    if (key in updates && written.has(key)) {
+      // A second assignment of a key already rewritten above. Compose reads the last one, so
+      // leaving it would put back the value this write replaced.
+      if (line.managed && isMarker(kept[kept.length - 1]?.text)) kept.pop()
+      continue
+    }
+
     if (key in updates) {
       const wantsMarker = managed.has(key)
       if (wantsMarker && !isMarker(kept[kept.length - 1]?.text)) {
@@ -143,56 +149,83 @@ export function upsertEnvFile(
   writeFileSync(envPath, next, "utf8")
 }
 
-/**
- * Parse a project `.env` into key/value pairs.
- *
- * Deliberately small: `KEY=value`, `#` comments, one optional layer of surrounding quotes. No
- * interpolation and no `export` handling, because Compose's own parser does not do those either and
- * a `.env` that means two different things depending on who reads it is worse than a limited one.
- */
-export function readEnvFile(cwd: string): Record<string, string> {
-  const envPath = join(cwd, ".env")
-  if (!existsSync(envPath)) return {}
+/** `KEY` and the text after its `=` for an assignment line, or null for anything else. */
+function splitAssignment(line: string): { key: string; rest: string } | null {
+  const trimmed = line.trim().replace(/^export\s+/, "")
+  if (trimmed.startsWith("#")) return null
+  const eq = trimmed.indexOf("=")
+  if (eq <= 0) return null
+  const key = trimmed.slice(0, eq).trim()
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? { key, rest: trimmed.slice(eq + 1) } : null
+}
 
+/** Index of the quote closing `value`'s opening one, skipping escaped quotes, or -1. */
+function closingQuote(value: string, quote: string): number {
+  for (let i = 1; i < value.length; i++) {
+    if (value[i] === quote && value[i - 1] !== "\\") return i
+  }
+  return -1
+}
+
+/**
+ * The value of one assignment, read the way Docker Compose's dotenv parser reads it.
+ *
+ * A quoted value runs to its closing quote and keeps any `#` inside; text after the quote is
+ * ignored. An unquoted value ends at the first space followed by `#`, and trailing whitespace is
+ * dropped, so `KEY=x  # note` is `x` while `KEY=x#y` is `x#y`. Reading ` # note` into the value
+ * signed tokens with a secret the stack, reading the same line through compose, did not have.
+ */
+function envValueOf(rest: string): string {
+  const value = rest.trim()
+  const quote = value[0]
+  if (quote === '"' || quote === "'") {
+    const close = closingQuote(value, quote)
+    if (close > 0) return value.slice(1, close)
+  }
+  const comment = value.indexOf(" #")
+  return (comment === -1 ? value : value.slice(0, comment)).trimEnd()
+}
+
+/**
+ * Parse `.env` text into key/value pairs, the one parser every reader of `.env` goes through.
+ *
+ * Follows Compose on what it shares with it: `#` comments, an optional `export `, quotes, inline
+ * comments, and the last assignment of a key winning. Not interpolation or escape sequences in
+ * double quotes, which nothing the CLI writes or reads relies on.
+ */
+export function parseEnvText(text: string): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (trimmed.length === 0 || trimmed.startsWith("#")) continue
-    const eq = trimmed.indexOf("=")
-    if (eq <= 0) continue
-    const key = trimmed.slice(0, eq).trim()
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue
-    let value = trimmed.slice(eq + 1).trim()
-    if (
-      value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'")))
-    ) {
-      value = value.slice(1, -1)
-    }
-    out[key] = value
+  for (const line of text.split(/\r?\n/)) {
+    const assignment = splitAssignment(line)
+    if (assignment !== null) out[assignment.key] = envValueOf(assignment.rest)
   }
   return out
 }
 
+/** Parse a project `.env` into key/value pairs. See {@link parseEnvText}. */
+export function readEnvFile(cwd: string): Record<string, string> {
+  const text = envText(cwd)
+  return text === null ? {} : parseEnvText(text)
+}
+
 /**
  * `.env`'s text, or null when there is none, without the byte order mark Windows tools write.
- * Left in, it hid the first key from the `^KEY=` matches below.
+ * Left in, it hid the first key from the single-key readers below.
  */
 function envText(cwd: string): string | null {
   const envPath = join(cwd, ".env")
   return existsSync(envPath) ? readFileSync(envPath, "utf8").replace(/^\uFEFF/, "") : null
 }
 
+/** `key`'s value in `.env`, or `fallback` when it is absent or blank. */
 export function readEnvValue(cwd: string, key: string, fallback: string): string {
-  const m = envText(cwd)?.match(new RegExp(`^${key}=(.+)$`, "m"))
-  return m?.[1] ? m[1].trim() : fallback
+  const value = readEnvFile(cwd)[key]
+  return value !== undefined && value !== "" ? value : fallback
 }
 
 /** Whether `.env` carries a non-empty value for `key`. Distinguishes absent from defaulted. */
 export function hasEnvValue(cwd: string, key: string): boolean {
-  const text = envText(cwd)
-  return text !== null && new RegExp(`^${key}=(.+)$`, "m").test(text)
+  return (readEnvFile(cwd)[key] ?? "") !== ""
 }
 
 /**

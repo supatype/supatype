@@ -64,7 +64,7 @@ mint_keys "$EXAMPLE_DIR" "$CLI_BIN"
 if [[ "$FUNCTIONS_ENV_EXISTED" == "no" ]]; then
   cp "$EXAMPLE_DIR/functions/.env.local.example" "$FUNCTIONS_ENV"
 fi
-WEBHOOK_SECRET="$(sed -n 's/^WEBHOOK_SECRET=//p' "$FUNCTIONS_ENV" | tr -d '"\r' | tail -1)"
+WEBHOOK_SECRET="$(env_file_value "$FUNCTIONS_ENV" WEBHOOK_SECRET)"
 if [[ -z "$WEBHOOK_SECRET" ]]; then
   echo "ERROR: no WEBHOOK_SECRET in $FUNCTIONS_ENV"
   exit 1

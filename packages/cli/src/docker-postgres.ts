@@ -239,7 +239,7 @@ function staleVolumeError(name: string): Error {
 /** Connection string for the Docker container (local dev credentials). */
 export function dockerDbUrl(projectName: string, port: number, password = DEFAULT_DEV_PASSWORD): string {
   // Host → published port. sqlx/libpq "prefer" can mis-handle SSL on some hosts (e.g. Docker Desktop on Windows).
-  return `postgres://${PG_USER}:${password}@127.0.0.1:${port}/${projectName}?sslmode=disable`
+  return `postgres://${PG_USER}:${encodeURIComponent(password)}@127.0.0.1:${port}/${projectName}?sslmode=disable`
 }
 
 /**
@@ -248,7 +248,7 @@ export function dockerDbUrl(projectName: string, port: number, password = DEFAUL
  * container where pg_hba grants trust, avoids host-published-port SCRAM/SSL issues.
  */
 export function dockerPgLoopbackDbUrl(projectName: string, password = DEFAULT_DEV_PASSWORD): string {
-  return `postgres://${PG_USER}:${password}@127.0.0.1:5432/${projectName}?sslmode=disable`
+  return `postgres://${PG_USER}:${encodeURIComponent(password)}@127.0.0.1:5432/${projectName}?sslmode=disable`
 }
 
 /**

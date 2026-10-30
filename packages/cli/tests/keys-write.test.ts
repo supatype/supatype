@@ -11,11 +11,14 @@
  * already in `.env` is held by clients this command cannot reach and reissuing it locks them out.
  * `--force` is how someone says they meant to rotate.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { anonKeyEnvUpdates, writeKeysToEnv } from "../src/commands/keys.js"
+import { anonKeyEnvUpdates, generateAndWriteKeys, writeKeysToEnv } from "../src/commands/keys.js"
+import { readEnvFile } from "../src/env-file.js"
+import { verifyJwt } from "../src/jwt.js"
+import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
 
 const PAIR = { anonKey: "anon.jwt.value", serviceKey: "service.jwt.value" }
 
@@ -138,11 +141,138 @@ describe("anonKeyEnvUpdates", () => {
       "VITE_SUPATYPE_ANON_KEY",
       "PUBLIC_SUPATYPE_ANON_KEY",
       "EXPO_PUBLIC_SUPATYPE_ANON_KEY",
+      "NEXT_PUBLIC_SUPATYPE_ANON_KEY",
     ])
   })
 
   it("adds the URL names only when given a URL", () => {
     expect(Object.keys(anonKeyEnvUpdates("a", "s", "http://x"))).toContain("VITE_SUPATYPE_URL")
     expect(Object.keys(anonKeyEnvUpdates("a", "s"))).not.toContain("VITE_SUPATYPE_URL")
+    expect(Object.keys(anonKeyEnvUpdates("a", "s", "http://x"))).toContain("NEXT_PUBLIC_SUPATYPE_URL")
+    expect(Object.keys(anonKeyEnvUpdates("a", "s"))).not.toContain("NEXT_PUBLIC_SUPATYPE_URL")
   })
 })
+
+describe("reading JWT_SECRET for keys", () => {
+  let dir: string
+  const savedSecret = process.env["JWT_SECRET"]
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "supatype-keys-secret-"))
+    delete process.env["JWT_SECRET"]
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    if (savedSecret === undefined) delete process.env["JWT_SECRET"]
+    else process.env["JWT_SECRET"] = savedSecret
+  })
+
+  it("leaves an inline comment out of the secret, as compose does", () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=the-real-secret-of-at-least-32-chars  # rotated in May\n")
+    expect(readEnvFile(dir)["JWT_SECRET"]).toBe("the-real-secret-of-at-least-32-chars")
+  })
+
+  it("reads the last JWT_SECRET when the key is assigned twice", () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=old-one\nJWT_SECRET=new-one\n")
+    expect(readEnvFile(dir)["JWT_SECRET"]).toBe("new-one")
+  })
+})
+
+describe("generateAndWriteKeys (init)", () => {
+  let dir: string
+  const SECRET = "a-local-development-secret-at-least-32-chars"
+  const savedSecret = process.env["JWT_SECRET"]
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "supatype-keys-init-"))
+    delete process.env["JWT_SECRET"]
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    if (savedSecret === undefined) delete process.env["JWT_SECRET"]
+    else process.env["JWT_SECRET"] = savedSecret
+  })
+
+  it("writes the Next.js names with the rest, and keys that verify against the secret", () => {
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${SECRET}  # note\nPUBLIC_SUPATYPE_URL=http://localhost:18999\n`)
+    const result = generateAndWriteKeys(dir)
+    if (!result.ok) throw new Error(result.reason)
+
+    expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_ANON_KEY")).toBe(result.anonKey)
+    expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_URL")).toBe("http://localhost:18999")
+    expect(verifyJwt(envValue(dir, "ANON_KEY") ?? "", SECRET)).not.toBeNull()
+  })
+})
+
+/**
+ * `init` writes a new `.env` and then signs keys into it. A JWT_SECRET exported in the shell used
+ * to sign the keys while `.env` got a generated secret, so the keys failed against the stack as soon
+ * as it ran from a shell without that variable.
+ */
+describe("the secret init signs its keys with", () => {
+  const OTHER = "a-different-secret-that-is-also-32-chars"
+  let dir: string
+  const savedSecret = process.env["JWT_SECRET"]
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "supatype-keys-init-shell-"))
+    process.env["JWT_SECRET"] = OTHER
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    vi.spyOn(process, "exit").mockImplementation((code?: string | number | null) => {
+      throw new Error(`exit ${String(code)}`)
+    })
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    rmSync(dir, { recursive: true, force: true })
+    if (savedSecret === undefined) delete process.env["JWT_SECRET"]
+    else process.env["JWT_SECRET"] = savedSecret
+  })
+
+  it("is the one the new .env holds, which is the shell's when one is exported", () => {
+    scaffold(dir, defaultScaffoldOptions("acme"))
+    generateAndWriteKeys(dir)
+
+    const secret = envValue(dir, "JWT_SECRET") ?? ""
+    expect(secret).toBe(OTHER)
+    expect(verifyJwt(envValue(dir, "ANON_KEY") ?? "", secret)).not.toBeNull()
+  })
+
+  it("signs with .env's JWT_SECRET when the shell's differs, and never exits mid-init", () => {
+    const inFile = "a-local-development-secret-at-least-32-chars"
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${inFile}\nANON_KEY=\n`)
+
+    const result = generateAndWriteKeys(dir)
+
+    expect(result.ok).toBe(true)
+    expect(envValue(dir, "JWT_SECRET")).toBe(inFile)
+    expect(verifyJwt(envValue(dir, "ANON_KEY") ?? "", inFile)).not.toBeNull()
+  })
+
+  it("comes back with the reason rather than exiting when .env's JWT_SECRET is too short", () => {
+    const before = "JWT_SECRET=twenty-chars-secret!\nANON_KEY=\n"
+    writeFileSync(join(dir, ".env"), before)
+
+    const result = generateAndWriteKeys(dir)
+
+    expect(result.ok).toBe(false)
+    expect(readFileSync(join(dir, ".env"), "utf8")).toBe(before)
+  })
+
+  it.each([
+    ["too short", "twenty-chars-secret!"],
+    ["holding a #, which .env would read as a comment", "a-secret-long-enough-to-use#but-commented"],
+    ["holding a space", "a secret long enough to use but with spaces"],
+  ])("is generated instead of a shell JWT_SECRET %s", (_case, shell) => {
+    process.env["JWT_SECRET"] = shell
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    scaffold(dir, defaultScaffoldOptions("acme"))
+
+    const secret = readEnvFile(dir)["JWT_SECRET"] ?? ""
+    expect(secret).not.toBe(shell)
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{64}$/)
+    expect(warned).toHaveBeenCalledTimes(1)
+  })
+})
+

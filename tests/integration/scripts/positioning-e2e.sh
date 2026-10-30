@@ -35,6 +35,7 @@ COMPOSE_PROJECT="supatype-${NAME}"
 BASE_URL="http://127.0.0.1:${SUPATYPE_KONG_PORT}"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
 
 DEV_PID=""
 cleanup() {
@@ -71,9 +72,8 @@ export type Member = Model<{
 /** Keeps the Optional import used before the checks add a field with it. */
 export type MaybeText = Optional<string>
 TS
-sed -i "s/^SUPATYPE_KONG_PORT=.*/SUPATYPE_KONG_PORT=${SUPATYPE_KONG_PORT}/" "$PROJECT_DIR/.env"
-grep -q '^SUPATYPE_KONG_PORT=' "$PROJECT_DIR/.env" || echo "SUPATYPE_KONG_PORT=${SUPATYPE_KONG_PORT}" >>"$PROJECT_DIR/.env"
-grep -q '^SUPATYPE_DEV_DB_PORT=' "$PROJECT_DIR/.env" || echo "SUPATYPE_DEV_DB_PORT=${DB_PORT}" >>"$PROJECT_DIR/.env"
+env_file_set "$PROJECT_DIR/.env" SUPATYPE_KONG_PORT "${SUPATYPE_KONG_PORT}"
+grep -q '^SUPATYPE_DEV_DB_PORT=' "$PROJECT_DIR/.env" || env_file_set "$PROJECT_DIR/.env" SUPATYPE_DEV_DB_PORT "${DB_PORT}"
 if [[ -n "${MASKING_ENGINE_BIN:-}" ]]; then
   MASKING_ENGINE_BIN="$MASKING_ENGINE_BIN" node -e '
     const fs = require("fs"); const path = process.argv[1]
@@ -96,8 +96,8 @@ fi
 
 pg() {
   local pw db
-  pw="$(grep -E '^POSTGRES_PASSWORD=' "$PROJECT_DIR/.env" | cut -d= -f2-)"
-  db="$(grep -E '^POSTGRES_DB=' "$PROJECT_DIR/.env" | cut -d= -f2-)"
+  pw="$(env_file_value "$PROJECT_DIR/.env" POSTGRES_PASSWORD)"
+  db="$(env_file_value "$PROJECT_DIR/.env" POSTGRES_DB)"
   docker exec -e PGPASSWORD="$pw" "${COMPOSE_PROJECT}-db-1" psql -h 127.0.0.1 -U supatype_admin -d "$db" -X -A -t -q -v ON_ERROR_STOP=1 -c "$1"
 }
 [[ "$(pg "select to_regclass('_supatype.managed_objects_undo') is not null")" == t ]] \

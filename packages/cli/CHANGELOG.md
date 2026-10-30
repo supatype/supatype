@@ -1,5 +1,70 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* **keys:** `supatype keys` writes into `.env` when there is one, filling only the blank keys, as
+  `--write` did. `--print` only prints. `--write` still works, so scripts and docs written for 0.7.0
+  keep running. With no `.env` the keys are printed, with a line saying how to have them written.
+  `--print` with no secret anywhere exits 1 rather than printing keys signed with one it made up and
+  kept nowhere. `--print` checks the secret as writing does, since printed keys end up in a `.env`
+  all the same: at least 32 characters, and for a given one, no whitespace, `#` or quotes.
+* **keys, self-host, init, dev:** one rule for the `JWT_SECRET` keys are signed with. `.env`'s always
+  wins. A shell `JWT_SECRET` is used only when `.env` has none, and is then written into `.env`; one
+  that differs from `.env`'s gets a single warning line saying `.env`'s is used, and is never
+  refused. Only a `keys --secret` that differs from `.env`'s is refused. Docker Compose reads the
+  shell ahead of `.env`, so every compose command now runs without the shell's `JWT_SECRET`,
+  `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines that name, and without a shell key the stack
+  would not accept under `.env`'s `JWT_SECRET` (another secret, another role, or expired):
+  `supatype dev` on docker with a different shell `JWT_SECRET` started services that refused every
+  key with 401. A shell key the stack accepts still fills a blank one. `push`, `status` and the
+  other commands calling the local stack follow the same rule, and send `.env`'s `SERVICE_ROLE_KEY`,
+  the name the stack is started with, and never a `SUPATYPE_SERVICE_ROLE_KEY` there. When a
+  `JWT_SECRET` is newly written into `.env` (given or generated), `keys` and `self-host compose up`
+  sign both keys again and say so, since keys already there cannot verify against it. A secret is
+  checked before anything is written: at least 32 characters, and for one written into `.env`, no
+  whitespace, `#` or quotes. `compose up` used to write keys signed with a short secret and then
+  refuse it, leaving keys that were never re-signed once the secret was fixed. `init` warns and
+  generates a secret when the shell's is unusable, and never exits mid-wizard over the keys.
+* **keys, dev:** `NEXT_PUBLIC_SUPATYPE_ANON_KEY` is written beside the `VITE_`, `PUBLIC_` and
+  `EXPO_PUBLIC_` copies, and `NEXT_PUBLIC_SUPATYPE_URL` wherever the other URL copies are.
+
+### Bug Fixes
+
+* **security:** a project with no `JWT_SECRET` gets one in `.env` from `dev` or `keys`: the shell's
+  when usable, else a generated one. Before, it signed with a published fallback, and the docker dev
+  path wrote that fallback into the `.env` a self-host deployment reads. A secret already in `.env`
+  is kept, whatever it is. A native dev project that never had one signs with the new secret, so its
+  existing sessions sign out once.
+* **push:** on a native dev stack, the service-role key push uses to create storage buckets is the
+  project's, from `.env`, as on docker. It was signed with the published dev secret, which a stack
+  running with its own `JWT_SECRET` refused with 401.
+* **env:** `.env` is read the way Docker Compose reads it, through one parser: `KEY=x  # note` is
+  `x`, a quoted value keeps its `#`, `export KEY=` is understood, and the last assignment of a key
+  wins. The CLI kept ` # note` in the value and read the first of two assignments, so it could sign
+  keys with a secret, or wait on a port, that the stack did not have (F14:
+  `SUPATYPE_DEV_DB_PORT` appended a second time was ignored). Updating a key assigned twice leaves
+  one line for it.
+* **dev, self-host:** database passwords are encoded in every connection URL the CLI builds. The
+  compose file cannot encode them, so the commands that start or recreate containers (`dev` at
+  startup, and `self-host compose up`, `render` and `restart`) refuse a `POSTGRES_PASSWORD`,
+  `AUTHENTICATOR_PASSWORD` or `SUPATYPE_SQL_EDITOR_PASSWORD` holding a character that breaks a URL,
+  naming the variable and how to generate a safe one. Writing the compose file does not check, so
+  `update` and the dev watcher never exit over a password an older stack runs with. `push`, `diff`
+  and dev's database recovery, which start only the database, print the same message as a warning.
+  `self-host compose down`, `status` and `logs` run against the compose file already on disk rather
+  than rewriting it from the current config, so such a stack can still be stopped and inspected.
+  With no compose file on disk yet they render one, without the check.
+* **self-host:** `self-host compose logs --service <name>` shows that service. The option was
+  taken by the hidden native `logs` command, declared in a way that attached its options to
+  `self-host` itself, so every service was shown. The other native commands had the same fault.
+* **dev, self-host:** `compose up` failing with "all predefined address pools have been fully
+  subnetted" says Docker is out of network addresses, how many Supatype networks there are, and that
+  `docker network prune` frees the unused ones.
+* **cli:** running the CLI from a monorepo checkout that has not been built says to run
+  `pnpm install && pnpm build` at the repository root, rather than a bare "Cannot find module".
+
 ## 0.7.0
 
 Highlights: `adopt` takes what a push refuses, with `--key`, `--release` and `--reclaim`, and
