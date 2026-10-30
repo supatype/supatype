@@ -1,6 +1,6 @@
 # Supatype: full context for language models
 
-> Zero drift: one set of TypeScript types runs the whole stack, database to component. One schema derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, auth, storage, realtime, Studio editing views and the typed client. Self-hostable. SDKs MIT, CLI and services Apache 2.0, schema engine source-available under BSL 1.1.
+> Zero drift: one set of TypeScript types runs the whole stack, database to component. One schema derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, auth, storage, realtime, Studio editing views and the typed client. Self-hostable. SDKs MIT, CLI and services Apache 2.0, API server MIT, Postgres image PostgreSQL License, schema engine source-available under BSL 1.1.
 
 This file is the expanded companion to https://www.supatype.com/llms.txt: a summary first, then the full text of every docs and guide page. Prefer linking agents here when they need product facts without scraping HTML.
 
@@ -8,14 +8,14 @@ This file is the expanded companion to https://www.supatype.com/llms.txt: a summ
 
 Supatype lets developers define backend data models as TypeScript `Model<>` types. That schema is the contract. From it, the platform generates and keeps in step:
 
-- PostgreSQL tables, indexes and migrations, with a recorded rollback and a risk class for every change (safe, cautious, destructive)
-- Row-level security policies from access rules on models and fields (`Public`, `LoggedIn`, `Owner<>`, `OwnerFrom<>`, `Role<>`, combined with `Any<>`, `All<>`, `Not<>`)
+- PostgreSQL tables, indexes and migrations, with a recorded rollback and a risk class for every change (safe, cautious, destructive). After the transaction commits, new indexes on tables with rows are built `CONCURRENTLY` and new constraints are validated online
+- Row-level security policies from access rules on models (`Public`, `LoggedIn`, `Owner<>`, `OwnerFrom<>`, `Role<>`, combined with `Any<>`, `All<>`, `Not<>`); field rules mask or refuse single columns
 - REST (PostgREST) and GraphQL (pg_graphql) APIs, both running as the caller so row-level security applies
 - The typed client and framework bindings your components use
 - Auth (email and password, magic links, OAuth providers, MFA)
 - Storage buckets from `Bucket<>` types, with accept lists, size limits, access rules, image transforms and time-limited signed URLs
 - Realtime change subscriptions, presence and broadcast; each event, deletes included, reaches only subscribers allowed to read that row
-- Studio: a schema-generated admin and CMS (lists, forms, rich text, blocks, media library, drafts, versions, live preview, SQL runner, migration history). Four roles on self-host: admin, developer, editor and viewer (Cloud adds owner and billing), each acting under the project's own access rules unless an owner or admin acts elevated
+- Studio: a schema-generated admin and CMS (lists, forms, rich text, blocks, media library, drafts, versions, live preview, SQL runner, migration history). Four roles on self-host: admin, developer, editor and viewer (Cloud adds owner and billing). Admins and developers work with full access by default. Editors and viewers work in Studio mode, where the app's row rules are skipped and its field rules and masks still apply
 
 "Zero drift" means: change a field once and every layer follows; rename a field and the TypeScript build fails instead of production.
 
@@ -27,7 +27,7 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 
 ## How developers use it
 
-1. Install the CLI (`npm install -g @supatype/cli`) and create a project with `supatype init`.
+1. Install the CLI with `npm install -g @supatype/cli` (on Linux and macOS, also `curl -fsSL https://supatype.com/install.sh | bash` or `brew install supatype/tap/supatype`) and create a project with `supatype init`.
 2. Author models in `schema/index.ts`.
 3. Run `supatype dev`. It starts the stack in Docker Compose (or natively), applies the schema, and on every save migrates the database and regenerates the typed client. It keeps running; use a second terminal for other commands. It stops with its stack when the process that started it exits (a killed script, a cancelled CI job), as on Ctrl+C; to leave a stack running with nothing attached, use `supatype self-host compose up -d`. If `dev` itself is killed (its process ended, or its window closed before it finished stopping), the stack can be left running: the next `supatype dev` offers to stop it, and `supatype self-host compose down` stops it now.
 4. Apply the schema to another database (staging, production, a self-hosted server) with `supatype push`. `supatype diff` previews a change; `supatype migrate` writes the SQL without applying it.
@@ -40,31 +40,35 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 - Gateway: Kong in front of PostgREST, `supatype-server` (Go: auth and the gateway), storage, realtime and the Deno functions worker. The gateway decides CORS: the site URL, `api.corsOrigins` and a list saved in Studio; `*` only when written.
 - Extensions (PostGIS, pgvector, unaccent, pgcrypto) are created in the `extensions` schema; their functions are not API endpoints, so expose one through a SQL function of your own. REST is PostgREST 14.18, which needs a JWT secret of at least 32 characters.
 - Realtime: a WAL-based service (`supatype/realtime`) reading logical replication; it judges every event, deletes included, against the schema's generated read rules.
-- Images: `supatype/postgres` (Postgres 17 with PostGIS, pgvector, pg_graphql and others), `supatype/server`, `supatype/realtime`, `supatype/storage`, `supatype/studio`, `supatype/functions-worker`, `supatype/schema-engine`.
+- Images: `supatype/postgres` (Postgres 17 with PostGIS, pgvector, pg_graphql and others), `supatype/server`, `supatype/realtime`, `supatype/storage`, `supatype/studio`, `supatype/functions-worker`, `supatype/schema-engine`, `supatype/control-plane`.
 
 ## Building an app: key facts
 
 Schema (https://www.supatype.com/docs/schema.html):
 - Models are `Model<Fields, Meta>` types exported from `schema/index.ts`, imported from `@supatype/types`. The table name is the type name in snake case (`BlogPost` is `blog_post`); `tableName` overrides it.
-- Fields are required unless wrapped in `Optional<>`. Plain `string`, `number` (float) and `boolean`, a union of string literals for an enum, and `Int`, `UUID`, `Timestamp`, `JSON<T>`, `RichText`, `Blocks<T>`, `Slug<"title">`, `ImageAsset<Bucket>`, `SupatypeAuthUserId`.
+- Fields are required unless wrapped in `Optional<>`. Plain `string`, `number` (float) and `boolean`, a union of string literals for an enum, and `Int`, `UUID`, `Timestamp`, `JSON<T>`, `RichText`, `Blocks<T>`, `Slug<"title">`, `ImageAsset<Bucket>`, `SupatypeAuthUserId`. `Identity<>` declares an identity column and `Generated<T, "expr">` a stored generated column.
+- A model index can name its method with `using` (`"gist"`, `"hnsw"` and others). An `hnsw` index uses cosine distance unless `distance` is `"l2"` or `"innerProduct"`.
+- `Blocks<T>` entries are `{ type, data }`, with the block's fields under `data`. `supatype push` moves rows written in the pre-0.7.0 flat shape.
 - `RelatedTo<M>` adds `<field>_id`, nullable unless `{ required: true }`, `onDelete` default `"restrict"`. `HasMany` and `HasOne` add no column. `ManyToMany` makes one junction per pair, named from both tables in alphabetical order (`post_tag`).
 - Access rules per `read`, `create`, `update`, `delete`: `Public`, `LoggedIn`, `Private`, `Owner<"col">`, `OwnerFrom<"rel">`, `Role<"name">` (reads `app_metadata.role`), `Any`, `All`, `Not`, and comparisons `Eq`, `Neq`, `Gt`, `Gte`, `Lt`, `Lte`, `Like`. An operation with no rule is denied.
 - Field rules go in `access.fields`; an unreadable column comes back `null`. A model with `versions` cannot have field rules.
-- `versions: { drafts: true }`: the model's table holds the published record; drafts and history are in `<table>_versions`; direct API writes to the live row are refused.
+- `versions: { drafts: true }`: the model's table holds the published record; drafts and history are in `<table>_versions`; direct API updates of the live row are refused (`42501`).
 - `SupatypeAuthUserId` has no foreign key unless `onDelete` (`"cascade"`, `"restrict"`, `"setNull"`) is set; with an `Owner<"col">` create rule it defaults to the caller's id.
 - Renames are recorded with `supatype rename` in `supatype/renames.json`. `supatype push --yes` does not ask about renames.
 
 Client (https://www.supatype.com/docs/client.html):
 - Import `createClient` from the generated `supatype/generated/client.ts`, with no type argument. It knows which models keep drafts.
 - On a drafts model, `update` saves a draft; `update(data, { publish: true })` also publishes; `.draft()` reads drafts; `rpc("publish", { model_table, record_id }, { schema: "supatype" })` publishes.
-- Realtime: `from(table).subscribe(cb, { event })`. Functions: `functions.invoke(name, { body })`. `error` is a plain object with `message` and `code`; auth and storage calls throw on a network failure.
-- GraphQL: `graphql<T>(query, variables)`. Rich text, blocks and json fields come back as objects, not the JSON strings pg_graphql sends: the client reads the schema once per role and decodes every `JSON` scalar field the query selects, through aliases, fragments, relations and lists. A field it cannot place stays as returned.
+- Realtime: `from(table).subscribe(cb, { event })`. Functions: `functions.invoke(name, { body })`. `error` is a plain object with `message` and, when known, `code`, `status`, `details`, `hint` and `field`. Auth calls and storage object calls (upload, download and the rest) throw on a network failure.
+- `BigInt` columns read as `bigint`; `Decimal` and `Money` read as strings, so no digits are lost.
+- GraphQL: `graphql<T>(query, variables)`. Rich text, blocks and json fields come back as objects, not the JSON strings pg_graphql sends: the client reads the schema once per role and decodes every `JSON` scalar field the query selects, through aliases, fragments, relations and lists. A field it cannot place stays as returned. Relation fields use the schema's names (`talks`, not `talkCollection`) from the first push on 0.7.0.
 
 Seeding (https://www.supatype.com/docs/seeding.html):
 - `seeds/*.ts` run alphabetically, each exporting `default async function seed({ db, expr, log }: SeedContext)` from `@supatype/cli/seed`. The builder records writes; the engine applies each file in one transaction.
 - Prefer `upsert({ where, data })` keyed by a primary or unique key. Nested `create` children under an upsert are added only when no identical child exists.
 - `RichText` accepts a plain string. `expr.default()` (`{ "$default": true }`) resets a column to its default. Relations take `{ connect: { key: value } }`.
-- Seeds cannot create sign-in users: create them with `supatype admin create-user` or the auth API, then reference their ids. Many-to-many rows go through `db.$sql`.
+- Seeds cannot create sign-in users: create them with `supatype admin create-user` or the auth API, then reference their ids. Many-to-many rows go through `db.$sql`. Its string params bind as `text`, so cast them where the column needs another type, as in `$1::uuid`.
+- Blocks values are `{ type, data }`.
 
 Studio roles (https://www.supatype.com/docs/studio-roles.html):
 - Self-host roles: admin, developer, editor, viewer. Only admins give or change Studio roles, and a developer cannot change an admin's account.
@@ -102,7 +106,9 @@ Studio roles (https://www.supatype.com/docs/studio-roles.html):
 
 - Client SDKs, types, framework bindings, auth UI and plugins: MIT.
 - CLI, Studio, storage, realtime, functions worker and the self-host control plane: Apache 2.0.
-- Schema engine: source-available under the Business Source License 1.1 (SPDX `BUSL-1.1`), Licensor Supatype Ltd. Source: https://github.com/supatype/schema-engine. Production use is allowed, including commercial apps, self-hosting and agencies hosting client apps. Not allowed without a commercial licence: offering Supatype or the engine to others as a hosted or managed service (paid or free), or selling a product whose primary value is the engine. Each version becomes Apache 2.0 four years after its release. `supatype-engine licence` prints the terms; commercial licences: licensing@supatype.com.
+- API server (`supatype/server`, https://github.com/supatype/server): MIT.
+- Postgres image (`supatype/postgres`, https://github.com/supatype/postgres): PostgreSQL License.
+- Schema engine: source-available under the Business Source License 1.1 (SPDX `BUSL-1.1`), Licensor Supatype Ltd. Source: https://github.com/supatype/schema-engine. Production use is allowed, including commercial apps, self-hosting and agencies hosting client apps. Not allowed without a commercial licence: giving others the engine's functionality as a hosted or managed service, paid or free (a Competing Service), or selling a product whose primary value is the engine (a Competing Product). Each version becomes Apache 2.0 four years after its release. `supatype-engine licence` prints the terms; commercial licences: licensing@supatype.com.
 - Each package's `LICENSE` file and `license` field are authoritative.
 - Supatype is pre-1.0 and in active development; APIs and config may change between releases.
 
@@ -133,6 +139,13 @@ $ npm install -g @supatype/cli
 ```
 
 The CLI needs Node.js 22 or later. For a machine without Node, the [CLI](https://www.supatype.com/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
+
+On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.
+
+```sh
+$ curl -fsSL https://supatype.com/install.sh | bash
+$ brew install supatype/tap/supatype
+```
 
 #### 2. Create a project
 
@@ -272,20 +285,19 @@ $ supatype init
 #### 3. Start Compose
 
 ```sh
-$ supatype self-host compose render
 $ supatype self-host compose up -d
 $ supatype push
 ```
 
-The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYPE_KONG_PORT` in `.env` (18473 when it is unset), with Studio at `/studio/`. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.
+`compose up` writes the compose file itself, so there is no separate render step. The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYPE_KONG_PORT` in `.env` (18473 when it is unset), with Studio at `/studio/`. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.
 
 > **REST BEFORE THE FIRST PUSH:** Until the first `supatype push`, every REST request answers `503` with `PGRST002`: PostgREST will not serve until the schemas it exposes exist, and the push creates them. After a push PostgREST can take up to about 30 seconds to notice, so `push` waits (at most 40 seconds) until REST answers, printing one line while it does.
 
-> **ALLOWED ORIGINS:** Browsers may call the API from the origin of `SITE_URL` and from the origins in `api.corsOrigins` (`supatype.config.ts`) or `SUPATYPE_CORS_ALLOW_ORIGINS` (`.env`). Any other origin is refused. Owners and admins can change the list in Studio, on the Settings page's CORS tab: a saved list is kept in the database and replaces the default until it is reset. The site URL stays allowed whatever is saved. `*` allows every origin, and only when you write it.
+> **ALLOWED ORIGINS:** Browsers may call the API from the origin of `SITE_URL` and from the origins in `api.corsOrigins` (`supatype.config.ts`) or `SUPATYPE_CORS_ALLOW_ORIGINS` (`.env`). Any other origin is refused. Owners, admins and developers can change the list in Studio, on the Settings page's CORS tab: a saved list is kept in the database and replaces the default until it is reset. The site URL stays allowed whatever is saved. `*` allows every origin, and only when you write it.
 
 > **PORTS:** Only the gateway is published on every interface, at `SUPATYPE_KONG_PORT`, or on ports 80 and 443 once HTTPS is on. Postgres (`SUPATYPE_DB_PORT`, default 5432), the API server (`SUPATYPE_SERVER_PORT`, default 9999) and SeaweedFS (`SUPATYPE_SEAWEEDFS_PORT`, default 8333) bind `127.0.0.1`, so they are reachable from the server itself and nowhere else. To reach them from other machines, set `SUPATYPE_PUBLISH_ADDRESS=0.0.0.0` (or one interface's address) in `.env` and run `supatype self-host compose up -d`. Put a firewall in front first. `supatype init` lists these variables, commented out, in `.env`.
 
-Images come from Docker Hub at `:latest`: `supatype/postgres:17-latest`, `supatype/server` (which includes realtime), `supatype/storage`, `supatype/studio`, `supatype/schema-engine`, `supatype/functions-worker` and `supatype/control-plane`. Pin versions with `SUPATYPE_*_IMAGE` in `.env` if you need to.
+Images come from Docker Hub at `:latest`: `supatype/postgres`, `supatype/server`, `supatype/realtime`, `supatype/storage`, `supatype/studio`, `supatype/schema-engine`, `supatype/functions-worker` and `supatype/control-plane`. The stack also runs `postgrest/postgrest`, `kong` and SeaweedFS, and Valkey when the cache does not run inside Postgres. Pin versions with `SUPATYPE_*_IMAGE` in `.env`, or with `versions` in `supatype.config.ts`.
 
 To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: { external: { url: process.env.DATABASE_URL! } }` in `supatype.config.ts`. The stack then starts no `db` service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in `supatype/postgres`. Realtime needs `wal_level = logical`, a free replication slot, the `wal2json` plugin and a role with `REPLICATION`. `supatype db check --connection "$DATABASE_URL"` reports what a database lacks, and `--emit` prints the SQL that fixes what it can.
 
@@ -336,8 +348,8 @@ Local and self-hosted environments read the same committed config. What differs 
 | Change | Local | Self-hosted |
 | --- | --- | --- |
 | Schema | `supatype push` | `supatype push` |
-| Frontend | Nothing with the dev proxy. Otherwise `npm run build` | `npm run build`, then `compose render` and `compose up -d` |
-| `supatype.config.ts` | Restart `supatype dev` | `compose render` and `compose up -d` |
+| Frontend | Nothing with the dev proxy. Otherwise `npm run build` | `npm run build`, then `compose up -d` |
+| `supatype.config.ts` | Restart `supatype dev` | `compose up -d` |
 | `.env` | Restart `supatype dev` | `compose up -d`, or `compose restart <service>` for one service |
 
 > **ONE SERVICE:** `supatype self-host compose restart server` recreates just that service with the current config and `.env`. Use it rather than typing a `docker compose` command yourself: the CLI renders the compose file first, so it always names this project's folders where they are now.
@@ -350,7 +362,6 @@ $ git pull
 $ npm install           # if package.json changed
 $ supatype push         # schema migrations
 $ npm run build         # static files into public/ or dist/
-$ supatype self-host compose render
 $ supatype self-host compose up -d
 ```
 
@@ -358,19 +369,22 @@ $ supatype self-host compose up -d
 
 ### Upgrading Supatype
 
-Moving to newer Supatype components is separate from deploying your own changes, and it takes two commands, not one.
+Moving to newer Supatype components is separate from deploying your own changes. It takes four commands.
 
 ```sh
-$ supatype update      # pull new images and binaries
-$ supatype self-host compose up -d   # run the new images
-$ supatype push        # apply the schema those components expect
+$ npm install -g @supatype/cli@latest   # or supatype self-update
+$ supatype update                       # pull the new images
+$ supatype self-host compose up -d      # run them
+$ supatype push                         # apply the schema they expect
 ```
+
+`supatype update` never updates the CLI itself, so update it first. Under Docker, `update` renders the compose file and pulls the images. It does not restart anything, which is why `compose up -d` follows.
 
 The push is the step that is easy to miss. Grants, policies, functions and buckets are generated from your schema and only reach the database through `push`, so new images on an older database can refuse rules until it runs. The upgrade is finished after the push, not before.
 
 > **403S AFTER AN UPGRADE:** This is the usual cause. The storage service logs the reason and names `supatype push` as the fix.
 
-> **0.7.0:** Upgrading from 0.6.0? Deploy the new realtime image before the first push, and upgrade the CLI with the engine. The [upgrade notes](https://github.com/supatype/supatype/blob/main/UPGRADING.md) cover ownership checks, declared renames, identity columns and the rest.
+> **0.7.0:** Upgrading from 0.6.0? Deploy the new realtime image before the first push, and upgrade the CLI with the engine. The [upgrade notes](https://github.com/supatype/supatype/blob/main/UPGRADING.md) cover ownership checks, declared renames, identity columns and the rest. CORS changed too: outside dev, only the origin of `SITE_URL` and the origins you list are allowed. If your app is served from another origin, add it to `api.corsOrigins` before you upgrade.
 
 ### Running in production
 
@@ -443,9 +457,24 @@ export type Post = Model<{
 
 The table name is the type name in snake case: `Post` becomes `post`, `BlogPost` becomes `blog_post`. Set `tableName` in the second argument to choose another.
 
-An `id: UUID` field becomes the primary key, and the database fills it in.
+An `id: UUID` field becomes the primary key, and the database fills it in. A model with no `id` field and no `PrimaryKey<>` gets one anyway: an `id UUID` primary key filled by `gen_random_uuid()`. Wrap another field in `PrimaryKey<>` to key the model by it instead.
 
-The second argument also takes `label` and `labelPlural` (names in Studio), `indexes`, `versions` and `singleton: true` (one row, such as site settings).
+The second argument also takes these options:
+
+| Option | Does |
+| --- | --- |
+| `label`, `labelPlural` | Names the model in Studio |
+| `indexes` | Adds indexes, see below |
+| `versions` | Keeps drafts and history, see [below](https://www.supatype.com/docs/schema.html#drafts) |
+| `singleton: true` | Keeps one row, such as site settings. The table is `_global_` plus the snake case name, unless you set `tableName` |
+| `constraints` | Checks the database runs on every write, in the access rule language, such as `Lte<"starts_at", "ends_at">`. They cannot name the caller or the clock |
+| `searchable` | The fields the search box in Studio's list looks in |
+| `timestamps`, `softDelete` | Adds `created_at` and `updated_at` columns, or a `deleted_at` column. Left out, they follow the fields the model declares |
+| `autoLocalize: true` | Makes copy fields localized by default. Wrap one in `NotLocalized<>` to opt out |
+| `hooks`, `validate` | Runs an edge function before or after an API write, or to check one field. They do not run for direct SQL or seeds |
+| `cache` | Says how reads of the model may be cached |
+
+An index is `{ fields: ["a", "b"] }`, with `unique: true` and `name` if you need them. `using` picks the method: `"btree"` (the default), `"gin"`, `"gist"`, `"hnsw"` or `"brin"`. An `"hnsw"` index is for `Vector` fields only. Its `distance` is `"cosine"` (the default), `"l2"` or `"innerProduct"`. A `distance` on any other index is refused.
 
 `supatype dev` applies each save. `supatype push` applies the schema to another database. `supatype diff` shows the change without applying it.
 
@@ -460,16 +489,31 @@ Every field is required (`NOT NULL`) unless you wrap it in `Optional<>`. Use `Op
 | `Int`, `SmallInt`, `BigInt`, `Decimal<10, 2>`, `Money` | exact numbers |
 | `boolean` | true or false |
 | `Timestamp`, `DateTime`, `DateOnly` | a time with zone, or a date |
-| `UUID`, `Email`, `URL`, `Color`, `PhoneNumber` | text with a known format |
-| `"news" \| "guide"` | an enum of those values |
+| `UUID` | a Postgres `uuid` |
+| `Email`, `URL`, `Color`, `PhoneNumber`, `Markdown` | text. The database checks the format of `Email` and `URL` |
+| `"news" \| "guide"` | text limited to those values by a check |
 | `string[]` | an array |
 | `JSON<T>` | JSONB, typed as `T` in the client |
+| `Code`, `Currency`, `Duration`, `Button` | JSONB with a typed shape, such as `{ amount, code }` for `Currency` |
 | `Vector<1536>` | a pgvector embedding with that many dimensions |
+| `GeoPoint`, `Geo` | a PostGIS `geography` point |
+| `IPAddress`, `CIDR`, `MacAddress`, `Bytea`, `XML`, `TSVector`, `TSQuery` | the matching Postgres type: `inet`, `cidr`, `macaddr`, `bytea`, `xml`, `tsvector`, `tsquery` |
 | `RichText`, `Blocks<T>`, `Slug<"title">` | content fields, see [below](https://www.supatype.com/docs/schema.html#content) |
 | `ImageAsset<Bucket>`, `FileAsset` | a file in a storage bucket |
 | `SupatypeAuthUserId` | the id of a sign-in user, see [below](https://www.supatype.com/docs/schema.html#owners) |
 
-Wrap a field to add more: `Unique<T>`, `Indexed<T>`, `Default<T, value>`, `MaxLength<T, n>`, `Between<T, min, max>`.
+Wrap a field to add more:
+
+| Wrap | Does |
+| --- | --- |
+| `Unique<T>`, `Indexed<T>` | Adds a unique constraint, or an index |
+| `Default<T, value>` | Sets the column's default |
+| `ServerDefault<T>` | Says the database fills the column, by a trigger or default. Inserts may leave it out |
+| `MinLength<T, n>`, `MaxLength<T, n>` | Bounds the length of text |
+| `MinItems<T, n>`, `MaxItems<T, n>` | Bounds how many items an array, JSON array or `Blocks` field holds |
+| `Between<T, min, max>` | Bounds a number or a date |
+| `Searchable<T>` | Adds the field to the search box in Studio's list |
+| `Localized<T>` | Stores one value per locale, such as `{ "en": "Hello", "de": "Hallo" }` |
 
 Three wrappers shape a field in Studio. `EditorReadOnly<T>` is shown but not editable there, and the API can still write it. `Computed<T>` is filled by the database and read-only in Studio. `ComputedFrom<string, "title">` is prefilled from the fields it names on a new record, until the editor changes it.
 
@@ -479,11 +523,32 @@ Wrap the fields in `WithTimestamps<{ ... }>` to add `created_at` and `updated_at
 
 With the Native provider, `supatype dev` stores `Vector<>` and `Geo` fields as JSONB, because its Postgres has no pgvector or PostGIS. Use Docker to work with them locally.
 
+### Identity and generated columns
+
+An integer field can be an identity column. `Int<{ identity: "always" }>`, or `Identity<number>`, is `GENERATED ALWAYS AS IDENTITY`. An insert cannot give it a value. `BigInt<{ identity: "by-default" }>`, or `Identity<bigint, "by-default">`, takes a value when an insert gives one.
+
+`AutoIncrement<number>` is `Identity<number, "by-default">`. Before 0.7.0 it was a `SERIAL`. A serial column pushed then is left as it is.
+
+`Generated<T, "sql">` is a stored generated column, such as `Generated<string, "lower(name)">`. Most types also take it as an option: `Float<{ generated: "price * quantity" }>`.
+
+`schema/index.ts`:
+
+```ts
+export type LineItem = Model<{
+  id: PrimaryKey<Int<{ identity: "always" }>>
+  price: Float
+  quantity: Int
+  total: Generated<Float, "price * quantity">
+}>
+```
+
+A column cannot be both. Neither takes a `Default<>`. The generated client leaves generated columns and `"always"` identities out of inserts and updates. A `"by-default"` identity is optional on insert. Removing either is destructive, so the push asks first or needs `--yes`.
+
 ### Relations
 
 `RelatedTo<Model>` adds a foreign key column named after the field plus `_id`. The field `author` becomes the column `author_id`. The column can be null unless you pass `{ required: true }`.
 
-`onDelete` takes `"cascade"`, `"setNull"`, `"restrict"` or `"noAction"`. It defaults to `"restrict"`: deleting an author with posts is refused.
+`onDelete` takes `"cascade"`, `"setNull"`, `"restrict"` or `"noAction"`. It defaults to `"restrict"`: deleting an author with posts is refused. `onUpdate` takes the same values and defaults to `"cascade"`.
 
 `HasMany<Model>` and `HasOne<Model>` are the other side of a `RelatedTo`. They add no column. They let the client and seeds reach the related rows.
 
@@ -560,13 +625,19 @@ An operation with no rule is denied. A model with no `access` at all is not reac
 | `Public` | Everyone, signed in or not |
 | `LoggedIn` | Any signed-in user |
 | `Private` | Nobody through the API |
-| `Owner<"author_id">` | The user whose id is in that column. Use `"id"`, a `SupatypeAuthUserId` field, or a relation's `_id` column |
+| `Owner<"author_id">` | The user whose id is in that column. Use `"id"`, a `SupatypeAuthUserId` field, or a relation's `_id` column. `Owner<Post, "author_id">` also names the model, so the editor checks the field |
 | `OwnerFrom<"post">` | The owner of the related row, one relation deep |
 | `Role<"admin">` | A user whose `app_metadata.role` is `admin` |
 | `Any<[A, B]>`, `All<[A, B]>`, `Not<A>` | Either rule, both rules, or the opposite |
 | `Eq`, `Neq`, `Gt`, `Gte`, `Lt`, `Lte`, `Like` | A comparison, such as `Lte<"published_at", Now>` |
+| `In<"site_id", Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>>` | The column's value is in the set: rows of another table, `Values<["draft", "review"]>`, or a claim holding an array |
+| `Exists<Rows<...>>` | The set is not empty, whatever the row holds |
 
 In a comparison, a plain string names a column. Wrap a constant in `Literal<>`. `Now`, `AuthUid` and `Claim<"app_metadata.plan">` are also available. `IsNull<"col">` and `NotNull<"col">` test for null.
+
+A time can be relative to now. `Ago<30, "days">` and `FromNow<7, "days">` take one amount and one unit. `StartOf<"day">` is the start of the day, week, month or year. `After<Now, { days: 30 }>` and `Before<StartOf<"day">, { hours: 9 }>` add or take away several units at once. So `Gte<"created_at", Ago<30, "days">>` passes rows from the last 30 days.
+
+Since 0.7.0 a push refuses an owner rule that could never match. An `Owner` on a relation must reach, through one relation at most, a model keyed by a `SupatypeAuthUserId` or one with its own `Owner` rule. On a plain `UUID` field it still works, with a warning.
 
 `Role<>` reads the user's `app_metadata.role`, which only the auth admin API can set. It is not the Studio role.
 
@@ -612,21 +683,21 @@ By default there is no foreign key to the user. Deleting a user leaves their row
 | `"restrict"` | Deleting the user is refused while they own rows |
 | `"setNull"` | The column is set to null. The field must be `Optional<>` |
 
-The push that adds the key refuses if existing rows name a user that does not exist. Its message says how many rows and how to remove them.
+The push that adds the key refuses if existing rows name a user that does not exist. Its message says how many rows and how to remove them. It also refuses if the database has no `auth.users` table, which Supatype's auth server creates. Start the auth server against the database once, or remove `onDelete` so the field holds an id with no foreign key.
 
 ### Drafts and versions
 
-`versions: { drafts: true }` keeps drafts and a history of each record. `keep` sets how many versions to keep (default 20).
+`versions: { drafts: true }` keeps drafts and a history of each record. `versions: true` is short for the same. `keep` sets how many versions to keep (default 20).
 
 The model's own table holds the published record. That is what `read` rules and the public API see. Drafts and old versions live in `post_versions`.
 
 Publishing copies a draft into the live table. It also sets `published_at` if it is empty. The `update` rule decides who may publish.
 
-A direct API write to the live row is refused. Save a draft with the client's `update`, then publish. See [Client](https://www.supatype.com/docs/client.html#drafts).
+A direct API update of the live row is refused with error `42501`. Save a draft with the client's `update`, then publish, or pass `{ publish: true }` to do both. See [Client](https://www.supatype.com/docs/client.html#drafts).
 
 `versions: { drafts: false }` keeps history only. Writes go straight to the live row.
 
-Who sees drafts in Studio is set by `publishing.draft_visibility` in `supatype.config.ts`. The default is admin, developer and editor.
+The `read` rule does not decide who sees a draft. The record's creator sees it. So do the Studio roles in `publishing.draft_visibility` in `supatype.config.ts` (default admin, developer and editor), and anyone with a signed preview link.
 
 ### Slugs, rich text and blocks
 
@@ -644,6 +715,10 @@ export type ProseBlock = Block<"prose", { body: RichText }>
 ```
 
 Each entry is stored as `{ "type": "hero", "data": { "heading": "Hi" } }`. A renderer switches on `type` and reads `data`. Rich text inside a block is not converted from a string, so write the full document there.
+
+A third argument, `{ label, icon }`, sets how Studio shows the block, such as `Block<"hero", { heading: string }, { label: "Hero banner" }>`. Both are optional.
+
+Before 0.7.0 a block's fields sat beside `type`. `supatype push` moves entries stored that way under `data`, and `supatype diff` shows how many are pending. Push before anyone opens those records in Studio. See [Upgrading](https://www.supatype.com/docs/#upgrading).
 
 ### Storage buckets
 
@@ -668,14 +743,14 @@ A rule you leave out is refused for everyone but the service role, and the push 
 
 A push never guesses a rename. Renaming a field in the schema looks like a drop and an add.
 
-In a terminal, `supatype push` asks "Was X renamed to Y?". Answer yes and it records the rename. Without a terminal it stops and prints the command to run.
+In a terminal, `supatype push` and `supatype dev` ask, for example "Was post.title renamed to post.headline? (recorded in supatype/renames.json)". Answer yes and it records the rename. Without a terminal the push stops and prints the `supatype rename` command to run.
 
 ```sh
 $ supatype rename post.title post.headline   # a column
 $ supatype rename post article               # a table
 ```
 
-Renames are recorded in `supatype/renames.json`. Commit it. Every push replays it, so each database gets the same rename. `supatype rename --prune` removes entries the target database has already applied.
+Renames are recorded in `supatype/renames.json`. Commit it. Every push replays it, so each database gets the same rename. `supatype rename --prune` removes entries the target database has already applied. Point it at a database with `--connection`, `--env` or `--direct`, as for a push.
 
 > **CAREFUL:** `supatype push --yes` does not ask about renames. An unrecorded rename is then pushed as a drop and an add, and the column's data is lost. Record renames first.
 
@@ -685,9 +760,13 @@ Renames are recorded in `supatype/renames.json`. Commit it. Every push replays i
 | --- | --- |
 | A change can lose data, such as a drop | Answer yes in a terminal, or pass `--yes` in CI |
 | A table the schema names exists but Supatype did not create it | `supatype adopt`, or give the model another `tableName`. The push offers to adopt in a terminal |
-| Policies, grants or row level security were changed by hand | `--overwrite-drift` puts Supatype's back. To keep the hand edits, run `supatype doctor --rebaseline --accept-access-drift` |
+| A change rewrites or scans a table of more than 100,000 rows, which locks it while it runs | Answer yes in a terminal, or pass `--yes` |
+| Policies, grants, labels or row level security were changed outside Supatype | `--overwrite-drift` puts Supatype's back. To keep the hand edits, run `supatype doctor --rebaseline --accept-access-drift` |
 | A versioned model has field rules | Remove one of the two |
 | An `onDelete` key would point at missing users | Delete or fix those rows |
+| An `onDelete` key needs `auth.users` and the database has none | Start the auth server against the database once, or remove `onDelete` |
+| The schema has identity or generated columns and the engine is older than 0.7.0 | Run `supatype update` |
+| A `JSON` field changed to `Blocks` holds values that are not objects | Change or remove those values, then push again |
 
 `--yes` does not override hand-edited access rules. Only `--overwrite-drift` does. Objects that Supatype did not create are never dropped or taken over.
 
@@ -714,7 +793,7 @@ export const supatype = createClient({
 })
 ```
 
-Every page in these docs imports the client from this one file. `supatype init` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. Read them rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys --write` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. Read them rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 
@@ -737,11 +816,15 @@ The session is saved and restored by default. Pass `auth: { persistSession: fals
 
 | File | Holds |
 | --- | --- |
-| `supatype/generated/client.ts` | The `createClient` to import |
+| `supatype/generated/client.ts` | The `createClient` to import, the table types, the columns that keep exact values and the models that keep drafts. It also re-exports `@supatype/client` |
 | `supatype/generated/index.d.ts` | Row, insert and update types for each table |
 | `types/database.ts` | The `Database` type, for code that wants the raw shapes |
 
 Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `createClient` with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: `createClient<MyDatabase>({ ... })`.
+
+Exact numbers keep every digit when you import from the generated `client.ts`. A `BigInt` column reads as a `bigint`. `Decimal` and `Money` columns read as strings.
+
+A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.
 
 ### Read rows
 
@@ -773,6 +856,15 @@ const { data: post } = await supatype.from("post").select("*").eq("slug", "hello
 console.log(post?.title)
 ```
 
+`count` is `null` unless you ask for it:
+
+`typescript`:
+
+```ts
+const { count } = await supatype.from("post").select("id", { count: "exact" }).eq("kind", "news")
+console.log(count)
+```
+
 ### Filters
 
 | Filter | Matches |
@@ -782,6 +874,7 @@ console.log(post?.title)
 | `like`, `ilike` | a pattern, `ilike` ignores case |
 | `in` | any of a list |
 | `is` | `null`, `true` or `false` |
+| `contains`, `containedBy` | an array, range or jsonb column that holds the value, or is held by it |
 | `not`, `or`, `match` | negation, either filter, several equalities |
 
 `typescript`:
@@ -809,9 +902,11 @@ await supatype.from("comment").update({ body: "Edited" }).eq("id", commentId)
 await supatype.from("comment").delete().eq("id", commentId)
 ```
 
-A write returns no rows unless you add `.select()`. `upsert` inserts or updates by primary key.
+A write returns no rows unless you add `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
 
-A `RichText` field takes a plain string on write. Owner columns with an `Owner<>` create rule can be left out: they default to the caller.
+A `RichText` field takes a plain string on write.
+
+Some owner columns can be left out. A `SupatypeAuthUserId` field that the `create` rule names in `Owner<>`, and that has no default of its own, defaults to the caller. A relation's key, such as `author_id`, is not filled in, so send it.
 
 ### Drafts and publishing
 
@@ -864,6 +959,8 @@ await supatype.auth.signOut()
 
 Once signed in, every request carries the user's token, so access rules see them. `onAuthStateChange` calls back at once with the current state, then on each change.
 
+When the project asks new users to confirm their email, `signUp` returns `session: null` and does not sign the user in. They sign in once they have confirmed.
+
 `getUser()` fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on `supatype.auth` too.
 
 ### Storage
@@ -885,6 +982,15 @@ console.log(publicUrl, signed?.signedUrl)
 ```
 
 `getPublicUrl` works for public buckets. `createSignedUrl` gives a link that expires after the number of seconds you pass. `download`, `list` and `remove` are on the bucket too.
+
+An `ImageAsset` or `FileAsset` column holds `{ bucket, path }`, not a URL. `publicUrl` builds the URL from it, and returns `null` for an empty column:
+
+`typescript`:
+
+```ts
+const { data: post } = await supatype.from("post").select("title, cover").eq("slug", "hello-world").maybeSingle()
+const coverUrl = supatype.storage.publicUrl(post?.cover)
+```
 
 The bucket's access rules from the schema decide who may upload, overwrite and delete.
 
@@ -912,7 +1018,15 @@ if (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)
 ```
 
-The call goes to `/functions/v1/hello` with the user's token. A JSON response is parsed. Function names and bodies are not typed. `invoke` also takes `method` (default `POST`), `headers` and `idempotent`.
+The call goes to `/functions/v1/hello` with the user's token. A JSON response is parsed. Function names and bodies are not typed. `invoke` also takes `method` (default `POST`), `headers` and `idempotent`. Only a `GET` is retried on a transient failure, because a `POST` may already have run. Pass `idempotent: true` when running the function twice is harmless.
+
+`typescript`:
+
+```ts
+await supatype.functions.invoke("stats", { method: "GET", headers: { "x-region": "eu" } })
+```
+
+Inside a function, `ctx.url` is the API's internal address, for calls the function makes. `ctx.publicUrl` is the public address, for links you give to people.
 
 `supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`.
 
@@ -924,12 +1038,17 @@ The call goes to `/functions/v1/hello` with the user's token. A JSON response is
 import type { TableRow } from "../supatype/generated/client"
 
 type Post = TableRow<"post">
-type PostPage = { postCollection: { edges: { node: Pick<Post, "title" | "body"> }[] } }
+type Author = TableRow<"author">
+type PostPage = {
+  postCollection: { edges: { node: Pick<Post, "title" | "body"> & { author: Pick<Author, "name"> } }[] }
+}
 
 const { data, error } = await supatype.graphql<PostPage>(`{
-  postCollection(first: 10) { edges { node { title body } } }
+  postCollection(first: 10) { edges { node { title body author { name } } } }
 }`)
-const firstParagraph = data?.postCollection.edges[0]?.node.body.root.children?.[0]
+if (error) throw new Error(error.message)
+const first = data?.postCollection.edges[0]?.node
+console.log(first?.author.name, first?.body.root.children?.[0])
 ```
 
 The query goes to `/graphql/v1` as the signed-in user, under the same access rules as REST. Pass variables as the second argument, and `{ idempotent: true }` as the third to retry a read on a transient failure.
@@ -938,7 +1057,11 @@ Rich text, blocks and json fields come back as objects and arrays, not strings. 
 
 The type argument names the answer's shape and is not checked at runtime. Build it from the generated `TableRow` types so `body` is typed as the rich text document it now is. Variables you send are not encoded: a json argument still takes a string.
 
-Using another GraphQL client? `readGraphqlSchema` reads the `data` of an introspection answer to `GRAPHQL_SCHEMA_QUERY`, and `decodeGraphqlJsonFields(query, data, schema)` decodes an answer the same way.
+Relation fields use your schema's names. The side that holds the key takes the relation field's name, so `author` above. The other side takes its `HasMany` or `HasOne` field's name, so an author's posts are `posts`. A list is still a connection, read through `edges { node }`. REST embeds are named as before.
+
+> **CHANGED IN 0.7.0:** GraphQL used to name relations after the tables they join, such as `postCollection` for an author's posts. The next `supatype push` writes the schema's names, and a query that still uses an old name fails with `Unknown field`. A few ambiguous relations keep pg_graphql's own name.
+
+Using another GraphQL client? `readGraphqlSchema` reads the `data` of an introspection answer to `GRAPHQL_SCHEMA_QUERY`, and `decodeGraphqlJsonFields(query, data, schema)` decodes an answer the same way. Read the schema again when it returns `schemaIsStale: true`.
 
 ### Errors
 
@@ -948,7 +1071,7 @@ Queries, `rpc`, `functions.invoke`, auth and most storage calls return `{ data, 
 
 An insert an access rule refuses returns code `42501`. An update or delete that the rules hide matches no rows and returns no error. `single()` with no row returns `PGRST116`.
 
-> **NETWORK FAILURES:** A network failure on a query, `rpc` or function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Most auth and storage calls throw instead, so wrap them in `try` when the network may fail. Three return the failure as `error` like a query: `storage.listBuckets`, `storage.createBucket` and `auth.refreshSession`. `auth.signOut` ignores a network failure and clears the session on this device anyway.
+> **NETWORK FAILURES:** A network failure on a query, `rpc`, `graphql` or a function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Most auth and storage calls throw instead, so wrap them in `try` when the network may fail. Three return the failure as `error` like a query: `storage.listBuckets`, `storage.createBucket` and `auth.refreshSession`. `auth.signOut` ignores a network failure and clears the session on this device anyway.
 
 ### Timeouts and retries
 
@@ -2313,7 +2436,7 @@ Pre-1.0: APIs and config may change between releases.
 
 ### Seed files
 
-Put seed files in `seeds/`. They run in alphabetical order, so name them `01-authors.ts`, `02-posts.ts`. Without a `seeds/` folder, `seed.ts` at the project root runs instead.
+Put seed files in `seeds/`. They run in alphabetical order, so name them `01-authors.ts`, `02-posts.ts`. Files ending `.ts`, `.mts` or `.tsx` are found. When `seeds/` holds none, `seed.ts` at the project root runs instead.
 
 Each file exports a default function. The function does not connect or await anything. It records the writes, and the engine applies them.
 
@@ -2322,10 +2445,10 @@ Each file exports a default function. The function does not connect or await any
 ```ts
 import type { SeedContext } from "@supatype/cli/seed"
 
-// Sign-in users are not seeded. Create them first, then use their ids:
+// Sign-in users are not seeded. Create one first, then paste the id list-users prints:
 //   supatype admin create-user --email alex@example.com --role editor
 //   supatype admin list-users
-const ALEX = "00000000-0000-4000-8000-0000000000a1"
+const ALEX = "<id from supatype admin list-users>"
 
 export default async function seed({ db, expr, log }: SeedContext) {
   log("seeding authors, tags and posts")
@@ -2359,9 +2482,29 @@ This uses the schema from the [Schema](https://www.supatype.com/docs/schema.html
 
 `db` has one property per table, typed from your schema. A wrong column or a missing required field fails to compile.
 
-The types come from `supatype/generated/seed.ts`. `supatype generate`, `supatype dev` and `supatype push` write it. It needs no database, so it is gitignored and rebuilt on install.
+The types come from `supatype/generated/seed.ts`, which is gitignored. `supatype generate`, `dev` and `push` write it, and a project made by `supatype init` also rebuilds it on install.
 
 The context also has `expr` (values the database computes), `log` (print a line) and `environment` (the `--environment` name, if given).
+
+`db.$if(condition, body)` runs `body` only when the database says so. The builder never connects, so the engine checks the condition when the seed runs. Use a plain `if` for anything your own code can decide.
+
+`seeds/01-blog.ts`:
+
+```ts
+db.$if({ notExists: { model: "Tag" } }, () => {
+  db.tag.create({ name: "general" })
+})
+```
+
+The condition is `{ exists }` or `{ notExists }`, naming a model and an optional `where`, or `{ environment: "staging" }`.
+
+A file can also export a `config`. `runOnce: true` applies the file at most once, for a one-time backfill. It covers the whole run: if one file sets it, every file in that run gets it, with a warning.
+
+`seeds/01-blog.ts`:
+
+```ts
+export const config = { runOnce: true }
+```
 
 ### Create and upsert
 
@@ -2394,13 +2537,13 @@ db.post.upsert({
 })
 ```
 
-`create` and `upsert` return a reference you can use in later writes, such as `post.id`. It is not a value read from the database. The engine fills it in when it applies the seed.
+`create` and `upsert` return a reference you can use in later writes, such as `post.id`. It is a placeholder, filled in with the real value when the seed is applied. `createMany` returns nothing, so use `create` for a row you need to reference.
 
 `seeds/02-posts.ts`:
 
 ```ts
 const tag = db.tag.create({ name: "release" })
-log(`created a tag, referenced as ${String(tag.id)}`)
+log(`created a tag, referenced as ${JSON.stringify(tag.id)}`)
 ```
 
 ### Nested children
@@ -2418,6 +2561,8 @@ Under an `upsert`, a child is written only if the parent has no child with the s
 
 A `RichText` field takes a plain string. It becomes a one-paragraph document. Rich text inside a block is not converted, so write the full document there.
 
+A `Blocks` entry is `{ type, data }`, with the block's fields under `data`, as Studio stores it. See `sections` below.
+
 `expr` gives values the database works out when the seed runs:
 
 `seeds/02-posts.ts`:
@@ -2429,6 +2574,7 @@ db.post.upsert({
     title: "Launch day",
     slug: "launch-day",
     body: "We are live.",
+    sections: [{ type: "hero", data: { heading: "We are live" } }],
     kind: "news",
     views: expr.default(),
     published_at: expr.now({ days: 7 }),
@@ -2437,7 +2583,7 @@ db.post.upsert({
 })
 ```
 
-`expr.now()`, `expr.ago({ days: 1 })` and `expr.startOf("day", { days: 30, hours: 9 })` are times. They only fit date fields.
+`expr.now()`, `expr.ago({ days: 1 })`, `expr.startOf("day", { days: 30, hours: 9 })` and `expr.startOfBefore("month", { months: 1 })` are times. `startOf` moves forward from the start of the period and `startOfBefore` moves back. They only fit date fields.
 
 `expr.default()` sets the column's own default. It is sent as `{ "$default": true }`. Leaving a field out of an upsert keeps the old value. `expr.default()` resets it. It only fits columns that have a default.
 
@@ -2481,7 +2627,16 @@ Each param binds by its JSON type: a string as `text`, a whole number as `bigint
 `seeds/03-tags.ts`:
 
 ```ts
-const post = db.post.create({ slug: "hello-world", title: "Hello" })
+const post = db.post.upsert({
+  where: { slug: "release-notes" },
+  data: {
+    title: "Release notes",
+    slug: "release-notes",
+    body: "What changed.",
+    kind: "news",
+    author: { connect: { id: ALEX } },
+  },
+})
 db.$sql(
   `insert into post_tag (post_id, tag_id)
    select $1::uuid, t.id from tag t where t.name = $2
@@ -2492,14 +2647,22 @@ db.$sql(
 
 > **ONE PARAM PER PLACEHOLDER:** Pass exactly one param for each of `$1` to `$n` in the statement. A count that does not match is refused before anything runs. A param is a value, so write expressions such as `now()` in the statement itself.
 
+A JavaScript `bigint` is sent as its digits, and a `Date` as an ISO timestamp. Both bind as text, so cast them: `$1::bigint`, `$2::timestamptz`. `expr` values, `expr.default()` included, are refused as params.
+
 ### Running seeds
 
 ```sh
 $ supatype seed                    # every file in seeds/
 $ supatype seed seeds/02-posts.ts  # one file
 $ supatype seed --atomic           # all files in one transaction
-$ supatype seed --status           # what ran, when, and what it wrote
+$ supatype seed --status           # what ran, when, and what changed since
+$ supatype seed --connection <dsn> # another database
+$ supatype seed --environment staging
 ```
+
+`--status` lists each applied file with its status, when it ran, how long it took, and whether the file has changed since. `--environment` names the environment for an `{ environment }` condition.
+
+A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass `--force` only when you mean to seed the linked project.
 
 Each file is one transaction. Without `--atomic`, a failure in the third file leaves the first two applied, and the report says so.
 
@@ -2772,9 +2935,9 @@ The server checks every Studio request against this table.
 | Create, change and delete buckets | Yes | Yes | No | No |
 | Give and remove Studio roles | Yes | No | No | No |
 
-> **SQL EDITOR:** The SQL editor runs as the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.
+> **SQL EDITOR:** The SQL editor signs in as `supatype_sql_editor`. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.
 
-> **BUCKET RULES:** A bucket's access rules page is part of "see the access rules". Viewers see it read-only. Editors cannot open it today. A change in progress shows it to editors read-only too. Only admins and developers can change the rules.
+> **BUCKET RULES:** A bucket's access rules page is part of "see the access rules". Viewers and editors see it read-only. Only admins and developers can change the rules.
 
 ### Full access and Studio mode
 
@@ -2822,7 +2985,7 @@ In the Data browser, saving a cell or adding a row on a drafts model asks first:
 
 ### Giving someone a role
 
-In Studio, open Authentication > Users. The Studio access column shows each user's role. An admin can change it there, or choose No access. Other roles see it read-only. Your own row cannot be changed.
+In Studio, open Authentication > Users. The Studio access column shows each user's role. An admin can change it there, or choose No access. Developers see it read-only. Editors and viewers have no Authentication page. Your own row cannot be changed.
 
 Create User has a Studio access choice too. Only admins see it.
 
@@ -2897,7 +3060,6 @@ This writes `server.mode`, `server.domain` and `server.tls` to `supatype.config.
 
 ```sh
 $ supatype dev
-$ supatype push
 ```
 
 Optionally proxy to Vite from a gitignored `supatype.local.config.ts` while production stays `static`. See [Deploy changes](https://www.supatype.com/docs/#deploy-changes).
@@ -2946,6 +3108,7 @@ AUTHENTICATOR_PASSWORD=CHANGE_ME
 SUPATYPE_SQL_EDITOR_PASSWORD=CHANGE_ME
 SUPATYPE_CONTROL_PLANE_SECRET=CHANGE_ME
 JWT_SECRET=CHANGE_ME            # at least 32 characters
+# Leave both keys blank. compose up mints them from JWT_SECRET.
 ANON_KEY=
 SERVICE_ROLE_KEY=
 API_EXTERNAL_URL=https://example.com
@@ -2961,13 +3124,13 @@ Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SER
 ```sh
 $ cd /opt/my-blog
 $ npm install
-$ supatype self-host compose render
 $ supatype self-host compose up -d
 $ supatype push
 $ npm run build
-$ supatype self-host compose render
 $ supatype self-host compose up -d
 ```
+
+`compose up` writes the compose file itself, so there is no separate render step.
 
 Before this, point an A record for `example.com` at the VM and open ports 80 and 443 in its firewall. Then open `https://example.com`, with Studio at `/studio/`. Without a domain in `supatype.config.ts`, the gateway is on `http://YOUR_VM_IP:18473` instead. Backups, logs and rollbacks are covered in [Running in production](https://www.supatype.com/docs/#production).
 
@@ -3017,13 +3180,14 @@ jobs:
             npm ci
             supatype push
             npm run build
-            supatype self-host compose render
             supatype self-host compose up -d
 ```
 
 On every push to `main` the VM pulls the latest code, applies schema migrations, rebuilds `public/` and refreshes Compose.
 
 > **NOTE:** `supatype push` reads `DATABASE_URL` from the VM's `.env`, which points at the Compose Postgres on `localhost:5432`. If you would rather not install the CLI globally on the VM, use `npx @supatype/cli` in the script.
+
+> **CHANGES THAT NEED A YES:** The push in CI has no terminal to ask in. A change that needs your consent, such as a drop, an undeclared rename or a large table rewrite, fails the job, and the log prints the command to run. Record renames with `supatype rename` and commit `supatype/renames.json`. After a Supatype upgrade, run the first push by hand over SSH.
 
 ### Verify the pipeline
 
@@ -3042,8 +3206,8 @@ Watch the run under **Actions** on GitHub. When it succeeds, load your gateway U
 | Symptom | Check |
 | --- | --- |
 | SSH fails | The firewall allows port 22, and `VM_SSH_KEY` matches the VM's `authorized_keys`. |
-| `supatype push` fails | Compose is up, and `DATABASE_URL` points at `localhost:5432`. |
-| Site unchanged | `npm run build` writes to the directory in `app.static_dir`, then re-run `compose render` and `up -d`. |
+| `supatype push` fails | Compose is up, and `DATABASE_URL` points at `localhost:5432`. If it refused a change that needs your consent, see [The workflow](https://www.supatype.com/deploy-vm-github-actions.html#workflow). |
+| Site unchanged | `npm run build` writes to the directory in `app.static_dir`, then re-run `supatype self-host compose up -d`. |
 
 > **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
 
@@ -4016,12 +4180,13 @@ Pre-1.0: APIs and config may change between releases.
 
 ### In one minute
 
-**SDKs** (MIT): The client SDKs, framework bindings and plugins. Use them for anything.
+**SDKs and server** (MIT): The client SDKs, framework bindings and plugins, and the API server (`supatype/server`). Use them for anything.
 
-**CLI and services** (APACHE 2.0): The CLI, Studio and the services (storage, realtime, functions worker). Use them for anything.
+**CLI and services** (APACHE 2.0): The CLI, Studio and the services in this repository (storage, realtime, functions worker). Use them for anything.
 
 **Schema engine** (BSL 1.1): Source-available under the Business Source License 1.1 (SPDX `BUSL-1.1`), and its source is at [github.com/supatype/schema-engine](https://github.com/supatype/schema-engine). You can read it, change it, redistribute it and run it in production.
 
+- The Postgres image (`supatype/postgres`) is under the **PostgreSQL License**. Use it for anything.
 - The one thing you cannot do without a commercial licence: offer Supatype or the engine to others as a hosted or managed service, paid or free, or sell a product whose primary value is the engine.
 - Each engine version becomes **Apache 2.0** on its Change Date, four years after that version's release.
 
@@ -4042,8 +4207,8 @@ The engine's licence, with its Additional Use Grant, is in the `LICENSE` file at
 
 ### Can I? Not without a commercial licence
 
-- **Run a hosted Supatype, or a Supatype-compatible backend, for others.** Paid or free. The licence calls this a Competing Service: a hosted or managed database, backend or schema management service where third parties define, migrate or manage their own schemas, or build their own applications.
-- **Sell a product whose primary value is the engine.** For example, a schema migration or database change management tool built on it, or a backend platform that includes it. The licence calls this a Competing Product.
+- **Give others the engine's functionality as a hosted or managed service.** Paid or free, to anyone other than your employees and contractors, in whole or in substantial part. The licence calls this a Competing Service. It includes offering Supatype or the engine as a hosted or managed database, backend or schema management service on which others define, migrate or manage database schemas they control, or build and run their own applications.
+- **Sell a product whose primary value is the engine.** Sold, licensed or otherwise provided for a fee, including through paid support or subscriptions. For example, a schema management, schema migration or database change management tool built on it, or a backend platform that includes or requires it. The licence calls this a Competing Product.
 
 If your product is not competing when you first make it generally available, it does not become competing later because Supatype ships a new version or a new product.
 
@@ -4075,6 +4240,8 @@ Not sure where you fall? Ask at [licensing@supatype.com](mailto:licensing@supaty
 | --- | --- |
 | `client`, `types`, `react`, `react-native`, `vue`, `svelte`, `solid`, `ssr`, the auth UI packages, the plugin packages, `ui`, `common` | MIT |
 | CLI, Studio, storage, realtime, functions worker, self-host control plane, and the rest of the `supatype/supatype` repository | Apache 2.0 |
+| API server ([`supatype/server`](https://github.com/supatype/server)) | MIT |
+| Postgres image ([`supatype/postgres`](https://github.com/supatype/postgres)) | PostgreSQL License |
 | Schema engine (`supatype-engine`, image `supatype/schema-engine`) | BSL 1.1, Apache 2.0 on each version's Change Date |
 
 The CLI downloads the engine as a separate binary; the CLI's own licence is unaffected. Your application code, schemas and data are yours, whatever you build them with.

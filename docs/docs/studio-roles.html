@@ -152,11 +152,11 @@
     </table></div>
     <div class="callout warn">
       <span class="callout-label">SQL EDITOR</span>
-      <p>The SQL editor runs as the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.</p>
+      <p>The SQL editor signs in as <code>supatype_sql_editor</code>. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.</p>
     </div>
     <div class="callout">
       <span class="callout-label">BUCKET RULES</span>
-      <p>A bucket's access rules page is part of "see the access rules". Viewers see it read-only. Editors cannot open it today. A change in progress shows it to editors read-only too. Only admins and developers can change the rules.</p>
+      <p>A bucket's access rules page is part of "see the access rules". Viewers and editors see it read-only. Only admins and developers can change the rules.</p>
     </div>
 
     <h2 id="modes">Full access and Studio mode</h2>
@@ -200,7 +200,7 @@
     </div>
 
     <h2 id="grant">Giving someone a role</h2>
-    <p>In Studio, open Authentication &gt; Users. The Studio access column shows each user's role. An admin can change it there, or choose No access. Other roles see it read-only. Your own row cannot be changed.</p>
+    <p>In Studio, open Authentication &gt; Users. The Studio access column shows each user's role. An admin can change it there, or choose No access. Developers see it read-only. Editors and viewers have no Authentication page. Your own row cannot be changed.</p>
     <p>Create User has a Studio access choice too. Only admins see it.</p>
     <p>From the command line:</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
@@ -243,7 +243,7 @@
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

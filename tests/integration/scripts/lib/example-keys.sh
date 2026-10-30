@@ -4,10 +4,10 @@
 #
 #   source "$(dirname "${BASH_SOURCE[0]}")/lib/example-keys.sh"
 #
-# `supatype dev` does not write ANON_KEY into .env — only `init` and `self-host` do. A script that
-# reads the keys from there therefore works on a machine where `init` once ran and fails on a fresh
-# checkout, where it never did, with a 401 that names nothing. This mints them the same way the CLI
-# does, from the example's own JWT_SECRET, and fails loudly instead.
+# `supatype dev` writes ANON_KEY into .env, but only once the stack is starting. A script that reads
+# the keys from there before dev has run fails on a fresh checkout with a 401 that names nothing.
+# This mints them the same way the CLI does, from the example's own JWT_SECRET, and fails loudly
+# instead.
 #
 # Call it BEFORE starting the stack: a front end that bakes its key in at build time (Vite,
 # Next) needs the value to exist before its build runs, not after.

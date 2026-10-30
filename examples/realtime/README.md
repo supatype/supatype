@@ -12,6 +12,17 @@ So this example waits, with a deadline, and exits non-zero when nothing arrives.
 
 ## Running it
 
+Running this outside the repo? See [Running an example](../README.md#running-an-example).
+
+From the monorepo root:
+
+```sh
+pnpm install
+pnpm build     # the CLI and the libraries run from their dist/
+```
+
+Then, from this directory:
+
 ```sh
 pnpm dev       # in one terminal: Postgres, the schema, the stack
 pnpm verify    # in another
@@ -68,8 +79,28 @@ Neither touches the database, so they are checked separately from
 `postgres_changes`: a stack whose replication is broken still serves them, and a
 stack whose socket is fine can still fail them.
 
+## Filtered subscriptions
+
+```sh
+pnpm verify:filter
+```
+
+A subscription with a filter must be told about the rows it asked for and not
+the others. An unfiltered run cannot catch a filter dropped on the way to the
+server, because receiving every row still includes the one you were watching
+for. So this asserts both halves: it subscribes
+with `filter: "author=eq.wanted-author"`, writes a row that does not match and
+then one that does, and fails if the first arrives or the second does not:
+
+```
+  subscribed with filter author=eq.wanted-author
+  the matching row arrived
+  the non-matching row did not arrive (seen: ["wanted-author"])
+PASS: the filter was applied on both sides
+```
+
 ## What it does not cover
 
-Row-level filtering of change events, and change events for a user whose access
-rules hide the row. Everything here is public, so absence of an event would be
-ambiguous; access control has its own examples.
+Change events for a user whose access rules hide the row. Everything here is
+public, so the absence of an event would be ambiguous; access control has its
+own examples.

@@ -17,10 +17,9 @@ realtime, storage uploads, per-row access, functions.
 the edge functions, two field validators, the seed, the headless verify and the CI job that runs it
 against a live stack.
 
-**What has not happened is the running.** That CI job is dispatch-gated like the other live-stack
-jobs, so it has never executed; every claim here is backed by code that typechecks and builds, and
-by assertions written to fail loudly, but not yet by a green run. The first dispatch or scheduled
-run is where that changes.
+**And it runs.** That CI job (`tests/integration/scripts/kitchen-sink-e2e.sh`) starts a live stack
+on every pull request and every push to `main`, seeds it, runs the headless verify against it, and
+then drives the app in a browser with Playwright.
 
 `apps/app` (Vite SPA, `app.mode = "static"`) is the session-shaped half, and it is organised by
 what an attendee does rather than by which API each screen exercises. **Programme** groups the
@@ -138,12 +137,12 @@ trigger all three refusals rather than describing them. Bounds and constraints h
 writer including `psql`; a validator runs on the API write path only, so both are rules a `CHECK`
 genuinely cannot express.
 
-Two things are still absent, both for reasons outside this example:
+Two things are still absent:
 
 - the `plugin-seo` composite, because schema-side plugin registration needs a spike first
-- a publish button, because `supatype.publish(table, id)` is documented in `@supatype/types` and
-  implemented nowhere. The client exposes `.draft()` for reading but nothing for publishing, so
-  publishing happens in Studio and this example reads the result
+- a publish button: the client can publish since 0.7.0
+  ([drafts](https://www.supatype.com/docs/client.html#drafts)), but this example still publishes
+  in Studio
 
 `Searchable` is here in both its spellings (the modifier on `Speaker.name`, the ordered model-level
 list on `Talk`), and building this example is what turned up the fact that the CLI was discarding
@@ -152,9 +151,15 @@ separately, so a search box in Studio needs an engine carrying it.
 
 ## Running it
 
+Running this outside the repo? See [Running an example](../README.md#running-an-example).
+
+From the monorepo root:
+
 ```bash
 pnpm install
-cp .env.example .env # `supatype keys` needs a JWT_SECRET; it does not invent one
+pnpm build           # the CLI and the libraries run from their dist/
+cd examples/kitchen-sink
+cp .env.example .env # `supatype keys --write` needs a JWT_SECRET; it does not invent one
 pnpm keys            # mints ANON_KEY / SERVICE_ROLE_KEY into .env
 pnpm build:app       # app.mode is "static", so the SPA must exist before the stack serves it
 pnpm dev             # Postgres, the schema, the whole stack

@@ -25,18 +25,28 @@ Guide for working with Supatype projects. If unsure about a command or flag, run
 
 ## Prerequisites
 
-Node.js 18+, Docker (default provider), npm/pnpm/yarn.
+Node.js 22 or later, Docker (default provider), npm/pnpm/yarn.
+
+Install the CLI with npm, or on Linux and macOS with the install script or Homebrew (on Windows, use npm):
+
+```bash
+npm install -g @supatype/cli
+curl -fsSL https://supatype.com/install.sh | bash
+brew install supatype/tap/supatype
+```
 
 ## New project
 
 ```bash
-npx @supatype/cli init <project-name> --mode standalone  # self-host target
+npx @supatype/cli init <project-name>     # asks where it runs in production; --defaults skips the prompts
 cd <project-name>
 npm install                                # only if init skipped the install
-supatype keys                              # only if init skipped the keys: ANON_KEY + SERVICE_ROLE_KEY in .env
+supatype keys --write                      # only if init skipped the keys: ANON_KEY + SERVICE_ROLE_KEY in .env
 supatype dev                               # terminal 1: Docker Compose (Kong :18473); applies the schema and watches it
 npm run vite                               # terminal 2: if app.vite_dev_url is set
 ```
+
+Plain `supatype keys` prints the keys and writes nothing; `--write` puts them in `.env`.
 
 `supatype dev` keeps running. It pushes the schema when it starts and on every save, and
 regenerates the typed client each time; there is no separate `push` step locally. `push` is for
@@ -52,24 +62,19 @@ To run a second stack of the same project (another checkout, a test run), set
 `SUPATYPE_PROJECT_NAME=<name>` or pass `--project-name <name>`, with its own `SUPATYPE_KONG_PORT`:
 the compose project and the database follow the name for that run, and no file is written.
 
-Install matching versions of CLI, client, and types from npm:
+Install matching versions of CLI, client, and types from npm (`latest` is the current release):
 
 ```bash
-npm view @supatype/cli dist-tags    # compare latest vs alpha
 npm install @supatype/cli@latest @supatype/client@latest @supatype/types@latest
-```
-
-Use `@alpha` only when the alpha tag is newer than `latest`:
-
-```bash
-npm install @supatype/cli@alpha @supatype/client@alpha @supatype/types@alpha
 ```
 
 Pin all `@supatype/*` packages to the **same version** to avoid client/type skew.
 
 Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
 
-**Scaffold reference:** `supatype init --mode standalone` (static + `vite_dev_url`). Reference fixture: [`examples/self-host/`](https://github.com/supatype/supatype/tree/main/examples/self-host) in the Supatype repository. See [references/frontend.md](references/frontend.md).
+**Scaffold:** run `supatype init` and answer its prompts (production target, local runtime, schema
+path, front end), or pass `--defaults` to take the defaults. `--mode dev | standalone` still works
+for older scripts. For wiring a front end, see [references/frontend.md](references/frontend.md).
 
 ## Daily workflow
 

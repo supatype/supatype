@@ -117,15 +117,15 @@
     <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
 
     <h2 id="files">Seed files</h2>
-    <p>Put seed files in <code>seeds/</code>. They run in alphabetical order, so name them <code>01-authors.ts</code>, <code>02-posts.ts</code>. Without a <code>seeds/</code> folder, <code>seed.ts</code> at the project root runs instead.</p>
+    <p>Put seed files in <code>seeds/</code>. They run in alphabetical order, so name them <code>01-authors.ts</code>, <code>02-posts.ts</code>. Files ending <code>.ts</code>, <code>.mts</code> or <code>.tsx</code> are found. When <code>seeds/</code> holds none, <code>seed.ts</code> at the project root runs instead.</p>
     <p>Each file exports a default function. The function does not connect or await anything. It records the writes, and the engine applies them.</p>
     <div class="cb"><div class="cb-bar"><span>seeds/01-blog.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import type</span> { <span class="t">SeedContext</span> } <span class="k">from</span> <span class="s">"@supatype/cli/seed"</span>
 
-<span class="c">// Sign-in users are not seeded. Create them first, then use their ids:</span>
+<span class="c">// Sign-in users are not seeded. Create one first, then paste the id list-users prints:</span>
 <span class="c">//   supatype admin create-user --email alex@example.com --role editor</span>
 <span class="c">//   supatype admin list-users</span>
-<span class="k">const</span> ALEX = <span class="s">"00000000-0000-4000-8000-0000000000a1"</span>
+<span class="k">const</span> ALEX = <span class="s">"&lt;id from supatype admin list-users&gt;"</span>
 
 <span class="k">export default async function</span> seed({ db, expr, log }: <span class="t">SeedContext</span>) {
   log(<span class="s">"seeding authors, tags and posts"</span>)
@@ -155,8 +155,17 @@
 
     <h2 id="builder">The builder</h2>
     <p><code>db</code> has one property per table, typed from your schema. A wrong column or a missing required field fails to compile.</p>
-    <p>The types come from <code>supatype/generated/seed.ts</code>. <code>supatype generate</code>, <code>supatype dev</code> and <code>supatype push</code> write it. It needs no database, so it is gitignored and rebuilt on install.</p>
+    <p>The types come from <code>supatype/generated/seed.ts</code>, which is gitignored. <code>supatype generate</code>, <code>dev</code> and <code>push</code> write it, and a project made by <code>supatype init</code> also rebuilds it on install.</p>
     <p>The context also has <code>expr</code> (values the database computes), <code>log</code> (print a line) and <code>environment</code> (the <code>--environment</code> name, if given).</p>
+    <p><code>db.$if(condition, body)</code> runs <code>body</code> only when the database says so. The builder never connects, so the engine checks the condition when the seed runs. Use a plain <code>if</code> for anything your own code can decide.</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/01-blog.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>db.$if({ notExists: { model: <span class="s">"Tag"</span> } }, () =&gt; {
+  db.tag.create({ name: <span class="s">"general"</span> })
+})</pre></div>
+    <p>The condition is <code>{ exists }</code> or <code>{ notExists }</code>, naming a model and an optional <code>where</code>, or <code>{ environment: "staging" }</code>.</p>
+    <p>A file can also export a <code>config</code>. <code>runOnce: true</code> applies the file at most once, for a one-time backfill. It covers the whole run: if one file sets it, every file in that run gets it, with a warning.</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/01-blog.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export const</span> config = { runOnce: <span class="k">true</span> }</pre></div>
 
     <h2 id="upsert">Create and upsert</h2>
     <div class="tbl"><table>
@@ -183,10 +192,10 @@
     author: { connect: { id: ALEX } },
   },
 })</pre></div>
-    <p><code>create</code> and <code>upsert</code> return a reference you can use in later writes, such as <code>post.id</code>. It is not a value read from the database. The engine fills it in when it applies the seed.</p>
+    <p><code>create</code> and <code>upsert</code> return a reference you can use in later writes, such as <code>post.id</code>. It is a placeholder, filled in with the real value when the seed is applied. <code>createMany</code> returns nothing, so use <code>create</code> for a row you need to reference.</p>
     <div class="cb"><div class="cb-bar"><span>seeds/02-posts.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> tag = db.tag.create({ name: <span class="s">"release"</span> })
-log(<span class="s">`created a tag, referenced as ${String(tag.id)}`</span>)</pre></div>
+log(<span class="s">`created a tag, referenced as ${JSON.stringify(tag.id)}`</span>)</pre></div>
 
     <h2 id="children">Nested children</h2>
     <p>Write a row's children inside it with <code>create</code> or <code>createMany</code>. Their foreign keys are filled in for you.</p>
@@ -200,6 +209,7 @@ log(<span class="s">`created a tag, referenced as ${String(tag.id)}`</span>)</pr
 
     <h2 id="values">Rich text and defaults</h2>
     <p>A <code>RichText</code> field takes a plain string. It becomes a one-paragraph document. Rich text inside a block is not converted, so write the full document there.</p>
+    <p>A <code>Blocks</code> entry is <code>{ type, data }</code>, with the block's fields under <code>data</code>, as Studio stores it. See <code>sections</code> below.</p>
     <p><code>expr</code> gives values the database works out when the seed runs:</p>
     <div class="cb"><div class="cb-bar"><span>seeds/02-posts.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>db.post.upsert({
@@ -208,13 +218,14 @@ log(<span class="s">`created a tag, referenced as ${String(tag.id)}`</span>)</pr
     title: <span class="s">"Launch day"</span>,
     slug: <span class="s">"launch-day"</span>,
     body: <span class="s">"We are live."</span>,
+    sections: [{ type: <span class="s">"hero"</span>, data: { heading: <span class="s">"We are live"</span> } }],
     kind: <span class="s">"news"</span>,
     views: expr.default(),
     published_at: expr.now({ days: 7 }),
     author: { connect: { id: ALEX } },
   },
 })</pre></div>
-    <p><code>expr.now()</code>, <code>expr.ago({ days: 1 })</code> and <code>expr.startOf("day", { days: 30, hours: 9 })</code> are times. They only fit date fields.</p>
+    <p><code>expr.now()</code>, <code>expr.ago({ days: 1 })</code>, <code>expr.startOf("day", { days: 30, hours: 9 })</code> and <code>expr.startOfBefore("month", { months: 1 })</code> are times. <code>startOf</code> moves forward from the start of the period and <code>startOfBefore</code> moves back. They only fit date fields.</p>
     <p><code>expr.default()</code> sets the column's own default. It is sent as <code>{ "$default": true }</code>. Leaving a field out of an upsert keeps the old value. <code>expr.default()</code> resets it. It only fits columns that have a default.</p>
     <p>Leave <code>id</code> out and the database makes one.</p>
 
@@ -240,7 +251,16 @@ log(<span class="s">`created a tag, referenced as ${String(tag.id)}`</span>)</pr
     <p>The statement runs at its position in the file, after every write above it, so it can read the rows those writes made.</p>
     <p>Each param binds by its JSON type: a string as <code>text</code>, a whole number as <code>bigint</code>, any other number as <code>double precision</code>, a boolean as <code>boolean</code>, and an object or array as <code>jsonb</code>. A column of another type needs a cast on its placeholder, such as <code>$1::uuid</code>. That includes an id taken from an earlier write, such as <code>post.id</code>, which binds as text:</p>
     <div class="cb"><div class="cb-bar"><span>seeds/03-tags.ts</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="k">const</span> post = db.post.create({ slug: <span class="s">"hello-world"</span>, title: <span class="s">"Hello"</span> })
+<pre><span class="k">const</span> post = db.post.upsert({
+  where: { slug: <span class="s">"release-notes"</span> },
+  data: {
+    title: <span class="s">"Release notes"</span>,
+    slug: <span class="s">"release-notes"</span>,
+    body: <span class="s">"What changed."</span>,
+    kind: <span class="s">"news"</span>,
+    author: { connect: { id: ALEX } },
+  },
+})
 db.$sql(
   <span class="s">`insert into post_tag (post_id, tag_id)
    select $1::uuid, t.id from tag t where t.name = $2
@@ -251,13 +271,18 @@ db.$sql(
       <span class="callout-label">ONE PARAM PER PLACEHOLDER</span>
       <p>Pass exactly one param for each of <code>$1</code> to <code>$n</code> in the statement. A count that does not match is refused before anything runs. A param is a value, so write expressions such as <code>now()</code> in the statement itself.</p>
     </div>
+    <p>A JavaScript <code>bigint</code> is sent as its digits, and a <code>Date</code> as an ISO timestamp. Both bind as text, so cast them: <code>$1::bigint</code>, <code>$2::timestamptz</code>. <code>expr</code> values, <code>expr.default()</code> included, are refused as params.</p>
 
     <h2 id="run">Running seeds</h2>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> supatype seed                    <span class="c"># every file in seeds/</span>
 <span class="pr">$</span> supatype seed seeds/02-posts.ts  <span class="c"># one file</span>
 <span class="pr">$</span> supatype seed --atomic           <span class="c"># all files in one transaction</span>
-<span class="pr">$</span> supatype seed --status           <span class="c"># what ran, when, and what it wrote</span></pre></div>
+<span class="pr">$</span> supatype seed --status           <span class="c"># what ran, when, and what changed since</span>
+<span class="pr">$</span> supatype seed --connection &lt;dsn&gt; <span class="c"># another database</span>
+<span class="pr">$</span> supatype seed --environment staging</pre></div>
+    <p><code>--status</code> lists each applied file with its status, when it ran, how long it took, and whether the file has changed since. <code>--environment</code> names the environment for an <code>{ environment }</code> condition.</p>
+    <p>A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass <code>--force</code> only when you mean to seed the linked project.</p>
     <p>Each file is one transaction. Without <code>--atomic</code>, a failure in the third file leaves the first two applied, and the report says so.</p>
     <p>Errors name your schema, such as <code>Tag.name is already taken</code>, with the file and position. Exit code <code>1</code> means a seed failed. Exit code <code>2</code> means the run could not start.</p>
     <p>A seed writes the model's own table, so rows on a drafts model are seeded as published.</p>
@@ -285,7 +310,7 @@ db.$sql(
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

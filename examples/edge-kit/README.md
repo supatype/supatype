@@ -21,10 +21,13 @@ Also:
 
 ## Setup
 
+Running this outside the repo? See [Running an example](../README.md#running-an-example).
+
 From the monorepo root:
 
 ```bash
 pnpm install
+pnpm build             # the CLI and the libraries run from their dist/
 cd examples/edge-kit
 cp .env.example .env
 cp functions/.env.local.example functions/.env.local

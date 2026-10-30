@@ -125,7 +125,7 @@
   url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
-    <p>Every page in these docs imports the client from this one file. <code>supatype init</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
+    <p>Every page in these docs imports the client from this one file. <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys --write</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
     <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
     <p><code>createClient</code> takes these options as well as <code>url</code> and <code>anonKey</code>:</p>
     <div class="tbl"><table>
@@ -147,12 +147,14 @@
     <div class="tbl"><table>
       <thead><tr><th scope="col">File</th><th scope="col">Holds</th></tr></thead>
       <tbody>
-        <tr><td><code>supatype/generated/client.ts</code></td><td>The <code>createClient</code> to import</td></tr>
+        <tr><td><code>supatype/generated/client.ts</code></td><td>The <code>createClient</code> to import, the table types, the columns that keep exact values and the models that keep drafts. It also re-exports <code>@supatype/client</code></td></tr>
         <tr><td><code>supatype/generated/index.d.ts</code></td><td>Row, insert and update types for each table</td></tr>
         <tr><td><code>types/database.ts</code></td><td>The <code>Database</code> type, for code that wants the raw shapes</td></tr>
       </tbody>
     </table></div>
     <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: <code>createClient&lt;MyDatabase&gt;({ ... })</code>.</p>
+    <p>Exact numbers keep every digit when you import from the generated <code>client.ts</code>. A <code>BigInt</code> column reads as a <code>bigint</code>. <code>Decimal</code> and <code>Money</code> columns read as strings.</p>
+    <p>A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.</p>
 
     <h2 id="read">Read rows</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -171,6 +173,10 @@
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> { data: post } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"*"</span>).eq(<span class="s">"slug"</span>, <span class="s">"hello-world"</span>).maybeSingle()
 console.log(post?.title)</pre></div>
+    <p><code>count</code> is <code>null</code> unless you ask for it:</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { count } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id"</span>, { count: <span class="s">"exact"</span> }).eq(<span class="s">"kind"</span>, <span class="s">"news"</span>)
+console.log(count)</pre></div>
 
     <h2 id="filters">Filters</h2>
     <div class="tbl"><table>
@@ -181,6 +187,7 @@ console.log(post?.title)</pre></div>
         <tr><td><code>like</code>, <code>ilike</code></td><td>a pattern, <code>ilike</code> ignores case</td></tr>
         <tr><td><code>in</code></td><td>any of a list</td></tr>
         <tr><td><code>is</code></td><td><code>null</code>, <code>true</code> or <code>false</code></td></tr>
+        <tr><td><code>contains</code>, <code>containedBy</code></td><td>an array, range or jsonb column that holds the value, or is held by it</td></tr>
         <tr><td><code>not</code>, <code>or</code>, <code>match</code></td><td>negation, either filter, several equalities</td></tr>
       </tbody>
     </table></div>
@@ -200,8 +207,9 @@ console.log(post?.title)</pre></div>
 
 <span class="k">await</span> supatype.from(<span class="s">"comment"</span>).update({ body: <span class="s">"Edited"</span> }).eq(<span class="s">"id"</span>, commentId)
 <span class="k">await</span> supatype.from(<span class="s">"comment"</span>).delete().eq(<span class="s">"id"</span>, commentId)</pre></div>
-    <p>A write returns no rows unless you add <code>.select()</code>. <code>upsert</code> inserts or updates by primary key.</p>
-    <p>A <code>RichText</code> field takes a plain string on write. Owner columns with an <code>Owner&lt;&gt;</code> create rule can be left out: they default to the caller.</p>
+    <p>A write returns no rows unless you add <code>.select()</code>. On a delete, <code>.select()</code> returns the rows it deleted. <code>upsert</code> inserts or updates by primary key.</p>
+    <p>A <code>RichText</code> field takes a plain string on write.</p>
+    <p>Some owner columns can be left out. A <code>SupatypeAuthUserId</code> field that the <code>create</code> rule names in <code>Owner&lt;&gt;</code>, and that has no default of its own, defaults to the caller. A relation's key, such as <code>author_id</code>, is not filled in, so send it.</p>
 
     <h2 id="drafts">Drafts and publishing</h2>
     <p>On a model with <code>versions: { drafts: true }</code>, <code>update</code> saves a draft. The live row does not change until the record is published.</p>
@@ -241,6 +249,7 @@ subscription.unsubscribe()
 
 <span class="k">await</span> supatype.auth.signOut()</pre></div>
     <p>Once signed in, every request carries the user's token, so access rules see them. <code>onAuthStateChange</code> calls back at once with the current state, then on each change.</p>
+    <p>When the project asks new users to confirm their email, <code>signUp</code> returns <code>session: null</code> and does not sign the user in. They sign in once they have confirmed.</p>
     <p><code>getUser()</code> fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on <code>supatype.auth</code> too.</p>
 
     <h2 id="storage">Storage</h2>
@@ -257,6 +266,10 @@ subscription.unsubscribe()
 <span class="k">const</span> { data: signed } = <span class="k">await</span> bucket.createSignedUrl(upload.path, 60)
 console.log(publicUrl, signed?.signedUrl)</pre></div>
     <p><code>getPublicUrl</code> works for public buckets. <code>createSignedUrl</code> gives a link that expires after the number of seconds you pass. <code>download</code>, <code>list</code> and <code>remove</code> are on the bucket too.</p>
+    <p>An <code>ImageAsset</code> or <code>FileAsset</code> column holds <code>{ bucket, path }</code>, not a URL. <code>publicUrl</code> builds the URL from it, and returns <code>null</code> for an empty column:</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: post } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"title, cover"</span>).eq(<span class="s">"slug"</span>, <span class="s">"hello-world"</span>).maybeSingle()
+<span class="k">const</span> coverUrl = supatype.storage.publicUrl(post?.cover)</pre></div>
     <p>The bucket's access rules from the schema decide who may upload, overwrite and delete.</p>
 
     <h2 id="realtime">Realtime</h2>
@@ -273,7 +286,10 @@ sub.unsubscribe()</pre></div>
 <pre><span class="k">const</span> { data: reply, error: fnError } = <span class="k">await</span> supatype.functions.invoke(<span class="s">"hello"</span>, { body: { name: <span class="s">"Alex"</span> } })
 <span class="k">if</span> (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)</pre></div>
-    <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed. <code>invoke</code> also takes <code>method</code> (default <code>POST</code>), <code>headers</code> and <code>idempotent</code>.</p>
+    <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed. <code>invoke</code> also takes <code>method</code> (default <code>POST</code>), <code>headers</code> and <code>idempotent</code>. Only a <code>GET</code> is retried on a transient failure, because a <code>POST</code> may already have run. Pass <code>idempotent: true</code> when running the function twice is harmless.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">await</span> supatype.functions.invoke(<span class="s">"stats"</span>, { method: <span class="s">"GET"</span>, headers: { <span class="s">"x-region"</span>: <span class="s">"eu"</span> } })</pre></div>
+    <p>Inside a function, <code>ctx.url</code> is the API's internal address, for calls the function makes. <code>ctx.publicUrl</code> is the public address, for links you give to people.</p>
     <p><code>supatype.rpc(name, params, options)</code> calls a Postgres function. Its options are <code>count</code>, <code>head</code>, <code>schema</code> for a function outside the default schema, and <code>idempotent</code>.</p>
 
     <h2 id="graphql">GraphQL</h2>
@@ -281,16 +297,26 @@ console.log(reply)</pre></div>
 <pre><span class="k">import</span> <span class="k">type</span> { <span class="t">TableRow</span> } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
 <span class="k">type</span> <span class="t">Post</span> = <span class="t">TableRow</span>&lt;<span class="s">"post"</span>&gt;
-<span class="k">type</span> <span class="t">PostPage</span> = { postCollection: { edges: { node: <span class="t">Pick</span>&lt;<span class="t">Post</span>, <span class="s">"title"</span> | <span class="s">"body"</span>&gt; }[] } }
+<span class="k">type</span> <span class="t">Author</span> = <span class="t">TableRow</span>&lt;<span class="s">"author"</span>&gt;
+<span class="k">type</span> <span class="t">PostPage</span> = {
+  postCollection: { edges: { node: <span class="t">Pick</span>&lt;<span class="t">Post</span>, <span class="s">"title"</span> | <span class="s">"body"</span>&gt; &amp; { author: <span class="t">Pick</span>&lt;<span class="t">Author</span>, <span class="s">"name"</span>&gt; } }[] }
+}
 
 <span class="k">const</span> { data, error } = <span class="k">await</span> supatype.graphql&lt;<span class="t">PostPage</span>&gt;(<span class="s">`{
-  postCollection(first: 10) { edges { node { title body } } }
+  postCollection(first: 10) { edges { node { title body author { name } } } }
 }`</span>)
-<span class="k">const</span> firstParagraph = data?.postCollection.edges[0]?.node.body.root.children?.[0]</pre></div>
+<span class="k">if</span> (error) <span class="k">throw</span> <span class="k">new</span> <span class="t">Error</span>(error.message)
+<span class="k">const</span> first = data?.postCollection.edges[0]?.node
+console.log(first?.author.name, first?.body.root.children?.[0])</pre></div>
     <p>The query goes to <code>/graphql/v1</code> as the signed-in user, under the same access rules as REST. Pass variables as the second argument, and <code>{ idempotent: true }</code> as the third to retry a read on a transient failure.</p>
     <p>Rich text, blocks and json fields come back as objects and arrays, not strings. pg_graphql types every json and jsonb column with its <code>JSON</code> scalar and sends it as a JSON-encoded string, so the client reads the schema once per role, finds each field of that type in your query, and decodes it. Aliases, named and inline fragments, nested relations and lists all decode. A field the client cannot place stays exactly as returned: one added since the schema was read (it reads the schema again on the next call), a document with more than one operation, or a schema it could not read.</p>
     <p>The type argument names the answer's shape and is not checked at runtime. Build it from the generated <code>TableRow</code> types so <code>body</code> is typed as the rich text document it now is. Variables you send are not encoded: a json argument still takes a string.</p>
-    <p>Using another GraphQL client? <code>readGraphqlSchema</code> reads the <code>data</code> of an introspection answer to <code>GRAPHQL_SCHEMA_QUERY</code>, and <code>decodeGraphqlJsonFields(query, data, schema)</code> decodes an answer the same way.</p>
+    <p>Relation fields use your schema's names. The side that holds the key takes the relation field's name, so <code>author</code> above. The other side takes its <code>HasMany</code> or <code>HasOne</code> field's name, so an author's posts are <code>posts</code>. A list is still a connection, read through <code>edges { node }</code>. REST embeds are named as before.</p>
+    <div class="callout">
+      <span class="callout-label">CHANGED IN 0.7.0</span>
+      <p>GraphQL used to name relations after the tables they join, such as <code>postCollection</code> for an author's posts. The next <code>supatype push</code> writes the schema's names, and a query that still uses an old name fails with <code>Unknown field</code>. A few ambiguous relations keep pg_graphql's own name.</p>
+    </div>
+    <p>Using another GraphQL client? <code>readGraphqlSchema</code> reads the <code>data</code> of an introspection answer to <code>GRAPHQL_SCHEMA_QUERY</code>, and <code>decodeGraphqlJsonFields(query, data, schema)</code> decodes an answer the same way. Read the schema again when it returns <code>schemaIsStale: true</code>.</p>
 
     <h2 id="errors">Errors</h2>
     <p>Queries, <code>rpc</code>, <code>functions.invoke</code>, auth and most storage calls return <code>{ data, error }</code>. Check <code>error</code> before using <code>data</code>.</p>
@@ -298,7 +324,7 @@ console.log(reply)</pre></div>
     <p>An insert an access rule refuses returns code <code>42501</code>. An update or delete that the rules hide matches no rows and returns no error. <code>single()</code> with no row returns <code>PGRST116</code>.</p>
     <div class="callout warn">
       <span class="callout-label">NETWORK FAILURES</span>
-      <p>A network failure on a query, <code>rpc</code> or function call comes back as <code>error</code> with a code: <code>NETWORK_TIMEOUT</code>, <code>NETWORK_CONNECTION_REFUSED</code>, <code>NETWORK_DNS_FAILURE</code> or <code>NETWORK_ERROR</code>. A read still answered 429 after its last retry has code <code>RATE_LIMITED</code>. Most auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail. Three return the failure as <code>error</code> like a query: <code>storage.listBuckets</code>, <code>storage.createBucket</code> and <code>auth.refreshSession</code>. <code>auth.signOut</code> ignores a network failure and clears the session on this device anyway.</p>
+      <p>A network failure on a query, <code>rpc</code>, <code>graphql</code> or a function call comes back as <code>error</code> with a code: <code>NETWORK_TIMEOUT</code>, <code>NETWORK_CONNECTION_REFUSED</code>, <code>NETWORK_DNS_FAILURE</code> or <code>NETWORK_ERROR</code>. A read still answered 429 after its last retry has code <code>RATE_LIMITED</code>. Most auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail. Three return the failure as <code>error</code> like a query: <code>storage.listBuckets</code>, <code>storage.createBucket</code> and <code>auth.refreshSession</code>. <code>auth.signOut</code> ignores a network failure and clears the session on this device anyway.</p>
     </div>
 
     <h2 id="timeouts-and-retries">Timeouts and retries</h2>
@@ -345,7 +371,7 @@ console.log(reply)</pre></div>
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

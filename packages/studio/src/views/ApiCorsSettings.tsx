@@ -49,7 +49,7 @@ function projectList(data: CorsOrigins): string[] {
 
 /**
  * Which browser origins may call this project's API: what is in force, where each entry comes
- * from, and for owners and admins, adding, removing and resetting. A change here is saved in the
+ * from, and for owners, admins and developers, adding, removing and resetting. A change here is saved in the
  * project's database and replaces the default (the site URL plus `api.corsOrigins` and
  * SUPATYPE_CORS_ALLOW_ORIGINS) until it is reset.
  */
@@ -176,7 +176,7 @@ function ReadOnlyNote({ data }: { data: CorsOrigins }): React.ReactElement {
   return (
     <p className="text-xs text-muted-foreground">
       {data.editable
-        ? "Owners and admins can change this list."
+        ? "Owners, admins and developers can change this list."
         : "This deployment has no database to save a list in; set api.corsOrigins or SUPATYPE_CORS_ALLOW_ORIGINS instead."}
     </p>
   )

@@ -17,17 +17,17 @@ Pre-1.0: APIs and config may change between releases.
 
 <h2 id="files">Seed files</h2>
 
-Put seed files in `seeds/`. They run in alphabetical order, so name them `01-authors.ts`, `02-posts.ts`. Without a `seeds/` folder, `seed.ts` at the project root runs instead.
+Put seed files in `seeds/`. They run in alphabetical order, so name them `01-authors.ts`, `02-posts.ts`. Files ending `.ts`, `.mts` or `.tsx` are found. When `seeds/` holds none, `seed.ts` at the project root runs instead.
 
 Each file exports a default function. The function does not connect or await anything. It records the writes, and the engine applies them.
 
 ```ts title="seeds/01-blog.ts"
 import type { SeedContext } from "@supatype/cli/seed"
 
-// Sign-in users are not seeded. Create them first, then use their ids:
+// Sign-in users are not seeded. Create one first, then paste the id list-users prints:
 //   supatype admin create-user --email alex@example.com --role editor
 //   supatype admin list-users
-const ALEX = "00000000-0000-4000-8000-0000000000a1"
+const ALEX = "<id from supatype admin list-users>"
 
 export default async function seed({ db, expr, log }: SeedContext) {
   log("seeding authors, tags and posts")
@@ -61,9 +61,25 @@ This uses the schema from the [Schema](/docs/schema.html#relations) page.
 
 `db` has one property per table, typed from your schema. A wrong column or a missing required field fails to compile.
 
-The types come from `supatype/generated/seed.ts`. `supatype generate`, `supatype dev` and `supatype push` write it. It needs no database, so it is gitignored and rebuilt on install.
+The types come from `supatype/generated/seed.ts`, which is gitignored. `supatype generate`, `dev` and `push` write it, and a project made by `supatype init` also rebuilds it on install.
 
 The context also has `expr` (values the database computes), `log` (print a line) and `environment` (the `--environment` name, if given).
+
+`db.$if(condition, body)` runs `body` only when the database says so. The builder never connects, so the engine checks the condition when the seed runs. Use a plain `if` for anything your own code can decide.
+
+```ts title="seeds/01-blog.ts"
+db.$if({ notExists: { model: "Tag" } }, () => {
+  db.tag.create({ name: "general" })
+})
+```
+
+The condition is `{ exists }` or `{ notExists }`, naming a model and an optional `where`, or `{ environment: "staging" }`.
+
+A file can also export a `config`. `runOnce: true` applies the file at most once, for a one-time backfill. It covers the whole run: if one file sets it, every file in that run gets it, with a warning.
+
+```ts title="seeds/01-blog.ts"
+export const config = { runOnce: true }
+```
 
 <h2 id="upsert">Create and upsert</h2>
 
@@ -94,11 +110,11 @@ db.post.upsert({
 })
 ```
 
-`create` and `upsert` return a reference you can use in later writes, such as `post.id`. It is not a value read from the database. The engine fills it in when it applies the seed.
+`create` and `upsert` return a reference you can use in later writes, such as `post.id`. It is a placeholder, filled in with the real value when the seed is applied. `createMany` returns nothing, so use `create` for a row you need to reference.
 
 ```ts title="seeds/02-posts.ts"
 const tag = db.tag.create({ name: "release" })
-log(`created a tag, referenced as ${String(tag.id)}`)
+log(`created a tag, referenced as ${JSON.stringify(tag.id)}`)
 ```
 
 <h2 id="children">Nested children</h2>
@@ -116,6 +132,8 @@ Under an `upsert`, a child is written only if the parent has no child with the s
 
 A `RichText` field takes a plain string. It becomes a one-paragraph document. Rich text inside a block is not converted, so write the full document there.
 
+A `Blocks` entry is `{ type, data }`, with the block's fields under `data`, as Studio stores it. See `sections` below.
+
 `expr` gives values the database works out when the seed runs:
 
 ```ts title="seeds/02-posts.ts"
@@ -125,6 +143,7 @@ db.post.upsert({
     title: "Launch day",
     slug: "launch-day",
     body: "We are live.",
+    sections: [{ type: "hero", data: { heading: "We are live" } }],
     kind: "news",
     views: expr.default(),
     published_at: expr.now({ days: 7 }),
@@ -133,7 +152,7 @@ db.post.upsert({
 })
 ```
 
-`expr.now()`, `expr.ago({ days: 1 })` and `expr.startOf("day", { days: 30, hours: 9 })` are times. They only fit date fields.
+`expr.now()`, `expr.ago({ days: 1 })`, `expr.startOf("day", { days: 30, hours: 9 })` and `expr.startOfBefore("month", { months: 1 })` are times. `startOf` moves forward from the start of the period and `startOfBefore` moves back. They only fit date fields.
 
 `expr.default()` sets the column's own default. It is sent as `{ "$default": true }`. Leaving a field out of an upsert keeps the old value. `expr.default()` resets it. It only fits columns that have a default.
 
@@ -173,7 +192,16 @@ The statement runs at its position in the file, after every write above it, so i
 Each param binds by its JSON type: a string as `text`, a whole number as `bigint`, any other number as `double precision`, a boolean as `boolean`, and an object or array as `jsonb`. A column of another type needs a cast on its placeholder, such as `$1::uuid`. That includes an id taken from an earlier write, such as `post.id`, which binds as text:
 
 ```ts title="seeds/03-tags.ts"
-const post = db.post.create({ slug: "hello-world", title: "Hello" })
+const post = db.post.upsert({
+  where: { slug: "release-notes" },
+  data: {
+    title: "Release notes",
+    slug: "release-notes",
+    body: "What changed.",
+    kind: "news",
+    author: { connect: { id: ALEX } },
+  },
+})
 db.$sql(
   `insert into post_tag (post_id, tag_id)
    select $1::uuid, t.id from tag t where t.name = $2
@@ -186,14 +214,22 @@ db.$sql(
 Pass exactly one param for each of `$1` to `$n` in the statement. A count that does not match is refused before anything runs. A param is a value, so write expressions such as `now()` in the statement itself.
 :::
 
+A JavaScript `bigint` is sent as its digits, and a `Date` as an ISO timestamp. Both bind as text, so cast them: `$1::bigint`, `$2::timestamptz`. `expr` values, `expr.default()` included, are refused as params.
+
 <h2 id="run">Running seeds</h2>
 
 ```sh
 $ supatype seed                    # every file in seeds/
 $ supatype seed seeds/02-posts.ts  # one file
 $ supatype seed --atomic           # all files in one transaction
-$ supatype seed --status           # what ran, when, and what it wrote
+$ supatype seed --status           # what ran, when, and what changed since
+$ supatype seed --connection <dsn> # another database
+$ supatype seed --environment staging
 ```
+
+`--status` lists each applied file with its status, when it ran, how long it took, and whether the file has changed since. `--environment` names the environment for an `{ environment }` condition.
+
+A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass `--force` only when you mean to seed the linked project.
 
 Each file is one transaction. Without `--atomic`, a failure in the third file leaves the first two applied, and the report says so.
 

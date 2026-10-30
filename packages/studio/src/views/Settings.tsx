@@ -351,7 +351,7 @@ function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
       <p className="mt-2 max-w-[640px] text-[0.85rem] text-muted-foreground leading-relaxed">
         A deployed project allows browsers from its site URL and from the origins in{" "}
         <code>api.corsOrigins</code> or <code>SUPATYPE_CORS_ALLOW_ORIGINS</code> in <code>.env</code>.
-        Owners and admins can change the list here; <code>supatype dev</code> allows every origin.
+        Owners, admins and developers can change the list here; <code>supatype dev</code> allows every origin.
       </p>
     </Card>
   )

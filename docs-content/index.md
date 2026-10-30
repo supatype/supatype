@@ -27,6 +27,13 @@ $ npm install -g @supatype/cli
 
 The CLI needs Node.js 22 or later. For a machine without Node, the [CLI](/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
 
+On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.
+
+```sh
+$ curl -fsSL https://supatype.com/install.sh | bash
+$ brew install supatype/tap/supatype
+```
+
 ### 2. Create a project
 
 ```sh
@@ -157,26 +164,25 @@ $ supatype init
 ### 3. Start Compose
 
 ```sh
-$ supatype self-host compose render
 $ supatype self-host compose up -d
 $ supatype push
 ```
 
-The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYPE_KONG_PORT` in `.env` (18473 when it is unset), with Studio at `/studio/`. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.
+`compose up` writes the compose file itself, so there is no separate render step. The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYPE_KONG_PORT` in `.env` (18473 when it is unset), with Studio at `/studio/`. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.
 
 :::note[Rest before the first push]
 Until the first `supatype push`, every REST request answers `503` with `PGRST002`: PostgREST will not serve until the schemas it exposes exist, and the push creates them. After a push PostgREST can take up to about 30 seconds to notice, so `push` waits (at most 40 seconds) until REST answers, printing one line while it does.
 :::
 
 :::note[Allowed origins]
-Browsers may call the API from the origin of `SITE_URL` and from the origins in `api.corsOrigins` (`supatype.config.ts`) or `SUPATYPE_CORS_ALLOW_ORIGINS` (`.env`). Any other origin is refused. Owners and admins can change the list in Studio, on the Settings page's CORS tab: a saved list is kept in the database and replaces the default until it is reset. The site URL stays allowed whatever is saved. `*` allows every origin, and only when you write it.
+Browsers may call the API from the origin of `SITE_URL` and from the origins in `api.corsOrigins` (`supatype.config.ts`) or `SUPATYPE_CORS_ALLOW_ORIGINS` (`.env`). Any other origin is refused. Owners, admins and developers can change the list in Studio, on the Settings page's CORS tab: a saved list is kept in the database and replaces the default until it is reset. The site URL stays allowed whatever is saved. `*` allows every origin, and only when you write it.
 :::
 
 :::note[Ports]
 Only the gateway is published on every interface, at `SUPATYPE_KONG_PORT`, or on ports 80 and 443 once HTTPS is on. Postgres (`SUPATYPE_DB_PORT`, default 5432), the API server (`SUPATYPE_SERVER_PORT`, default 9999) and SeaweedFS (`SUPATYPE_SEAWEEDFS_PORT`, default 8333) bind `127.0.0.1`, so they are reachable from the server itself and nowhere else. To reach them from other machines, set `SUPATYPE_PUBLISH_ADDRESS=0.0.0.0` (or one interface's address) in `.env` and run `supatype self-host compose up -d`. Put a firewall in front first. `supatype init` lists these variables, commented out, in `.env`.
 :::
 
-Images come from Docker Hub at `:latest`: `supatype/postgres:17-latest`, `supatype/server` (which includes realtime), `supatype/storage`, `supatype/studio`, `supatype/schema-engine`, `supatype/functions-worker` and `supatype/control-plane`. Pin versions with `SUPATYPE_*_IMAGE` in `.env` if you need to.
+Images come from Docker Hub at `:latest`: `supatype/postgres`, `supatype/server`, `supatype/realtime`, `supatype/storage`, `supatype/studio`, `supatype/schema-engine`, `supatype/functions-worker` and `supatype/control-plane`. The stack also runs `postgrest/postgrest`, `kong` and SeaweedFS, and Valkey when the cache does not run inside Postgres. Pin versions with `SUPATYPE_*_IMAGE` in `.env`, or with `versions` in `supatype.config.ts`.
 
 To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: { external: { url: process.env.DATABASE_URL! } }` in `supatype.config.ts`. The stack then starts no `db` service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in `supatype/postgres`. Realtime needs `wal_level = logical`, a free replication slot, the `wal2json` plugin and a role with `REPLICATION`. `supatype db check --connection "$DATABASE_URL"` reports what a database lacks, and `--emit` prints the SQL that fixes what it can.
 
@@ -229,8 +235,8 @@ Local and self-hosted environments read the same committed config. What differs 
 | Change | Local | Self-hosted |
 | --- | --- | --- |
 | Schema | `supatype push` | `supatype push` |
-| Frontend | Nothing with the dev proxy. Otherwise `npm run build` | `npm run build`, then `compose render` and `compose up -d` |
-| `supatype.config.ts` | Restart `supatype dev` | `compose render` and `compose up -d` |
+| Frontend | Nothing with the dev proxy. Otherwise `npm run build` | `npm run build`, then `compose up -d` |
+| `supatype.config.ts` | Restart `supatype dev` | `compose up -d` |
 | `.env` | Restart `supatype dev` | `compose up -d`, or `compose restart <service>` for one service |
 
 :::note[One service]
@@ -245,7 +251,6 @@ $ git pull
 $ npm install           # if package.json changed
 $ supatype push         # schema migrations
 $ npm run build         # static files into public/ or dist/
-$ supatype self-host compose render
 $ supatype self-host compose up -d
 ```
 
@@ -255,13 +260,16 @@ $ supatype self-host compose up -d
 
 <h2 id="upgrading">Upgrading Supatype</h2>
 
-Moving to newer Supatype components is separate from deploying your own changes, and it takes two commands, not one.
+Moving to newer Supatype components is separate from deploying your own changes. It takes four commands.
 
 ```sh
-$ supatype update      # pull new images and binaries
-$ supatype self-host compose up -d   # run the new images
-$ supatype push        # apply the schema those components expect
+$ npm install -g @supatype/cli@latest   # or supatype self-update
+$ supatype update                       # pull the new images
+$ supatype self-host compose up -d      # run them
+$ supatype push                         # apply the schema they expect
 ```
+
+`supatype update` never updates the CLI itself, so update it first. Under Docker, `update` renders the compose file and pulls the images. It does not restart anything, which is why `compose up -d` follows.
 
 The push is the step that is easy to miss. Grants, policies, functions and buckets are generated from your schema and only reach the database through `push`, so new images on an older database can refuse rules until it runs. The upgrade is finished after the push, not before.
 
@@ -270,7 +278,7 @@ This is the usual cause. The storage service logs the reason and names `supatype
 :::
 
 :::note[0.7.0]
-Upgrading from 0.6.0? Deploy the new realtime image before the first push, and upgrade the CLI with the engine. The [upgrade notes](https://github.com/supatype/supatype/blob/main/UPGRADING.md) cover ownership checks, declared renames, identity columns and the rest.
+Upgrading from 0.6.0? Deploy the new realtime image before the first push, and upgrade the CLI with the engine. The [upgrade notes](https://github.com/supatype/supatype/blob/main/UPGRADING.md) cover ownership checks, declared renames, identity columns and the rest. CORS changed too: outside dev, only the origin of `SITE_URL` and the origins you list are allowed. If your app is served from another origin, add it to `api.corsOrigins` before you upgrade.
 :::
 
 <h2 id="production">Running in production</h2>
