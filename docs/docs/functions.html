@@ -240,7 +240,7 @@ $ npx supatype functions env unset RESEND_API_KEY</pre></div>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></div>
-<p><code>serve</code> listens on port <code>54321</code> by default; change it with <code>--port</code>. It loads <code>functions/.env.local</code> unless you pass <code>--env-file</code>. <code>invoke</code> sends a POST, prints the status and the response, and gives up after 30 seconds. <code>--auth</code> adds a test token to the request.</p>
+<p><code>serve</code> listens on port <code>18472</code> by default; change it with <code>--port</code>. It loads <code>functions/.env.local</code> unless you pass <code>--env-file</code>. <code>invoke</code> sends a POST, prints the status and the response, and gives up after 30 seconds. <code>--auth</code> adds a test token to the request.</p>
 
 <h2 id="self-host">Self-host</h2>
 <p>The self-host Compose file always includes a <code>functions-worker</code> service, built from the <code>supatype/functions-worker</code> image. It mounts the project read-only and serves <code>functions/</code> from it. There is no bundle or upload step: the files on disk are what runs.</p>
