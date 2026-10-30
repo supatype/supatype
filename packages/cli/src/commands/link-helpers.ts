@@ -10,7 +10,8 @@ import {
 } from "../link.js"
 import { ensureSupatypeGitignore, warnIfLinkNotGitignored } from "../gitignore.js"
 import { targetFetch } from "../target-client.js"
-import { localPublicApiUrl } from "../local-gateway.js"
+import { localLinkLabel } from "../local-gateway.js"
+import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { isArrayOf, isShape, isString } from "@supatype/shared"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -187,10 +188,10 @@ export async function runLinkAction(opts: {
       } else {
         url = ensureNotCancelled(
           await p.text({
-            message: "Kong gateway URL",
+            message: localLinkLabel(config),
             placeholder: "https://api.example.com",
-            // This project's own gateway, not the first port `dev` tries, which may be another's.
-            defaultValue: localPublicApiUrl(cwd),
+            // This project's own API: its gateway, or the native server. Not the first port `dev` tries.
+            defaultValue: resolveProjectApiUrl(cwd, config),
           }),
         ).trim()
       }

@@ -1,5 +1,6 @@
 import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
 import { readAuthAnswer } from "./auth-answer.js"
+import { bodyReason } from "./error-message.js"
 
 export interface TargetFetchOptions {
   method: string
@@ -97,7 +98,7 @@ async function fetchOnce(url: string, opts: TargetFetchOptions, token: string): 
 function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): TargetApiError {
   const code = bodyString(result.json, "code")
   const message =
-    bodyString(result.json, "message") ?? bodyString(result.json, "error") ?? `API error: ${result.status} ${url}`
+    bodyReason(result.json) ?? `API error: ${result.status} ${url}`
   if (isAuthExpiry(result.status, code, message) && !opts.authRefresh) {
     return new TargetApiError(`${message}. Session expired, run: supatype login`, result.status, code)
   }
@@ -127,7 +128,7 @@ export async function targetFetch(
 ): Promise<unknown> {
   const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
   let result = await fetchOnce(url, opts, opts.token)
-  const reason = bodyString(result.json, "message") ?? bodyString(result.json, "error")
+  const reason = bodyReason(result.json)
   if (!result.ok && opts.authRefresh && isAuthExpiry(result.status, bodyString(result.json, "code"), reason)) {
     result = await fetchOnce(url, opts, await refreshAccessToken(opts.authRefresh))
   }

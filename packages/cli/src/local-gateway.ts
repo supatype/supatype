@@ -1,5 +1,5 @@
 import { readComposeEnvInt, readEnvValue } from "./env-file.js"
-import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
+import { COMPOSE_DEV_KONG_PORT, resolveRuntimeProvider, type SupatypeProjectConfig } from "./project-config.js"
 
 /**
  * The local stack's public address, without a trailing slash: `.env`'s API_EXTERNAL_URL, the value
@@ -15,4 +15,9 @@ export function localPublicApiUrl(cwd: string): string {
   // The port compose binds when SUPATYPE_KONG_PORT is unset: one definition with every other caller.
   const port = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
   return `http://localhost:${port}`
+}
+
+/** What `link`'s field is called: the server's URL for native dev, which has no gateway (local test 3b). */
+export function localLinkLabel(config: SupatypeProjectConfig): string {
+  return resolveRuntimeProvider(config) === "native" ? "Server URL" : "Kong gateway URL"
 }

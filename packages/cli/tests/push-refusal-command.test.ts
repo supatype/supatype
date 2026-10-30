@@ -25,7 +25,10 @@ vi.mock("../src/service-role-check.js", () => ({
   checkServiceRoleRoutes: () => ({ warnings: [], missing: [] }),
   serviceRoleProblemLines: () => [],
 }))
-vi.mock("../src/engine-floor.js", () => ({ assertEngineSupportsSchema: () => undefined }))
+vi.mock("../src/engine-floor.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/engine-floor.js")>()),
+  assertEngineSupportsSchema: () => undefined,
+}))
 vi.mock("../src/binary-cache.js", () => ({ pinnedVersion: () => undefined }))
 vi.mock("../src/preview-config-check.js", () => ({
   modelsWithUnresolvablePreview: () => [],

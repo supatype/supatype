@@ -11,7 +11,7 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, relative, sep } from "node:path"
+import { join, relative } from "node:path"
 import { spawnComposeEngine, type ComposeEngineTarget } from "./compose-engine-run.js"
 import { errorMessage, spawnFailureText } from "./error-message.js"
 import type { Capabilities } from "./engine-ownership-gate.js"
@@ -20,7 +20,7 @@ import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary
 import { ensureBinary } from "./ensure-binary.js"
 import { findJsonLine } from "./engine-json-line.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
-import { ENGINE_BUSY, ENGINE_BUSY_WORDING, engineBusySentence, isUnknown, type Guard } from "@supatype/shared"
+import { ENGINE_BUSY, ENGINE_BUSY_WORDING, engineBusySentence, isUnknown, toPosixPath, type Guard } from "@supatype/shared"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -263,12 +263,12 @@ export async function engineRequest(
 ): Promise<unknown> {
   if (compose !== undefined) return composeEngineRequest(endpoint, body, guard, compose)
   const bin = await getEngineBin()
-  // A schema with identity or generated columns goes only to an engine that reads them: one that
-  // does not would push plain columns and say nothing. Imported here, as the gate imports this.
+  // A schema goes only to an engine that can read it: one older than this CLI needs is refused by
+  // asking it (decision D3; once per binary), and one without identity or generated columns would
+  // push plain columns and say nothing. Imported here, as the gate imports this.
   if (body["ast"] !== undefined) {
     const { assertSupported, binaryCapabilities, identityColumnsNeed } = await import("./engine-ownership-gate.js")
-    const needs = identityColumnsNeed(body["ast"])
-    if (needs.length > 0) assertSupported(binaryCapabilities(bin), needs)
+    assertSupported(binaryCapabilities(bin), identityColumnsNeed(body["ast"]))
   }
   return readEngineResult(endpoint, spawnEngineHere(bin, endpoint, body), guard)
 }
@@ -354,7 +354,7 @@ function composeEngineRequest<T>(
 
 /** The request's files as the engine container sees them, under the project mount. */
 function inContainer(files: RequestFiles, cwd: string): RequestFiles {
-  const map = (path: string): string => `/project/${relative(cwd, path).split(sep).join("/")}`
+  const map = (path: string): string => `/project/${toPosixPath(relative(cwd, path))}`
   return {
     reqFile: map(files.reqFile),
     ...(files.gzPath !== undefined && { gzPath: map(files.gzPath) }),

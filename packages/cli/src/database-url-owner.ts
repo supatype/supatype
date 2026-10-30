@@ -124,8 +124,8 @@ export async function reconcileNativeDatabaseUrl(
   cwd: string,
   nativeDsn: string,
   shell: NodeJS.ProcessEnv = process.env,
+  state: DatabaseUrlState = databaseUrlState(cwd),
 ): Promise<void> {
-  const state = databaseUrlState(cwd)
   if (state.owner === "you") return warnIfHandWrittenUrlSilent(cwd, state)
   if (state.owner !== "cli") return
   // A port only the shell gives is this run's (DR9): the URL follows it for this run, not in `.env`.

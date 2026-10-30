@@ -37,7 +37,7 @@ import {
   nativeDenoPort,
   DENO_PORT_ENV,
   nativeStateRoot,
-  NATIVE_SERVER_PORT,
+  nativeServerPort,
   REALTIME_PORT_ENV,
   resolveRuntimeProvider,
   schemaPathFromProject,
@@ -91,7 +91,7 @@ import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
 import { recordNativeRoutes } from "../route-manifest.js"
-import { reconcileNativeDatabaseUrl } from "../database-url-owner.js"
+import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
@@ -238,7 +238,7 @@ export function registerDev(program: Command): void {
       }
 
       const projectName = config.project.name
-      const serverPort = opts.port ?? String(config.server.port ?? NATIVE_SERVER_PORT)
+      const serverPort = opts.port ?? String(nativeServerPort(config))
       const postgrestPort = String(config.server.postgrestPort ?? 3001)
       const pgPort = nativeDbPort(config, cwd)
       const realtimePort = String(nativeRealtimePort(config, cwd))
@@ -365,8 +365,9 @@ export function registerDev(program: Command): void {
           console.log("[supatype] This Postgres trusted every local connection; it now checks passwords.")
         }
         dbURL = localDSN(config, pgPassword, cwd)
-        // A DATABASE_URL the CLI wrote, for Docker perhaps, now names this database (N1).
-        await reconcileNativeDatabaseUrl(cwd, dbURL)
+        // A port only the shell gives is offered to .env (B1), then a DATABASE_URL the CLI wrote,
+        // for Docker perhaps, names this database (N1).
+        await reconcileNativeDevDatabaseUrl(cwd, dbURL)
         postgrestDbURL = `postgres://authenticator:${encodeURIComponent(authenticatorPassword)}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         stopPostgres = () => pgStop(pgOpts)
 

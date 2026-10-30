@@ -2,7 +2,7 @@ import type { Command } from "commander"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve, relative } from "node:path"
 import ts from "typescript"
-import { isJsonObject } from "@supatype/shared"
+import { isJsonObject, toPosixPath } from "@supatype/shared"
 import { loadConfig } from "../config.js"
 import { parsePackageJson } from "../package-json.js"
 import { projectOutputPaths } from "../type-generation.js"
@@ -36,7 +36,7 @@ export function registerTypes(program: Command): void {
         const cfg: Record<string, unknown> = isJsonObject(parsed.config) ? parsed.config : {}
         const include = Array.isArray(cfg["include"]) ? cfg["include"].map(String) : []
         const files = Array.isArray(cfg["files"]) ? cfg["files"].map(String) : []
-        const relAug = toPosix(relative(cwd, augmentationPath))
+        const relAug = toPosixPath(relative(cwd, augmentationPath))
         const coveredByFiles = files.includes(relAug)
         const coveredByInclude = include.some((entry) => {
           if (entry.includes("**")) return relAug.startsWith(entry.split("**")[0] ?? "")
@@ -70,6 +70,3 @@ export function registerTypes(program: Command): void {
     })
 }
 
-function toPosix(path: string): string {
-  return path.replace(/\\/g, "/")
-}

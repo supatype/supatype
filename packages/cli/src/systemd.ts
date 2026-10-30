@@ -9,7 +9,7 @@
 import { writeFileSync, mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
-import { NATIVE_SERVER_PORT, type SupatypeProjectConfig } from "./project-config.js"
+import { nativeServerPort, type SupatypeProjectConfig } from "./project-config.js"
 import { pgServerSettings } from "./postgres-ctl.js"
 
 export interface SystemdOptions {
@@ -104,7 +104,7 @@ function serverUnit(
   user: string,
   envFile: string,
 ): string {
-  const port = config.server.port ?? NATIVE_SERVER_PORT
+  const port = nativeServerPort(config)
   const serverBin = `%h/.supatype/cache/server/${config.versions?.server ?? "latest"}/supatype-server`
   const logDir = join(stateDir, "logs")
 

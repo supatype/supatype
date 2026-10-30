@@ -19,7 +19,7 @@ export default defineConfig({
 })
 ```
 
-With `provider: "native"`, init also writes `server.port: 54321`, the port the native server
+With `provider: "native"`, init also writes `server.port: 18471`, the port the native server
 listens on. A Docker project's API is on the gateway port, `SUPATYPE_KONG_PORT` in `.env`.
 
 **Docker images:** omit `versions` so compose runs the exact images the installed CLI release was tested with (never `:latest`). Pin `versions.*` only when you need a different release.
@@ -280,7 +280,7 @@ export default defineConfig({
 })
 ```
 
-Requires no Docker. Uses host Postgres on :5432 and supatype-server on `server.port` (default 54321).
+Requires no Docker. Uses host Postgres on :5432 and supatype-server on `server.port` (default 18471).
 
 The native Postgres is not the Docker image, and some of what the image has is missing:
 

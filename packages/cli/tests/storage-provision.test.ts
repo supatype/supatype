@@ -84,6 +84,26 @@ describe("provisionBuckets", () => {
 
     expect(warn).toHaveBeenCalledWith('[storage] Storage API unreachable, skipped bucket "photos"')
   })
+
+  // Local test round 3, N3: a 502 with an empty body printed `Failed to provision bucket "big": `.
+  it("names the HTTP status when a refusal has an empty body", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 502, statusText: "" })))
+
+    await provisionBuckets("http://localhost:18473/storage/v1", "key", [{ id: "big" }])
+
+    expect(warn).toHaveBeenCalledWith('[storage] Failed to provision bucket "big": HTTP 502, with an empty body')
+  })
+
+  it("names the HTTP status and the body when the storage API says why", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const said = new Response('{"error":"invalid bucket id"}', { status: 400, statusText: "Bad Request" })
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(said))
+
+    await provisionBuckets("http://localhost:18473/storage/v1", "key", [{ id: "big" }])
+
+    expect(warn).toHaveBeenCalledWith('[storage] Failed to provision bucket "big": HTTP 400 Bad Request: invalid bucket id')
+  })
 })
 
 describe("provisionBucketsFromAst", () => {

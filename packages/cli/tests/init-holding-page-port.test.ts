@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
+import { NATIVE_SERVER_PORT } from "../src/project-config.js"
 
 /**
  * The page `init` scaffolds told people to open http://localhost:18473/ whatever gateway port the
@@ -35,6 +36,6 @@ describe("the scaffolded holding page", () => {
 
   it("names the API server's port for a native project", () => {
     const page = holdingPage({ ...defaultScaffoldOptions("acme"), app: staticApp, provider: "native" })
-    expect(page).toContain("http://localhost:54321/")
+    expect(page).toContain(`http://localhost:${NATIVE_SERVER_PORT}/`)
   })
 })

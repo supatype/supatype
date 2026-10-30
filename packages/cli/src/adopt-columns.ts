@@ -16,11 +16,11 @@
  * CLI did not leave as it wrote it is never put back: an edit made meanwhile is the person's.
  */
 import { readFileSync, writeFileSync } from "node:fs"
-import { normalize, relative, sep } from "node:path"
+import { normalize, relative } from "node:path"
 import { Node, Project, ts, type SourceFile, type TypeLiteralNode, type TypeNode } from "ts-morph"
 import { extractSchemaAstFromTypes, walkSchemaSourceAbsPaths } from "./type-extractor.js"
 import type { DbColumnState } from "./pull-utils.js"
-import { isJsonObject, keptName, pathInside } from "@supatype/shared"
+import { isJsonObject, keptName, pathInside, toPosixPath } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
 import { isDbColumnState } from "./engine-answers.js"
 import { errorMessage } from "./error-message.js"
@@ -467,7 +467,7 @@ const DUPLICATE_CODES = new Set([2300, 2440, 2395])
 /** The first "duplicate identifier" kind of error in `text`, checked as one file on its own. */
 function duplicateIdentifier(path: string, text: string): string | undefined {
   // The compiler host asks for files by forward-slash names on every platform.
-  const fileName = path.split(sep).join("/")
+  const fileName = toPosixPath(path)
   const options: ts.CompilerOptions = { noLib: true, noResolve: true, types: [], noEmit: true }
   const host = ts.createCompilerHost(options)
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true)
@@ -947,5 +947,5 @@ function liveColumns(state: unknown): Map<string, LiveColumn> {
  * a schema import names it; otherwise the platform's own absolute path.
  */
 function displayPath(file: string, cwd: string): string {
-  return pathInside(cwd, file) ? relative(cwd, file).split(sep).join("/") : file
+  return pathInside(cwd, file) ? toPosixPath(relative(cwd, file)) : file
 }

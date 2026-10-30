@@ -81,7 +81,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | Command | Purpose |
 |---------|---------|
 | `supatype functions new <name>` | Scaffold `functions/<name>/index.ts` plus Deno IDE types (`functions/deno.d.ts`, `functions/tsconfig.json`) |
-| `supatype functions serve` | Local Deno server for all functions |
+| `supatype functions serve` | Local Deno server for all functions, on port 18472 unless `--port` moves it |
 | `supatype functions deploy` | Deploy edge functions via control plane when linked. On a self-host compose stack nothing is uploaded (the worker reads `functions/` from disk): run `supatype self-host compose restart functions-worker` to load changes (`supatype dev` does that on save) |
 | `supatype functions list` | List deployed functions |
 | `supatype plugins` | Plugin scaffolding |

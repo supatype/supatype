@@ -97,7 +97,7 @@ export interface SupatypeProjectConfig {
      * "managed"    = cloud-managed, HMAC tenant verification
      */
     mode: "dev" | "standalone" | "managed"
-    /** Port supatype-server listens on (default: 54321). */
+    /** Port supatype-server listens on (default: NATIVE_SERVER_PORT, 18471). */
     port?: number
     /** Port PostgREST listens on in local dev (default: 3001). */
     postgrestPort?: number
@@ -862,7 +862,7 @@ export function preferredFunctionsPathFromProject(cfg: SupatypeProjectConfig, cw
  * running two (A3-N4, A4-N2); with no port recorded there is no address to give.
  */
 export function serverBaseUrl(cfg: SupatypeProjectConfig, cwd: string = process.cwd()): string | undefined {
-  const port = cfg.server.port ?? NATIVE_SERVER_PORT
+  const port = nativeServerPort(cfg)
   switch (cfg.server.mode) {
     case "dev":
     case "standalone":
@@ -939,8 +939,20 @@ export function localDSN(cfg: SupatypeProjectConfig, password = "postgres", cwd:
 /** Where native Postgres listens when nothing moves it. */
 export const NATIVE_DB_PORT = 5432
 
-/** Where supatype-server listens when `server.port` does not move it. */
-export const NATIVE_SERVER_PORT = 54321
+/**
+ * Where supatype-server listens when `server.port` does not move it. In Supatype's own range, below
+ * the gateway's {@link COMPOSE_DEV_KONG_PORT}, from which `dev` walks upward for each further
+ * project. It was 54321, Supabase's port, which a Supabase user already holds (decision D4).
+ */
+export const NATIVE_SERVER_PORT = 18471
+
+/** Where `supatype functions serve` listens without `--port`, beside the native server (D4). */
+export const FUNCTIONS_SERVE_PORT = 18472
+
+/** The port supatype-server listens on: `server.port`, else {@link NATIVE_SERVER_PORT}. */
+export function nativeServerPort(cfg: SupatypeProjectConfig): number {
+  return cfg.server.port ?? NATIVE_SERVER_PORT
+}
 
 /** Where native realtime listens when nothing moves it. */
 export const NATIVE_REALTIME_PORT = 4000

@@ -54,7 +54,7 @@ import {
   assertSupported,
   engineCapabilities,
   identityColumnsNeed,
-  parseCapabilities,
+  serverAnswerCapabilities,
   REBASELINE_KEYS_NEED,
   type Capabilities,
   type FeatureNeed,
@@ -329,7 +329,7 @@ async function serverCapabilities(target: DeployTarget): Promise<Capabilities> {
     if (isUnknownProject(err)) throw new Error(unknownProjectMessage(target, err))
     if (err.status !== 404) throw err
   }
-  return { features: parseCapabilities(answer) ?? new Set(), source: "server" }
+  return serverAnswerCapabilities(answer)
 }
 
 /**

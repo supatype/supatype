@@ -1,5 +1,5 @@
 import type { Command } from "commander"
-import { errorMessage } from "../error-message.js"
+import { errorMessage, responseFailureText } from "../error-message.js"
 import {
   existsSync,
   mkdirSync,
@@ -10,12 +10,12 @@ import {
 } from "node:fs"
 import { resolve, join, relative, isAbsolute } from "node:path"
 import { execSync } from "node:child_process"
-import { localPublicApiUrl } from "../local-gateway.js"
 import { runUntilStopped } from "../run-until-stopped.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
 import {
+  FUNCTIONS_SERVE_PORT,
   functionsPathCandidatesFromProject,
   preferredFunctionsPathFromProject,
   serviceRoleRoutes,
@@ -35,7 +35,7 @@ import { loadProjectLink } from "../link.js"
 import { resolveCloudAccessToken } from "../cloud-credentials.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
-import { isArrayOf, isJsonObject, isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
+import { isArrayOf, isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
 import {
   ensureFunctionsDenoTypes,
   sharedFunctionsReadmeSource,
@@ -71,9 +71,10 @@ export function registerFunctions(program: Command): void {
   fnCmd
     .command("serve")
     .description("Start a local Deno server that serves all functions with hot reload")
-    .option("--port <port>", "Port to serve on", "54321")
+    .option("--port <port>", "Port to serve on", String(FUNCTIONS_SERVE_PORT))
+    .option("--host <host>", "Address to listen on (0.0.0.0 to be reachable from other machines)", "127.0.0.1")
     .option("--env-file <path>", "Path to env file", ENV_LOCAL)
-    .action(async (opts: { port: string; envFile: string }) => {
+    .action(async (opts: { port: string; host: string; envFile: string }) => {
       await serve(process.cwd(), opts)
     })
 
@@ -245,7 +246,7 @@ function discoverFunctions(cwd: string): DiscoveredFunctionRoute[] {
 
 // ─── Serve (local dev) ──────────────────────────────────────────────────────
 
-async function serve(cwd: string, opts: { port: string; envFile: string }): Promise<void> {
+async function serve(cwd: string, opts: { port: string; host: string; envFile: string }): Promise<void> {
   const config = loadConfig(cwd)
   const functionsDir = resolveFunctionsDir(cwd, "read")
   const routes = discoverServeRoutes(cwd, functionsDir)
@@ -253,7 +254,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
 
   const envArgs = denoEnvFileArgs(resolveEnvFilePath(cwd, functionsDir, opts.envFile))
 
-  info(`Serving functions at http://localhost:${opts.port}/functions/v1/`)
+  info(`Serving functions at ${serveDisplayUrl(opts.host, opts.port)}`)
   info("Watching for changes...")
   plain()
 
@@ -268,7 +269,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   await runDenoServe(
     denoBin,
     ["run", "--allow-net", "--allow-env", "--allow-read", "--watch", ...envArgs, routerPath],
-    { cwd, env: denoServeEnv(cwd, functionsDir, opts.port, config) },
+    { cwd, env: denoServeEnv(cwd, functionsDir, config, opts) },
   )
 }
 
@@ -331,21 +332,49 @@ function writeServeFiles(cwd: string, functionsDir: string, routes: DiscoveredFu
   return routerPath
 }
 
-/** The environment the serve's Deno runs with: this shell's, plus where it serves from, uncoloured. */
+/**
+ * The address `functions serve` announces for `host`: localhost for a wildcard bind (`0.0.0.0`, `::`),
+ * which is no address a browser can open, and an IPv6 host in brackets, as a URL writes it.
+ */
+export function serveDisplayUrl(host: string, port: string): string {
+  const bare = unbracketedHost(host)
+  const shown = bare === "0.0.0.0" || bare === "::" ? "localhost" : bare.includes(":") ? `[${bare}]` : bare
+  return `http://${shown}:${port}/functions/v1/`
+}
+
+/** `host` without the brackets a URL puts round an IPv6 address: `[::1]` is `::1`, as Deno binds it. */
+function unbracketedHost(host: string): string {
+  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host
+}
+
+/** Where `functions serve` listens. */
+export interface ServeListen {
+  port: string
+  host: string
+}
+
+/**
+ * The environment the serve's Deno runs with: this shell's, plus where it serves from, uncoloured.
+ * Handlers reach the project's API where it answers (resolve-api-url.ts): the native server for a
+ * native project, never a gateway a Docker run left in `.env`.
+ */
 export function denoServeEnv(
   cwd: string,
   functionsDir: string,
-  port: string,
   config: SupatypeProjectConfig,
+  listen: ServeListen,
 ): NodeJS.ProcessEnv {
+  const apiUrl = resolveProjectApiUrl(cwd, config)
   return {
     ...process.env,
     ...DENO_ENV,
-    PORT: port,
+    PORT: listen.port,
+    // The router listens on 127.0.0.1 without it (functions-router-gen.ts).
+    SUPATYPE_FUNCTIONS_HOST: unbracketedHost(listen.host),
     SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
     SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
-    SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localPublicApiUrl(cwd),
-    SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
+    SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? apiUrl,
+    SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? apiUrl,
     SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
     // The router grants the key only to these routes, as the deployed worker does.
     SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
@@ -521,7 +550,7 @@ async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: st
       })
 
       if (!res.ok) {
-        const reason = await failureReason(res)
+        const reason = await responseFailureText(res)
         plain(`  ${fn.name} ✗ ${reason}`)
         continue
       }
@@ -550,13 +579,6 @@ export function serviceRoleRoutesFor(cwd: string): string[] | undefined {
     rethrowIfConfigBroken(err)
     return undefined
   }
-}
-
-/** The control plane's reason for a refusal: its `message`, else the status text. */
-async function failureReason(res: Response): Promise<string> {
-  const body = await res.json().catch(() => ({}))
-  const message = isJsonObject(body) ? body["message"] : undefined
-  return typeof message === "string" ? message : res.statusText
 }
 
 /** `GET /functions`: each deployed function, with its last day's use. */
@@ -630,7 +652,7 @@ async function listFunctions(cwd: string): Promise<void> {
     })
 
     if (!res.ok) {
-      error(`Failed to list functions: ${res.statusText}`)
+      error(`Failed to list functions: ${await responseFailureText(res)}`)
       process.exit(1)
     }
 
@@ -685,7 +707,7 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
     })
 
     if (!res.ok) {
-      const reason = await failureReason(res)
+      const reason = await responseFailureText(res)
       error(`Failed to delete "${name}": ${reason}`)
       process.exit(1)
     }
@@ -727,7 +749,7 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
     )
 
     if (!res.ok) {
-      error(`Failed to fetch logs: ${res.statusText}`)
+      error(`Failed to fetch logs: ${await responseFailureText(res)}`)
       process.exit(1)
     }
 
@@ -760,7 +782,7 @@ async function invoke(
   const headers: Record<string, string> = { "Content-Type": "application/json" }
 
   // The project's own gateway, as every other command that calls the API finds it. A fixed
-  // localhost:54321 reached whatever else on the machine listened there.
+  // localhost port reached whatever else on the machine listened there.
   const localUrl = `${resolveProjectApiUrl(cwd)}/functions/v1/${name}`
   if (opts.local) {
     url = localUrl
@@ -869,7 +891,7 @@ async function envList(cwd: string): Promise<void> {
     })
 
     if (!res.ok) {
-      error(`Failed to list env vars: ${res.statusText}`)
+      error(`Failed to list env vars: ${await responseFailureText(res)}`)
       process.exit(1)
     }
 
@@ -940,7 +962,7 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
     })
 
     if (!res.ok) {
-      const reason = await failureReason(res)
+      const reason = await responseFailureText(res)
       error(`Failed to set env var: ${reason}`)
       process.exit(1)
     }
@@ -988,7 +1010,7 @@ async function envUnset(cwd: string, key: string): Promise<void> {
     })
 
     if (!res.ok) {
-      const reason = await failureReason(res)
+      const reason = await responseFailureText(res)
       error(`Failed to unset env var: ${reason}`)
       process.exit(1)
     }
