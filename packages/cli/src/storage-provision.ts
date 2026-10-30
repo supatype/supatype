@@ -127,6 +127,8 @@ export async function postToStorage(url: string, headers: Record<string, string>
   let res: Response
   try {
     // A Buffer is a Uint8Array, but the DOM's BodyInit type (as the integration package reads it) does not say so.
+    // A view over the same bytes would not copy, but its type is still Uint8Array<ArrayBufferLike>,
+    // which BodyInit refuses; the copy is the one form both type checks accept.
     res = await fetch(url, { method: "POST", headers, body: typeof body === "string" ? body : new Uint8Array(body) })
   } catch (err) {
     return { kind: "failed", status: null, text: errorMessage(err) }
