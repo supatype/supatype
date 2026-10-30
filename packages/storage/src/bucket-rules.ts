@@ -52,6 +52,40 @@ export function bucketSettingsProblem(settings: BucketSettings): string | null {
   return null
 }
 
+/** Every field a bucket create or update reads. */
+const BUCKET_FIELDS: ReadonlySet<string> = new Set([
+  "id",
+  "name",
+  "public",
+  "file_size_limit",
+  "allowed_mime_types",
+  "access_mode",
+  "s3_bucket_policy",
+])
+
+/**
+ * Why `body` cannot be a bucket write: it names a field the service does not read, which used to be
+ * ignored, so `policy` meant for `s3_bucket_policy` made a bucket without one. Null when it names none.
+ */
+export function unknownFieldsProblem(body: object): string | null {
+  const unknown = Object.keys(body).filter((key) => !BUCKET_FIELDS.has(key))
+  return unknown.length > 0 ? `unknown field(s): ${unknown.join(", ")}` : null
+}
+
+/** Why an update naming `id` or `name` cannot be applied to `bucket`: it names another. Null when it does not. */
+export function renameProblem(
+  bucket: { id: string; name: string },
+  body: { id?: string | undefined; name?: string | undefined },
+): string | null {
+  if (body.id !== undefined && body.id !== bucket.id) {
+    return `a bucket cannot be renamed: id ${JSON.stringify(body.id)} is not ${JSON.stringify(bucket.id)}`
+  }
+  if (body.name !== undefined && body.name !== bucket.name) {
+    return `a bucket cannot be renamed: name ${JSON.stringify(body.name)} is not ${JSON.stringify(bucket.name)}`
+  }
+  return null
+}
+
 function isJsonObjectText(text: string): boolean {
   try {
     return isJsonObject(JSON.parse(text))

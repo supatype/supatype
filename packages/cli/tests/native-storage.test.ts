@@ -209,7 +209,7 @@ describe("the import of the server's object store", () => {
     const warn = vi.spyOn(console, "warn")
     const refused = (path: string): number => (path === "/object/avatars/big.png" ? 413 : 200)
     expect(uploadsIn(await importAs(root, "0.7.0", refused))).toEqual(["/object/avatars/big.png", "/object/avatars/me/pic.png"])
-    expect(warn.mock.calls.flat().filter((line) => String(line).includes("avatars/big.png (413)"))).toHaveLength(1)
+    expect(warn.mock.calls.flat().filter((line) => String(line).includes("avatars/big.png (HTTP 413"))).toHaveLength(1)
     expect(markerOf(root)).toMatchObject({ skipped: [{ id: "avatars/big.png", status: 413 }] })
     // Not tried again until its file changes.
     expect(uploadsIn(await importAs(root, "0.7.0", refused))).toEqual([])
@@ -225,11 +225,44 @@ describe("the import of the server's object store", () => {
     const { root, status } = storeWithBadBucket(400)
     const warn = vi.spyOn(console, "warn")
     expect(uploadsIn(await importAs(root, "0.7.0", status))).toContain("/object/avatars/me/pic.png")
-    expect(warn.mock.calls.flat().filter((line) => String(line).includes("bad (400)"))).toHaveLength(1)
+    expect(warn.mock.calls.flat().filter((line) => String(line).includes("bad (HTTP 400"))).toHaveLength(1)
     expect(markerOf(root)).toMatchObject({ skipped_buckets: [{ id: "bad", status: 400 }], skipped: [{ id: "bad/kept.png", status: 404 }] })
     // Taken at a later start, the bucket's objects go with it, though their files did not change.
     expect(uploadsIn(await importAs(root, "0.7.0"))).toEqual(["/object/bad/kept.png"])
     expect(markerOf(root)).toMatchObject({ skipped_buckets: [], skipped: [] })
+  })
+
+  // Local test round 3c: a refusal was named by its status only, `r3chuge (400)`.
+  it("names the service's reason for a refused bucket and object, and records it", async () => {
+    const { root, status } = storeWithBadBucket(400)
+    const reason = (path: string): string =>
+      JSON.stringify({ error: path === "/bucket" ? "file_size_limit is out of range" : "Bucket not found" })
+    const warn = vi.spyOn(console, "warn")
+    await importAs(root, "0.7.0", status, reason)
+    const said = warn.mock.calls.flat().map(String).join("\n")
+    expect(said).toContain("bad (HTTP 400 Bad Request: file_size_limit is out of range)")
+    expect(said).toContain("bad/kept.png (HTTP 404 Not Found: Bucket not found)")
+    expect(markerOf(root)).toMatchObject({
+      skipped_buckets: [{ id: "bad", status: 400, reason: "HTTP 400 Bad Request: file_size_limit is out of range" }],
+    })
+  })
+
+  // Local test round 3c: the refused-bucket warning repeated on every start.
+  it("warns of a refused bucket once, and again only when its refusal or its row changes", async () => {
+    const { root, status } = storeWithBadBucket(400)
+    const warn = vi.spyOn(console, "warn")
+    const bucketWarnings = (): number => warn.mock.calls.flat().filter((line) => String(line).includes("bucket(s)")).length
+    await importAs(root, "0.7.0", status)
+    await importAs(root, "0.7.0", status)
+    expect(bucketWarnings()).toBe(1)
+    const rows = [{ id: "avatars", name: "avatars", public: true }, { id: "bad", name: "bad", public: false, file_size_limit: 2e20 }]
+    writeFileSync(join(root, ".supatype", "buckets.json"), JSON.stringify(rows))
+    await importAs(root, "0.7.0", status)
+    expect(bucketWarnings()).toBe(2)
+    await importAs(root, "0.7.0", status, () => '{"error":"another reason"}')
+    expect(bucketWarnings()).toBe(3)
+    await importAs(root, "0.7.0", status, () => '{"error":"another reason"}')
+    expect(bucketWarnings()).toBe(3)
   })
 
   // The service answers 400 for a value it cannot hold, so any 5xx for a bucket is the service failing.

@@ -130,3 +130,48 @@ describe("functions commands against a cloud link", () => {
     expect(run.output).not.toContain("cloud link")
   })
 })
+
+// Local test round 3c (N17): every function failed, and deploy still said `Deployed 1 function(s)`,
+// printed the invoke URL and exited 0.
+describe("functions deploy to Cloud when a function fails", () => {
+  function linkAndLogIn(): void {
+    writeConfig(project.dir)
+    writeFunction(project.dir)
+    mkdirSync(join(project.dir, "functions", "bye"), { recursive: true })
+    writeFileSync(join(project.dir, "functions", "bye", "index.ts"), "export default () => new Response('bye')\n")
+    linkToCloud(project.dir)
+    vi.stubEnv("SUPATYPE_ACCESS_TOKEN", "token")
+  }
+
+  function platformRefusing(name: string): void {
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      const body = String(init?.body ?? "")
+      if (body.includes(`"name":"${name}"`)) {
+        return new Response(JSON.stringify({ error: "bundle too large" }), { status: 422 })
+      }
+      return new Response(JSON.stringify({ data: {} }), { headers: { "Content-Type": "application/json" } })
+    })
+  }
+
+  it("names the failed function, counts only those deployed, and exits non-zero", async () => {
+    linkAndLogIn()
+    platformRefusing("bye")
+
+    const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+
+    expect(run.output).toContain("bye ✗ HTTP 422: bundle too large")
+    expect(run.output).toContain("1 of 2 function(s) failed to deploy: bye")
+    expect(run.output).not.toContain("Deployed 2 function(s)")
+    expect(run.exitCode).toBe(1)
+  })
+
+  it("says every function deployed and exits 0 when none failed", async () => {
+    linkAndLogIn()
+    platformRefusing("none")
+
+    const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+
+    expect(run.output).toContain("Deployed 2 function(s)")
+    expect(run.exitCode ?? 0).toBe(0)
+  })
+})

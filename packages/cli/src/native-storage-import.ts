@@ -57,9 +57,17 @@ const isSidecar = isShape({ name: isString, content_type: optional(isString), ow
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** Something the service refused: an object as `bucket/name`, or a bucket by id, and the status. */
-const isSkip = isShape({ id: isString, status: isNumber })
+/**
+ * Something the service refused: an object as `bucket/name`, or a bucket by id, the status, and what
+ * the service said. A marker from before the reason was recorded has none.
+ */
+const skipFields = { id: isString, status: isNumber, reason: optional(isString) }
+const isSkip = isShape(skipFields)
 type Skip = typeof isSkip extends Guard<infer T> ? T : never
+
+/** A refused bucket, with its buckets.json row as it was sent, so a changed row is warned of again. */
+const isBucketSkip = isShape({ ...skipFields, row: optional(isString) })
+type BucketSkip = typeof isBucketSkip extends Guard<infer T> ? T : never
 
 /**
  * The marker: which CLI release first imported the store, that the import finished, when the last
@@ -80,14 +88,14 @@ const isImportMarker = isShape({
   /** Objects the service refused, not sent again until their file changes. */
   skipped: optional(isArrayOf(isSkip)),
   /** Buckets the service refused on the last import; their objects were refused with them. */
-  skipped_buckets: optional(isArrayOf(isSkip)),
+  skipped_buckets: optional(isArrayOf(isBucketSkip)),
 })
 type ImportMarker = typeof isImportMarker extends Guard<infer T> ? T : never
 
 export async function importLegacyNativeStorage(job: LegacyStorageImport): Promise<void> {
   if (!existsSync(job.legacyRoot)) return
-  const refusedBuckets = await importBuckets(job)
   const read = readJsonFile(join(job.legacyRoot, IMPORTED_MARKER), isImportMarker)
+  const refusedBuckets = await importBuckets(job, read?.skipped_buckets ?? [])
   const prior = read?.complete === true ? read : undefined
   const startedAt = new Date().toISOString()
   // A bucket refused before and taken now: its objects were refused with it, so they go again.
@@ -128,9 +136,9 @@ function mergeSkipped(before: readonly Skip[], sent: readonly string[], now: rea
   return [...before.filter((skip) => !retried.has(skip.id)), ...now]
 }
 
-/** Skips as one line names them: `id (status)`. */
+/** Skips as one line names them: `id (what the service said)`, or its status when that is not known. */
 function describeSkips(skips: readonly Skip[]): string {
-  return skips.map((skip) => `${skip.id} (${skip.status})`).join(", ")
+  return skips.map((skip) => `${skip.id} (${skip.reason ?? skip.status})`).join(", ")
 }
 
 /**
@@ -230,23 +238,31 @@ function removeUnkept(path: string, keep: ReadonlySet<string>): string[] {
 
 /**
  * Every bucket `buckets.json` names, created in the service unless it is there already, and the
- * ones it refused. A refused bucket is named in one warning; its objects are then refused in turn,
- * so they are skipped and kept. Throws when the service itself failed for any.
+ * ones it refused. Refused buckets are named in one warning, given only when they differ from
+ * `before`, those the last import recorded; their objects are then refused in turn, so they are
+ * skipped and kept. Throws when the service itself failed for any.
  */
-async function importBuckets(job: LegacyStorageImport): Promise<Skip[]> {
+async function importBuckets(job: LegacyStorageImport, before: readonly BucketSkip[]): Promise<BucketSkip[]> {
   const rows: unknown[] = readJsonFile(join(job.legacyRoot, ".supatype", "buckets.json"), isArrayOf(isJsonObject)) ?? []
-  const refused: Skip[] = []
+  const refused: BucketSkip[] = []
   const failed: string[] = []
   for (const bucket of rows.filter(isBucketRow)) {
     const write = await createBucket(job.url, serviceToken(job.jwtSecret, undefined), bucket)
-    if (write.kind === "refused") refused.push({ id: bucket.id, status: write.status })
+    if (write.kind === "refused") refused.push({ id: bucket.id, status: write.status, reason: write.text, row: JSON.stringify(bucket) })
     else if (write.kind === "failed") failed.push(`${bucket.id}: ${write.text}`)
   }
   if (failed.length > 0) throw new Error(`bucket(s) not created in the storage service: ${failed.join("; ")}`)
-  if (refused.length > 0) {
+  if (refused.length > 0 && !sameRefusals(before, refused)) {
     console.warn(`[supatype] ⚠  The storage service refused ${refused.length} bucket(s) of the server's old store, left there: ${describeSkips(refused)}`)
   }
   return refused
+}
+
+/** Whether `now` refuses the buckets `before` did, for the same reasons, with the same rows. */
+function sameRefusals(before: readonly BucketSkip[], now: readonly BucketSkip[]): boolean {
+  const key = (skip: BucketSkip): string => JSON.stringify([skip.id, skip.reason, skip.row])
+  const known = new Set(before.map(key))
+  return before.length === now.length && now.every((skip) => known.has(key(skip)))
 }
 
 /** A service-role token, carrying the object's owner as its subject when it has one. */
@@ -281,7 +297,7 @@ async function importObjects(job: LegacyStorageImport, due: DueCheck, overwrite:
     const id = `${object.bucket}/${object.name}`
     result.sent.push(id)
     if (write.kind === "created") result.uploaded++
-    else if (write.kind === "refused") result.skipped.push({ id, status: write.status })
+    else if (write.kind === "refused") result.skipped.push({ id, status: write.status, reason: write.text })
     else if (write.kind === "failed") result.failed.push(`${id}: ${write.text}`)
   }
   return result

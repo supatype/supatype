@@ -119,3 +119,47 @@ describe("POST /bucket", () => {
     expect(s3.applyBucketPolicyFromConfig).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * Local test round 3c: a field the service does not read, `policy` for `s3_bucket_policy` say, was
+ * ignored without a word, so the bucket was made without what the caller meant it to have.
+ */
+describe("a bucket write naming a field the service does not read", () => {
+  function answer(body: unknown): { ctx: Parameters<typeof buckets.update>[0]; sent: () => { status: number; body: string } } {
+    const ctx = context(body)
+    let said = ""
+    ctx.res.end = ((chunk?: unknown) => {
+      said = typeof chunk === "string" ? chunk : ""
+      return ctx.res
+    }) as typeof ctx.res.end
+    return { ctx, sent: () => ({ status: ctx.res.statusCode, body: said }) }
+  }
+
+  it("is refused on create, with 400 naming the field", async () => {
+    const { ctx, sent } = answer({ name: "b", public: true, policy: "{}", size: 1 })
+    await buckets.create(ctx)
+    expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: "unknown field(s): policy, size" }) })
+    expect(db.createBucket).not.toHaveBeenCalled()
+  })
+
+  it("is refused on update, with 400 naming the field", async () => {
+    vi.mocked(db.getBucket).mockResolvedValue(row("private", false))
+    const { ctx, sent } = answer({ public: true, policy: "{}" })
+    await buckets.update(ctx)
+    expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: "unknown field(s): policy" }) })
+    expect(db.updateBucket).not.toHaveBeenCalled()
+  })
+
+  // A Supabase client's update sends the bucket's own id and name along with the settings.
+  it("takes an update naming the bucket's own id and name, and refuses a rename", async () => {
+    vi.mocked(db.getBucket).mockResolvedValue(row("private", false))
+    vi.mocked(db.updateBucket).mockResolvedValue(row("private", false))
+    await buckets.update(context({ id: "b", name: "b", public: false }))
+    expect(db.updateBucket).toHaveBeenCalled()
+    vi.mocked(db.updateBucket).mockClear()
+    const { ctx, sent } = answer({ id: "b", name: "c" })
+    await buckets.update(ctx)
+    expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'a bucket cannot be renamed: name "c" is not "b"' }) })
+    expect(db.updateBucket).not.toHaveBeenCalled()
+  })
+})

@@ -103,6 +103,7 @@ import {
   pushStartUndo,
   pushStartUndoLast,
   registerDevShutdown,
+  reportUnlessStopping,
   stopQuietlyDuringStart,
   waitForDevShutdown,
 } from "../dev-shutdown.js"
@@ -477,7 +478,7 @@ export function registerDev(program: Command): void {
       const schemaPush: NativeSchemaPush = {
         cwd, engineBin, schemaPath, dbURL, adminConfigPath, storagePath: localStoragePath, skipFieldKinds, config, overwriteDrift,
       }
-      await runSchemaPush(schemaPush).catch(reportDevPushFailure)
+      await runSchemaPush(schemaPush).catch(reportUnlessStopping(reportDevPushFailure))
       await haltIfStopping()
 
       const { ensureFirstAdminUser } = await import("./admin.js")
@@ -758,7 +759,7 @@ export function registerDev(program: Command): void {
           push: (why) => {
             console.log(`\n[supatype] ${why}, checking schema...`)
             // A hook the push declares is served once the worker's routes name it.
-            runSchemaPush(schemaPush).then(() => functionsWatch?.refresh()).catch(reportDevPushFailure)
+            runSchemaPush(schemaPush).then(() => functionsWatch?.refresh()).catch(reportUnlessStopping(reportDevPushFailure))
           },
         })
       }

@@ -20,6 +20,7 @@ describe("the Valkey sidecar container", () => {
 const listeners: ChildProcess[] = []
 afterEach(() => {
   for (const child of listeners.splice(0)) child.kill()
+  vi.restoreAllMocks()
 })
 
 /**
@@ -115,5 +116,25 @@ describe("a container left by an earlier session", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined)
     const sidecar = await ensureValkeySidecar("demo", { freePort: async () => fresh, docker, existingPort: leftover })
     expect(sidecar).toMatchObject({ addr: `127.0.0.1:${fresh}`, containerName: "supatype-valkey-dev-demo", started: true })
+  })
+})
+
+// Local test round 3c: dev said nothing when it used a Valkey already on 6379.
+describe("a Valkey already running", () => {
+  it("is used, with one line saying so, and no sidecar is started", async () => {
+    const existing = await listener("+PONG\r\n")
+    const calls: string[][] = []
+    const docker = async (args: readonly string[]): Promise<DockerResult> => {
+      calls.push([...args])
+      return { status: 0, stdout: "", stderr: "" }
+    }
+    const logs: string[] = []
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void logs.push(args.join(" ")))
+
+    const valkey = await ensureValkeySidecar("demo", { freePort: async () => null, docker, existingPort: existing })
+
+    expect(valkey).toMatchObject({ addr: `127.0.0.1:${existing}`, containerName: null, started: false })
+    expect(logs).toEqual([`[supatype] Using the Valkey already running at 127.0.0.1:${existing}.`])
+    expect(calls.some((args) => args[0] === "run")).toBe(false)
   })
 })
