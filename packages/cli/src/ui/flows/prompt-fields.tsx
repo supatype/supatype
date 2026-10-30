@@ -80,10 +80,18 @@ export function ConfirmPrompt({ spec, onSubmit }: ConfirmPromptProps): React.Rea
         ) : (
           <Text dimColor>No</Text>
         )}
-        <Text dimColor>: y/n, ←/→, enter</Text>
+        <Text dimColor>: {confirmPromptHint(value)}</Text>
       </Text>
     </Box>
   )
+}
+
+/**
+ * The keys, with the answer enter gives as the capital letter (`Y/n`) and in words, so the default
+ * is readable without colour.
+ */
+export function confirmPromptHint(selected: boolean): string {
+  return selected ? "Y/n, ←/→, enter for yes" : "y/N, ←/→, enter for no"
 }
 
 interface TextPromptProps {

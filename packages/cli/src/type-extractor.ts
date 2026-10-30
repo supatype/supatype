@@ -32,6 +32,7 @@ import {
   type ParsedField,
 } from "./schema-ast-v2.js"
 import { jsonTypeArgText } from "./json-type-text.js"
+import { callerOwnedIds } from "./owner-default.js"
 import { compileBounds, measureFormFor, type DeclaredBounds } from "./field-bounds.js"
 
 export type { ExtractedSchemaAstV2 as ExtractedSchemaAst, ExtractedStorageBucketAst } from "./schema-ast-v2.js"
@@ -102,6 +103,7 @@ export function extractSchemaAstFromTypes(
         if (!ts.isPropertySignature(member) || !member.type) continue
         const name = getPropertyName(member.name)
         if (!name) continue
+        if (member.questionToken !== undefined) refuseQuestionToken(member.type, stmt.name.text, name)
         fields[name] = parseFieldType(
           name,
           member.type,
@@ -137,7 +139,7 @@ export function extractSchemaAstFromTypes(
       models.push(
         emitModel(
           stmt.name.text,
-          fields,
+          withUuidKeyDefaults(fields, access["create"]),
           options,
           tableName,
           access,
@@ -176,6 +178,31 @@ export function extractSchemaAstFromTypes(
       defaultLocale: localeConfig.defaultLocale,
     }),
   })
+}
+
+/**
+ * A `?` on a model field reads as "nullable" but the column comes out NOT NULL, because nullability
+ * is carried by `Optional<>`, not by the property. Refuse it so the two never disagree silently.
+ */
+function refuseQuestionToken(type: ts.TypeNode, modelName: string, fieldName: string): never {
+  // From the field's own file: a field can come from another one through an intersection.
+  const typeText = type.getText()
+  throw new Error(
+    `${modelName}.${fieldName} is declared with \`?\`, which Supatype does not read as nullable. ` +
+      `Write \`${fieldName}: Optional<${typeText}>\` for a nullable column, or drop the \`?\` for a required one.`,
+  )
+}
+
+const GEO_SHAPES = ["point", "polygon", "linestring"] as const
+
+/** The shape of `Geo<"polygon">`; a bare `Geo` is a point. */
+function parseGeoShape(arg: ts.TypeNode | undefined, fieldName: string, sourceFile: ts.SourceFile): string {
+  if (arg === undefined) return "point"
+  const shape = literalStringType(arg)
+  if (shape !== null && isOneOf(GEO_SHAPES)(shape)) return shape
+  throw new Error(
+    `Field "${fieldName}": Geo<${arg.getText(sourceFile)}> is not a shape Geo has. Use point, polygon or linestring.`,
+  )
 }
 
 export interface SchemaSourceFile {
@@ -478,6 +505,21 @@ function isArrayLikeTypeNode(node: ts.TypeNode, sourceFile: ts.SourceFile): bool
   return false
 }
 
+/**
+ * `fields` with `gen_random_uuid()` on each uuid primary key that declares no default of its own,
+ * except an auth user id `createRule` makes the caller's: a random uuid would name no user, and the
+ * engine defaults that column to the caller instead. A default the schema writes is never touched.
+ */
+function withUuidKeyDefaults(fields: Record<string, FieldAstV2>, createRule: unknown): Record<string, FieldAstV2> {
+  const callerOwned = callerOwnedIds(createRule, fields)
+  const entries = Object.entries(fields).map(([name, field]) => {
+    const randomKey =
+      field.kind === "uuid" && field["primaryKey"] === true && field["default"] === undefined && !callerOwned.has(name)
+    return [name, randomKey ? { ...field, default: { kind: "genRandomUuid" } } : field] as const
+  })
+  return Object.fromEntries(entries)
+}
+
 function parseFieldType(
   fieldName: string,
   typeNode: ts.TypeNode,
@@ -773,15 +815,8 @@ function parseFieldType(
     }
   }
 
-  if (parsed.kernel.primaryKey === true && parsed.kind === "uuid" && parsed.kernel.default === undefined) {
-    parsed = {
-      ...parsed,
-      kernel: { ...parsed.kernel, default: { kind: "genRandomUuid" } },
-    }
-  } else if (
-    parsed.kernel.primaryKey === true &&
-    (parsed.kind === "serial" || parsed.kind === "bigSerial")
-  ) {
+  // A uuid key's default waits for the model's access rule: withUuidKeyDefaults decides it.
+  if (parsed.kernel.primaryKey === true && (parsed.kind === "serial" || parsed.kind === "bigSerial")) {
     flags.serverGenerated = true
   }
 
@@ -1159,7 +1194,7 @@ function parseScalarType(
       }
       case "GeoPoint":
       case "Geo":
-        return scalar("geo", { kernel: { geoType: "point", srid: 4326 } })
+        return scalar("geo", { kernel: { geoType: parseGeoShape(typeNode.typeArguments?.[0], fieldName, sourceFile), srid: 4326 } })
       case "Asset":
       case "FileAsset": {
         const bucket = resolveBucketName(typeNode.typeArguments?.[0], sourceFile, bucketAliases, "assets")
@@ -1652,7 +1687,8 @@ function parseInlineBlockDefinition(
     name,
     ...(label !== undefined && { label }),
     ...(icon !== undefined && { icon }),
-    fields,
+    // A block has no access rule of its own, so none of its uuid keys is the caller's.
+    fields: withUuidKeyDefaults(fields, undefined),
   }
 }
 

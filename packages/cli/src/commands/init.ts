@@ -26,6 +26,8 @@ import {
 } from "../functions-deno-types.js"
 import { functionTemplateSource } from "../functions-template.js"
 import { mergeSupatypePackageJson } from "../init-package-json.js"
+import { downloadRelease, initFromExample } from "../init-example.js"
+import { errorMessage } from "../error-message.js"
 import { parseJsonObject } from "@supatype/shared"
 import { cliPackageVersion } from "../cli-package-version.js"
 import {
@@ -139,6 +141,30 @@ interface InitCliOptions {
   adminEmail?: string
   adminPassword?: string
   admin?: boolean
+  example?: string
+}
+
+/**
+ * `init <dir> --example <name>`: the example from this CLI's release, in place of the scaffold. Its
+ * README carries the rest of the setup, so the next steps end there.
+ */
+async function runExampleInit(name: string | undefined, example: string): Promise<void> {
+  const target = name ?? example
+  const dir = resolve(process.cwd(), target)
+  const version = cliPackageVersion()
+  try {
+    info(`Downloading the ${example} example from supatype v${version}...`)
+    const { files, hasReadme } = await initFromExample({ dir, example, version, download: downloadRelease })
+    info(`Wrote ${files} files to ${target}/, with @supatype dependencies pinned to ^${version}.`)
+    nextSteps("Next steps:", [
+      `cd ${target}`,
+      `${detectInvokingPackageManager()} install`,
+      hasReadme ? "Then follow README.md: it has the rest of this example's setup." : "supatype dev",
+    ])
+  } catch (err) {
+    error(errorMessage(err))
+    process.exit(1)
+  }
 }
 
 export function registerInit(program: Command): void {
@@ -156,7 +182,12 @@ export function registerInit(program: Command): void {
     .option("--admin-email <email>", "First admin panel user email (written to .env)")
     .option("--admin-password <password>", "First admin panel user password (written to .env)")
     .option("--no-admin", "Do not configure a first admin user")
+    .option("--example <name>", "Start from an example of this CLI's release (examples/<name> on GitHub)")
     .action(async (name: string | undefined, opts: InitCliOptions) => {
+      if (opts.example !== undefined) {
+        await runExampleInit(name, opts.example)
+        return
+      }
       const dir = name ? resolve(process.cwd(), name) : process.cwd()
 
       if (name && existsSync(dir)) {
@@ -210,13 +241,7 @@ export function registerInit(program: Command): void {
 
       if (name) mkdirSync(dir, { recursive: true })
 
-      const deps = await resolveInitDependencyVersions()
-      const runningCli = cliPackageVersion()
-      if (deps.cli !== runningCli || deps.types !== runningCli) {
-        info(
-          `Using published npm versions: @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}`,
-        )
-      }
+      const deps = await resolveDependencyVersions()
 
       scaffold(dir, result, deps)
 
@@ -274,7 +299,13 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
         ),
       )
     }
-    let result = await collectWizardAnswers(defaultName, modeTarget, dir, detected)
+    let result = await collectWizardAnswers({
+      defaultName,
+      defaultTarget: modeTarget,
+      dir,
+      detected,
+      askName: name === undefined,
+    })
 
     if (opts.admin === false) {
       delete result.adminEmail
@@ -289,13 +320,7 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
 
     if (name) mkdirSync(dir, { recursive: true })
 
-    const deps = await resolveInitDependencyVersions()
-    const runningCli = cliPackageVersion()
-    if (deps.cli !== runningCli || deps.types !== runningCli) {
-      info(
-        `Using published npm versions: @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}`,
-      )
-    }
+    const deps = await resolveDependencyVersions()
 
     const setupSpinner = p.spinner()
     setupSpinner.start("Setting up your project...")
@@ -355,19 +380,18 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
 
 // ─── Wizard ──────────────────────────────────────────────────────────────────
 
-async function collectWizardAnswers(
-  defaultName: string,
-  defaultTarget: ProductionTarget,
-  dir: string,
-  detected: DetectedProjectSetup,
-): Promise<WizardResult> {
-    const projectName = ensureNotCancelled(
-      await p.text({
-        message: "Project name",
-        defaultValue: defaultName,
-        placeholder: defaultName,
-      }),
-    ).trim() || defaultName
+export interface WizardContext {
+  defaultName: string
+  defaultTarget: ProductionTarget
+  dir: string
+  detected: DetectedProjectSetup
+  /** False when `init <name>` already named the project. */
+  askName: boolean
+}
+
+export async function collectWizardAnswers(context: WizardContext): Promise<WizardResult> {
+    const { defaultName, defaultTarget, dir, detected } = context
+    const projectName = context.askName ? await promptProjectName(defaultName) : defaultName
 
     const admin = await promptAdminUser()
 
@@ -469,13 +493,8 @@ async function collectWizardAnswers(
       }),
     )
 
-    const storageProduction = ensureNotCancelled(
-      await p.select<StorageProvider>({
-        message: "Production storage?",
-        initialValue: "local",
-        options: STORAGE_PROVIDER_OPTIONS,
-      }),
-    )
+    // No production to store for yet: production storage is chosen with the production target.
+    const storageProduction = productionTarget === "later" ? storageLocal : await promptProductionStorage()
 
     const helloFunction = ensureNotCancelled(
       await p.confirm({
@@ -502,6 +521,23 @@ async function collectWizardAnswers(
       generateKeys: true,
       ...admin,
     }
+}
+
+async function promptProjectName(defaultName: string): Promise<string> {
+  const answer = ensureNotCancelled(
+    await p.text({ message: "Project name", defaultValue: defaultName, placeholder: defaultName }),
+  )
+  return answer.trim() || defaultName
+}
+
+async function promptProductionStorage(): Promise<StorageProvider> {
+  return ensureNotCancelled(
+    await p.select<StorageProvider>({
+      message: "Production storage?",
+      initialValue: "local",
+      options: STORAGE_PROVIDER_OPTIONS,
+    }),
+  )
 }
 
 async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?: string }> {
@@ -654,7 +690,7 @@ async function ensureInitBinaries(dir: string): Promise<boolean> {
     }
     return true
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorMessage(err)
     warn(`Could not verify component binaries: ${message}`)
     warn("Run manually from your project directory: supatype update")
     return false
@@ -827,6 +863,19 @@ function scaffoldHelloFunction(
 
 // ─── Templates ───────────────────────────────────────────────────────────────
 
+/** The Supatype package versions to pin, saying so when the registry moved any off the running CLI's. */
+async function resolveDependencyVersions(): Promise<InitDependencyVersions> {
+  const deps = await resolveInitDependencyVersions()
+  const runningCli = cliPackageVersion()
+  if (deps.cli !== runningCli || deps.types !== runningCli || deps.client !== runningCli) {
+    info(
+      `Using published npm versions: @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}, ` +
+        `@supatype/client ^${deps.client}`,
+    )
+  }
+  return deps
+}
+
 function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions): string {
   const scripts: string[] = [
     `    "dev": "supatype dev"`,
@@ -848,8 +897,9 @@ function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions
   // against a real database: schema/index.ts imports @supatype/types with `import type`, which is
   // erased at build; supatype.config.ts imports defineConfig, which only the CLI evaluates; and
   // seed.ts is run by `tsx seed.ts`. Nothing `supatype push` or `supatype generate` writes refers
-  // to either package: the generated types import nothing, and the client augmentation declares a
-  // module for @supatype/client, which stays a real dependency.
+  // to either package: the generated types import nothing. The generated client
+  // (supatype/generated/client.ts) imports @supatype/client at runtime, so that one is a real
+  // dependency.
   //
   // In dependencies they were installed by `npm install --omit=dev`, so every production install
   // of a Supatype app pulled the whole CLI toolchain (ink, react, typescript, ts-morph, pg, tsx)
@@ -869,6 +919,9 @@ function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions
   "type": "module",
   "scripts": {
 ${scripts.join(",\n")}
+  },
+  "dependencies": {
+    "@supatype/client": "^${deps.client}"
   },
   "devDependencies": {
 ${devDeps.join(",\n")}
@@ -1478,7 +1531,8 @@ function warnDockerUnavailableForProvider(provider: ScaffoldOptions["provider"])
 /** What `init` did and was asked for, which decides the steps it prints. */
 export interface InitStepsArgs {
   name: string | undefined
-  result: Pick<WizardResult, "provider" | "kongPort" | "adminEmail" | "packageManager" | "helloFunction">
+  result: Pick<WizardResult, "provider" | "kongPort" | "adminEmail" | "packageManager" | "helloFunction"> &
+    Partial<Pick<WizardResult, "productionTarget" | "domain" | "tlsEmail">>
   installed: boolean
   keysGenerated: boolean
   binariesReady: boolean
@@ -1494,10 +1548,21 @@ function printNextSteps(args: InitStepsArgs & { result: WizardResult }): void {
   info(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
   nextSteps(initSetupComplete(args) ? "Next steps:" : "Finish setup:", initFirstSteps(args))
   printProductionSteps(result)
+  if (result.productionTarget === "self-host") nextSteps("Develop locally:", initDevSteps(result))
 }
 
-/** The commands to run next, in order, after `init`. */
+/**
+ * The commands to run next, in order, after `init`: setting up, then what the project is for. A
+ * self-host project leads with taking it to its server, and its local development is printed after
+ * ({@link printNextSteps}); every other project leads with `supatype dev`.
+ */
 export function initFirstSteps(args: InitStepsArgs): string[] {
+  const { result } = args
+  const next = result.productionTarget === "self-host" ? selfHostProductionSteps(result) : initDevSteps(result)
+  return [...initSetupSteps(args), ...next]
+}
+
+function initSetupSteps(args: InitStepsArgs): string[] {
   const { name, result, installed, keysGenerated, binariesReady } = args
   const steps: string[] = []
   if (name) steps.push(`cd ${name}`)
@@ -1506,8 +1571,15 @@ export function initFirstSteps(args: InitStepsArgs): string[] {
     if (!binariesReady) steps.push("supatype update        # download component binaries")
     if (!keysGenerated) steps.push("supatype keys")
   }
-  // dev is the last step: it applies the schema and generates the types, then watches both. `push`
-  // is for another database (`push --env <name>`), and listing it here sent people to it anyway.
+  return steps
+}
+
+/**
+ * `supatype dev`, which applies the schema and generates the types, then watches both. `push` is for
+ * another database (`push --env <name>`), and listing it here sent people to it anyway.
+ */
+function initDevSteps(result: InitStepsArgs["result"]): string[] {
+  const steps: string[] = []
   const stack =
     result.provider === "docker"
       ? `Docker Compose stack, API on http://localhost:${result.kongPort ?? 18473}`
@@ -1547,7 +1619,7 @@ export function printProductionSteps(result: WizardResult): void {
     ])
     info("supatype.local.config.ts keeps `supatype dev` local while the committed config targets cloud.")
   } else if (result.productionTarget === "self-host") {
-    nextSteps("Self-host production (your own server):", selfHostProductionSteps(result))
+    // The self-host steps lead the first block (initFirstSteps); local development follows this.
     info("supatype.local.config.ts keeps `supatype dev` local while the committed config targets self-host.")
   }
   plain()

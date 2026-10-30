@@ -300,7 +300,7 @@ async function offerSchemaRestore(
   const root = projectRootFromConfig(config, cwd)
   const backupDir = join(cwd, ".supatype", "schema-backups", `${Date.now()}`)
   const gz = Buffer.from(gzB64, "base64")
-  restoreSchemaSourcesFromGz(gz, manifest, root, { backupDir })
+  restoreSchemaSourcesFromGz(gz, root, { backupDir })
 
   const manifestPaths = new Set(manifest.files.map((f) => f.path))
   const orphans = findOrphanSchemaFiles(root, manifest.entryPoint, manifestPaths)

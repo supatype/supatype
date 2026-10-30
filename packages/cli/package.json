@@ -27,8 +27,8 @@
       "types": "./dist/index.d.ts"
     },
     "./seed": {
-      "import": "./dist/seed.js",
-      "types": "./dist/seed.d.ts"
+      "types": "./dist/seed.d.ts",
+      "default": "./dist/seed.js"
     },
     "./deno": {
       "types": "./deno.d.ts"

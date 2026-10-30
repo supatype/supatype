@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { localKongBaseUrl } from "../local-gateway.js"
 import { updateAppConfigInProject } from "../app-config.js"
+import { loadConfig } from "../config.js"
 import { error, file, info, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 
@@ -65,11 +66,7 @@ function addStaticApp(cwd: string, staticDir: string): void {
     const configPath = updateAppConfigInProject(cwd, { mode: "static", staticDir })
     file("updated", configPath)
     info(`Static app directory: ${staticDir}`)
-    nextSteps("Build your frontend, then:", [
-      "supatype self-host compose render",
-      "supatype self-host compose up -d",
-      `App URL: ${localKongBaseUrl()}/`,
-    ])
+    nextSteps("Build your frontend, then:", [...applySteps(cwd), `App URL: ${localKongBaseUrl()}/`])
   } catch (err) {
     error(errorMessage(err))
     process.exit(1)
@@ -82,7 +79,7 @@ function addProxyApp(cwd: string, port: string, upstream?: string): void {
     const configPath = updateAppConfigInProject(cwd, { mode: "proxy", upstream: upstreamUrl })
     file("updated", configPath)
     info(`Forwarding to ${upstreamUrl}: app at ${localKongBaseUrl()}/`)
-    nextSteps("Next:", ["supatype self-host compose render"])
+    nextSteps("Next:", applySteps(cwd))
   } catch (err) {
     error(errorMessage(err))
     process.exit(1)
@@ -94,8 +91,31 @@ function removeApp(cwd: string): void {
     const configPath = updateAppConfigInProject(cwd, { mode: "none" })
     file("updated", configPath)
     info("App routing disabled (app.mode=none).")
+    nextSteps("Next:", applySteps(cwd))
   } catch (err) {
     error(errorMessage(err))
     process.exit(1)
+  }
+}
+
+/**
+ * How the changed routing reaches the running stack. A dev project (`server.mode: "dev"`, the merged
+ * config `supatype dev` reads) is served by `supatype dev`, which keeps the old app until it
+ * restarts; a self-hosted one is brought up through compose, whose `up` renders the compose file
+ * from the config first.
+ */
+function applySteps(cwd: string): string[] {
+  if (projectServerMode(cwd) === "dev") {
+    return ["Restart `supatype dev`: a running dev stack keeps serving the old app until it restarts."]
+  }
+  return ["supatype self-host compose up -d"]
+}
+
+/** The project's server mode, or undefined when the config cannot be read (the write above still stands). */
+function projectServerMode(cwd: string): string | undefined {
+  try {
+    return loadConfig(cwd).server.mode
+  } catch {
+    return undefined
   }
 }

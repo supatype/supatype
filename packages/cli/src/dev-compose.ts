@@ -889,6 +889,11 @@ export interface ComposePushOptions {
   force?: boolean
   /** The engine's audit flags (`composeAuditArgs`), empty for an engine that does not take them. */
   audit?: readonly string[]
+  /**
+   * Push without the schema snapshot when it cannot be taken, rather than refuse. dev's, which
+   * pushes on every save; `supatype push` refuses ({@link writeSchemaSourcePushArtifacts}).
+   */
+  snapshotOptional?: boolean
 }
 
 /**
@@ -978,7 +983,7 @@ async function applyViaHostEngine(
   opts: ComposePushOptions,
 ): Promise<void> {
   await ensureEngine()
-  const sources = writeSchemaSourcePushArtifacts(cwd)
+  const sources = writeSchemaSourcePushArtifacts(cwd, opts.snapshotOptional === true)
   const body = {
     ast,
     database_url: projectDatabaseUrl(cwd, config),
@@ -1001,7 +1006,7 @@ async function applyViaComposeEngine(
   opts: ComposePushOptions,
 ): Promise<void> {
   const { paths, composeProject } = stack
-  const sources = writeSchemaSourcePushArtifacts(cwd)
+  const sources = writeSchemaSourcePushArtifacts(cwd, opts.snapshotOptional === true)
   const audit = opts.audit ?? (await composeAuditArgs(cwd, config))
   const pushOnce = () => runComposeEnginePush(paths, cwd, composeProject, config, sources, { ...opts, audit })
   const runPush = async () => {
@@ -1094,7 +1099,13 @@ async function runDevSchemaPush(
   const once = (overwriteDrift: boolean) =>
     pushConsentingToDestructive(
       (force) =>
-        runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, audit, overwriteDrift, force }),
+        runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, {
+          ...opts,
+          audit,
+          overwriteDrift,
+          force,
+          snapshotOptional: true,
+        }),
       DEV_DESTRUCTIVE_POLICY,
       consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
     )

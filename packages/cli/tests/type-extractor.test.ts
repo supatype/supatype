@@ -1061,6 +1061,33 @@ export type Report = Model<{
     )
   })
 
+  it("gives a uuid key inside a block the random uuid default, as a model's gets", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-block-uuid-key-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Block, Blocks, Model, UUID } from "@supatype/types"
+
+export type Card = Block<"card", { id: UUID; title: string }>
+
+export type Board = Model<{
+  id: UUID
+  cards: Blocks<Card>
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const isBlocks = isShape({ blocks: optional(isArrayOf(isShape({ fields: isJsonObject }))) })
+    const board = ast?.models.find((m) => m.name === "Board")
+    const fields = expectShape(board?.fields["cards"], isBlocks).blocks?.[0]?.fields
+    expect(fields?.["id"]).toMatchObject({ primaryKey: true, default: { kind: "genRandomUuid" } })
+    expect(board?.fields["id"]).toMatchObject({ primaryKey: true, default: { kind: "genRandomUuid" } })
+  })
+
   it("reads the blocks of Blocks<T> through an alias naming their union", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-block-union-alias-"))
     dirs.push(dir)

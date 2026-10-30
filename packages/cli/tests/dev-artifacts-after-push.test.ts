@@ -83,9 +83,14 @@ vi.mock("../src/config.js", async (importOriginal) => ({
   loadSchemaAst: () => schema.ast,
 }))
 
+/** `snapshotOptional` as each push passed it: dev's may go without the snapshot, push's may not. */
+const snapshotOptional = vi.hoisted((): boolean[] => [])
 vi.mock("../src/schema-sources.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/schema-sources.js")>()),
-  writeSchemaSourcePushArtifacts: () => null,
+  writeSchemaSourcePushArtifacts: (_cwd: string, optional: boolean) => {
+    snapshotOptional.push(optional)
+    return null
+  },
 }))
 
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: () => false }))
@@ -214,6 +219,13 @@ describe.each([
     expect(read(ADMIN)).toBe("APPLIED-ADMIN")
     expect(read(TYPES)).toBe("APPLIED-TYPES")
     expect(generated("/admin")).toBe(0)
+  })
+
+  it("takes the schema snapshot as push's, which refuses a name restore would refuse", async () => {
+    snapshotOptional.length = 0
+    const { pushYes } = await loadPush(over)
+    await pushYes()
+    expect(snapshotOptional).toEqual([false])
   })
 
   it("writes them exactly once when push --yes applies after the engine's refusal", async () => {

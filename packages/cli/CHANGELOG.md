@@ -2,8 +2,34 @@
 
 ## Unreleased
 
+### Breaking Changes
+
+* **schema:** a `?` on a model field (`due?: string`) is refused, naming `Model.field` and saying to
+  write `Optional<>`. It read as nullable but compiled to a `NOT NULL` column.
+* **generate:** `supatype generate --connection` is refused as an unknown option. Generate writes the
+  types from the schema file and never opened a database, so the option was accepted and ignored.
+* **seed:** a seed file's `export const config = { transaction: ... }` is refused, and `transaction`
+  is gone from `SeedConfig`. It was validated and never sent: every seed file runs in a transaction
+  of its own (all of them in one with `--atomic`), and the engine cannot run one outside it. Any
+  other key `config` does not have (a misspelt `runonce`, say) is refused too, rather than ignored.
+
 ### Features
 
+* **init:** `supatype init <dir> --example <name>` starts from `examples/<name>` of the release
+  matching the CLI (`v<version>` on GitHub), with every `workspace:` dependency pinned to
+  `^<version>`. An unknown name is refused with the list of examples in that release, and so is an
+  example holding a file named with `..`, a backslash, a NUL, a leading drive (`C:`) or an absolute
+  path, or one that resolves outside the directory; nothing is written then. A colon anywhere in a
+  name is refused too, since on Windows `docs/a:b.md` writes a hidden stream of a file `docs/a`.
+  Such a name elsewhere in the repository does not stop an example. Schema snapshots are restored
+  with the same checks, and `push` refuses a schema file named in a way restore would refuse.
+  `supatype dev` warns instead and pushes without a snapshot, so it does not stop on every save.
+* **seed:** `authUser: { connect: { id } }` on a relation to the auth user (`RelatedTo<SupatypeAuthUser>`)
+  writes the relation's key column. It failed with "`supatype:user` is not a model in this schema".
+  The generated `...Create` type still offers the key column (`auth_user_id`) rather than `authUser`;
+  that comes from the engine.
+* **schema:** `Geo<"polygon">` and `Geo<"linestring">` compile to `GEOGRAPHY(POLYGON, 4326)` and
+  `GEOGRAPHY(LINESTRING, 4326)`. Every `Geo` field was a point whatever it said; a bare `Geo` still is.
 * **keys:** `supatype keys` writes into `.env` when there is one, filling only the blank keys, as
   `--write` did. `--print` only prints. `--write` still works, so scripts and docs written for 0.7.0
   keep running. With no `.env` the keys are printed, with a line saying how to have them written.
@@ -32,6 +58,43 @@
 
 ### Bug Fixes
 
+* **migrate:** restoring a migration's schema sources refuses a file that lands beside the project
+  under a path starting with the project's own (`/srv/app2/x.ts` for `/srv/app`). The check compared
+  string prefixes, so it took that file for one inside the project. The snapshot is now read by the
+  same tar reader as `init --example`, so a name with a backslash, a NUL, a leading drive or an
+  absolute path is refused too (a backslash was read as a separator), an entry naming the project
+  root itself (`./`) is refused rather than failing on write, and a name that only starts with two
+  dots (`..notes/x.ts`) is restored rather than refused. The backup taken before a restore copies
+  the files the snapshot overwrites, not the paths its manifest lists, which were never checked.
+
+* **schema:** an `id: SupatypeAuthUserId` primary key under `create: Owner<"id">` (also inside `Any`
+  or `All`) no longer gets a `gen_random_uuid()` default. A random id names no user, and the default
+  kept the engine from defaulting the column to the caller, so an insert leaving `id` out was
+  refused. Under any other create rule the key keeps its random default, as nothing else fills it.
+  The generated `Insert` type leaves `id` optional either way, since the database fills it.
+* **self-host:** `self-host native backup`, `serve`, `reload`, `status`, `logs` and `install-service`
+  run their own action with their own options. They were declared as executable subcommands, so
+  their options and actions landed on `self-host native` and `self-host`.
+* **seed:** a seed file in a project without `"type": "module"` (a Next.js app) can import
+  `@supatype/cli/seed`. The export map had only an `import` condition, and a CommonJS seed failed
+  with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+* **seed:** a failure whose message already carries its remedy (a column the database does not have)
+  prints the remedy once, not twice.
+* **init:** a new project depends on `@supatype/client`, pinned like the other packages; the
+  generated `supatype/generated/client.ts` imports it.
+* **init:** the wizard does not ask the project name `init <name>` already gave, does not ask for
+  production storage when production is decided later, and shows a yes/no prompt's default as `Y/n`
+  or `y/N`. `init --mode standalone` leads its next steps with the self-host steps, then local
+  development.
+* **app:** `supatype app add` and `app remove` rewrite `supatype.config.ts` at its own indentation and
+  keep it valid TypeScript (they wrote `mode: "proxy",,` against init's config, and a comma in a
+  comment after the last entry was taken for its separator), and the same for the `server` block
+  `supatype add domain` writes. In a dev project they say to restart `supatype dev`, which keeps
+  serving the old app until it restarts; in a self-hosted one, to run `self-host compose up -d`, which
+  renders the compose file itself.
+* **dev:** "Create an admin user now?" is asked once per project. A "no" is kept in
+  `.supatype/admin-prompt.json`, so later starts neither ask nor wait; a run that is not interactive
+  was never asked.
 * **security:** a project with no `JWT_SECRET` gets one in `.env` from `dev` or `keys`: the shell's
   when usable, else a generated one. Before, it signed with a published fallback, and the docker dev
   path wrote that fallback into the `.env` a self-host deployment reads. A secret already in `.env`
@@ -64,6 +127,7 @@
   `docker network prune` frees the unused ones.
 * **cli:** running the CLI from a monorepo checkout that has not been built says to run
   `pnpm install && pnpm build` at the repository root, rather than a bare "Cannot find module".
+
 
 ## 0.7.0
 
