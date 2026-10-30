@@ -48,7 +48,7 @@ import {
 import { detectProjectSetup, type DetectedProjectSetup } from "../init-project-detect.js"
 import { SUPATYPE_GITIGNORE_PATHS } from "../gitignore.js"
 import { DEFAULT_CLIENT_PATH, DEFAULT_TYPES_PATH } from "../type-generation.js"
-import { COMPOSE_DEV_KONG_PORT, NATIVE_SERVER_PORT } from "../project-config.js"
+import { COMPOSE_DEV_KONG_PORT, NATIVE_DB_PORT, NATIVE_SERVER_PORT, nativeDatabaseUrl } from "../project-config.js"
 import { cliDatabaseUrlLines } from "../database-url-owner.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
@@ -1308,8 +1308,11 @@ function envTemplate(opts: ScaffoldOptions): string {
   // only because `supatype dev` no longer overwrites them on every run (see local-secrets.ts).
   const postgresPassword = randomBytes(24).toString("base64url")
 
-  // Labelled as the CLI's, so it follows the provider the project runs (database-url-owner.ts).
-  const databaseUrl = `postgresql://${BUNDLED_DB_USER}:${encodeURIComponent(postgresPassword)}@localhost:5432/${opts.projectName}`
+  // Labelled as the CLI's, so it follows the provider the project runs (database-url-owner.ts). A
+  // native project's is the one its dev uses, which used to rewrite a Docker URL on the first start.
+  const databaseUrl = opts.provider === "native"
+    ? nativeDatabaseUrl(opts.projectName, postgresPassword, NATIVE_DB_PORT)
+    : `postgresql://${BUNDLED_DB_USER}:${encodeURIComponent(postgresPassword)}@localhost:5432/${opts.projectName}`
   sections.push(`${cliDatabaseUrlLines(databaseUrl)}
 POSTGRES_USER=${BUNDLED_DB_USER}
 POSTGRES_PASSWORD=${postgresPassword}
