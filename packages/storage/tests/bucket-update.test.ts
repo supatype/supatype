@@ -46,6 +46,17 @@ function context(body: unknown): Parameters<typeof buckets.update>[0] {
   return { req, res, jwt: null, params: { id: "b" }, url: new URL("http://s/bucket/b") }
 }
 
+/** `ctx` for a request with `body`, and what was answered to it. */
+function answer(body: unknown): { ctx: Parameters<typeof buckets.update>[0]; sent: () => { status: number; body: string } } {
+  const ctx = context(body)
+  let said = ""
+  ctx.res.end = ((chunk?: unknown) => {
+    said = typeof chunk === "string" ? chunk : ""
+    return ctx.res
+  }) as typeof ctx.res.end
+  return { ctx, sent: () => ({ status: ctx.res.statusCode, body: said }) }
+}
+
 beforeEach(() => {
   vi.mocked(s3.applyBucketPolicyFromConfig).mockClear()
   vi.mocked(db.updateBucket).mockClear()
@@ -125,16 +136,6 @@ describe("POST /bucket", () => {
  * ignored without a word, so the bucket was made without what the caller meant it to have.
  */
 describe("a bucket write naming a field the service does not read", () => {
-  function answer(body: unknown): { ctx: Parameters<typeof buckets.update>[0]; sent: () => { status: number; body: string } } {
-    const ctx = context(body)
-    let said = ""
-    ctx.res.end = ((chunk?: unknown) => {
-      said = typeof chunk === "string" ? chunk : ""
-      return ctx.res
-    }) as typeof ctx.res.end
-    return { ctx, sent: () => ({ status: ctx.res.statusCode, body: said }) }
-  }
-
   it("is refused on create, with 400 naming the field", async () => {
     const { ctx, sent } = answer({ name: "b", public: true, policy: "{}", size: 1 })
     await buckets.create(ctx)
@@ -161,5 +162,46 @@ describe("a bucket write naming a field the service does not read", () => {
     await buckets.update(ctx)
     expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'a bucket cannot be renamed: name "c" is not "b"' }) })
     expect(db.updateBucket).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Review of round 3c: what Supabase's storage client sends. Its create sends `type` ("STANDARD" for
+ * an ordinary bucket) and `versioning_status`, and its update sends `name` equal to the bucket's id.
+ * Each was refused, so the client could create or update no bucket here.
+ */
+describe("a bucket write from Supabase's storage client", () => {
+  it("creates a standard bucket from the body its createBucket sends", async () => {
+    vi.mocked(db.createBucket).mockReset().mockResolvedValue(row("private", false))
+    const { ctx, sent } = answer({ id: "b", name: "b", type: "STANDARD", public: false, file_size_limit: 10, allowed_mime_types: ["image/png"] })
+    await buckets.create(ctx)
+    expect(sent().status).toBe(200)
+    expect(db.createBucket).toHaveBeenCalled()
+  })
+
+  it("refuses a bucket type or versioning it has no such feature for, naming it", async () => {
+    const analytics = answer({ id: "b", name: "b", type: "ANALYTICS" })
+    await buckets.create(analytics.ctx)
+    expect(analytics.sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'type "ANALYTICS" is not supported: this service stores STANDARD buckets' }) })
+    const versioned = answer({ id: "b", name: "b", versioning_status: "Enabled" })
+    await buckets.create(versioned.ctx)
+    expect(versioned.sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'versioning_status "Enabled" is not supported: this service keeps no object versions' }) })
+  })
+
+  it("updates a bucket whose name is not its id from the body its updateBucket sends", async () => {
+    const named = { ...row("private", false), name: "Pictures" }
+    vi.mocked(db.getBucket).mockResolvedValue(named)
+    vi.mocked(db.updateBucket).mockResolvedValue(named)
+    const { ctx, sent } = answer({ id: "b", name: "b", public: false })
+    await buckets.update(ctx)
+    expect(sent().status).toBe(200)
+    expect(db.updateBucket).toHaveBeenCalled()
+  })
+
+  it("still refuses an update naming another id", async () => {
+    vi.mocked(db.getBucket).mockResolvedValue(row("private", false))
+    const { ctx, sent } = answer({ id: "c" })
+    await buckets.update(ctx)
+    expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'a bucket cannot be renamed: id "c" is not "b"' }) })
   })
 })

@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 import { spawnComposeEngine, type ComposeEngineTarget } from "./compose-engine-run.js"
+import { ENGINE_SERVICE } from "./compose-engine-service.js"
 import { errorMessage, spawnFailureText } from "./error-message.js"
 import type { Capabilities } from "./engine-ownership-gate.js"
 import { hasProjectConfig, loadConfig } from "./config.js"
@@ -354,7 +355,7 @@ function composeEngineRequest<T>(
 
 /** The request's files as the engine container sees them, under the project mount. */
 function inContainer(files: RequestFiles, cwd: string): RequestFiles {
-  const map = (path: string): string => `/project/${toPosixPath(relative(cwd, path))}`
+  const map = (path: string): string => `${ENGINE_SERVICE.projectDir}/${toPosixPath(relative(cwd, path))}`
   return {
     reqFile: map(files.reqFile),
     ...(files.gzPath !== undefined && { gzPath: map(files.gzPath) }),
