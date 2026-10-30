@@ -370,16 +370,19 @@ Deno.serve({
     })
     return response
   } catch (err) {
-    emit("error", err instanceof Error ? err.message : "Unknown error", {
+    // Plain, as a load failure's: the message goes out as JSON, and a module a handler imports
+    // late fails with the same coloured text.
+    const message = err instanceof Error ? err.message.replace(TERMINAL_ESCAPES, "") : "Unknown error"
+    emit("error", message, {
       request_id: context.executionId,
       function: fnName,
       status: 500,
       duration_ms: Number((performance.now() - start).toFixed(1)),
     })
-    return new Response(JSON.stringify({
-      error: "function_error",
-      message: err instanceof Error ? err.message : "Unknown error",
-    }), { status: 500, headers: { "Content-Type": "application/json" } })
+    return new Response(JSON.stringify({ error: "function_error", message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    })
   }
 })
 `

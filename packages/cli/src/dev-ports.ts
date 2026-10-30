@@ -4,13 +4,12 @@
  * availability so multiple projects and port collisions are surfaced clearly.
  */
 
-import { spawnSync } from "node:child_process"
 import { CLACK_CANCEL, isCancel, p } from "./ui/clack.js"
-import { askDocker, type DockerRunner } from "./docker-exec.js"
+import { askDocker, askDockerSync, DOCKER_QUERY_TIMEOUT_MS, type DockerRunner } from "./docker-exec.js"
 import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 import { isPortInUse } from "./postgres-ctl.js"
 import { readComposeEnvInt, shellEnvInt, upsertEnvFile } from "./env-file.js"
-import { CLI_DATABASE_URL, cliMayWriteDatabaseUrl } from "./database-url-owner.js"
+import { writeCliDatabaseUrl } from "./database-url-owner.js"
 import { isInteractive } from "./ui/interactive.js"
 import { fatalError } from "./ui/fatal.js"
 import { COMPOSE_DEV_DB_PORT, hostComposeDbUrl } from "./host-database.js"
@@ -44,12 +43,11 @@ export function composeProjectOwnsPort(dockerPsOutput: string, project: string):
  * into the wrong database. Refusing is the safe answer for a stranger; only our own stack is fine.
  */
 export function portHeldByComposeProject(port: number, project: string): boolean {
-  const result = spawnSync(
-    "docker",
-    ["ps", "--filter", `publish=${port}`, "--format", '{{.Label "com.docker.compose.project"}}'],
-    { encoding: "utf8" },
-  )
-  if (result.status !== 0 || typeof result.stdout !== "string") return false
+  // Synchronous: `projectStackUrl` (local-stack.ts) asks it from synchronous push and seed paths.
+  const result = askDockerSync(["ps", "--filter", `publish=${port}`, "--format", '{{.Label "com.docker.compose.project"}}'], {
+    timeoutMs: DOCKER_QUERY_TIMEOUT_MS,
+  })
+  if (result.status !== 0) return false
   return composeProjectOwnsPort(result.stdout, project)
 }
 
@@ -59,9 +57,9 @@ export function portHeldByComposeProject(port: number, project: string): boolean
  */
 export interface ComposePortReader {
   /** One `<container id> <compose project>` line per container, or null when Docker cannot be asked. */
-  listContainers: () => Promise<string | null> | string | null
+  listContainers: () => Promise<string | null>
   /** One `HostConfig.PortBindings` JSON object per line for `ids`, or null when Docker cannot be asked. */
-  portBindings: (ids: readonly string[]) => Promise<string | null> | string | null
+  portBindings: (ids: readonly string[]) => Promise<string | null>
 }
 
 /**
@@ -439,8 +437,7 @@ export async function ensureDevDbPort(cwd: string, opts: EnsureDevDbPortOptions 
 }
 
 function persistDevDbPort(cwd: string, port: number): number {
-  // The URL only over one the CLI wrote: a hand-written DATABASE_URL always wins.
-  const url = cliMayWriteDatabaseUrl(cwd) ? { DATABASE_URL: hostComposeDbUrl(cwd, port) } : {}
-  upsertEnvFile(cwd, { SUPATYPE_DEV_DB_PORT: String(port), ...url }, CLI_DATABASE_URL)
+  // The URL only over one the CLI owns: one that is yours always wins (database-url-owner.ts).
+  writeCliDatabaseUrl(cwd, hostComposeDbUrl(cwd, port), { SUPATYPE_DEV_DB_PORT: String(port) })
   return port
 }

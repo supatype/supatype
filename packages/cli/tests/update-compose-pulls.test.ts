@@ -16,6 +16,8 @@ const stack = vi.hoisted(() => ({
   failing: new Set<string>(),
   /** Images Docker has on this machine. */
   local: new Set<string>(),
+  /** Each single-service pull's start and end, in the order they happened. */
+  events: [] as string[],
 }))
 
 vi.mock("../src/config.js", async (importOriginal) => ({
@@ -32,11 +34,21 @@ vi.mock("../src/config.js", async (importOriginal) => ({
 vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/self-host-compose.js")>()),
   writeSelfHostCompose: () => ({ composePath: "/stack/docker-compose.yml" }),
-  // As compose behaves: a pull exits non-zero when any service it names fails, and with
-  // --ignore-pull-failures, which update used to pass, it exits 0 whatever failed.
+  // As compose behaves: a pull exits non-zero when any service it names fails (every service when
+  // it names none), and with --ignore-pull-failures, which update used to pass, it exits 0.
   runDockerCompose: vi.fn((_path: string, args: string[]) => {
     if (args[0] !== "pull" || args.includes("--ignore-pull-failures")) return 0
-    return args.slice(1).some((arg) => stack.failing.has(arg)) ? 1 : 0
+    const named = args.slice(1)
+    const pulled = named.length > 0 ? named : stack.images.map((one) => one.service)
+    return pulled.some((service) => stack.failing.has(service)) ? 1 : 0
+  }),
+  askDockerCompose: vi.fn(async (_path: string, args: string[]) => {
+    const service = args[1] ?? ""
+    stack.events.push(`start ${service}`)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    stack.events.push(`end ${service}`)
+    const failed = stack.failing.has(service)
+    return { status: failed ? 1 : 0, stdout: "", stderr: failed ? `${service} Pulling\nmanifest unknown` : "", timedOut: false, missing: false }
   }),
 }))
 
@@ -49,7 +61,11 @@ vi.mock("../src/dev-compose.js", () => ({ syncComposeImagePins: () => undefined 
 
 vi.mock("../src/compose-services.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-services.js")>()),
-  composeServiceImages: () => stack.images,
+  composeServiceImages: vi.fn(async () => stack.images),
+}))
+
+vi.mock("../src/docker-exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/docker-exec.js")>()),
   dockerHasImage: (image: string) => stack.local.has(image),
 }))
 
@@ -67,6 +83,7 @@ vi.mock("../src/ui/fatal.js", () => ({
 }))
 
 const { registerUpdate } = await import("../src/commands/update.js")
+const { composeServiceImages } = await import("../src/compose-services.js")
 
 async function runUpdate(): Promise<void> {
   const program = new Command().exitOverride()
@@ -84,6 +101,7 @@ beforeEach(() => {
   ]
   stack.failing = new Set()
   stack.local = new Set()
+  stack.events = []
 })
 
 afterEach(() => {
@@ -113,5 +131,20 @@ describe("supatype update on a Docker project", () => {
   it("says the images were updated when every pull worked", async () => {
     await expect(runUpdate()).resolves.toBeUndefined()
     expect(messages.info).toContain("Compose images updated.")
+  })
+
+  // `docker compose config` is a second pass over the whole file, and a pull that worked has no use for it.
+  it("does not ask compose for its services when the pull works", async () => {
+    await runUpdate()
+    expect(vi.mocked(composeServiceImages)).not.toHaveBeenCalled()
+  })
+
+  // Each pull waits on a registry; one after another, a slow registry cost the sum of them.
+  it("pulls the services again side by side when the pull fails, naming what Docker said", async () => {
+    stack.failing.add("storage")
+    await expect(runUpdate()).rejects.toThrow(/storage \(supatype\/storage:0\.7\.0\): docker compose could not pull it: manifest unknown/)
+    const starts = stack.events.filter((event) => event.startsWith("start ")).length
+    expect(starts).toBe(stack.images.length)
+    expect(stack.events.slice(0, starts).every((event) => event.startsWith("start "))).toBe(true)
   })
 })

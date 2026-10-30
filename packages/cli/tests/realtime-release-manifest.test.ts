@@ -195,7 +195,7 @@ describe.skipIf(!hasMinisign)("installing a realtime release through the CLI", (
     vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", publicKey("release"))
     signChecksums("release")
 
-    const installed = await download("realtime", VERSION, PLATFORM)
+    const { path: installed } = await download("realtime", VERSION, PLATFORM)
     expect(readFileSync(installed)).toEqual(binaryFor(PLATFORM))
   })
 })

@@ -138,7 +138,10 @@ environments: {
 
 `default` wins: with it set, `branchDefaults` is never read.
 
-For Docker dev, `supatype dev` may rewrite `DATABASE_URL` to the host-published compose Postgres port when using a local engine override.
+### Who owns `DATABASE_URL` in `.env`
+
+- **The CLI's**: the URL sits under `# supatype:managed, built from supatype.config.ts and the POSTGRES_ values below` (what `init` writes; an older `# supatype:managed` marker counts too), or is exactly the URL the CLI writes (`supatype_admin`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, a host on this machine, any port). Docker dev, native dev, a saved shell port and `self-host compose up` rewrite it to the provider and port the project runs, and host commands (`push`, `seed`, `admin`) use the project's own database in its place.
+- **Yours**: anything else. No command changes it, host commands use it as written, and dev warns when nothing answers where it points. Remove it to go back to the project's own database.
 
 ## Self-host HTTPS (custom domain)
 

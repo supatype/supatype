@@ -2,8 +2,10 @@
  * Lightweight Valkey container for native `supatype dev` (REST response cache).
  */
 
-import { spawnSync } from "node:child_process"
 import { createConnection } from "node:net"
+import { setTimeout as sleep } from "node:timers/promises"
+import { askDocker, DOCKER_PULL_TIMEOUT_MS, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
+import { spawnFailureText } from "./error-message.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 6379
@@ -14,34 +16,8 @@ function containerName(projectName: string): string {
   return `supatype-valkey-dev-${safe}`
 }
 
-function dockerAvailable(): boolean {
-  const r = spawnSync("docker", ["info"], { stdio: "ignore" })
-  return r.status === 0
-}
-
-function isAddrReachable(host: string, port: number, timeoutMs = 800): boolean {
-  try {
-    const r = spawnSync(
-      process.execPath,
-      [
-        "-e",
-        `const n=require('net');const s=n.createConnection({host:${JSON.stringify(host)},port:${port}});` +
-          `s.on('connect',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));` +
-          `setTimeout(()=>process.exit(1),${timeoutMs})`,
-      ],
-      { stdio: "ignore" },
-    )
-    return r.status === 0
-  } catch {
-    return false
-  }
-}
-
-function sleepMs(ms: number): void {
-  const end = Date.now() + ms
-  while (Date.now() < end) {
-    /* spin */
-  }
+async function dockerAvailable(): Promise<boolean> {
+  return (await askDocker(["info"], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })).status === 0
 }
 
 export interface ValkeySidecarResult {
@@ -50,11 +26,13 @@ export interface ValkeySidecarResult {
   started: boolean
 }
 
+const NO_VALKEY: ValkeySidecarResult = { addr: "", containerName: null, started: false }
+
 /**
  * Ensure Valkey is reachable at 127.0.0.1:6379 for native dev.
  * Starts a named Docker container when Docker is available and nothing is listening.
  */
-export function ensureValkeySidecar(projectName: string): ValkeySidecarResult {
+export async function ensureValkeySidecar(projectName: string): Promise<ValkeySidecarResult> {
   const envAddr = process.env["SUPATYPE_VALKEY_ADDR"]?.trim()
   if (envAddr) {
     return { addr: envAddr, containerName: null, started: false }
@@ -62,54 +40,54 @@ export function ensureValkeySidecar(projectName: string): ValkeySidecarResult {
 
   const addr = `${DEFAULT_HOST}:${DEFAULT_PORT}`
 
-  if (isAddrReachable(DEFAULT_HOST, DEFAULT_PORT)) {
+  if (await probeTcp(DEFAULT_HOST, DEFAULT_PORT)) {
     return { addr, containerName: null, started: false }
   }
 
-  if (!dockerAvailable()) {
+  if (!(await dockerAvailable())) {
     console.warn(
       "[supatype] ⚠  Valkey not available (Docker not running). " +
         "REST server cache (`cache({ server: true })`) will bypass until Valkey is reachable.",
     )
-    return { addr: "", containerName: null, started: false }
+    return NO_VALKEY
   }
 
   const name = containerName(projectName)
-  spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" })
+  return (await startContainer(name)) ? await awaitReachable(addr, name) : NO_VALKEY
+}
 
-  const run = spawnSync(
-    "docker",
-    ["run", "-d", "--name", name, "-p", `${DEFAULT_PORT}:6379`, IMAGE],
-    { encoding: "utf8" },
+/** Start the container, replacing any left from an earlier session; false, having said why, when it would not start. */
+async function startContainer(name: string): Promise<boolean> {
+  await askDocker(["rm", "-f", name], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
+  // `run` pulls the image first when this machine does not have it.
+  const run = await askDocker(["run", "-d", "--name", name, "-p", `${DEFAULT_PORT}:6379`, IMAGE], { timeoutMs: DOCKER_PULL_TIMEOUT_MS })
+  if (run.status === 0) return true
+  console.warn(
+    `[supatype] ⚠  Could not start Valkey sidecar: ${spawnFailureText(run)}\n` +
+      "  REST server cache will bypass until Valkey is available.",
   )
+  return false
+}
 
-  if (run.status !== 0) {
-    const detail = (run.stderr || run.stdout || "").trim()
-    console.warn(
-      `[supatype] ⚠  Could not start Valkey sidecar: ${detail || `exit ${run.status}`}\n` +
-        "  REST server cache will bypass until Valkey is available.",
-    )
-    return { addr: "", containerName: null, started: false }
-  }
-
+/** Wait up to three seconds for the started container to accept connections. */
+async function awaitReachable(addr: string, name: string): Promise<ValkeySidecarResult> {
   for (let i = 0; i < 30; i++) {
-    if (isAddrReachable(DEFAULT_HOST, DEFAULT_PORT)) {
+    if (await probeTcp(DEFAULT_HOST, DEFAULT_PORT)) {
       console.log(`[supatype] Valkey sidecar running (${addr})`)
       return { addr, containerName: name, started: true }
     }
-    sleepMs(100)
+    await sleep(100)
   }
-
   console.warn("[supatype] ⚠  Valkey sidecar started but not reachable yet, cache may bypass initially.")
   return { addr, containerName: name, started: true }
 }
 
-export function stopValkeySidecar(containerName: string | null): void {
+export async function stopValkeySidecar(containerName: string | null): Promise<void> {
   if (!containerName) return
-  spawnSync("docker", ["rm", "-f", containerName], { stdio: "ignore" })
+  await askDocker(["rm", "-f", containerName], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
 }
 
-/** @internal Test helper: probe without subprocess. */
+/** Whether something accepts connections at `host:port`, within 800ms. */
 export function probeTcp(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const s = createConnection({ host, port })

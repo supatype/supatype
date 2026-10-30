@@ -511,7 +511,6 @@ export function registerDev(program: Command): void {
         databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
       })
 
-
       // Postgres serves RESP itself when the archive had pg_keyspace and the port came up.
       const nativeKeyspaceAddr = await nativeKeyspaceAddrFor(keyspacePort)
       if (nativeKeyspaceAddr) {
@@ -519,7 +518,7 @@ export function registerDev(program: Command): void {
       }
       const valkeySidecar = nativeKeyspaceAddr
         ? { addr: nativeKeyspaceAddr, containerName: null, started: false }
-        : ensureValkeySidecar(projectName)
+        : await ensureValkeySidecar(projectName)
 
       // `.env` and `.env.local`, read once for everything the server's environment takes from them.
       const dotEnv = readDotEnvFiles(cwd)
@@ -710,7 +709,7 @@ export function registerDev(program: Command): void {
           studioProc?.stop(),
           appProc?.stop(),
         ])
-        stopValkeySidecar(valkeySidecar.containerName)
+        await stopValkeySidecar(valkeySidecar.containerName)
         await stopPostgres()
       })
 
@@ -1254,11 +1253,9 @@ function repairWindowsPostgrestRuntime(cacheDir: string, archivePath: string, bi
 // Local-dev JWT generator (no external dep, pure crypto)
 // ---------------------------------------------------------------------------
 
-
 // ---------------------------------------------------------------------------
 // AST adaptation: replace extension-dependent fields with JSONB fallbacks
 // ---------------------------------------------------------------------------
-
 
 // Field kinds that require Postgres extensions not available in all builds.
 // Maps kind → { extension name, JSONB fallback AST }

@@ -22,7 +22,7 @@ vi.mock("../src/binary-cache.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/binary-cache.js")>()),
   currentPlatform: () => ({ os: "linux", arch: "amd64" }),
   fetchAllLatestVersions: vi.fn(async () => project.latest),
-  isCachedBinaryReady: (component: string) => project.cached.has(component),
+  isCachedBinaryReady: vi.fn((component: string) => project.cached.has(component)),
   download: vi.fn(async () => {
     throw new Error("CDN answered 404")
   }),
@@ -53,7 +53,7 @@ vi.mock("../src/ui/fatal.js", () => ({
 }))
 
 const { registerUpdate } = await import("../src/commands/update.js")
-const { download } = await import("../src/binary-cache.js")
+const { download, isCachedBinaryReady } = await import("../src/binary-cache.js")
 
 async function runUpdate(): Promise<void> {
   const program = new Command().exitOverride()
@@ -163,9 +163,9 @@ describe("supatype update downloads", () => {
   })
 
   // Local test: "postgres v17.2.10 already cached." was followed by "postgres v17.2.10 downloaded."
+  // `download` says it had one cached; update reports from what it answers, and checks no cache itself.
   it("does not call a component it already had downloaded", async () => {
-    project.cached.add("postgres")
-    vi.mocked(download).mockImplementation(async () => "/cache/binary")
+    vi.mocked(download).mockImplementation(async (component) => ({ path: "/cache/binary", fetched: component !== "postgres" }))
     try {
       // Components this CLI does not pin and the CDN names nothing for still fail; not the point here.
       await runUpdate().catch(() => undefined)
@@ -174,9 +174,9 @@ describe("supatype update downloads", () => {
         throw new Error("CDN answered 404")
       })
     }
-    const said = messages.info.filter((message) => message.startsWith("postgres "))
-    expect(said).toEqual([expect.stringMatching(/^postgres v\S+ already cached\.$/)])
-    expect(vi.mocked(download).mock.calls.map(([component]) => component)).not.toContain("postgres")
+    expect(messages.info.filter((message) => message.startsWith("postgres "))).toEqual([])
+    expect(messages.info.filter((message) => message.startsWith("engine "))).toEqual([expect.stringMatching(/^engine v\S+ downloaded\.$/)])
+    expect(vi.mocked(isCachedBinaryReady)).not.toHaveBeenCalled()
   })
 })
 

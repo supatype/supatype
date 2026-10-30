@@ -43,6 +43,7 @@ import {
 import { functionTemplateSource } from "../functions-template.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
+import { DENO_ENV } from "../native-dev-env.js"
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -330,8 +331,8 @@ function writeServeFiles(cwd: string, functionsDir: string, routes: DiscoveredFu
   return routerPath
 }
 
-/** The environment the serve's Deno runs with: this shell's, plus where it serves from. */
-function denoServeEnv(
+/** The environment the serve's Deno runs with: this shell's, plus where it serves from, uncoloured. */
+export function denoServeEnv(
   cwd: string,
   functionsDir: string,
   port: string,
@@ -339,6 +340,7 @@ function denoServeEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    ...DENO_ENV,
     PORT: port,
     SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
     SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),

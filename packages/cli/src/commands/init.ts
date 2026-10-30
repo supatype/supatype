@@ -7,6 +7,7 @@ import { p, runClackFlow } from "../ui/clack.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
 import {
+  BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
   generateControlPlaneSecret,
   givenJwtSecret,
@@ -39,7 +40,7 @@ import { detectProjectSetup, type DetectedProjectSetup } from "../init-project-d
 import { SUPATYPE_GITIGNORE_PATHS } from "../gitignore.js"
 import { DEFAULT_CLIENT_PATH, DEFAULT_TYPES_PATH } from "../type-generation.js"
 import { COMPOSE_DEV_KONG_PORT, NATIVE_SERVER_PORT } from "../project-config.js"
-import { MANAGED_MARKER } from "../env-file.js"
+import { cliDatabaseUrlLines } from "../database-url-owner.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -202,31 +203,18 @@ export function registerInit(program: Command): void {
 
       const modeTarget = productionTargetFromMode(opts.mode)
 
-      let result: WizardResult
-      let asked: InitQuestions
       if (interactive) {
-        await runInteractiveInit({
-          name,
-          dir,
-          defaultName,
-          modeTarget,
-          opts,
-        })
+        await runInteractiveInit({ name, dir, defaultName, modeTarget, opts })
         return
-      } else {
-        result = {
-          ...defaultScaffoldOptions(defaultName, modeTarget),
-          packageManager: detectInvokingPackageManager(),
-          install: true,
-          generateKeys: true,
-        }
-        asked = startInitQuestions(result.provider)
-        if (asked.kongPort) result.kongPort = await asked.kongPort
-        if (!opts.admin && opts.adminEmail && opts.adminPassword) {
-          result.adminEmail = opts.adminEmail
-          result.adminPassword = opts.adminPassword
-        }
       }
+      const result: WizardResult = {
+        ...defaultScaffoldOptions(defaultName, modeTarget),
+        packageManager: detectInvokingPackageManager(),
+        install: true,
+        generateKeys: true,
+      }
+      const asked = startInitQuestions(result.provider)
+      if (asked.kongPort) result.kongPort = await asked.kongPort
 
       if (opts.admin === false) {
         delete result.adminEmail
@@ -1304,10 +1292,10 @@ function envTemplate(opts: ScaffoldOptions): string {
   // only because `supatype dev` no longer overwrites them on every run (see local-secrets.ts).
   const postgresPassword = randomBytes(24).toString("base64url")
 
-  // Marked as the CLI's, so it follows the provider the project runs (database-url-owner.ts).
-  sections.push(`${MANAGED_MARKER}
-DATABASE_URL=postgresql://supatype_admin:${encodeURIComponent(postgresPassword)}@localhost:5432/${opts.projectName}
-POSTGRES_USER=supatype_admin
+  // Labelled as the CLI's, so it follows the provider the project runs (database-url-owner.ts).
+  const databaseUrl = `postgresql://${BUNDLED_DB_USER}:${encodeURIComponent(postgresPassword)}@localhost:5432/${opts.projectName}`
+  sections.push(`${cliDatabaseUrlLines(databaseUrl)}
+POSTGRES_USER=${BUNDLED_DB_USER}
 POSTGRES_PASSWORD=${postgresPassword}
 POSTGRES_DB=${opts.projectName}
 

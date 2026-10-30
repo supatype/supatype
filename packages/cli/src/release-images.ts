@@ -23,7 +23,7 @@ import { PINNED_IMAGES } from "./generated/release-images.js"
 export type PinnedComponent = keyof typeof PINNED_IMAGES
 
 /** The images built in this repository, published under the CLI's version. */
-type InRepoImage = "studio" | "storage" | "realtime" | "functions-worker" | "control-plane"
+export type InRepoImage = "studio" | "storage" | "realtime" | "functions-worker" | "control-plane"
 
 type ReleaseImageName = PinnedComponent | InRepoImage
 
@@ -60,7 +60,7 @@ export function releaseImages(version: string = EMBEDDED_CLI_VERSION): Record<Re
 export const RELEASE_IMAGES = releaseImages()
 
 /** The variable that names each in-repo image in place of the CLI's own. */
-const IN_REPO_IMAGE_ENV: Readonly<Record<InRepoImage, string>> = {
+export const IN_REPO_IMAGE_ENV: Readonly<Record<InRepoImage, string>> = {
   studio: "SUPATYPE_STUDIO_IMAGE",
   storage: "SUPATYPE_STORAGE_IMAGE",
   realtime: "SUPATYPE_REALTIME_IMAGE",

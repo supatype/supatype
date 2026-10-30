@@ -31,11 +31,21 @@ export interface NativeServerCoreInput {
 }
 
 /**
+ * What every Deno the CLI or compose starts is given: no colour. Deno colours the text of an error,
+ * a missing module's location among it, whether or not it writes to a terminal, and a function's
+ * error reaches its caller as JSON. The routers still strip escape codes, for a Deno started some
+ * other way. The compose worker's template says the same in YAML (self-host-compose.ts).
+ */
+export const DENO_ENV = { NO_COLOR: "1" } as const
+
+/**
  * supatype-server's outer layer: mode, cache, manifest paths, PostgREST and GraphQL, and the
- * database as this machine reaches it, without its password, for Studio's connection strings.
+ * database as this machine reaches it, without its password, for Studio's connection strings. The
+ * server passes its environment to the Deno child that runs functions, so {@link DENO_ENV} too.
  */
 export function nativeServerCoreEnv(input: NativeServerCoreInput): Record<string, string> {
   return {
+    ...DENO_ENV,
     SUPATYPE_MODE: input.mode,
     ...(input.valkeyAddr ? { SUPATYPE_VALKEY_ADDR: input.valkeyAddr } : {}),
     SUPATYPE_MANAGED_PROJECT_REF: input.projectRef,

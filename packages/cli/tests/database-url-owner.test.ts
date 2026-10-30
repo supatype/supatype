@@ -4,10 +4,9 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
 import { ensureDevDbPort } from "../src/dev-ports.js"
-import { writeDatabaseUrlPort } from "../src/db-port.js"
-import { envValueOwner, MANAGED_MARKER } from "../src/env-file.js"
+import { MANAGED_MARKER } from "../src/env-file.js"
 import { resolveHostDatabaseUrl } from "../src/host-database.js"
-import { adoptNativeDatabaseUrl, cliWroteDatabaseUrl, reconcileNativeDatabaseUrl } from "../src/database-url-owner.js"
+import { databaseUrlOwner, reconcileNativeDatabaseUrl, writeCliDatabaseUrl } from "../src/database-url-owner.js"
 import { localDSN, validateProjectConfig } from "../src/project-config.js"
 
 /**
@@ -48,25 +47,22 @@ describe("who wrote DATABASE_URL", () => {
   it("init marks the URL it writes", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined)
     scaffold(dir, defaultScaffoldOptions("acme"))
-    expect(envValueOwner(dir, "DATABASE_URL")).toBe("cli")
+    expect(databaseUrlOwner(dir)).toBe("cli")
   })
 
   it("dev marks the URL it writes for the port it chose", async () => {
     writeEnv([])
     await ensureDevDbPort(dir)
-    expect(envValueOwner(dir, "DATABASE_URL")).toBe("cli")
+    expect(databaseUrlOwner(dir)).toBe("cli")
   })
 
-  it("moving a port keeps whoever wrote the URL", () => {
+  it("rewriting a URL keeps it the CLI's, and leaves one that is yours alone", () => {
     writeEnv(["DATABASE_URL=postgresql://me:secret@localhost:5432/mine"])
-    writeDatabaseUrlPort(dir, 5433)
-    expect(cliWroteDatabaseUrl(dir)).toBe(false)
+    expect(writeCliDatabaseUrl(dir, INIT_URL)).toBe("yours")
+    expect(databaseUrlOwner(dir)).toBe("you")
     writeEnv([MANAGED_MARKER, "DATABASE_URL=postgresql://supatype_admin:other@localhost:5432/acme"])
-    writeDatabaseUrlPort(dir, 5433)
-    expect(envValueOwner(dir, "DATABASE_URL")).toBe("cli")
-    writeEnv([`DATABASE_URL=${INIT_URL}`])
-    writeDatabaseUrlPort(dir, 5433)
-    expect(cliWroteDatabaseUrl(dir)).toBe(true)
+    writeCliDatabaseUrl(dir, INIT_URL.replace("5432", "5433"))
+    expect(databaseUrlOwner(dir)).toBe("cli")
   })
 })
 
@@ -87,12 +83,13 @@ describe("a native project's host commands", () => {
   })
 })
 
-describe("adoptNativeDatabaseUrl", () => {
-  it("points a URL the CLI wrote at the native database, marked", () => {
+describe("native dev and .env's DATABASE_URL", () => {
+  it("points a URL the CLI wrote at the native database, labelled", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
     writeEnv([`DATABASE_URL=${INIT_URL}`])
-    expect(adoptNativeDatabaseUrl(dir, nativeDsn())).toBe("adopted")
+    await reconcileNativeDatabaseUrl(dir, nativeDsn())
     expect(readFileSync(join(dir, ".env"), "utf8")).toContain(`DATABASE_URL=${nativeDsn()}`)
-    expect(envValueOwner(dir, "DATABASE_URL")).toBe("cli")
+    expect(databaseUrlOwner(dir)).toBe("cli")
   })
 
   it("says when native dev moves the URL, and warns about a hand-written one nothing answers on", async () => {
@@ -109,9 +106,10 @@ describe("adoptNativeDatabaseUrl", () => {
     expect(said.join("\n")).not.toContain("secret")
   })
 
-  it("leaves a hand-written URL alone", () => {
+  it("leaves a hand-written URL alone", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
     writeEnv(["DATABASE_URL=postgresql://me:secret@localhost:6000/mine"])
-    expect(adoptNativeDatabaseUrl(dir, nativeDsn())).toBe("hand-written")
+    await reconcileNativeDatabaseUrl(dir, nativeDsn())
     expect(readFileSync(join(dir, ".env"), "utf8")).toContain("DATABASE_URL=postgresql://me:secret@localhost:6000/mine")
   })
 })

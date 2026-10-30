@@ -17,10 +17,10 @@
  * localhost:5432."
  *
  * The variable compose binds for the stack's layout is the source of truth: `SUPATYPE_DB_PORT` for
- * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it.
+ * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it, when the CLI wrote
+ * it: this file says where Postgres is published and reads connection strings, and the one writer
+ * of `.env`'s URL, which decides whose it is first, is database-url-owner.ts.
  */
-import { envValueOwner, readComposeEnvInt, readEnvFile, shellEnvInt, upsertEnvFile } from "./env-file.js"
-import { setForThisRunOnly, setInShell } from "./shell-ports.js"
 
 /** The `.env` key that moves the published Postgres port for a self-host stack. */
 export const DB_PORT_ENV = "SUPATYPE_DB_PORT"
@@ -115,89 +115,15 @@ export function databaseUrlSyncMessage(sync: DbPortSync): string {
     : `DATABASE_URL port ${sync.from} -> ${sync.to} in .env, to match ${sync.envKey}.`
 }
 
-/**
- * Rewrite `DATABASE_URL`'s port to match the port the stack's layout publishes Postgres on, and
- * report it.
- *
- * `devLocal` is the layout of the stack the caller is working with, never a guess from which
- * variables happen to be in `.env`: a project that once ran `supatype dev` keeps
- * `SUPATYPE_DEV_DB_PORT` there, and preferring it on a self-host push repointed every host-side
- * command (seed, admin) at the dev database.
- *
- * Returns null when there is nothing to do, which is the common case.
- *
- * Only touches a URL pointing at this machine. A project whose `DATABASE_URL` names a managed
- * Postgres elsewhere has a port that is nothing to do with our compose mapping, and rewriting it
- * would repoint the whole project at a database that does not exist.
- */
-export function syncDatabaseUrlPort(
-  cwd: string,
-  devLocal: boolean,
-  shell: NodeJS.ProcessEnv = process.env,
-): DbPortSync | null {
-  const { envKey, defaultPort } = composeDbPublish(devLocal)
-  const port = readComposeEnvInt(cwd, envKey, shell) ?? defaultPort
-  if (shellOnlyPort(cwd, envKey, shell) !== null) return syncRunDatabaseUrl(cwd, envKey, port, shell)
-  const moved = writeDatabaseUrlPort(cwd, port)
-  return moved === null ? null : { ...moved, envKey }
-}
-
-/**
- * The port the shell gives `envKey` when `.env` does not hold the same one: the run's, not the
- * project's (DR9). Null when the shell sets none, or repeats `.env`'s own.
- */
-export function shellOnlyPort(cwd: string, envKey: ComposeDbPublish["envKey"], shell: NodeJS.ProcessEnv): number | null {
-  return setForThisRunOnly(shell, readEnvFile(cwd), envKey) ? shellEnvInt(envKey, shell) : null
-}
-
-/**
- * Rewrite `.env`'s `DATABASE_URL` to `port`, with `alongside` written in the same pass, when the URL
- * names this machine on another port. What moved, or null when nothing did. Whoever wrote the URL
- * still has it: a marked one stays marked as the CLI's, a hand-written one stays unmarked.
- */
-export function writeDatabaseUrlPort(
-  cwd: string,
-  port: number,
-  alongside: Record<string, string> = {},
-): Pick<DbPortSync, "from" | "to"> | null {
-  const moved = databaseUrlPortMove(cwd, port)
-  if (moved === null) return null
-  const managed = envValueOwner(cwd, "DATABASE_URL") === "cli" ? ["DATABASE_URL"] : []
-  upsertEnvFile(cwd, { ...alongside, DATABASE_URL: moved.url }, { managed })
-  return { from: moved.from, to: moved.to }
-}
-
-/** How `.env`'s `DATABASE_URL` would change to name `port`, or null when it would not. Writes nothing. */
-export function databaseUrlPortMove(cwd: string, port: number): { url: string; from: string; to: string } | null {
-  return movedDatabaseUrl(readEnvFile(cwd)["DATABASE_URL"], port)
-}
-
-/**
- * The same correction for a port the shell gave. Compose binds the shell's port ahead of `.env`,
- * and reading `.env` alone left the URL on a port nothing listened on. The port is the run's, not
- * the project's (DR9), so the URL goes into this process's environment, which compose, seeds and
- * the CLI's own connections read ahead of `.env`, and `.env` keeps its own. A `DATABASE_URL` the
- * shell sets, or this run already set from the same port, is left as it is.
- */
-function syncRunDatabaseUrl(
-  cwd: string,
-  envKey: DbPortSync["envKey"],
-  port: number,
-  shell: NodeJS.ProcessEnv,
-): DbPortSync | null {
-  if (setInShell(shell, "DATABASE_URL")) return null
-  const moved = databaseUrlPortMove(cwd, port)
-  if (moved === null) return null
-  shell["DATABASE_URL"] = moved.url
-  return { from: moved.from, to: moved.to, envKey, runOnly: true }
-}
-
 /** `value` with its port set to `port`, when it names this machine on a different port. */
-function movedDatabaseUrl(value: string | undefined, port: number): { url: string; from: string; to: string } | null {
+export function databaseUrlWithPort(
+  value: string | undefined,
+  port: number,
+): { url: string; from: string; to: string } | null {
   const url = localDatabaseUrl(value)
   if (url === null) return null
   const wanted = String(port)
-  const current = url.port === "" ? String(DEFAULT_DB_PORT) : url.port
+  const current = String(urlPort(url))
   if (current === wanted) return null
   url.port = wanted
   return { url: url.toString(), from: current, to: wanted }
@@ -209,15 +135,33 @@ export function isLocalDatabaseUrl(url: string): boolean {
 }
 
 /** `DATABASE_URL` parsed, when it names this machine; null when it is unset, malformed or remote. */
-function localDatabaseUrl(value: string | undefined): URL | null {
+export function localDatabaseUrl(value: string | undefined): URL | null {
+  const url = parsedDatabaseUrl(value)
+  return url !== null && LOCAL_HOSTS.has(url.hostname) ? url : null
+}
+
+/** The host and port a Postgres URL names, the port defaulting to 5432; undefined when it does not parse. */
+export function databaseUrlHostPort(value: string | undefined): { host: string; port: number } | undefined {
+  const url = parsedDatabaseUrl(value)
+  return url === null ? undefined : { host: url.hostname.replace(/^\[|\]$/g, ""), port: urlPort(url) }
+}
+
+/** The port `url` names, or the one Postgres listens on when it names none. */
+function urlPort(url: URL): number {
+  return url.port === "" ? DEFAULT_DB_PORT : Number(url.port)
+}
+
+/**
+ * A connection string parsed, or null when it is blank or malformed. Malformed is never ours to
+ * rewrite: a partial edit would turn a typo into a URL that parses and points somewhere wrong,
+ * which is harder to spot than the typo.
+ */
+function parsedDatabaseUrl(value: string | undefined): URL | null {
   const raw = (value ?? "").trim()
   if (raw === "") return null
   try {
-    const url = new URL(raw)
-    return LOCAL_HOSTS.has(url.hostname) ? url : null
+    return new URL(raw)
   } catch {
-    // Malformed, so not ours to rewrite: a partial edit here would turn a typo into a URL that
-    // parses and points somewhere wrong, which is harder to spot than the typo.
     return null
   }
 }

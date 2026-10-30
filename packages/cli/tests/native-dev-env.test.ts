@@ -66,6 +66,7 @@ describe("supatype-server's outer environment on the native path", () => {
   it("carries the rest of the outer layer unchanged", () => {
     installLibrary("pg_graphql")
     expect(nativeServerCoreEnv(coreInput(binDir))).toEqual({
+      NO_COLOR: "1",
       SUPATYPE_MODE: "dev",
       SUPATYPE_VALKEY_ADDR: "127.0.0.1:6379",
       SUPATYPE_MANAGED_PROJECT_REF: "acme",

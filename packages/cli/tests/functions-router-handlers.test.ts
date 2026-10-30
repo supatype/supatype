@@ -268,6 +268,18 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
     }
   }, 60_000)
 
+  // A handler that throws while serving answers 500 with its message as JSON, which a client has no
+  // terminal to colour, so escape codes come out of it as they do from a load failure's.
+  it("answers a handler that throws with its message, without escape codes", async () => {
+    const base = await serve(
+      project({ fails: `export default () => { throw new Error("\\u001b[31mboom\\u001b[0m at work") }\n` }),
+      {},
+    )
+    const res = await fetch(`${base}/functions/v1/fails`)
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "function_error", message: "boom at work" })
+  }, 60_000)
+
   // The deployed worker answers the same failure with its own copy of this code
   // (packages/functions-worker/main.ts). Both serve one functions dir here, so the two cannot drift.
   it("answers a function that failed to load exactly as the deployed worker does", async () => {

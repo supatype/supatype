@@ -8,7 +8,8 @@
  * Confirmed by a prompt that names the volume. With no TTY there is nobody to answer it, so the
  * flag is refused unless `--yes` says the caller has already decided.
  */
-import { spawnSync } from "node:child_process"
+import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
+import { spawnFailureText } from "./error-message.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 import { DB_VOLUME_KEY, exitComposeFailed, runDockerCompose } from "./self-host-compose.js"
 import { confirm } from "./ui/confirm.js"
@@ -42,7 +43,7 @@ function fail(target: DevDbResetTarget, message: string, hints: string[]): never
 }
 
 function volumeExists(volume: string): boolean {
-  return spawnSync("docker", ["volume", "inspect", volume], { encoding: "utf8" }).status === 0
+  return askDockerSync(["volume", "inspect", volume], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS }).status === 0
 }
 
 /** Returns once the developer has agreed to lose the volume, and exits otherwise. */
@@ -71,9 +72,9 @@ function removeDbVolume(target: DevDbResetTarget, volume: string): void {
     target.onFailure?.()
     exitComposeFailed(rm, "Could not stop the Postgres container. Nothing was removed.", target.brand)
   }
-  const removed = spawnSync("docker", ["volume", "rm", volume], { encoding: "utf8" })
+  const removed = askDockerSync(["volume", "rm", volume], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
   if (removed.status !== 0) {
-    fail(target, `Could not remove the Postgres data volume ${volume}.`, [String(removed.stderr ?? "").trim()])
+    fail(target, `Could not remove the Postgres data volume ${volume}.`, [spawnFailureText(removed)])
   }
 }
 
