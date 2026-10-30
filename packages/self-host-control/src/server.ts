@@ -1,6 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
-import { fileURLToPath, pathToFileURL } from "node:url"
-import { resolve } from "node:path"
 import { HttpError, readBody, sendJson, matchRoute, type RouteHandler } from "./http.js"
 import { registerSchemaRoutes } from "./routes/schema.js"
 import { registerFunctionRoutes } from "./routes/functions.js"
@@ -8,7 +6,7 @@ import { registerDeploymentRoutes } from "./routes/deployments.js"
 import { registerStatusRoute } from "./routes/status.js"
 import { registerRealtimeRoutes } from "./routes/realtime.js"
 import { registerProjectRoute } from "./routes/project.js"
-import { CONTROL_PLANE_SECRET_ENV, controlPlaneSecretFromEnv, secretCheck } from "./auth.js"
+import { secretCheck } from "./auth.js"
 
 const routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }> = []
 
@@ -73,21 +71,4 @@ async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void
     const message = err instanceof Error ? err.message : String(err)
     sendJson(res, 500, { error: "internal_error", message })
   }
-}
-
-const port = parseInt(process.env["PORT"] ?? "8080", 10)
-const isMainEntry = process.argv[1]
-  ? fileURLToPath(pathToFileURL(resolve(process.argv[1]))) === fileURLToPath(import.meta.url)
-  : false
-if (isMainEntry) {
-  // Refuses to start rather than starting into a state where it answers nobody: a stack missing
-  // the variable is a setup mistake, and an exit says so where a wall of 401s would not.
-  const secret = controlPlaneSecretFromEnv()
-  if (secret === "") {
-    console.error(`[control-plane] ${CONTROL_PLANE_SECRET_ENV} is not set; refusing to start`)
-    process.exit(1)
-  }
-  createControlPlaneServer(secret).listen(port, "0.0.0.0", () => {
-    console.log(`[control-plane] listening on :${port}`)
-  })
 }

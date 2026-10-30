@@ -84,6 +84,12 @@ export function validateFileSize(
   return null
 }
 
+/** The 413 for an upload whose body passed the bucket's limit before it ended, at a size not known. */
+export function oversizeRefusal(bucket: BucketRow): { status: 413; body: { error: string } } {
+  const maxSize = getEffectiveMaxUploadSize(bucket)
+  return { status: 413, body: { error: `File size exceeds the maximum allowed size of ${formatBytes(maxSize)}` } }
+}
+
 /**
  * Validate Content-Type against bucket's allowed MIME types.
  *

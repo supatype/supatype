@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto"
 import type { RequestContext } from "../server.js"
-import { sendJson, readBody, readJson } from "../server.js"
+import { sendJson, readBodyUpTo, readJson } from "../server.js"
 import * as db from "../db.js"
 import * as store from "../object-store.js"
 import { parseTransformParams, transformImage, UnrenderableImageError } from "../transform.js"
 import { config } from "../env.js"
-import { uploadRefusal } from "../middleware/storage-limits.js"
+import { getEffectiveMaxUploadSize, oversizeRefusal, uploadRefusal, validateFileSize } from "../middleware/storage-limits.js"
 import { checkReadAccess } from "../middleware/access-control.js"
 import type { JwtPayload } from "../auth.js"
 import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
@@ -51,7 +51,8 @@ export async function upload(ctx: RequestContext): Promise<void> {
   const jwt = callerOf(ctx)
 
   const contentType = inferMime(objectPath, ctx.req.headers["content-type"] ?? "")
-  const body = await readBody(ctx.req)
+  const body = await readUploadBody(ctx, bucket)
+  if (body === null) return
   // Type, size and quota, read once the body is in, since a folder's empty placeholder is exempt from the type rule.
   const refusal = await uploadRefusal(bucket, { objectPath, contentType, bodyLength: body.length })
   if (refusal) {
@@ -61,6 +62,25 @@ export async function upload(ctx: RequestContext): Promise<void> {
 
   const write: db.ObjectWrite = { bucketId, name: objectPath, metadata: { mimetype: contentType, size: body.length } }
   await writeObject(ctx, jwt, write, { body, contentType })
+}
+
+/**
+ * The upload's bytes, or null once it has answered 413: from Content-Length before any of the body
+ * is read, else as soon as the body passes the limit. An oversized upload was read whole first.
+ */
+async function readUploadBody(ctx: RequestContext, bucket: db.BucketRow): Promise<Buffer | null> {
+  const declared = Number(ctx.req.headers["content-length"] ?? Number.NaN)
+  const early = Number.isFinite(declared) ? validateFileSize(bucket, declared) : null
+  if (early !== null) return refuseUnread(ctx, early)
+  const body = await readBodyUpTo(ctx.req, getEffectiveMaxUploadSize(bucket))
+  return body ?? refuseUnread(ctx, oversizeRefusal(bucket))
+}
+
+/** Answers `refusal` to an upload whose body is left unread, so the connection cannot carry another request. */
+function refuseUnread(ctx: RequestContext, refusal: { status: number; body: { error: string } }): null {
+  ctx.res.setHeader("Connection", "close")
+  sendJson(ctx.res, refusal.status, refusal.body)
+  return null
 }
 
 /**

@@ -1,0 +1,61 @@
+/**
+ * What a bucket may be, refused with 400 before anything is stored.
+ *
+ * The id rules are the server's built-in store's (internal/objstore, cleanBucketID and
+ * refuseBucketID): an id that could not be a directory of its own, a separator, `.` or `..`, and
+ * the store's own `.supatype` in any case, which an import from that store must never turn into a
+ * bucket. The length cap and the settings checks are this service's: a size limit is a whole number
+ * of bytes the bigint column can hold, a MIME type is `type/subtype` (or `type/*`), and a policy is
+ * a JSON object, so a value that cannot be honoured is refused rather than stored or answered 500.
+ */
+import { isJsonObject } from "./json.js"
+
+/** The longest bucket id, as S3 allows a bucket name. */
+const MAX_BUCKET_ID = 63
+
+/** The server's store keeps its own bookkeeping in a directory of this name, so it is never a bucket. */
+const STORE_META_DIR = ".supatype"
+
+/** A MIME type a bucket can accept: `type/subtype` in RFC 6838's restricted names, or `type/*`. */
+const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$/i
+
+/** Why `id` cannot be a bucket, or null when it can. */
+export function bucketIdProblem(id: string): string | null {
+  const unusable =
+    id === "" ||
+    id !== id.trim() ||
+    id.length > MAX_BUCKET_ID ||
+    /[/\\]/.test(id) ||
+    id === "." ||
+    id === ".." ||
+    id.toLowerCase() === STORE_META_DIR
+  return unusable ? `invalid bucket id: ${JSON.stringify(id)}` : null
+}
+
+/** The settings a create or an update may name. */
+export interface BucketSettings {
+  file_size_limit?: number | null | undefined
+  allowed_mime_types?: readonly string[] | null | undefined
+  s3_bucket_policy?: string | null | undefined
+}
+
+/** Why these settings cannot be stored, or null when they can. Absent and null are fine. */
+export function bucketSettingsProblem(settings: BucketSettings): string | null {
+  const limit = settings.file_size_limit
+  if (limit != null && (!Number.isSafeInteger(limit) || limit < 0)) {
+    return `file_size_limit must be a whole number of bytes from 0 to ${Number.MAX_SAFE_INTEGER}, got ${limit}`
+  }
+  const badType = settings.allowed_mime_types?.find((type) => !MIME_TYPE.test(type))
+  if (badType !== undefined) return `allowed_mime_types holds ${JSON.stringify(badType)}, which is not a MIME type`
+  const policy = settings.s3_bucket_policy
+  if (policy != null && policy !== "" && !isJsonObjectText(policy)) return "s3_bucket_policy must be a JSON object"
+  return null
+}
+
+function isJsonObjectText(text: string): boolean {
+  try {
+    return isJsonObject(JSON.parse(text))
+  } catch {
+    return false
+  }
+}

@@ -18,6 +18,14 @@ export interface DevComposeShutdownFallback {
 }
 
 let shutdownWork: (() => Promise<void>) | null = null
+/** An undo of something dev's start began. */
+type StartUndo = () => void | Promise<void>
+/** The services dev's start began, undone together by an interrupted start or by the shutdown. */
+const serviceUndo: StartUndo[] = []
+/** What the services use (native Postgres), undone after them, last first. */
+const lastUndo: StartUndo[] = []
+/** Undos recorded once the shutdown had begun: run at once, and waited for before the process ends. */
+const lateUndo: Array<Promise<unknown>> = []
 let composeFallback: DevComposeShutdownFallback | null = null
 let shutdownCwd: string | null = null
 let shuttingDown = false
@@ -113,6 +121,62 @@ export function registerDevShutdown(
 }
 
 /**
+ * Records the undo of a service dev's start has just spawned (realtime, storage, the server, the
+ * Valkey container), the moment it is spawned, before it reports ready. An interrupted start undoes
+ * them all, and so does the shutdown dev registers once it is up, after its own work.
+ */
+export function pushStartUndo(undo: StartUndo): void {
+  if (shuttingDown) return runLate(undo)
+  serviceUndo.push(undo)
+  ensureDevShutdownHooks()
+}
+
+/**
+ * Records the undo of what the services use, native Postgres, the moment it starts: undone after
+ * every service has stopped. Ctrl+C during the auth migrations left Postgres running.
+ */
+export function pushStartUndoLast(undo: StartUndo): void {
+  if (shuttingDown) return runLate(undo)
+  lastUndo.push(undo)
+  ensureDevShutdownHooks()
+}
+
+/**
+ * An undo recorded after the shutdown began, while the start was still running: the lists may
+ * already be emptied, so it runs now, and the drain waits for it.
+ */
+function runLate(undo: StartUndo): void {
+  lateUndo.push(Promise.resolve().then(undo).then(() => undefined, (err: unknown) => err))
+}
+
+/**
+ * Never settles once the shutdown has begun, so a start still running stops before it begins
+ * anything more; the shutdown ends the process. Called between dev's start steps.
+ */
+export async function haltIfStopping(): Promise<void> {
+  if (shuttingDown) await new Promise<never>(() => undefined)
+}
+
+/**
+ * Runs every recorded undo: the services' together, then the rest one at a time, last first.
+ * Returns the errors of those that failed; a failed one stops nothing after it.
+ */
+export async function drainStartUndo(): Promise<unknown[]> {
+  const services = await Promise.allSettled(serviceUndo.splice(0).map((undo) => Promise.resolve().then(undo)))
+  const errors: unknown[] = []
+  for (const result of services) {
+    if (result.status === "rejected") errors.push(result.reason as unknown)
+  }
+  for (let undo = lastUndo.pop(); undo !== undefined; undo = lastUndo.pop()) {
+    await Promise.resolve().then(undo).catch((err: unknown) => errors.push(err))
+  }
+  while (lateUndo.length > 0) {
+    for (const failed of await Promise.all(lateUndo.splice(0))) if (failed !== undefined) errors.push(failed)
+  }
+  return errors
+}
+
+/**
  * Keep `supatype dev` running until a signal (or the TUI) shuts it down. Never resolves.
  *
  * A pending promise is not something Node waits for. `dev` used to end on
@@ -136,6 +200,32 @@ export function requestDevShutdown(): void {
   void runDevShutdown()
 }
 
+/** How long a failed start step waits for a Ctrl+C that reached its child too. */
+const INTERRUPT_SETTLE_MS = 250
+
+/**
+ * `action`, ending quietly when it failed because of a Ctrl+C. Ctrl+C reaches a start step's child
+ * (pg_ctl, the server's migrations) as well, which then fails, and the signal reaches this process
+ * just after. So when the action fails, this waits a moment, and when a shutdown began, never
+ * settles: the shutdown ends the process with one line, and the child's failure is not reported.
+ * A failure for any other reason undoes what the start began, then is reported: it left Postgres
+ * and the services running.
+ */
+export function stopQuietlyDuringStart<A extends unknown[]>(
+  action: (...args: A) => Promise<void>,
+): (...args: A) => Promise<void> {
+  return async (...args) => {
+    try {
+      await action(...args)
+    } catch (err) {
+      await new Promise((resolve) => setTimeout(resolve, INTERRUPT_SETTLE_MS))
+      await haltIfStopping()
+      await drainStartUndo()
+      throw err
+    }
+  }
+}
+
 export function isDevShuttingDown(): boolean {
   return shuttingDown
 }
@@ -143,6 +233,9 @@ export function isDevShuttingDown(): boolean {
 /** @internal Tests: reset module state between cases. */
 export function resetDevShutdownForTests(): void {
   shutdownWork = null
+  serviceUndo.length = 0
+  lastUndo.length = 0
+  lateUndo.length = 0
   composeFallback = null
   shutdownCwd = null
   shuttingDown = false
@@ -152,6 +245,25 @@ export function resetDevShutdownForTests(): void {
   ignoreSigintUntil = 0
   parentWatch?.stop()
   parentWatch = null
+}
+
+/**
+ * Ctrl+C before dev registered its shutdown: dev was still starting. Undoes what the start began
+ * (pushStartUndo, pushStartUndoLast), says so in one line, and exits 130. A failed undo is not reported over that
+ * line: there is nothing more to do about it here.
+ */
+async function stopDuringStart(): Promise<never> {
+  process.stderr.write("\n[supatype] Stopped during start.\n")
+  await drainStartUndo()
+  if (shutdownCwd) clearDevSessionLock(shutdownCwd)
+  process.exit(130)
+}
+
+/** The registered work, then what the start began, last first; throws the first failure. */
+async function runShutdownWork(work: () => Promise<void>): Promise<void> {
+  const failed = await Promise.resolve().then(work).then(() => [], (err: unknown) => [err])
+  const [first] = [...failed, ...(await drainStartUndo())]
+  if (first !== undefined) throw first
 }
 
 async function runDevShutdown(): Promise<void> {
@@ -176,12 +288,9 @@ async function runDevShutdown(): Promise<void> {
 
   try {
     endDevSession()
+    if (!shutdownWork) return await stopDuringStart()
     process.stderr.write("\n[supatype] Shutting down…\n")
-    if (!shutdownWork) {
-      if (shutdownCwd) clearDevSessionLock(shutdownCwd)
-      process.exit(130)
-    }
-    await shutdownWork()
+    await runShutdownWork(shutdownWork)
     shutdownCompleted = true
     if (shutdownCwd) clearDevSessionLock(shutdownCwd)
     process.exit(0)

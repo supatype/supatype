@@ -287,6 +287,9 @@ export function syncManifestHooks(cwd: string, ast: unknown): boolean {
   return true
 }
 
+/** Said when the manifest's hook, validator and cache maps were rewritten. */
+export const HOOK_MAPS_WRITTEN = "Hook and validator maps written to .supatype/manifest.json"
+
 /**
  * Set one manifest key to `map`, or remove it when the schema declares none.
  *

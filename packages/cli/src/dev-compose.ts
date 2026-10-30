@@ -19,14 +19,13 @@ import {
   pgSchema,
   projectRootFromConfig,
   resolveRuntimeProvider,
-  hooksPathFromProject,
   schemaPathFromProject,
   selfHostTlsEnabled,
   usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
-import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
-import { rowCacheChangeNote, syncRowCacheEnv } from "./model-cache.js"
+import { rowCacheChangeNote } from "./model-cache.js"
+import { writeAppliedAstArtifacts } from "./applied-ast-artifacts.js"
 import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { devApiKeys } from "./dev-api-keys.js"
 import { warnUrlUnsafeComposePasswords } from "./url-safe-passwords.js"
@@ -38,7 +37,6 @@ import { devSessionLockFor, recoverStaleDevSession, writeDevSessionLock } from "
 import { endDevSession, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
-import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
 import { offerToSaveShellDbPort } from "./db-port-offer.js"
@@ -702,19 +700,10 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // Every project running on Compose therefore had a manifest with no `hooks` and no `validators`
   // key, and the server, having nothing to call, ran neither. A hook silently not firing is bad; a
   // validator silently not firing means a write the schema says is checked is accepted with a 201.
-  const hooksModule = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
-  if (hooksModule !== null) console.log(`[supatype] Hook handler types written to ${hooksModule}`)
-  // And the context module, on the same terms. `init` and `functions new` wrote it and nothing
-  // else did, so a project that already had functions when the two-argument contract landed never
-  // received one: its handlers had no `FunctionContext` to import.
-  const contextModule = refreshFunctionsContext(cwd, config)
-  if (contextModule !== undefined) console.log(`[supatype] Function context type written to ${contextModule}`)
-  if (syncManifestHooks(cwd, ast)) {
-    console.log("[supatype] Hook and validator maps written to .supatype/manifest.json")
-  }
-  // Written before the stack comes up, so a first run with a row cache declared starts with it on
-  // rather than needing a second `supatype dev`.
-  const rowCache = syncRowCacheEnv(cwd, ast)
+  // The row cache is written before the stack comes up, so a first run with a row cache declared
+  // starts with it on rather than needing a second `supatype dev`.
+  const { lines, rowCache } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: true })
+  for (const line of lines) console.log(`[supatype] ${line}`)
   if (rowCache !== null) {
     console.log(`[supatype] ${rowCacheChangeNote(rowCache)}`)
   }

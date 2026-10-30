@@ -5,9 +5,10 @@
 
 import { setTimeout as sleep } from "node:timers/promises"
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve as resolvePath } from "node:path"
+import { pidAlive } from "./parent-watch.js"
 
 export interface PgOptions {
   /** Absolute path to the directory containing pg_ctl, initdb, psql, etc. */
@@ -87,6 +88,13 @@ function hostCaBundle(exists: (path: string) => boolean): string | undefined {
 /** How every local and host connection to a native cluster authenticates. */
 export const NATIVE_AUTH_METHOD = "scram-sha-256"
 
+/** What the Postgres build in a bin directory can do, as far as the native cluster's locale goes. */
+export interface PgBuild {
+  major: number | null
+  /** Whether the build has ICU, so a cluster can collate by language. */
+  icu: boolean
+}
+
 /**
  * initdb's arguments: the superuser `postgres`, with the password in `pwfile`, and password
  * authentication for every connection.
@@ -94,35 +102,124 @@ export const NATIVE_AUTH_METHOD = "scram-sha-256"
  * This used to be `--auth trust`, which made the passwords the CLI generates decoration: any
  * local process could connect as any role, the superuser included, with any password or none.
  */
-export function initdbArgs(dataDir: string, pwfile: string): string[] {
+export function initdbArgs(dataDir: string, pwfile: string, build: PgBuild): string[] {
   return [
     "-D", dataDir,
     "--username", "postgres",
     `--pwfile=${pwfile}`,
     `--auth-local=${NATIVE_AUTH_METHOD}`,
     `--auth-host=${NATIVE_AUTH_METHOD}`,
+    ...nativeLocaleArgs(build),
   ]
+}
+
+/**
+ * UTF8, as the image's clusters are, on every platform. Given nothing, initdb and createdb took the
+ * Windows code page, so a database refused Cyrillic, Greek, CJK and emoji. The image sorts by
+ * language (`en_US.utf8`), which is no Windows locale name, so the collation is ICU's en-US, the
+ * same order on every platform; LC_CTYPE and LC_COLLATE are C, which goes with any encoding. A
+ * build without ICU sorts by code point: the builtin C.UTF-8 on Postgres 17, plain C before it.
+ * A provider is named only where the version has it: `--locale-provider` came with 15, and `builtin`
+ * with 17; an unknown version gets none.
+ */
+function nativeLocaleArgs(build: PgBuild): string[] {
+  const utf8 = ["--encoding=UTF8", "--locale=C"]
+  const major = build.major ?? 0
+  if (build.icu && major >= 15) return [...utf8, "--locale-provider=icu", "--icu-locale=en-US"]
+  if (major >= 17) return [...utf8, "--locale-provider=builtin", "--builtin-locale=C.UTF-8"]
+  return utf8
+}
+
+/** createdb's arguments for the project database: as the cluster, from template0, whatever template1 holds. */
+export function createdbArgs(connArgs: readonly string[], database: string, build: PgBuild): string[] {
+  return [...connArgs, "--template=template0", ...nativeLocaleArgs(build), database]
+}
+
+/** The encoding of the database `connArgs` name, as psql reports it, or null when it cannot say. */
+export function databaseEncoding(psqlBin: string, connArgs: readonly string[], env: NodeJS.ProcessEnv): string | null {
+  const result = spawnSync(psqlBin, [...connArgs, "-X", "-tAc", "SHOW server_encoding"], { encoding: "utf8", env })
+  const encoding = (result.stdout ?? "").trim()
+  return result.status === 0 && encoding !== "" ? encoding : null
+}
+
+/**
+ * Whether a build has ICU, from `pg_config --configure`: named with `--with-icu`, or on by default
+ * from Postgres 16 unless `--without-icu` turned it off. Nothing to read is no ICU.
+ */
+export function icuFromConfigure(configure: string, major: number | null): boolean {
+  if (configure.includes("--without-icu")) return false
+  return configure.includes("--with-icu") || (configure.trim() !== "" && major !== null && major >= 16)
+}
+
+/** Whether the ICU libraries (`libicu*`) sit in `pgBinDir` or the `lib` directory beside it. */
+export function hasIcuLibraries(pgBinDir: string): boolean {
+  return [pgBinDir, join(pgBinDir, "..", "lib")].some((dir) => {
+    try {
+      return readdirSync(dir).some((name) => name.toLowerCase().startsWith("libicu"))
+    } catch {
+      return false
+    }
+  })
+}
+
+/**
+ * The major version and ICU support of the Postgres build in `pgBinDir`, from initdb and pg_config;
+ * from the ICU libraries beside it when pg_config says nothing (a meson build's `--configure` is
+ * empty).
+ */
+export function pgBuild(pgBinDir: string): PgBuild {
+  const env = pgSpawnEnv(pgBinDir)
+  const version = spawnSync(pgBin(pgBinDir, "initdb"), ["--version"], { encoding: "utf8", env })
+  const match = /\(PostgreSQL\)\s+(\d+)/.exec(version.stdout ?? "")
+  const major = match?.[1] !== undefined ? Number(match[1]) : null
+  const configure = spawnSync(pgBin(pgBinDir, "pg_config"), ["--configure"], { encoding: "utf8", env })
+  const said = configure.status === 0 ? (configure.stdout ?? "").trim() : ""
+  return { major, icu: said === "" ? hasIcuLibraries(pgBinDir) : icuFromConfigure(said, major) }
+}
+
+/** Says, once per new cluster, that a build without ICU sorts text by code point. */
+function warnWithoutIcu(build: PgBuild): void {
+  if (build.icu) return
+  console.warn(
+    "[supatype] ⚠  This Postgres build has no ICU, so the new cluster sorts text by code point " +
+      "('Zebra' before 'apple'), not by language as the Docker image does.",
+  )
+}
+
+/**
+ * The warning for a project database an older CLI created in another encoding than UTF8, or null.
+ * It is left as it is: re-encoding a database is not a thing to do to someone's data unasked.
+ */
+export function nonUtf8DatabaseWarning(encoding: string | null, database: string, dataDir: string): string | null {
+  if (encoding === null || encoding === "UTF8") return null
+  return (
+    `[supatype] ⚠  Database "${database}" is ${encoding}, not UTF8, so text outside that encoding ` +
+    "(Cyrillic, Greek, CJK, emoji) is refused. An older CLI created it so. To start fresh in UTF8, " +
+    `stop dev and move or delete ${dataDir}: that removes this local database and everything in it.`
+  )
 }
 
 /**
  * Prepare native dev's data directory, saying which of the two happens. It printed "Initialising
  * Postgres data directory..." on every start, which read as the cluster being made again; an
- * existing one never was ({@link initdb} returns at once when PG_VERSION is there).
+ * existing one never was ({@link initdb} returns at once when PG_VERSION is there). `build` is
+ * asked only when a cluster is made.
  */
-export function ensureCluster(opts: PgOptions, superuserPassword: string): void {
+export function ensureCluster(opts: PgOptions, superuserPassword: string, build?: () => PgBuild): void {
   if (existsSync(join(opts.dataDir, "PG_VERSION"))) {
     console.log(`[supatype] Using the existing Postgres data directory ${opts.dataDir}`)
     return
   }
   console.log(`[supatype] Initialising a new Postgres data directory at ${opts.dataDir}...`)
-  initdb(opts, superuserPassword)
+  initdb(opts, superuserPassword, build)
 }
 
 /**
  * Initialise a Postgres data directory, with `superuserPassword` for `postgres`.
- * Does nothing if the data directory already contains a PG_VERSION file.
+ * Does nothing if the data directory already contains a PG_VERSION file. `build` is asked only
+ * when there is a cluster to create, so a caller that also needs it can ask once.
  */
-export function initdb(opts: PgOptions, superuserPassword: string): void {
+export function initdb(opts: PgOptions, superuserPassword: string, build: () => PgBuild = () => pgBuild(opts.pgBinDir)): void {
   const pgVersionFile = join(opts.dataDir, "PG_VERSION")
   if (existsSync(pgVersionFile)) return // Already initialised.
 
@@ -134,7 +231,10 @@ export function initdb(opts: PgOptions, superuserPassword: string): void {
   const pwfile = join(pwDir, "pw")
   try {
     writeFileSync(pwfile, `${superuserPassword}\n`, { mode: 0o600 })
-    const result = spawnSync(pgBin(opts.pgBinDir, "initdb"), initdbArgs(opts.dataDir, pwfile), {
+    const built = build()
+    warnWithoutIcu(built)
+    const args = initdbArgs(opts.dataDir, pwfile, built)
+    const result = spawnSync(pgBin(opts.pgBinDir, "initdb"), args, {
       stdio: "inherit",
       encoding: "utf8",
       env: pgSpawnEnv(opts.pgBinDir),
@@ -311,8 +411,8 @@ function keyspaceOptions(opts: PgSettingsOptions): string[] {
 }
 
 export function start(opts: PgOptions): void {
-  const bin = pgBin(opts.pgBinDir, "pg_ctl")
   const logPath = opts.logPath ?? join(opts.dataDir, "postgres.log")
+  removeStalePidFile(opts.dataDir)
 
   // `supatype_mask` is a planner hook and pg_keyspace registers background
   // workers and shared memory, so both have to be preloaded: `CREATE
@@ -330,14 +430,43 @@ export function start(opts: PgOptions): void {
     "--wait",
   ]
 
-  const result = spawnSync(bin, args, {
-    stdio: "inherit",
-    encoding: "utf8",
-    env: pgSpawnEnv(opts.pgBinDir),
-  })
-  if (result.status !== 0) {
-    throw new Error(`pg_ctl start failed (exit ${result.status})`)
+  runPgCtlStart(opts, args, logPath)
+}
+
+/**
+ * pg_ctl start, with its errors in a file beside the log, put in the error thrown when it fails.
+ * Ctrl+C during the start made it print `could not send stop signal` to dev's terminal, which an
+ * interrupted start has no reason to show. A file, not a pipe: Postgres inherits the handle, and
+ * a pipe would hold this call until Postgres exits.
+ */
+function runPgCtlStart(opts: PgOptions, args: string[], logPath: string): void {
+  const errPath = `${logPath}.pg_ctl-stderr`
+  const fd = openSync(errPath, "w")
+  try {
+    const result = spawnSync(pgBin(opts.pgBinDir, "pg_ctl"), args, { stdio: ["ignore", "inherit", fd], env: pgSpawnEnv(opts.pgBinDir) })
+    if (result.status !== 0) {
+      const detail = readFileSync(errPath, "utf8").trim()
+      throw new Error(`pg_ctl start failed (exit ${result.status})${detail ? `: ${detail}` : ""}`)
+    }
+  } finally {
+    closeSync(fd)
   }
+}
+
+/**
+ * Removes `postmaster.pid` when no process has its pid, saying so. A start cut short by Ctrl+C
+ * leaves one, and pg_ctl then warns that another server might be running. One whose process lives,
+ * or that names no pid, is left for pg_ctl and Postgres to judge. True when it was removed.
+ */
+export function removeStalePidFile(dataDir: string, alive: (pid: number) => boolean = pidAlive): boolean {
+  const pidFile = join(dataDir, "postmaster.pid")
+  if (!existsSync(pidFile)) return false
+  const firstLine = (readFileSync(pidFile, "utf8").split("\n")[0] ?? "").trim()
+  const pid = /^\d+$/.test(firstLine) ? Number(firstLine) : 0
+  if (pid <= 0 || alive(pid)) return false
+  rmSync(pidFile, { force: true })
+  console.log(`[supatype] Removed a stale postmaster.pid (process ${pid} is gone) from ${dataDir}.`)
+  return true
 }
 
 /**
@@ -346,9 +475,10 @@ export function start(opts: PgOptions): void {
  * Ctrl+C in a terminal reaches Postgres as well as `supatype dev`, so by the time dev stops it,
  * Postgres has usually shut itself down, and pg_ctl printed `PID file ... does not exist` on every
  * exit. No pid file means no server to stop. A stop that leaves the pid file in place did fail,
- * and says so, where it used to be ignored along with the harmless case.
+ * and says so, where it used to be ignored along with the harmless case; unless `quiet`, for an
+ * interrupted start that ends with one line of its own.
  */
-export function stop(opts: PgOptions): void {
+export function stop(opts: PgOptions, { quiet = false }: { quiet?: boolean } = {}): void {
   const pidFile = join(opts.dataDir, "postmaster.pid")
   if (!existsSync(pidFile)) return
   const result = spawnSync(pgBin(opts.pgBinDir, "pg_ctl"), ["stop", "-D", opts.dataDir, "-m", "fast", "--wait"], {
@@ -357,7 +487,7 @@ export function stop(opts: PgOptions): void {
     env: pgSpawnEnv(opts.pgBinDir),
   })
   // Gone meanwhile: it finished shutting down on its own while pg_ctl looked.
-  if (result.status === 0 || !existsSync(pidFile)) return
+  if (result.status === 0 || !existsSync(pidFile) || quiet) return
   const said = (result.stderr ?? "").trim() || (result.error !== undefined ? result.error.message : `exit ${result.status}`)
   console.warn(`[supatype] Could not stop Postgres (data directory ${opts.dataDir}): ${said}`)
 }
