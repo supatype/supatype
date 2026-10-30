@@ -1,111 +1,153 @@
 /**
- * Who wrote `.env`'s `DATABASE_URL`: the CLI, or a person.
+ * Whose `.env` `DATABASE_URL` is, and the one writer of it.
  *
  * `init` writes a URL for the Docker stack, and every host command reads `.env`'s URL ahead of the
  * project's own database. A project made for Docker and then run native therefore sent `push`,
  * `seed` and `admin` to the Docker database, where nothing listened (local test N1). Nothing could
  * tell that URL from one a person wrote to reach their own Postgres, which must always win.
  *
- * So the CLI marks every URL it writes, with the managed marker `.env` already uses, and a URL it
- * wrote belongs to whichever provider the project runs. A `.env` from before the marker counts as
- * the CLI's when it is exactly the shape `init` and Docker dev write: the bundled user, `.env`'s
- * POSTGRES_PASSWORD, its database and a host on this machine, on any port.
+ * So there is one rule, read from `.env` once:
+ *
+ * - none: `.env` names no URL.
+ * - cli: the URL carries the CLI's label ({@link DATABASE_URL_MARKER}, or an older managed marker),
+ *   or is exactly the URL the CLI writes, from a `.env` older than the label: the bundled user,
+ *   POSTGRES_PASSWORD, POSTGRES_DB and a host on this machine, on any port. It belongs to whichever
+ *   provider and port the project runs: every writer may rewrite it, and host commands use the
+ *   database the project runs in its place (host-database.ts).
+ * - you: anything else. Never changed, by any command, with a warning when nothing answers there.
+ *
+ * Every write of the URL, by `init`, Docker dev, native dev, a port saved from the shell or a
+ * self-host stack started, goes through {@link writeCliDatabaseUrl}, which applies the rule.
  */
-import { envValueOwner, readEnvFile, upsertEnvFile } from "./env-file.js"
-import { databaseUrlSyncMessage, DEFAULT_DB_PORT, isLocalDatabaseUrl, syncDatabaseUrlPort } from "./db-port.js"
+import { DATABASE_URL_MARKER, readEnvSnapshot, shellEnvInt, upsertEnvFile } from "./env-file.js"
+import { composeDbPublish, databaseUrlHostPort, databaseUrlWithPort, DEV_DB_PORT_ENV, publishedDbPort, type DbPortSync } from "./db-port.js"
+import { setForThisRunOnly, setInShell } from "./shell-ports.js"
 import { connectSucceeds } from "./postgres-ctl.js"
-import { BUNDLED_DB_USER } from "./local-secrets.js"
+import { devDatabaseIdentityOf, isDevDatabaseUrl } from "./local-secrets.js"
 
 const DATABASE_URL = "DATABASE_URL"
 
+/** Whose `.env` DATABASE_URL is: see the module comment. */
+export type DatabaseUrlOwner = "none" | "cli" | "you"
+
+/** `.env`'s DATABASE_URL and whose it is, from one read of the file. */
+export interface DatabaseUrlState {
+  owner: DatabaseUrlOwner
+  /** The URL, trimmed; undefined when `.env` names none. */
+  url: string | undefined
+  /** Every `.env` value from the same read, for a caller that needs more than the URL. */
+  env: Readonly<Record<string, string>>
+}
+
+/** `.env`'s DATABASE_URL and whose it is. */
+export function databaseUrlState(cwd: string): DatabaseUrlState {
+  const { values, managed } = readEnvSnapshot(cwd)
+  const url = values[DATABASE_URL]?.trim()
+  if (url === undefined || url === "") return { owner: "none", url: undefined, env: values }
+  const cli = managed.has(DATABASE_URL) || isDevDatabaseUrl(url, devDatabaseIdentityOf(values), { credentials: true })
+  return { owner: cli ? "cli" : "you", url, env: values }
+}
+
+/** Whose `.env` DATABASE_URL is. */
+export function databaseUrlOwner(cwd: string): DatabaseUrlOwner {
+  return databaseUrlState(cwd).owner
+}
+
+/** The lines holding a URL the CLI owns, exactly as {@link writeCliDatabaseUrl} writes them, for `init`'s template. */
+export function cliDatabaseUrlLines(url: string): string {
+  return `${DATABASE_URL_MARKER}\n${DATABASE_URL}=${url}`
+}
+
+/** What {@link writeCliDatabaseUrl} did with the URL. */
+export type CliDatabaseUrlWrite = "written" | "unchanged" | "yours"
+
 /**
- * Point a CLI-written DATABASE_URL at the port the stack publishes Postgres on, for a dev
- * (`devLocal`) or a self-host stack, and say so. A hand-written URL, an external database's
- * typically, is left as it is, for this run as well: it always wins.
+ * Write `url` as `.env`'s DATABASE_URL, labelled as the CLI's, with `alongside` in the same pass,
+ * unless the URL there is yours: then only `alongside` is written. `state` is the caller's read of
+ * `.env`, when it has one.
  */
-export function syncStackDatabaseUrl(cwd: string, devLocal: boolean): void {
-  if (!cliMayWriteDatabaseUrl(cwd)) return
-  const dbPort = syncDatabaseUrlPort(cwd, devLocal)
-  if (dbPort !== null) console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
-}
-
-/** Upsert options that write `DATABASE_URL` as the CLI's. */
-export const CLI_DATABASE_URL = { managed: [DATABASE_URL] } as const
-
-/** True when `.env`'s DATABASE_URL is the CLI's: marked, or unmarked in the shape it writes. */
-export function cliWroteDatabaseUrl(cwd: string): boolean {
-  const owner = envValueOwner(cwd, DATABASE_URL)
-  if (owner === null) return false
-  return owner === "cli" || hasInitShape(readEnvFile(cwd))
-}
-
-/** The URL `init` or Docker dev wrote before the marker: their user, password and database, locally. */
-function hasInitShape(env: Readonly<Record<string, string>>): boolean {
-  const value = env[DATABASE_URL] ?? ""
-  const password = env["POSTGRES_PASSWORD"] ?? ""
-  if (password === "" || !isLocalDatabaseUrl(value)) return false
-  const url = new URL(value)
-  return (
-    decodeURIComponent(url.username) === (env["POSTGRES_USER"] || BUNDLED_DB_USER) &&
-    decodeURIComponent(url.password) === password &&
-    url.pathname.replace(/^\//, "") === (env["POSTGRES_DB"] || "supatype")
-  )
+export function writeCliDatabaseUrl(
+  cwd: string,
+  url: string,
+  alongside: Record<string, string> = {},
+  state: DatabaseUrlState = databaseUrlState(cwd),
+): CliDatabaseUrlWrite {
+  if (state.owner === "you") {
+    if (Object.keys(alongside).length > 0) upsertEnvFile(cwd, alongside)
+    return "yours"
+  }
+  upsertEnvFile(cwd, { ...alongside, [DATABASE_URL]: url }, { managed: [DATABASE_URL], label: DATABASE_URL_MARKER })
+  return state.url === url ? "unchanged" : "written"
 }
 
 /**
- * Native dev's half: a CLI-written URL is moved to the native database and said to be; a
- * hand-written one is kept, with a warning when nothing answers where it points, since every
- * host command will use it.
+ * The URL for this run only, when the port it names came from the shell (DR9): set in this
+ * process's environment, which compose, seeds and the CLI's own connections read ahead of `.env`.
+ * Not over a URL that is yours, nor one the shell sets. True when it was set.
  */
-export async function reconcileNativeDatabaseUrl(cwd: string, nativeDsn: string): Promise<void> {
-  const outcome = adoptNativeDatabaseUrl(cwd, nativeDsn)
-  if (outcome === "adopted") {
-    console.log("[supatype] DATABASE_URL in .env now names this project's native database; the CLI had written it for Docker.")
+export function setCliDatabaseUrlForRun(state: DatabaseUrlState, url: string, shell: NodeJS.ProcessEnv = process.env): boolean {
+  if (state.owner === "you" || setInShell(shell, DATABASE_URL)) return false
+  shell[DATABASE_URL] = url
+  return true
+}
+
+/**
+ * Point a CLI-owned DATABASE_URL at the port the stack's layout publishes Postgres on, for a dev
+ * stack (`devLocal`) or a self-host one: in `.env`, or for a port only the shell gives, in this
+ * run's environment. What moved, for the caller to report, or null.
+ *
+ * `devLocal` is the layout of the stack the caller works with, never a guess from which variables
+ * `.env` holds: a project that once ran dev keeps SUPATYPE_DEV_DB_PORT there, and preferring it on a
+ * self-host push repointed every host command at the dev database. Only a URL on this machine
+ * moves; one naming a database elsewhere has a port that is nothing to do with the compose mapping.
+ */
+export function syncDatabaseUrlPort(cwd: string, devLocal: boolean, shell: NodeJS.ProcessEnv = process.env): DbPortSync | null {
+  const state = databaseUrlState(cwd)
+  if (state.owner !== "cli") return null
+  const { envKey } = composeDbPublish(devLocal)
+  const moved = databaseUrlWithPort(state.url, shellEnvInt(envKey, shell) ?? publishedDbPort(state.env, devLocal))
+  if (moved === null) return null
+  const sync: DbPortSync = { from: moved.from, to: moved.to, envKey }
+  if (!setForThisRunOnly(shell, state.env, envKey) || shellEnvInt(envKey, shell) === null) {
+    writeCliDatabaseUrl(cwd, moved.url, {}, state)
+    return sync
+  }
+  return setCliDatabaseUrlForRun(state, moved.url, shell) ? { ...sync, runOnly: true } : null
+}
+
+/**
+ * Native dev's half: a CLI-owned URL is moved to the native database and said to be; one that is
+ * yours is kept, with a warning when nothing answers where it points, since every host command
+ * will use it.
+ */
+export async function reconcileNativeDatabaseUrl(
+  cwd: string,
+  nativeDsn: string,
+  shell: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const state = databaseUrlState(cwd)
+  if (state.owner === "you") return warnIfHandWrittenUrlSilent(cwd, state)
+  if (state.owner !== "cli") return
+  // A port only the shell gives is this run's (DR9): the URL follows it for this run, not in `.env`.
+  if (setForThisRunOnly(shell, state.env, DEV_DB_PORT_ENV)) {
+    setCliDatabaseUrlForRun(state, nativeDsn, shell)
     return
   }
-  if (outcome === "hand-written") await warnIfHandWrittenUrlSilent(cwd)
+  if (writeCliDatabaseUrl(cwd, nativeDsn, {}, state) === "written") {
+    console.log("[supatype] DATABASE_URL in .env now names this project's native database; the CLI had written it for Docker.")
+  }
 }
 
 /**
- * True when the CLI may write `.env`'s DATABASE_URL: there is none, or the CLI wrote the one there.
- * Docker dev and native dev both rewrite only these; a hand-written URL always wins.
+ * Warn, naming host and port but never the password, when `.env` holds a DATABASE_URL that is
+ * yours and nothing answers where it points: every host command (push, seed, admin) will use it.
  */
-export function cliMayWriteDatabaseUrl(cwd: string): boolean {
-  return envValueOwner(cwd, DATABASE_URL) === null || cliWroteDatabaseUrl(cwd)
-}
-
-/**
- * Warn, naming host and port but never the password, when `.env` holds a hand-written DATABASE_URL
- * and nothing answers where it points: every host command (push, seed, admin) will use it.
- */
-export async function warnIfHandWrittenUrlSilent(cwd: string): Promise<void> {
-  if (cliMayWriteDatabaseUrl(cwd)) return
-  const where = databaseHostPort(readEnvFile(cwd)[DATABASE_URL] ?? "")
+export async function warnIfHandWrittenUrlSilent(cwd: string, state: DatabaseUrlState = databaseUrlState(cwd)): Promise<void> {
+  if (state.owner !== "you") return
+  const where = databaseUrlHostPort(state.url)
   if (where === undefined || (await connectSucceeds(where.port, 1_000, where.host))) return
   console.warn(
     `[supatype] ⚠  DATABASE_URL in .env, which you wrote, names ${where.host}:${where.port}, and nothing answers ` +
       "there. Host commands (push, seed, admin) use it as written; remove it to use this project's database.",
   )
-}
-
-/** The host and port a Postgres URL names, the port defaulting to 5432; undefined when it does not parse. */
-function databaseHostPort(value: string): { host: string; port: number } | undefined {
-  try {
-    const url = new URL(value)
-    return { host: url.hostname.replace(/^\[|\]$/g, ""), port: url.port === "" ? DEFAULT_DB_PORT : Number(url.port) }
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Point a CLI-written `.env` DATABASE_URL at the native database, marked as the CLI's, so host
- * commands run from any shell reach it. A hand-written URL is left as it is: it always wins.
- */
-export function adoptNativeDatabaseUrl(cwd: string, nativeDsn: string): "adopted" | "hand-written" | "unchanged" {
-  if (envValueOwner(cwd, DATABASE_URL) === null) return "unchanged"
-  if (!cliWroteDatabaseUrl(cwd)) return "hand-written"
-  if (readEnvFile(cwd)[DATABASE_URL] === nativeDsn) return "unchanged"
-  upsertEnvFile(cwd, { [DATABASE_URL]: nativeDsn }, CLI_DATABASE_URL)
-  return "adopted"
 }

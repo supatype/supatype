@@ -19,7 +19,7 @@
  * fall back to one while Kong was still starting, which is every dev start (KONG-N1). A Kong the
  * `up` started or recreated resolves afresh on its own, so it is left alone.
  */
-import { spawnSync, type SpawnSyncReturns } from "node:child_process"
+import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS, type DockerAnswer } from "./docker-exec.js"
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { composeBaseArgs, type ComposeStack } from "./compose-db-psql.js"
@@ -38,8 +38,12 @@ export interface RunningContainer {
 const INSPECT_FORMAT =
   '{{index .Config.Labels "com.docker.compose.service"}} {{.Id}}{{range .NetworkSettings.Networks}} {{.IPAddress}}{{end}}'
 
-function compose(cwd: string, stack: ComposeStack, args: string[]): SpawnSyncReturns<string> {
-  return spawnSync("docker", [...composeBaseArgs(cwd, stack), ...args], { cwd, encoding: "utf8" })
+/**
+ * Synchronous: these run around `runDockerCompose`'s `up`, which is synchronous for its callers.
+ * Each is a question about running containers, or a reload, so a query's limit.
+ */
+function compose(cwd: string, stack: ComposeStack, args: string[]): DockerAnswer {
+  return askDockerSync([...composeBaseArgs(cwd, stack), ...args], { cwd, timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
 }
 
 /** True when the named compose service has a running container. */
@@ -55,13 +59,13 @@ export function composeServiceIsRunning(cwd: string, stack: ComposeStack, servic
  */
 function runningContainers(cwd: string, stack: ComposeStack): Map<string, RunningContainer> | undefined {
   const filter = `label=com.docker.compose.project=${stack.project}`
-  const listed = spawnSync("docker", ["ps", "-q", "--filter", filter], { cwd, encoding: "utf8" })
-  if (listed.status !== 0 || typeof listed.stdout !== "string") return undefined
+  const listed = askDockerSync(["ps", "-q", "--filter", filter], { cwd, timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
+  if (listed.status !== 0) return undefined
   const ids = listed.stdout.split(/\s+/).filter((id) => id !== "")
   const containers = new Map<string, RunningContainer>()
   if (ids.length === 0) return containers
-  const inspected = spawnSync("docker", ["inspect", "-f", INSPECT_FORMAT, ...ids], { cwd, encoding: "utf8" })
-  if (inspected.status !== 0 || typeof inspected.stdout !== "string") return undefined
+  const inspected = askDockerSync(["inspect", "-f", INSPECT_FORMAT, ...ids], { cwd, timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
+  if (inspected.status !== 0) return undefined
   for (const line of inspected.stdout.split(/\r?\n/)) {
     const [service, id, ...addresses] = line.trim().split(/\s+/)
     if (service && id) containers.set(service, { id, addresses: addresses.sort().join(" ") })

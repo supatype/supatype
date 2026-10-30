@@ -5,8 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { upsertDevComposeEnv } from "../src/dev-compose.js"
 import { ensureDevDbPort } from "../src/dev-ports.js"
 import { offerToSaveShellDbPort } from "../src/db-port-offer.js"
-import { warnIfHandWrittenUrlSilent } from "../src/database-url-owner.js"
-import { envValueOwner } from "../src/env-file.js"
+import { databaseUrlOwner, warnIfHandWrittenUrlSilent } from "../src/database-url-owner.js"
 import { validateProjectConfig } from "../src/project-config.js"
 
 /**
@@ -52,7 +51,7 @@ describe("Docker dev and a DATABASE_URL in .env", () => {
     writeEnv(INIT_URL)
     upsertDevComposeEnv(dir, docker, "anon", "service", 18474, 54333)
     expect(envUrl()).toContain("127.0.0.1:54333/acme")
-    expect(envValueOwner(dir, "DATABASE_URL")).toBe("cli")
+    expect(databaseUrlOwner(dir)).toBe("cli")
   })
 
   it("does not write a hand-written URL over when it picks the dev port", async () => {

@@ -22,17 +22,26 @@ const PROD_PORT = 6543
  * What `docker` answers: whether the project's server container runs, and the mode it runs in.
  * `compose` counts the compose commands run, so a refusal can be shown to start nothing.
  */
-const docker = vi.hoisted(() => ({ running: true, serverMode: "dev" as "dev" | "standalone", compose: 0 }))
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>()
-  const fake = (command: string, args: readonly string[] = []) => {
-    if (command !== "docker") return actual.spawnSync(command, [...args], { encoding: "utf8" })
-    if (args[0] === "ps") return { status: 0, stdout: docker.running ? "c0ffee\n" : "", stderr: "" }
-    if (args[0] === "inspect") return { status: 0, stdout: `SUPATYPE_MODE=${docker.serverMode}\n`, stderr: "" }
+const docker = vi.hoisted(() => {
+  const state = { running: true, serverMode: "dev" as "dev" | "standalone", compose: 0 }
+  const answer = (args: readonly string[]): { status: number; stdout: string; stderr: string } => {
+    if (args[0] === "ps") return { status: 0, stdout: state.running ? "c0ffee\n" : "", stderr: "" }
+    if (args[0] === "inspect") return { status: 0, stdout: `SUPATYPE_MODE=${state.serverMode}\n`, stderr: "" }
     return { status: 0, stdout: "", stderr: "" }
   }
+  return Object.assign(state, { answer })
+})
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>()
+  const fake = (command: string, args: readonly string[] = []) =>
+    command === "docker" ? docker.answer(args) : actual.spawnSync(command, [...args], { encoding: "utf8" })
   return { ...actual, spawnSync: fake }
 })
+// The asynchronous docker calls (the database's health check among them) go through askDocker.
+vi.mock("../src/docker-exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/docker-exec.js")>()),
+  askDocker: async (args: readonly string[]) => ({ ...docker.answer(args), timedOut: false, missing: false }),
+}))
 
 vi.mock("../src/dev-ports.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/dev-ports.js")>()),

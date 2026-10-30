@@ -17,7 +17,7 @@
  * `supatype dev` itself is the one caller that does not ask: it is what makes a stack dev.
  */
 
-import { spawnSync } from "node:child_process"
+import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { liveDevSessionLock } from "./dev-session-lock.js"
 import { composeProjectName } from "./self-host-compose.js"
 
@@ -33,22 +33,20 @@ export interface ComposeRenderModeProbe {
 
 /** `SUPATYPE_MODE` from a running server container's environment, as the render wrote it. */
 function runningServerModeFromDocker(composeProject: string): ComposeRenderMode | undefined {
-  const listed = spawnSync(
-    "docker",
+  // Synchronous: the render mode is read while compose is rendered, which is synchronous.
+  const listed = askDockerSync(
     [
       "ps", "-q",
       "--filter", `label=com.docker.compose.project=${composeProject}`,
       "--filter", "label=com.docker.compose.service=server",
     ],
-    { encoding: "utf8" },
+    { timeoutMs: DOCKER_QUERY_TIMEOUT_MS },
   )
   const id = listed.status === 0 ? listed.stdout.trim().split(/\s+/)[0] : undefined
   if (!id) return undefined
-  const inspected = spawnSync(
-    "docker",
-    ["inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", id],
-    { encoding: "utf8" },
-  )
+  const inspected = askDockerSync(["inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", id], {
+    timeoutMs: DOCKER_QUERY_TIMEOUT_MS,
+  })
   if (inspected.status !== 0) return undefined
   const mode = inspected.stdout.split(/\r?\n/).find((line) => line.startsWith("SUPATYPE_MODE="))
   return mode === "SUPATYPE_MODE=dev" ? "dev" : "standalone"

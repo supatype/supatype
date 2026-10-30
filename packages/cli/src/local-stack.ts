@@ -12,7 +12,7 @@
 import { readComposeEnvInt } from "./env-file.js"
 import { composeDbHostPort } from "./host-database.js"
 import { composeRenderMode } from "./compose-render-mode.js"
-import { devDatabaseIdentity } from "./local-secrets.js"
+import { devDatabaseIdentity, isDevDatabaseUrl } from "./local-secrets.js"
 import { portHeldByComposeProject } from "./dev-ports.js"
 import { composeProjectName } from "./self-host-compose.js"
 import {
@@ -22,8 +22,6 @@ import {
   usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
-
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
 
 /**
  * True when `databaseUrl` is the database this project runs for itself: the docker project's
@@ -39,13 +37,7 @@ export function isProjectDatabase(
   if (databaseUrl === undefined) return true
   if (resolveRuntimeProvider(config) !== "docker") return sameDatabase(databaseUrl, connectionString(config, undefined, cwd))
   const port = composeDbHostPort(cwd, composeRenderMode(cwd, config.project.name))
-  const own = parse(databaseUrl)
-  return (
-    own !== null &&
-    LOOPBACK.has(own.hostname) &&
-    Number(own.port || 5432) === port &&
-    own.pathname.replace(/^\//, "") === devDatabaseIdentity(cwd).database
-  )
+  return isDevDatabaseUrl(databaseUrl, devDatabaseIdentity(cwd), { port })
 }
 
 /**

@@ -16,7 +16,7 @@
  * Whether an exact tag exists is IO, so it is asked once per process and the answer is kept: the
  * compose file, the `.env` image pin and the cache provider all read the same resolution.
  */
-import { spawnSync } from "node:child_process"
+import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS, dockerHasImage } from "./docker-exec.js"
 import { pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { compareVersions } from "./engine-floor.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
@@ -111,28 +111,31 @@ export interface DockerResult {
   stderr: string
 }
 
-export type DockerRun = (args: string[]) => DockerResult
+/** The two questions a tag check asks Docker; a test answers them itself. */
+export interface TagQuestions {
+  /** Whether this machine has the image. */
+  hasImage: (ref: string) => boolean
+  /** `docker manifest inspect`: whether the registry has it, and what it said when not. */
+  manifest: (ref: string) => DockerResult
+}
 
-/** Long enough for a slow registry, short enough that an unreachable one does not stall a command. */
-const REGISTRY_TIMEOUT_MS = 15_000
-
-function runDocker(args: string[]): DockerResult {
-  const result = spawnSync("docker", args, {
-    encoding: "utf8",
-    stdio: ["ignore", "ignore", "pipe"],
-    timeout: REGISTRY_TIMEOUT_MS,
-  })
-  return { status: result.status, stderr: result.stderr ?? "" }
+/**
+ * Asked synchronously: the image is resolved while compose is rendered, which is synchronous. Long
+ * enough for a slow registry, short enough that an unreachable one does not stall a command.
+ */
+const LIVE_TAG_QUESTIONS: TagQuestions = {
+  hasImage: dockerHasImage,
+  manifest: (ref) => askDockerSync(["manifest", "inspect", ref], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS }),
 }
 
 /** Docker's answer for a tag the registry does not have, as opposed to a registry it could not ask. */
 const MISSING_MANIFEST = /no such manifest|manifest unknown/i
 
 /** Local image store first (works offline), then the registry; "unknown" when neither can answer. */
-export function dockerTagCheck(run: DockerRun = runDocker): PostgresTagCheck {
+export function dockerTagCheck(ask: TagQuestions = LIVE_TAG_QUESTIONS): PostgresTagCheck {
   return (ref) => {
-    if (run(["image", "inspect", ref]).status === 0) return "local"
-    const remote = run(["manifest", "inspect", ref])
+    if (ask.hasImage(ref)) return "local"
+    const remote = ask.manifest(ref)
     if (remote.status === 0) return "published"
     return MISSING_MANIFEST.test(remote.stderr) ? "missing" : "unknown"
   }

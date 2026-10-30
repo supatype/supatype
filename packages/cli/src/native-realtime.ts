@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises"
 import { isJsonObject } from "@supatype/shared"
 import { ProcessManager } from "./process-manager.js"
 import { errorMessage } from "./error-message.js"
@@ -68,38 +69,70 @@ export async function startNativeRealtime(
   opts: NativeRealtimeOptions,
   resolveLaunch: ResolveLaunch = resolveRealtimeLaunch,
 ): Promise<ProcessManager | null> {
-  // A clean exit before realtime answered ends the wait; one after it means it has gone, and the
-  // gateway stops routing subscriptions to its port.
-  const gone = new AbortController()
-  let announced = false
-  const exited = new Promise<RealtimeState>((resolve) => gone.signal.addEventListener("abort", () => resolve({ kind: "exited" })))
-  const manifestPath = opts.manifestPath
-  const onExit = (): void => (announced ? disableRealtime(manifestPath, "Realtime exited.") : gone.abort())
+  const watch = watchExit(opts.manifestPath)
   let proc: ProcessManager
   try {
-    proc = spawnRealtime(await resolveLaunch(opts.config, opts.cwd), opts, onExit)
+    proc = spawnRealtime(await resolveLaunch(opts.config, opts.cwd), opts, watch.onExit)
   } catch (err) {
     return realtimeNotRunning(opts, errorMessage(err))
   }
   const timeoutMs = opts.readyTimeoutMs ?? READY_TIMEOUT_MS
-  const state = await Promise.race([exited, awaitReady(opts.url, timeoutMs, gone.signal)])
+  const state = await firstAnswer(opts.url, timeoutMs, watch.gone)
   if (state.kind === "exited" || state.kind === "silent") {
     await proc.stop()
     return realtimeNotRunning(opts, notRunningReason(state.kind, opts.url, timeoutMs))
   }
-  announced = true
+  watch.announced()
   announceRealtime(opts, state)
   return proc
 }
 
-/** Ask `/health/ready` until it answers for good, the time is up or `gone` aborts; the last answer. */
+/** How realtime's exit is heard, and whether it has been announced yet. */
+interface ExitWatch {
+  /** Aborted by an exit before the announcement, which ends the wait for an answer. */
+  gone: AbortSignal
+  onExit: () => void
+  announced: () => void
+}
+
+/**
+ * A clean exit before realtime is announced ends the wait for it; one after means it has gone, and
+ * the gateway stops routing subscriptions to its port. Watching goes on for the life of the
+ * process, so a realtime announced while still connecting is still switched off if it then exits.
+ */
+function watchExit(manifestPath: string): ExitWatch {
+  const gone = new AbortController()
+  let announced = false
+  return {
+    gone: gone.signal,
+    onExit: () => (announced ? disableRealtime(manifestPath, "Realtime exited.") : gone.abort()),
+    announced: () => {
+      announced = true
+    },
+  }
+}
+
+/** The first answer that settles whether realtime is up, or that it exited first. */
+function firstAnswer(url: string, timeoutMs: number, gone: AbortSignal): Promise<RealtimeState> {
+  const exited = new Promise<RealtimeState>((resolve) => {
+    if (gone.aborted) resolve({ kind: "exited" })
+    gone.addEventListener("abort", () => resolve({ kind: "exited" }))
+  })
+  return Promise.race([exited, awaitReady(url, timeoutMs, gone)])
+}
+
+/**
+ * Ask `/health/ready` until realtime answers, the time is up or `gone` aborts; the last answer.
+ * Connecting counts as an answer: the socket is up, broadcast and presence work, and waiting out
+ * the database held dev's start for the whole limit.
+ */
 async function awaitReady(url: string, timeoutMs: number, gone: AbortSignal): Promise<RealtimeState> {
   const deadline = Date.now() + timeoutMs
   let state: RealtimeState = { kind: "silent" }
   while (!gone.aborted && Date.now() < deadline) {
     state = await probeReady(url)
-    if (state.kind === "ready" || state.kind === "unsupported") return state
-    await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS))
+    if (state.kind !== "silent") return state
+    await sleep(READY_POLL_MS)
   }
   return state
 }

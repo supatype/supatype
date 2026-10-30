@@ -2,8 +2,8 @@
  * supatype logs: tail logs from the local stack.
  */
 import type { Command } from "commander"
-import { spawn } from "node:child_process"
 import { composeArgs, composeContext, composeServiceNames } from "../compose-services.js"
+import { spawnDocker } from "../docker-exec.js"
 import { error, info } from "../ui/messages.js"
 
 /**
@@ -32,7 +32,7 @@ export function registerLogs(program: Command): void {
     .option("--service <name>", "Filter to a single service")
     .option("--since <duration>", "Show logs since duration (e.g. 5m, 1h)", "5m")
     .option("-f, --follow", "Follow log output", true)
-    .action((opts: { service?: string; since?: string; follow?: boolean }) => {
+    .action(async (opts: { service?: string; since?: string; follow?: boolean }) => {
       const ctx = composeContext(process.cwd())
       if (!ctx) {
         error("No generated compose file here.")
@@ -40,14 +40,15 @@ export function registerLogs(program: Command): void {
         process.exit(1)
       }
 
-      const available = composeServiceNames(ctx)
+      const available = await composeServiceNames(ctx)
       if (opts.service && available.length > 0 && !available.includes(opts.service)) {
         error(`Unknown service: ${opts.service}`)
         error(`Available: ${available.join(", ")}`)
         process.exit(1)
       }
 
-      const child = spawn("docker", logsArgs(composeArgs(ctx), opts), { stdio: "inherit" })
+      // Followed until the person stops it, so no limit (docker-exec.ts).
+      const child = spawnDocker(logsArgs(composeArgs(ctx), opts), { stdio: "inherit" })
       child.on("error", () => {
         error("Docker not found. Ensure Docker is installed and running.")
         process.exit(1)

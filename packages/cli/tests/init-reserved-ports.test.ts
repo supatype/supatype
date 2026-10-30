@@ -23,8 +23,8 @@ type Reader = Parameters<typeof reservedComposePorts>[0]
 /** Docker as it answers with one stopped Supatype stack on 18473 and 54329, and a stranger's. */
 function reader(overrides: Partial<NonNullable<Reader>> = {}): NonNullable<Reader> {
   return {
-    listContainers: () => ["a1 supatype-other", "b2 supatype-other", "c3 someone-elses-app", ""].join("\n"),
-    portBindings: (ids) =>
+    listContainers: async () => ["a1 supatype-other", "b2 supatype-other", "c3 someone-elses-app", ""].join("\n"),
+    portBindings: async (ids) =>
       ids
         .map((id) =>
           id === "a1"
@@ -60,8 +60,8 @@ describe("ports init will not hand out", () => {
   })
 
   it("are none when Docker cannot be asked", async () => {
-    expect((await reservedComposePorts(reader({ listContainers: () => null }))).size).toBe(0)
-    expect((await reservedComposePorts(reader({ portBindings: () => null }))).size).toBe(0)
+    expect((await reservedComposePorts(reader({ listContainers: async () => null }))).size).toBe(0)
+    expect((await reservedComposePorts(reader({ portBindings: async () => null }))).size).toBe(0)
   })
 })
 
@@ -79,7 +79,7 @@ describe("the Kong port init chooses", () => {
   })
 
   it("is the default when no Supatype stack claims it", async () => {
-    expect(await chooseInitKongPort(reader({ listContainers: () => "" }))).toBe(18473)
+    expect(await chooseInitKongPort(reader({ listContainers: async () => "" }))).toBe(18473)
   })
 })
 
@@ -103,6 +103,6 @@ describe("the Kong port init takes from the shell", () => {
 
   it("is ignored when it is not a usable port", async () => {
     vi.stubEnv("SUPATYPE_KONG_PORT", "not-a-port")
-    expect(await chooseInitKongPort(reader({ listContainers: () => "" }))).toBe(18473)
+    expect(await chooseInitKongPort(reader({ listContainers: async () => "" }))).toBe(18473)
   })
 })

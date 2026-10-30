@@ -50,7 +50,7 @@ describe("ensureBinary", () => {
   it("downloads on cache miss", async () => {
     const platform = binaryCache.currentPlatform()
     const expected = binaryCache.cachedBinaryPath("deno", TEST_VERSION, platform)
-    const downloadSpy = vi.spyOn(binaryCache, "download").mockResolvedValue(expected)
+    const downloadSpy = vi.spyOn(binaryCache, "download").mockResolvedValue({ path: expected, fetched: true })
 
     const path = await ensureBinary("deno", config())
     expect(path).toBe(expected)

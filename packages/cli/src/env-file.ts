@@ -16,9 +16,18 @@ export const MANAGED_MARKER = "# supatype:managed, value from supatype.config.ts
 /** The marker's wording when it only ever introduced image pins, still in `.env` files it wrote. */
 const LEGACY_MANAGED_MARKER = "# supatype:managed, value from versions in supatype.config.ts"
 
+/**
+ * The label above a `DATABASE_URL` the CLI owns. Not a value copied from the config, as
+ * {@link MANAGED_MARKER} says of the rest: the CLI builds the URL from the provider and port the
+ * config gives and the POSTGRES_ values `init` writes beneath it, and rebuilds it when they change.
+ */
+export const DATABASE_URL_MARKER = "# supatype:managed, built from supatype.config.ts and the POSTGRES_ values below"
+
+/** Every label that marks a value as the CLI's, older wordings included. */
+const MARKERS: ReadonlySet<string> = new Set([MANAGED_MARKER, LEGACY_MANAGED_MARKER, DATABASE_URL_MARKER])
+
 function isMarker(text: string | undefined): boolean {
-  const trimmed = text?.trim()
-  return trimmed === MANAGED_MARKER || trimmed === LEGACY_MANAGED_MARKER
+  return MARKERS.has(text?.trim() ?? "")
 }
 
 interface EnvLine {
@@ -62,6 +71,8 @@ export interface UpsertOptions {
   removeManaged?: readonly string[]
   /** Keys in `updates` that come from config and may later be cleaned up. Written with the marker. */
   managed?: readonly string[]
+  /** The marker the `managed` keys are written under: {@link MANAGED_MARKER} unless given. */
+  label?: string
   /** Keys to delete outright, whoever wrote them. For secrets being rotated out. */
   remove?: readonly string[]
 }
@@ -88,6 +99,7 @@ export function upsertEnvFile(
   const removeManaged = new Set(opts.removeManaged ?? [])
   const removeAlways = new Set(opts.remove ?? [])
   const managed = new Set(opts.managed ?? [])
+  const label = opts.label ?? MANAGED_MARKER
 
   const envPath = join(cwd, ".env")
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
@@ -120,12 +132,7 @@ export function upsertEnvFile(
 
     if (key in updates) {
       const wantsMarker = managed.has(key)
-      if (wantsMarker && !isMarker(kept[kept.length - 1]?.text)) {
-        kept.push({ text: MANAGED_MARKER, managed: false })
-      }
-      if (!wantsMarker && line.managed && isMarker(kept[kept.length - 1]?.text)) {
-        kept.pop()
-      }
+      relabel(kept, wantsMarker ? label : undefined)
       kept.push({ key, text: `${key}=${updates[key]}`, managed: wantsMarker })
       written.add(key)
       continue
@@ -137,7 +144,7 @@ export function upsertEnvFile(
   const appended: string[] = []
   for (const [key, value] of Object.entries(updates)) {
     if (written.has(key)) continue
-    if (managed.has(key)) appended.push(MANAGED_MARKER)
+    if (managed.has(key)) appended.push(label)
     appended.push(`${key}=${value}`)
   }
 
@@ -147,6 +154,17 @@ export function upsertEnvFile(
   // stack (push or doctor with dev running) has no business touching it.
   if (next === existing.replace(/\r\n/g, "\n")) return
   writeFileSync(envPath, next, "utf8")
+}
+
+/**
+ * Put `label` above the assignment about to be written at the end of `kept`, in place of any marker
+ * there; with no label, take the marker away. A marker in an older wording is brought up to date.
+ */
+function relabel(kept: EnvLine[], label: string | undefined): void {
+  const above = kept[kept.length - 1]?.text
+  if (label !== undefined && above?.trim() === label) return
+  if (isMarker(above)) kept.pop()
+  if (label !== undefined) kept.push({ text: label, managed: false })
 }
 
 /** `KEY` and the text after its `=` for an assignment line, or null for anything else. */
@@ -246,11 +264,28 @@ export function hasEnvValue(cwd: string, key: string): boolean {
  * or null when `.env` has no such key.
  */
 export function envValueOwner(cwd: string, key: string): "cli" | "operator" | null {
-  const text = envText(cwd)
-  // The last assignment, as compose reads it.
-  const line = text === null ? undefined : parseLines(text).filter((l) => l.key === key).pop()
-  if (line === undefined) return null
-  return line.managed ? "cli" : "operator"
+  const env = readEnvSnapshot(cwd)
+  if (!(key in env.values)) return null
+  return env.managed.has(key) ? "cli" : "operator"
+}
+
+/** `.env` read once: its values, and the keys the CLI wrote, by the marker above their last assignment. */
+export interface EnvSnapshot {
+  values: Readonly<Record<string, string>>
+  managed: ReadonlySet<string>
+}
+
+/** `.env` as an {@link EnvSnapshot}; empty when there is no `.env`. */
+export function readEnvSnapshot(cwd: string): EnvSnapshot {
+  const text = envText(cwd) ?? ""
+  const managed = new Set<string>()
+  // The last assignment of each key, as compose reads it.
+  for (const line of parseLines(text)) {
+    if (line.key === undefined) continue
+    if (line.managed) managed.add(line.key)
+    else managed.delete(line.key)
+  }
+  return { values: parseEnvText(text), managed }
 }
 
 export function readEnvInt(cwd: string, key: string): number | null {

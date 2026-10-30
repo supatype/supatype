@@ -7,7 +7,9 @@
  *   - supatype-schema-engine (pg_advisory_xact_lock on the same keys)
  */
 
-import { spawn, spawnSync, type ChildProcess } from "node:child_process"
+import type { ChildProcess } from "node:child_process"
+import { setTimeout as sleep } from "node:timers/promises"
+import { askDocker, DOCKER_EXEC_TIMEOUT_MS, spawnDocker } from "./docker-exec.js"
 import type { SelfHostComposePaths } from "./self-host-compose.js"
 import { composeDbPsql } from "./compose-db-psql.js"
 import type { DockerEnv } from "./docker-env.js"
@@ -26,11 +28,8 @@ function dbExec(
   return composeDbPsql(cwd, stack, ["-v", "ON_ERROR_STOP=1", ...psqlArgs])
 }
 
-function schemaPushLockIsHeld(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-): boolean {
+/** Whether the schema-push advisory lock is held by any session. */
+async function schemaPushLockIsHeld(paths: SelfHostComposePaths, cwd: string, composeProject: string): Promise<boolean> {
   const { args, env } = dbExec(paths, cwd, composeProject, [
     "-tAc",
     `SELECT EXISTS (
@@ -41,8 +40,54 @@ function schemaPushLockIsHeld(
          AND granted
      )`,
   ])
-  const result = spawnSync("docker", args, { cwd, encoding: "utf8", env })
+  const result = await askDocker(args, { cwd, env, timeoutMs: DOCKER_EXEC_TIMEOUT_MS })
   return result.status === 0 && result.stdout.trim() === "t"
+}
+
+/** The holder session and what it has said on stderr so far. */
+interface LockHolder {
+  process: ChildProcess
+  stderr: () => string
+}
+
+/**
+ * Start the psql session that takes the lock. It is held by a session reading from **stdin**, not
+ * by `-c … pg_sleep(86400)`.
+ *
+ * Killing the local `docker` client does not stop the process inside the container: `docker
+ * compose exec` does not forward the signal. With a sleeping session that meant every push
+ * left a backend holding this advisory lock for 24 hours, so `supatype push` never exited and
+ * the next push blocked on it. Observed end-to-end before this change.
+ *
+ * Closing stdin *does* propagate: psql sees EOF, exits, and the session ends, which is what
+ * releases an advisory lock. Deterministic, and it needs no signal to cross the boundary. So this
+ * process has no limit: it lives exactly as long as the push, and its owner ends it.
+ */
+function startLockHolder(paths: SelfHostComposePaths, cwd: string, composeProject: string): LockHolder {
+  const { args, env } = dbExec(paths, cwd, composeProject, ["-f", "-"])
+  let stderrBuf = ""
+  const holder = spawnDocker(args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] })
+  holder.stdin?.write(`SELECT pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID});\n`)
+  // Deliberately not ended: the open pipe is what keeps the session, and the lock, alive.
+  holder.stderr?.on("data", (chunk: Buffer) => {
+    stderrBuf += chunk.toString()
+  })
+  return { process: holder, stderr: () => stderrBuf }
+}
+
+/** Wait up to 30 seconds for the holder to have the lock; throws, having stopped it, when it does not. */
+async function awaitLockHeld(holder: LockHolder, paths: SelfHostComposePaths, cwd: string, composeProject: string): Promise<void> {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    if (holder.process.exitCode !== null) {
+      throw new Error(`[supatype] Failed to acquire schema-push advisory lock: ${holder.stderr().trim() || "lock holder exited"}`)
+    }
+    if (await schemaPushLockIsHeld(paths, cwd, composeProject)) return
+    await sleep(200)
+  }
+  if (await schemaPushLockIsHeld(paths, cwd, composeProject)) return
+  holder.process.kill("SIGTERM")
+  throw new Error("[supatype] Timed out waiting for schema-push advisory lock")
 }
 
 /**
@@ -55,50 +100,29 @@ export async function withComposeSchemaPushLock<T>(
   composeProject: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  // The lock is held by a psql session reading from **stdin**, not by `-c … pg_sleep(86400)`.
-  //
-  // Killing the local `docker` client does not stop the process inside the container: `docker
-  // compose exec` does not forward the signal. With a sleeping session that meant every push
-  // left a backend holding this advisory lock for 24 hours, so `supatype push` never exited and
-  // the next push blocked on it. Observed end-to-end before this change.
-  //
-  // Closing stdin *does* propagate: psql sees EOF, exits, and the session ends, which is what
-  // releases an advisory lock. Deterministic, and it needs no signal to cross the boundary.
-  const { args, env } = dbExec(paths, cwd, composeProject, ["-f", "-"])
-
-  let stderrBuf = ""
-  const holder: ChildProcess = spawn("docker", args, {
-    cwd,
-    env,
-    stdio: ["pipe", "pipe", "pipe"],
-  })
-  holder.stdin?.write(
-    `SELECT pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID});\n`,
-  )
-  // Deliberately not ended: the open pipe is what keeps the session, and the lock, alive.
-  holder.stderr?.on("data", (chunk: Buffer) => {
-    stderrBuf += chunk.toString()
-  })
-
-  const deadline = Date.now() + 30_000
-  while (Date.now() < deadline) {
-    if (holder.exitCode !== null) {
-      const err = stderrBuf.trim() || "lock holder exited"
-      throw new Error(`[supatype] Failed to acquire schema-push advisory lock: ${err}`)
-    }
-    if (schemaPushLockIsHeld(paths, cwd, composeProject)) break
-    await new Promise((r) => setTimeout(r, 200))
-  }
-  if (!schemaPushLockIsHeld(paths, cwd, composeProject)) {
-    holder.kill("SIGTERM")
-    throw new Error("[supatype] Timed out waiting for schema-push advisory lock")
-  }
-
+  const holder = startLockHolder(paths, cwd, composeProject)
+  await awaitLockHeld(holder, paths, cwd, composeProject)
   try {
     return await fn()
   } finally {
-    await releaseHolder(holder, paths, cwd, composeProject)
+    await releaseHolder(holder.process, paths, cwd, composeProject)
   }
+}
+
+/** Close the holder's stdin and wait for it to exit, killing it after five seconds. */
+async function endHolder(holder: ChildProcess): Promise<void> {
+  if (holder.exitCode !== null) return
+  holder.stdin?.end()
+  await new Promise<void>((resolveDone) => {
+    const t = setTimeout(() => {
+      holder.kill("SIGKILL")
+      resolveDone()
+    }, 5000)
+    holder.once("exit", () => {
+      clearTimeout(t)
+      resolveDone()
+    })
+  })
 }
 
 /**
@@ -113,21 +137,8 @@ async function releaseHolder(
   cwd: string,
   composeProject: string,
 ): Promise<void> {
-  if (holder.exitCode === null) {
-    holder.stdin?.end()
-    await new Promise<void>((resolveDone) => {
-      const t = setTimeout(() => {
-        holder.kill("SIGKILL")
-        resolveDone()
-      }, 5000)
-      holder.once("exit", () => {
-        clearTimeout(t)
-        resolveDone()
-      })
-    })
-  }
-
-  if (!schemaPushLockIsHeld(paths, cwd, composeProject)) return
+  await endHolder(holder)
+  if (!(await schemaPushLockIsHeld(paths, cwd, composeProject))) return
 
   // Last resort: the session outlived its client. Ending it releases the lock.
   const terminate = dbExec(paths, cwd, composeProject, [
@@ -136,5 +147,5 @@ async function releaseHolder(
        WHERE pid <> pg_backend_pid()
          AND query LIKE '%pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID})%'`,
   ])
-  spawnSync("docker", terminate.args, { cwd, stdio: "ignore", env: terminate.env })
+  await askDocker(terminate.args, { cwd, env: terminate.env, timeoutMs: DOCKER_EXEC_TIMEOUT_MS })
 }

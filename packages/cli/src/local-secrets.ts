@@ -12,7 +12,8 @@
  */
 
 import { randomBytes } from "node:crypto"
-import { hasEnvValue, readEnvValue, upsertEnvFile } from "./env-file.js"
+import { hasEnvValue, readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
+import { databaseUrlHostPort, localDatabaseUrl } from "./db-port.js"
 import { verifyJwt } from "./jwt.js"
 import {
   GIVEN_JWT_SECRET_REMEDY,
@@ -350,11 +351,40 @@ export interface DevDatabaseIdentity {
  * through here, so a project's own credentials cannot be read by one path and assumed by another.
  */
 export function devDatabaseIdentity(cwd: string): DevDatabaseIdentity {
+  return devDatabaseIdentityOf(readEnvFile(cwd))
+}
+
+/** {@link devDatabaseIdentity} from `.env` values already read. */
+export function devDatabaseIdentityOf(env: Readonly<Record<string, string>>): DevDatabaseIdentity {
   return {
     user: BUNDLED_DB_USER,
-    password: devPostgresPassword(cwd),
-    database: readEnvValue(cwd, "POSTGRES_DB", "supatype"),
+    password: env["POSTGRES_PASSWORD"] || FALLBACK_POSTGRES_PASSWORD,
+    database: env["POSTGRES_DB"] || "supatype",
   }
+}
+
+/** What else a URL must match to name the local database, beyond this machine and its name. */
+export interface DevDatabaseMatch {
+  /** The host port it must name; any when absent. */
+  port?: number
+  /** Its user and password must be the identity's: the URL the CLI itself writes. */
+  credentials?: true
+}
+
+/**
+ * The one definition of "this project's own local database": a URL naming this machine and the
+ * identity's database, and, as asked, the port the stack publishes or the identity's credentials.
+ * `push` asks with the port, to know a target is the stack it runs; `.env`'s owner asks with the
+ * credentials, to know a URL is the one the CLI writes (database-url-owner.ts).
+ */
+export function isDevDatabaseUrl(value: string, identity: DevDatabaseIdentity, match: DevDatabaseMatch = {}): boolean {
+  const url = localDatabaseUrl(value)
+  if (url === null || url.pathname.replace(/^\//, "") !== identity.database) return false
+  if (match.port !== undefined && databaseUrlHostPort(value)?.port !== match.port) return false
+  return (
+    match.credentials !== true ||
+    (decodeURIComponent(url.username) === identity.user && decodeURIComponent(url.password) === identity.password)
+  )
 }
 
 /** A connection string to the local database at `hostPort`, `db:5432` inside the network. */

@@ -65,5 +65,5 @@ export async function ensureBinary(
     }
   }
 
-  return download(component, version, platform)
+  return (await download(component, version, platform)).path
 }

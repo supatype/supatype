@@ -6,15 +6,13 @@
  * which names neither the cause nor the fix.
  */
 
-import { spawnSync } from "node:child_process"
+import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 
 /** One docker invocation's outcome. Injected so the decisions here are testable without Docker. */
 export type DockerRun = (args: readonly string[]) => { status: number | null; stdout: string; stderr: string }
 
-const dockerRun: DockerRun = (args) => {
-  const result = spawnSync("docker", [...args], { encoding: "utf8" })
-  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
-}
+/** Synchronous: the hint is printed from `runDockerCompose`'s failure report, which is synchronous. */
+const dockerRun: DockerRun = (args) => askDockerSync(args, { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
 
 /** Whether docker or compose output says the address pools are exhausted. */
 export function isAddressPoolExhausted(output: string): boolean {

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { spawnSync } from "node:child_process"
 import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
+import { askDocker, askDockerSync, NO_DOCKER_LIMIT, type DockerAnswer } from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
 import {
   COMPOSE_DEV_KONG_PORT,
@@ -37,7 +37,7 @@ import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-mask
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
-import { RELEASE_IMAGES, unpinnedImagesNote } from "./release-images.js"
+import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage } from "./release-images.js"
 import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
@@ -416,9 +416,17 @@ function roleDatabaseUrl(config: SupatypeProjectConfig, role: string, passwordVa
  */
 export const COMPOSE_STUDIO_HOST_URL = `http://host.docker.internal:${STUDIO_DEV_PORT}`
 
+/**
+ * Compose's reference to an in-repo image: the variable that names it (IN_REPO_IMAGE_ENV, which the
+ * `:latest` note reads too) when set, else this CLI's own.
+ */
+function inRepoImage(name: InRepoImage): string {
+  return `\${${IN_REPO_IMAGE_ENV[name]}:-${RELEASE_IMAGES[name]}}`
+}
+
 /** Studio container: this release's Studio image unless SUPATYPE_STUDIO_IMAGE is set in .env. */
 function studioServiceBlock(): string {
-  return `    image: \${SUPATYPE_STUDIO_IMAGE:-${RELEASE_IMAGES.studio}}`
+  return `    image: ${inRepoImage("studio")}`
 }
 
 /** Host dev app (Astro/Vite on the machine) as seen from inside compose services. */
@@ -731,7 +739,7 @@ ${dbDependencyClause}      seaweedfs:
   const realtime = realtimeEnabled(config)
   const realtimeBlock = realtime
     ? `  realtime:
-    image: \${SUPATYPE_REALTIME_IMAGE:-${RELEASE_IMAGES.realtime}}
+    image: ${inRepoImage("realtime")}
     expose:
       - "4000"
       - "4001"
@@ -911,7 +919,7 @@ ${dbServiceBlock}  postgrest:
       PGRST_DB_POOL: 3
 ${dbDependency}
   storage:
-    image: \${SUPATYPE_STORAGE_IMAGE:-${RELEASE_IMAGES.storage}}
+    image: ${inRepoImage("storage")}
     expose:
       - "5000"
     environment:
@@ -931,12 +939,15 @@ ${dbDependency}
       MAX_UPLOAD_SIZE: \${MAX_UPLOAD_SIZE:--1}
 ${storageDependency}
   functions-worker:
-    image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-${RELEASE_IMAGES["functions-worker"]}}
+    image: ${inRepoImage("functions-worker")}
     expose:
       - "8001"
 ${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:
 ${mounts.projectReadOnly}
     environment:
+      # Deno colours an error's text whether or not it writes to a terminal, and a function's error
+      # reaches its caller as JSON (DENO_ENV in native-dev-env.ts).
+      NO_COLOR: "1"
       SUPATYPE_FUNCTIONS_ROOT: ${functionsDir}
       SUPATYPE_DENO_FUNCTIONS_DIR: ${functionsDir}
       # Model hooks, served by this same worker under a hooks/ route the gateway refuses from
@@ -979,7 +990,7 @@ ${mounts.projectReadOnly}
 ${dbDependency}
 ${realtimeBlock}
   control-plane:
-    image: \${SUPATYPE_CONTROL_PLANE_IMAGE:-${RELEASE_IMAGES["control-plane"]}}
+    image: ${inRepoImage("control-plane")}
     expose:
       - "8080"
     volumes:
@@ -1453,6 +1464,25 @@ export function exitComposeFailed(
   )
 }
 
+/** The `docker` arguments for `docker compose <args>` on one project's file. */
+function composeInvocation(composePath: string, args: readonly string[], projectRoot: string, composeProject: string | undefined, quiet: boolean): string[] {
+  const envFile = resolve(projectRoot, ".env")
+  const composeArgs = ["compose", ...(quiet ? ["--progress", "quiet"] : [])]
+  // Per-project name isolates containers/volumes/network so multiple Supatype
+  // projects on one machine never share a database (default would be the
+  // ".supatype/self-host" dir name, identical for every project).
+  if (composeProject) composeArgs.push("-p", composeProject)
+  // Resolve ${VAR} in compose.yml from the project root .env (not .supatype/self-host/).
+  composeArgs.push("--project-directory", projectRoot, "-f", composePath)
+  if (existsSync(envFile)) composeArgs.push("--env-file", envFile)
+  return [...composeArgs, ...args]
+}
+
+/**
+ * `docker compose <args>`, synchronously. Its many callers are synchronous, and so are the exit
+ * paths that stop a stack. No limit: `up`, `pull` and `build` wait on registries and builds a
+ * person watches and can stop, and a quiet run here is one of those too (docker-exec.ts).
+ */
 export function runDockerCompose(
   composePath: string,
   args: string[],
@@ -1461,30 +1491,13 @@ export function runDockerCompose(
   options?: RunDockerComposeOptions,
 ): number {
   requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
-  const envFile = resolve(projectRoot, ".env")
-  const composeArgs = ["compose"]
-  if (options?.quiet) {
-    composeArgs.push("--progress", "quiet")
-  }
-  // Per-project name isolates containers/volumes/network so multiple Supatype
-  // projects on one machine never share a database (default would be the
-  // ".supatype/self-host" dir name, identical for every project).
-  if (composeProject) composeArgs.push("-p", composeProject)
-  // Resolve ${VAR} in compose.yml from the project root .env (not .supatype/self-host/).
-  composeArgs.push("--project-directory", projectRoot)
-  composeArgs.push("-f", composePath)
-  if (existsSync(envFile)) {
-    composeArgs.push("--env-file", envFile)
-  }
-  composeArgs.push(...args)
-  const env = composeProcessEnv(projectRoot, options?.quiet === true)
-  const stdio = options?.quiet ? "pipe" : "inherit"
+  const quiet = options?.quiet === true
   const runCompose = () =>
-    spawnSync("docker", composeArgs, {
-      stdio,
+    askDockerSync(composeInvocation(composePath, args, projectRoot, composeProject, quiet), {
+      stdio: quiet ? "pipe" : "inherit",
       cwd: projectRoot,
-      env,
-      ...(options?.quiet ? { encoding: "utf8" as const } : {}),
+      env: composeProcessEnv(projectRoot, quiet),
+      timeoutMs: NO_DOCKER_LIMIT,
     })
   // Whatever `up` created or recreated keeps its name but not its address, and a Kong that was
   // already running would go on sending to the old one (EXT-N1), so that Kong is reloaded.
@@ -1492,10 +1505,20 @@ export function runDockerCompose(
     args[0] === "up" && composeProject !== undefined
       ? upKeepingKongCurrent(projectRoot, { project: composeProject, composePath }, runCompose)
       : runCompose()
-  if (result.status !== 0) {
-    reportComposeFailure(args, options?.quiet === true ? capturedComposeOutput(result) : null)
-  }
+  if (result.status !== 0) reportComposeFailure(args, quiet ? capturedComposeOutput(result) : null)
   return result.status ?? 1
+}
+
+/** `docker compose <args>` quietly and asynchronously, within `timeoutMs`: for calls run side by side. */
+export function askDockerCompose(
+  composePath: string,
+  args: readonly string[],
+  projectRoot: string,
+  composeProject: string,
+  timeoutMs: number,
+): Promise<DockerAnswer> {
+  const call = { cwd: projectRoot, env: composeProcessEnv(projectRoot, true), timeoutMs }
+  return askDocker(composeInvocation(composePath, args, projectRoot, composeProject, true), call)
 }
 
 /** The environment compose runs with: the CLI's, less the shell's keys `.env` overrides. */

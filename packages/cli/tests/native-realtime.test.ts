@@ -133,6 +133,16 @@ describe("startNativeRealtime", () => {
     expect(warnings.join("\n")).toMatch(/database changes are off: wal_level is not logical/)
   })
 
+  // Connecting is up: the socket answers, and waiting out the whole limit for the database held dev's
+  // start for 15 seconds. Realtime is announced at once, and a later exit is still heard.
+  it("announces a realtime still connecting at once, and still hears it exit", async () => {
+    const begun = Date.now()
+    expect(await start(answering(503, { status: "connecting" }, 1_000))).not.toBeNull()
+    expect(Date.now() - begun).toBeLessThan(options().readyTimeoutMs ?? 0)
+    expect(logs.join("\n")).toContain(`Realtime service: ${options().url} (still connecting to the database)`)
+    await vi.waitFor(() => expect(manifest()).toEqual({ realtime_enabled: false }), { timeout: 5_000 })
+  }, 10_000)
+
   it("disables realtime when it exits after starting", async () => {
     await start(answering(200, { status: "ok" }, 500))
     expect(manifest()["realtime_enabled"]).toBe(true)

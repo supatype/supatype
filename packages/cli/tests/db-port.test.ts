@@ -14,7 +14,9 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { DEFAULT_DB_PORT, publishedDbPort, syncDatabaseUrlPort } from "../src/db-port.js"
+import { DEFAULT_DB_PORT, publishedDbPort } from "../src/db-port.js"
+import { syncDatabaseUrlPort } from "../src/database-url-owner.js"
+import { DATABASE_URL_MARKER } from "../src/env-file.js"
 
 let dir: string
 
@@ -29,8 +31,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
+/**
+ * `lines` as `.env`, its DATABASE_URL labelled as the CLI's: only a URL the CLI owns follows the
+ * port (a hand-written one is never changed, database-url-owner-rule.test.ts).
+ */
 function writeEnv(lines: string): void {
-  writeFileSync(join(dir, ".env"), lines, "utf8")
+  writeFileSync(join(dir, ".env"), lines.replace(/^DATABASE_URL=/m, `${DATABASE_URL_MARKER}\nDATABASE_URL=`), "utf8")
 }
 
 function envText(): string {

@@ -18,9 +18,9 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { runningStackMode, type ComposeRenderMode } from "./compose-render-mode.js"
 import { composeDbPublish } from "./db-port.js"
-import { readComposeEnvInt, readEnvFile } from "./env-file.js"
+import { readComposeEnvInt } from "./env-file.js"
 import { devDatabaseUrl, devPostgresPassword } from "./local-secrets.js"
-import { cliWroteDatabaseUrl } from "./database-url-owner.js"
+import { databaseUrlState } from "./database-url-owner.js"
 import {
   externalDatabaseUrl,
   localDSN,
@@ -157,7 +157,6 @@ export function resolveHostDatabaseUrl(
 ): ResolvedDsn {
   const root = projectRootFromConfig(config, cwd)
   const envPath = join(root, ".env")
-  const fromFile = readEnvFile(root)
   const tried: DsnSource[] = []
 
   const candidate = (name: string, value: string | undefined, absent: string): string | undefined => {
@@ -195,12 +194,12 @@ export function resolveHostDatabaseUrl(
   }
 
   const fileLabel = `DATABASE_URL in ${envPath}`
-  const fromEnvFile = envFileDatabaseUrl(root, config, options, fromFile["DATABASE_URL"])
-  const fileValue = candidate(fileLabel, fromEnvFile, existsSync(envPath) ? fileUrlAbsence(fromFile) : "no .env file")
+  const fromEnvFile = existsSync(envPath) ? envFileDatabaseUrl(root, config, options) : { skipped: "no .env file" }
+  const fileValue = candidate(fileLabel, fromEnvFile.url, fromEnvFile.skipped ?? "")
   if (fileValue !== undefined) return { dsn: fileValue, source: fileLabel, tried }
 
   if (options.allowDerived === true) {
-    const derived = derivedDsn(root, config)
+    const derived = fromEnvFile.own ?? derivedDsn(root, config)
     tried.push({ name: DERIVED_DSN_SOURCE, detail: redact(derived), found: true })
     return { dsn: derived, source: DERIVED_DSN_SOURCE, tried }
   }
@@ -213,28 +212,39 @@ export function resolveHostDatabaseUrl(
   throw new DsnNotFound(tried)
 }
 
+/** `.env`'s DATABASE_URL to use, or why it is passed over and, when known, the database used instead. */
+interface EnvFileUrl {
+  url?: string
+  skipped?: string
+  own?: string
+}
+
 /**
- * `.env`'s DATABASE_URL as this project should use it. A URL the CLI wrote belongs to the provider
- * the project runs, so a native project that may fall back to its own database passes over one
- * written for Docker (local test N1: `init` writes the Docker URL, and `push` after switching to
- * native went to it). A hand-written URL is always used as written (database-url-owner.ts).
+ * `.env`'s DATABASE_URL as this project should use it (the rule is database-url-owner.ts's). One
+ * that is yours is used as written. One the CLI owns names whichever provider and port the project
+ * ran when it was written, so a command that may fall back to the project's own database uses the
+ * one it runs now: `init` writes the Docker URL, and `push` after switching to native went to it
+ * (local test N1). A Docker project with no stack running has no port in use, so the CLI's URL
+ * stands.
  */
 function envFileDatabaseUrl(
   root: string,
   config: SupatypeProjectConfig,
   options: ResolveOptions,
-  value: string | undefined,
-): string | undefined {
-  if (value === undefined || options.allowDerived !== true) return value
-  if (resolveRuntimeProvider(config) !== "native" || !cliWroteDatabaseUrl(root)) return value
-  return value.trim() === derivedDsn(root, config) ? value : undefined
+): EnvFileUrl {
+  const state = databaseUrlState(root)
+  if (state.url === undefined) return { skipped: "the file has no DATABASE_URL" }
+  if (state.owner !== "cli" || options.allowDerived !== true) return { url: state.url }
+  const own = runningDatabaseUrl(root, config)
+  if (own === undefined || own === state.url) return { url: state.url }
+  return { skipped: "written by the CLI for a provider or port the project no longer runs", own }
 }
 
-/** Why `.env` gave no DATABASE_URL, when the file exists. */
-function fileUrlAbsence(fromFile: Readonly<Record<string, string>>): string {
-  return fromFile["DATABASE_URL"] === undefined
-    ? "the file has no DATABASE_URL"
-    : "written by the CLI for the Docker stack, and this project runs native"
+/** The project's own database as it runs now; undefined for a Docker project with no stack running. */
+function runningDatabaseUrl(root: string, config: SupatypeProjectConfig): string | undefined {
+  if (resolveRuntimeProvider(config) !== "docker") return derivedDsn(root, config)
+  const mode = runningStackMode(root, config.project.name)
+  return mode === undefined ? undefined : hostComposeDbUrl(root, composeDbHostPort(root, mode))
 }
 
 /**

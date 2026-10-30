@@ -12,6 +12,27 @@ export function errorMessage(err: unknown): string {
   return describeSilentError(err)
 }
 
+/** How a child process ended, as far as its failure text needs. */
+export interface SpawnOutcome {
+  status: number | null
+  stderr?: string | null | undefined
+  stdout?: string | null | undefined
+  /** Why it could not run: a spawn error's message. */
+  error?: string | undefined
+  timedOut?: boolean | undefined
+}
+
+/**
+ * Why a child process failed, in one line of its own words: its stderr, or why it could not run,
+ * or its stdout, or how it ended. Each caller used to pick its own subset in its own order, and
+ * some printed an empty string for a process that said nothing.
+ */
+export function spawnFailureText(outcome: SpawnOutcome): string {
+  const said = [outcome.stderr, outcome.error, outcome.stdout].map((text) => (text ?? "").trim()).find((text) => text !== "")
+  if (said !== undefined) return said
+  return outcome.timedOut === true ? "it did not answer in time" : `exit ${outcome.status ?? "unknown"}`
+}
+
 /** A thrown value's errno code (`ENOENT`, `EADDRINUSE`, ...), when it carries one as text. */
 export function errorCode(err: unknown): string | undefined {
   if (typeof err !== "object" || err === null || !("code" in err)) return undefined

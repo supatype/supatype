@@ -5,7 +5,7 @@
 
 import { existsSync, mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
-import { spawnSync } from "node:child_process"
+import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { runDockerCompose, selfHostComposePaths } from "./self-host-compose.js"
 import { projectNameInFile } from "./project-name-override.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
@@ -135,12 +135,12 @@ export function clearDevSessionLock(cwd: string): void {
 }
 
 export function composeStackHasContainers(composeProject: string): boolean {
-  const result = spawnSync(
-    "docker",
+  // Synchronous: dev's exit path asks this too, where nothing may be awaited.
+  const result = askDockerSync(
     ["ps", "-a", "--filter", `label=com.docker.compose.project=${composeProject}`, "--format", "{{.Names}}"],
-    { encoding: "utf8", shell: process.platform === "win32" },
+    { shell: process.platform === "win32", timeoutMs: DOCKER_QUERY_TIMEOUT_MS },
   )
-  return Boolean(result.stdout?.trim())
+  return result.stdout.trim() !== ""
 }
 
 /**

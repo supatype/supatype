@@ -8,9 +8,10 @@
  * URL moved to match, by the same code a self-host push uses for `SUPATYPE_DB_PORT`. No keeps it for
  * the run. With nobody to answer, nothing is written: one line names what to add.
  */
-import { databaseUrlPortMove, DEV_DB_PORT_ENV, shellOnlyPort, writeDatabaseUrlPort } from "./db-port.js"
-import { setInShell } from "./shell-ports.js"
-import { cliMayWriteDatabaseUrl } from "./database-url-owner.js"
+import { databaseUrlWithPort, DEV_DB_PORT_ENV } from "./db-port.js"
+import { shellEnvInt } from "./env-file.js"
+import { setForThisRunOnly, setInShell } from "./shell-ports.js"
+import { databaseUrlState, writeCliDatabaseUrl, type DatabaseUrlState } from "./database-url-owner.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 
@@ -25,10 +26,12 @@ const TERMINAL: DbPortAsk = {
   confirm: (question) => confirm(question, { default: false }),
 }
 
-/** A port only the shell gives, and the `DATABASE_URL` port in `.env` it differs from. */
+/** A port only the shell gives, and the `DATABASE_URL` in `.env` it would move. */
 interface ShellOnlyDbPort {
   port: number
   from: string
+  url: string
+  state: DatabaseUrlState
 }
 
 /**
@@ -37,10 +40,12 @@ interface ShellOnlyDbPort {
  * for a hand-written URL in `.env` either: that one is the person's, and always wins.
  */
 function shellOnlyDbPort(cwd: string, shell: NodeJS.ProcessEnv): ShellOnlyDbPort | null {
-  const port = shellOnlyPort(cwd, DEV_DB_PORT_ENV, shell)
-  if (port === null || setInShell(shell, "DATABASE_URL") || !cliMayWriteDatabaseUrl(cwd)) return null
-  const move = databaseUrlPortMove(cwd, port)
-  return move === null ? null : { port, from: move.from }
+  const state = databaseUrlState(cwd)
+  const port = shellEnvInt(DEV_DB_PORT_ENV, shell)
+  if (port === null || !setForThisRunOnly(shell, state.env, DEV_DB_PORT_ENV)) return null
+  if (setInShell(shell, "DATABASE_URL") || state.owner !== "cli") return null
+  const move = databaseUrlWithPort(state.url, port)
+  return move === null ? null : { port, from: move.from, url: move.url, state }
 }
 
 /** Ask, or say, what keeps a dev database port given only in the shell; see the file's comment. */
@@ -59,7 +64,7 @@ export async function offerToSaveShellDbPort(
   }
   const save = await ask.confirm(`${situation} Save port ${change.port} to .env?`)
   if (save) {
-    writeDatabaseUrlPort(cwd, change.port, { [DEV_DB_PORT_ENV]: String(change.port) })
+    writeCliDatabaseUrl(cwd, change.url, { [DEV_DB_PORT_ENV]: String(change.port) }, change.state)
     console.log(`[supatype] Saved ${line} to .env, and DATABASE_URL port ${change.from} -> ${change.port}.`)
     return
   }

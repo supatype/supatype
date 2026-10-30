@@ -17,7 +17,7 @@ import { join, relative, resolve, sep } from "node:path"
 import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import { engineRequest, ensureEngine, type ComposeEngine } from "../engine-client.js"
-import { DEFAULT_DB_PORT, isLocalDatabaseUrl } from "../db-port.js"
+import { databaseUrlHostPort, isLocalDatabaseUrl } from "../db-port.js"
 import { composeRenderMode } from "../compose-render-mode.js"
 import {
   isArrayOf,
@@ -206,8 +206,7 @@ export async function seedEngine(
  */
 function isStackDatabaseUrl(cwd: string, config: SupatypeConfig, dsn: string): boolean {
   if (!isLocalDatabaseUrl(dsn)) return false
-  const port = new URL(dsn).port || String(DEFAULT_DB_PORT)
-  return port === String(composeDbHostPort(cwd, composeRenderMode(cwd, config.project.name)))
+  return databaseUrlHostPort(dsn)?.port === composeDbHostPort(cwd, composeRenderMode(cwd, config.project.name))
 }
 
 // --- Discovery ---

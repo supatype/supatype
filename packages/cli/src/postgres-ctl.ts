@@ -3,6 +3,7 @@
  * a native Postgres installation.
  */
 
+import { setTimeout as sleep } from "node:timers/promises"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -32,7 +33,6 @@ export interface PgOptions {
 
 /** What the server's settings are decided from: the install, the keyspace and the database. */
 type PgSettingsOptions = Pick<PgOptions, "pgBinDir" | "keyspacePort" | "keyspaceDatabase" | "database">
-
 
 /**
  * Native Postgres bundles are built with prefix /usr/local/supatype-pg; dyld/ld
@@ -467,10 +467,6 @@ export async function isPortInUse(port: number): Promise<boolean> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 /** Returns the full path to a Postgres binary, appending .exe on Windows. */
 export function pgBin(binDir: string, name: string): string {

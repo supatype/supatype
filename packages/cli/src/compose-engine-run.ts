@@ -2,10 +2,10 @@
  * The schema engine run once in a stack's compose `tools` profile.
  */
 
-import { spawnSync, type SpawnSyncReturns } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { dockerEnv } from "./docker-env.js"
+import { askDockerSync, NO_DOCKER_LIMIT, type DockerAnswer } from "./docker-exec.js"
 import { hasEnvValue } from "./env-file.js"
 
 /** Which stack, and the engine image to run in it (none: the compose file's default). */
@@ -22,7 +22,6 @@ export interface ComposeEngineSpawn {
   runFlags?: readonly string[]
   /** Variables for the engine, each a bare `-e NAME` with its value in docker's environment. */
   secrets?: Record<string, string>
-  maxBuffer?: number
 }
 
 /** What compose reads for a required variable that a `--no-deps` engine run never hands to a service. */
@@ -59,7 +58,7 @@ export function spawnComposeEngine(
   target: ComposeEngineTarget,
   engineArgs: readonly string[],
   spawn: ComposeEngineSpawn = {},
-): SpawnSyncReturns<string> {
+): DockerAnswer {
   const { cwd, project, composePath, engineImage } = target
   const envFile = resolve(cwd, ".env")
   const args = ["compose", "--progress", "quiet"]
@@ -71,10 +70,7 @@ export function spawnComposeEngine(
   const secrets = dockerEnv(spawn.secrets ?? {}, { ...process.env, ...interpolation, COMPOSE_PROGRESS: "quiet" })
   if (engineImage) secrets.env["SUPATYPE_ENGINE_IMAGE"] = engineImage
   args.push("--profile", "tools", "run", "--rm", ...runFlags, ...secrets.args, "schema-engine")
-  return spawnSync("docker", [...args, ...engineArgs], {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: spawn.maxBuffer ?? 10 * 1024 * 1024,
-    env: secrets.env,
-  })
+  // No limit: a push applies a schema the person is waiting on, and abandoning the client would
+  // leave the `compose run` container applying it anyway. The callers are synchronous (engineRequest).
+  return askDockerSync([...args, ...engineArgs], { cwd, env: secrets.env, timeoutMs: NO_DOCKER_LIMIT })
 }

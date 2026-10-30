@@ -13,10 +13,11 @@
  * A list of services in the source is a list that goes stale the next time the
  * stack changes shape. `docker compose ps` cannot.
  */
-import { spawnSync } from "node:child_process"
 import { isJsonObject } from "@supatype/shared"
 import { existsSync } from "node:fs"
 import { loadConfig } from "./config.js"
+import { askDocker, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
+import { spawnFailureText } from "./error-message.js"
 import { composeProjectName, selfHostComposePaths } from "./self-host-compose.js"
 
 /** Where the local stack's compose file is, and what project name it runs under. */
@@ -67,11 +68,8 @@ export function composeContext(cwd: string): ComposeContext | undefined {
  * `--all` so a stopped service is reported as stopped rather than vanishing,
  * which is the question `supatype status` is usually asked.
  */
-export function composeServices(ctx: ComposeContext): ComposeService[] {
-  const result = spawnSync("docker", [...composeArgs(ctx), "ps", "--all", "--format", "json"], {
-    encoding: "utf8",
-    timeout: 15_000,
-  })
+export async function composeServices(ctx: ComposeContext): Promise<ComposeService[]> {
+  const result = await askDocker([...composeArgs(ctx), "ps", "--all", "--format", "json"], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
   if (result.status !== 0 || !result.stdout) return []
   return parseComposePs(result.stdout)
 }
@@ -162,11 +160,8 @@ export function composeArgs(ctx: ComposeContext): string[] {
  * containers: a service that failed to start is exactly the one whose logs you
  * want, and it has no container.
  */
-export function composeServiceNames(ctx: ComposeContext): string[] {
-  const result = spawnSync("docker", [...composeArgs(ctx), "config", "--services"], {
-    encoding: "utf8",
-    timeout: 15_000,
-  })
+export async function composeServiceNames(ctx: ComposeContext): Promise<string[]> {
+  const result = await askDocker([...composeArgs(ctx), "config", "--services"], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
   if (result.status !== 0 || !result.stdout) return []
   return result.stdout
     .split("\n")
@@ -185,14 +180,10 @@ export interface ServiceImage {
  * Each service the compose file defines and the image it runs, as compose resolves the file, `.env`
  * included. Throws when compose cannot read the file: an empty list would read as nothing to pull.
  */
-export function composeServiceImages(ctx: ComposeContext): ServiceImage[] {
-  const result = spawnSync("docker", [...composeArgs(ctx), "config", "--format", "json"], {
-    encoding: "utf8",
-    timeout: 30_000,
-  })
+export async function composeServiceImages(ctx: ComposeContext): Promise<ServiceImage[]> {
+  const result = await askDocker([...composeArgs(ctx), "config", "--format", "json"], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
   if (result.status !== 0) {
-    const said = (result.stderr ?? "").trim() || result.error?.message || `exit ${result.status}`
-    throw new Error(`docker compose could not read ${ctx.composePath}: ${said}`)
+    throw new Error(`docker compose could not read ${ctx.composePath}: ${spawnFailureText({ ...result, stdout: "" })}`)
   }
   const parsed: unknown = JSON.parse(result.stdout)
   const services = isJsonObject(parsed) ? parsed["services"] : undefined
@@ -202,9 +193,4 @@ export function composeServiceImages(ctx: ComposeContext): ServiceImage[] {
       isJsonObject(spec) && typeof spec["image"] === "string" ? [{ service, image: spec["image"] }] : [],
     )
     .sort((a, b) => a.service.localeCompare(b.service))
-}
-
-/** Whether Docker has `image` on this machine. */
-export function dockerHasImage(image: string): boolean {
-  return spawnSync("docker", ["image", "inspect", image], { stdio: "ignore", timeout: 15_000 }).status === 0
 }

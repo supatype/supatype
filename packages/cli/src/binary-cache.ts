@@ -16,6 +16,7 @@
  *   The only escape hatch is the explicit SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1.
  */
 
+import { setTimeout as sleep } from "node:timers/promises"
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
 import { isJsonObject } from "@supatype/shared"
 import { errorMessage } from "./error-message.js"
@@ -374,7 +375,7 @@ export async function ensureCachedBinary(
   version: string,
   platform: PlatformId,
 ): Promise<string> {
-  return download(component, version, platform)
+  return (await download(component, version, platform)).path
 }
 
 async function acquireDownloadSlot(
@@ -416,11 +417,17 @@ async function acquireDownloadSlot(
   )
 }
 
+/** Where a downloaded component is, and whether this call fetched it or found it already there. */
+export interface Downloaded {
+  path: string
+  fetched: boolean
+}
+
 export async function download(
   component: Component,
   version: string,
   platform: PlatformId,
-): Promise<string> {
+): Promise<Downloaded> {
   if (version === VERSION_PIN_LOCAL) {
     throw new Error(
       `cannot download CDN binary when version is "${VERSION_PIN_LOCAL}": set overrides.${component === "postgres" ? "postgres_dir" : component} or pin a semver`,
@@ -431,12 +438,11 @@ export async function download(
   mkdirSync(dir, { recursive: true })
 
   const destPath = join(dir, binaryName(component, version, platform))
-  if (keepCachedArtifact(component, version, destPath)) return destPath
+  if (keepCachedArtifact(component, version, destPath)) return { path: destPath, fetched: false }
 
   await acquireDownloadSlot(component, version, platform)
-  if (isCachedBinaryReady(component, version, platform)) {
-    return destPath
-  }
+  // Another process fetched it while this one waited for the lock.
+  if (isCachedBinaryReady(component, version, platform)) return { path: destPath, fetched: false }
 
   console.log(`[supatype] Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
 
@@ -452,7 +458,7 @@ export async function download(
   }
 
   if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version, platform), dir)
-  return destPath
+  return { path: destPath, fetched: true }
 }
 
 /** True when `destPath` is a valid cached artifact; an invalid one is deleted for the download to replace. */
@@ -973,7 +979,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
         `[supatype] Download attempt ${i}/${attempts} failed: ${errorMessage(err)}. ` +
           `Retrying in ${delay / 1_000}s...`,
       )
-      await new Promise((r) => setTimeout(r, delay))
+      await sleep(delay)
     }
   }
   throw new Error("unreachable")

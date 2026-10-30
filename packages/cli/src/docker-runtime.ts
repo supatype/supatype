@@ -2,10 +2,16 @@
  * Docker daemon availability: used before `docker compose` and other docker CLI calls.
  */
 
-import { spawnSync } from "node:child_process"
 import { platform } from "node:os"
 import { endDevSession, getActiveDevSession } from "./dev-session.js"
-import { askDocker, DOCKER_PROBE_TIMEOUT_MS, type DockerRunner } from "./docker-exec.js"
+import {
+  askDocker,
+  askDockerSync,
+  DOCKER_PROBE_TIMEOUT_MS,
+  DOCKER_QUERY_TIMEOUT_MS,
+  type DockerAnswer,
+  type DockerRunner,
+} from "./docker-exec.js"
 import { isInteractive } from "./ui/interactive.js"
 import { error, plain } from "./ui/messages.js"
 import { p, printLogo } from "./ui/prompts.js"
@@ -23,34 +29,29 @@ export type DockerReportOptions = {
   brand?: DockerBrandOptions
 }
 
-function dockerSpawn(args: string[]) {
-  return spawnSync("docker", args, {
-    encoding: "utf8",
-    stdio: "pipe",
-    shell: process.platform === "win32",
-  })
-}
-
-/** One docker call's result, as both the blocking and the bounded probe read it. */
-interface ProbeAnswer {
-  status: number | null
-  stdout: string
-  stderr: string
-  missing: boolean
-}
+/** One docker call's result, as the verdicts below read it. */
+type ProbeAnswer = Omit<DockerAnswer, "timedOut">
 
 const VERSION_ARGS = ["version", "--format", "{{.Client.Version}}"]
 
-function spawnAnswer(args: string[]): ProbeAnswer {
-  const result = dockerSpawn(args)
-  const missing = result.error !== undefined && "code" in result.error && result.error.code === "ENOENT"
-  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", missing }
+/** A daemon that did not answer within `timeoutMs`. */
+function silentDaemon(timeoutMs: number): DockerDaemonProbe {
+  return { ok: false, reason: "daemon_unavailable", detail: `Docker did not answer within ${Math.round(timeoutMs / 1000)}s` }
 }
 
-/** Returns whether the Docker CLI is on PATH and the daemon accepts connections. */
+/**
+ * Returns whether the Docker CLI is on PATH and the daemon accepts connections. Synchronous because
+ * `requireDockerDaemon` guards `runDockerCompose`, which every compose command calls synchronously;
+ * each question is still given up on after {@link DOCKER_QUERY_TIMEOUT_MS}.
+ */
 export function probeDockerDaemon(): DockerDaemonProbe {
-  const version = spawnAnswer(VERSION_ARGS)
-  return verdictFromVersion(version) ?? verdictFromInfo(spawnAnswer(["info"]), version)
+  const ask = { shell: process.platform === "win32", timeoutMs: DOCKER_QUERY_TIMEOUT_MS }
+  const version = askDockerSync(VERSION_ARGS, ask)
+  if (version.timedOut) return silentDaemon(DOCKER_QUERY_TIMEOUT_MS)
+  const early = verdictFromVersion(version)
+  if (early !== null) return early
+  const info = askDockerSync(["info"], ask)
+  return info.timedOut ? silentDaemon(DOCKER_QUERY_TIMEOUT_MS) : verdictFromInfo(info, version)
 }
 
 /**
@@ -61,10 +62,7 @@ export function probeDockerDaemon(): DockerDaemonProbe {
 export async function probeDockerDaemonAsync(runner?: DockerRunner, timeoutMs?: number): Promise<DockerDaemonProbe> {
   const ask = { shell: process.platform === "win32", ...(runner && { runner }), ...(timeoutMs !== undefined && { timeoutMs }) }
   const [version, info] = await Promise.all([askDocker(VERSION_ARGS, ask), askDocker(["info"], ask)])
-  if (version.timedOut || info.timedOut) {
-    const seconds = Math.round((timeoutMs ?? DOCKER_PROBE_TIMEOUT_MS) / 1000)
-    return { ok: false, reason: "daemon_unavailable", detail: `Docker did not answer within ${seconds}s` }
-  }
+  if (version.timedOut || info.timedOut) return silentDaemon(timeoutMs ?? DOCKER_PROBE_TIMEOUT_MS)
   return verdictFromVersion(version) ?? verdictFromInfo(info, version)
 }
 

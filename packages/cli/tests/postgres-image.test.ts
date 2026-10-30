@@ -256,7 +256,8 @@ describe("dockerTagCheck asks the local image store first, then the registry", (
   for (const row of rows) {
     it(`reports ${row.presence}: ${row.name}`, () => {
       const { run, asked } = runner(row.answers)
-      expect(dockerTagCheck(run)(REF)).toBe(row.presence)
+      const ask = { hasImage: (ref: string) => run(["image", "inspect", ref]).status === 0, manifest: (ref: string) => run(["manifest", "inspect", ref]) }
+      expect(dockerTagCheck(ask)(REF)).toBe(row.presence)
       expect(asked).toEqual(row.asked)
     })
   }

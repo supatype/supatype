@@ -2,13 +2,14 @@
  * `supatype dev` when `provider: docker`, full self-host Compose stack (Kong gateway).
  */
 
+import { setTimeout as sleep } from "node:timers/promises"
 import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { spawnSync } from "node:child_process"
+import { askDocker, askDockerSync, DOCKER_EXEC_TIMEOUT_MS, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
 import { loadSchemaAst, projectNameInFile } from "./config.js"
 import { withComposeSchemaPushLock } from "./schema-push-lock.js"
@@ -41,11 +42,13 @@ import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
 import { offerToSaveShellDbPort } from "./db-port-offer.js"
+import { databaseUrlSyncMessage } from "./db-port.js"
 import {
-  CLI_DATABASE_URL,
-  cliMayWriteDatabaseUrl,
-  syncStackDatabaseUrl,
+  databaseUrlState,
+  setCliDatabaseUrlForRun,
+  syncDatabaseUrlPort,
   warnIfHandWrittenUrlSilent,
+  writeCliDatabaseUrl,
 } from "./database-url-owner.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
@@ -367,13 +370,7 @@ export function upsertDevComposeEnv(
   // every CLI command reads, with a DSN pointing at a database that does not exist. Found by
   // rehearsing a push against a real external Postgres, where the compose guard then refused to
   // proceed because .env and the config disagreed. They disagreed because of this line.
-  if (devDbPort !== undefined && !usesExternalDatabase(config)) {
-    updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
-    // User and database from the project, not hardcoded, same reason as
-    // `seedMissingDatabaseIdentity`: a project not named "supatype" had this URL pointing at a
-    // database that does not exist. Only over a URL the CLI wrote: a hand-written one always wins.
-    if (cliMayWriteDatabaseUrl(cwd)) updates.DATABASE_URL = hostComposeDbUrl(cwd, devDbPort)
-  }
+  if (devDbPort !== undefined && !usesExternalDatabase(config)) updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
   // `SUPATYPE_SERVER_IMAGE` is written here, not passed in, and it is deliberately *not* marked
   // managed. The managed marker means "this value came from `versions` in the config and is mine to
   // clean up when the pin goes away". The locally built image comes from `overrides`, so removing
@@ -397,8 +394,7 @@ export function upsertDevComposeEnv(
   applyForThisRun(runOnly)
   upsertEnvFile(cwd, persist, {
     removeManaged: removeImageKeys,
-    // DATABASE_URL marked as the CLI's, so it follows the provider the project runs.
-    managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV, ...CLI_DATABASE_URL.managed],
+    managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
     // A local image left in `.env` after the project stopped asking for one would keep pointing
     // compose at a stale build, and it carries no marker for `removeManaged` to act on.
     remove: [
@@ -408,6 +404,21 @@ export function upsertDevComposeEnv(
         : []),
     ],
   })
+  if (devDbPort !== undefined && !usesExternalDatabase(config)) {
+    writeDevStackDatabaseUrl(cwd, devDbPort, runOnly.SUPATYPE_DEV_DB_PORT !== undefined)
+  }
+}
+
+/**
+ * Docker dev's DATABASE_URL: the stack's database at `devDbPort`, with the project's own user and
+ * database, not hardcoded ones, which on a project not named "supatype" named a database that does
+ * not exist. Written over a URL the CLI owns, for this run only when the port is the shell's; one
+ * that is yours always wins (database-url-owner.ts).
+ */
+function writeDevStackDatabaseUrl(cwd: string, devDbPort: number, runOnly: boolean): void {
+  const url = hostComposeDbUrl(cwd, devDbPort)
+  if (runOnly) setCliDatabaseUrlForRun(databaseUrlState(cwd), url)
+  else writeCliDatabaseUrl(cwd, url)
 }
 
 /** Keep compose + Studio on the same freshly signed dev JWTs; sync optional image pins from config. */
@@ -453,8 +464,7 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
 
   const deadline = Date.now() + maxMs
   while (Date.now() < deadline) {
-    const ready = spawnSync(
-      "docker",
+    const ready = await askDocker(
       // Over TCP, deliberately, not the Unix socket.
       //
       // On a first run the Postgres entrypoint starts a temporary server with `listen_addresses=''`
@@ -468,10 +478,10 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
         ...baseArgs, "exec", "-T", "db",
         "pg_isready", "-h", "127.0.0.1", "-U", devDatabaseIdentity(cwd).user,
       ],
-      { cwd: composeDir, encoding: "utf8" },
+      { cwd: composeDir, timeoutMs: DOCKER_EXEC_TIMEOUT_MS },
     )
     if (ready.status === 0) return
-    await new Promise((r) => setTimeout(r, 2000))
+    await sleep(2000)
   }
   throw new Error("Compose db service did not become healthy in time")
 }
@@ -496,12 +506,9 @@ function dumpComposeDbLogs(
   if (existsSync(envFile)) args.push("--env-file", envFile)
   args.push("logs", "--no-color", "--timestamps", "--tail", "800", "db")
 
-  const result = spawnSync("docker", args, {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-  })
-  const body = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+  // Synchronous: called from the failure paths that then exit.
+  const result = askDockerSync(args, { cwd, timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
+  const body = `${result.stdout}${result.stderr}`.trim()
   const content = body || `(empty, docker compose logs db exit ${result.status ?? "?"})\n`
   try {
     writeFileSync(logPath, content)
@@ -550,23 +557,21 @@ async function fetchWithin(url: string, ms: number, init?: RequestInit): Promise
  * That sends people to look at Kong, which is almost never the problem, and in
  * CI the containers are gone by the time anything else can inspect them.
  */
-function reportUnhealthyStack(composePath: string, cwd: string, project: string): void {
-  const capture = (args: string[]): string => {
-    const result = spawnSync("docker", ["compose", "-p", project, "--project-directory", cwd, "-f", composePath, ...args], {
-      encoding: "utf8",
-      cwd,
-    })
-    return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+async function reportUnhealthyStack(composePath: string, cwd: string, project: string): Promise<void> {
+  const capture = async (args: string[]): Promise<string> => {
+    const call = { cwd, timeoutMs: DOCKER_QUERY_TIMEOUT_MS }
+    const result = await askDocker(["compose", "-p", project, "--project-directory", cwd, "-f", composePath, ...args], call)
+    return `${result.stdout}${result.stderr}`.trim()
   }
 
   console.error("")
   console.error("[supatype] The gateway is up but a service behind it is not. Container state:")
-  const state = capture(["ps", "-a"])
+  const state = await capture(["ps", "-a"])
   console.error(state === "" ? "  (no containers)" : state)
 
   // The two the gateway health check depends on, and db because both need it.
   for (const service of ["server", "realtime", "db"]) {
-    const logs = capture(["logs", "--no-color", "--tail", "40", service])
+    const logs = await capture(["logs", "--no-color", "--tail", "40", service])
     if (logs === "") continue
     console.error("")
     console.error(`[supatype] last 40 lines from ${service}:`)
@@ -598,10 +603,10 @@ async function waitKongReady(
     } catch (err) {
       lastAuth = lastRealtime = errorMessage(err)
     }
-    await new Promise((r) => setTimeout(r, 1000))
+    await sleep(1000)
   }
   if (stack !== undefined) {
-    reportUnhealthyStack(stack.composePath, stack.cwd, stack.project)
+    await reportUnhealthyStack(stack.composePath, stack.cwd, stack.project)
   }
   throw new Error(
     `Gateway at ${base} did not become ready within ${maxSec}s ` +
@@ -630,7 +635,7 @@ async function waitStorageApiReady(
     } catch {
       /* retry */
     }
-    await new Promise((r) => setTimeout(r, 1000))
+    await sleep(1000)
   }
   console.warn(
     `[supatype] Storage API at ${url} did not become ready within ${maxSec}s, bucket provisioning may fail.`,
@@ -723,10 +728,11 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
  * on `npm run seed` with ECONNREFUSED against a port nothing was listening on. The layout is the
  * stack's own (dev while a dev session holds it, otherwise self-host), so a self-host push in a
  * project that once ran dev keeps the self-host port, and the message names the variable it read.
- * A hand-written URL is left as it is, for this run too: it always wins (syncStackDatabaseUrl).
+ * Only a URL the CLI owns moves: one that is yours is left as it is, for this run too.
  */
 function syncDatabaseUrlToStack(cwd: string, config: SupatypeProjectConfig): void {
-  syncStackDatabaseUrl(cwd, composeRenderMode(cwd, config.project.name) === "dev")
+  const sync = syncDatabaseUrlPort(cwd, composeRenderMode(cwd, config.project.name) === "dev")
+  if (sync !== null) console.log(`[supatype] ${databaseUrlSyncMessage(sync)}`)
 }
 
 /**
@@ -995,7 +1001,7 @@ async function applyViaComposeEngine(
     // Windows Docker bind mounts can lag briefly after the host write. A consent refusal is the
     // engine's considered answer, not a lagging mount, and running it again only repeats it.
     if (first.status === 0 || consentRefusal(first.output) !== null) return first
-    await new Promise((r) => setTimeout(r, 250))
+    await sleep(250)
     return pushOnce()
   }
   // B: only hold the advisory lock when realtime is already decoding, first-boot
@@ -1167,10 +1173,10 @@ export async function dockerEngineCapabilities(cwd: string, config: SupatypeProj
     const target = { cwd, project: composeProjectName(config.project.name), composePath: paths.composePath, engineImage }
     return probeCapabilities((args) => {
       const run = spawnComposeEngine(target, args, { runFlags: ["--no-deps"] })
-      return { status: run.status, stdout: run.stdout ?? "", stderr: run.error?.message ?? run.stderr ?? "" }
+      return { status: run.status, stdout: run.stdout, stderr: run.error ?? run.stderr }
     })
   }
-  const imageId = engineImage === undefined ? "compose-default" : localImageId(engineImage)
+  const imageId = engineImage === undefined ? "compose-default" : await localImageId(engineImage)
   // Not pulled yet: the probe pulls it, and the next call keys on the ID it then has.
   if (imageId === undefined) return probe()
   return rememberCapabilitiesSync(dockerCapabilities, `${cwd}\0${engineImage ?? ""}\0${imageId}`, probe)
@@ -1180,8 +1186,8 @@ export async function dockerEngineCapabilities(cwd: string, config: SupatypeProj
  * The local image's ID, or undefined when Docker does not have it. The answer is keyed on it, so
  * a tag that now names another image (a pull, a rebuild) is asked again, and nothing else is.
  */
-function localImageId(image: string): string | undefined {
-  const inspect = spawnSync("docker", ["image", "inspect", "--format", "{{.Id}}", image], { encoding: "utf8" })
+async function localImageId(image: string): Promise<string | undefined> {
+  const inspect = await askDocker(["image", "inspect", "--format", "{{.Id}}", image], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
   const id = inspect.status === 0 ? inspect.stdout.trim() : ""
   return id === "" ? undefined : id
 }
@@ -1412,7 +1418,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   let result = await runComposeEngineDiff(paths, cwd, project, config)
   // Windows Docker bind mounts can lag briefly after the host write.
   if (result.status !== 0) {
-    await new Promise((r) => setTimeout(r, 250))
+    await sleep(250)
     result = await runComposeEngineDiff(paths, cwd, project, config)
   }
   if (result.status !== 0) {
@@ -1539,7 +1545,7 @@ async function applyInitialSchema(
     push: () => runDevSchemaPush(cwd, config, paths, schemaPath, project, opts),
     recoverDatabase: () => startComposeDatabase(config, paths, cwd, project, brand, undefined, endDevSession),
     dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    sleep: (ms) => sleep(ms),
   }
   const outcome = await adoptingOnRefusal(await pushInitialSchema(steps), steps, cwd, config)
   // Ending the session before an exit, so its message reaches the real terminal rather than a TUI
@@ -1670,7 +1676,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   }
   await startComposeDatabase(config, paths, cwd, project, devBrand, 180_000, endDevSession)
   // Settle before DDL: pg_isready can pass slightly before the instance is stable.
-  await new Promise((r) => setTimeout(r, 3000))
+  await sleep(3000)
   // With the stack's database up, so a hand-written URL naming it is not reported as silent.
   await warnIfHandWrittenUrlSilent(cwd)
 
@@ -1877,12 +1883,9 @@ async function runComposeEngineGenerator(
 ): Promise<string | null> {
   const engineImage = await schemaEngineImageForPush(config, cwd)
   const target = { cwd, project: composeProject, composePath: paths.composePath, engineImage }
-  const result = spawnComposeEngine(target, [...args, "-i", COMPOSE_SCHEMA_AST], {
-    runFlags: ["-T"],
-    maxBuffer: 20 * 1024 * 1024,
-  })
+  const result = spawnComposeEngine(target, [...args, "-i", COMPOSE_SCHEMA_AST], { runFlags: ["-T"] })
   if ((result.status ?? 1) !== 0) return null
-  return String(result.stdout ?? "")
+  return result.stdout
 }
 
 /**
