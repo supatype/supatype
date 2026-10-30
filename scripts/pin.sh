@@ -45,12 +45,33 @@
 #   PIN_CDN_BASE       where the CLI downloads binaries (default https://releases.supatype.com)
 set -euo pipefail
 
+# Reading a pin is answered before the bash check below. It needs nothing newer than the bash macOS
+# ships (3.2): the e2e scripts read pins through here (tests/integration/scripts/lib/pinned-image.sh)
+# and must run on a stock Mac. Every assignment stands on its own line, where set -e stops on a
+# failed read in any bash.
+case "${1:-}" in
+  commit | tag | image)
+    field="$1"
+    component="${2:?usage: pin.sh $1 <component>}"
+    pins_mjs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-images.mjs"
+    if [ "$field" = image ]; then
+      image="$(node "$pins_mjs" get "$component" image)"
+      tag="$(node "$pins_mjs" get "$component" tag)"
+      printf '%s:%s\n' "$image" "$tag"
+    else
+      node "$pins_mjs" get "$component" "$field"
+    fi
+    exit 0
+    ;;
+esac
+
 # inherit_errexit keeps set -e on inside $(...), so a function read through a command substitution
 # stops at its first failing command instead of printing a half-built answer. It does not reach a
 # substitution used as an argument or inside [[ ]]: the outer command still runs and its status is
 # the one that counts, so those reads stay assigned on their own lines. Bash 4.4 added it, and
 # below 4.4 an empty "${auth[@]}" under set -u is already an error, so older bash (macOS ships
-# 3.2) is refused here rather than failing later for a reason that does not name itself.
+# 3.2) is refused here, for every command but the reads above, rather than failing later for a
+# reason that does not name itself.
 if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
   printf 'pin: needs bash 4.4 or newer, this is %s (on macOS: brew install bash)\n' "$BASH_VERSION" >&2
   exit 1
@@ -235,22 +256,10 @@ cmd_engine_image() {
   fi
 }
 
-read_pin() {
-  local field="$1" component="${2:?usage: pin.sh $1 <component>}" tag
-  if [[ "$field" == image ]]; then
-    # Assigned first: a failed read inside an argument would not stop the script.
-    tag="$(pins get "$component" tag)"
-    image_ref "$component" "$tag"
-  else
-    pins get "$component" "$field"
-  fi
-}
-
 case "${1:-}" in
   set) shift; cmd_set "$@" ;;
   check) shift; cmd_check "$@" ;;
   latest) shift; cmd_latest "$@" ;;
-  commit | tag | image) read_pin "$@" ;;
   engine-image) shift; cmd_engine_image "$@" ;;
   *) sed -n '2,45p' "$0" >&2; exit 2 ;;
 esac
