@@ -719,3 +719,68 @@ describe("email links carry the caller's redirect", () => {
     expect(url.searchParams.get("redirect_to")).toBe("myapp://auth/callback")
   })
 })
+
+// ─── autoRefreshToken ────────────────────────────────────────────────────────
+
+describe("AuthClient autoRefreshToken", () => {
+  /** A session whose access token expired a minute ago. */
+  const expired = {
+    accessToken: "expired-token",
+    refreshToken: "refresh-token-abc",
+    tokenType: "bearer",
+    expiresIn: 3600,
+    expiresAt: Math.floor(Date.now() / 1000) - 60,
+    user: { id: "user-1", appMetadata: {}, userMetadata: {}, createdAt: "", updatedAt: "" },
+  }
+
+  it("schedules a refresh timer by default", () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal("fetch", mockFetch(TOKEN_RESPONSE))
+      new AuthClient(SUPATYPE_URL, HEADERS, { initialSession: { ...expired, expiresAt: expired.expiresAt + 7200 } })
+      expect(vi.getTimerCount()).toBe(1)
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("schedules nothing and refreshes nothing on its own when off", async () => {
+    vi.useFakeTimers()
+    const fetchSpy = mockFetch(TOKEN_RESPONSE)
+    vi.stubGlobal("fetch", fetchSpy)
+    try {
+      const client = new AuthClient(SUPATYPE_URL, HEADERS, { initialSession: expired, autoRefreshToken: false })
+      await vi.runAllTimersAsync()
+      expect(vi.getTimerCount()).toBe(0)
+      expect(fetchSpy).not.toHaveBeenCalled()
+
+      // A caller that needs a valid token still gets one, and refreshing schedules nothing either.
+      await client.ensureValidSession()
+      expect(client.currentAccessToken).toBe("access-token-123")
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("leaves an expired session as it is when refreshExpiredToken is off", async () => {
+    const fetchSpy = mockFetch(TOKEN_RESPONSE)
+    vi.stubGlobal("fetch", fetchSpy)
+    try {
+      const client = new AuthClient(SUPATYPE_URL, HEADERS, {
+        initialSession: expired,
+        autoRefreshToken: false,
+        refreshExpiredToken: false,
+      })
+      await client.ensureValidSession()
+      const { data } = await client.getSession()
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(client.currentAccessToken).toBe("expired-token")
+      expect(data.session?.refreshToken).toBe("refresh-token-abc")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
