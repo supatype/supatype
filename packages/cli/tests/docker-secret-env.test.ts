@@ -38,6 +38,18 @@ function onlyCall(): { args: readonly string[]; env: NodeJS.ProcessEnv } {
   return { args, env: opts?.env ?? {} }
 }
 
+/**
+ * The one engine run, beside the questions asked of a binary once before a schema reaches it
+ * (`capabilities`, `--version`: the engine floor and the identity-column gate).
+ */
+function onlyEngineRun(): { args: readonly string[]; env: NodeJS.ProcessEnv } {
+  const runs = spawnSync.mock.calls.filter(([, args]) => args[0] !== "capabilities" && args[0] !== "--version")
+  expect(runs).toHaveLength(1)
+  const [, args, opts] = runs[0]!
+  expect(args.join(" ")).not.toContain(SECRET)
+  return { args, env: opts?.env ?? {} }
+}
+
 /** The names passed as bare `-e NAME`. */
 function bareEnvFlags(args: readonly string[]): string[] {
   return args.flatMap((arg, i) => (args[i - 1] === "-e" ? [arg] : []))
@@ -92,7 +104,7 @@ describe("the engine", () => {
       const url = `postgresql://supatype_admin:${SECRET}@127.0.0.1:54329/app`
 
       await engineRequest(endpoint, { ast: { models: [] }, database_url: url })
-      const { args, env } = onlyCall()
+      const { args, env } = onlyEngineRun()
 
       expect(args).not.toContain("--database-url")
       expect(env["DATABASE_URL"]).toBe(url)

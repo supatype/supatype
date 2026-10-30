@@ -13,7 +13,7 @@
 
 import type { Command } from "commander"
 import { existsSync, readdirSync } from "node:fs"
-import { join, relative, resolve, sep } from "node:path"
+import { join, relative, resolve } from "node:path"
 import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import { engineRequest, ensureEngine, type ComposeEngine } from "../engine-client.js"
@@ -28,6 +28,7 @@ import {
   isString,
   nullable,
   optional,
+  toPosixPath,
   type Guard,
 } from "@supatype/shared"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
@@ -140,7 +141,7 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
 
   const prepared: Prepared[] = []
   for (const path of paths) {
-    const label = toPosix(relative(cwd, path))
+    const label = toPosixPath(relative(cwd, path))
     let collected
     try {
       collected = collectSeed(path, {
@@ -229,7 +230,7 @@ function locateBuilder(cwd: string, config: SupatypeConfig): string | undefined 
   const path = resolve(cwd, relativePath)
   if (!existsSync(path)) {
     error(
-      `The generated seed builder is missing: ${toPosix(relativePath)}\n` +
+      `The generated seed builder is missing: ${toPosixPath(relativePath)}\n` +
         "  Run `supatype generate`. It needs no database and no running stack.",
     )
     return undefined
@@ -435,7 +436,3 @@ export function reportSeedStatus(result: SeedStatus, dsn: string): number {
   return 0
 }
 
-/** Reported with forward slashes, so the message reads the same on every platform. */
-function toPosix(path: string): string {
-  return path.split(sep).join("/")
-}

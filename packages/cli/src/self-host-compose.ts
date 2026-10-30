@@ -16,6 +16,7 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { hasStudioOverride, pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
+import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { postgresImageFor, runningPostgresImage } from "./postgres-image.js"
@@ -188,11 +189,17 @@ export async function schemaEngineImageForPush(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | undefined> {
   const named = env["SUPATYPE_ENGINE_IMAGE"]?.trim() || readEnvFile(cwd)["SUPATYPE_ENGINE_IMAGE"]?.trim()
-  if (named) return named
+  if (named) return supportedEngineImage(named, "SUPATYPE_ENGINE_IMAGE")
   const pinned = pinnedVersion("engine", config)
   if (pinned === VERSION_PIN_LOCAL) return undefined
-  if (pinned) return dockerImageRef("engine", pinned)
-  return RELEASE_IMAGES.engine
+  if (pinned) return supportedEngineImage(dockerImageRef("engine", pinned), "versions.engine in supatype.config.ts")
+  return supportedEngineImage(RELEASE_IMAGES.engine, "the engine image this CLI build pins")
+}
+
+/** `image`, once its tag is known not to name an engine older than this CLI needs (engine-floor.ts). */
+function supportedEngineImage(image: string, from: string): string {
+  assertEngineVersionSupported(engineImageVersion(image), from, "image")
+  return image
 }
 
 /**

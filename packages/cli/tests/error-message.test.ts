@@ -1,6 +1,6 @@
 import { connect } from "node:net"
 import { describe, expect, it } from "vitest"
-import { errorMessage } from "../src/error-message.js"
+import { bodyReason, errorMessage, httpFailureText } from "../src/error-message.js"
 
 /**
  * Local test N4: an error whose message is empty printed as a blank line. Node reports a refused
@@ -54,5 +54,30 @@ describe("errorMessage", () => {
   it("keeps the inner messages when they say something the codes do not", () => {
     const err = new AggregateError([new Error("first went wrong"), new Error("second went wrong")], "")
     expect(errorMessage(err)).toBe("first went wrong; second went wrong")
+  })
+})
+
+/**
+ * One failure text for every HTTP refusal: the status, then the body's own `message`, else its
+ * `error`, else the body as it came. Functions, deploy, plugins and storage each had their own.
+ */
+describe("httpFailureText", () => {
+  it("names the status and the body's message", () => {
+    expect(httpFailureText(403, "Forbidden", '{"message":"not allowed","error":"x"}')).toBe("HTTP 403 Forbidden: not allowed")
+  })
+
+  it("falls back to the body's error, then to the body itself", () => {
+    expect(httpFailureText(400, "", '{"error":"invalid bucket id"}')).toBe("HTTP 400: invalid bucket id")
+    expect(httpFailureText(502, "Bad Gateway", "upstream down")).toBe("HTTP 502 Bad Gateway: upstream down")
+    expect(httpFailureText(502, "", "")).toBe("HTTP 502, with an empty body")
+  })
+})
+
+describe("bodyReason", () => {
+  it("is a JSON body's message, else its error, else nothing", () => {
+    expect(bodyReason({ message: "m", error: "e" })).toBe("m")
+    expect(bodyReason({ error: "e" })).toBe("e")
+    expect(bodyReason({ message: "  " })).toBeUndefined()
+    expect(bodyReason("text")).toBeUndefined()
   })
 })

@@ -66,7 +66,7 @@ kill "$DEV_PID"; wait "$DEV_PID"
 
 If `dev` itself is killed (its process ended, or its window closed before it finished stopping), the stack can be left running. The next `supatype dev` finds it and offers to stop it, and `supatype self-host compose down` stops it now.
 
-The gateway serves REST at `/rest/v1/`, auth at `/auth/v1/`, storage and realtime. With Docker it listens on `http://localhost:<gateway-port>`: init picks a free port per project and writes the URL to `.env` as `API_EXTERNAL_URL` (the port alone is `SUPATYPE_KONG_PORT`). With Native it listens on `http://localhost:54321`.
+The gateway serves REST at `/rest/v1/`, auth at `/auth/v1/`, storage and realtime. With Docker it listens on `http://localhost:<gateway-port>`: init picks a free port per project and writes the URL to `.env` as `API_EXTERNAL_URL` (the port alone is `SUPATYPE_KONG_PORT`). With Native it listens on `http://localhost:18471`, `server.port` in `supatype.config.ts`.
 
 For direct SQL, Docker publishes Postgres on `127.0.0.1` at `SUPATYPE_DEV_DB_PORT` (54329 unless set), and `dev` points `DATABASE_URL` in `.env` at it. Native Postgres listens on port 5432 and checks passwords: connect as `postgres` with `POSTGRES_PASSWORD` from `.env`, or run `supatype pg psql`, which passes it for you.
 

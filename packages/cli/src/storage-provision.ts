@@ -7,6 +7,7 @@
  */
 
 import { isArrayOf, isBoolean, isNumber, isOneOf, isShape, isString, nullable, optional, type Guard } from "@supatype/shared"
+import { responseFailureText } from "./error-message.js"
 
 export type { ExtractedStorageBucketAst as SchemaStorageBucketAst } from "./schema-ast-v2.js"
 
@@ -78,7 +79,7 @@ export async function provisionBucketsFromAst(
 /**
  * Ensure all declared buckets exist in the storage server.
  *
- * @param storageApiUrl  Base URL of the storage API, e.g. "http://localhost:54321/storage/v1"
+ * @param storageApiUrl  Base URL of the storage API, e.g. "http://localhost:18473/storage/v1"
  * @param serviceRoleKey  A service_role JWT for the storage server
  * @param buckets  Buckets to provision (from the resolved AST)
  */
@@ -114,8 +115,7 @@ export async function provisionBuckets(
     }
     if (res.status === 409) continue // already exists, fine
     if (!res.ok) {
-      const msg = await res.text().catch(() => res.statusText)
-      console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${msg}`)
+      console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${await responseFailureText(res)}`)
       continue
     }
     console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)

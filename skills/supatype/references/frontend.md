@@ -36,7 +36,7 @@ export default defineConfig({
   database: { provider: "docker" },
   server: {
     mode: "standalone",
-    port: 54321,
+    port: 18471,
     domain: "demo.supatype.com",
     tls: { email: "you@example.com", provider: "kong" },
   },

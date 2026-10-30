@@ -1,3 +1,5 @@
+import { isJsonObject, parseJsonObject } from "@supatype/shared"
+
 /**
  * A thrown value's message: an Error's own, or the value as text for anything else thrown.
  *
@@ -31,6 +33,35 @@ export function spawnFailureText(outcome: SpawnOutcome): string {
   const said = [outcome.stderr, outcome.error, outcome.stdout].map((text) => (text ?? "").trim()).find((text) => text !== "")
   if (said !== undefined) return said
   return outcome.timedOut === true ? "it did not answer in time" : `exit ${outcome.status ?? "unknown"}`
+}
+
+/** A JSON body's own reason for a refusal: its string `message`, else its `error`; never blank. */
+export function bodyReason(body: unknown): string | undefined {
+  if (!isJsonObject(body)) return undefined
+  return [body["message"], body["error"]].find((said): said is string => typeof said === "string" && said.trim() !== "")
+}
+
+/** The most of a response body a failure line quotes. */
+const BODY_QUOTE_LIMIT = 300
+
+/**
+ * Why an HTTP request failed, never blank: its status, its status text when it has one, then what
+ * the body said. A gateway with no upstream answers 502 with an empty body, and a status text is
+ * often empty too, so printing the body or the status text alone gave
+ * `Failed to provision bucket "big": ` with nothing after it (local test round 3, N3).
+ */
+export function httpFailureText(status: number, statusText: string, body: string): string {
+  const head = statusText.trim() === "" ? `HTTP ${status}` : `HTTP ${status} ${statusText.trim()}`
+  const parsed = parseJsonObject(body)
+  const said = ((parsed.ok ? bodyReason(parsed.value) : undefined) ?? body).trim().replace(/\s+/g, " ")
+  if (said === "") return `${head}, with an empty body`
+  return `${head}: ${said.length > BODY_QUOTE_LIMIT ? `${said.slice(0, BODY_QUOTE_LIMIT)}...` : said}`
+}
+
+/** {@link httpFailureText} for a response whose body has not been read yet. */
+export async function responseFailureText(res: Response): Promise<string> {
+  const body = await res.text().catch((err: unknown) => `(its body could not be read: ${errorMessage(err)})`)
+  return httpFailureText(res.status, res.statusText, body)
 }
 
 /** A thrown value's errno code (`ENOENT`, `EADDRINUSE`, ...), when it carries one as text. */

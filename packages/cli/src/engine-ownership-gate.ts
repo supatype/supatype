@@ -28,7 +28,7 @@ import { statSync } from "node:fs"
 import { capabilitiesCache, isJsonObject, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
 import { astModels, objectAt } from "./ast-read.js"
 import { engineBinPath } from "./engine-client.js"
-import { compareVersions } from "./engine-floor.js"
+import { assertReportedEngineVersion, compareVersions, ENGINE_MIN_FOR_CLI } from "./engine-floor.js"
 
 /** Every feature this CLI may need, as the engine's `capabilities` names them. */
 export const OWNERSHIP_FEATURES = [
@@ -59,6 +59,8 @@ export interface FeatureNeed {
 export interface Capabilities {
   features: ReadonlySet<string>
   source: "server" | "engine"
+  /** The engine's version as it reported it, when it did (`capabilities`, `--version`). */
+  version?: string
 }
 
 /**
@@ -187,13 +189,43 @@ export class EngineProbeFailed extends Error {
 export function probeCapabilities(probe: EngineProbe): Capabilities {
   const answered = probe(["capabilities"])
   if (answered.status === 0) {
-    const features = parseCapabilities(firstJson(answered.stdout))
-    if (features !== undefined) return { features, source: "engine" }
+    const json = firstJson(answered.stdout)
+    const features = parseCapabilities(json)
+    if (features !== undefined) return { features, source: "engine", ...reportedVersion(json) }
   }
   const version = probe(["--version"])
-  if (version.status === 0) return { features: legacyFeatures(version.stdout), source: "engine" }
+  if (version.status === 0) {
+    return { features: legacyFeatures(version.stdout), source: "engine", version: version.stdout.trim() }
+  }
   const said = [version.stderr, answered.stderr].find((s) => s !== undefined && s.trim() !== "")?.trim()
   throw new EngineProbeFailed(`Could not ask the Supatype engine what it supports: ${said ?? "it did not run"}`)
+}
+
+/** A capabilities answer's `version`, as a field to spread, when it has one. */
+function reportedVersion(json: unknown): { version?: string } {
+  const version = isJsonObject(json) ? json["version"] : undefined
+  return typeof version === "string" ? { version } : {}
+}
+
+/** What to do about an engine the gate refuses for its version (engine-floor.ts). */
+const UPDATE_ENGINE = `Run \`supatype update\`, or pin versions.engine to ${ENGINE_MIN_FOR_CLI} or newer in supatype.config.ts.`
+
+/**
+ * {@link probeCapabilities}, refusing an engine that reports a version older than this CLI needs
+ * (decision D3). The pin and image tag are checked before anything runs; a tag such as `latest`
+ * names no version, so the engine that answers is the last word.
+ */
+export function checkedCapabilities(probe: EngineProbe): Capabilities {
+  const caps = probeCapabilities(probe)
+  assertReportedEngineVersion(caps.version, "the engine that answered", UPDATE_ENGINE)
+  return caps
+}
+
+/** A server's `capabilities` answer, refused when it names an engine older than this CLI needs. */
+export function serverAnswerCapabilities(answer: unknown): Capabilities {
+  const caps: Capabilities = { features: parseCapabilities(answer) ?? new Set(), source: "server", ...reportedVersion(answer) }
+  assertReportedEngineVersion(caps.version, "the server's engine", "Update the server, or push with a CLI that matches it.")
+  return caps
 }
 
 /** The first JSON value in `text`, which may follow log lines. */
@@ -223,7 +255,7 @@ function binaryKey(bin: string): string {
 /** What the engine binary at `bin` supports. */
 export function binaryCapabilities(bin: string): Capabilities {
   return rememberCapabilitiesSync(binaryCache, binaryKey(bin), () =>
-    probeCapabilities((args) => {
+    checkedCapabilities((args) => {
       const run = spawnSync(bin, [...args], { encoding: "utf8" })
       return { status: run.status, stdout: run.stdout ?? "", stderr: run.error?.message ?? run.stderr ?? "" }
     }),

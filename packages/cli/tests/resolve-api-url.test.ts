@@ -21,3 +21,13 @@ describe("resolveProjectApiUrl()", () => {
     expect(resolveProjectApiUrl(cwd)).toBe("http://localhost:19200")
   })
 })
+
+// SITE_URL is the app's address, where auth emails send people, not the API's. Read as the API, a
+// fresh init's `http://localhost:3000` sent `functions invoke --local` and the cache admin to the app.
+describe("resolveProjectApiUrl() and SITE_URL", () => {
+  it("is not the API's address", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-api-url-"))
+    writeFileSync(join(cwd, ".env"), "SITE_URL=http://localhost:3000\nSUPATYPE_KONG_PORT=19000\n", "utf8")
+    expect(resolveProjectApiUrl(cwd)).toBe("http://localhost:19000")
+  })
+})

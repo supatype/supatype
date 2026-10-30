@@ -14,12 +14,19 @@
  * functions would create the thing it describes out of nothing.
  */
 import { existsSync } from "node:fs"
+import { join, relative } from "node:path"
+import { toPosixPath } from "@supatype/shared"
 import { ensureFunctionsDenoTypes } from "./functions-deno-types.js"
 import { preferredFunctionsPathFromProject, type SupatypeProjectConfig } from "./project-config.js"
 
-/** Rewrite the context module. True when this project has functions and one was written. */
-export function refreshFunctionsContext(cwd: string, config: SupatypeProjectConfig): boolean {
+/**
+ * Rewrite the context module. The path written, relative to `cwd` (`edge/_shared/context.ts` under
+ * `functions.path: "edge"`), when this project has functions and one was written; else undefined.
+ * Callers print it: they used to print `functions/_shared/context.ts` whatever the path was.
+ */
+export function refreshFunctionsContext(cwd: string, config: SupatypeProjectConfig): string | undefined {
   const functionsDir = preferredFunctionsPathFromProject(config, cwd)
-  if (!existsSync(functionsDir)) return false
-  return ensureFunctionsDenoTypes(cwd, functionsDir).wroteContextModule
+  if (!existsSync(functionsDir)) return undefined
+  if (!ensureFunctionsDenoTypes(cwd, functionsDir).wroteContextModule) return undefined
+  return toPosixPath(relative(cwd, join(functionsDir, "_shared", "context.ts")))
 }

@@ -18,7 +18,7 @@
 
 import pg from "pg"
 import { isBoolean, isShape, isString, nullable, type Guard } from "@supatype/shared"
-import { queryRows, type UnknownRow } from "./db-rows.js"
+import { queryRows, withDatabase, type UnknownRow } from "./db-rows.js"
 import { errorCode } from "./error-message.js"
 
 export type Severity = "pass" | "warn" | "degrade" | "fail"
@@ -86,6 +86,24 @@ export async function foreignTables(q: QueryFn, schema: string): Promise<string[
     [schema],
   )
   return rows.map((t) => t.relname)
+}
+
+/**
+ * Why the database cannot give realtime logical decoding, or undefined when it can: `wal_level`
+ * first, then the wal2json slot probe, the checks `supatype db check` runs. For native dev to name
+ * the cause when realtime exits without a word, instead of guessing at it (local test round 3).
+ */
+export async function decodingProblem(q: QueryFn): Promise<string | undefined> {
+  const [row] = await queryAs(q, isShape({ wal_level: isString }), "SHOW wal_level")
+  const level = row?.wal_level ?? "unknown"
+  if (level !== "logical") return `wal_level is "${level}", not logical`
+  const probe = await probeLogicalDecoding(q)
+  return probe.severity === "degrade" ? probe.detail : undefined
+}
+
+/** {@link decodingProblem} for the database at `databaseUrl`, on a connection of its own. */
+export async function logicalDecodingProblem(databaseUrl: string): Promise<string | undefined> {
+  return withDatabase(databaseUrl, (client) => decodingProblem((sql, params = []) => queryRows(client, sql, params)))
 }
 
 /**

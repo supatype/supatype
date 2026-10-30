@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { offerToSaveShellDbPort, type DbPortAsk } from "../src/db-port-offer.js"
+import { offerToSaveShellDbPort, reconcileNativeDevDatabaseUrl, type DbPortAsk } from "../src/db-port-offer.js"
 import { MANAGED_MARKER } from "../src/env-file.js"
 
 /**
@@ -97,5 +97,32 @@ describe("offerToSaveShellDbPort", () => {
     await offerToSaveShellDbPort(dir, ask, { ...shell, DATABASE_URL: "postgresql://u:p@localhost:6000/acme" })
     expect(ask.asked).toEqual([])
     expect(envText()).toBe(`${URL_5432}\n`)
+  })
+})
+
+/**
+ * Local test round 3, B1: native dev never offered the shell's port, so host commands from another
+ * shell kept going to `.env`'s 5432. Native dev now offers it, as Docker dev does, before it points
+ * `DATABASE_URL` at the native database.
+ */
+describe("reconcileNativeDevDatabaseUrl", () => {
+  const nativeDsn = "postgres://postgres:pw@127.0.0.1:54339/acme?sslmode=disable"
+
+  it("names the line to add when nobody can answer, and keeps .env as it was", async () => {
+    writeEnv(`${URL_5432}\n`)
+    const ask = asker(undefined)
+    await reconcileNativeDevDatabaseUrl(dir, nativeDsn, ask, { ...shell })
+    expect(printed).toHaveLength(1)
+    expect(printed[0]).toContain("To keep it, add this line to .env: SUPATYPE_DEV_DB_PORT=54339")
+    expect(envText()).toBe(`${URL_5432}\n`)
+  })
+
+  it("saves the port and points DATABASE_URL at the native database on yes", async () => {
+    writeEnv(`${URL_5432}\n`)
+    const ask = asker(true)
+    await reconcileNativeDevDatabaseUrl(dir, nativeDsn, ask, { ...shell })
+    expect(ask.asked).toHaveLength(1)
+    expect(envText()).toContain("SUPATYPE_DEV_DB_PORT=54339")
+    expect(envText()).toContain(`DATABASE_URL=${nativeDsn}`)
   })
 })

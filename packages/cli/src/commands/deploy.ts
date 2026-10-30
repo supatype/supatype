@@ -31,6 +31,7 @@ import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackag
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
+import { responseFailureText } from "../error-message.js"
 import { withSpinner } from "../ui/progress.js"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import { explainingRefusal } from "../push-refusal.js"
@@ -457,8 +458,7 @@ async function deployStaticSite(
   })
 
   if (!createRes.ok) {
-    const body = await createRes.text()
-    throw new Error(`Failed to create deployment: ${createRes.status} ${body}`)
+    throw new Error(`Failed to create deployment: ${await responseFailureText(createRes)}`)
   }
 
   const { data } = await readJson(createRes, isCreatedUpload)

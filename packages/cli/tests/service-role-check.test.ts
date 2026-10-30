@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../src/service-role-check.js"
+import { fatalError } from "../src/ui/fatal.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 
@@ -95,6 +96,22 @@ describe("serviceRoleProblemLines", () => {
       available: ["audit", "send-email"],
     })
     expect(lines.join("\n")).toContain("Functions found: audit, send-email")
+  })
+
+  // Local test round 3: the refusal printed lines of only two spaces: fatalError indented the blank
+  // entries here, though it already spaces its hints apart. It now skips a blank hint.
+  it("prints through fatalError with no line of only spaces", () => {
+    const printed: string[] = []
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void printed.push(args.join(" ")))
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    vi.spyOn(process, "exit").mockImplementation((): never => {
+      throw new Error("exited")
+    })
+    const lines = serviceRoleProblemLines({ errors: ['  "x": nope'], missing: ["x"], warnings: [], available: [] })
+    expect(() => fatalError("functions.serviceRole names a function that does not exist.", [...lines, ""])).toThrow("exited")
+    vi.restoreAllMocks()
+    expect(printed.some((line) => line !== "" && line.trim() === "")).toBe(false)
+    expect(printed.join("\n")).toContain("No functions found")
   })
 
   it("says so when there are no functions at all", () => {

@@ -1527,22 +1527,33 @@ function parsePartialBucketAccess(
   return access
 }
 
-/** Parse human-readable size from schema types, e.g. `50MB`. */
+/** Each size unit `maxSize` reads, as a power of two. */
+const SIZE_UNIT_EXPONENTS: Readonly<Record<string, number>> = { B: 0, KB: 10, MB: 20, GB: 30 }
+
+/** The units `maxSize` reads, as a sentence names them: "B, KB, MB or GB". */
+function sizeUnitList(): string {
+  const units = Object.keys(SIZE_UNIT_EXPONENTS)
+  return `${units.slice(0, -1).join(", ")} or ${units.at(-1) ?? ""}`
+}
+
+/**
+ * Parse human-readable size from schema types, e.g. `50MB`. A number and a unit it does not read,
+ * or a size past the most bytes a number holds exactly, are each named as what they are: both used
+ * to say only "Invalid maxSize literal" (local test round 3b).
+ */
 function parseDataSizeBytes(lit: string): number {
-  const m = lit.trim().match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)$/i)
+  const m = lit.trim().match(/^(\d+(?:\.\d+)?)\s*([A-Za-z]+)$/)
   if (!m?.[1] || !m[2]) throw new Error(`Invalid maxSize literal: "${lit}". Use forms like "50MB", "100KB".`)
-  const n = Number(m[1])
-  if (!Number.isFinite(n) || n < 0) throw new Error(`Invalid maxSize number in: "${lit}"`)
-  const pow: Record<string, number> = {
-    B: 0,
-    KB: 10,
-    MB: 20,
-    GB: 30,
+  const exp = SIZE_UNIT_EXPONENTS[m[2].toUpperCase()]
+  if (exp === undefined) {
+    throw new Error(`Invalid maxSize "${lit}": "${m[2]}" is not a size unit here: use ${sizeUnitList()}.`)
   }
-  const unit = m[2].toUpperCase() as keyof typeof pow
-  const exp = pow[unit]
-  if (exp === undefined) throw new Error(`Unsupported maxSize unit in: "${lit}"`)
-  return Math.round(n * Math.pow(2, exp))
+  const bytes = Math.round(Number(m[1]) * Math.pow(2, exp))
+  if (!Number.isSafeInteger(bytes)) {
+    const largest = `${Math.floor(Number.MAX_SAFE_INTEGER / Math.pow(2, 30))}GB`
+    throw new Error(`maxSize "${lit}" is too big: the largest is ${largest} (${Number.MAX_SAFE_INTEGER} bytes).`)
+  }
+  return bytes
 }
 
 function stripQuotes(s: string): string {

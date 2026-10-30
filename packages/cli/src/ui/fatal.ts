@@ -18,11 +18,10 @@ export function fatalError(message: string, hints: string[] = [], opts?: FatalOp
 
   error(message)
 
-  if (hints.length > 0) {
-    for (const hint of hints) {
-      plain()
-      plain(`  ${hint}`)
-    }
+  // A blank hint is skipped: indented, it printed a line of only spaces.
+  for (const hint of hints.filter((text) => text.trim() !== "")) {
+    plain()
+    plain(`  ${hint}`)
   }
 
   process.exit(opts?.exitCode ?? 1)

@@ -216,6 +216,8 @@ ${routes.join("\n")}
 }
 
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
+// This machine only, unless asked: on every address, other machines on the network reached it.
+const hostname = Deno.env.get("SUPATYPE_FUNCTIONS_HOST") ?? "127.0.0.1"
 const functionsDir = Deno.env.get("SUPATYPE_DENO_FUNCTIONS_DIR") ?? ""
 const normalizedFunctionsDir = functionsDir.endsWith("/") ? functionsDir.slice(0, -1) : functionsDir
 const sharedEnvPath = Deno.env.get("SUPATYPE_SHARED_ENV_FILE")
@@ -319,6 +321,7 @@ function resolvePublicUrl(): string {
 const publicUrl = resolvePublicUrl()
 
 Deno.serve({
+  hostname,
   port,
   onListen: ({ hostname, port: bound }) => {
     emit("info", "functions router listening on http://" + hostname + ":" + bound)

@@ -1,9 +1,18 @@
 import type { Command } from "commander"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve, join, basename } from "node:path"
-import { spawnSync } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { p, runClackFlow } from "../ui/clack.js"
+import { withProgressView } from "../ui/progress.js"
+import {
+  installCommand,
+  installDependencies,
+  plainStepView,
+  runTimedStep,
+  spinnerStepView,
+  type StepView,
+  type TimedStep,
+} from "../init-setup-steps.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
 import {
@@ -234,25 +243,10 @@ export function registerInit(program: Command): void {
 
       scaffold(dir, result, deps)
 
-      const installOk = doInstall ? runInstall(dir, result.packageManager) : false
-      const keysGenerated = doKeys ? writeKeys(dir) : false
-      const binariesReady =
-        doInstall && installOk ? await ensureInitBinaries(dir) : false
-
-      if (doInstall && !installOk) {
-        error(
-          `Dependency install failed. Run "${result.packageManager} install" in the project directory, then "supatype update".`,
-        )
-        process.exit(1)
-      }
-      if (doKeys && !keysGenerated) {
-        error("Could not generate API keys. Check the project has a .env, then run `supatype keys`.")
-        process.exit(1)
-      }
-      if (doInstall && installOk && !binariesReady) {
-        error("Component binaries could not be downloaded. Run `supatype update` in the project directory.")
-        process.exit(1)
-      }
+      const wants: SetupWants = { install: doInstall, keys: doKeys }
+      const outcome = await withStepView((view) => runSetupSteps(dir, result.packageManager, wants, view))
+      exitOnFailedSetup(outcome, wants, result.packageManager)
+      const { installOk, keysGenerated, binariesReady } = outcome
 
       await warnDockerUnavailableForProvider(result.provider, asked.daemon)
 
@@ -311,46 +305,14 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
 
     const deps = await resolveDependencyVersions()
 
-    const setupSpinner = p.spinner()
-    setupSpinner.start("Setting up your project...")
-
     scaffold(dir, result, deps)
 
-    let installOk = !doInstall
-    if (doInstall) {
-      setupSpinner.start(`Installing dependencies with ${result.packageManager}...`)
-      installOk = runInstall(dir, result.packageManager)
-      setupSpinner.stop(installOk ? "Dependencies installed." : "Dependency install failed.")
-    }
-
-    let keysGenerated = !doKeys
-    if (doKeys) {
-      setupSpinner.start("Generating API keys...")
-      keysGenerated = writeKeys(dir)
-      setupSpinner.stop(keysGenerated ? "API keys generated." : "Could not generate API keys.")
-    }
-
-    let binariesReady = false
-    if (doInstall && installOk) {
-      setupSpinner.start("Preparing component binaries...")
-      binariesReady = await ensureInitBinaries(dir)
-      setupSpinner.stop(binariesReady ? "Component binaries ready." : "Some binaries are missing.")
-    }
-
-    if (doInstall && !installOk) {
-      error(
-        `Dependency install failed. Run "${result.packageManager} install" in the project directory, then "supatype update".`,
-      )
-      process.exit(1)
-    }
-    if (doKeys && !keysGenerated) {
-      error("Could not generate API keys. Check the project has a .env, then run `supatype keys`.")
-      process.exit(1)
-    }
-    if (doInstall && installOk && !binariesReady) {
-      error("Component binaries could not be downloaded. Run `supatype update` in the project directory.")
-      process.exit(1)
-    }
+    const wants: SetupWants = { install: doInstall, keys: doKeys }
+    const outcome = await withStepView((view) => runSetupSteps(dir, result.packageManager, wants, view))
+    exitOnFailedSetup(outcome, wants, result.packageManager)
+    const { installOk, binariesReady } = outcome
+    // Keys nobody asked for are not a step left to do.
+    const keysGenerated = outcome.keysGenerated || !doKeys
 
     await warnDockerUnavailableForProvider(result.provider)
 
@@ -655,16 +617,70 @@ function detectInvokingPackageManager(): PackageManager {
   return "npm"
 }
 
-function runInstall(dir: string, pm: PackageManager): boolean {
-  const res = spawnSync(pm, ["install"], {
-    cwd: dir,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  })
-  if (res.status !== 0 || res.error) {
-    return false
+/** Which setup steps init was asked to run. */
+interface SetupWants {
+  install: boolean
+  keys: boolean
+}
+
+/** What init's setup steps did: each true only when it ran and succeeded. */
+interface SetupOutcome {
+  installOk: boolean
+  keysGenerated: boolean
+  binariesReady: boolean
+}
+
+/**
+ * The view init's setup steps are shown on: a spinner in a terminal, the flow's or the command
+ * chrome's (ui/progress.ts decides, as for every spinner), and plain start and done lines otherwise.
+ */
+async function withStepView<T>(run: (view: StepView) => Promise<T>): Promise<T> {
+  return withProgressView((spinner) => run(spinner === undefined ? plainStepView() : spinnerStepView(spinner)))
+}
+
+/** Install, then keys, then the component binaries an install makes possible, each timed on `view`. */
+async function runSetupSteps(dir: string, pm: PackageManager, wants: SetupWants, view: StepView): Promise<SetupOutcome> {
+  const installOk = wants.install && (await runTimedStep(view, installStep(dir, pm, view.live)))
+  const keysGenerated =
+    wants.keys &&
+    (await runTimedStep(view, {
+      label: "Generating API keys",
+      run: async () => writeKeys(dir),
+      done: (ok) => (ok ? "API keys generated" : "Could not generate API keys"),
+    }))
+  const binariesReady =
+    installOk &&
+    (await runTimedStep(view, {
+      label: "Preparing component binaries",
+      run: () => ensureInitBinaries(dir),
+      done: (ok) => (ok ? "Component binaries ready" : "Some binaries are missing"),
+    }))
+  return { installOk, keysGenerated, binariesReady }
+}
+
+/** The install step: in a terminal its output is read for the spinner, otherwise it passes through. */
+function installStep(dir: string, pm: PackageManager, live: boolean): TimedStep<boolean> {
+  return {
+    label: `Installing dependencies with ${pm}`,
+    run: (detail) => installDependencies(dir, installCommand(pm), live ? detail : undefined),
+    done: (ok) => (ok ? "Dependencies installed" : "Dependency install failed"),
   }
-  return true
+}
+
+/** Stop init, naming what to run, when a setup step it was asked for failed. */
+function exitOnFailedSetup(outcome: SetupOutcome, wants: SetupWants, pm: PackageManager): void {
+  if (wants.install && !outcome.installOk) {
+    error(`Dependency install failed. Run "${pm} install" in the project directory, then "supatype update".`)
+    process.exit(1)
+  }
+  if (wants.keys && !outcome.keysGenerated) {
+    error("Could not generate API keys. Check the project has a .env, then run `supatype keys`.")
+    process.exit(1)
+  }
+  if (wants.install && !outcome.binariesReady) {
+    error("Component binaries could not be downloaded. Run `supatype update` in the project directory.")
+    process.exit(1)
+  }
 }
 
 async function ensureInitBinaries(dir: string): Promise<boolean> {
@@ -941,7 +957,7 @@ function tsConfigTemplate(opts: ScaffoldOptions): string {
   lines.push(`  server: {`)
   lines.push(`    mode: "${serverMode}",`)
   // The native server listens on server.port. A docker project's API is on the gateway port in
-  // .env (SUPATYPE_KONG_PORT), so writing 54321 there only named a port nothing listened on.
+  // .env (SUPATYPE_KONG_PORT), so writing a server port there only named a port nothing listened on.
   if (opts.provider === "native") lines.push(`    port: ${NATIVE_SERVER_PORT},`)
   if (serverMode === "standalone") {
     lines.push(`    domain: "${opts.domain ?? ""}",  // e.g. "api.example.com" for ACME TLS`)

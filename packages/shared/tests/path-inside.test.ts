@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path"
 import { describe, expect, it } from "vitest"
-import { pathInside, resolveInside } from "../src/index.js"
+import { pathInside, resolveInside, toPosixPath } from "../src/index.js"
 
 // Paths are built with resolve() and join() so each case reads the same on POSIX and on Windows.
 const ROOT = resolve("/srv/app")
@@ -48,5 +48,12 @@ describe("resolveInside()", () => {
   it("is undefined for the root itself", () => {
     expect(resolveInside(ROOT, ".")).toBeUndefined()
     expect(resolveInside(ROOT, "a/..")).toBeUndefined()
+  })
+})
+
+describe("toPosixPath()", () => {
+  it("writes this platform's separator as a forward slash", () => {
+    expect(toPosixPath(join("edge", "_shared", "context.ts"))).toBe("edge/_shared/context.ts")
+    expect(toPosixPath("already/posix")).toBe("already/posix")
   })
 })

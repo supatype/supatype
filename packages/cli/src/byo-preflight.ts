@@ -7,11 +7,10 @@
  * lists every gap with the statement or step that closes it.
  */
 
-import pg from "pg"
 import { isJsonObject } from "@supatype/shared"
 import { apiRoleSql } from "./db-preflight.js"
 import { astModels, objectAt } from "./ast-read.js"
-import { queryRows, type UnknownRow } from "./db-rows.js"
+import { queryRows, withDatabase, type UnknownRow } from "./db-rows.js"
 
 /** The roles PostgREST switches to per request, which the engine grants to. */
 const API_ROLES = ["anon", "authenticated", "service_role"] as const
@@ -82,11 +81,7 @@ export function byoGapLines(gaps: ByoGaps): string[] {
 
 /** The gaps of the database at `databaseUrl` for pushing `ast`, as lines to print. */
 export async function byoPreflight(databaseUrl: string, ast: unknown): Promise<string[]> {
-  const client = new pg.Client({ connectionString: databaseUrl })
-  await client.connect()
-  try {
-    return byoGapLines(await findByoGaps((sql, params) => queryRows(client, sql, params), ast))
-  } finally {
-    await client.end().catch(() => undefined)
-  }
+  return withDatabase(databaseUrl, async (client) =>
+    byoGapLines(await findByoGaps((sql, params) => queryRows(client, sql, params), ast)),
+  )
 }

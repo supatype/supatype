@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { startNativeRealtime, type NativeRealtimeOptions } from "../src/native-realtime.js"
+import { decodingProblem } from "../src/db-preflight.js"
 import type { RealtimeLaunchSpec } from "../src/realtime-launch.js"
 import type { ProcessManager } from "../src/process-manager.js"
 import { isJsonObject } from "@supatype/shared"
@@ -149,4 +150,52 @@ describe("startNativeRealtime", () => {
     await vi.waitFor(() => expect(manifest()).toEqual({ realtime_enabled: false }), { timeout: 5_000 })
     expect(warnings.join("\n")).toMatch(/Realtime exited/)
   }, 10_000)
+})
+
+/**
+ * Local test round 3: realtime's silent exit was explained as "on a Postgres without logical
+ * decoding" while `wal_level` was logical; the real cause was no wal2json. Dev now asks the database
+ * the way `db check` does and names what it found.
+ */
+describe("a realtime that exits without a word", () => {
+  it("names the decoding check's own finding", async () => {
+    const check = async (): Promise<string | undefined> => "the wal2json output plugin is not installed on this server"
+    expect(await startNativeRealtime(options(), fakeRealtime("process.exit(0)\n"), check)).toBeNull()
+    const said = warnings.join("\n")
+    expect(said).toContain("the wal2json output plugin is not installed on this server")
+    expect(said).not.toContain("without logical decoding")
+  })
+
+  it("does not blame decoding when the database can decode", async () => {
+    const check = async (): Promise<string | undefined> => undefined
+    expect(await startNativeRealtime(options(), fakeRealtime("process.exit(0)\n"), check)).toBeNull()
+    expect(warnings.join("\n")).toContain("logical decoding works on this Postgres")
+  })
+})
+
+describe("decodingProblem", () => {
+  /** A database answering `SHOW wal_level` with `level`, and the slot probe with `slotError`. */
+  function database(level: string, slotError?: { code: string }): (sql: string) => Promise<Record<string, unknown>[]> {
+    return async (sql) => {
+      if (sql.startsWith("SHOW wal_level")) return [{ wal_level: level }]
+      if (sql.includes("pg_create_logical_replication_slot") && slotError !== undefined) {
+        throw Object.assign(new Error("could not access file"), slotError)
+      }
+      return [{}]
+    }
+  }
+
+  it("names wal_level when it is not logical", async () => {
+    expect(await decodingProblem(database("replica"))).toBe('wal_level is "replica", not logical')
+  })
+
+  it("names a missing wal2json when wal_level is logical", async () => {
+    expect(await decodingProblem(database("logical", { code: "58P01" }))).toBe(
+      "the wal2json output plugin is not installed on this server",
+    )
+  })
+
+  it("finds nothing when a wal2json slot can be made", async () => {
+    expect(await decodingProblem(database("logical"))).toBeUndefined()
+  })
 })

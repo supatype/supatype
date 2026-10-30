@@ -7,7 +7,7 @@ import { nextSteps } from "../ui/next-steps.js"
 import { isArrayOf, isNumber, isShape, isString, optional, readJson } from "@supatype/shared"
 import { objectAt } from "../ast-read.js"
 import { parsePackageJson, type PackageJson } from "../package-json.js"
-import { errorMessage } from "../error-message.js"
+import { errorMessage, responseFailureText } from "../error-message.js"
 
 /**
  * Said wherever a plugin could look like it is in use. Nothing loads one yet (not the engine, the
@@ -109,7 +109,7 @@ async function searchPlugins(query: string): Promise<void> {
     })
 
     if (!res.ok) {
-      error(`Search failed: ${res.statusText}`)
+      error(`Search failed: ${await responseFailureText(res)}`)
       return
     }
 

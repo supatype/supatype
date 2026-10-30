@@ -55,7 +55,7 @@ describe("every Deno the CLI starts", () => {
   })
 
   it("is told NO_COLOR by functions serve", () => {
-    expect(denoServeEnv(dir, join(dir, "functions"), "8001", config)["NO_COLOR"]).toBe("1")
+    expect(denoServeEnv(dir, join(dir, "functions"), config, { port: "8001", host: "127.0.0.1" })["NO_COLOR"]).toBe("1")
   })
 
   it("is told NO_COLOR in the compose functions worker", () => {

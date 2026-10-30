@@ -229,6 +229,73 @@ describe("databaseStateToSchemaScaffold()", () => {
 })
 
 /**
+ * Decision D5 (local test round 3): a pulled table's draft gave `Public` for every access rule,
+ * whatever its RLS policies were, so a draft pushed unchanged opened the table to everyone. The
+ * draft is closed instead, with a TODO naming each policy found on the table.
+ */
+describe("databaseStateToSchemaScaffold() access rules", () => {
+  const posts = { name: "posts", columns: [{ name: "id", dataType: "uuid", udtName: "uuid", nullable: false }] }
+  const policies = [
+    { table: "posts", name: "posts_read_all", command: "SELECT" },
+    { table: "posts", name: "posts_owner_write", command: "ALL" },
+    { table: "other", name: "other_read", command: "SELECT" },
+  ]
+
+  it("drafts every rule closed, never Public", () => {
+    const draft = databaseStateToSchemaScaffold({ tables: [posts], rlsPolicies: policies })
+    expect(draft).not.toMatch(/: Public/)
+    for (const op of ["read", "create", "update", "delete"]) expect(draft).toContain(`    ${op}: Private`)
+  })
+
+  it("names each RLS policy on the table in a TODO, and no other table's", () => {
+    const draft = databaseStateToSchemaScaffold({ tables: [posts], rlsPolicies: policies })
+    expect(draft).toContain('// TODO: closed until you write its rules. RLS policies on "posts": "posts_read_all" (SELECT), "posts_owner_write" (ALL).')
+    expect(draft).not.toContain("other_read")
+  })
+
+  // A policy is named by whoever wrote it, and a name can hold a newline or `*/`. Written raw into
+  // the one-line comment, the rest of the name became code and the scaffold did not parse.
+  it("keeps the TODO one line whatever a policy's name or command holds", () => {
+    const NL = String.fromCharCode(10)
+    const odd = [{ table: "posts", name: `line one${NL}read: Public */ x`, command: `q${NL}z` }]
+    const draft = databaseStateToSchemaScaffold({ tables: [posts], rlsPolicies: odd })
+    const todo = draft.split(NL).find((line) => line.includes("TODO: closed"))
+    const escaped = (text: string): string => JSON.stringify(text)
+    expect(todo).toBe(
+      `  // TODO: closed until you write its rules. RLS policies on "posts": ${escaped(odd[0]!.name)} (${escaped(odd[0]!.command)}).`,
+    )
+    expect(draft).not.toMatch(/^read: Public/m)
+  })
+
+  // JSON.stringify leaves U+2028 and U+2029 as they are, and TypeScript ends a `//` comment at
+  // either, so a name holding one still put the rest of it into the scaffold as code.
+  it("keeps the TODO one line when a policy's name holds a line or paragraph separator", () => {
+    const separators = [String.fromCharCode(0x2028), String.fromCharCode(0x2029)]
+    const odd = separators.map((sep, i) => ({ table: "posts", name: `p${i}${sep}read: Public`, command: "r" }))
+    const draft = databaseStateToSchemaScaffold({ tables: [posts], rlsPolicies: odd })
+    for (const sep of separators) expect(draft).not.toContain(sep)
+    const todo = draft.split(String.fromCharCode(10)).find((line) => line.includes("TODO: closed"))
+    expect(todo).toContain(`"p0${String.fromCharCode(92)}u2028read: Public" (SELECT)`)
+    expect(todo).toContain(`"p1${String.fromCharCode(92)}u2029read: Public" (SELECT)`)
+  })
+
+  // An index's columns went into the scaffold as `"${name}"`, so a column named with a quote
+  // closed the string early. Each is a JSON string now, which TypeScript reads as the same name.
+  it("writes an index's column names as valid string literals", () => {
+    const quoted = 'say "hi"'
+    const table = { name: "posts", columns: [{ name: quoted, dataType: "text", udtName: "text", nullable: false }] }
+    const indexes = [{ table: "posts", name: "i", columns: [quoted, "id"], unique: false, method: "btree", isPrimary: false }]
+    const draft = databaseStateToSchemaScaffold({ tables: [table], indexes })
+    expect(draft).toContain(`{ fields: [${JSON.stringify(quoted)}, "id"] },`)
+  })
+
+  it("says when the table has no RLS policy", () => {
+    const draft = databaseStateToSchemaScaffold({ tables: [posts] })
+    expect(draft).toContain('// TODO: closed until you write its rules. No RLS policy was found on "posts".')
+  })
+})
+
+/**
  * #19: a uuid column with a foreign key to `auth.users(id)` is a user's id, and the draft says so
  * with SupatypeAuthUserId and the key's delete rule. The engine reports the referenced schema from
  * 0.7.0 on; an older engine names only the table, and `users` in `auth` cannot be told from any

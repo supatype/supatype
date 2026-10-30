@@ -11,7 +11,7 @@
 import { databaseUrlWithPort, DEV_DB_PORT_ENV } from "./db-port.js"
 import { shellEnvInt } from "./env-file.js"
 import { setForThisRunOnly, setInShell } from "./shell-ports.js"
-import { databaseUrlState, writeCliDatabaseUrl, type DatabaseUrlState } from "./database-url-owner.js"
+import { databaseUrlState, reconcileNativeDatabaseUrl, writeCliDatabaseUrl, type DatabaseUrlState } from "./database-url-owner.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 
@@ -39,8 +39,7 @@ interface ShellOnlyDbPort {
  * machine on another port. Not when the shell sets `DATABASE_URL` too: that one is the shell's. Not
  * for a hand-written URL in `.env` either: that one is the person's, and always wins.
  */
-function shellOnlyDbPort(cwd: string, shell: NodeJS.ProcessEnv): ShellOnlyDbPort | null {
-  const state = databaseUrlState(cwd)
+function shellOnlyDbPort(state: DatabaseUrlState, shell: NodeJS.ProcessEnv): ShellOnlyDbPort | null {
   const port = shellEnvInt(DEV_DB_PORT_ENV, shell)
   if (port === null || !setForThisRunOnly(shell, state.env, DEV_DB_PORT_ENV)) return null
   if (setInShell(shell, "DATABASE_URL") || state.owner !== "cli") return null
@@ -48,25 +47,46 @@ function shellOnlyDbPort(cwd: string, shell: NodeJS.ProcessEnv): ShellOnlyDbPort
   return move === null ? null : { port, from: move.from, url: move.url, state }
 }
 
-/** Ask, or say, what keeps a dev database port given only in the shell; see the file's comment. */
+/**
+ * Ask, or say, what keeps a dev database port given only in the shell; see the file's comment.
+ * True when it wrote `.env`, so a caller holding `state` knows to read it again.
+ */
 export async function offerToSaveShellDbPort(
   cwd: string,
   ask: DbPortAsk = TERMINAL,
   shell: NodeJS.ProcessEnv = process.env,
-): Promise<void> {
-  const change = shellOnlyDbPort(cwd, shell)
-  if (change === null) return
+  state: DatabaseUrlState = databaseUrlState(cwd),
+): Promise<boolean> {
+  const change = shellOnlyDbPort(state, shell)
+  if (change === null) return false
   const line = `${DEV_DB_PORT_ENV}=${change.port}`
   const situation = `${line} is set in this shell only, so commands run from other shells read port ${change.from} from .env's DATABASE_URL.`
   if (!ask.interactive()) {
     console.log(`[supatype] ${situation} To keep it, add this line to .env: ${line}`)
-    return
+    return false
   }
   const save = await ask.confirm(`${situation} Save port ${change.port} to .env?`)
   if (save) {
     writeCliDatabaseUrl(cwd, change.url, { [DEV_DB_PORT_ENV]: String(change.port) }, change.state)
     console.log(`[supatype] Saved ${line} to .env, and DATABASE_URL port ${change.from} -> ${change.port}.`)
-    return
+    return true
   }
   console.log(`[supatype] Using port ${change.port} for this run only. .env keeps port ${change.from}.`)
+  return false
+}
+
+/**
+ * Native dev's `DATABASE_URL`: a port only the shell gives is offered to `.env` first, as Docker dev
+ * offers it (local test round 3, B1), and then `.env`'s URL, when the CLI wrote it, names the native
+ * database. Called before any host command reads the URL, so a yes is what the rest of the run sees.
+ */
+export async function reconcileNativeDevDatabaseUrl(
+  cwd: string,
+  nativeDsn: string,
+  ask: DbPortAsk = TERMINAL,
+  shell: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const state = databaseUrlState(cwd)
+  const wrote = await offerToSaveShellDbPort(cwd, ask, shell, state)
+  await reconcileNativeDatabaseUrl(cwd, nativeDsn, shell, wrote ? databaseUrlState(cwd) : state)
 }

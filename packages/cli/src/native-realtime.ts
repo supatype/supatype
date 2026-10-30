@@ -5,6 +5,7 @@ import { errorMessage } from "./error-message.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { resolveRealtimeLaunch, type RealtimeLaunchSpec } from "./realtime-launch.js"
 import { patchRouteManifest } from "./route-manifest.js"
+import { logicalDecodingProblem } from "./db-preflight.js"
 
 export interface NativeRealtimeOptions {
   config: SupatypeProjectConfig
@@ -21,6 +22,9 @@ export interface NativeRealtimeOptions {
 }
 
 type ResolveLaunch = (config: SupatypeProjectConfig, cwd: string) => Promise<RealtimeLaunchSpec>
+
+/** Why the database cannot give realtime logical decoding, or undefined (db-preflight.ts). */
+type CheckDecoding = (databaseUrl: string) => Promise<string | undefined>
 
 /** What realtime's `/health/ready` said, or that it said nothing. */
 type RealtimeState =
@@ -68,6 +72,7 @@ function spawnRealtime(launch: RealtimeLaunchSpec, opts: NativeRealtimeOptions, 
 export async function startNativeRealtime(
   opts: NativeRealtimeOptions,
   resolveLaunch: ResolveLaunch = resolveRealtimeLaunch,
+  checkDecoding: CheckDecoding = logicalDecodingProblem,
 ): Promise<ProcessManager | null> {
   const watch = watchExit(opts.manifestPath)
   let proc: ProcessManager
@@ -78,9 +83,13 @@ export async function startNativeRealtime(
   }
   const timeoutMs = opts.readyTimeoutMs ?? READY_TIMEOUT_MS
   const state = await firstAnswer(opts.url, timeoutMs, watch.gone)
-  if (state.kind === "exited" || state.kind === "silent") {
+  if (state.kind === "exited") {
     await proc.stop()
-    return realtimeNotRunning(opts, notRunningReason(state.kind, opts.url, timeoutMs))
+    return realtimeNotRunning(opts, await exitedReason(opts.databaseUrl, checkDecoding))
+  }
+  if (state.kind === "silent") {
+    await proc.stop()
+    return realtimeNotRunning(opts, `nothing answered at ${opts.url}/health/ready within ${Math.round(timeoutMs / 1000)}s.`)
   }
   watch.announced()
   announceRealtime(opts, state)
@@ -155,10 +164,21 @@ function unsupportedReason(body: unknown): string | undefined {
   return typeof body["reason"] === "string" ? body["reason"] : "the database cannot stream changes"
 }
 
-function notRunningReason(kind: "exited" | "silent", url: string, timeoutMs: number): string {
-  return kind === "exited"
-    ? "it exited as it started, without a word. A realtime build from before /health/ready exits like this on a Postgres without logical decoding; `supatype update` fetches a current one."
-    : `nothing answered at ${url}/health/ready within ${Math.round(timeoutMs / 1000)}s.`
+/**
+ * Why realtime exited as it started, from asking the database as `supatype db check` does. It was
+ * blamed on a Postgres without logical decoding whatever the database said, while `wal_level` was
+ * logical and the cause was a missing wal2json (local test round 3).
+ */
+async function exitedReason(databaseUrl: string, checkDecoding: CheckDecoding): Promise<string> {
+  const exited = "it exited as it started, without a word"
+  try {
+    const problem = await checkDecoding(databaseUrl)
+    return problem === undefined
+      ? `${exited}, and logical decoding works on this Postgres. \`supatype update\` fetches a current realtime.`
+      : `${exited}. This Postgres cannot stream changes to it: ${problem}.`
+  } catch (err) {
+    return `${exited}, and logical decoding could not be checked: ${errorMessage(err)}.`
+  }
 }
 
 /** Record and say that realtime is serving, and how much of it. */

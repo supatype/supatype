@@ -94,3 +94,30 @@ describe("the locally built server image", () => {
     expect(envOf(cwd)).not.toContain(LOCAL_SERVER_DOCKER_IMAGE)
   })
 })
+
+/**
+ * Local test round 3, N1: Docker dev removed a hand-set `SUPATYPE_SERVER_IMAGE=supatype/server:it-r3`
+ * whenever the config pinned no server and asked for no local build, so the stack quietly ran the
+ * published server. Only the local-dev image this CLI wrote is removed.
+ */
+describe("a server image set by hand in .env", () => {
+  const unpinned = (): { cwd: string; config: SupatypeProjectConfig } => {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-hand-image-"))
+    dirs.push(cwd)
+    return { cwd, config: projectConfig({ database: { provider: "docker" } }) }
+  }
+
+  it("is kept by docker dev when the config pins no server", () => {
+    const { cwd, config } = unpinned()
+    writeFileSync(join(cwd, ".env"), "JWT_SECRET=x\nSUPATYPE_SERVER_IMAGE=supatype/server:it-r3\n", "utf8")
+    upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18473)
+    expect(envOf(cwd)).toContain("SUPATYPE_SERVER_IMAGE=supatype/server:it-r3")
+  })
+
+  it("is removed when it is the local-dev image and nothing asks for it any more", () => {
+    const { cwd, config } = unpinned()
+    writeFileSync(join(cwd, ".env"), `JWT_SECRET=x\nSUPATYPE_SERVER_IMAGE=${LOCAL_SERVER_DOCKER_IMAGE}\n`, "utf8")
+    upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18473)
+    expect(envOf(cwd)).not.toContain("SUPATYPE_SERVER_IMAGE")
+  })
+})

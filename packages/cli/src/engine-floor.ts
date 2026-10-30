@@ -67,6 +67,71 @@ export const ENGINE_MIN_FOR_SEED = "0.4.0"
 export const ENGINE_MIN_FOR_GENERATED_COLUMNS = "0.7.0"
 
 /**
+ * The oldest engine this CLI runs at all (decision D3, local test round 3, N9). A bucket that names
+ * no access mode leaves `public` out of the schema, and engine 0.7.0 fails on it with
+ * ``missing field `public` ``, which says nothing about the cause.
+ *
+ * Unconditional, unlike the floors above: every schema this CLI writes is read by the engine, and
+ * a bucket is not something a project can be expected to know it must avoid.
+ */
+export const ENGINE_MIN_FOR_CLI = "0.8.0"
+
+/** A version as a release names it (`0.7.0`, `v0.8.0-rc.1`), not a tag such as `it-r3` or `latest`. */
+function releaseVersion(text: string): string | undefined {
+  return /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$/.exec(text.trim())?.[1]
+}
+
+/**
+ * The version an engine image's tag names: `supatype/schema-engine:v0.7.0` gives `0.7.0`. A digest
+ * (`@sha256:...`) is dropped first, since its own `:` is not the tag's, and a registry's port
+ * (`localhost:5000/...`) comes before the last `/`, so only a `:` after that starts a tag.
+ */
+export function engineImageVersion(image: string): string | undefined {
+  const named = image.split("@")[0] ?? ""
+  const colon = named.lastIndexOf(":")
+  if (colon <= named.lastIndexOf("/")) return undefined
+  return releaseVersion(named.slice(colon + 1))
+}
+
+/**
+ * Refuse an engine older than {@link ENGINE_MIN_FOR_CLI}, naming where its version came from
+ * (`from`) and what to change. A version that is not a release's (a binary built from source, an
+ * image tagged `it-r3`) is the developer's own choice and passes.
+ */
+export function assertEngineVersionSupported(
+  version: string | undefined,
+  from: string,
+  runs: "binary" | "image",
+): void {
+  const release = version === undefined ? undefined : releaseVersion(version)
+  if (release === undefined || compareVersions(release, ENGINE_MIN_FOR_CLI) >= 0) return
+  // Only a compose push runs an image: native dev and the host binary never read SUPATYPE_ENGINE_IMAGE.
+  const image = runs === "image" ? ", or name a newer engine image in SUPATYPE_ENGINE_IMAGE" : ""
+  throw engineTooOld(release, from, `Pin versions.engine to ${ENGINE_MIN_FOR_CLI} or newer in supatype.config.ts${image}.`)
+}
+
+/** The one refusal for an engine older than {@link ENGINE_MIN_FOR_CLI}, with what to do about it. */
+function engineTooOld(version: string, from: string, remedy: string): Error {
+  return new Error(
+    `This CLI needs Supatype engine ${ENGINE_MIN_FOR_CLI} or newer, and ${from} is engine ${version}, which ` +
+      `cannot read the schema this CLI writes. ${remedy}`,
+  )
+}
+
+/**
+ * Refuse an engine that itself reports a version older than {@link ENGINE_MIN_FOR_CLI}: its
+ * `capabilities` answer, its `--version`, or a server's answer for its engine. The fast path above
+ * reads the pin or the image tag; a tag such as `latest` names no version, so the engine that runs
+ * is asked too (engine-ownership-gate.ts). A development build reports the next release with `-dev`
+ * and passes. An answer with no version says nothing to compare, and passes.
+ */
+export function assertReportedEngineVersion(reported: string | undefined, from: string, remedy: string): void {
+  const version = reported === undefined ? undefined : /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/.exec(reported)?.[1]
+  if (version === undefined || compareVersions(version, ENGINE_MIN_FOR_CLI) >= 0) return
+  throw engineTooOld(version, from, remedy)
+}
+
+/**
  * Compare two dotted versions numerically. Returns <0, 0 or >0.
  *
  * Pre-release suffixes are dropped before comparing, so `0.2.0-rc.1` counts as `0.2.0`. That is

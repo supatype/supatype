@@ -7,6 +7,8 @@
  */
 
 import { isJsonObject } from "@supatype/shared"
+import { errorMessage } from "./error-message.js"
+import type { Client } from "pg"
 
 /** One row, keyed by column name, with values not yet checked. */
 export type UnknownRow = Record<string, unknown>
@@ -26,4 +28,30 @@ export function toUnknownRows(rows: unknown[]): UnknownRow[] {
 export async function queryRows(db: RowQueryable, text: string, values: unknown[] = []): Promise<UnknownRow[]> {
   const { rows } = await db.query(text, values)
   return toUnknownRows(rows)
+}
+
+/** A database the CLI could not connect to, apart from a failure once connected. */
+export class DatabaseConnectFailed extends Error {
+  override readonly name = "DatabaseConnectFailed"
+}
+
+/**
+ * Connect to `url`, run `use` with the client, and end the connection whatever happens. `pg` is
+ * loaded here, on first use, as each caller loaded it before. A failure to connect throws
+ * {@link DatabaseConnectFailed}, so a caller can say so in its own words.
+ */
+export async function withDatabase<T>(url: string, use: (client: Client) => Promise<T>): Promise<T> {
+  const { default: pg } = await import("pg")
+  const client = new pg.Client({ connectionString: url })
+  try {
+    await client.connect()
+  } catch (err) {
+    await client.end().catch(() => undefined)
+    throw new DatabaseConnectFailed(errorMessage(err), { cause: err })
+  }
+  try {
+    return await use(client)
+  } finally {
+    await client.end().catch(() => undefined)
+  }
 }

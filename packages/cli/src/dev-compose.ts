@@ -51,6 +51,7 @@ import {
   writeCliDatabaseUrl,
 } from "./database-url-owner.js"
 import { degraded } from "./strict.js"
+import { ENGINE_FALLBACK, generatedFilesEngine, type EngineChoice } from "./generated-files-engine.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
 import { consentRefusal, reportDevPushFailure } from "./push-refusal.js"
@@ -84,7 +85,6 @@ import {
   isDiffResult,
   isEnginePushResult,
   isGenerateAnswer,
-  isObjectAnswer,
 } from "./engine-answers.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
@@ -118,7 +118,7 @@ import {
   engineCapabilities,
   identityColumnsNeed,
   OVERWRITE_DRIFT_NEED,
-  probeCapabilities,
+  checkedCapabilities,
   type Capabilities,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
@@ -390,23 +390,32 @@ export function upsertDevComposeEnv(
   // and its replacement precisely enough to fix by hand.
   const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
   // A port the shell gave for this run is the run's, not the project's (DR9), unless `.env` holds it too.
-  const { persist, runOnly } = splitShellPortUpdates(updates, process.env, readEnvFile(cwd))
+  const dotEnv = readEnvFile(cwd)
+  const { persist, runOnly } = splitShellPortUpdates(updates, process.env, dotEnv)
   applyForThisRun(runOnly)
   upsertEnvFile(cwd, persist, {
     removeManaged: removeImageKeys,
     managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
-    // A local image left in `.env` after the project stopped asking for one would keep pointing
-    // compose at a stale build, and it carries no marker for `removeManaged` to act on.
-    remove: [
-      ...retiredKeys,
-      ...(!wantsLocalServer && !("SUPATYPE_SERVER_IMAGE" in imagePins)
-        ? ["SUPATYPE_SERVER_IMAGE"]
-        : []),
-    ],
+    remove: [...retiredKeys, ...staleLocalServerImage(dotEnv["SUPATYPE_SERVER_IMAGE"], wantsLocalServer, imagePins)],
   })
   if (devDbPort !== undefined && !usesExternalDatabase(config)) {
     writeDevStackDatabaseUrl(cwd, devDbPort, runOnly.SUPATYPE_DEV_DB_PORT !== undefined)
   }
+}
+
+/**
+ * `SUPATYPE_SERVER_IMAGE` to remove from `.env`: the local-dev image this CLI wrote, once the project
+ * stops asking for a local build and pins no server. It carries no marker for `removeManaged` to act
+ * on, and left behind it would keep pointing compose at a stale build. Any other value was set by
+ * hand, `supatype/server:it-r3` for instance, and is kept (local test round 3, N1).
+ */
+function staleLocalServerImage(
+  current: string | undefined,
+  wantsLocalServer: boolean,
+  imagePins: Record<string, string>,
+): string[] {
+  if (wantsLocalServer || "SUPATYPE_SERVER_IMAGE" in imagePins) return []
+  return current?.trim() === LOCAL_SERVER_DOCKER_IMAGE ? ["SUPATYPE_SERVER_IMAGE"] : []
 }
 
 /**
@@ -660,9 +669,8 @@ let _composePushQueued = false
 /**
  * Regenerate everything derived from the schema once a push has applied it: the AST-derived files,
  * then the types and admin config from the engine. Never called for a push that was refused or
- * failed. A docker project with no `overrides.engine` uses its own engine image, the one that
- * pushed (A5-N3); otherwise the host binary, falling back to the image when the binary cannot be
- * fetched.
+ * failed. The engine is the one `supatype generate` uses, the host program, with the project's
+ * image only when that cannot be fetched (generated-files-engine.ts).
  */
 async function refreshSchemaArtifacts(
   cwd: string,
@@ -670,16 +678,18 @@ async function refreshSchemaArtifacts(
   ast: unknown,
 ): Promise<void> {
   writeAstDerivedArtifacts(cwd, config, ast)
-  const adminConfigPath = join(cwd, ".supatype", "admin-config.json")
-  let engine: ComposeEngine | undefined
+  // The client and augmentation need no engine, so no engine problem keeps them from being written.
+  writeDevAstOutputs(cwd, ast, config, "")
+  let choice: EngineChoice
   try {
-    engine = await projectComposeEngine(cwd, config)
+    choice = await generatedFilesEngine(cwd, config)
   } catch (err) {
-    degraded("The project's engine image could not be resolved, admin config and types not refreshed", errorMessage(err))
+    degraded("No engine could write the admin config and types, so they were not refreshed", errorMessage(err))
     return
   }
-  if (engine === undefined && !(await hostEngineOrComposeFallback(cwd, config, ast, adminConfigPath))) return
-  await writeEngineArtifacts(cwd, config, ast, adminConfigPath, engine)
+  await writeEngineArtifacts(cwd, config, ast, join(cwd, ".supatype", "admin-config.json"), choice.engine)
+  // Said after writing, so SUPATYPE_STRICT fails the run with the files written and the true reason.
+  if (choice.fellBack !== undefined) degraded(ENGINE_FALLBACK, choice.fellBack)
 }
 
 /** The files read straight off the applied AST, written whatever happens with the generator afterwards. */
@@ -697,9 +707,8 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // And the context module, on the same terms. `init` and `functions new` wrote it and nothing
   // else did, so a project that already had functions when the two-argument contract landed never
   // received one: its handlers had no `FunctionContext` to import.
-  if (refreshFunctionsContext(cwd, config)) {
-    console.log("[supatype] Function context type written to functions/_shared/context.ts")
-  }
+  const contextModule = refreshFunctionsContext(cwd, config)
+  if (contextModule !== undefined) console.log(`[supatype] Function context type written to ${contextModule}`)
   if (syncManifestHooks(cwd, ast)) {
     console.log("[supatype] Hook and validator maps written to .supatype/manifest.json")
   }
@@ -735,50 +744,7 @@ function syncDatabaseUrlToStack(cwd: string, config: SupatypeProjectConfig): voi
   if (sync !== null) console.log(`[supatype] ${databaseUrlSyncMessage(sync)}`)
 }
 
-/**
- * True when the host engine binary is ready. When it is not, the in-compose engine writes the
- * admin config and types instead and this answers false, having said which happened.
- */
-async function hostEngineOrComposeFallback(
-  cwd: string,
-  config: SupatypeProjectConfig,
-  ast: unknown,
-  adminConfigPath: string,
-): Promise<boolean> {
-  try {
-    await ensureEngine()
-    return true
-  } catch (err) {
-    // A project that named its engine gets that engine or an error, never a stand-in.
-    if (hasEngineOverride(config)) {
-      degraded("overrides.engine could not be used, admin config and types not refreshed", errorMessage(err))
-      return false
-    }
-    // The host engine is a CDN download and this machine could not complete it. The schema is
-    // already applied, so fall back to the engine in compose rather than giving up: without
-    // admin-config.json Studio reports "No schema has been pushed yet" on a stack whose schema is
-    // entirely live, which reads as a failed push rather than a missing binary.
-    const paths = selfHostComposePaths(cwd)
-    const composeProject = composeProjectName(config.project.name)
-    const wrote = await generateViaComposeEngine(paths, cwd, composeProject, config, ast, adminConfigPath)
-      .catch(() => false)
-    // Reported through `degraded` rather than warned, so a run that takes this path says so where
-    // CI looks, rather than in a line that scrolls past.
-    const message = errorMessage(err)
-    if (wrote) {
-      degraded("Host engine unavailable, used the in-compose engine instead", message)
-    } else {
-      degraded(
-        "Host engine unavailable, admin config and types not refreshed",
-        `${message}\n[supatype] Studio will report no schema until this succeeds, even though the ` +
-          "schema is applied. Retry with the stack up, or run `supatype push`.",
-      )
-    }
-    return false
-  }
-}
-
-/** The types, the AST outputs and the admin config, from `engine` (the host binary when undefined). */
+/** The types, the seed builder and the admin config, from `engine` (the host binary when undefined). */
 async function writeEngineArtifacts(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -800,7 +766,6 @@ async function writeEngineArtifacts(
     console.warn(`[supatype] Type generation failed: ${errorMessage(err)}`)
   }
 
-  writeDevAstOutputs(cwd, ast, config, "")
   await writeDevSeedBuilder(cwd, config, ast, engine)
 
   try {
@@ -1171,7 +1136,7 @@ export async function dockerEngineCapabilities(cwd: string, config: SupatypeProj
   const probe = (): Capabilities => {
     const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
     const target = { cwd, project: composeProjectName(config.project.name), composePath: paths.composePath, engineImage }
-    return probeCapabilities((args) => {
+    return checkedCapabilities((args) => {
       const run = spawnComposeEngine(target, args, { runFlags: ["--no-deps"] })
       return { status: run.status, stdout: run.stdout, stderr: run.error ?? run.stderr }
     })
@@ -1863,88 +1828,4 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   // Until Ctrl+C or a signal: the shutdown hook takes the stack down and exits.
   await waitForDevShutdown()
-}
-
-/**
- * Run one read-only generator in the in-compose schema-engine and return its stdout.
- *
- * The same image and the same bind mount the push just used, so if the schema could be applied
- * this can run. It exists because the host engine is a separate binary fetched from a CDN, and a
- * machine that cannot fetch it is not a machine that cannot generate: the schema is already
- * applied, the AST is already on disk, and the container that did it is one `docker compose run`
- * away.
- */
-async function runComposeEngineGenerator(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  config: SupatypeProjectConfig,
-  args: readonly string[],
-): Promise<string | null> {
-  const engineImage = await schemaEngineImageForPush(config, cwd)
-  const target = { cwd, project: composeProject, composePath: paths.composePath, engineImage }
-  const result = spawnComposeEngine(target, [...args, "-i", COMPOSE_SCHEMA_AST], { runFlags: ["-T"] })
-  if ((result.status ?? 1) !== 0) return null
-  return result.stdout
-}
-
-/**
- * The in-compose engine as {@link engineRequest} takes it, for generating only. No database URL:
- * `/generate` reads the AST alone and runs without starting the database.
- */
-async function composeGeneratorEngine(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  config: SupatypeProjectConfig,
-): Promise<ComposeEngine> {
-  const engineImage = await schemaEngineImageForPush(config, cwd)
-  return {
-    target: { cwd, project: composeProject, composePath: paths.composePath, engineImage },
-    databaseUrl: "",
-    capabilities: () => dockerEngineCapabilities(cwd, config),
-  }
-}
-
-/**
- * Write `admin-config.json` and the generated types using the in-compose engine.
- *
- * The fallback for a host engine that could not be fetched. Without it, a `supatype dev` that
- * applied the schema perfectly well still left no `admin-config.json`, and Studio reads that file
- * to decide whether a schema exists: the stack came up, every table was live, the API served them,
- * and Studio said **"No schema has been pushed yet."** The warning that preceded it named the
- * download, not the consequence, so nothing connected the two.
- *
- * Returns true when the admin config was written, which is the file Studio actually needs.
- */
-export async function generateViaComposeEngine(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  config: SupatypeProjectConfig,
-  ast: unknown,
-  adminConfigPath: string,
-): Promise<boolean> {
-  const { typesPath } = projectOutputPaths(config.output)
-  const out = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["generate"])
-  if (writeEngineTypes(cwd, typesPath, out ?? undefined)) {
-    console.log(`[supatype] Types written to ${typesPath} (in-compose engine).`)
-  }
-
-  // The same AST-derived files as the host path. This is the fallback used when the host engine
-  // could not be fetched, and these need no engine at all, so there is no reason for a project on
-  // this path to end up with fewer generated files than one on the other.
-  writeDevAstOutputs(cwd, ast, config, " (in-compose engine).")
-  await writeDevSeedBuilder(cwd, config, ast, await composeGeneratorEngine(paths, cwd, composeProject, config))
-
-  const adminOut = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["admin"])
-  if (!adminOut) return false
-  const parsed = parseEngineJsonOutput(adminOut, isObjectAnswer)
-  if (parsed === null) return false
-
-  const admin = withAdminRoles(parsed, config)
-  restoreSystemRelationTargets(admin, ast)
-  writeFileSync(adminConfigPath, `${JSON.stringify(admin, null, 2)}\n`)
-  console.log("[supatype] Admin config written to .supatype/admin-config.json (in-compose engine).")
-  return true
 }
