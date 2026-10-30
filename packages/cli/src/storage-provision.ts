@@ -126,7 +126,8 @@ export type StorageWrite =
 export async function postToStorage(url: string, headers: Record<string, string>, body: string | Buffer): Promise<StorageWrite> {
   let res: Response
   try {
-    res = await fetch(url, { method: "POST", headers, body })
+    // A Buffer is a Uint8Array, but the DOM's BodyInit type (as the integration package reads it) does not say so.
+    res = await fetch(url, { method: "POST", headers, body: typeof body === "string" ? body : new Uint8Array(body) })
   } catch (err) {
     return { kind: "failed", status: null, text: errorMessage(err) }
   }
