@@ -8,6 +8,14 @@ import { isArrayOf, isNumber, isShape, isString, optional, readJson } from "@sup
 import { objectAt } from "../ast-read.js"
 import { parsePackageJson, type PackageJson } from "../package-json.js"
 
+/**
+ * Said wherever a plugin could look like it is in use. Nothing loads one yet (not the engine, the
+ * server, Studio or the schema compiler), and `add` used to say "installed and registered" and `list`
+ * "active", which promised a field type or widget that then did nothing.
+ */
+const PLUGINS_NOT_LOADED =
+  "Supatype does not load plugins yet: an installed plugin is in node_modules but nothing uses it."
+
 // ─── Registration ────────────────────────────────────────────────────────────
 
 export function registerPlugins(program: Command): void {
@@ -17,7 +25,7 @@ export function registerPlugins(program: Command): void {
 
   cmd
     .command("list")
-    .description("Show all installed and active plugins")
+    .description("Show installed plugins (Supatype does not load plugins yet)")
     .action(() => {
       listPlugins(process.cwd())
     })
@@ -31,7 +39,7 @@ export function registerPlugins(program: Command): void {
 
   cmd
     .command("add <package>")
-    .description("Install a plugin package and register it")
+    .description("Install a plugin package (Supatype does not load plugins yet)")
     .action((pkg: string) => {
       addPlugin(process.cwd(), pkg)
     })
@@ -80,9 +88,11 @@ function listPlugins(cwd: string): void {
 
   for (const p of plugins) {
     const types = p.supatype?.types?.join(", ") ?? "unknown"
-    const status = p.compatible ? "active" : "incompatible"
+    const status = p.compatible ? "installed" : "incompatible"
     plain(`  ${p.name.padEnd(35)} ${types.padEnd(14)} ${p.version.padEnd(12)} ${status}`)
   }
+  plain()
+  warn(PLUGINS_NOT_LOADED)
 }
 
 // ─── Search ──────────────────────────────────────────────────────────────────
@@ -163,8 +173,9 @@ function addPlugin(cwd: string, pkg: string): void {
     }
   }
 
-  info(`${pkg} installed and registered.`)
-  info("Run 'npx supatype plugins list' to see active plugins.")
+  info(`${pkg} installed.`)
+  warn(PLUGINS_NOT_LOADED)
+  info("Run 'npx supatype plugins list' to see installed plugins.")
 }
 
 // ─── Remove ──────────────────────────────────────────────────────────────────

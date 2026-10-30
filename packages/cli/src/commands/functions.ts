@@ -7,11 +7,11 @@ import {
   readdirSync,
   statSync,
   writeFileSync,
-  unlinkSync,
 } from "node:fs"
 import { resolve, join, relative, isAbsolute } from "node:path"
-import { spawnSync, execSync } from "node:child_process"
-import { localKongBaseUrl, localPublicApiUrl } from "../local-gateway.js"
+import { execSync } from "node:child_process"
+import { localPublicApiUrl } from "../local-gateway.js"
+import { runUntilStopped } from "../run-until-stopped.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
@@ -19,11 +19,16 @@ import {
   functionsPathCandidatesFromProject,
   preferredFunctionsPathFromProject,
   serviceRoleRoutes,
+  type SupatypeProjectConfig,
 } from "../project-config.js"
 import {
   discoverFunctionsOrExit,
   functionNameProblem,
+  functionsServeFiles,
   generateFunctionsRouterSource,
+  removeOnExit,
+  sweepStaleServeFiles,
+  writeServiceRoleKeyFileUntilExit,
   type DiscoveredFunctionRoute,
 } from "../functions-router-gen.js"
 import { loadProjectLink } from "../link.js"
@@ -242,30 +247,11 @@ function discoverFunctions(cwd: string): DiscoveredFunctionRoute[] {
 async function serve(cwd: string, opts: { port: string; envFile: string }): Promise<void> {
   const config = loadConfig(cwd)
   const functionsDir = resolveFunctionsDir(cwd, "read")
-  const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
-  const routes = discoverFunctionsOrExit(functionsDir)
-  if (routes.length === 0) {
-    error(`No functions found in ${functionsDirLabel}/`)
-    error("Create one with: npx supatype functions new <name>")
-    process.exit(1)
-  }
-
-  plain(`Discovered ${routes.length} function(s):`)
-  for (const fn of routes) {
-    plain(`  /${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
-  }
-  plain()
-
-  // Generate a Deno entry script that routes requests to the correct function
-  const routerPath = resolve(functionsDir, ".serve-router.ts")
-  const routerScript = generateFunctionsRouterSource(routerPath, routes)
-  writeFileSync(routerPath, routerScript, "utf8")
+  const routes = discoverServeRoutes(cwd, functionsDir)
+  const routerPath = writeServeFiles(cwd, functionsDir, routes)
 
   const envFilePath = resolveEnvFilePath(cwd, functionsDir, opts.envFile)
-  const envArgs: string[] = []
-  if (existsSync(envFilePath)) {
-    envArgs.push("--env-file", envFilePath)
-  }
+  const envArgs = existsSync(envFilePath) ? ["--env-file", envFilePath] : []
 
   info(`Serving functions at http://localhost:${opts.port}/functions/v1/`)
   info("Watching for changes...")
@@ -279,39 +265,80 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
     process.exit(1)
   }
 
-  const result = spawnSync(
+  await runDenoServe(
     denoBin,
-    [
-      "run",
-      "--allow-net",
-      "--allow-env",
-      "--allow-read",
-      "--watch",
-      ...envArgs,
-      routerPath,
-    ],
-    {
-      stdio: "inherit",
-      cwd,
-      env: {
-        ...process.env,
-        PORT: opts.port,
-        SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
-        SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
-        SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localKongBaseUrl(),
-        SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
-        SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
-        SUPATYPE_SERVICE_ROLE_KEY: process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? "",
-      },
-    },
+    ["run", "--allow-net", "--allow-env", "--allow-read", "--watch", ...envArgs, routerPath],
+    { cwd, env: denoServeEnv(cwd, functionsDir, opts.port, config) },
   )
+}
 
-  // Clean up router script
-  try { unlinkSync(routerPath) } catch { /* ignore */ }
+/**
+ * Runs the serve's Deno until it stops, then ends the command, with an error when it failed. It
+ * exits on a clean stop too, in the same turn: a Ctrl+C heard once the stop listeners are gone
+ * would kill the CLI without the `exit` that removes the key and router files.
+ */
+async function runDenoServe(denoBin: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): Promise<void> {
+  let status: number
+  try {
+    status = await runUntilStopped(denoBin, args, opts)
+  } catch (err) {
+    error(`Could not start Deno: ${errorMessage(err)}`)
+    process.exit(1)
+  }
+  if (status !== 0) error("Function server exited with errors.")
+  process.exit(status)
+}
 
-  if (result.status !== 0) {
-    error("Function server exited with errors.")
-    process.exit(result.status ?? 1)
+/** The functions under `functionsDir`, listed for the terminal, ending the command when there are none. */
+function discoverServeRoutes(cwd: string, functionsDir: string): DiscoveredFunctionRoute[] {
+  const routes = discoverFunctionsOrExit(functionsDir)
+  if (routes.length === 0) {
+    error(`No functions found in ${relativeFunctionsDir(cwd, functionsDir)}/`)
+    error("Create one with: npx supatype functions new <name>")
+    process.exit(1)
+  }
+  plain(`Discovered ${routes.length} function(s):`)
+  for (const fn of routes) {
+    plain(`  /${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
+  }
+  plain()
+  return routes
+}
+
+/**
+ * Writes this serve's Deno router and, when the shell gave a key, its key file, both removed when
+ * the serve stops. The router reads the key from that file, as it still can after a --watch
+ * reload, and grants it only to the routes SUPATYPE_SERVICE_ROLE_ROUTES names, as the deployed
+ * worker does. Files of serves killed outright are swept first. Returns the router's path.
+ */
+function writeServeFiles(cwd: string, functionsDir: string, routes: DiscoveredFunctionRoute[]): string {
+  sweepStaleServeFiles(cwd, functionsDir)
+  const { routerPath, keyPath } = functionsServeFiles(cwd, functionsDir)
+  const serviceRoleKey = process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? ""
+  const serviceRoleKeyPath = serviceRoleKey !== "" ? keyPath : undefined
+  if (serviceRoleKeyPath !== undefined) writeServiceRoleKeyFileUntilExit(serviceRoleKeyPath, serviceRoleKey)
+  writeFileSync(routerPath, generateFunctionsRouterSource(routerPath, routes, serviceRoleKeyPath), "utf8")
+  removeOnExit(routerPath)
+  return routerPath
+}
+
+/** The environment the serve's Deno runs with: this shell's, plus where it serves from. */
+function denoServeEnv(
+  cwd: string,
+  functionsDir: string,
+  port: string,
+  config: SupatypeProjectConfig,
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PORT: port,
+    SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
+    SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
+    SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localPublicApiUrl(cwd),
+    SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
+    SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
+    // The router grants the key only to these routes, as the deployed worker does.
+    SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
   }
 }
 
@@ -358,7 +385,7 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
 
   const { selfHostComposePaths } = await import("../self-host-compose.js")
   if (existsSync(selfHostComposePaths(cwd).composePath)) {
-    deploySelfHosted(cwd, fns, FUNCTIONS_WORKER_RESTART_COMMAND)
+    deploySelfHosted(cwd, resolveFunctionsDir(cwd, "read"), fns, FUNCTIONS_WORKER_RESTART_COMMAND)
     return
   }
 
@@ -371,9 +398,15 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
  */
 const FUNCTIONS_WORKER_RESTART_COMMAND = "supatype self-host compose restart functions-worker"
 
-function deploySelfHosted(cwd: string, fns: DiscoveredFunctionRoute[], restartCommand: string): void {
+function deploySelfHosted(
+  cwd: string,
+  functionsDir: string,
+  fns: DiscoveredFunctionRoute[],
+  restartCommand: string,
+): void {
   info("Self-host Compose deployment.")
-  plain("Functions are served from your project functions/ directory (no bundle step).\n")
+  // The directory functions.path names, which the stack mounts; it is not always functions/.
+  plain(`Functions are served from ${relativeFunctionsDir(cwd, functionsDir)}/ in your project (no bundle step).\n`)
 
   for (const fn of fns) {
     plain(`  ${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)

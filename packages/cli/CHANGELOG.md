@@ -58,6 +58,65 @@
 
 ### Bug Fixes
 
+* **dev:** a blank mailer setting in `.env` no longer erases the one `email` in `supatype.config.ts`
+  sets. `init` scaffolds `SUPATYPE_SMTP_HOST=`, `SUPATYPE_RESEND_API_KEY=` and the rest blank, and
+  native `dev` applied `.env` over the config, so a project with its SMTP host or Resend key in the
+  config got the noop mailer and sent nothing. A value in `.env` still wins over the config.
+
+* **app, status, functions serve:** the local gateway address follows `.env`. `app add` printed the
+  app URL, `status` the API URL, and `functions serve` gave functions `SUPATYPE_URL`, all on the
+  default port 18473 whatever `SUPATYPE_KONG_PORT` said, so after `dev` moved Kong to another port
+  they pointed at whichever stack held 18473. They now use `.env`'s `API_EXTERNAL_URL`, else
+  `SUPATYPE_KONG_PORT`, as `ctx.publicUrl` already did.
+
+* **pull:** a uuid `id` column is drafted as `UUID`. Every one was drafted as `SupatypeAuthUserId`,
+  which declares the key to be an auth user's id; telling the two apart needs the schema of a foreign
+  key's table, which the engine does not report yet. A drafted model also names its table
+  (`tableName`) when its model name would not map back to it, as `HTTPLog` or `Orders` do, so a push
+  of the draft does not create a second, empty table.
+
+* **plugins:** `plugins add` and `plugins list` no longer claim a plugin is in use. `add` said
+  "installed and registered" and `list` showed every compatible plugin as "active", but nothing in
+  Supatype loads plugins yet. Both now say the plugin is installed and that it is not loaded.
+
+* **functions:** the scaffolded `functions/_shared/context.ts` says where `ctx.env` comes from: the
+  functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then `.env.<function>.local`,
+  which wins. It said `.env`, which is never read for it.
+
+* **dev, functions serve:** the local functions router loads and guards handlers as the deployed
+  worker does. It accepted only `export default`, so a function exporting a named `handler`, which the
+  worker serves, failed to load locally; a module with neither is now refused at start, naming it. It
+  also gave every function the service-role key, in `ctx.serviceRoleKey` and in `Deno.env`, where the
+  worker takes the key out of the environment before importing any handler and grants it only to the
+  routes `functions.serviceRole` lists, and to hooks. The router now does the same, so a function that
+  relies on the key without being listed fails locally rather than once deployed. The key is still
+  granted after `--watch` reloads the router on a change, however the run before it ended: a function
+  that failed to load, an unhandled rejection or a crash no longer leaves every later reload without
+  the key until `dev` restarts. The router reads it from a file in `.supatype/`, readable by its owner
+  only, rather than from the environment it takes the key out of. The file is removed when `dev` or
+  `functions serve` stops, Ctrl+C included, and each `functions serve` has a file of its own.
+
+* **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
+  server and the control plane were all told `/project/functions` whatever the config said, so a
+  project keeping its functions elsewhere had every one answer 404; hooks were likewise fixed at
+  `/project/hooks` rather than following `supatype.root`. A `functions.path` or `supatype.root`
+  outside the project directory is refused with a message saying why, since the stack mounts only
+  the project. `functions deploy` names the real directory instead of a fixed `functions/`.
+
+* **dev, self-host, init:** Resend and SES settings reach the auth server. Native `dev` sent them as
+  `RESEND_API_KEY`, `RESEND_FROM` and `SES_FROM`, which the server does not read, docker `dev` sent
+  none of them, and the self-host compose file had no way to pass them, so `email.provider: "resend"`
+  or `"ses"` fell back to the noop mailer and sent nothing. All three now use
+  `SUPATYPE_RESEND_API_KEY`, `SUPATYPE_RESEND_FROM` and `SUPATYPE_SES_FROM`, and the compose file
+  passes them through from `.env`. `init` scaffolds the email settings under those names too, and
+  SMTP's as `SUPATYPE_SMTP_*`; the unprefixed `SMTP_HOST` and the rest it used to write were never
+  read either. Rename any of these already in a project's `.env`.
+
+* **dev:** magic-link, confirmation, invite and recovery links in native `dev` open the auth
+  server's verify endpoint. They pointed at `http://localhost:<port>/verify` and 404'd: the external
+  URL ends in `/auth/v1`, and the server's default `/verify` replaced that path rather than adding to
+  it. Native `dev` now sets the same `/auth/v1/verify` paths the compose file does.
+
 * **migrate:** restoring a migration's schema sources refuses a file that lands beside the project
   under a path starting with the project's own (`/srv/app2/x.ts` for `/srv/app`). The check compared
   string prefixes, so it took that file for one inside the project. The snapshot is now read by the

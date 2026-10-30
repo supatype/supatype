@@ -31,10 +31,19 @@ describe("the generated functions router", () => {
   })
 
   it("does not write per-invocation values into the process environment", () => {
-    // `Deno.env.set` is the mechanism, and there is no safe amount of it: the environment is shared
-    // by every invocation in the isolate, so one write is enough to need the lock back.
-    expect(ROUTER).not.toContain("Deno.env.set")
-    expect(ROUTER).not.toContain("Deno.env.delete")
+    // `Deno.env.set` per invocation is the mechanism, and there is no safe amount of it: the
+    // environment is shared by every invocation in the isolate, so one write is enough to need the
+    // lock back.
+    //
+    // The one delete is the service-role key's, once at start before any handler is imported, as
+    // the deployed worker does. Nothing puts it back: a --watch reload reads the key from its file
+    // again. The delete is not per invocation: it is outside the request handler, which Deno.serve
+    // takes last.
+    expect(ROUTER.match(/Deno\.env\.delete\(/g)).toHaveLength(1)
+    expect(ROUTER).toContain('Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")')
+    expect(ROUTER).not.toMatch(/Deno\.env\.set\(/)
+    expect(ROUTER).not.toContain('addEventListener("unload"')
+    expect(ROUTER.indexOf("Deno.env.delete(")).toBeLessThan(ROUTER.indexOf("Deno.serve("))
   })
 
   it("passes the call's configuration to the handler instead", () => {
@@ -79,6 +88,6 @@ describe("the generated functions router", () => {
     // ends the literal and emits broken code. Cheap to assert, and it has bitten twice.
     expect(ROUTER).not.toContain("\\`")
     expect(ROUTER).not.toContain("\\${")
-    expect(ROUTER).toContain('import handler_0 from "')
+    expect(ROUTER).toContain('"hello": exportedHandler("hello", await import("')
   })
 })

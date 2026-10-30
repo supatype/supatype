@@ -1365,34 +1365,40 @@ const SELF_HOST_PORTS_ENV_SECTION = `# Self-host stack ports (supatype self-host
 # SUPATYPE_SERVER_PORT=9999
 # SUPATYPE_SEAWEEDFS_PORT=8333`
 
+/**
+ * The scaffolded `.env`'s email settings, under the names the auth server reads. They used to be
+ * written unprefixed (RESEND_API_KEY, SES_FROM, SMTP_HOST), which nothing reads, so a developer who
+ * filled them in still got no email.
+ */
 function emailEnvSection(email: ScaffoldOptions["email"], projectName: string): string {
   switch (email) {
     case "resend":
       return `# Email (Resend)
-RESEND_API_KEY=
-RESEND_FROM=onboarding@resend.dev`
+SUPATYPE_RESEND_API_KEY=
+SUPATYPE_RESEND_FROM=onboarding@resend.dev`
     case "ses":
       return `# Email (Amazon SES)
-SES_FROM=
+SUPATYPE_SES_FROM=
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=`
     case "smtp":
       return `# Email (SMTP)
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASS=
-SMTP_SENDER_NAME=${projectName}`
+SUPATYPE_SMTP_HOST=
+SUPATYPE_SMTP_PORT=587
+SUPATYPE_SMTP_USER=
+SUPATYPE_SMTP_PASS=
+SUPATYPE_SMTP_SENDER_NAME=${projectName}`
     case "console":
     default:
+      // Commented out: an empty SUPATYPE_SMTP_PORT is not a number, and the server refuses it.
       return `# SMTP: unused while email.provider is console, which logs each email instead of sending it.
 # Email confirmation is auth.email.enableConfirmations in supatype.config.ts.
-SMTP_HOST=
-SMTP_PORT=
-SMTP_USER=
-SMTP_PASS=
-SMTP_SENDER_NAME=${projectName}`
+# SUPATYPE_SMTP_HOST=
+# SUPATYPE_SMTP_PORT=587
+# SUPATYPE_SMTP_USER=
+# SUPATYPE_SMTP_PASS=
+# SUPATYPE_SMTP_SENDER_NAME=${projectName}`
   }
 }
 

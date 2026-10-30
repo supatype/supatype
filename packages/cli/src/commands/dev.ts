@@ -38,10 +38,16 @@ import {
   REALTIME_PORT_ENV,
   resolveRuntimeProvider,
   schemaPathFromProject,
+  serviceRoleRoutes,
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
-import { discoverFunctionsOrExit, writeDevFunctionsRouter } from "../functions-router-gen.js"
+import {
+  devServiceRoleKeyPath,
+  discoverFunctionsOrExit,
+  writeDevFunctionsRouter,
+  writeServiceRoleKeyFileUntilExit,
+} from "../functions-router-gen.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
@@ -84,8 +90,14 @@ import { startNativeRealtime } from "../native-realtime.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { nativeMailerAutoconfirmEnv } from "../mailer-autoconfirm.js"
+import { mailerProviderEnv, withoutBlankMailerOverrides } from "../mailer-env.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
-import { nativeDevRolesSql, nativePostgrestSchemaEnv, nativeServerCoreEnv } from "../native-dev-env.js"
+import {
+  nativeAuthMailerEnv,
+  nativeDevRolesSql,
+  nativePostgrestSchemaEnv,
+  nativeServerCoreEnv,
+} from "../native-dev-env.js"
 import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
 import { nativeKeyspaceAddr as nativeKeyspaceAddrFor, nativeKeyspacePort } from "../native-keyspace.js"
 import {
@@ -102,24 +114,6 @@ import {
   requireSuperuserPassword,
   superuserPasswordMissingMessage,
 } from "../native-pg-auth.js"
-/** Map `email.smtp` from supatype.config.ts into SUPATYPE_SMTP_* for the embedded auth service. */
-function authSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
-  const s = email?.smtp
-  if (!s) return {}
-  const out: Record<string, string> = {}
-  const host = s.host?.trim()
-  if (host) out.SUPATYPE_SMTP_HOST = host
-  if (s.port !== undefined) out.SUPATYPE_SMTP_PORT = String(s.port)
-  const user = s.user?.trim()
-  if (user) out.SUPATYPE_SMTP_USER = user
-  if (s.pass !== undefined && s.pass !== "") out.SUPATYPE_SMTP_PASS = s.pass
-  const admin = s.admin_email?.trim()
-  if (admin) out.SUPATYPE_SMTP_ADMIN_EMAIL = admin
-  const sender = s.sender_name?.trim()
-  if (sender) out.SUPATYPE_SMTP_SENDER_NAME = sender
-  return out
-}
-
 function portCheckCommand(port: number): string {
   return process.platform === "win32"
     ? `netstat -ano | findstr :${port}`
@@ -481,15 +475,16 @@ export function registerDev(program: Command): void {
         }
       }
 
-      // Matches SUPATYPE_HOOK_SEND_EMAIL_SECRETS symmetric format (dev only). Override via .env.
-      const LOCAL_SEND_EMAIL_HOOK_SECRETS =
-        "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567"
       const now = Math.floor(Date.now() / 1000)
       const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
       const anonKey        = signJwt({ ...jwtBase, role: "anon" },         LOCAL_JWT_SECRET)
       const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
       const realtimeUrl = `http://127.0.0.1:${realtimePort}`
+      // The server passes its environment, the key included, on to Deno, but the functions router
+      // reads the key from this file: a --watch reload evaluates it again in an environment an
+      // earlier evaluation already took the key out of.
+      writeServiceRoleKeyFileUntilExit(devServiceRoleKeyPath(cwd), serviceRoleKey)
 
       writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
 
@@ -498,16 +493,6 @@ export function registerDev(program: Command): void {
         databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
       })
 
-
-      const emailProvider = config.email?.provider ?? "console"
-      const authMailerProvider =
-        emailProvider === "console"
-          ? "console"
-          : emailProvider === "resend"
-            ? "resend"
-            : emailProvider === "ses"
-              ? "ses"
-              : "smtp"
 
       // Postgres serves RESP itself when the archive had pg_keyspace and the port came up.
       const nativeKeyspaceAddr = await nativeKeyspaceAddrFor(keyspacePort)
@@ -545,6 +530,9 @@ export function registerDev(program: Command): void {
         SUPATYPE_REALTIME_URL: realtimeUrl,
         SUPATYPE_ANON_KEY: anonKey,
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
+        // functions.serviceRole: the functions router withholds the key above from every other one,
+        // as the deployed worker does, so a function relying on it fails here first, not in production.
+        SUPATYPE_SERVICE_ROLE_ROUTES: serviceRoleRoutes(config).join(","),
         PORT: serverPort,
         SUPATYPE_APP_MODE: config.app.mode ?? "none",
         ...(config.app.mode === "static" && config.app.static_dir?.trim()
@@ -567,45 +555,17 @@ export function registerDev(program: Command): void {
         SUPATYPE_JWT_EXP: "3600",
         SUPATYPE_JWT_AUD: "authenticated",
         SUPATYPE_JWT_ADMIN_ROLES: "supatype_admin,service_role",
-        SUPATYPE_API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
         SUPATYPE_API_HOST: "localhost",
         SUPATYPE_SITE_URL: `http://localhost:${serverPort}`,
-        SUPATYPE_MAILER_MAILER_PROVIDER: authMailerProvider,
+        // External URL, mailer provider, emailed-link paths and the send-email hook.
+        ...nativeAuthMailerEnv(config.email, serverPort),
         SUPATYPE_LOG_LEVEL: "info",
         SUPATYPE_DISABLE_SIGNUP: "false",
-        ...(config.email?.resend_api_key !== undefined && config.email.resend_api_key !== ""
-          ? { RESEND_API_KEY: config.email.resend_api_key }
-          : {}),
-        ...(authMailerProvider === "resend" &&
-        config.email?.resend_from !== undefined &&
-        config.email.resend_from.trim() !== ""
-          ? { RESEND_FROM: config.email.resend_from.trim() }
-          : {}),
-        ...(authMailerProvider === "ses" &&
-        config.email?.ses_from !== undefined &&
-        config.email.ses_from.trim() !== ""
-          ? { SES_FROM: config.email.ses_from.trim() }
-          : {}),
-        ...(authMailerProvider === "smtp" ? authSMTPFromEmailConfig(config.email) : {}),
-        ...(config.email?.send_email_hook === true
-          ? {
-              SUPATYPE_HOOK_SEND_EMAIL_ENABLED: "true",
-              SUPATYPE_HOOK_SEND_EMAIL_URI:
-                config.email?.send_email_hook_uri !== undefined &&
-                config.email.send_email_hook_uri.trim() !== ""
-                  ? config.email.send_email_hook_uri.trim()
-                  : `http://127.0.0.1:${serverPort}/internal/v0hooks/send-email`,
-              SUPATYPE_HOOK_SEND_EMAIL_SECRETS:
-                config.email?.send_email_hook_secrets !== undefined &&
-                config.email.send_email_hook_secrets.trim() !== ""
-                  ? config.email.send_email_hook_secrets.trim()
-                  : LOCAL_SEND_EMAIL_HOOK_SECRETS,
-            }
-          : {}),
         ...(config.storage?.provider !== "s3" ? localStorageEnv(stateRoot) : {}),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
-        ...loadDotEnv(cwd),
+        // A blank mailer value init scaffolded into .env does not erase the config's.
+        ...withoutBlankMailerOverrides(loadDotEnv(cwd), mailerProviderEnv(config.email)),
         // After .env: auth.email.enableConfirmations, unless the developer set their own value.
         ...nativeMailerAutoconfirmEnv(cwd, config),
       }
