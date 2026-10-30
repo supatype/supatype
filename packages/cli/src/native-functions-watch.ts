@@ -7,11 +7,12 @@
  * function or hook added afterwards was imported by nothing. The entry names the routes found, and
  * is rewritten when that set changes, so Deno's watch reloads the worker, which finds the new one.
  *
- * What it cannot do: a project with neither a functions/ nor a hooks/ directory when dev started
- * has a server started with no Deno at all (its environment is fixed at spawn), so the first
- * function or hook in such a project still needs `supatype dev` restarted.
+ * The worker runs on every native dev, with or without a function or hook yet (native-worker.ts):
+ * the server's environment is fixed at spawn, so a project with neither directory when dev started
+ * used to need `supatype dev` restarted for its first one (local test round 3d, N19).
  */
 import { existsSync, watch as fsWatch } from "node:fs"
+import { basename, dirname } from "node:path"
 import { errorMessage } from "./error-message.js"
 import { localWorkerRoutes, writeDevFunctionsEntry } from "./functions-worker-files.js"
 import type { WatchFn } from "./dev-functions-watch.js"
@@ -47,9 +48,9 @@ export function refreshNativeFunctionsEntry(target: NativeFunctionsTarget, known
 }
 
 /**
- * Watch the functions and hooks directories and reload the worker whenever their routes change.
- * `refresh` checks at once, for the schema watch after a push: a hook the push just declared may
- * sit in a directory made after dev started, which no watcher was set on.
+ * Watch the functions and hooks directories and reload the worker whenever their routes change. A
+ * directory not there yet is watched for in its parent, and from when it appears. `refresh` checks
+ * at once, for the schema watch after a push: a hook the push just declared is served then.
  */
 export function watchNativeFunctions(
   target: NativeFunctionsTarget,
@@ -68,8 +69,8 @@ export function watchNativeFunctions(
       refresh()
     }, DEBOUNCE_MS)
   }
-  const dirs = [target.functionsDir, target.hooksDir].filter((dir): dir is string => dir !== undefined && existsSync(dir))
-  const watchers = dirs.map((dir) => watch(dir, { recursive: true }, onChange))
+  const dirs = [target.functionsDir, target.hooksDir].filter((dir): dir is string => dir !== undefined)
+  const watchers = watchDirsAsMade(dirs, onChange, watch)
   return {
     refresh,
     close: () => {
@@ -77,4 +78,27 @@ export function watchNativeFunctions(
       for (const watcher of watchers) watcher.close()
     },
   }
+}
+
+/**
+ * Each of `dirs` watched with `onChange`: at once when it is there, else from when it appears in
+ * its parent, which is then told as a change. A directory whose parent is not there either is left
+ * to `refresh`.
+ */
+function watchDirsAsMade(dirs: readonly string[], onChange: () => void, watch: WatchFn): { close: () => void }[] {
+  const watchers: { close: () => void }[] = []
+  const watched = new Set<string>()
+  const watchDir = (dir: string): boolean => {
+    if (watched.has(dir) || !existsSync(dir)) return false
+    watched.add(dir)
+    watchers.push(watch(dir, { recursive: true }, onChange))
+    return true
+  }
+  for (const dir of dirs) {
+    if (watchDir(dir) || !existsSync(dirname(dir))) continue
+    watchers.push(watch(dirname(dir), { recursive: false }, (_event, filename) => {
+      if (filename === basename(dir) && watchDir(dir)) onChange()
+    }))
+  }
+  return watchers
 }
