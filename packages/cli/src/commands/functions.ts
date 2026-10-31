@@ -31,7 +31,7 @@ import {
 import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
 import { loadProjectLink } from "../link.js"
 import { projectRequest, resolveTarget, targetFunctions, type DeployTarget } from "../resolve-target.js"
-import { targetFetch, targetStream } from "../target-client.js"
+import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
 import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, type Guard } from "@supatype/shared"
 import {
   ensureFunctionsDenoTypes,
@@ -494,60 +494,69 @@ function requireLinkedTarget(cwd: string): DeployTarget {
 }
 
 /** Asks `target` for `subpath` of its project, ending the command with `what` and the reason when it fails. */
+/** `call` to the target's project, with the time limit its route needs. */
+function targetRequest(target: DeployTarget, call: TargetCall): TargetFetchOptions {
+  const timeoutMs = call.restartsWorker === true ? RESTART_TIMEOUT_MS : TARGET_TIMEOUT_MS
+  return { ...projectRequest(target, call.method, call.subpath, call.body), timeoutMs }
+}
+
 async function askTarget<T>(target: DeployTarget, what: string, call: TargetCall, guard: Guard<T>): Promise<T> {
   try {
-    const timeoutMs = call.restartsWorker === true ? RESTART_TIMEOUT_MS : TARGET_TIMEOUT_MS
-    const request = { ...projectRequest(target, call.method, call.subpath, call.body), timeoutMs }
-    return await targetFetch(target.apiBaseUrl, target.apiPrefix, request, guard)
+    return await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call), guard)
   } catch (err) {
     error(`${what}: ${errorMessage(err)}`)
     process.exit(1)
   }
 }
 
-/** Deploys through the linked target, saying how each went. Returns the names that failed. */
+/**
+ * Deploys through the linked target in one request carrying every function, so a self-hosted worker
+ * restarts once a deploy rather than once a function; saying how each went. A refused request fails
+ * every function it carried. Returns the names that failed.
+ */
 async function deployViaTarget(cwd: string, target: DeployTarget, fns: DiscoveredFunctionRoute[]): Promise<string[]> {
   info(`Deploying to ${target.mode} project: ${target.projectRef} (${target.environment})`)
   plain()
   const serviceRole = serviceRoleRoutesFor(cwd)
-  return deployEach(fns, async (fn, source) => {
-    const request = projectRequest(target, "POST", "/functions/deploy", deployRequestBody(fn, source, serviceRole))
-    await targetFetch(target.apiBaseUrl, target.apiPrefix, { ...request, timeoutMs: RESTART_TIMEOUT_MS })
-  })
+  const { sent, failed } = readSources(fns)
+  if (sent.length === 0) return failed
+  const start = Date.now()
+  const body = { functions: sent, serviceRole }
+  try {
+    await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, { method: "POST", subpath: "/functions/deploy", body, restartsWorker: true }))
+  } catch (err) {
+    for (const fn of sent) plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
+    return [...failed, ...sent.map((fn) => fn.name)]
+  }
+  for (const fn of sent) plain(`  ${fn.name} ✓ deployed (${Date.now() - start}ms)`)
+  return failed
+}
+
+/** One function as the deploy request carries it. */
+interface DeployedSource {
+  name: string
+  source: string
+  entrypoint: string
 }
 
 /**
- * One function's deploy request, the same on both paths: they reach the same endpoint, and a project
- * deployed one way must not end up with a different credential surface than the other. The
- * service-role list is sent every deploy and replaced wholesale by the platform: the config file is
- * the whole truth, so a name removed from it must stop being entitled to the service-role key. It is
- * read once per deploy, so a broken config stops the deploy once, before anything is sent.
+ * Each function's source, as the deploy request carries it; one that cannot be read is said and
+ * failed here, and the rest are still sent. The service-role list goes with them every deploy and is
+ * replaced wholesale by the platform: the config file is the whole truth, so a name removed from it
+ * must stop being entitled to the service-role key.
  */
-function deployRequestBody(fn: DiscoveredFunctionRoute, source: string, serviceRole: string[] | undefined): Record<string, unknown> {
-  return {
-    functions: [{ name: fn.name, source, entrypoint: `${fn.name}/index.ts` }],
-    serviceRole,
-  }
-}
-
-
-/** Deploys each function with `deployOne`, saying how each went. Returns the names that failed. */
-async function deployEach(
-  fns: DiscoveredFunctionRoute[],
-  deployOne: (fn: DiscoveredFunctionRoute, source: string) => Promise<void>,
-): Promise<string[]> {
+function readSources(fns: DiscoveredFunctionRoute[]): { sent: DeployedSource[]; failed: string[] } {
+  const sent: DeployedSource[] = []
   const failed: string[] = []
   for (const fn of fns) {
-    const start = Date.now()
     try {
-      await deployOne(fn, readFunctionSource(fn))
-      plain(`  ${fn.name} ✓ deployed (${Date.now() - start}ms)`)
+      sent.push({ name: fn.name, source: readFunctionSource(fn), entrypoint: `${fn.name}/index.ts` })
     } catch (err) {
       failed.push(fn.name)
       plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
     }
   }
-  return failed
+  return { sent, failed }
 }
 
 /** Says how many deployed, or names those that failed and ends non-zero. */

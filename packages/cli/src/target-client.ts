@@ -11,7 +11,8 @@ export interface TargetFetchOptions {
   environment?: string | undefined
   /**
    * Give up after this many milliseconds, with an error saying so. None when unset: a push can run
-   * for minutes. A stream ({@link targetStream}) is never cut off.
+   * for minutes, and a stream ({@link targetStream}) until it is stopped. Both sends of a request
+   * whose session is renewed share it; the renewal has its own limit.
    */
   timeoutMs?: number
   /**
@@ -141,21 +142,28 @@ async function answerOf(res: Response): Promise<FetchAnswer> {
 
 /**
  * The accepted response to a request, its body unread. A session that expired is renewed once and
- * the request sent again, when the target can renew it; a refusal throws, saying why. With `timed`,
- * each send has `opts.timeoutMs` of its own: the renewal, timed apart, takes none of it.
+ * the request sent again, when the target can renew it; a refusal throws, saying why. The two sends
+ * share `opts.timeoutMs`, the renewal timed apart, so a renewed request ends within that and the
+ * renewal's own limit.
  */
-async function acceptedResponse(url: string, opts: TargetFetchOptions, timed: boolean): Promise<Response> {
-  const signal = (): AbortSignal | undefined =>
-    timed && opts.timeoutMs !== undefined ? AbortSignal.timeout(opts.timeoutMs) : undefined
-  let res = await send(url, opts, opts.token, signal())
+async function acceptedResponse(url: string, opts: TargetFetchOptions): Promise<Response> {
+  const started = Date.now()
+  let res = await send(url, opts, opts.token, budgetSignal(opts.timeoutMs))
   if (res.ok) return res
   let answer = await answerOf(res)
   if (opts.authRefresh && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
-    res = await send(url, opts, await refreshAccessToken(opts.authRefresh), signal())
+    const spent = Date.now() - started
+    const token = await refreshAccessToken(opts.authRefresh)
+    res = await send(url, opts, token, budgetSignal(opts.timeoutMs === undefined ? undefined : opts.timeoutMs - spent))
     if (res.ok) return res
     answer = await answerOf(res)
   }
   throw refusal(answer, url, opts)
+}
+
+/** A signal that aborts after `ms` (at least 1), or none without a limit. */
+function budgetSignal(ms: number | undefined): AbortSignal | undefined {
+  return ms === undefined ? undefined : AbortSignal.timeout(Math.max(ms, 1))
 }
 
 /**
@@ -205,7 +213,7 @@ export async function targetFetch(
 /** The whole answer to a request, within `opts.timeoutMs` when it is set. */
 async function timedAnswer(url: string, opts: TargetFetchOptions): Promise<FetchAnswer> {
   try {
-    return await answerOf(await acceptedResponse(url, opts, true))
+    return await answerOf(await acceptedResponse(url, opts))
   } catch (err) {
     if (!isTimeout(err) || opts.timeoutMs === undefined) throw err
     throw new Error(`${opts.method} ${url} did not answer within ${opts.timeoutMs / 1000} s`, { cause: err })
@@ -222,7 +230,7 @@ export async function targetStream(
   opts: TargetFetchOptions,
 ): Promise<ReadableStream<Uint8Array>> {
   const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
-  const res = await acceptedResponse(url, opts, false)
+  const res = await acceptedResponse(url, opts)
   if (res.body === null) throw new Error(`${url} answered with no body to stream`)
   return res.body
 }

@@ -32,7 +32,7 @@ describe("targetFetch against a target that never answers", () => {
 })
 
 /** A Cloud request answered 401 TOKEN_EXPIRED, then the refresh and the resend as `answer` says. */
-function expiringSession(answer: { refreshMs: number | "never"; resendMs: number }): void {
+function expiringSession(answer: { refreshMs: number | "never"; resendMs: number; firstMs?: number }): void {
   let calls = 0
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     calls++
@@ -44,7 +44,12 @@ function expiringSession(answer: { refreshMs: number | "never"; resendMs: number
         }
       })
     }
-    if (calls === 1) return Promise.resolve(new Response(JSON.stringify({ code: "TOKEN_EXPIRED" }), { status: 401 }))
+    if (calls === 1) {
+      return new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))
+        setTimeout(() => resolve(new Response(JSON.stringify({ code: "TOKEN_EXPIRED" }), { status: 401 })), answer.firstMs ?? 0)
+      })
+    }
     return new Promise<Response>((resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))
       setTimeout(() => resolve(new Response(JSON.stringify({ data: ["ok"] }))), answer.resendMs)
@@ -67,6 +72,12 @@ describe("a Cloud session renewed during a request", () => {
     vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => real(Math.min(ms, 100)))
     expiringSession({ refreshMs: "never", resendMs: 0 })
     await expect(expiredRequest(5_000)).rejects.toThrow(/refresh.*did not answer/i)
+  }, 3000)
+
+  // Review of round 5: each send had the whole limit, so a renewed request could take twice it.
+  it("gives both sends one limit between them, the renewal apart", async () => {
+    expiringSession({ firstMs: 200, refreshMs: 0, resendMs: 200 })
+    await expect(expiredRequest(300)).rejects.toThrow("did not answer within 0.3 s")
   }, 3000)
 
   it("gives the resent request its own time, not what the refresh left of it", async () => {
