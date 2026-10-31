@@ -37,16 +37,31 @@ declare namespace Deno {
   function readDir(path: string): AsyncIterable<DirEntry>
   function stat(path: string): Promise<FileInfo>
   function readTextFile(path: string): Promise<string>
+  function readTextFileSync(path: string): string
+
+  /** What `serve` returns: stopping it (stop.ts) waits for the requests in flight. */
+  interface HttpServer {
+    /** Stops taking connections; resolves once the requests in flight have finished. */
+    shutdown(): Promise<void>
+    /** Resolves when the server has closed. */
+    readonly finished: Promise<void>
+  }
 
   function serve(
     options: { port: number; hostname?: string; onListen?: (params: { hostname: string; port: number }) => void },
     handler: (req: Request) => Response | Promise<Response>,
-  ): void
+  ): HttpServer
+
+  // What stop.ts uses to exit on a stop signal.
+  const build: { readonly os: "darwin" | "linux" | "android" | "windows" | "freebsd" | "netbsd" | "aix" | "solaris" | "illumos" }
+  function addSignalListener(signal: "SIGTERM" | "SIGINT", handler: () => void): void
+  function exit(code?: number): never
 
   // What tests/ uses to start the worker as a child process and give it a functions directory.
   function test(name: string, fn: () => void | Promise<void>): void
   function execPath(): string
   function makeTempDir(options?: { prefix?: string }): Promise<string>
+  function makeTempFile(options?: { prefix?: string; suffix?: string }): Promise<string>
   function mkdir(path: string, options?: { recursive?: boolean }): Promise<void>
   function writeTextFile(path: string, data: string): Promise<void>
   function remove(path: string, options?: { recursive?: boolean }): Promise<void>

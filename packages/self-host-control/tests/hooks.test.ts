@@ -166,10 +166,31 @@ describe("hooks deploy route", () => {
     const handler = join(projectDir, "hooks", "tag-note", "index.ts")
     const manifestFile = join(projectDir, ".supatype", "manifest.json")
     const before = [statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs]
+    docker.calls.length = 0
     const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
     assert.equal(again.status, 200)
     assert.equal(dataOf(again.json)["restarted"], false)
     assert.deepEqual([statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs], before)
+    // Review: Docker is not asked anything for a deploy that changes nothing, so it cannot 502 one.
+    assert.deepEqual(docker.calls, [])
+  })
+
+  // Review: the hash took every file, so a README or an editor's temp file restarted the worker.
+  test("restarts nothing for files the worker does not load, and restarts for a module it imports", async () => {
+    const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP, validators: {}, cache: {} }
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    const hookDir = join(projectDir, "hooks", "tag-note")
+    writeFileSync(join(hookDir, "README.md"), "notes\n")
+    writeFileSync(join(hookDir, "index.ts~"), "backup\n")
+    writeFileSync(join(hookDir, ".index.ts.swp"), "swap\n")
+    mkdirSync(join(projectDir, "hooks", ".git"), { recursive: true })
+    writeFileSync(join(projectDir, "hooks", ".git", "HEAD.ts"), "ref\n")
+    const untouched = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    assert.equal(dataOf(untouched.json)["restarted"], false)
+    mkdirSync(join(projectDir, "hooks", "_shared"), { recursive: true })
+    writeFileSync(join(projectDir, "hooks", "_shared", "util.ts"), "export const x = 1\n")
+    const imported = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    assert.equal(dataOf(imported.json)["restarted"], true)
   })
 
   test("restarts for a hook edited on disk before the push, though the push writes nothing", async () => {
@@ -205,11 +226,12 @@ describe("hooks deploy route", () => {
     assert.deepEqual(manifest(projectDir)["cache"], { note: { enabled: true } })
   })
 
-  test("starts a worker that has stopped, though what it loads has not changed", async () => {
+  test("starts a worker that has stopped when a deploy changes what it loads", async () => {
     await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
     docker.exited = true
     docker.calls.length = 0
-    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    const edited = { name: "tag-note", source: `${TAG_NOTE.source}// stopped\n` }
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [edited, ADAPTER], map: MAP })
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.deepEqual(docker.calls.find((args) => args[0] === "restart"), ["restart", "worker-1"])
   })

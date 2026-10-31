@@ -952,6 +952,9 @@ ${mounts.projectReadOnly}
       # outside. One worker rather than two: a second container would cost a pod per project on
       # cloud, for isolation the route boundary already provides.
       SUPATYPE_HOOKS_ROOT: ${hooksDir}
+      # What \`functions env set\` gives the project: the control plane writes it under the project it
+      # mounts at /project, and the worker reads it on every call.
+      SUPATYPE_FUNCTION_ENV_FILE: /project/.supatype/function-env.json
       # Every log line the worker writes carries this, and on cloud it is the label Loki indexes
       # each project's logs under. Without it a line is collected and filed under no project, which
       # is the same as losing it.

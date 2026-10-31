@@ -38,3 +38,20 @@ Deno.test("ctx.env reads .env.local the way the CLI and compose do", async () =>
     await worker.stop()
   }
 })
+
+// Review: `functions env set` on self-host wrote .supatype/function-env.json, which the worker never
+// read, so a value set never reached a function. The worker reads it, as compose names it, on every
+// call: a value set is seen, and one unset is gone, with no restart between.
+Deno.test("ctx.env carries what functions env set wrote, and loses what unset removed", async () => {
+  const managed = `${await Deno.makeTempDir()}/function-env.json`
+  await Deno.writeTextFile(managed, JSON.stringify({ API_KEY: "set" }))
+  const worker = await startWorker({ reports: REPORTS_ENV }, { ...Deno.env.toObject(), SUPATYPE_FUNCTION_ENV_FILE: managed })
+  try {
+    const envNow = async (): Promise<string> => JSON.stringify(await (await fetch(`${worker.origin}/functions/v1/reports`)).json())
+    expectEqual(await envNow(), JSON.stringify({ API_KEY: "set" }), "ctx.env after set")
+    await Deno.writeTextFile(managed, JSON.stringify({}))
+    expectEqual(await envNow(), JSON.stringify({}), "ctx.env after unset")
+  } finally {
+    await worker.stop()
+  }
+})

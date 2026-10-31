@@ -93,8 +93,7 @@ export function fakeDocker(): FakeDocker {
     fake.calls.push([...args])
     if (args[0] === "ps") {
       const listed = !fake.exited || args.includes("-a") ? fake.containers : []
-      const state = fake.exited ? "exited" : "running"
-      return { status: 0, stdout: listed.map((id) => (args.includes("--format") ? `${id} ${state}` : id)).join("\n"), stderr: "" }
+      return { status: 0, stdout: listed.join("\n"), stderr: "" }
     }
     if (args[0] === "restart") {
       if (fake.restartStatus === 0) fake.exited = false

@@ -159,8 +159,9 @@ export interface FunctionContext {
   readonly dbUrl?: string
   readonly region: string
   /**
-   * Values from the functions directory's .env.local (or SUPATYPE_SHARED_ENV_FILE), then from
-   * .env.<function>.local, which wins. The project's own .env is not read for these.
+   * Values from the functions directory's .env.local (or SUPATYPE_SHARED_ENV_FILE), then those
+   * "supatype functions env set" gave a self-hosted project, then .env.<function>.local, which
+   * wins. The project's own .env is not read for these.
    */
   readonly env: Readonly<Record<string, string>>
 }

@@ -12,6 +12,7 @@ import {
   type FunctionContext,
 } from "./invocation.ts"
 import {
+  closeTails,
   installStructuredLogging,
   log,
   tailResponse,
@@ -344,11 +345,31 @@ async function readEnvFile(path: string): Promise<Record<string, string>> {
   }
 }
 
+/**
+ * The values `functions env set` gave a self-hosted project: the control plane's JSON map, which
+ * compose names here. Without it a value set through the control plane never reached a function.
+ * Read on every call, like the env files, so a set or unset is seen without a restart.
+ */
+const managedEnvPath = (Deno.env.get("SUPATYPE_FUNCTION_ENV_FILE") ?? "").trim()
+
+async function readManagedEnv(): Promise<Record<string, string>> {
+  if (!managedEnvPath) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await Deno.readTextFile(managedEnvPath))
+  } catch {
+    return {}
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
+  return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+}
+
+/** The shared env file, then the managed values, then the function's own file, which wins. */
 async function scopedEnvForFunction(fnName: string): Promise<Record<string, string>> {
   const shared = await readEnvFile(sharedEnvPath)
-  const fnPath = `${normalizedFunctionsDir}/.env.${fnName}.local`
-  const fnVars = await readEnvFile(fnPath)
-  return { ...shared, ...fnVars }
+  const managed = await readManagedEnv()
+  const fnVars = await readEnvFile(`${normalizedFunctionsDir}/.env.${fnName}.local`)
+  return { ...shared, ...managed, ...fnVars }
 }
 
 const HOOK_DEPTH_HEADER = "x-supatype-hook-depth"
@@ -496,5 +517,8 @@ const server = Deno.serve({
   }
 })
 // A restart of its container waited out the stop timeout without this, and must not cut off the
-// requests in flight (stop.ts).
-exitOnStop(() => server.shutdown())
+// requests in flight (stop.ts). A log tail never ends on its own, so it is closed first.
+exitOnStop(() => {
+  closeTails()
+  return server.shutdown()
+})

@@ -102,7 +102,8 @@ jobs:
         run: pnpm turbo run build
 
       # Every package's typecheck, then the root tsconfig.json (the config files beside each
-      # package's build config, which no package's typecheck covers).
+      # package's build config, which no package's typecheck covers), then the functions worker,
+      # which has no package.json: one beside its deno.json switches Deno to node_modules resolution.
       - name: Typecheck
         run: pnpm typecheck
 

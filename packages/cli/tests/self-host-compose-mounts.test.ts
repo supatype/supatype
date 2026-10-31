@@ -190,4 +190,13 @@ describe("self-host compose functions worker", () => {
     expect(block).toContain("functions-worker:")
     expect(block).toContain("\n    init: true")
   })
+
+  // Review: `functions env set` wrote the control plane's file, and nothing told the worker of it, so
+  // no value set ever reached a function. The worker is named the file the control plane writes.
+  it("reads the function env the control plane writes", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const [controlPlaneRoot] = envValues(compose, "SUPATYPE_PROJECT_ROOT")
+    expect(controlPlaneRoot).toBe("/project")
+    expect(envValues(compose, "SUPATYPE_FUNCTION_ENV_FILE")).toEqual(["/project/.supatype/function-env.json"])
+  })
 })

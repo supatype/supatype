@@ -64,7 +64,8 @@ export interface FunctionContext {
   readonly dbUrl?: string
   readonly region: string
   /**
-   * Values from the functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then from
+   * Values from the functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then those
+   * `functions env set` gave a self-hosted project (`SUPATYPE_FUNCTION_ENV_FILE`), then
    * `.env.<function>.local`, which wins. Per route rather than per call.
    */
   readonly env: Readonly<Record<string, string>>
