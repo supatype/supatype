@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert"
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { test, describe, before, after } from "node:test"
-import { fakeDocker, request, startServer, type ControlPlaneServer, type FakeDocker } from "./helpers.js"
+import { dataOf, fakeDocker, request, startServer, type ControlPlaneServer, type FakeDocker } from "./helpers.js"
 
 const PROJECT = "test-project"
 
@@ -107,7 +107,7 @@ describe("functions routes", () => {
     docker.calls.length = 0
     const again = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/NEVER_SET`)
     assert.equal(again.status, 200)
-    assert.deepEqual(docker.calls, [])
+    assert.deepEqual(docker.calls.map((args) => args[0]), ["ps"])
   })
 
   // Review: the worker reads this file (SUPATYPE_FUNCTION_ENV_FILE), so it must be a map of names
@@ -119,6 +119,16 @@ describe("functions routes", () => {
     assert.match(readFileSync(envFile, "utf8"), /"READ_BY_WORKER": "yes"/)
     await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/READ_BY_WORKER`)
     assert.doesNotMatch(readFileSync(envFile, "utf8"), /READ_BY_WORKER/)
+  })
+
+  test("env unset of a key not set answers 200 with a warning when Docker cannot be reached", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "SETTLED", value: "v" })
+    docker.psStatus = 1
+    docker.psSays = "Cannot connect to the Docker daemon"
+    const res = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/NEVER_SET`)
+    docker.psStatus = 0
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.match(String(dataOf(res.json)["warning"]), /Cannot connect to the Docker daemon/)
   })
 
   test("env unset answers 502 with the reason when the worker cannot be restarted", async () => {
@@ -140,6 +150,70 @@ describe("functions routes", () => {
     const res = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/NEVER_SET`)
     assert.equal(res.status, 200)
     assert.ok(docker.calls.some((args) => args[0] === "restart"))
+  })
+
+  // Round 6 N27 (data loss): a directory function reached the control plane as a JSON map of its
+  // files in `source`, which was written as its index.ts, over the project's own checkout.
+  describe("a function made of several files", () => {
+    const ENTRY = 'import { greet } from "./lib/greet.ts"\nexport default () => new Response(greet())\n'
+    const LIB = 'export const greet = (): string => "hi"\n'
+    const dirOf = (name: string): string => join(projectDir, "functions", name)
+
+    test("writes each file it carries under the function's directory", async () => {
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, {
+        functions: [{ name: "multi", source: ENTRY, entrypoint: "multi/index.ts", files: { "index.ts": ENTRY, "lib/greet.ts": LIB } }],
+      })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.equal(readFileSync(join(dirOf("multi"), "index.ts"), "utf8"), ENTRY)
+      assert.equal(readFileSync(join(dirOf("multi"), "lib", "greet.ts"), "utf8"), LIB)
+    })
+
+    test("writes the files of a map an older CLI sent as the source, not the map as index.ts", async () => {
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, {
+        functions: [{ name: "legacy", source: JSON.stringify({ "index.ts": ENTRY, "lib\\greet.ts": LIB }) }],
+      })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.equal(readFileSync(join(dirOf("legacy"), "index.ts"), "utf8"), ENTRY)
+      assert.equal(readFileSync(join(dirOf("legacy"), "lib", "greet.ts"), "utf8"), LIB)
+    })
+
+    test("leaves a file whose content is the same untouched", async () => {
+      const body = { functions: [{ name: "same", source: ENTRY, files: { "index.ts": ENTRY, "lib/greet.ts": LIB } }] }
+      await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, body)
+      const lib = join(dirOf("same"), "lib", "greet.ts")
+      const before = statSync(lib).mtimeMs
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, body)
+      assert.equal(statSync(lib).mtimeMs, before)
+    })
+
+    for (const path of ["../escape.ts", "lib/../../escape.ts", "/abs.ts", "C:\\abs.ts", "\\\\server\\share.ts", "", "lib/"]) {
+      test(`refuses the file path ${JSON.stringify(path)} and writes nothing`, async () => {
+        const before = tree(tmp)
+        const res = await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, {
+          functions: [{ name: "unsafe", source: ENTRY, files: { "index.ts": ENTRY, [path]: LIB } }],
+        })
+        assert.equal(res.status, 400, JSON.stringify(res.json))
+        assert.deepEqual(tree(tmp), before)
+      })
+    }
+
+    test("refuses to write through a link that leaves the function's directory", async (t) => {
+      const outside = join(tmp, "outside")
+      mkdirSync(outside, { recursive: true })
+      mkdirSync(dirOf("linked"), { recursive: true })
+      try {
+        symlinkSync(outside, join(dirOf("linked"), "lib"), "junction")
+      } catch {
+        t.skip("this machine cannot make a link")
+        return
+      }
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, {
+        functions: [{ name: "linked", source: ENTRY, files: { "index.ts": ENTRY, "lib/greet.ts": LIB } }],
+      })
+      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.equal(existsSync(join(outside, "greet.ts")), false)
+    })
   })
 
   const routes: Array<[string, string, unknown?]> = [

@@ -15,7 +15,7 @@ import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
-import { FUNCTION_NAME_RULE, isFunctionName, parseJsonObject } from "@supatype/shared"
+import { FUNCTION_NAME_RULE, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, isFunctionName, parseJsonObject } from "@supatype/shared"
 import { badRequest, HttpError } from "./http.js"
 import { projectRoot } from "./project.js"
 
@@ -127,43 +127,85 @@ export async function workerContentHash(): Promise<string> {
   return hash.digest("hex")
 }
 
-/** The worker's containers, running or exited; one `docker ps` a restart. */
-async function workerContainers(): Promise<string[]> {
+/** One worker container, and whether it runs. */
+interface WorkerContainer {
+  id: string
+  running: boolean
+}
+
+/** The worker's containers, running or exited, from one `docker ps -a`; or why Docker could not list them. */
+async function workerContainers(): Promise<{ containers: WorkerContainer[] } | { failed: string }> {
   const found = await docker([
-    "ps", "-a", "-q",
+    "ps", "-a",
     "--filter", `label=com.docker.compose.project=${composeProject()}`,
     "--filter", "label=com.docker.compose.service=functions-worker",
+    "--format", "{{.ID}} {{.State}}",
   ])
-  if (found.status !== 0) {
-    throw new HttpError(502, "worker_restart_failed", `The files are written, but Docker could not list the functions worker: ${found.stderr.trim()}`)
-  }
-  return found.stdout.split("\n").map((line) => line.trim()).filter((id) => id !== "")
+  if (found.status !== 0) return { failed: found.stderr.trim() || `docker exited ${String(found.status)}` }
+  const containers = found.stdout.split("\n").map((line) => line.trim().split(/\s+/))
+    .filter(([id]) => id !== undefined && id !== "")
+    .map(([id = "", state = ""]) => ({ id, running: state === "running" }))
+  return { containers }
 }
 
 /**
- * Restarts the functions worker when it may serve something other than what is on disk (see the
- * file's comment); true when it did. Docker is not asked anything for a deploy that changed nothing
- * and owes nothing, so a no-op deploy cannot fail on Docker. The container is found by the labels
- * compose gives it and restarted with plain `docker`: the control-plane image has Docker without the
- * compose plugin (local test round 5), and `docker restart` also starts one that has exited. A
- * restart that fails throws a 502 naming why, after the files are written, and is owed to the next
- * deploy.
+ * `docker <verb> <ids>`, throwing a 502 that says the worker did not `what` and why. A restart gives
+ * the worker the stop grace compose gives it, so its drain is not cut off.
  */
-export async function ensureWorkerCurrent(): Promise<boolean> {
+async function dockerOrThrow(verb: "restart" | "start", ids: readonly string[], what: string): Promise<void> {
+  const grace = verb === "restart" ? ["-t", String(FUNCTIONS_WORKER_STOP_GRACE_SECONDS)] : []
+  const ran = await docker([verb, ...grace, ...ids])
+  if (ran.status !== 0) {
+    throw new HttpError(502, "worker_restart_failed", `The files are written, but the functions worker did not ${what}: ${ran.stderr.trim() || `docker exited ${String(ran.status)}`}`)
+  }
+}
+
+/** What a deploy did to the worker: whether it restarted or started it, and a warning when Docker could not be asked. */
+export interface WorkerCheck {
+  restarted: boolean
+  warning?: string
+}
+
+/**
+ * Keeps the functions worker serving what is on disk, and running; one `docker ps -a` a deploy. It
+ * is restarted when what it loads differs from what it last loaded or a restart is owed (see the
+ * file's comment), and a stopped one whose content is current is started. Found by the labels
+ * compose gives it and restarted with plain `docker`: the control-plane image has Docker without
+ * the compose plugin (local test round 5).
+ *
+ * A restart or start that is needed and fails, Docker unreachable included, throws a 502 naming
+ * why, after the files are written; a restart is then owed to the next deploy. A deploy that needed
+ * nothing done while Docker could not be reached answers with a warning: the worker already serves it.
+ */
+export async function ensureWorkerCurrent(): Promise<WorkerCheck> {
   const content = await workerContentHash()
-  if (content === readState("loaded") && readState("restart-owed") === null) return false
-  writeState("restart-owed", new Date().toISOString())
-  const containers = await workerContainers()
-  if (containers.length === 0) {
+  const stale = content !== readState("loaded") || readState("restart-owed") !== null
+  if (stale) writeState("restart-owed", new Date().toISOString())
+  const listed = await workerContainers()
+  if ("failed" in listed) {
+    if (!stale) return { restarted: false, warning: `Docker could not be asked whether the functions worker is running: ${listed.failed}` }
+    throw new HttpError(502, "worker_restart_failed", `The files are written, but Docker could not list the functions worker: ${listed.failed}`)
+  }
+  if (listed.containers.length === 0) {
     throw new HttpError(502, "worker_restart_failed", `The files are written, but no functions-worker container exists for compose project ${composeProject()}; is the stack up?`)
   }
-  const restarted = await docker(["restart", ...containers])
-  if (restarted.status !== 0) {
-    throw new HttpError(502, "worker_restart_failed", `The files are written, but the functions worker did not restart: ${restarted.stderr.trim() || `docker exited ${String(restarted.status)}`}`)
-  }
+  if (stale) return restartWorker(listed.containers, content)
+  const stopped = listed.containers.filter((c) => !c.running).map((c) => c.id)
+  if (stopped.length > 0) await dockerOrThrow("start", stopped, "start")
+  return { restarted: stopped.length > 0 }
+}
+
+/** The warning a route adds to its answer, when there is one. */
+export function warningOf(check: WorkerCheck): { warning?: string } {
+  return check.warning === undefined ? {} : { warning: check.warning }
+}
+
+/** Restarts every worker container (which also starts one that has exited) and records `content` as loaded. */
+async function restartWorker(containers: readonly WorkerContainer[], content: string): Promise<WorkerCheck> {
+  await dockerOrThrow("restart", containers.map((c) => c.id), "restart")
   writeState("loaded", content)
   writeState("restart-owed", null)
-  return true
+  return { restarted: true }
 }
 
 /**

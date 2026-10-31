@@ -19,6 +19,7 @@ const SECRET = "functions-env-self-host-test-secret-01234567"
 let project: { dir: string; remove: () => void }
 const servers: Server[] = []
 const restarts: string[][] = []
+const docker = { down: false }
 
 function listen(server: Server): Promise<string> {
   servers.push(server)
@@ -45,6 +46,7 @@ beforeEach(async () => {
   vi.stubEnv("SUPATYPE_PROJECT_REF", "acme")
   vi.stubEnv("COMPOSE_PROJECT_NAME", "supatype-acme")
   setDockerRunnerForTests(async (args) => {
+    if (docker.down) return { status: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" }
     if (args[0] === "restart") restarts.push([...args])
     return { status: 0, stdout: args[0] === "ps" ? "worker-1" : "", stderr: "" }
   })
@@ -66,6 +68,7 @@ beforeEach(async () => {
 afterEach(() => {
   for (const server of servers.splice(0)) server.close()
   restarts.length = 0
+  docker.down = false
   setDockerRunnerForTests(null)
   vi.unstubAllEnvs()
   project.remove()
@@ -77,6 +80,25 @@ describe("functions env unset on a self-host link", () => {
     expect(run.exitCode).toBeUndefined()
     expect(run.output).toContain("Removed API_KEY for project acme.")
     expect(JSON.parse(readFileSync(join(project.dir, "stack", ".supatype", "function-env.json"), "utf8"))).toEqual({ KEEP: "y" })
-    expect(restarts).toEqual([["restart", "worker-1"]])
+    expect(restarts).toEqual([["restart", "-t", "10", "worker-1"]])
   }, 30_000)
+})
+
+// When the stack's Docker cannot be reached and a call needed nothing restarted, the control plane
+// answers with a warning rather than failing; the CLI says it, and the command still succeeds.
+describe("a self-host call whose stack cannot reach Docker, with nothing to restart", () => {
+  const commands = [
+    ["functions", "env", "unset", "NEVER_SET"],
+    ["functions", "env", "set", "KEEP=y"],
+    ["functions", "delete", "never-deployed"],
+  ]
+  for (const args of commands) {
+    it(`says the warning and succeeds: ${args.join(" ")}`, async () => {
+      await runCommand(registerFunctions, ["functions", "env", "unset", "API_KEY"], project.dir)
+      docker.down = true
+      const run = await runCommand(registerFunctions, args, project.dir)
+      expect(run.exitCode).toBeUndefined()
+      expect(run.output).toContain("Docker could not be asked whether the functions worker is running: Cannot connect to the Docker daemon")
+    }, 30_000)
+  }
 })

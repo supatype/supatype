@@ -142,10 +142,23 @@ import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
 import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 import { mailerProviderEnv } from "./mailer-env.js"
+import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
+
+/**
+ * The image pins config asks for, once the engine's is known not to be older than this CLI needs.
+ * Checked before `.env` is written: a push refused the engine after writing its pin there as a
+ * managed line, and `.env` stayed pinned to the refused engine (local test round 6).
+ */
+function checkedImagePins(config: SupatypeProjectConfig): Record<string, string> {
+  const pins = composeDockerImageEnv(config)
+  const engine = pins["SUPATYPE_ENGINE_IMAGE"]
+  if (engine !== undefined) assertEngineVersionSupported(engineImageVersion(engine), "versions.engine in supatype.config.ts", "image")
+  return pins
+}
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
-  const imagePins = composeDockerImageEnv(config)
+  const imagePins = checkedImagePins(config)
   // Clean up only what a previous run wrote from config. A hand-written image tag in `.env` is the
   // documented way to run a local build, and this used to delete it on every compose run.
   const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
@@ -325,7 +338,7 @@ export function upsertDevComposeEnv(
   devDbPort?: number,
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
-  const imagePins = composeDockerImageEnv(config)
+  const imagePins = checkedImagePins(config)
   // `POSTGRES_PASSWORD` and `JWT_SECRET` are deliberately absent.
   //
   // They used to be pinned here to published constants on every `dev` run, against the same

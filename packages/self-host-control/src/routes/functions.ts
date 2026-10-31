@@ -1,35 +1,34 @@
 import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 import { isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
-import { childDir, ensureWorkerCurrent, functionEnvPath, functionsRoot } from "../worker.js"
-
-interface DeployedFunction {
-  name: string
-  source: string
-}
-
+import { functionFiles, writeChanged, type DeployFile } from "../deploy-files.js"
+import { childDir, ensureWorkerCurrent, functionEnvPath, functionsRoot, warningOf } from "../worker.js"
 
 /** The directory of the function `name`, refused unless it may be one (worker.ts `childDir`). */
 function functionDir(name: unknown): string {
   return childDir(functionsRoot(), name, "function")
 }
 
-/** The functions a deploy body names, every one checked before anything is written. */
-function deployedFunctions(body: unknown): Array<DeployedFunction & { dir: string }> {
+/**
+ * The files a deploy body's functions write, every function and path checked before anything is
+ * written (deploy-files.ts). Its count of functions comes with them.
+ */
+function deployedFiles(body: unknown): { count: number; files: DeployFile[] } {
   const list = bodyOf(body, isShape({ functions: optional(isUnknown) })).functions
-  if (list === undefined) return []
+  if (list === undefined) return { count: 0, files: [] }
   if (!Array.isArray(list)) throw badRequest("functions must be an array")
-  return list.map((entry) => {
+  const files = list.flatMap((entry) => {
     const fn = isJsonObject(entry) ? entry : {}
     const dir = functionDir(fn["name"])
     const name = String(fn["name"])
     const source = fn["source"]
     if (typeof source !== "string") throw badRequest(`Function ${name} has no source`)
-    return { name, source, dir }
+    return functionFiles(name, dir, source, fn["files"])
   })
+  return { count: list.length, files }
 }
 
 
@@ -63,22 +62,18 @@ export function registerFunctionRoutes(
 
   route(routes, "POST", "/projects/:ref/functions/deploy", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const functions = deployedFunctions(ctx.body)
-    for (const fn of functions) {
-      mkdirSync(fn.dir, { recursive: true })
-      writeFileSync(join(fn.dir, "index.ts"), fn.source, "utf8")
-    }
-
-    await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { message: "Functions deployed", count: functions.length } })
+    const { count, files } = deployedFiles(ctx.body)
+    writeChanged(files)
+    const worker = await ensureWorkerCurrent()
+    sendJson(ctx.res, 200, { data: { message: "Functions deployed", count, ...warningOf(worker) } })
   })
 
   route(routes, "DELETE", "/projects/:ref/functions/:name", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const name = ctx.params["name"]!
     rmSync(functionDir(name), { recursive: true, force: true })
-    await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { deleted: name } })
+    const worker = await ensureWorkerCurrent()
+    sendJson(ctx.res, 200, { data: { deleted: name, ...warningOf(worker) } })
   })
 
   route(routes, "GET", "/projects/:ref/functions/env", async (ctx) => {
@@ -96,8 +91,8 @@ export function registerFunctionRoutes(
     const current = readFunctionEnv()
     current[body.key] = body.value ?? ""
     writeFunctionEnv(current)
-    await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { key: body.key } })
+    const worker = await ensureWorkerCurrent()
+    sendJson(ctx.res, 200, { data: { key: body.key, ...warningOf(worker) } })
   })
 
   // `supatype functions env unset` on a self-host link: refused until now, since there was no route.
@@ -111,8 +106,8 @@ export function registerFunctionRoutes(
       delete current[key]
       writeFunctionEnv(current)
     }
-    await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { key, removed } })
+    const worker = await ensureWorkerCurrent()
+    sendJson(ctx.res, 200, { data: { key, removed, ...warningOf(worker) } })
   })
 }
 

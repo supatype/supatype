@@ -11,6 +11,8 @@ import {
 import { resolve, join, relative, isAbsolute } from "node:path"
 import { execSync } from "node:child_process"
 import { runUntilStopped } from "../run-until-stopped.js"
+import { STOP_SIGNALS } from "../stop-signals.js"
+import { sayTargetWarning } from "../target-warning.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
@@ -32,7 +34,7 @@ import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFile
 import { loadProjectLink } from "../link.js"
 import { projectRequest, resolveTarget, targetFunctions, type DeployTarget } from "../resolve-target.js"
 import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
-import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, type Guard } from "@supatype/shared"
+import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, toPosixPath, type Guard } from "@supatype/shared"
 import {
   ensureFunctionsDenoTypes,
   sharedFunctionsReadmeSource,
@@ -510,7 +512,9 @@ function targetRequest(target: DeployTarget, call: TargetCall): TargetFetchOptio
 /** Asks `target` for `subpath` of its project, ending the command with `what` and the reason when it fails. */
 async function askTarget<T>(target: DeployTarget, what: string, call: TargetCall, guard: Guard<T>): Promise<T> {
   try {
-    return await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call), guard)
+    const answer = await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call), guard)
+    sayTargetWarning(answer)
+    return answer
   } catch (err) {
     error(`${what}: ${errorMessage(err)}`)
     process.exit(1)
@@ -532,7 +536,7 @@ async function deployViaTarget(cwd: string, target: DeployTarget, fns: Discovere
   const body = { functions: sent, serviceRole }
   try {
     const call = { method: "POST", subpath: "/functions/deploy", body, restartsWorker: true, functions: sent.length }
-    await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call))
+    sayTargetWarning(await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call)))
   } catch (err) {
     for (const fn of sent) plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
     return [...failed, ...sent.map((fn) => fn.name)]
@@ -541,11 +545,15 @@ async function deployViaTarget(cwd: string, target: DeployTarget, fns: Discovere
   return failed
 }
 
-/** One function as the deploy request carries it. */
+/**
+ * One function as the deploy request carries it: its entry module as `source`, and for a directory
+ * function every file by path, which the platform writes under the function's directory.
+ */
 interface DeployedSource {
   name: string
   source: string
   entrypoint: string
+  files?: Record<string, string>
 }
 
 /**
@@ -557,7 +565,7 @@ function readSources(fns: DiscoveredFunctionRoute[]): { sent: DeployedSource[]; 
   const failed: string[] = []
   for (const fn of fns) {
     try {
-      sent.push({ name: fn.name, source: readFunctionSource(fn), entrypoint: `${fn.name}/index.ts` })
+      sent.push({ name: fn.name, entrypoint: `${fn.name}/index.ts`, ...readFunctionFiles(fn) })
     } catch (err) {
       failed.push(fn.name)
       plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
@@ -604,22 +612,22 @@ const isDeployedFunctions = isArrayOf(
 /** `GET /functions/:name/logs`: the newest entries first. */
 const isFunctionLogs = isArrayOf(isShape({ timestamp: isString, level: isString, message: optional(nullable(isString)) }))
 
-function readFunctionSource(fn: DiscoveredFunctionRoute): string {
-  const stat = statSync(fn.path)
-  if (stat.isFile()) {
-    return readFileSync(fn.path, "utf8")
-  }
-
-  // Directory function: read all .ts files
+/**
+ * A function's source as the deploy request carries it. A file function is its own entry. A
+ * directory function's entry is its index.ts, and every .ts and .js file under it goes in `files`,
+ * by a path with `/` on every OS. It used to go as a JSON map in `source`, which a self-hosted
+ * control plane wrote as index.ts over the project's own checkout (round 6, N27).
+ */
+function readFunctionFiles(fn: DiscoveredFunctionRoute): { source: string; files?: Record<string, string> } {
+  if (statSync(fn.path).isFile()) return { source: readFileSync(fn.path, "utf8") }
   const files: Record<string, string> = {}
-  const entries = readdirSync(fn.path, { recursive: true, encoding: "utf8" })
-  for (const entry of entries) {
+  for (const entry of readdirSync(fn.path, { recursive: true, encoding: "utf8" })) {
     const fullPath = join(fn.path, entry)
     if (statSync(fullPath).isFile() && (entry.endsWith(".ts") || entry.endsWith(".js"))) {
-      files[entry] = readFileSync(fullPath, "utf8")
+      files[toPosixPath(entry)] = readFileSync(fullPath, "utf8")
     }
   }
-  return JSON.stringify(files)
+  return { source: files["index.ts"] ?? "", files }
 }
 
 // ─── List ────────────────────────────────────────────────────────────────────
@@ -691,8 +699,21 @@ async function tailServerLogs(target: DeployTarget, name: string): Promise<void>
 
 /** Prints `name`'s lines from a server-sent event stream as they arrive, until it ends. */
 async function printLogStream(body: ReadableStream<Uint8Array>, name: string): Promise<void> {
-  const decoder = new TextDecoder()
   const reader = body.getReader()
+  // Ctrl+C closes the stream, and the command ends by itself: with nothing listening, it killed the
+  // process, which Windows reports as 0xC000013A (local test round 6).
+  const stop = (): void => void reader.cancel().catch(() => undefined)
+  for (const signal of STOP_SIGNALS) process.on(signal, stop)
+  try {
+    await printEvents(reader, name)
+  } finally {
+    for (const signal of STOP_SIGNALS) process.off(signal, stop)
+  }
+}
+
+/** Prints `name`'s lines from `reader` until the stream ends or is cancelled. */
+async function printEvents(reader: ReadableStreamDefaultReader<Uint8Array>, name: string): Promise<void> {
+  const decoder = new TextDecoder()
   let pending = ""
   // A reader rather than `for await`: the DOM lib the integration package compiles against gives a
   // ReadableStream no async iterator.

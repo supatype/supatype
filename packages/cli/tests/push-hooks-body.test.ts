@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { projectConfig } from "./support/project-config.js"
 
-const sent = vi.hoisted(() => ({ bodies: [] as unknown[], refuse: 0 }))
+const sent = vi.hoisted(() => ({ bodies: [] as unknown[], refuse: 0, answer: {} as Record<string, unknown> }))
 vi.mock("../src/target-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/target-client.js")>()
   return {
@@ -12,7 +12,7 @@ vi.mock("../src/target-client.js", async (importOriginal) => {
     targetFetch: async (_base: string, _prefix: string, opts: { body?: unknown }) => {
       sent.bodies.push(opts.body)
       if (sent.refuse !== 0) throw new actual.TargetApiError("Forbidden", sent.refuse)
-      return {}
+      return sent.answer
     },
   }
 })
@@ -28,6 +28,7 @@ const dirs: string[] = []
 afterEach(() => {
   sent.bodies.length = 0
   sent.refuse = 0
+  sent.answer = {}
   process.exitCode = undefined
   vi.restoreAllMocks()
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
@@ -58,7 +59,7 @@ describe("an empty hook deploy", () => {
     const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-body-"))
     dirs.push(cwd)
     said.length = 0
-    for (const stream of ["log", "error"] as const) {
+    for (const stream of ["log", "warn", "error"] as const) {
       vi.spyOn(console, stream).mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
     }
     return cwd
@@ -81,6 +82,14 @@ describe("an empty hook deploy", () => {
     sent.refuse = 403
     expect(await deployHooksToTarget(cwd, projectConfig(), target, { models: [] })).toBe(true)
     expect(process.exitCode).toBe(1)
+  })
+
+  it("says the warning a self-hosted stack answers with, and does not fail", async () => {
+    project()
+    sent.answer = { warning: "Docker could not be asked whether the functions worker is running: down" }
+    expect(await uploadHooks(target, { handlers: [{ name: "h", source: "x" }], map: {} }, 1)).toBe(false)
+    expect(said.join("\n")).toContain("Docker could not be asked whether the functions worker is running: down")
+    expect(process.exitCode).toBeUndefined()
   })
 
   it("still fails a hook deploy refused with 403 when it carries hooks", async () => {

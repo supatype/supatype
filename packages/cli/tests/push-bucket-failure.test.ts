@@ -51,8 +51,17 @@ describe("how a push to the project's own stack ends", () => {
   it("says it did not finish, with no Studio link, when its buckets failed", () => {
     reportLocalPush(local, "http://127.0.0.1:54321/studio", true)
     const out = said.join("\n")
-    expect(out).toContain("The push to local (dev) did not finish: the schema is applied, but a step after it failed (above).")
+    expect(out).toContain("The push to this project's local stack did not finish: the schema is applied, but a step after it failed (above).")
     expect(out).not.toContain("Studio:")
+  })
+
+  // Local test round 6: native dev's push ended "The push to direct (local) did not finish", its
+  // internal mode and environment.
+  it("names native dev's database as the user knows it", () => {
+    reportLocalPush({ mode: "direct", environment: "local" }, undefined, true)
+    const out = said.join("\n")
+    expect(out).toContain("The push to this project's database did not finish")
+    expect(out).not.toContain("direct (local)")
   })
 
   it("gives the Studio link when every step finished", () => {

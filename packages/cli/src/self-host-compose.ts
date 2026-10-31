@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { createInterface } from "node:readline"
+import { FUNCTIONS_WORKER_STOP_GRACE_SECONDS } from "@supatype/shared"
 import { composeHostPath } from "./compose-host-path.js"
 export { composeHostPath } from "./compose-host-path.js"
 import { ENGINE_SERVICE } from "./compose-engine-service.js"
@@ -938,6 +939,9 @@ ${storageDependency}
     # An init as PID 1 passes the stop signal on: without one the worker ignored SIGTERM, and every
     # restart a deploy made waited out the whole stop timeout.
     init: true
+    # Time to drain the requests in flight before Docker kills it, above the worker's own drain: one
+    # Docker killed it 3 s after SIGTERM. The control plane's restart passes the same.
+    stop_grace_period: ${FUNCTIONS_WORKER_STOP_GRACE_SECONDS}s
     expose:
       - "8001"
 ${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:
@@ -1155,6 +1159,12 @@ ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux 
       # for host.docker.internal after a few seconds and Studio's dev server became unreachable
       # (CE1). A recreated upstream is handled where the CLI recreates it: Kong is reloaded then
       # (runDockerCompose, EXT-N1).
+      #
+      # SRV is not looked up. Kong 3.6 asks for SRV records first, Docker's DNS never answers them,
+      # and each nginx worker's first upstream lookup waited about 4 s for the timeout: the first
+      # realtime subscribe often took that long. A records still come from the hosts file first, so
+      # host.docker.internal above resolves as before.
+      KONG_DNS_ORDER: "LAST,A,CNAME"
 ${kongTlsEnv}    volumes:
 ${mounts.kong}
     ports:

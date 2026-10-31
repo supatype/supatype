@@ -35,3 +35,20 @@ Deno.test("listens on every address when no host is named, as in its container",
     await worker.stop()
   }
 })
+
+// Round 6 N27: a function of several files, as the control plane now writes it, answers.
+Deno.test("serves a function that imports a module of its own", async () => {
+  const worker = await startWorker(
+    {
+      multi: 'import { greet } from "./lib/greet.ts"\nexport default () => new Response(greet())\n',
+      "multi/lib/greet.ts": 'export const greet = (): string => "hi from lib"\n',
+    },
+    Deno.env.toObject(),
+  )
+  try {
+    const res = await fetch(`${worker.origin}/functions/v1/multi`)
+    expectEqual(await res.text(), "hi from lib", "the answer")
+  } finally {
+    await worker.stop()
+  }
+})

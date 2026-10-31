@@ -171,8 +171,8 @@ describe("hooks deploy route", () => {
     assert.equal(again.status, 200)
     assert.equal(dataOf(again.json)["restarted"], false)
     assert.deepEqual([statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs], before)
-    // Review: Docker is not asked anything for a deploy that changes nothing, so it cannot 502 one.
-    assert.deepEqual(docker.calls, [])
+    // One `docker ps` checks the worker runs, and nothing more is asked of Docker.
+    assert.deepEqual(docker.calls.map((args) => args[0]), ["ps"])
   })
 
   // Review: the hash took every file, so a README or an editor's temp file restarted the worker.
@@ -226,6 +226,41 @@ describe("hooks deploy route", () => {
     assert.deepEqual(manifest(projectDir)["cache"], { note: { enabled: true } })
   })
 
+  // Nic's decision (a): every deploy checks the worker runs, and starts it if not.
+  test("starts a worker that has stopped, though what it loads has not changed", async () => {
+    const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP }
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    docker.exited = true
+    docker.calls.length = 0
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.deepEqual(docker.calls.filter((args) => args[0] !== "ps"), [["start", "worker-1"]])
+    assert.equal(docker.calls.filter((args) => args[0] === "ps").length, 1)
+  })
+
+  test("answers 200 with a warning when Docker cannot be reached and nothing needed restarting", async () => {
+    const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP }
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    docker.psStatus = 1
+    docker.psSays = "Cannot connect to the Docker daemon"
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    docker.psStatus = 0
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.equal(dataOf(res.json)["restarted"], false)
+    assert.match(String(dataOf(res.json)["warning"]), /Cannot connect to the Docker daemon/)
+  })
+
+  test("answers 502 when Docker cannot be reached and the worker needed restarting", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    docker.psStatus = 1
+    docker.psSays = "Cannot connect to the Docker daemon"
+    const edited = { name: "tag-note", source: `${TAG_NOTE.source}// unreachable\n` }
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [edited, ADAPTER], map: MAP })
+    docker.psStatus = 0
+    assert.equal(res.status, 502)
+    assert.match(String(res.json["message"]), /Cannot connect to the Docker daemon/)
+  })
+
   test("starts a worker that has stopped when a deploy changes what it loads", async () => {
     await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
     docker.exited = true
@@ -233,7 +268,8 @@ describe("hooks deploy route", () => {
     const edited = { name: "tag-note", source: `${TAG_NOTE.source}// stopped\n` }
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [edited, ADAPTER], map: MAP })
     assert.equal(res.status, 200, JSON.stringify(res.json))
-    assert.deepEqual(docker.calls.find((args) => args[0] === "restart"), ["restart", "worker-1"])
+    // Round 6 N29: the restart gives the worker the stop grace compose gives it, above its drain.
+    assert.deepEqual(docker.calls.find((args) => args[0] === "restart"), ["restart", "-t", "10", "worker-1"])
   })
 
   test("keeps a restart owed across a control plane restart, in the project's .supatype", async () => {
@@ -265,7 +301,7 @@ describe("hooks deploy route", () => {
     const ps = docker.calls.find((args) => args[0] === "ps") ?? []
     assert.ok(ps.includes("label=com.docker.compose.project=supatype-self-host-control-test-none"))
     assert.ok(ps.includes("label=com.docker.compose.service=functions-worker"))
-    assert.deepEqual(docker.calls.find((args) => args[0] === "restart"), ["restart", "worker-1"])
+    assert.deepEqual(docker.calls.find((args) => args[0] === "restart"), ["restart", "-t", "10", "worker-1"])
   })
 
   test("answers 502 with the reason when the worker cannot be restarted, and restarts it next time", async () => {

@@ -64,6 +64,7 @@ import {
 } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
 import { targetFetch } from "../target-client.js"
+import { sayTargetWarning } from "../target-warning.js"
 import {
   buildSchemaSourcesPayload,
   cacheSchemaSourcesLocally,
@@ -319,7 +320,7 @@ function reportTargetPush(
   stepFailed: boolean,
 ): void {
   if (saidUnfinished(target, stepFailed)) return
-  info(`Pushed to ${target.mode} (${target.environment}).`)
+  info(`Pushed to ${pushTargetName(target)}.`)
   // Cloud only. A self-host control plane has tiers too and they mean nothing there, so the same
   // sentence would be telling a self-hosted project to upgrade something it already has.
   if (target.mode === "cloud") {
@@ -337,8 +338,25 @@ function reportTargetPush(
  * way rather than with what a finished push ends with, which read as success below the failure.
  */
 function saidUnfinished(target: Pick<DeployTarget, "mode" | "environment">, stepFailed: boolean): boolean {
-  if (stepFailed) error(`The push to ${target.mode} (${target.environment}) did not finish: the schema is applied, but a step after it failed (above).`)
+  if (stepFailed) error(`The push to ${pushTargetName(target)} did not finish: the schema is applied, but a step after it failed (above).`)
   return stepFailed
+}
+
+/**
+ * The push's target as the user knows it. Its mode and environment read as internal labels: native
+ * dev's push ended "The push to direct (local) did not finish" (local test round 6).
+ */
+function pushTargetName(target: Pick<DeployTarget, "mode" | "environment">): string {
+  switch (target.mode) {
+    case "direct":
+      return "this project's database"
+    case "local":
+      return "this project's local stack"
+    case "cloud":
+      return `Supatype Cloud (${target.environment})`
+    case "self-host":
+      return `the self-hosted server (${target.environment})`
+  }
 }
 
 /** How a push to the project's own stack ends: unfinished, or with its Studio link when it has one. */
@@ -495,7 +513,7 @@ export async function uploadHooks(target: DeployTarget, body: HookDeployBody, co
   // Nothing declared: sent to clear whatever the target holds.
   const empty = count === 0 && emptyDeploy(body)
   try {
-    await withSpinner(empty ? "Clearing hooks the schema no longer declares" : `Deploying ${count} hook(s)`, () =>
+    const answer = await withSpinner(empty ? "Clearing hooks the schema no longer declares" : `Deploying ${count} hook(s)`, () =>
       targetFetch(target.apiBaseUrl, target.apiPrefix, {
         method: "POST",
         path: `/projects/${target.projectRef}/hooks/deploy`,
@@ -505,6 +523,7 @@ export async function uploadHooks(target: DeployTarget, body: HookDeployBody, co
         environment: target.mode === "cloud" ? target.environment : undefined,
       }),
     )
+    sayTargetWarning(answer)
   } catch (err) {
     postApplyFailed(
       empty

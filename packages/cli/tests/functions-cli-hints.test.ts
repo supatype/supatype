@@ -173,6 +173,48 @@ describe("functions deploy to Cloud when a function fails", () => {
     expect(run.output).toContain("Deployed 2 function(s)")
   })
 
+  // Round 6 N27: a directory function went as a JSON map of its files in `source`, which a
+  // self-hosted control plane wrote as its index.ts, over the project's own checkout.
+  it("sends a function's entry as its source, and every file it has by path", async () => {
+    linkAndLogIn()
+    mkdirSync(join(project.dir, "functions", "hello", "lib"), { recursive: true })
+    writeFileSync(join(project.dir, "functions", "hello", "lib", "greet.ts"), "export const greet = 'hi'\n")
+    const bodies: unknown[] = []
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "null")))
+      return new Response(JSON.stringify({ data: {} }), { headers: { "Content-Type": "application/json" } })
+    })
+
+    await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+
+    expect(bodies[0]).toMatchObject({
+      functions: [
+        { name: "bye", source: "export default () => new Response('bye')\n" },
+        {
+          name: "hello",
+          entrypoint: "hello/index.ts",
+          source: "export default () => new Response('hi')\n",
+          files: { "index.ts": "export default () => new Response('hi')\n", "lib/greet.ts": "export const greet = 'hi'\n" },
+        },
+      ],
+    })
+  })
+
+  it("says the warning a self-hosted stack answers with, and still deploys", async () => {
+    linkAndLogIn()
+    vi.stubGlobal("fetch", async () =>
+      new Response(JSON.stringify({ data: { warning: "Docker could not be asked whether the functions worker is running: down" } }), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+
+    const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+
+    expect(run.output).toContain("Docker could not be asked whether the functions worker is running: down")
+    expect(run.output).toContain("Deployed 2 function(s)")
+    expect(run.exitCode ?? 0).toBe(0)
+  })
+
   it("names every function the refused request carried, and exits non-zero", async () => {
     linkAndLogIn()
     platformRefusing("bye")

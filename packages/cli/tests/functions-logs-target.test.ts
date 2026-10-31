@@ -157,3 +157,34 @@ describe("functions invoke --auth on a local link", () => {
     expect(requests[0]?.auth).toMatch(/^Bearer eyJ.*\.test$/)
   })
 })
+
+// Local test round 6: one Ctrl+C ended the tail, but by killing the process (0xC000013A on Windows),
+// with nothing listening for it. It stops the stream and the command ends by itself.
+describe("Ctrl+C during functions logs on a self-host link", () => {
+  it("closes the stream and ends the command", async () => {
+    let cancelled = false
+    vi.stubGlobal("fetch", () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(event("hello", "first")))
+        },
+        cancel() {
+          cancelled = true
+        },
+      })
+      return Promise.resolve(new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }))
+    })
+    // Ctrl+C once the command listens for it: the tail starts after the link and config are read.
+    const stop = setInterval(() => {
+      if (process.listenerCount("SIGINT") === 0) return
+      clearInterval(stop)
+      process.emit("SIGINT")
+    }, 20)
+    const run = await runCommand(registerFunctions, ["functions", "logs", "hello"], project.dir)
+    clearInterval(stop)
+    expect(run.output).toContain("first")
+    expect(run.exitCode).toBeUndefined()
+    expect(cancelled).toBe(true)
+    expect(process.listenerCount("SIGINT")).toBe(0)
+  }, 15000)
+})

@@ -46,11 +46,14 @@ function ttyHandle(stdin: InkStdin): ReadingHandle | null {
 /**
  * Starts again the read {@link restoreStdinAfterInk} stopped, before a flow mounts: the stream
  * thinks it is still reading, so Ink asking it for input would not start it, and the flow would get
- * no keys. As Node's own `tryReadStart` does.
+ * no keys. As Node's own `tryReadStart` does. Raw mode first: started with it off, on Windows the
+ * read is a line-mode console read, which Ink turning raw mode on cancels, losing a key typed into
+ * it (local test round 6, an answer to the second flow of a first dev).
  */
 export function prepareStdinForInk(stdin: InkStdin = process.stdin): void {
   const handle = ttyHandle(stdin)
   if (handle === null || handle.reading) return
+  stdin.setRawMode?.(true)
   handle.reading = true
   handle.readStart()
 }

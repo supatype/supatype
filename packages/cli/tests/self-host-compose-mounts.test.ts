@@ -191,6 +191,22 @@ describe("self-host compose functions worker", () => {
     expect(block).toContain("\n    init: true")
   })
 
+  // Kong 3.6 asked for SRV records first, which Docker's DNS never answers: each nginx worker's first
+  // upstream lookup waited about 4 s, and the first realtime subscribe with it.
+  it("has Kong skip SRV lookups, keeping the hosts file's A records", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("\n  kong:")).split(/\n  [a-z]/)[1] ?? ""
+    expect(block).toContain('\n      KONG_DNS_ORDER: "LAST,A,CNAME"')
+    expect(block).toContain('\n      - "host.docker.internal:host-gateway"')
+  })
+
+  // Round 6 N29: a Docker that killed it 3 s after SIGTERM cut off its drain of requests in flight.
+  it("gives the worker a stop grace above its drain", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(block).toContain("\n    stop_grace_period: 10s")
+  })
+
   // Review: `functions env set` wrote the control plane's file, and nothing told the worker of it, so
   // no value set ever reached a function. The worker is named the file the control plane writes.
   it("reads the function env the control plane writes", () => {

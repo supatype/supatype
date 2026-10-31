@@ -11,12 +11,16 @@ export interface Worker {
   stop(): Promise<void>
 }
 
-/** A temporary functions root with `{name}/index.ts` for each entry of `functions`. */
+/**
+ * A temporary functions root with `{name}/index.ts` for each entry of `functions`; a key with a `/`
+ * is a file at that path instead, such as a module a function imports.
+ */
 async function functionsRoot(functions: Record<string, string>): Promise<string> {
   const root = await Deno.makeTempDir({ prefix: "worker-test-" })
-  for (const [name, source] of Object.entries(functions)) {
-    await Deno.mkdir(`${root}/${name}`)
-    await Deno.writeTextFile(`${root}/${name}/index.ts`, source)
+  for (const [key, source] of Object.entries(functions)) {
+    const path = key.includes("/") ? `${root}/${key}` : `${root}/${key}/index.ts`
+    await Deno.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true })
+    await Deno.writeTextFile(path, source)
   }
   return root
 }

@@ -47,3 +47,23 @@ describe("stdin between Ink flows", () => {
     expect(handle.readStart).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * Local test round 6: an `n` typed into "Create an admin user now?", the second flow of a first
+ * dev, was lost. The read restarted with raw mode off, so on Windows it began as a line-mode console
+ * read, and Ink turning raw mode on then cancelled that read with the key in it.
+ */
+describe("stdin restarted for the next flow", () => {
+  it("is in raw mode before its read starts", () => {
+    const { stdin, handle } = ttyStdin()
+    const order: string[] = []
+    stdin.setRawMode = (mode: boolean) => void order.push(`raw ${String(mode)}`)
+    handle.readStart = () => {
+      order.push("read")
+      return 0
+    }
+    handle.reading = false
+    prepareStdinForInk(stdin)
+    expect(order).toEqual(["raw true", "read"])
+  })
+})

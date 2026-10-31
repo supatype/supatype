@@ -78,9 +78,12 @@ export interface FakeDocker {
   containers: string[]
   /** The containers have stopped: `docker ps -a` lists them as exited. */
   exited: boolean
-  /** What `docker restart` exits with, and says when it fails. */
+  /** What `docker restart` and `docker start` exit with, and say when they fail. */
   restartStatus: number
   restartSays: string
+  /** What `docker ps` exits with, and says when it fails: non-zero is a daemon it cannot reach. */
+  psStatus: number
+  psSays: string
 }
 
 /**
@@ -88,14 +91,16 @@ export interface FakeDocker {
  * no compose plugin, so the restart must not need one, and a test must not reach a real daemon.
  */
 export function fakeDocker(): FakeDocker {
-  const fake: FakeDocker = { calls: [], containers: ["worker-1"], exited: false, restartStatus: 0, restartSays: "" }
+  const fake: FakeDocker = { calls: [], containers: ["worker-1"], exited: false, restartStatus: 0, restartSays: "", psStatus: 0, psSays: "" }
   setDockerRunnerForTests(async (args) => {
     fake.calls.push([...args])
     if (args[0] === "ps") {
+      if (fake.psStatus !== 0) return { status: fake.psStatus, stdout: "", stderr: fake.psSays }
       const listed = !fake.exited || args.includes("-a") ? fake.containers : []
-      return { status: 0, stdout: listed.join("\n"), stderr: "" }
+      const state = fake.exited ? "exited" : "running"
+      return { status: 0, stdout: listed.map((id) => (args.includes("--format") ? `${id} ${state}` : id)).join("\n"), stderr: "" }
     }
-    if (args[0] === "restart") {
+    if (args[0] === "restart" || args[0] === "start") {
       if (fake.restartStatus === 0) fake.exited = false
       return { status: fake.restartStatus, stdout: "", stderr: fake.restartSays }
     }

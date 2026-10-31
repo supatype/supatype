@@ -164,7 +164,7 @@ describe("a push whose hook deploy fails after the schema is applied", () => {
     const text = printed.join("\n")
     expect(text).toContain("Route not found")
     expect(text).not.toContain("Pushed to self-host")
-    expect(text).toContain("The push to self-host (prod) did not finish")
+    expect(text).toContain("The push to the self-hosted server (prod) did not finish")
     expect(process.exitCode).toBe(1)
   })
 })
