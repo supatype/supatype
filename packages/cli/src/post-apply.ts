@@ -6,10 +6,19 @@
  */
 import { error, plain } from "./ui/messages.js"
 
+/** How many post-apply steps have failed in this process, so a push can tell whether any of its own did. */
+let failures = 0
+
 /** Says that the schema was applied but `what` (what did not happen, where, and why) was not. */
 export function postApplyFailed(what: string, hint?: string): void {
+  failures++
   error(`The schema was applied, but ${what}`)
   if (hint !== undefined) plain(`  ${hint}`)
   plain("  Run `supatype push` again once that is fixed; the schema itself needs nothing more.")
   process.exitCode = 1
+}
+
+/** The post-apply steps failed so far: compared before and after a push's steps to see if any did. */
+export function postApplyFailureCount(): number {
+  return failures
 }

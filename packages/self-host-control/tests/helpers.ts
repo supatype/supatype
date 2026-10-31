@@ -76,6 +76,8 @@ export interface FakeDocker {
   calls: string[][]
   /** The worker containers `docker ps` finds. */
   containers: string[]
+  /** The containers are stopped, so only `docker ps -a` lists them. */
+  exited: boolean
   /** What `docker restart` exits with, and says when it fails. */
   restartStatus: number
   restartSays: string
@@ -86,10 +88,13 @@ export interface FakeDocker {
  * no compose plugin, so the restart must not need one, and a test must not reach a real daemon.
  */
 export function fakeDocker(): FakeDocker {
-  const fake: FakeDocker = { calls: [], containers: ["worker-1"], restartStatus: 0, restartSays: "" }
+  const fake: FakeDocker = { calls: [], containers: ["worker-1"], exited: false, restartStatus: 0, restartSays: "" }
   setDockerRunnerForTests(async (args) => {
     fake.calls.push([...args])
-    if (args[0] === "ps") return { status: 0, stdout: fake.containers.join("\n"), stderr: "" }
+    if (args[0] === "ps") {
+      const listed = !fake.exited || args.includes("-a") ? fake.containers : []
+      return { status: 0, stdout: listed.join("\n"), stderr: "" }
+    }
     if (args[0] === "restart") return { status: fake.restartStatus, stdout: "", stderr: fake.restartSays }
     return { status: 1, stdout: "", stderr: `unknown command: ${args.join(" ")}` }
   })

@@ -44,8 +44,8 @@ import { adoptKeysNeed, OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
-import { postApplyFailed } from "../post-apply.js"
-import type { HookDeployBody } from "@supatype/shared"
+import { postApplyFailed, postApplyFailureCount } from "../post-apply.js"
+import { isJsonObject, type HookDeployBody } from "@supatype/shared"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
@@ -63,13 +63,13 @@ import {
   type DeployTarget,
 } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
-import { targetFetch } from "../target-client.js"
+import { TargetApiError, targetFetch } from "../target-client.js"
 import {
   buildSchemaSourcesPayload,
   cacheSchemaSourcesLocally,
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
-import { info, plain } from "../ui/messages.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -295,6 +295,7 @@ async function pushViaTarget(
   // The diff's were printed before applying; what is left is what the push found once applied.
   printPushWarnings(pushResult, diff.warnings ?? [])
 
+  const failedBefore = postApplyFailureCount()
   if (target.mode === "cloud" || target.mode === "self-host") {
     await deployHooksToTarget(cwd, config, target, ast)
   }
@@ -306,6 +307,22 @@ async function pushViaTarget(
     return
   }
 
+  reportTargetPush(target, pushResult, postApplyFailureCount() > failedBefore)
+}
+
+/**
+ * How a push to a linked target ended. One whose step after the schema failed ends with that, not
+ * "Pushed to ..." and the API URL, which read as success above the failure.
+ */
+function reportTargetPush(
+  target: DeployTarget,
+  pushResult: Awaited<ReturnType<typeof targetSchemaPush>>,
+  stepFailed: boolean,
+): void {
+  if (stepFailed) {
+    error(`The push to ${target.mode} (${target.environment}) did not finish: the schema is applied, but a step after it failed (above).`)
+    return
+  }
   info(`Pushed to ${target.mode} (${target.environment}).`)
   // Cloud only. A self-host control plane has tiers too and they mean nothing there, so the same
   // sentence would be telling a self-hosted project to upgrade something it already has.
@@ -463,8 +480,10 @@ export async function deployHooksToTarget(
  * whole push failing (local test round 4, N23).
  */
 export async function uploadHooks(target: DeployTarget, body: HookDeployBody, count: number): Promise<void> {
+  // Nothing to deploy, sent so that hooks the schema no longer declares are cleared.
+  const empty = count === 0 && emptyDeploy(body)
   try {
-    await withSpinner(`Deploying ${count} hook(s)`, () =>
+    await withSpinner(empty ? "Clearing hooks the schema no longer declares" : `Deploying ${count} hook(s)`, () =>
       targetFetch(target.apiBaseUrl, target.apiPrefix, {
         method: "POST",
         path: `/projects/${target.projectRef}/hooks/deploy`,
@@ -475,13 +494,24 @@ export async function uploadHooks(target: DeployTarget, body: HookDeployBody, co
       }),
     )
   } catch (err) {
+    // Someone who may push a schema but not deploy hooks: with none to deploy, that is no failure.
+    if (empty && err instanceof TargetApiError && err.status === 403) {
+      warn("The target did not let this push change its hooks (HTTP 403); the schema declares none, so there was nothing to deploy.")
+      return
+    }
     postApplyFailed(
       `its ${count} hook(s) were not deployed to ${target.apiBaseUrl}: ${errorMessage(err)}`,
       "The hooks deployed before, if any, are still the ones that run.",
     )
     return
   }
-  info(`Deployed ${count} hook(s)`)
+  if (!empty) info(`Deployed ${count} hook(s)`)
+}
+
+/** Whether a deploy body carries no handler and no map entry. */
+function emptyDeploy(body: HookDeployBody): boolean {
+  const maps = [body.map, body.validators, body.cache]
+  return (body.handlers ?? []).length === 0 && maps.every((map) => map === undefined || (isJsonObject(map) && Object.keys(map).length === 0))
 }
 
 /**

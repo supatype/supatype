@@ -101,9 +101,38 @@ export function registerFunctionRoutes(
     }
     const current = readFunctionEnv()
     current[body.key] = body.value ?? ""
-    mkdirSync(dirname(envPath()), { recursive: true })
-    writeFileSync(envPath(), `${JSON.stringify(current, null, 2)}\n`, "utf8")
+    writeFunctionEnv(current)
     await restartFunctionsWorker()
     sendJson(ctx.res, 200, { data: { key: body.key } })
   })
+
+  // `supatype functions env unset` on a self-host link: refused until now, since there was no route.
+  // A key not set changes nothing, so the worker is not restarted for it.
+  route(routes, "DELETE", "/projects/:ref/functions/env/:key", async (ctx) => {
+    assertProject(ctx.params["ref"]!)
+    const key = decodedParam(ctx.params["key"]!)
+    const current = readFunctionEnv()
+    const removed = Object.hasOwn(current, key)
+    if (removed) {
+      delete current[key]
+      writeFunctionEnv(current)
+      await restartFunctionsWorker()
+    }
+    sendJson(ctx.res, 200, { data: { key, removed } })
+  })
+}
+
+/** Writes the function env file. */
+function writeFunctionEnv(env: Record<string, string>): void {
+  mkdirSync(dirname(envPath()), { recursive: true })
+  writeFileSync(envPath(), `${JSON.stringify(env, null, 2)}\n`, "utf8")
+}
+
+/** A path parameter as the caller encoded it (encodeURIComponent); a 400 when it cannot be decoded. */
+function decodedParam(raw: string): string {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    throw badRequest(`${JSON.stringify(raw)} is not a valid URL-encoded name`)
+  }
 }

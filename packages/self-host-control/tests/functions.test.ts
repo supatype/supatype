@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert"
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, existsSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { test, describe, before, after } from "node:test"
-import { fakeDocker, request, startServer, type ControlPlaneServer } from "./helpers.js"
+import { fakeDocker, request, startServer, type ControlPlaneServer, type FakeDocker } from "./helpers.js"
 
 const PROJECT = "test-project"
 
@@ -20,6 +20,7 @@ describe("functions routes", () => {
   let server: ControlPlaneServer
   let tmp: string
   let projectDir: string
+  let docker: FakeDocker
 
   before(async () => {
     // The project lives one level down so a name that climbs out of it still lands inside `tmp`.
@@ -29,10 +30,9 @@ describe("functions routes", () => {
     writeFileSync(join(projectDir, "keep.txt"), "project file", "utf8")
     process.env["SUPATYPE_PROJECT_ROOT"] = projectDir
     process.env["SUPATYPE_PROJECT_REF"] = PROJECT
-    // The worker restart shells out to docker compose; point it at a project that does not exist.
     process.env["COMPOSE_PROJECT_NAME"] = "supatype-self-host-control-test-none"
 
-    fakeDocker()
+    docker = fakeDocker()
     ;({ server, baseUrl } = await startServer())
   })
 
@@ -94,12 +94,39 @@ describe("functions routes", () => {
     assert.ok(existsSync(join(projectDir, "keep.txt")))
   })
 
+  // `supatype functions env unset` on a self-host link was refused: the control plane had no route.
+  test("env unset removes the key and restarts the worker, and does neither for a key not set", async () => {
+    const envFile = join(projectDir, ".supatype", "function-env.json")
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "GONE SOON", value: "1" })
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "KEPT", value: "2" })
+    docker.calls.length = 0
+    const res = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/${encodeURIComponent("GONE SOON")}`)
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.deepEqual(JSON.parse(readFileSync(envFile, "utf8")), { KEPT: "2" })
+    assert.ok(docker.calls.some((args) => args[0] === "restart"))
+    docker.calls.length = 0
+    const again = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/NEVER_SET`)
+    assert.equal(again.status, 200)
+    assert.deepEqual(docker.calls, [])
+  })
+
+  test("env unset answers 502 with the reason when the worker cannot be restarted", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "K2", value: "v" })
+    docker.restartStatus = 1
+    docker.restartSays = "Error response from daemon: no such container"
+    const res = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/K2`)
+    docker.restartStatus = 0
+    assert.equal(res.status, 502)
+    assert.match(String(res.json["message"]), /no such container/)
+  })
+
   const routes: Array<[string, string, unknown?]> = [
     ["GET", "/functions"],
     ["POST", "/functions/deploy", { functions: [{ name: "other", source: "x" }] }],
     ["DELETE", "/functions/other"],
     ["GET", "/functions/env"],
     ["POST", "/functions/env", { key: "K", value: "v" }],
+    ["DELETE", "/functions/env/K"],
   ]
   for (const [method, path, body] of routes) {
     test(`${method} ${path} refuses another project's ref`, async () => {

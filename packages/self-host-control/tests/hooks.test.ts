@@ -55,6 +55,7 @@ describe("hooks deploy route", () => {
   beforeEach(() => {
     docker.calls.length = 0
     docker.containers = ["worker-1"]
+    docker.exited = false
     docker.restartStatus = 0
     rmSync(projectDir, { recursive: true, force: true })
     mkdirSync(join(projectDir, ".supatype"), { recursive: true })
@@ -158,18 +159,54 @@ describe("hooks deploy route", () => {
   })
 
   // Every push restarted the worker and rewrote every file, though nothing had changed.
-  test("writes nothing and restarts nothing when the stack already has what the push sends", async () => {
+  test("writes nothing that is already there, but restarts the worker for the handlers it carries", async () => {
+    // On a stack run from the project's own checkout an edited hook is on disk already, and the
+    // worker (no --watch) serves the module it loaded: only a restart serves the edit.
     const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP, validators: {}, cache: {} }
-    const first = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
-    assert.equal(dataOf(first.json)["restarted"], true)
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
     const handler = join(projectDir, "hooks", "tag-note", "index.ts")
     const manifestFile = join(projectDir, ".supatype", "manifest.json")
     const before = [statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs]
     await new Promise((resolve) => setTimeout(resolve, 20))
     const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
     assert.equal(again.status, 200)
-    assert.equal(dataOf(again.json)["restarted"], false)
+    assert.equal(dataOf(again.json)["restarted"], true)
     assert.deepEqual([statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs], before)
+  })
+
+  test("restarts nothing for a deploy with no handlers whose maps are already there", async () => {
+    const body = { handlers: [], map: {}, validators: {}, cache: {} }
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    assert.equal(dataOf(again.json)["restarted"], false)
+  })
+
+  // The server reads the cache map; the worker does not, so a restart buys nothing.
+  test("writes a cache-only change without restarting the worker", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {}, cache: { note: { enabled: true } } })
+    assert.equal(dataOf(res.json)["restarted"], false)
+    assert.deepEqual(manifest(projectDir)["cache"], { note: { enabled: true } })
+  })
+
+  test("starts a worker that has stopped, which only `docker ps -a` lists", async () => {
+    docker.exited = true
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.deepEqual(docker.calls.find((args) => args[0] === "restart"), ["restart", "worker-1"])
+  })
+
+  test("keeps a restart owed across a control plane restart, in the project's .supatype", async () => {
+    docker.restartStatus = 1
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    assert.ok(existsSync(join(projectDir, ".supatype", "functions-worker-restart-owed")))
+    docker.restartStatus = 0
+    // Only the file says so: a control plane started since knows nothing else. A deploy that changes
+    // nothing still makes the restart, then clears it.
+    rmSync(join(projectDir, "hooks"), { recursive: true, force: true })
+    writeFileSync(join(projectDir, ".supatype", "manifest.json"), JSON.stringify({ functions_enabled: true }))
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {} })
+    assert.equal(dataOf(res.json)["restarted"], true)
+    assert.equal(existsSync(join(projectDir, ".supatype", "functions-worker-restart-owed")), false)
   })
 
   test("answers a manifest that is not JSON with 409, as one that is not an object", async () => {
@@ -204,11 +241,11 @@ describe("hooks deploy route", () => {
     assert.equal(dataOf(again.json)["restarted"], true)
   })
 
-  test("answers 502 when no worker container is running", async () => {
+  test("answers 502 saying no worker container exists at all", async () => {
     docker.containers = []
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
     assert.equal(res.status, 502)
-    assert.match(String(res.json["message"]), /functions-worker/)
+    assert.match(String(res.json["message"]), /no functions-worker container exists/)
   })
 
   test("answers another project ref as unknown", async () => {

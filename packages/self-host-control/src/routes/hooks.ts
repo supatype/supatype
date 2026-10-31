@@ -15,8 +15,9 @@
  * manifest. So each handler is written back into the layout a project keeps (`<name>/index.ts`,
  * importing `../_supatype/hooks.ts`), which on a stack run from the project's own checkout is the
  * file it already has, and the maps go into `.supatype/manifest.json` as a local push writes them.
- * Everything is checked before anything is written, and only what differs from the disk is written;
- * the worker is restarted only when something was. A handler the schema no longer names is left on
+ * Everything is checked before anything is written, and only what differs from the disk is written.
+ * The worker is restarted for a deploy that carries handlers or changes the hook or validator map, and
+ * not for a cache-only change, which the server reads. A handler the schema no longer names is left on
  * disk: no map names it, so nothing calls it, and on that same checkout it may be one being written.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -106,16 +107,13 @@ function deployFiles(handlers: ReadonlyArray<{ name: unknown; source: string }>)
   return { files, names: named.map((handler) => String(handler.name)).sort() }
 }
 
-/** Writes each file whose contents differ from the disk; true when any did. */
-function writeChanged(files: readonly HookFile[]): boolean {
-  let wrote = false
+/** Writes each file whose contents differ from the disk, and leaves the rest untouched. */
+function writeChanged(files: readonly HookFile[]): void {
   for (const file of files) {
     if (existsSync(file.path) && readFileSync(file.path, "utf8") === file.source) continue
     mkdirSync(dirname(file.path), { recursive: true })
     writeFileSync(file.path, file.source, "utf8")
-    wrote = true
   }
-  return wrote
 }
 
 export function registerHookRoutes(routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }>): void {
@@ -128,11 +126,15 @@ export function registerHookRoutes(routes: Array<{ method: string; pattern: RegE
     if (missing.length > 0) throw badRequest(`The maps name functions that were not uploaded: ${missing.join(", ")}`)
     const manifest = readManifest()
     // Handlers before the maps, so a map never names a handler not yet on disk.
-    const wroteFiles = writeChanged(files)
-    const wroteMaps = applyManifestMaps(manifest, maps)
-    if (wroteMaps) writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
-    // A restart owed by one that failed is made now, though nothing changed.
-    const restarted = wroteFiles || wroteMaps || workerRestartOwed()
+    writeChanged(files)
+    // Hooks and validators are the worker's to serve; the cache map is the server's alone.
+    const workerMaps = applyManifestMaps(manifest, { hooks: maps.hooks, validators: maps.validators })
+    const cacheMap = applyManifestMaps(manifest, { cache: maps.cache })
+    if (workerMaps || cacheMap) writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
+    // Restarted for any handlers it carries, written or not: on a stack run from the project's own
+    // checkout an edited hook is on disk already, and the worker (no --watch) serves the module it
+    // loaded. Also for a changed hook or validator map, and for a restart owed by one that failed.
+    const restarted = files.length > 0 || workerMaps || workerRestartOwed()
     if (restarted) await restartFunctionsWorker()
     sendJson(ctx.res, 200, { data: { handlers: names, tables: Object.keys(maps.hooks).sort(), restarted } })
   })

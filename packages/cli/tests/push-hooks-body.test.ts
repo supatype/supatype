@@ -4,16 +4,20 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { projectConfig } from "./support/project-config.js"
 
-const sent = vi.hoisted(() => ({ bodies: [] as unknown[] }))
-vi.mock("../src/target-client.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/target-client.js")>()),
-  targetFetch: async (_base: string, _prefix: string, opts: { body?: unknown }) => {
-    sent.bodies.push(opts.body)
-    return {}
-  },
-}))
+const sent = vi.hoisted(() => ({ bodies: [] as unknown[], refuse: 0 }))
+vi.mock("../src/target-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/target-client.js")>()
+  return {
+    ...actual,
+    targetFetch: async (_base: string, _prefix: string, opts: { body?: unknown }) => {
+      sent.bodies.push(opts.body)
+      if (sent.refuse !== 0) throw new actual.TargetApiError("Forbidden", sent.refuse)
+      return {}
+    },
+  }
+})
 
-const { deployHooksToTarget } = await import("../src/commands/push.js")
+const { deployHooksToTarget, uploadHooks } = await import("../src/commands/push.js")
 
 /**
  * The hook deploy body was built differently per target: the maps only for self-host, and nothing at
@@ -23,6 +27,8 @@ const { deployHooksToTarget } = await import("../src/commands/push.js")
 const dirs: string[] = []
 afterEach(() => {
   sent.bodies.length = 0
+  sent.refuse = 0
+  process.exitCode = undefined
   vi.restoreAllMocks()
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
@@ -42,4 +48,34 @@ describe("the hook deploy body", () => {
       expect(sent.bodies).toEqual([{ handlers: [], map: {}, validators: {}, cache: { note: { enabled: true } } }])
     })
   }
+})
+
+// Review: Cloud now got the body on every push, so a member who may push schema but not deploy hooks
+// failed every push, under "Deploying 0 hook(s)".
+describe("an empty hook deploy", () => {
+  it("says no hook count, and takes a 403 as nothing to deploy", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-body-"))
+    dirs.push(cwd)
+    const said: string[] = []
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
+    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
+    sent.refuse = 403
+    const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
+    await deployHooksToTarget(cwd, projectConfig(), target, { models: [] })
+    expect(process.exitCode).toBeUndefined()
+    expect(said.join("\n")).not.toMatch(/0 hook\(s\)/)
+    expect(said.join("\n")).toMatch(/nothing to deploy/)
+  })
+
+  it("still fails a hook deploy refused with 403 when it carries hooks", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-body-"))
+    dirs.push(cwd)
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    sent.refuse = 403
+    const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
+    await uploadHooks(target, { handlers: [{ name: "h", source: "x" }], map: {} }, 1)
+    expect(process.exitCode).toBe(1)
+  })
 })
