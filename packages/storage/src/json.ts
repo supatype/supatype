@@ -56,7 +56,7 @@ export function optional<T>(guard: Guard<T>): Optional<T> {
 }
 
 type Field = Guard<unknown> | Optional<unknown>
-type Shape = Readonly<Record<string, Field>>
+export type Shape = Readonly<Record<string, Field>>
 type Guarded<F> = F extends Guard<infer T> ? T : F extends Optional<infer T> ? T : never
 type RequiredKeys<S extends Shape> = { [K in keyof S]: S[K] extends Optional<unknown> ? never : K }[keyof S]
 type OptionalKeys<S extends Shape> = Exclude<keyof S, RequiredKeys<S>>
@@ -69,6 +69,14 @@ export type FromShape<S extends Shape> = { [K in RequiredKeys<S>]: Guarded<S[K]>
 function fieldAccepts(field: Field, value: unknown): boolean {
   if (typeof field === "function") return field(value)
   return value === undefined || field.optional(value)
+}
+
+/** The keys `shape` names whose values in `value` do not pass their guard, for an error that names them. */
+export function shapeMismatches(shape: Shape, value: unknown): string[] {
+  if (!isJsonObject(value)) return []
+  return Object.entries(shape)
+    .filter(([key, field]) => !fieldAccepts(field, value[key]))
+    .map(([key]) => key)
 }
 
 /** A JSON object whose named keys each pass their guard. Keys not named are allowed and not typed. */

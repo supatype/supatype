@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { createInterface } from "node:readline"
 import { composeHostPath } from "./compose-host-path.js"
 export { composeHostPath } from "./compose-host-path.js"
 import { ENGINE_SERVICE } from "./compose-engine-service.js"
-import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
-import { askDocker, askDockerSync, NO_DOCKER_LIMIT, type DockerAnswer } from "./docker-exec.js"
+import { requireDockerDaemon, type DockerBrandOptions, type DockerReportOptions } from "./docker-runtime.js"
+import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer } from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
 import {
   COMPOSE_DEV_KONG_PORT,
@@ -1515,6 +1516,44 @@ export function askDockerCompose(
 ): Promise<DockerAnswer> {
   const call = { cwd: projectRoot, env: composeProcessEnv(projectRoot, true), timeoutMs }
   return askDocker(composeInvocation(composePath, args, projectRoot, composeProject, true), call)
+}
+
+/** compose's closing line for an image it could not pull. */
+const DAEMON_PULL_ERROR = /^Error response from daemon: /
+
+/**
+ * Whether a line compose's pull writes is shown: all but its closing daemon errors. Each image that
+ * failed is pulled again on its own (compose-image-pull.ts), which says why, and one kept from this
+ * machine is no failure; compose printed them three times for an image `update` then said it kept
+ * (local test round 4).
+ */
+export function shownPullLine(line: string): boolean {
+  return !DAEMON_PULL_ERROR.test(line)
+}
+
+/** `docker compose pull` for the project, its progress shown as it runs ({@link shownPullLine}); its exit status. */
+export function pullComposeImages(
+  composePath: string,
+  projectRoot: string,
+  composeProject: string,
+  report?: DockerReportOptions,
+): Promise<number> {
+  requireDockerDaemon(report)
+  const child = spawnDocker(composeInvocation(composePath, ["pull"], projectRoot, composeProject, false), {
+    cwd: projectRoot,
+    env: composeProcessEnv(projectRoot, false),
+    stdio: ["ignore", "inherit", "pipe"],
+    windowsHide: true,
+  })
+  if (child.stderr !== null) {
+    createInterface({ input: child.stderr }).on("line", (line) => {
+      if (shownPullLine(line)) process.stderr.write(`${line}\n`)
+    })
+  }
+  return new Promise((resolve) => {
+    child.on("error", () => resolve(1))
+    child.on("close", (code) => resolve(code ?? 1))
+  })
 }
 
 /** The environment compose runs with: the CLI's, less the shell's keys `.env` overrides. */

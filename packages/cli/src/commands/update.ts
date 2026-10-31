@@ -9,7 +9,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
-import { askDockerCompose, runDockerCompose, writeSelfHostCompose, composeProjectName } from "../self-host-compose.js"
+import { askDockerCompose, pullComposeImages, writeSelfHostCompose, composeProjectName } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { syncComposeImagePins } from "../dev-compose.js"
 import { composeServiceImages } from "../compose-services.js"
@@ -94,7 +94,7 @@ async function updateComposeImages(cwd: string, config: SupatypeProjectConfig): 
   const project = composeProjectName(config.project.name)
   info("Pulling self-host compose images...")
   const pulls = await pullServiceImages({
-    pullAll: () => runDockerCompose(composePath, ["pull"], cwd, project, { brand: UPDATE_BRAND }),
+    pullAll: () => pullComposeImages(composePath, cwd, project, { brand: UPDATE_BRAND }),
     images: () => composeServiceImages({ composePath, projectRoot: cwd, projectName: project }),
     pullOne: async (service) => {
       const answer = await askDockerCompose(composePath, ["pull", service], cwd, project, DOCKER_PULL_TIMEOUT_MS)

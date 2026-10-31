@@ -430,7 +430,34 @@ export function start(opts: PgOptions): void {
     "--wait",
   ]
 
+  writeClusterSettings(opts)
   runPgCtlStart(opts, args, logPath)
+}
+
+/** The file in the data directory that keeps the settings dev starts the cluster with. */
+const CLUSTER_SETTINGS_FILE = "supatype.conf"
+
+/**
+ * Keeps {@link pgServerSettings} in the cluster itself, in `supatype.conf`, which its postgresql.conf
+ * includes, so a plain `pg_ctl start` of the data directory starts it as dev does. Given on the
+ * command line only, it refused: `logical replication slot "supatype_realtime" exists, but
+ * "wal_level" < "logical"` (local test round 4). The keyspace's settings, its port chosen per run,
+ * stay on the command line only; written at every start, so the file follows the archive's libraries.
+ * A directory with no postgresql.conf is no cluster, and is left for pg_ctl to say so.
+ */
+export function writeClusterSettings(opts: PgSettingsOptions & { dataDir: string }): void {
+  const confPath = join(opts.dataDir, "postgresql.conf")
+  if (!existsSync(confPath)) return
+  const lines = [...pgServerSettings(opts).matchAll(/-c (\S+?)=(\S+)/g)].flatMap(([, name = "", value = ""]) => {
+    if (name.startsWith("pg_keyspace.")) return []
+    const kept = name === "shared_preload_libraries" ? value.split(",").filter((lib) => lib !== "pg_keyspace").join(",") : value
+    return kept === "" ? [] : [`${name} = '${kept}'`]
+  })
+  const header = "# Written by supatype dev at every start of this cluster; edits are replaced. See postgres-ctl.ts."
+  writeFileSync(join(opts.dataDir, CLUSTER_SETTINGS_FILE), `${[header, ...lines].join("\n")}\n`)
+  const include = `include_if_exists = '${CLUSTER_SETTINGS_FILE}'`
+  const conf = readFileSync(confPath, "utf8")
+  if (!conf.includes(include)) writeFileSync(confPath, `${conf}${conf.endsWith("\n") ? "" : "\n"}${include}\n`)
 }
 
 /**

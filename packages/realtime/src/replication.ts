@@ -254,6 +254,9 @@ export class ReplicationListener {
         }
       }
     } catch (err) {
+      // Stopped while this poll waited on its query: the stop ended the connection, which is the
+      // error, so it is expected. Native dev's Ctrl+C printed it with a stack (local test round 4).
+      if (this.stopped) return
       // Log but don't crash, replication errors are recoverable
       console.error("[realtime] replication poll error:", err)
       // A lost connection is not recoverable by polling it again, which is what used to happen:

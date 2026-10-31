@@ -16,19 +16,13 @@ import { bucketIdProblem, bucketSettingsProblem, renameProblem, bucketFieldsProb
 
 const isAccessMode = isOneOf(["public", "private", "custom"] as const satisfies readonly BucketAccessMode[])
 
-/** `name` is checked by the handler, which answers a missing one by name. */
-const isCreateBucketBody = isShape({
-  id: optional(isString),
-  name: optional(isString),
-  public: optional(isBoolean),
-  file_size_limit: optional(isNumber),
-  allowed_mime_types: optional(isArrayOf(isString)),
-  access_mode: optional(isAccessMode),
-  s3_bucket_policy: optional(nullable(isString)),
-})
-
-/** `id` and `name` may only name the bucket itself: a Supabase client's update sends them along. */
-const isUpdateBucketBody = isShape({
+/**
+ * What a create and an update read; null for the size limit or the types is "no limit" in both (a
+ * create refused it, naming nothing, while an update took it: local test round 4). On a create,
+ * `name` is checked by the handler, which answers a missing one by name. On an update, `id` and
+ * `name` may only name the bucket itself: a Supabase client's update sends them along.
+ */
+const BUCKET_BODY = {
   id: optional(isString),
   name: optional(isString),
   public: optional(isBoolean),
@@ -36,7 +30,9 @@ const isUpdateBucketBody = isShape({
   allowed_mime_types: optional(nullable(isArrayOf(isString))),
   access_mode: optional(isAccessMode),
   s3_bucket_policy: optional(nullable(isString)),
-})
+} as const
+const isCreateBucketBody = isShape(BUCKET_BODY)
+const isUpdateBucketBody = isCreateBucketBody
 
 /** Answers 400 with `problem` and says so, or does nothing when there is none. */
 function refused(ctx: RequestContext, problem: string | null): boolean {
@@ -64,7 +60,7 @@ async function createBucketAndPolicy(id: string, body: CreateBucketBody & { name
 }
 
 export async function create(ctx: RequestContext): Promise<void> {
-  const body = await readJson(ctx.req, isCreateBucketBody)
+  const body = await readJson(ctx.req, isCreateBucketBody, BUCKET_BODY)
   if (refused(ctx, bucketFieldsProblem(body))) return
 
   if (!body.name) {
@@ -102,7 +98,7 @@ export async function get(ctx: RequestContext): Promise<void> {
 }
 
 export async function update(ctx: RequestContext): Promise<void> {
-  const body = await readJson(ctx.req, isUpdateBucketBody)
+  const body = await readJson(ctx.req, isUpdateBucketBody, BUCKET_BODY)
   if (refused(ctx, bucketFieldsProblem(body) ?? bucketSettingsProblem(body))) return
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)

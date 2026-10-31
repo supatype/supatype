@@ -205,3 +205,24 @@ describe("a bucket write from Supabase's storage client", () => {
     expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'a bucket cannot be renamed: id "c" is not "b"' }) })
   })
 })
+
+/**
+ * Local test round 4: a create with `"file_size_limit": null` or `"allowed_mime_types": null`
+ * answered 400 with `The request body does not have the fields this route reads, with their types`,
+ * naming no field, while an update took the same nulls as "no limit".
+ */
+describe("a bucket create naming no limit", () => {
+  it("takes null for the size limit and the types, as an update does", async () => {
+    vi.mocked(db.createBucket).mockReset().mockResolvedValue(row("private", false))
+    const { ctx, sent } = answer({ name: "b", file_size_limit: null, allowed_mime_types: null })
+    await buckets.create(ctx)
+    expect(sent().status).toBe(200)
+    expect(vi.mocked(db.createBucket).mock.lastCall?.slice(3, 5)).toEqual([null, null])
+  })
+
+  it("names the field whose type it cannot read", async () => {
+    // The server answers an InvalidBody with 400 and its message (server.ts).
+    const { ctx } = answer({ name: "b", file_size_limit: "1000" })
+    await expect(buckets.create(ctx)).rejects.toThrow("The request body's file_size_limit does not have the type this route reads")
+  })
+})

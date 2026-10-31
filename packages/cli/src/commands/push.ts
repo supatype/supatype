@@ -42,7 +42,7 @@ import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from 
 import { adoptKeysNeed, OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
-import { isParsedBuckets, provisionBucketsFromAst } from "../storage-provision.js"
+import { bucketSpecsFromAst, isParsedBuckets, provisionBuckets, type ParsedBuckets } from "../storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
@@ -66,7 +66,7 @@ import {
   cacheSchemaSourcesLocally,
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
-import { info, plain } from "../ui/messages.js"
+import { error, info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -450,16 +450,33 @@ async function deployHooksToTarget(
   const adapter = readGeneratedAdapter(hooksDir)
   const handlers = adapter === null ? upload.handlers : [...upload.handlers, adapter]
 
-  await withSpinner(`Deploying ${upload.handlers.length} hook(s)`, () =>
-    targetFetch(target.apiBaseUrl, target.apiPrefix, {
-      method: "POST",
-      path: `/projects/${target.projectRef}/hooks/deploy`,
-      body: { handlers, map: upload.map },
-      token: target.token!,
-      orgId: target.orgId,
-      environment: target.mode === "cloud" ? target.environment : undefined,
-    }),
-  ).then(() => info(`Deployed ${upload.handlers.length} hook(s)`))
+  await uploadHooks(target, { handlers, map: upload.map }, upload.handlers.length)
+}
+
+/**
+ * `POST /projects/:ref/hooks/deploy` on the target. A refusal comes after the schema was applied,
+ * so it says that, which target refused and what it answered: `Route not found` alone read as the
+ * whole push failing (local test round 4, N23).
+ */
+export async function uploadHooks(target: DeployTarget, body: { handlers: unknown[]; map: unknown }, count: number): Promise<void> {
+  try {
+    await withSpinner(`Deploying ${count} hook(s)`, () =>
+      targetFetch(target.apiBaseUrl, target.apiPrefix, {
+        method: "POST",
+        path: `/projects/${target.projectRef}/hooks/deploy`,
+        body,
+        token: target.token!,
+        orgId: target.orgId,
+        environment: target.mode === "cloud" ? target.environment : undefined,
+      }),
+    )
+  } catch (err) {
+    fatalError(
+      `The schema was applied, but its ${count} hook(s) were not deployed to ${target.apiBaseUrl}: ${errorMessage(err)}`,
+      ["The hooks deployed before, if any, are still the ones that run. Run `supatype push` again once the target takes them."],
+    )
+  }
+  info(`Deployed ${count} hook(s)`)
 }
 
 /**
@@ -517,7 +534,25 @@ async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig
   if (!serviceRoleKey) return
   await ensureEngine()
   const parsedAst = await engineRequest("/parse", { ast }, isParsedBuckets)
-  await provisionBucketsFromAst(parsedAst, `${baseUrl}/storage/v1`, serviceRoleKey)
+  await provisionSchemaBuckets(parsedAst, `${baseUrl}/storage/v1`, serviceRoleKey)
+}
+
+/**
+ * Creates the schema's buckets. One the stack does not have afterwards ends the push non-zero,
+ * named, as the hooks and the database checks do: it exited 0 with every bucket refused (local
+ * test round 4). The schema is applied by then, so the line says that too.
+ */
+export async function provisionSchemaBuckets(parsed: ParsedBuckets, storageApiUrl: string, serviceRoleKey: string): Promise<void> {
+  const buckets = bucketSpecsFromAst(parsed)
+  if (buckets.length === 0) return
+  console.log("[supatype] Provisioning storage buckets...")
+  const failed = await provisionBuckets(storageApiUrl, serviceRoleKey, buckets)
+  if (failed.length === 0) return
+  error(
+    `${failed.length} of ${buckets.length} bucket(s) were not provisioned: ${failed.join(", ")}. ` +
+      "The schema was applied; push again once the storage service takes them.",
+  )
+  process.exitCode = 1
 }
 
 /**

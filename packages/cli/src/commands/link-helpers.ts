@@ -1,6 +1,7 @@
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
 import { loadCloudCredentials } from "../cloud-credentials.js"
+import { readEnvFile } from "../env-file.js"
 import {
   createCloudLink,
   createSelfHostLink,
@@ -18,18 +19,38 @@ import { nextSteps } from "../ui/next-steps.js"
 import { isInteractive } from "../ui/interactive.js"
 import { ensureNotCancelled, p, runClackFlow } from "../ui/prompts.js"
 
-function resolveLinkToken(opts: {
+interface LinkTokenOptions {
   token?: string
   serviceRoleKey?: string
-}): string | undefined {
+}
+
+/** A Cloud link's token: the flag, the exported access token, else the session `supatype login` saved. */
+function cloudLinkToken(opts: LinkTokenOptions): string | undefined {
   return (
     opts.token ??
     opts.serviceRoleKey ??
     process.env["SUPATYPE_ACCESS_TOKEN"] ??
     process.env["SUPATYPE_TOKEN"] ??
-    process.env["SERVICE_ROLE_KEY"] ??
     loadCloudCredentials()?.accessToken
   )
+}
+
+/**
+ * A self-host link's token: the flag, then `.env`'s SERVICE_ROLE_KEY, then an exported one, then the
+ * key asked for, hidden, in a terminal. Never a Cloud credential: the Cloud login's access token was
+ * sent to the self-host URL, which is anyone's server (local test round 4, N21).
+ */
+async function selfHostLinkToken(opts: LinkTokenOptions, cwd: string): Promise<string | undefined> {
+  const given = opts.token ?? opts.serviceRoleKey ?? nonBlank(readEnvFile(cwd)["SERVICE_ROLE_KEY"]) ?? nonBlank(process.env["SERVICE_ROLE_KEY"])
+  if (given !== undefined || !isInteractive()) return given
+  const asked = await runClackFlow(async () =>
+    ensureNotCancelled(await p.password({ message: "The self-host stack's SERVICE_ROLE_KEY" })).trim(),
+  )
+  return nonBlank(asked)
+}
+
+function nonBlank(value: string | undefined): string | undefined {
+  return value === undefined || value.trim() === "" ? undefined : value.trim()
 }
 
 async function probeSelfHostLink(apiUrl: string, projectRef: string, token: string): Promise<void> {
@@ -199,8 +220,6 @@ export async function runLinkAction(opts: {
     })
   }
 
-  const token = resolveLinkToken(opts)
-
   if (opts.fixGitignore) {
     ensureSupatypeGitignore(cwd)
   } else {
@@ -210,8 +229,9 @@ export async function runLinkAction(opts: {
   const existing = loadProjectLink(cwd)
 
   if (url) {
+    const token = await selfHostLinkToken(opts, cwd)
     if (!token) {
-      error("Authentication required. Pass --token $SERVICE_ROLE_KEY")
+      error("Authentication required: the stack's service-role key. Pass --token $SERVICE_ROLE_KEY, or set SERVICE_ROLE_KEY in .env")
       process.exit(1)
     }
     const apiUrl = url.replace(/\/$/, "")
@@ -232,6 +252,7 @@ export async function runLinkAction(opts: {
     return
   }
 
+  const token = cloudLinkToken(opts)
   if (!token) {
     error("Authentication required. Run: supatype login  (or set SUPATYPE_ACCESS_TOKEN / pass --token).")
     process.exit(1)
