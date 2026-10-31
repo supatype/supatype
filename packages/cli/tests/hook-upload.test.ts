@@ -3,7 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import { ADAPTER_KEY, readHookUpload } from "../src/hook-upload.js"
+import { FLATTENED_ADAPTER_IMPORT } from "@supatype/shared"
+import { readHookUpload } from "../src/hook-upload.js"
 
 function project(): { cwd: string; hooks: string } {
   const cwd = mkdtempSync(join(tmpdir(), "supatype-hook-upload-"))
@@ -60,7 +61,7 @@ describe("readHookUpload", () => {
 
     const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
     expect(upload?.handlers).toHaveLength(1)
-    expect(upload?.handlers[0]?.source).toContain(`./${ADAPTER_KEY}`)
+    expect(upload?.handlers[0]?.source).toContain(FLATTENED_ADAPTER_IMPORT)
     expect(upload?.handlers[0]?.source).not.toContain("../_supatype/hooks.ts")
   })
 

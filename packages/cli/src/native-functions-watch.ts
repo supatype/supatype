@@ -33,12 +33,22 @@ export interface NativeFunctionsTarget {
  * rewrote, and null when nothing changed or the directories could not be read as handlers.
  */
 export function refreshNativeFunctionsEntry(target: NativeFunctionsTarget, known: readonly string[]): string[] | null {
-  return refreshIfChanged(
-    () => localWorkerRoutes(target.functionsDir, target.hooksDir),
-    (routes) => writeDevFunctionsEntry(target.cwd, routes, target.workerMain),
-    "Functions",
+  return refreshIfChanged({
+    read: () => localWorkerRoutes(target.functionsDir, target.hooksDir),
+    apply: (routes) => writeDevFunctionsEntry(target.cwd, routes, target.workerMain),
+    label: "Functions",
     known,
-  )
+  })
+}
+
+/** A list of routes to keep in force: how to read it now, how to apply it, and what it is called. */
+interface RouteRefresh {
+  read: () => string[]
+  apply: (routes: string[]) => void
+  /** What the log lines call the list. */
+  label: string
+  /** The list in force now. */
+  known: readonly string[]
 }
 
 /**
@@ -46,12 +56,7 @@ export function refreshNativeFunctionsEntry(target: NativeFunctionsTarget, known
  * force, or null when nothing changed or it could not be read or applied. It runs from a watcher's
  * timer, where a throw would end `supatype dev`, so a failure is a warning.
  */
-function refreshIfChanged(
-  read: () => string[],
-  apply: (routes: string[]) => void,
-  label: string,
-  known: readonly string[],
-): string[] | null {
+function refreshIfChanged({ read, apply, label, known }: RouteRefresh): string[] | null {
   let routes: string[]
   try {
     routes = read()
@@ -135,7 +140,7 @@ export function refreshServiceRoleRoutes(target: ServiceRoleRoutesTarget, known:
     writeServiceRoleRoutesFile(target.routesPath, routes)
     target.reload()
   }
-  return refreshIfChanged(target.readRoutes, apply, "functions.serviceRole", known)
+  return refreshIfChanged({ read: target.readRoutes, apply, label: "functions.serviceRole", known })
 }
 
 /** The project's config watched for a `functions.serviceRole` change. */

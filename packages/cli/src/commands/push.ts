@@ -65,6 +65,7 @@ import {
 import { loadProjectLink } from "../link.js"
 import { targetFetch } from "../target-client.js"
 import { sayTargetWarning } from "../target-warning.js"
+import { targetRequest } from "../target-request.js"
 import {
   buildSchemaSourcesPayload,
   cacheSchemaSourcesLocally,
@@ -167,8 +168,7 @@ export function dockerApplyMessage(force: boolean, engine: DockerPushEngine): st
 /**
  * `supatype push` on a docker project with no local control plane. No diff is read first on this
  * path, so the engine's refusals are where drift, unmanaged tables and lost data show up, and each
- * is asked about here. The push used to be forced, so a change that dropped a column applied with
- * no question asked; now it needs a yes in a terminal, or `--yes`.
+ * is asked about here: a change that drops data needs a yes in a terminal, or `--yes`.
  */
 async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushRun): Promise<void> {
   const { composeAuditArgs, dockerDiff, dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } =
@@ -342,10 +342,7 @@ function saidUnfinished(target: Pick<DeployTarget, "mode" | "environment">, step
   return stepFailed
 }
 
-/**
- * The push's target as the user knows it. Its mode and environment read as internal labels: native
- * dev's push ended "The push to direct (local) did not finish" (local test round 6).
- */
+/** The push's target as the user knows it, rather than its internal mode and environment. */
 function pushTargetName(target: Pick<DeployTarget, "mode" | "environment">): string {
   switch (target.mode) {
     case "direct":
@@ -420,8 +417,8 @@ function applyToTarget(
  * for the project's own running stack only, its storage buckets and Studio link.
  *
  * A push to some other database (`--connection`, or an external one) has no stack of this project
- * behind it. It used to provision buckets and print a Studio link on the default gateway port,
- * which is another project's on a machine running two (A3-N4, A4-N2).
+ * behind it, so it provisions no buckets and prints no Studio link: the default gateway port may be
+ * another project's on a machine running two.
  */
 async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<void> {
   await writeLocalAdminConfig(ast, config)
@@ -432,7 +429,7 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
   }
   await generateTypesLocal(ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
-    // A push to the running stack's database can change its tier (T2-N6), and PostgREST follows.
+    // A push to the running stack's database can change its tier, and PostgREST follows.
     const { followRecordedTier } = await import("../dev-compose.js")
     followRecordedTier(cwd, config, { recreate: true })
   }
@@ -446,7 +443,7 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
 
 /**
  * For a database this project does not run, whether it has what the push needs, saying what is
- * missing and how to add it when not (T2-N11). The project's own database always does.
+ * missing and how to add it when not. The project's own database always does.
  */
 async function databaseIsReady(
   cwd: string,
@@ -505,23 +502,16 @@ export async function deployHooksToTarget(
 }
 
 /**
- * `POST /projects/:ref/hooks/deploy` on the target. A refusal comes after the schema was applied,
- * so it says that, which target refused and what it answered: `Route not found` alone read as the
- * whole push failing (local test round 4, N23).
+ * `POST /projects/:ref/hooks/deploy` on the target, with the time limit a deploy of that many
+ * handlers has. A refusal comes after the schema was applied, so it says that, which target refused
+ * and what it answered.
  */
 export async function uploadHooks(target: DeployTarget, body: HookDeployBody, count: number): Promise<boolean> {
   // Nothing declared: sent to clear whatever the target holds.
   const empty = count === 0 && emptyDeploy(body)
   try {
     const answer = await withSpinner(empty ? "Clearing hooks the schema no longer declares" : `Deploying ${count} hook(s)`, () =>
-      targetFetch(target.apiBaseUrl, target.apiPrefix, {
-        method: "POST",
-        path: `/projects/${target.projectRef}/hooks/deploy`,
-        body,
-        token: target.token!,
-        orgId: target.orgId,
-        environment: target.mode === "cloud" ? target.environment : undefined,
-      }),
+      targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, { method: "POST", subpath: "/hooks/deploy", body, restartsWorker: true, handlers: count })),
     )
     sayTargetWarning(answer)
   } catch (err) {
@@ -581,11 +571,8 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, o
     )
   }
 
-  // The CLI writes these, it does not ask the engine to. Passing types_path and client_path and
-  // reading only `message` meant the generated TypeScript was printed to the terminal and no file
-  // was ever created, so `push` reported success and produced nothing. Written at the default
-  // paths when `output` is not set: a client left describing the old schema compiles against
-  // columns that no longer exist.
+  // The CLI writes these from the AST, at the default paths when `output` is not set: a client
+  // left describing the old schema compiles against columns that no longer exist.
   const written = await withSpinner("Generating types", () =>
     writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output) }),
   )
@@ -603,7 +590,7 @@ async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig
 
 /**
  * Creates the schema's buckets. One the stack does not have afterwards ends the push non-zero,
- * named (post-apply.ts): it exited 0 with every bucket refused (local test round 4).
+ * named (post-apply.ts).
  */
 export async function provisionSchemaBuckets(parsed: ParsedBuckets, storageApiUrl: string, serviceRoleKey: string): Promise<boolean> {
   const left = unprovisionedBuckets(await provisionBucketsFromAst(parsed, storageApiUrl, serviceRoleKey))

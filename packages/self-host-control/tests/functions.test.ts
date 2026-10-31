@@ -135,6 +135,19 @@ describe("functions routes", () => {
     assert.doesNotMatch(readFileSync(envFile, "utf8"), /READ_BY_WORKER/)
   })
 
+  // Review r7 A2: the list answered every value, secrets included. It answers the names, sorted, as
+  // Cloud's does.
+  test("env list answers the names only, never a value", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "ZED_SECRET", value: "s3cr3t-z" })
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "ALPHA_SECRET", value: "s3cr3t-a" })
+    const res = await request(baseUrl, "GET", `/projects/${PROJECT}/functions/env`)
+    assert.equal(res.status, 200)
+    const names: unknown = res.json["data"]
+    assert.ok(Array.isArray(names), JSON.stringify(res.json))
+    assert.deepEqual(names.filter((name) => name === "ALPHA_SECRET" || name === "ZED_SECRET"), ["ALPHA_SECRET", "ZED_SECRET"])
+    assert.doesNotMatch(JSON.stringify(res.json), /s3cr3t/)
+  })
+
   test("env unset of a key not set answers 200 with a warning when Docker cannot be reached", async () => {
     await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "SETTLED", value: "v" })
     docker.psStatus = 1

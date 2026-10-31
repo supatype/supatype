@@ -43,6 +43,7 @@ import {
   type ProjectLink,
 } from "./link.js"
 import {
+  envAccessToken,
   persistCloudSession,
   resolveCloudAccessToken,
   resolveCloudRefreshToken,
@@ -194,9 +195,9 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     )
   }
 
-  // SUPATYPE_ACCESS_TOKEN first for a Cloud link, as `supatype link` and the cloud commands read it.
+  // A token exported for CI first for a Cloud link, as `supatype link` and the cloud commands read it.
   const token =
-    (link.kind === "cloud" ? cloudEnvToken() ?? resolveCloudAccessToken(link) : undefined) ??
+    (link.kind === "cloud" ? envAccessToken() ?? resolveCloudAccessToken(link) : undefined) ??
     resolveEnvironmentToken(link, envTarget)
   if (!token && flags.tokenOptional !== true) {
     throw new Error(
@@ -275,12 +276,6 @@ function projectPath(target: DeployTarget, subpath: string): string {
   return `/projects/${target.projectRef}${subpath}`
 }
 
-/** A Cloud access token set in the environment, for CI; undefined when unset or empty. */
-function cloudEnvToken(): string | undefined {
-  const token = process.env["SUPATYPE_ACCESS_TOKEN"]?.trim()
-  return token ? token : undefined
-}
-
 /**
  * A request to the target's project API, at `/projects/<ref><subpath>`, carrying its token, org and
  * environment, and renewing a Cloud session that expired.
@@ -301,14 +296,18 @@ export interface TargetFunctions {
 
 /**
  * The target's functions: Supatype Cloud serves them on the project's own host and keeps past log
- * lines; a self-hosted or local server serves them under its API and relays a live tail. The link's
- * service-role key there is not handed to an invoke.
+ * lines; a self-hosted or local server serves them under its API and relays a live tail. An
+ * authenticated invoke carries the Cloud session, or a local link's key; a self-hosted link's
+ * service-role key is never handed to it.
  */
 export function targetFunctions(target: DeployTarget): TargetFunctions {
   if (target.mode === "cloud") {
     return { invokeBase: `https://${target.projectRef}.supatype.dev/functions/v1`, invokeToken: target.token, logs: "window" }
   }
-  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken: undefined, logs: "tail" }
+  // A local link is this machine's own server, and its key goes with an authenticated invoke there.
+  // A self-hosted link's service-role key is not handed to a function.
+  const invokeToken = target.mode === "local" ? target.token : undefined
+  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs: "tail" }
 }
 
 /**

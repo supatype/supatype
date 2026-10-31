@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { after, before, beforeEach, describe, test } from "node:test"
-import { isJsonObject } from "@supatype/shared"
+import { isJsonObject, workerLoadsFile } from "@supatype/shared"
 import { dataOf, fakeDocker, request, startServer, type ControlPlaneServer, type FakeDocker } from "./helpers.js"
 
 /**
@@ -191,6 +191,21 @@ describe("hooks deploy route", () => {
     writeFileSync(join(projectDir, "hooks", "_shared", "util.ts"), "export const x = 1\n")
     const imported = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
     assert.equal(dataOf(imported.json)["restarted"], true)
+  })
+
+  // Review r7: the CLI sends exactly the files `workerLoadsFile` counts, and the hash must count the
+  // same ones, or a deploy restarts for a file it never sent, or misses one it did.
+  test("restarts for exactly the files workerLoadsFile counts, the rule a deploy sends by", async () => {
+    const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP, validators: {}, cache: {} }
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    const paths = ["tag-note/data.json", "tag-note/lib/util.mjs", "tag-note/notes.txt", "tag-note/.cache/x.ts", "tag-note/types.d.ts"]
+    for (const [i, path] of paths.entries()) {
+      const file = join(projectDir, "hooks", ...path.split("/"))
+      mkdirSync(join(file, ".."), { recursive: true })
+      writeFileSync(file, `// ${i}\n`)
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+      assert.equal(dataOf(res.json)["restarted"], workerLoadsFile(path), path)
+    }
   })
 
   test("restarts for a hook edited on disk before the push, though the push writes nothing", async () => {

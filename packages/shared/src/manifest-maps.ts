@@ -4,7 +4,7 @@
  * maps for a local stack and sends the body to a linked one; the self-host control plane reads the
  * body and writes the same maps. Each kept its own copy of these until both drew them from here.
  */
-import { isArrayOf, isBoolean, isNumber, isRecordOf, isShape, isString, isUnknown, optional, type FromShape } from "./json.js"
+import { isArrayOf, isBoolean, isNumber, isOneOf, isRecordOf, isShape, isString, isUnknown, optional, type FromShape } from "./json.js"
 
 /** One hook or validator entry, in the shape the server's `proxy.RouteManifest` reads. */
 export interface ManifestHookEntry {
@@ -37,7 +37,7 @@ export interface ManifestMaps {
 const isHookEntry = isShape({
   function: isString,
   timeout: optional(isNumber),
-  onUnavailable: optional((value: unknown): value is "reject" | "log" => value === "reject" || value === "log"),
+  onUnavailable: optional(isOneOf(["reject", "log"])),
 })
 
 /** A hook or validator map: every entry names its function. */

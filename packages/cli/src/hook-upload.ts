@@ -11,9 +11,6 @@ import { join, relative } from "node:path"
 import { ADAPTER_IMPORT, ADAPTER_NAME, FLATTENED_ADAPTER_IMPORT, flattenHookSource, type HookMap } from "@supatype/shared"
 import { declaredHooks, declaredValidators, manifestHooks } from "./model-hooks.js"
 
-/** The generated adapter, flattened (@supatype/shared). `_`-prefixed, so the worker never routes to it. */
-export const ADAPTER_KEY = `${ADAPTER_NAME}.ts`
-
 export interface HookUpload {
   /** Handler name → its source, flattened and import-rewritten. */
   handlers: Array<{ name: string; source: string }>

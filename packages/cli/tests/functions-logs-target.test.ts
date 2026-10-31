@@ -140,10 +140,10 @@ describe("functions env unset of a key that was not set", () => {
   })
 })
 
-// Review of round 5: a link of kind "local" is this machine's own server, where the placeholder
-// test JWT is what --auth is for. It was refused along with self-hosted servers.
+// A link of kind "local" is this machine's own server: --auth sends the key the link holds, as a
+// Cloud link sends its session. Review of round 7: it sent a placeholder test JWT, signed by nothing.
 describe("functions invoke --auth on a local link", () => {
-  it("sends the local test JWT", async () => {
+  it("sends the key the link holds", async () => {
     writeFileSync(join(project.dir, ".supatype", "link.json"), JSON.stringify({
       version: 1,
       kind: "local",
@@ -154,7 +154,7 @@ describe("functions invoke --auth on a local link", () => {
     const run = await runCommand(registerFunctions, ["functions", "invoke", "hello", "--auth"], project.dir)
     expect(run.exitCode).toBeUndefined()
     expect(requests.map((r) => r.url)).toEqual(["http://localhost:18471/functions/v1/hello"])
-    expect(requests[0]?.auth).toMatch(/^Bearer eyJ.*\.test$/)
+    expect(requests[0]?.auth).toBe("Bearer svc-key")
   })
 })
 

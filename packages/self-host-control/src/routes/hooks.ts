@@ -7,8 +7,7 @@
  * it sends Cloud (`HookDeployBody`, @supatype/shared): `handlers`, each a name and its flattened
  * source, the generated adapter among them as `_supatype-hooks`; `map`, the hook map; and the
  * manifest's other two maps, `validators` (the functions a field's validator names travel with the
- * handlers) and `cache`. The control plane did not have the route, so that push applied its schema
- * and ended `Route not found` (local test round 4, N23).
+ * handlers) and `cache`.
  *
  * The stack's worker serves hooks from the project's hooks directory (SUPATYPE_HOOKS_ROOT), and the
  * server reads which hook or validator runs around a write, and what may be cached, from the
@@ -16,9 +15,11 @@
  * importing `../_supatype/hooks.ts`), which on a stack run from the project's own checkout is the
  * file it already has, and the maps go into `.supatype/manifest.json` as a local push writes them.
  * Everything is checked before anything is written, and only what differs from the disk is written.
- * The worker is restarted when what it loads differs from what it last loaded, when it is not
- * running, or when a restart is owed (worker.ts); not for a cache-only change. A handler the schema no longer names is left on
- * disk: no map names it, so nothing calls it, and on that same checkout it may be one being written.
+ *
+ * The worker is restarted when what it loads differs from what it last loaded or a restart is owed,
+ * and started when it has stopped (worker.ts); a cache-only change restarts nothing. A handler the
+ * schema no longer names is left on disk: no map names it, so nothing calls it, and on that same
+ * checkout it may be one being written.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
@@ -33,11 +34,11 @@ import {
   type CacheMap,
   type HookMap,
 } from "@supatype/shared"
-import { badRequest, bodyOf, HttpError, route, sendJson } from "../http.js"
+import { badRequest, bodyOf, HttpError, route } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
 import { writeChanged, type DeployFile } from "../deploy-files.js"
-import { childDir, ensureWorkerCurrent, hooksRoot, manifestPath, warningOf } from "../worker.js"
+import { answerWithWorkerCurrent, childDir, hooksRoot, manifestPath } from "../worker.js"
 
 /** Where a project keeps the generated adapter under its hooks root. */
 const ADAPTER_PATH = join("_supatype", "hooks.ts")
@@ -104,11 +105,10 @@ export function registerHookRoutes(routes: Array<{ method: string; pattern: RegE
     if (missing.length > 0) throw badRequest(`The maps name functions that were not uploaded: ${missing.join(", ")}`)
     const manifest = readManifest()
     // Handlers before the maps, so a map never names a handler not yet on disk.
-    writeChanged(files)
+    await writeChanged(files)
     if (applyManifestMaps(manifest, maps)) writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
     // The worker is restarted when what it loads differs from what it last loaded (worker.ts); the
     // cache map is not part of that, since the server reads it and the worker does not.
-    const worker = await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { handlers: names, tables: Object.keys(maps.hooks).sort(), restarted: worker.restarted, ...warningOf(worker) } })
+    await answerWithWorkerCurrent(ctx.res, { handlers: names, tables: Object.keys(maps.hooks).sort() }, { sayRestarted: true })
   })
 }

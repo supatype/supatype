@@ -1,5 +1,6 @@
 import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
 import { readAuthAnswer } from "./auth-answer.js"
+import { fetchWithin } from "./fetch-within.js"
 import { bodyReason, httpFailureText } from "./error-message.js"
 
 export interface TargetFetchOptions {
@@ -61,11 +62,10 @@ async function refreshAccessToken(
   let res: Response
   let body: unknown
   try {
-    res = await fetch(url, {
+    res = await fetchWithin(url, REFRESH_TIMEOUT_MS, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: authRefresh.refreshToken }),
-      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
     })
     body = await res.json().catch((err: unknown) => {
       if (isTimeout(err)) throw err

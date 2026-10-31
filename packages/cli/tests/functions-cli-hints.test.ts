@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { isArrayOf, isJsonObject, isShape, isString, optional } from "@supatype/shared"
 import { runCommand, tempProject } from "./support/command-run.js"
 
 let fakeHome = ""
@@ -23,6 +24,9 @@ import { registerFunctions } from "../src/commands/functions.js"
  * `supatype login` was told they were not logged in.
  */
 let project: { dir: string; remove: () => void }
+
+/** A functions deploy body, as far as the tests read it. */
+const isDeployBody = isShape({ functions: isArrayOf(isShape({ name: isString, files: optional(isJsonObject) })) })
 
 function writeConfig(dir: string): void {
   writeFileSync(
@@ -54,6 +58,7 @@ beforeEach(() => {
   fakeHome = join(project.dir, "home")
   mkdirSync(join(fakeHome, ".supatype"), { recursive: true })
   vi.stubEnv("SUPATYPE_ACCESS_TOKEN", undefined)
+  vi.stubEnv("SUPATYPE_TOKEN", undefined)
 })
 
 afterEach(() => {
@@ -122,6 +127,24 @@ describe("functions commands against a cloud link", () => {
 
     expect(run.output).not.toContain("Not logged in")
     expect(seen).toEqual(["Bearer saved-by-login"])
+  })
+
+  // Review of round 7: `supatype link` and the cloud commands take SUPATYPE_TOKEN, the older name,
+  // but a linked project's commands read only SUPATYPE_ACCESS_TOKEN and said "Not logged in".
+  it("uses a token exported as SUPATYPE_TOKEN", async () => {
+    writeConfig(project.dir)
+    linkToCloud(project.dir)
+    vi.stubEnv("SUPATYPE_TOKEN", "from-the-older-name")
+    const seen: string[] = []
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get("Authorization") ?? "")
+      return new Response(JSON.stringify({ data: [] }), { headers: { "Content-Type": "application/json" } })
+    })
+
+    const run = await runCommand(registerFunctions, ["functions", "list"], project.dir)
+
+    expect(run.output).not.toContain("Not logged in")
+    expect(seen).toEqual(["Bearer from-the-older-name"])
   })
 
   it("names supatype link when the project is not linked", async () => {
@@ -198,6 +221,29 @@ describe("functions deploy to Cloud when a function fails", () => {
         },
       ],
     })
+  })
+
+  // Review of round 7: only .ts and .js files went, so a function importing its JSON or an .mjs
+  // module deployed without them, while the worker loads both. One rule decides for both now.
+  it("sends every file the worker loads, and no dotfile or other file", async () => {
+    linkAndLogIn()
+    const dir = join(project.dir, "functions", "hello")
+    writeFileSync(join(dir, "data.json"), '{"greeting":"hi"}\n')
+    writeFileSync(join(dir, "util.mjs"), "export const n = 1\n")
+    writeFileSync(join(dir, "README.md"), "notes\n")
+    writeFileSync(join(dir, ".env.local"), "SECRET=1\n")
+    const bodies: unknown[] = []
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "null")))
+      return new Response(JSON.stringify({ data: {} }), { headers: { "Content-Type": "application/json" } })
+    })
+
+    await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+
+    const body = bodies[0]
+    if (!isDeployBody(body)) throw new Error(`not a deploy body: ${JSON.stringify(body)}`)
+    const hello = body.functions.find((fn) => fn.name === "hello")
+    expect(Object.keys(hello?.files ?? {}).sort()).toEqual(["data.json", "index.ts", "util.mjs"])
   })
 
   it("says the warning a self-hosted stack answers with, and still deploys", async () => {

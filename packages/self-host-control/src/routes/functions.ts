@@ -1,11 +1,11 @@
 import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
-import { isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { isFunctionDeployBody, isRecordOf, isShape, isString, optional } from "@supatype/shared"
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
 import { functionFiles, writeChanged, type DeployFile } from "../deploy-files.js"
-import { childDir, ensureWorkerCurrent, functionEnvPath, functionsRoot, warningOf } from "../worker.js"
+import { answerWithWorkerCurrent, childDir, functionEnvPath, functionsRoot } from "../worker.js"
 
 /** The directory of the function `name`, refused unless it may be one (worker.ts `childDir`). */
 function functionDir(name: unknown): string {
@@ -17,18 +17,9 @@ function functionDir(name: unknown): string {
  * written (deploy-files.ts). Its count of functions comes with them.
  */
 function deployedFiles(body: unknown): { count: number; files: DeployFile[] } {
-  const list = bodyOf(body, isShape({ functions: optional(isUnknown) })).functions
-  if (list === undefined) return { count: 0, files: [] }
-  if (!Array.isArray(list)) throw badRequest("functions must be an array")
-  const files = list.flatMap((entry) => {
-    const fn = isJsonObject(entry) ? entry : {}
-    const dir = functionDir(fn["name"])
-    const name = String(fn["name"])
-    const source = fn["source"]
-    if (typeof source !== "string") throw badRequest(`Function ${name} has no source`)
-    return functionFiles(name, dir, source, fn["files"])
-  })
-  return { count: list.length, files }
+  const { functions } = bodyOf(body, isFunctionDeployBody)
+  const files = functions.flatMap((fn) => functionFiles({ name: fn.name, dir: functionDir(fn.name), source: fn.source, files: fn.files }))
+  return { count: functions.length, files }
 }
 
 
@@ -63,22 +54,21 @@ export function registerFunctionRoutes(
   route(routes, "POST", "/projects/:ref/functions/deploy", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const { count, files } = deployedFiles(ctx.body)
-    writeChanged(files)
-    const worker = await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { message: "Functions deployed", count, ...warningOf(worker) } })
+    await writeChanged(files)
+    await answerWithWorkerCurrent(ctx.res, { message: "Functions deployed", count })
   })
 
   route(routes, "DELETE", "/projects/:ref/functions/:name", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const name = ctx.params["name"]!
     rmSync(functionDir(name), { recursive: true, force: true })
-    const worker = await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { deleted: name, ...warningOf(worker) } })
+    await answerWithWorkerCurrent(ctx.res, { deleted: name })
   })
 
+  // The names only, sorted, as Cloud lists them: a value is a secret, and never leaves the stack.
   route(routes, "GET", "/projects/:ref/functions/env", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    sendJson(ctx.res, 200, { data: readFunctionEnv() })
+    sendJson(ctx.res, 200, { data: Object.keys(readFunctionEnv()).sort() })
   })
 
   route(routes, "POST", "/projects/:ref/functions/env", async (ctx) => {
@@ -91,12 +81,10 @@ export function registerFunctionRoutes(
     const current = readFunctionEnv()
     current[body.key] = body.value ?? ""
     writeFunctionEnv(current)
-    const worker = await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { key: body.key, ...warningOf(worker) } })
+    await answerWithWorkerCurrent(ctx.res, { key: body.key })
   })
 
-  // `supatype functions env unset` on a self-host link: refused until now, since there was no route.
-  // An env change restarts nothing, since the worker reads the file on each call (worker.ts); the
+  // `supatype functions env unset` on a self-host link. An env change restarts nothing, since the worker reads the file on each call (worker.ts); the
   // worker is still started if it stopped, or restarted for a restart a failed deploy owes.
   route(routes, "DELETE", "/projects/:ref/functions/env/:key", async (ctx) => {
     assertProject(ctx.params["ref"]!)
@@ -107,8 +95,7 @@ export function registerFunctionRoutes(
       delete current[key]
       writeFunctionEnv(current)
     }
-    const worker = await ensureWorkerCurrent()
-    sendJson(ctx.res, 200, { data: { key, removed, ...warningOf(worker) } })
+    await answerWithWorkerCurrent(ctx.res, { key, removed })
   })
 }
 

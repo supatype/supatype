@@ -11,6 +11,10 @@ import {
 import { resolve, join, relative, isAbsolute } from "node:path"
 import { execSync } from "node:child_process"
 import { runUntilStopped } from "../run-until-stopped.js"
+import { fetchWithin } from "../fetch-within.js"
+import { targetRequest, type TargetCall } from "../target-request.js"
+import { parseEnvText } from "../dotenv-parse.js"
+import { withEnvValue, withoutEnvValue } from "../env-lines.js"
 import { STOP_SIGNALS } from "../stop-signals.js"
 import { sayTargetWarning } from "../target-warning.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
@@ -34,7 +38,7 @@ import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFile
 import { loadProjectLink } from "../link.js"
 import { projectRequest, resolveTarget, targetFunctions, type DeployTarget } from "../resolve-target.js"
 import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
-import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, toPosixPath, type Guard } from "@supatype/shared"
+import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, toPosixPath, workerLoadsFile, type FunctionDeployBody, type FunctionDeployEntry, type Guard } from "@supatype/shared"
 import {
   ensureFunctionsDenoTypes,
   sharedFunctionsReadmeSource,
@@ -52,30 +56,6 @@ const ENV_PRODUCTION = ".env.production"
 // The commands that exist: there is no `supatype cloud` group, login and link are top level.
 const NOT_LOGGED_IN = "Not logged in. Run: supatype login"
 const NOT_LINKED = "No linked project. Run: supatype link"
-
-/**
- * How long a request to the linked target may take. A deploy and a delete can restart the worker
- * before they answer, which often takes more than 10 s, so they get longer. So does an env change:
- * it restarts nothing itself, but starts a worker that stopped and pays a restart a failed deploy owes.
- */
-const TARGET_TIMEOUT_MS = 10_000
-const RESTART_TIMEOUT_MS = 60_000
-/**
- * More time for each function a deploy carries: Supatype Cloud syncs them in turn within the one
- * request, so a fixed limit timed a large deploy out while the server deployed every function.
- */
-const PER_FUNCTION_TIMEOUT_MS = 30_000
-
-/** One request to the linked project's functions API. */
-interface TargetCall {
-  method: string
-  subpath: string
-  body?: unknown
-  /** Whether the route restarts the worker before it answers. */
-  restartsWorker?: boolean
-  /** How many functions the call carries, each given {@link PER_FUNCTION_TIMEOUT_MS} more. */
-  functions?: number
-}
 
 // ─── Registration ────────────────────────────────────────────────────────────
 
@@ -503,13 +483,6 @@ function requireLinkedTarget(cwd: string): DeployTarget {
   return target
 }
 
-/** `call` to the target's project, with the time limit its route needs. */
-function targetRequest(target: DeployTarget, call: TargetCall): TargetFetchOptions {
-  const base = call.restartsWorker === true ? RESTART_TIMEOUT_MS : TARGET_TIMEOUT_MS
-  const timeoutMs = base + (call.functions ?? 0) * PER_FUNCTION_TIMEOUT_MS
-  return { ...projectRequest(target, call.method, call.subpath, call.body), timeoutMs }
-}
-
 /** Asks `target` for `subpath` of its project, ending the command with `what` and the reason when it fails. */
 async function askTarget<T>(target: DeployTarget, what: string, call: TargetCall, guard: Guard<T>): Promise<T> {
   try {
@@ -534,9 +507,9 @@ async function deployViaTarget(cwd: string, target: DeployTarget, fns: Discovere
   const { sent, failed } = readSources(fns)
   if (sent.length === 0) return failed
   const start = Date.now()
-  const body = { functions: sent, serviceRole }
+  const body: FunctionDeployBody = { functions: sent, ...(serviceRole !== undefined && { serviceRole }) }
   try {
-    const call = { method: "POST", subpath: "/functions/deploy", body, restartsWorker: true, functions: sent.length }
+    const call = { method: "POST", subpath: "/functions/deploy", body, restartsWorker: true, handlers: sent.length }
     sayTargetWarning(await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call)))
   } catch (err) {
     for (const fn of sent) plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
@@ -547,22 +520,11 @@ async function deployViaTarget(cwd: string, target: DeployTarget, fns: Discovere
 }
 
 /**
- * One function as the deploy request carries it: its entry module as `source`, and for a directory
- * function every file by path, which the platform writes under the function's directory.
- */
-interface DeployedSource {
-  name: string
-  source: string
-  entrypoint: string
-  files?: Record<string, string>
-}
-
-/**
  * Each function's source, as the deploy request carries it; one that cannot be read is said and
  * failed here, and the rest are still sent.
  */
-function readSources(fns: DiscoveredFunctionRoute[]): { sent: DeployedSource[]; failed: string[] } {
-  const sent: DeployedSource[] = []
+function readSources(fns: DiscoveredFunctionRoute[]): { sent: FunctionDeployEntry[]; failed: string[] } {
+  const sent: FunctionDeployEntry[] = []
   const failed: string[] = []
   for (const fn of fns) {
     try {
@@ -615,16 +577,15 @@ const isFunctionLogs = isArrayOf(isShape({ timestamp: isString, level: isString,
 
 /**
  * A function's source as the deploy request carries it. A file function is its own entry. A
- * directory function's entry is its index.ts, and every .ts and .js file under it goes in `files`,
- * by a path with `/` on every OS. It used to go as a JSON map in `source`, which a self-hosted
- * control plane wrote as index.ts over the project's own checkout (round 6, N27).
+ * directory function's entry is its index.ts, and every file under it the worker loads
+ * ({@link workerLoadsFile}) goes in `files`, by a path with `/` on every OS.
  */
 function readFunctionFiles(fn: DiscoveredFunctionRoute): { source: string; files?: Record<string, string> } {
   if (statSync(fn.path).isFile()) return { source: readFileSync(fn.path, "utf8") }
   const files: Record<string, string> = {}
   for (const entry of readdirSync(fn.path, { recursive: true, encoding: "utf8" })) {
     const fullPath = join(fn.path, entry)
-    if (statSync(fullPath).isFile() && (entry.endsWith(".ts") || entry.endsWith(".js"))) {
+    if (workerLoadsFile(entry) && statSync(fullPath).isFile()) {
       files[toPosixPath(entry)] = readFileSync(fullPath, "utf8")
     }
   }
@@ -701,8 +662,7 @@ async function tailServerLogs(target: DeployTarget, name: string): Promise<void>
 /** Prints `name`'s lines from a server-sent event stream as they arrive, until it ends. */
 async function printLogStream(body: ReadableStream<Uint8Array>, name: string): Promise<void> {
   const reader = body.getReader()
-  // Ctrl+C closes the stream, and the command ends by itself: with nothing listening, it killed the
-  // process, which Windows reports as 0xC000013A (local test round 6).
+  // Ctrl+C closes the stream and the command ends by itself, with exit 0, rather than being killed.
   const stop = (): void => void reader.cancel().catch(() => undefined)
   for (const signal of STOP_SIGNALS) process.on(signal, stop)
   try {
@@ -763,7 +723,7 @@ async function invoke(cwd: string, name: string, opts: InvokeOptions): Promise<v
   const { url, headers } = await invokeRequest(cwd, name, opts)
   try {
     const start = Date.now()
-    const res = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(30_000) })
+    const res = await fetchWithin(url, 30_000, { method: "POST", headers, body })
     const duration = Date.now() - start
     printInvokeAnswer(res.status, duration, await res.text())
   } catch (err) {
@@ -821,14 +781,13 @@ const LOCAL_TEST_JWT =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlhdCI6MTcwMDAwMDAwMH0.test"
 
 /**
- * The token `invoke --auth` sends to a linked target, or the command ends saying why there is none:
- * the Cloud session, or the test JWT for a local link, this machine's own server. A self-hosted
- * server gets neither the placeholder nor the link's service-role key.
+ * The token `invoke --auth` sends to a linked target ({@link targetFunctions}), or the command ends
+ * saying why there is none. A self-hosted server gets neither the placeholder nor the link's
+ * service-role key.
  */
 function invokeToken(target: DeployTarget): string {
   const token = targetFunctions(target).invokeToken
   if (token !== undefined) return token
-  if (target.mode === "local") return LOCAL_TEST_JWT
   if (target.mode === "cloud") error(`--auth sends your Supatype Cloud session. ${NOT_LOGGED_IN}`)
   else error(`--auth has no user token for ${target.apiBaseUrl}. Call the function with a signed-in user's access token instead.`)
   process.exit(1)
@@ -840,7 +799,8 @@ async function envList(cwd: string): Promise<void> {
   const target = linkedTarget(cwd, undefined)
   if (target === null) return listLocalEnv(cwd)
   const listed = await askTarget(target, "Failed to list env vars", { method: "GET", subpath: "/functions/env" }, isEnvListing)
-  // Cloud lists the names; a self-hosted server answers the names with their values.
+  // Every target lists the names. An older self-hosted control plane answers a map of names to
+  // values, read here for its names alone.
   const keys = Array.isArray(listed) ? listed : Object.keys(listed)
   if (keys.length === 0) {
     info("No environment variables set.")
@@ -861,11 +821,7 @@ function listLocalEnv(cwd: string): void {
     return
   }
   plain("Local environment variables:\n")
-  for (const line of readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim()
-    const eqIdx = trimmed.indexOf("=")
-    if (trimmed && !trimmed.startsWith("#") && eqIdx > 0) plain(`  ${trimmed.slice(0, eqIdx)} = ••••••••`)
-  }
+  for (const key of Object.keys(parseEnvText(readFileSync(envPath, "utf8")))) plain(`  ${key} = ••••••••`)
 }
 
 async function envSet(cwd: string, keyvalue: string): Promise<void> {
@@ -886,10 +842,8 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
 /** Sets `key` in the functions' local env file, replacing its line or adding one. */
 function setLocalEnv(cwd: string, key: string, value: string): void {
   const envPath = resolve(resolveFunctionsDir(cwd, "write"), ENV_LOCAL)
-  let content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-  const regex = new RegExp(`^${key}=.*$`, "m")
-  content = regex.test(content) ? content.replace(regex, `${key}=${value}`) : content.trimEnd() + `\n${key}=${value}\n`
-  writeFileSync(envPath, content, "utf8")
+  const content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
+  writeFileSync(envPath, withEnvValue(content, key, value), "utf8")
   info(`Set ${key} in local env file.`)
 }
 
@@ -910,7 +864,12 @@ function unsetLocalEnv(cwd: string, key: string): void {
     error("No local env file found.")
     process.exit(1)
   }
-  writeFileSync(envPath, readFileSync(envPath, "utf8").replace(new RegExp(`^${key}=.*\n?`, "m"), ""), "utf8")
+  const { text, removed } = withoutEnvValue(readFileSync(envPath, "utf8"), key)
+  if (!removed) {
+    info(`${key} was not set in the local env file.`)
+    return
+  }
+  writeFileSync(envPath, text, "utf8")
   info(`Removed ${key} from local env file.`)
 }
 
@@ -934,7 +893,7 @@ const isServeListing = isShape({ available: isArrayOf(isString) })
 export async function runningServeBase(port: string): Promise<string | undefined> {
   const base = `http://127.0.0.1:${port}/functions/v1`
   try {
-    const res = await fetch(`${base}/`, { signal: AbortSignal.timeout(1000) })
+    const res = await fetchWithin(`${base}/`, 1000)
     const body: unknown = await res.json()
     return isServeListing(body) ? base : undefined
   } catch {

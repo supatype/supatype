@@ -364,11 +364,16 @@ async function readManagedEnv(): Promise<Record<string, string>> {
   return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
 }
 
-/** The shared env file, then the managed values, then the function's own file, which wins. */
+/**
+ * The shared env file, then the managed values, then the function's own file, which wins. The three
+ * are read together: every call waits for them.
+ */
 async function scopedEnvForFunction(fnName: string): Promise<Record<string, string>> {
-  const shared = await readEnvFile(sharedEnvPath)
-  const managed = await readManagedEnv()
-  const fnVars = await readEnvFile(`${normalizedFunctionsDir}/.env.${fnName}.local`)
+  const [shared, managed, fnVars] = await Promise.all([
+    readEnvFile(sharedEnvPath),
+    readManagedEnv(),
+    readEnvFile(`${normalizedFunctionsDir}/.env.${fnName}.local`),
+  ])
   return { ...shared, ...managed, ...fnVars }
 }
 

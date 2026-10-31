@@ -1,6 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
-import { loadCloudCredentials } from "../cloud-credentials.js"
+import { envAccessToken, loadCloudCredentials } from "../cloud-credentials.js"
 import { readEnvFile } from "../env-file.js"
 import {
   createCloudLink,
@@ -29,8 +29,7 @@ function cloudLinkToken(opts: LinkTokenOptions): string | undefined {
   return (
     opts.token ??
     opts.serviceRoleKey ??
-    process.env["SUPATYPE_ACCESS_TOKEN"] ??
-    process.env["SUPATYPE_TOKEN"] ??
+    envAccessToken() ??
     loadCloudCredentials()?.accessToken
   )
 }

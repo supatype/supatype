@@ -60,7 +60,9 @@ vi.mock("../src/target-client.js", async (importOriginal) => ({
     return {}
   },
 }))
-vi.mock("../src/resolve-target.js", () => ({
+vi.mock("../src/resolve-target.js", async (importOriginal) => ({
+  // projectRequest and the rest stay real: the hook upload builds its request with them.
+  ...(await importOriginal<typeof import("../src/resolve-target.js")>()),
   resolveTarget: () => ({
     mode: "self-host",
     environment: "prod",

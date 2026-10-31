@@ -6,21 +6,21 @@
  * Whether the worker is stale is decided by content, not clocks: a hash of everything it loads once,
  * at start (the source files under the functions and hooks roots, the manifest's hook and validator
  * maps), is recorded when a restart succeeds, and a deploy restarts it when the hash differs or when
- * a restart failed since. File times could not say: a hook edited in the project's own checkout, a
- * manifest changed by someone else, clock skew and rsync-kept mtimes all left the worker serving old
- * code.
+ * a restart failed since. Content holds where file times do not: for a hook edited in the project's
+ * own checkout, a manifest someone else changed, clock skew, and mtimes rsync kept.
  *
  * Env values are not in it. The worker reads every env file on each call (the function env file
  * `functions env set` writes, `.env.local`, `.env.<function>.local`), so a change is seen on the
- * next call, and a restart for one only took every function down (round 6b, N28a).
+ * next call and needs no restart.
  */
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
-import { dirname, join, relative, resolve } from "node:path"
-import { FUNCTION_NAME_RULE, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, isFunctionName, parseJsonObject } from "@supatype/shared"
-import { badRequest, HttpError } from "./http.js"
+import { dirname, join, resolve } from "node:path"
+import { FUNCTION_NAME_RULE, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, isFunctionName, parseJsonObject, workerLoadsFile } from "@supatype/shared"
+import type { ServerResponse } from "node:http"
+import { badRequest, HttpError, sendJson } from "./http.js"
 import { projectRoot } from "./project.js"
 
 export function functionsRoot(): string {
@@ -89,42 +89,38 @@ function writeState(name: "restart-owed" | "loaded", value: string | null): void
   writeFileSync(statePath(name), `${value}\n`, "utf8")
 }
 
-/** Sources the worker imports: a handler and the modules and JSON it imports. */
-const SOURCE_FILE = /\.(?:ts|tsx|mts|js|jsx|mjs|json)$/
-
 /**
- * Whether the worker loads the file `name` at start: a source, never a dotfile. The env files
- * beside the functions are dotfiles, and the worker reads them on each call instead.
+ * The files under `root` the worker loads (`workerLoadsFile`, the rule a deploy sends by too), by
+ * `/` path relative to it, sorted so the hash does not depend on the order read. A dot directory
+ * (.git, an editor's) is never entered, and a README or an editor's temp file is not counted: it
+ * changes no code the worker runs.
  */
-function workerLoads(name: string): boolean {
-  return !name.startsWith(".") && SOURCE_FILE.test(name)
-}
-
-/**
- * The files under `root` the worker loads, by path relative to it, sorted so the hash does not
- * depend on the order read. Dot directories (.git, an editor's) are skipped, and so is anything that
- * is not a source file: a README or an editor's temp file changes no code the worker runs.
- */
-async function loadedFilesUnder(root: string): Promise<string[]> {
-  const entries = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => [])
-  return entries
-    .filter((entry) => entry.isFile() && workerLoads(entry.name))
-    .map((entry) => relative(root, join(entry.parentPath, entry.name)))
-    .filter((path) => !path.split(/[\\/]/).slice(0, -1).some((dir) => dir.startsWith(".")))
-    .sort()
+async function loadedFilesUnder(root: string, under = ""): Promise<string[]> {
+  const entries = await readdir(join(root, under), { withFileTypes: true }).catch(() => [])
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const path = under === "" ? entry.name : `${under}/${entry.name}`
+      if (entry.isDirectory()) return entry.name.startsWith(".") ? [] : loadedFilesUnder(root, path)
+      return entry.isFile() && workerLoadsFile(path) ? [path] : []
+    }),
+  )
+  return nested.flat().sort()
 }
 
 /** The text of `path`, or "" when there is none. */
 const textOf = (path: string): Promise<string> => readFile(path, "utf8").catch(() => "")
 
-/** A hash of everything the worker loads; see the file's comment. */
-export async function workerContentHash(): Promise<string> {
+/** A hash of everything the worker loads; see the file's comment. The files are read together. */
+async function workerContentHash(): Promise<string> {
+  const roots = [["functions", resolve(functionsRoot())], ["hooks", resolve(hooksRoot())]] as const
+  const read = await Promise.all(
+    roots.map(async ([label, root]) => {
+      const files = await loadedFilesUnder(root)
+      return Promise.all(files.map(async (file) => ({ key: `${label}:${file}`, bytes: await readFile(join(root, file)) })))
+    }),
+  )
   const hash = createHash("sha256")
-  for (const [label, root] of [["functions", resolve(functionsRoot())], ["hooks", resolve(hooksRoot())]] as const) {
-    for (const file of await loadedFilesUnder(root)) {
-      hash.update(`${label}:${file}\0`).update(await readFile(join(root, file))).update("\0")
-    }
-  }
+  for (const { key, bytes } of read.flat()) hash.update(`${key}\0`).update(bytes).update("\0")
   const manifest = parseJsonObject(await textOf(manifestPath()))
   const maps = manifest.ok ? { hooks: manifest.value["hooks"], validators: manifest.value["validators"] } : {}
   hash.update(`maps:${JSON.stringify(maps)}`)
@@ -153,19 +149,19 @@ async function workerContainers(): Promise<{ containers: WorkerContainer[] } | {
 }
 
 /**
- * `docker <verb> <ids>`, throwing a 502 that says the worker did not `what` and why. A restart gives
- * the worker the stop grace compose gives it, so its drain is not cut off.
+ * `docker <verb> <ids>`, throwing a 502 that says the worker did not restart or start, and why. A
+ * restart gives the worker the stop grace compose gives it, so its drain is not cut off.
  */
-async function dockerOrThrow(verb: "restart" | "start", ids: readonly string[], what: string): Promise<void> {
-  const grace = verb === "restart" ? ["-t", String(FUNCTIONS_WORKER_STOP_GRACE_SECONDS)] : []
-  const ran = await docker([verb, ...grace, ...ids])
+async function dockerOrThrow(call: { verb: "restart" | "start"; ids: readonly string[] }): Promise<void> {
+  const grace = call.verb === "restart" ? ["-t", String(FUNCTIONS_WORKER_STOP_GRACE_SECONDS)] : []
+  const ran = await docker([call.verb, ...grace, ...call.ids])
   if (ran.status !== 0) {
-    throw new HttpError(502, "worker_restart_failed", `The files are written, but the functions worker did not ${what}: ${ran.stderr.trim() || `docker exited ${String(ran.status)}`}`)
+    throw new HttpError(502, "worker_restart_failed", `The files are written, but the functions worker did not ${call.verb}: ${ran.stderr.trim() || `docker exited ${String(ran.status)}`}`)
   }
 }
 
 /** What a deploy did to the worker: whether it restarted or started it, and a warning when Docker could not be asked. */
-export interface WorkerCheck {
+interface WorkerCheck {
   restarted: boolean
   warning?: string
 }
@@ -175,13 +171,13 @@ export interface WorkerCheck {
  * is restarted when what it loads differs from what it last loaded or a restart is owed (see the
  * file's comment), and a stopped one whose content is current is started. Found by the labels
  * compose gives it and restarted with plain `docker`: the control-plane image has Docker without
- * the compose plugin (local test round 5).
+ * the compose plugin.
  *
  * A restart or start that is needed and fails, Docker unreachable included, throws a 502 naming
  * why, after the files are written; a restart is then owed to the next deploy. A deploy that needed
  * nothing done while Docker could not be reached answers with a warning: the worker already serves it.
  */
-export async function ensureWorkerCurrent(): Promise<WorkerCheck> {
+async function ensureWorkerCurrent(): Promise<WorkerCheck> {
   const content = await workerContentHash()
   const stale = content !== readState("loaded") || readState("restart-owed") !== null
   if (stale) writeState("restart-owed", new Date().toISOString())
@@ -195,18 +191,33 @@ export async function ensureWorkerCurrent(): Promise<WorkerCheck> {
   }
   if (stale) return restartWorker(listed.containers, content)
   const stopped = listed.containers.filter((c) => !c.running).map((c) => c.id)
-  if (stopped.length > 0) await dockerOrThrow("start", stopped, "start")
+  if (stopped.length > 0) await dockerOrThrow({ verb: "start", ids: stopped })
   return { restarted: stopped.length > 0 }
 }
 
-/** The warning a route adds to its answer, when there is one. */
-export function warningOf(check: WorkerCheck): { warning?: string } {
-  return check.warning === undefined ? {} : { warning: check.warning }
+/**
+ * The tail every deploying route ends with: brings the worker current (ensureWorkerCurrent), then
+ * answers 200 with `data`, the warning when Docker could not be asked, and with `sayRestarted`
+ * whether the worker was restarted. A restart that fails throws, and the router answers its 502.
+ */
+export async function answerWithWorkerCurrent(
+  res: ServerResponse,
+  data: Record<string, unknown>,
+  opts: { sayRestarted?: boolean } = {},
+): Promise<void> {
+  const worker = await ensureWorkerCurrent()
+  sendJson(res, 200, {
+    data: {
+      ...data,
+      ...(opts.sayRestarted === true && { restarted: worker.restarted }),
+      ...(worker.warning !== undefined && { warning: worker.warning }),
+    },
+  })
 }
 
 /** Restarts every worker container (which also starts one that has exited) and records `content` as loaded. */
 async function restartWorker(containers: readonly WorkerContainer[], content: string): Promise<WorkerCheck> {
-  await dockerOrThrow("restart", containers.map((c) => c.id), "restart")
+  await dockerOrThrow({ verb: "restart", ids: containers.map((c) => c.id) })
   writeState("loaded", content)
   writeState("restart-owed", null)
   return { restarted: true }

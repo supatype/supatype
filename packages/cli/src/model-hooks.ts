@@ -164,9 +164,6 @@ export function writeHooksModule(cwd: string, hooksDir: string, ast: unknown): s
   return relative(cwd, file) || file
 }
 
-/** Per-table hook config, in the shape `proxy.RouteManifest` reads (@supatype/shared). */
-export type { ManifestHookEntry } from "@supatype/shared"
-
 /** The manifest's three maps for `ast`: what a local push writes and a linked push sends. */
 export function manifestMaps(ast: unknown): ManifestMaps {
   return { hooks: manifestHooks(ast), validators: manifestValidators(ast), cache: manifestCache(ast) }
