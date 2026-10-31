@@ -107,7 +107,7 @@ import {
 } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
 import { nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
-import { configSnapshot } from "../native-functions-watch.js"
+import { configSnapshot } from "../config-snapshot.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { extractArchive } from "../archive-extract.js"

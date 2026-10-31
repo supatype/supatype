@@ -51,9 +51,21 @@ const ENV_PRODUCTION = ".env.production"
 const NOT_LOGGED_IN = "Not logged in. Run: supatype login"
 const NOT_LINKED = "No linked project. Run: supatype link"
 
-/** How long a request to the linked target may take: a deploy uploads a bundle, so it gets longer. */
+/**
+ * How long a request to the linked target may take. A deploy, a delete and an env change restart
+ * the worker before they answer, which often takes more than 10 s, so they get longer.
+ */
 const TARGET_TIMEOUT_MS = 10_000
-const DEPLOY_TIMEOUT_MS = 60_000
+const RESTART_TIMEOUT_MS = 60_000
+
+/** One request to the linked project's functions API. */
+interface TargetCall {
+  method: string
+  subpath: string
+  body?: unknown
+  /** Whether the route restarts the worker before it answers. */
+  restartsWorker?: boolean
+}
 
 // ─── Registration ────────────────────────────────────────────────────────────
 
@@ -115,13 +127,13 @@ export function registerFunctions(program: Command): void {
     .command("invoke <name>")
     .description("Invoke a local or deployed function")
     .option("--data <json>", "JSON body to send", "{}")
-    .option("--auth", "Include a test JWT in the request")
+    .option("--auth", "Send a token: your Cloud session on a Cloud link, a test JWT on this machine; refused for a self-hosted server")
     .option(
       "--local",
       "Invoke locally: a running `functions serve` on --port if one answers, otherwise the dev API (the default when no Cloud project is linked)",
     )
     .option("--port <port>", "Port of the local `functions serve` to try first", String(FUNCTIONS_SERVE_PORT))
-    .action(async (name: string, opts: { data: string; auth?: boolean; local?: boolean; port: string }) => {
+    .action(async (name: string, opts: InvokeOptions) => {
       await invoke(process.cwd(), name, opts)
     })
 
@@ -482,9 +494,10 @@ function requireLinkedTarget(cwd: string): DeployTarget {
 }
 
 /** Asks `target` for `subpath` of its project, ending the command with `what` and the reason when it fails. */
-async function askTarget<T>(target: DeployTarget, what: string, method: string, subpath: string, guard: Guard<T>, body?: unknown): Promise<T> {
+async function askTarget<T>(target: DeployTarget, what: string, call: TargetCall, guard: Guard<T>): Promise<T> {
   try {
-    const request = { ...projectRequest(target, method, subpath, body), timeoutMs: TARGET_TIMEOUT_MS }
+    const timeoutMs = call.restartsWorker === true ? RESTART_TIMEOUT_MS : TARGET_TIMEOUT_MS
+    const request = { ...projectRequest(target, call.method, call.subpath, call.body), timeoutMs }
     return await targetFetch(target.apiBaseUrl, target.apiPrefix, request, guard)
   } catch (err) {
     error(`${what}: ${errorMessage(err)}`)
@@ -499,7 +512,7 @@ async function deployViaTarget(cwd: string, target: DeployTarget, fns: Discovere
   const serviceRole = serviceRoleRoutesFor(cwd)
   return deployEach(fns, async (fn, source) => {
     const request = projectRequest(target, "POST", "/functions/deploy", deployRequestBody(fn, source, serviceRole))
-    await targetFetch(target.apiBaseUrl, target.apiPrefix, { ...request, timeoutMs: DEPLOY_TIMEOUT_MS })
+    await targetFetch(target.apiBaseUrl, target.apiPrefix, { ...request, timeoutMs: RESTART_TIMEOUT_MS })
   })
 }
 
@@ -598,7 +611,7 @@ function readFunctionSource(fn: DiscoveredFunctionRoute): string {
 async function listFunctions(cwd: string): Promise<void> {
   const target = linkedTarget(cwd, undefined)
   if (target === null) return listLocalFunctions(cwd)
-  const data = await askTarget(target, "Failed to list functions", "GET", "/functions", isDeployedFunctions)
+  const data = await askTarget(target, "Failed to list functions", { method: "GET", subpath: "/functions" }, isDeployedFunctions)
   if (data.length === 0) {
     info("No deployed functions.")
     return
@@ -627,7 +640,8 @@ function listLocalFunctions(cwd: string): void {
 
 async function deleteFunction(cwd: string, name: string): Promise<void> {
   const target = requireLinkedTarget(cwd)
-  await askTarget(target, `Failed to delete "${name}"`, "DELETE", `/functions/${encodeURIComponent(name)}`, isUnknown)
+  const call = { method: "DELETE", subpath: `/functions/${encodeURIComponent(name)}`, restartsWorker: true }
+  await askTarget(target, `Failed to delete "${name}"`, call, isUnknown)
   info(`Function "${name}" deleted. It will return 404 immediately.`)
 }
 
@@ -640,9 +654,8 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
 async function functionLogs(cwd: string, name: string, opts: { since: string }): Promise<void> {
   const target = requireLinkedTarget(cwd)
   if (targetFunctions(target).logs === "tail") return tailServerLogs(target, name)
-  const lines = await askTarget(
-    target, "Failed to fetch logs", "GET", `/functions/${encodeURIComponent(name)}/logs?since=${encodeURIComponent(opts.since)}`, isFunctionLogs,
-  )
+  const subpath = `/functions/${encodeURIComponent(name)}/logs?since=${encodeURIComponent(opts.since)}`
+  const lines = await askTarget(target, "Failed to fetch logs", { method: "GET", subpath }, isFunctionLogs)
   if (lines.length === 0) info(`No logs for "${name}" in the last ${opts.since}.`)
   for (const entry of lines) plain(formatLogLine(entry))
 }
@@ -699,58 +712,70 @@ function formatLogLine(entry: { timestamp: string; level: string; message?: stri
 
 // ─── Invoke ──────────────────────────────────────────────────────────────────
 
-async function invoke(
-  cwd: string,
-  name: string,
-  opts: { data: string; auth?: boolean; local?: boolean; port: string },
-): Promise<void> {
-  const target = opts.local ? null : linkedTarget(cwd, undefined, false)
-  const { url, token } = target === null
-    ? { url: `${await localFunctionsBase(cwd, opts.port)}/${name}`, token: LOCAL_TEST_JWT }
-    : { url: `${targetFunctions(target).invokeBase}/${name}`, token: opts.auth ? remoteInvokeToken(target) : undefined }
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (opts.auth) headers["Authorization"] = `Bearer ${token}`
+/** What `functions invoke` takes. */
+interface InvokeOptions {
+  data: string
+  auth?: boolean
+  local?: boolean
+  port: string
+}
 
+async function invoke(cwd: string, name: string, opts: InvokeOptions): Promise<void> {
+  const body = jsonBodyOrExit(opts.data)
+  const { url, headers } = await invokeRequest(cwd, name, opts)
   try {
-    let body: string | undefined
-    try {
-      JSON.parse(opts.data)
-      body = opts.data
-    } catch {
-      error("Invalid JSON data. Use --data '{\"key\": \"value\"}'")
-      process.exit(1)
-    }
-
     const start = Date.now()
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      body,
-      signal: AbortSignal.timeout(30_000),
-    })
-
+    const res = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(30_000) })
     const duration = Date.now() - start
-    const responseBody = await res.text()
-
-    plain(`Status: ${res.status} (${duration}ms)`)
-    plain()
-
-    // Try to pretty-print JSON
-    try {
-      const json: unknown = JSON.parse(responseBody)
-      plain(JSON.stringify(json, null, 2))
-    } catch {
-      plain(responseBody)
-    }
+    printInvokeAnswer(res.status, duration, await res.text())
   } catch (err) {
-    if (err instanceof TypeError && errorMessage(err).includes("fetch")) {
-      error(`Cannot reach ${url}`)
-      error("Is the function server running? Start it with: npx supatype functions serve")
-    } else {
-      error(`Error: ${errorMessage(err)}`)
-    }
+    reportInvokeFailure(url, err)
+  }
+}
+
+/** `data` when it is JSON; otherwise the command ends saying so. */
+function jsonBodyOrExit(data: string): string {
+  try {
+    JSON.parse(data)
+    return data
+  } catch {
+    error("Invalid JSON data. Use --data '{\"key\": \"value\"}'")
     process.exit(1)
   }
+}
+
+/** Where the function is, the linked target's or this machine's, and the headers to send it. */
+async function invokeRequest(cwd: string, name: string, opts: InvokeOptions): Promise<{ url: string; headers: Record<string, string> }> {
+  const target = opts.local ? null : linkedTarget(cwd, undefined, false)
+  const url = target === null
+    ? `${await localFunctionsBase(cwd, opts.port)}/${name}`
+    : `${targetFunctions(target).invokeBase}/${name}`
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (opts.auth) headers["Authorization"] = `Bearer ${target === null ? LOCAL_TEST_JWT : invokeToken(target)}`
+  return { url, headers }
+}
+
+/** The status, how long it took, and the body, as JSON when it is. */
+function printInvokeAnswer(status: number, duration: number, responseBody: string): void {
+  plain(`Status: ${status} (${duration}ms)`)
+  plain()
+  try {
+    const json: unknown = JSON.parse(responseBody)
+    plain(JSON.stringify(json, null, 2))
+  } catch {
+    plain(responseBody)
+  }
+}
+
+/** Ends the command with why the function could not be called. */
+function reportInvokeFailure(url: string, err: unknown): never {
+  if (err instanceof TypeError && errorMessage(err).includes("fetch")) {
+    error(`Cannot reach ${url}`)
+    error("Is the function server running? Start it with: npx supatype functions serve")
+  } else {
+    error(`Error: ${errorMessage(err)}`)
+  }
+  process.exit(1)
 }
 
 /** A placeholder user token for a function served on this machine; never sent to a linked server. */
@@ -758,12 +783,14 @@ const LOCAL_TEST_JWT =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlhdCI6MTcwMDAwMDAwMH0.test"
 
 /**
- * The token `invoke --auth` sends to a linked target, or the command ends saying why there is none.
- * The local placeholder is never sent there, and nor is a self-hosted link's service-role key.
+ * The token `invoke --auth` sends to a linked target, or the command ends saying why there is none:
+ * the Cloud session, or the test JWT for a local link, this machine's own server. A self-hosted
+ * server gets neither the placeholder nor the link's service-role key.
  */
-function remoteInvokeToken(target: DeployTarget): string {
+function invokeToken(target: DeployTarget): string {
   const token = targetFunctions(target).invokeToken
   if (token !== undefined) return token
+  if (target.mode === "local") return LOCAL_TEST_JWT
   if (target.mode === "cloud") error(`--auth sends your Supatype Cloud session. ${NOT_LOGGED_IN}`)
   else error(`--auth has no user token for ${target.apiBaseUrl}. Call the function with a signed-in user's access token instead.`)
   process.exit(1)
@@ -774,7 +801,7 @@ function remoteInvokeToken(target: DeployTarget): string {
 async function envList(cwd: string): Promise<void> {
   const target = linkedTarget(cwd, undefined)
   if (target === null) return listLocalEnv(cwd)
-  const listed = await askTarget(target, "Failed to list env vars", "GET", "/functions/env", isEnvListing)
+  const listed = await askTarget(target, "Failed to list env vars", { method: "GET", subpath: "/functions/env" }, isEnvListing)
   // Cloud lists the names; a self-hosted server answers the names with their values.
   const keys = Array.isArray(listed) ? listed : Object.keys(listed)
   if (keys.length === 0) {
@@ -813,7 +840,8 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
   const value = keyvalue.slice(eqIdx + 1)
   const target = linkedTarget(cwd, undefined)
   if (target === null) return setLocalEnv(cwd, key, value)
-  await askTarget(target, "Failed to set env var", "POST", "/functions/env", isUnknown, { key, value })
+  const call = { method: "POST", subpath: "/functions/env", body: { key, value }, restartsWorker: true }
+  await askTarget(target, "Failed to set env var", call, isUnknown)
   info(`Set ${key} for project ${target.projectRef}.`)
 }
 
@@ -830,8 +858,11 @@ function setLocalEnv(cwd: string, key: string, value: string): void {
 async function envUnset(cwd: string, key: string): Promise<void> {
   const target = linkedTarget(cwd, undefined)
   if (target === null) return unsetLocalEnv(cwd, key)
-  await askTarget(target, "Failed to unset env var", "DELETE", `/functions/env/${encodeURIComponent(key)}`, isUnknown)
-  info(`Removed ${key} for project ${target.projectRef}.`)
+  const call = { method: "DELETE", subpath: `/functions/env/${encodeURIComponent(key)}`, restartsWorker: true }
+  const answer = await askTarget(target, "Failed to unset env var", call, isUnknown)
+  // A self-hosted server says whether the key was there to remove.
+  if (isJsonObject(answer) && answer["removed"] === false) info(`${key} was not set for project ${target.projectRef}.`)
+  else info(`Removed ${key} for project ${target.projectRef}.`)
 }
 
 /** Removes `key` from the functions' local env file. */

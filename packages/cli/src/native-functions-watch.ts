@@ -11,9 +11,9 @@
  * the server's environment is fixed at spawn, so a project with neither directory when dev started
  * used to need `supatype dev` restarted for its first one (local test round 3d, N19).
  */
-import { createHash } from "node:crypto"
-import { existsSync, readFileSync, watch as fsWatch } from "node:fs"
-import { basename, dirname, join } from "node:path"
+import { existsSync, watch as fsWatch } from "node:fs"
+import { basename, dirname } from "node:path"
+import { configSnapshot } from "./config-snapshot.js"
 import { debounce } from "./debounce.js"
 import { errorMessage } from "./error-message.js"
 import { localWorkerRoutes, writeDevFunctionsEntry, writeServiceRoleRoutesFile } from "./functions-worker-files.js"
@@ -146,7 +146,7 @@ export interface ServiceRoleRoutesWatch extends ServiceRoleRoutesTarget {
   configFiles: readonly string[]
   /** `functions.serviceRole` as the worker was started with. */
   initial: readonly string[]
-  /** {@link configSnapshot} of the config `initial` was read from, taken before it was read. */
+  /** `configSnapshot` of the config `initial` was read from, taken before it was read. */
   baseline: string | null
 }
 
@@ -171,19 +171,4 @@ export function watchServiceRoleRoutes(opts: ServiceRoleRoutesWatch, watch: Watc
   })
   onChange.trigger()
   return { close: () => { onChange.cancel(); watcher.close() } }
-}
-
-/**
- * A hash of each config file's bytes, empty for one not there, or null when one could not be read
- * (an editor mid-replace): then the config is loaded, which says what is wrong if anything is.
- */
-export function configSnapshot(dir: string, configFiles: readonly string[]): string | null {
-  try {
-    return configFiles
-      .map((file) => join(dir, file))
-      .map((path) => (existsSync(path) ? createHash("sha256").update(readFileSync(path)).digest("hex") : ""))
-      .join(",")
-  } catch {
-    return null
-  }
 }

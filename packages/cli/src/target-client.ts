@@ -50,16 +50,31 @@ function isAuthExpiry(status: number, code?: string, message?: string): boolean 
   return m.includes("token expired") || m.includes("authentication required")
 }
 
+/** How long renewing a Cloud session may take, apart from the request it was renewed for. */
+const REFRESH_TIMEOUT_MS = 10_000
+
 async function refreshAccessToken(
   authRefresh: NonNullable<TargetFetchOptions["authRefresh"]>,
 ): Promise<string> {
-  const base = authRefresh.cloudApiUrl.replace(/\/$/, "")
-  const res = await fetch(`${base}/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: authRefresh.refreshToken }),
-  })
-  const answer = readAuthAnswer(await res.json().catch(() => ({})))
+  const url = `${authRefresh.cloudApiUrl.replace(/\/$/, "")}/auth/refresh`
+  let res: Response
+  let body: unknown
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: authRefresh.refreshToken }),
+      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
+    })
+    body = await res.json().catch((err: unknown) => {
+      if (isTimeout(err)) throw err
+      return {}
+    })
+  } catch (err) {
+    if (!isTimeout(err)) throw err
+    throw new Error(`Renewing the Cloud session: ${url} did not answer within ${REFRESH_TIMEOUT_MS / 1000} s. Run: supatype login`, { cause: err })
+  }
+  const answer = readAuthAnswer(body)
   if (!res.ok || !answer.accessToken) {
     throw new Error(`${answer.failure ?? "Token refresh failed"}. Run: supatype login`)
   }
@@ -126,14 +141,17 @@ async function answerOf(res: Response): Promise<FetchAnswer> {
 
 /**
  * The accepted response to a request, its body unread. A session that expired is renewed once and
- * the request sent again, when the target can renew it; a refusal throws, saying why.
+ * the request sent again, when the target can renew it; a refusal throws, saying why. With `timed`,
+ * each send has `opts.timeoutMs` of its own: the renewal, timed apart, takes none of it.
  */
-async function acceptedResponse(url: string, opts: TargetFetchOptions, signal?: AbortSignal): Promise<Response> {
-  let res = await send(url, opts, opts.token, signal)
+async function acceptedResponse(url: string, opts: TargetFetchOptions, timed: boolean): Promise<Response> {
+  const signal = (): AbortSignal | undefined =>
+    timed && opts.timeoutMs !== undefined ? AbortSignal.timeout(opts.timeoutMs) : undefined
+  let res = await send(url, opts, opts.token, signal())
   if (res.ok) return res
   let answer = await answerOf(res)
   if (opts.authRefresh && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
-    res = await send(url, opts, await refreshAccessToken(opts.authRefresh), signal)
+    res = await send(url, opts, await refreshAccessToken(opts.authRefresh), signal())
     if (res.ok) return res
     answer = await answerOf(res)
   }
@@ -186,9 +204,8 @@ export async function targetFetch(
 
 /** The whole answer to a request, within `opts.timeoutMs` when it is set. */
 async function timedAnswer(url: string, opts: TargetFetchOptions): Promise<FetchAnswer> {
-  const signal = opts.timeoutMs !== undefined ? AbortSignal.timeout(opts.timeoutMs) : undefined
   try {
-    return await answerOf(await acceptedResponse(url, opts, signal))
+    return await answerOf(await acceptedResponse(url, opts, true))
   } catch (err) {
     if (!isTimeout(err) || opts.timeoutMs === undefined) throw err
     throw new Error(`${opts.method} ${url} did not answer within ${opts.timeoutMs / 1000} s`, { cause: err })
@@ -205,7 +222,7 @@ export async function targetStream(
   opts: TargetFetchOptions,
 ): Promise<ReadableStream<Uint8Array>> {
   const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
-  const res = await acceptedResponse(url, opts)
+  const res = await acceptedResponse(url, opts, false)
   if (res.body === null) throw new Error(`${url} answered with no body to stream`)
   return res.body
 }

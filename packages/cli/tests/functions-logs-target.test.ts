@@ -39,6 +39,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   project.remove()
 })
 
@@ -91,5 +92,68 @@ describe("a functions request to the linked target", () => {
     await runCommand(registerFunctions, ["functions", "list"], project.dir)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.signal).toBeInstanceOf(AbortSignal)
+  })
+})
+
+// Review of round 5: these routes restart the worker, which often takes longer than 10 s, so they
+// were reported as failed while they succeeded.
+describe("a functions request whose route restarts the worker", () => {
+  function timeoutsAskedFor(argv: string[]): Promise<number[]> {
+    const asked: number[] = []
+    const real = AbortSignal.timeout.bind(AbortSignal)
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+      asked.push(ms)
+      return real(ms)
+    })
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({ data: { key: "K", removed: true } }), {
+      headers: { "Content-Type": "application/json" },
+    })))
+    return runCommand(registerFunctions, argv, project.dir).then(() => asked)
+  }
+
+  it("waits as long as a deploy for env set", async () => {
+    expect(await timeoutsAskedFor(["functions", "env", "set", "K=v"])).toEqual([60_000])
+  })
+
+  it("waits as long as a deploy for env unset", async () => {
+    expect(await timeoutsAskedFor(["functions", "env", "unset", "K"])).toEqual([60_000])
+  })
+
+  it("waits as long as a deploy for delete", async () => {
+    expect(await timeoutsAskedFor(["functions", "delete", "hello"])).toEqual([60_000])
+  })
+
+  it("keeps the shorter limit for a list", async () => {
+    expect(await timeoutsAskedFor(["functions", "list"])).toEqual([10_000])
+  })
+})
+
+// Review of round 5: unset said "Removed" for a key the server said was never set.
+describe("functions env unset of a key that was not set", () => {
+  it("says it was not set", async () => {
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({ data: { key: "NOPE", removed: false } }), {
+      headers: { "Content-Type": "application/json" },
+    })))
+    const run = await runCommand(registerFunctions, ["functions", "env", "unset", "NOPE"], project.dir)
+    expect(run.output).toContain("NOPE was not set")
+    expect(run.output).not.toContain("Removed NOPE")
+  })
+})
+
+// Review of round 5: a link of kind "local" is this machine's own server, where the placeholder
+// test JWT is what --auth is for. It was refused along with self-hosted servers.
+describe("functions invoke --auth on a local link", () => {
+  it("sends the local test JWT", async () => {
+    writeFileSync(join(project.dir, ".supatype", "link.json"), JSON.stringify({
+      version: 1,
+      kind: "local",
+      projectRef: "acme",
+      defaultEnvironment: "local",
+      environments: { local: { name: "local", apiUrl: "http://localhost:18471", token: "svc-key", linkedAt: "2026-01-01T00:00:00Z" } },
+    }))
+    const run = await runCommand(registerFunctions, ["functions", "invoke", "hello", "--auth"], project.dir)
+    expect(run.exitCode).toBeUndefined()
+    expect(requests.map((r) => r.url)).toEqual(["http://localhost:18471/functions/v1/hello"])
+    expect(requests[0]?.auth).toMatch(/^Bearer eyJ.*\.test$/)
   })
 })

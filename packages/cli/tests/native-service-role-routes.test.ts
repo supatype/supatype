@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { configSnapshot, refreshServiceRoleRoutes, watchServiceRoleRoutes } from "../src/native-functions-watch.js"
+import { configSnapshot } from "../src/config-snapshot.js"
+import { refreshServiceRoleRoutes, watchServiceRoleRoutes } from "../src/native-functions-watch.js"
 import type { WatchFn } from "../src/dev-functions-watch.js"
 
 /**
