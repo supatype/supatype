@@ -1,15 +1,14 @@
 /**
- * Package a project's hooks for a managed stack.
- *
- * Self-hosted stacks need none of this: the worker mounts the project directory, so `hooks/` is already
- * where it looks. A managed project has no directory, its worker reads a ConfigMap, whose keys may only
+ * Package a project's hooks, and the functions its validators name, for a stack the push reaches over
+ * the network: Cloud, or a linked self-host stack (whose control plane writes them back into the
+ * project's layout). A managed project has no directory, its worker reads a ConfigMap, whose keys may only
  * contain alphanumerics, `-`, `_` and `.`. So the tree is flattened here, where it can be checked and
  * explained, rather than in the deploy route where a dropped file would be silent.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 
-import { declaredHooks, manifestHooks, type ManifestHookEntry } from "./model-hooks.js"
+import { declaredHooks, declaredValidators, manifestHooks, type ManifestHookEntry } from "./model-hooks.js"
 
 /** The generated adapter, flattened. `_`-prefixed, so the worker never routes to it. */
 export const ADAPTER_KEY = "_supatype-hooks.ts"
@@ -49,7 +48,9 @@ function unsupportedImports(source: string): string[] {
 }
 
 /**
- * Read the hooks a schema actually names, ready to upload.
+ * Read the hooks a schema actually names, and the functions its validators name, ready to upload.
+ * Validators name functions in the same directory as hooks, and a stack whose map names a validator
+ * it was never sent refuses every write to that column.
  *
  * **Named-only**, not every directory under `hooks/`: an unnamed handler would sit on the worker
  * holding the service-role key with nothing able to call it. Uploading it buys nothing and widens what
@@ -60,7 +61,7 @@ function unsupportedImports(source: string): string[] {
  * the table's writes being broken for no visible reason.
  */
 export function readHookUpload(cwd: string, hooksDir: string, ast: unknown): HookUpload | null {
-  const declared = declaredHooks(ast)
+  const declared = [...declaredHooks(ast), ...declaredValidators(ast)]
   if (declared.length === 0) return null
 
   const names = [...new Set(declared.map((hook) => hook.function))].sort()

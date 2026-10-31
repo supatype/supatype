@@ -7,7 +7,9 @@
  * it sends Cloud: `handlers`, each a name and its source, flattened (packages/cli/src/hook-upload.ts),
  * with the generated adapter as `_supatype-hooks`, and `map`, table to event to the hook's settings.
  * The control plane did not have the route, so that push applied its schema and ended `Route not
- * found` (local test round 4, N23).
+ * found` (local test round 4, N23). It also sends the manifest's other two maps, `validators` (the
+ * functions a field's validator names travel with the handlers) and `cache`, which a local push writes
+ * beside the hook map, so that validators and the row cache apply on a linked stack too.
  *
  * The stack's worker serves hooks from the project's hooks directory (SUPATYPE_HOOKS_ROOT), and the
  * server reads which hook runs around a write from the manifest's `hooks` key. So each handler is
@@ -19,7 +21,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { FUNCTION_NAME_RULE, isArrayOf, isFunctionName, isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { FUNCTION_NAME_RULE, isArrayOf, isBoolean, isFunctionName, isJsonObject, isNumber, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { badRequest, bodyOf, HttpError, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject, projectRoot } from "../project.js"
@@ -33,9 +35,16 @@ const ADAPTER_PATH = join("_supatype", "hooks.ts")
 const FLATTENED_IMPORT = `./${ADAPTER_NAME}.ts`
 const PROJECT_IMPORT = "../_supatype/hooks.ts"
 
+/**
+ * `validators` and `cache` are the manifest's other two maps, which a local push writes beside the
+ * hook map (applied-ast-artifacts.ts). A key not sent is left as the manifest has it: a CLI from
+ * before them sends neither.
+ */
 const isDeployBody = isShape({
   handlers: optional(isArrayOf(isShape({ name: isUnknown, source: isString }))),
   map: optional(isUnknown),
+  validators: optional(isUnknown),
+  cache: optional(isUnknown),
 })
 
 /** One file to write, already checked: its path under the hooks root and its contents. */
@@ -68,18 +77,31 @@ function handlerFile(name: unknown, source: string): HookFile {
 const isHookMap = isRecordOf(isRecordOf(isShape({ function: isString })))
 type HookMap = typeof isHookMap extends (value: unknown) => value is infer T ? T : never
 
-function checkedMap(map: unknown): HookMap {
+function checkedMap(map: unknown, key: "map" | "validators"): HookMap {
   const value = map ?? {}
-  if (!isHookMap(value)) throw badRequest("map must be table to event to settings that name a function")
+  if (!isHookMap(value)) throw badRequest(`${key} must be table to event or column to settings that name a function`)
   return value
 }
 
-/** The handler names the map calls that were not uploaded, so a map never names a missing handler. */
-function unresolved(names: ReadonlySet<string>, map: HookMap): string[] {
+/** The cache map as the manifest carries it (packages/cli/src/model-cache.ts, ManifestCacheEntry). */
+const isCacheMap = isRecordOf(
+  isShape({ enabled: optional(isBoolean), public: optional(isBoolean), rows: optional(isBoolean), maxTtl: optional(isNumber) }),
+)
+
+function checkedCache(cache: unknown): Record<string, unknown> | undefined {
+  if (cache === undefined) return undefined
+  if (!isCacheMap(cache)) throw badRequest("cache must be table to its settings: enabled, public, rows, maxTtl")
+  return cache
+}
+
+/** The functions the maps call that were not uploaded, so a map never names a missing handler. */
+function unresolved(names: ReadonlySet<string>, maps: readonly HookMap[]): string[] {
   const missing = new Set<string>()
-  for (const events of Object.values(map)) {
-    for (const entry of Object.values(events)) {
-      if (!names.has(entry.function)) missing.add(entry.function)
+  for (const map of maps) {
+    for (const entries of Object.values(map)) {
+      for (const entry of Object.values(entries)) {
+        if (!names.has(entry.function)) missing.add(entry.function)
+      }
     }
   }
   return [...missing].sort()
@@ -95,10 +117,16 @@ function readManifest(): Record<string, unknown> {
   return manifest
 }
 
-/** Sets the manifest's `hooks` key to `map`, or removes it when there is none, as the CLI writes it. */
-function writeHookMap(manifest: Record<string, unknown>, map: HookMap): void {
-  if (Object.keys(map).length === 0) delete manifest["hooks"]
-  else manifest["hooks"] = map
+/**
+ * Sets each manifest key `maps` names to its map, or removes the key when the map is empty, as the
+ * CLI writes them; a key whose map is undefined was not sent and is left as it is. One write.
+ */
+function writeManifestMaps(manifest: Record<string, unknown>, maps: Record<string, Record<string, unknown> | undefined>): void {
+  for (const [key, map] of Object.entries(maps)) {
+    if (map === undefined) continue
+    if (Object.keys(map).length === 0) delete manifest[key]
+    else manifest[key] = map
+  }
   writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
 }
 
@@ -116,15 +144,17 @@ export function registerHookRoutes(routes: Array<{ method: string; pattern: RegE
     assertProject(ctx.params["ref"]!)
     const body = bodyOf(ctx.body, isDeployBody)
     const { files, names } = deployFiles(body.handlers ?? [])
-    const map = checkedMap(body.map)
-    const missing = unresolved(new Set(names), map)
-    if (missing.length > 0) throw badRequest(`The hook map names handlers that were not uploaded: ${missing.join(", ")}`)
+    const map = checkedMap(body.map, "map")
+    const validators = body.validators === undefined ? undefined : checkedMap(body.validators, "validators")
+    const cache = checkedCache(body.cache)
+    const missing = unresolved(new Set(names), validators === undefined ? [map] : [map, validators])
+    if (missing.length > 0) throw badRequest(`The maps name functions that were not uploaded: ${missing.join(", ")}`)
     const manifest = readManifest()
     for (const file of files) {
       mkdirSync(dirname(file.path), { recursive: true })
       writeFileSync(file.path, file.source, "utf8")
     }
-    writeHookMap(manifest, map)
+    writeManifestMaps(manifest, { hooks: map, validators, cache })
     restartFunctionsWorker()
     sendJson(ctx.res, 200, { data: { handlers: names, tables: Object.keys(map).sort() } })
   })

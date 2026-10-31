@@ -111,6 +111,47 @@ describe("hooks deploy route", () => {
     assert.equal(existsSync(join(projectDir, "hooks")), false)
   })
 
+  // A linked push wrote no validator or cache map on the stack, so neither applied there.
+  const CHECK_TITLE = { name: "check-title", source: "export default () => ({ ok: true })\n" }
+  const VALIDATORS = { note: { title: { function: "check-title", timeout: 5000, onUnavailable: "reject" } } }
+  const CACHE = { note: { enabled: true, rows: true, maxTtl: 60 } }
+
+  test("writes the validator and cache maps in the same manifest write", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, {
+      handlers: [TAG_NOTE, CHECK_TITLE, ADAPTER],
+      map: MAP,
+      validators: VALIDATORS,
+      cache: CACHE,
+    })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    const written = manifest(projectDir)
+    assert.deepEqual(written["validators"], VALIDATORS)
+    assert.deepEqual(written["cache"], CACHE)
+    assert.ok(existsSync(join(projectDir, "hooks", "check-title", "index.ts")))
+  })
+
+  test("removes a map sent empty, and leaves one not sent as it is", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [CHECK_TITLE], map: {}, validators: VALIDATORS, cache: CACHE })
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {}, cache: {} })
+    assert.equal(res.status, 200)
+    const written = manifest(projectDir)
+    assert.equal("cache" in written, false)
+    assert.deepEqual(written["validators"], VALIDATORS)
+  })
+
+  test("refuses a validator map naming a function that was not uploaded, and writes nothing", async () => {
+    const before = tree(tmp)
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {}, validators: VALIDATORS })
+    assert.equal(res.status, 400)
+    assert.match(String(res.json["message"]), /check-title/)
+    assert.deepEqual(tree(tmp), before)
+  })
+
+  test("refuses a cache map whose settings are not the manifest's", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {}, cache: { note: { maxTtl: "60" } } })
+    assert.equal(res.status, 400)
+  })
+
   test("answers another project ref as unknown", async () => {
     const res = await request(baseUrl, "POST", "/projects/other/hooks/deploy", { handlers: [], map: {} })
     assert.equal(res.status, 404)

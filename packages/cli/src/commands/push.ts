@@ -5,10 +5,11 @@ import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import {
   validateModelHooks,
+  manifestValidators,
   validateModelValidators,
   writeHooksModule,
 } from "../model-hooks.js"
-import { rowCacheChangeNote } from "../model-cache.js"
+import { manifestCache, rowCacheChangeNote } from "../model-cache.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
 import { adapterEntry, readHookUpload } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
@@ -426,7 +427,7 @@ async function databaseIsReady(
  * this machine, and `hooks/_supatype/hooks.ts` is what makes them typed, it is generated, never
  * committed, so a fresh clone that has only ever pushed to cloud would otherwise have no types at all.
  */
-async function deployHooksToTarget(
+export async function deployHooksToTarget(
   cwd: string,
   config: SupatypeProjectConfig,
   target: DeployTarget,
@@ -445,12 +446,16 @@ async function deployHooksToTarget(
     fatalError(errorMessage(err))
     return
   }
-  if (upload === null) return
+  // A self-host stack's manifest learns the validator and cache maps only here, as a local push
+  // writes them (applied-ast-artifacts.ts); a schema with none of either still clears what is there.
+  const selfHost = target.mode === "self-host"
+  if (upload === null && !selfHost) return
 
   const adapter = readGeneratedAdapter(hooksDir)
-  const handlers = adapter === null ? upload.handlers : [...upload.handlers, adapter]
-
-  await uploadHooks(target, { handlers, map: upload.map }, upload.handlers.length)
+  const named = upload?.handlers ?? []
+  const handlers = adapter === null || named.length === 0 ? named : [...named, adapter]
+  const maps = selfHost ? { validators: manifestValidators(ast), cache: manifestCache(ast) } : {}
+  await uploadHooks(target, { handlers, map: upload?.map ?? {}, ...maps }, named.length)
 }
 
 /**
@@ -458,7 +463,7 @@ async function deployHooksToTarget(
  * so it says that, which target refused and what it answered: `Route not found` alone read as the
  * whole push failing (local test round 4, N23).
  */
-export async function uploadHooks(target: DeployTarget, body: { handlers: unknown[]; map: unknown }, count: number): Promise<void> {
+export async function uploadHooks(target: DeployTarget, body: { handlers: unknown[]; map: unknown; validators?: unknown; cache?: unknown }, count: number): Promise<void> {
   try {
     await withSpinner(`Deploying ${count} hook(s)`, () =>
       targetFetch(target.apiBaseUrl, target.apiPrefix, {

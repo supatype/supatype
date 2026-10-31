@@ -17,6 +17,7 @@ vi.mock("../src/model-versioning.js", () => ({ withPublishing: (ast: unknown) =>
 vi.mock("../src/model-hooks.js", () => ({
   validateModelHooks: () => [],
   validateModelValidators: () => [],
+  manifestValidators: () => ({}),
   syncManifestHooks: () => false,
   writeHooksModule: () => null,
 }))
@@ -49,6 +50,11 @@ vi.mock("../src/schema-sources.js", () => ({
 }))
 // Waiting for the linked server's REST API is rest-ready.test.ts's subject, not this one's.
 vi.mock("../src/rest-ready.js", () => ({ waitForRestReady: async () => true }))
+// A self-host push sends its hook, validator and cache maps after the schema; the stack takes them.
+vi.mock("../src/target-client.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/target-client.js")>()),
+  targetFetch: async () => ({}),
+}))
 vi.mock("../src/resolve-target.js", () => ({
   resolveTarget: () => ({
     mode: "self-host",

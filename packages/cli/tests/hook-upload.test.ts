@@ -123,3 +123,30 @@ describe("readHookUpload", () => {
       .toThrow(/moderate-post/)
   })
 })
+
+/**
+ * A linked push wrote the manifest's hook map on the stack, but not its validator map, so a
+ * validator never ran on a remote self-host stack; it also never uploaded the validator's function.
+ * Validators name functions in the same directory as hooks, so they travel with the hooks.
+ */
+describe("readHookUpload with validators", () => {
+  function astWithValidator(): unknown {
+    return {
+      models: [
+        {
+          name: "Post",
+          fields: [],
+          annotations: { db: { tableName: "posts" }, platform: { validate: { title: { function: "check-title" } } } },
+        },
+      ],
+    }
+  }
+
+  it("uploads the function a validator names, with no hook declared", () => {
+    const { cwd, hooks } = project()
+    writeHook(hooks, "check-title", HANDLER)
+    const upload = readHookUpload(cwd, hooks, astWithValidator())
+    expect(upload?.handlers.map((handler) => handler.name)).toEqual(["check-title"])
+    expect(upload?.map).toEqual({})
+  })
+})

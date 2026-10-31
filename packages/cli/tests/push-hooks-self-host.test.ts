@@ -6,8 +6,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { isJsonObject } from "@supatype/shared"
 import { CONTROL_PLANE_SECRET_HEADER } from "../../self-host-control/src/auth.js"
 import { createControlPlaneServer } from "../../self-host-control/src/server.js"
-import { uploadHooks } from "../src/commands/push.js"
+import { deployHooksToTarget, uploadHooks } from "../src/commands/push.js"
 import { portOf } from "./support/ports.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * Local test round 4 (N23): a push to a project linked to a self-host stack applied the schema and
@@ -72,5 +73,37 @@ describe("push's hook upload to a self-host stack", () => {
     expect(readFileSync(join(projectDir, "hooks", "tag-note", "index.ts"), "utf8")).toContain('from "../_supatype/hooks.ts"')
     const manifest: unknown = JSON.parse(readFileSync(join(projectDir, ".supatype", "manifest.json"), "utf8"))
     expect(isJsonObject(manifest) && manifest["hooks"]).toEqual(map)
+  }, 30_000)
+
+  // A linked push wrote no validator or cache map on the stack, so neither applied there, and a
+  // schema with validators and no hooks sent nothing at all.
+  it("sends the validator and cache maps, and the validator's function, with no hook declared", async () => {
+    const controlPlane = await listen(createControlPlaneServer(SECRET))
+    const apiBaseUrl = await listen(gateway(controlPlane))
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl, apiPrefix: "/platform/v1", token: "service-role-key", link: null } as const
+    const cwd = join(tmp, "local")
+    mkdirSync(join(cwd, "hooks", "check-title"), { recursive: true })
+    writeFileSync(join(cwd, "hooks", "check-title", "index.ts"), "export default () => ({ ok: true })\n")
+    const ast = {
+      models: [
+        {
+          name: "Note",
+          fields: {},
+          annotations: {
+            db: { tableName: "note" },
+            platform: { validate: { title: { function: "check-title" } }, cache: { enabled: true, rows: true, maxTtl: 60 } },
+          },
+        },
+      ],
+    }
+
+    await deployHooksToTarget(cwd, projectConfig(), target, ast)
+
+    const manifest: unknown = JSON.parse(readFileSync(join(projectDir, ".supatype", "manifest.json"), "utf8"))
+    if (!isJsonObject(manifest)) throw new Error("the manifest is not a JSON object")
+    expect(manifest["validators"]).toMatchObject({ note: { title: { function: "check-title", onUnavailable: "reject" } } })
+    expect(manifest["cache"]).toEqual({ note: { enabled: true, rows: true, maxTtl: 60 } })
+    expect(readFileSync(join(projectDir, "hooks", "check-title", "index.ts"), "utf8")).toContain("ok: true")
   }, 30_000)
 })
