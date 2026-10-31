@@ -12,7 +12,7 @@ export {
   type CapabilitiesCache,
 } from "./capabilities-cache.js"
 export { FUNCTION_NAME, FUNCTION_NAME_RULE, isFunctionName } from "./function-name.js"
-export { FUNCTIONS_WORKER_STOP_GRACE_SECONDS } from "./functions-worker.js"
+export { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS } from "./functions-worker.js"
 export {
   MAX_IDENTIFIER_BYTES,
   keptName,

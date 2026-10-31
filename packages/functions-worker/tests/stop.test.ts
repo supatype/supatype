@@ -1,5 +1,5 @@
 import { expectEqual } from "./worker-harness.ts"
-import { DRAIN_GRACE_MS, exitOnStop, type StopHooks } from "../stop.ts"
+import { DRAIN_GRACE_MS, drainGraceMs, exitOnStop, MAX_DRAIN_GRACE_MS, type StopHooks } from "../stop.ts"
 import { closeTails, tailResponse } from "../logging.ts"
 
 /**
@@ -89,4 +89,16 @@ Deno.test("closes an open log tail, which would otherwise hold the drain", async
   let chunk = await reader.read()
   while (!chunk.done) chunk = await reader.read()
   expectEqual(chunk.done, true, "the tail ended")
+})
+
+// Round 6b, N29: a self-hosted worker drained for 4 s, sized for dev's 5 s kill, though Docker gives
+// it 10 s, so a function with more left got a 502 at every restart. The grace comes from
+// SUPATYPE_FUNCTIONS_DRAIN_MS, which the self-host compose sets.
+Deno.test("takes its drain grace from the environment, within bounds", () => {
+  expectEqual(drainGraceMs(undefined), DRAIN_GRACE_MS, "unset")
+  expectEqual(drainGraceMs("9000"), 9000, "a value")
+  expectEqual(drainGraceMs(" 2500 "), 2500, "spaces round it")
+  expectEqual(drainGraceMs("0"), 0, "no drain")
+  for (const bad of ["", "soon", "-1", "1.5", "9e3", "NaN"]) expectEqual(drainGraceMs(bad), DRAIN_GRACE_MS, `the default for ${JSON.stringify(bad)}`)
+  expectEqual(drainGraceMs("600000"), MAX_DRAIN_GRACE_MS, "capped")
 })

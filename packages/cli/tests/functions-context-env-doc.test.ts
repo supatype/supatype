@@ -36,6 +36,24 @@ describe("ctx.env's documentation", () => {
     expect(worker).not.toMatch(/Values from `\.env` and/)
   })
 
+  // Round 6b, N28b: values set with `functions env set` or the env files arrive in ctx.env, per
+  // call, and never in Deno.env, which every call shares. Nothing said so, and a function reading
+  // Deno.env.get found nothing.
+  it("says the values arrive in ctx.env per call, never in Deno.env, and why", () => {
+    const source = functionsContextModuleSource()
+    expect(source).toContain("functions env set")
+    expect(source).toMatch(/never in Deno\.env: .*one process environment, shared by[\s*]+every[\s*]+call/s)
+    expect(read("packages/functions-worker/invocation.ts")).toMatch(/never in `Deno\.env`/)
+    expect(read("docs-content/functions.md")).toMatch(/never in `Deno\.env`: .*shared by every call/s)
+    expect(read("skills/supatype/references/cli.md")).toMatch(/supatype functions env set.*ctx\.env.*never in `Deno\.env`/)
+  })
+
+  it("is not described as Deno.env in the edge-kit example", () => {
+    for (const path of ["examples/edge-kit/README.md", "examples/edge-kit/src/App.tsx", "examples/edge-kit/functions/env-check/index.ts", "examples/edge-kit/functions/write-note/index.ts"]) {
+      expect(read(path), path).not.toMatch(/Deno\.env/)
+    }
+  })
+
   for (const copy of COPIES) {
     it(`is current in ${copy}`, () => {
       expect(read(copy)).toBe(functionsContextModuleSource().replace(/\r\n/g, "\n"))

@@ -84,6 +84,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype functions serve` | Local Deno server for all functions, on port 18472 unless `--port` moves it |
 | `supatype functions deploy` | Deploy edge functions via control plane when linked. On a self-host compose stack nothing is uploaded (the worker reads `functions/` from disk): run `supatype self-host compose restart functions-worker` to load changes (`supatype dev` does that on save) |
 | `supatype functions list` | List deployed functions |
+| `supatype functions env set KEY=value` / `list` / `unset KEY` | A function's env values: on the linked project, else `functions/.env.local`. With `functions/.env.<name>.local` (one function, wins), every value arrives in `ctx.env`, read again on each call, never in `Deno.env`: that is the worker's one process environment, shared by every call running at once, so `Deno.env.get` finds none of them |
 | `supatype plugins` | Plugin scaffolding |
 | `supatype types` | Type utilities |
 

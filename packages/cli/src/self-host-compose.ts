@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { createInterface } from "node:readline"
-import { FUNCTIONS_WORKER_STOP_GRACE_SECONDS } from "@supatype/shared"
+import { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS } from "@supatype/shared"
 import { composeHostPath } from "./compose-host-path.js"
 export { composeHostPath } from "./compose-host-path.js"
 import { ENGINE_SERVICE } from "./compose-engine-service.js"
@@ -959,6 +959,9 @@ ${mounts.projectReadOnly}
       # What \`functions env set\` gives the project: the control plane writes it under the project it
       # mounts at /project, and the worker reads it on every call.
       SUPATYPE_FUNCTION_ENV_FILE: /project/.supatype/function-env.json
+      # How long requests in flight get to finish when the worker is stopped: under its stop grace
+      # above, so it exits by itself before Docker kills it. Its own default is dev's 4 s.
+      SUPATYPE_FUNCTIONS_DRAIN_MS: "${FUNCTIONS_WORKER_DRAIN_MS}"
       # Every log line the worker writes carries this, and on cloud it is the label Loki indexes
       # each project's logs under. Without it a line is collected and filed under no project, which
       # is the same as losing it.

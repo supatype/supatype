@@ -24,6 +24,12 @@ type StartUndo = () => void | Promise<void>
 const serviceUndo: StartUndo[] = []
 /** What the services use (native Postgres), undone after them, last first. */
 const lastUndo: StartUndo[] = []
+/**
+ * Docker containers dev's start began (native dev's Valkey sidecar): undone beside everything else,
+ * since nothing else waits for them, and named if a forced quit leaves them running.
+ */
+const containerUndo: StartUndo[] = []
+const containersStarted: string[] = []
 /** Undos recorded once the shutdown had begun: run at once, and waited for before the process ends. */
 const lateUndo: Array<Promise<unknown>> = []
 let composeFallback: DevComposeShutdownFallback | null = null
@@ -125,9 +131,10 @@ export function registerDevShutdown(
  * Valkey container), the moment it is spawned, before it reports ready. An interrupted start undoes
  * them all, and so does the shutdown dev registers once it is up, after its own work.
  */
-export function pushStartUndo(undo: StartUndo): void {
+export function pushStartUndo(undo: StartUndo, opts: { container?: string } = {}): void {
+  if (opts.container !== undefined) containersStarted.push(opts.container)
   if (shuttingDown) return runLate(undo)
-  serviceUndo.push(undo)
+  ;(opts.container !== undefined ? containerUndo : serviceUndo).push(undo)
   ensureDevShutdownHooks()
 }
 
@@ -158,18 +165,45 @@ export async function haltIfStopping(): Promise<void> {
 }
 
 /**
- * Runs every recorded undo: the services' together, then the rest one at a time, last first.
- * Returns the errors of those that failed; a failed one stops nothing after it.
+ * `work`, and under SUPATYPE_DEBUG=1 how long it took, so where a shutdown's time goes can be read
+ * from a run rather than guessed (round 6b, C10).
+ */
+async function timed<T>(phase: string, work: () => Promise<T>): Promise<T> {
+  if (process.env["SUPATYPE_DEBUG"] !== "1") return work()
+  const start = Date.now()
+  try {
+    return await work()
+  } finally {
+    process.stderr.write(`[supatype] shutdown: ${phase} took ${Date.now() - start} ms\n`)
+  }
+}
+
+/** Runs `undos` together; the errors of those that failed. */
+async function undoTogether(undos: StartUndo[]): Promise<unknown[]> {
+  const settled = await Promise.allSettled(undos.map((undo) => Promise.resolve().then(undo)))
+  return settled.flatMap((result) => (result.status === "rejected" ? [result.reason as unknown] : []))
+}
+
+/** The services' undos together, then what they use one at a time, last first. */
+async function undoServicesThenLast(): Promise<unknown[]> {
+  const errors = await timed("services", () => undoTogether(serviceUndo.splice(0)))
+  await timed("Postgres and what else the services use", async () => {
+    for (let undo = lastUndo.pop(); undo !== undefined; undo = lastUndo.pop()) {
+      await Promise.resolve().then(undo).catch((err: unknown) => errors.push(err))
+    }
+  })
+  return errors
+}
+
+/**
+ * Runs every recorded undo: the services' together, then the rest one at a time, last first, with
+ * the containers' beside them all (a `docker rm -f` is about a second on Docker Desktop, and
+ * Postgres's stop waited for it). Returns the errors of those that failed; a failed one stops
+ * nothing after it.
  */
 export async function drainStartUndo(): Promise<unknown[]> {
-  const services = await Promise.allSettled(serviceUndo.splice(0).map((undo) => Promise.resolve().then(undo)))
-  const errors: unknown[] = []
-  for (const result of services) {
-    if (result.status === "rejected") errors.push(result.reason as unknown)
-  }
-  for (let undo = lastUndo.pop(); undo !== undefined; undo = lastUndo.pop()) {
-    await Promise.resolve().then(undo).catch((err: unknown) => errors.push(err))
-  }
+  const [chain, containers] = await Promise.all([undoServicesThenLast(), timed("containers", () => undoTogether(containerUndo.splice(0)))])
+  const errors = [...chain, ...containers]
   while (lateUndo.length > 0) {
     for (const failed of await Promise.all(lateUndo.splice(0))) if (failed !== undefined) errors.push(failed)
   }
@@ -252,6 +286,8 @@ export function resetDevShutdownForTests(): void {
   shutdownWork = null
   serviceUndo.length = 0
   lastUndo.length = 0
+  containerUndo.length = 0
+  containersStarted.length = 0
   lateUndo.length = 0
   composeFallback = null
   shutdownCwd = null
@@ -283,24 +319,39 @@ async function runShutdownWork(work: () => Promise<void>): Promise<void> {
   if (first !== undefined) throw first
 }
 
-async function runDevShutdown(): Promise<void> {
-  if (shuttingDown) {
-    if (!forceQuitRequested) {
-      forceQuitRequested = true
-      process.stderr.write(
-        "\n[supatype] Still shutting down (stopping Docker)… press Ctrl+C again to force quit.\n",
-      )
-      return
-    }
-    try {
-      endDevSession()
-    } catch {
-      // best-effort terminal restore
-    }
-    process.stderr.write("\n[supatype] Forced quit: Docker containers may still be running.\n")
-    process.stdout.write("\n")
-    process.exit(130)
+/**
+ * What a forced quit may leave running: the compose stack's containers, or the containers native
+ * dev started; undefined when there are none, and a forced quit leaves nothing behind.
+ */
+function leftByForcedQuit(): string | undefined {
+  if (composeFallback !== null) return "Docker containers"
+  return containersStarted.length > 0 ? containersStarted.join(", ") : undefined
+}
+
+/**
+ * A Ctrl+C while the shutdown runs. Where containers could be left running, the first one only says
+ * so and the next forces the exit; with none (native dev without a Valkey sidecar) it forces the
+ * exit at once (round 6b, C10).
+ */
+function interruptShutdown(): void {
+  const left = leftByForcedQuit()
+  if (left !== undefined && !forceQuitRequested) {
+    forceQuitRequested = true
+    process.stderr.write("\n[supatype] Still shutting down… press Ctrl+C again to force quit.\n")
+    return
   }
+  try {
+    endDevSession()
+  } catch {
+    // best-effort terminal restore
+  }
+  process.stderr.write(left === undefined ? "\n[supatype] Forced quit.\n" : `\n[supatype] Forced quit: ${left} may still be running.\n`)
+  process.stdout.write("\n")
+  process.exit(130)
+}
+
+async function runDevShutdown(): Promise<void> {
+  if (shuttingDown) return interruptShutdown()
   shuttingDown = true
 
   try {
@@ -313,9 +364,9 @@ async function runDevShutdown(): Promise<void> {
     process.exit(0)
   } catch (err) {
     process.stderr.write(`[supatype] Shutdown failed: ${errorMessage(err)}\n`)
-    process.stderr.write(
-      "[supatype] Docker containers may still be running, try: supatype self-host compose down\n",
-    )
+    if (composeFallback !== null) {
+      process.stderr.write("[supatype] Docker containers may still be running, try: supatype self-host compose down\n")
+    }
     syncComposeDownFallback()
     shutdownCompleted = true
     process.exit(1)

@@ -125,7 +125,7 @@ export async function ensureValkeySidecar(projectName: string, given: Partial<Va
 async function startContainer(name: string, port: number, deps: ValkeySidecarDeps): Promise<boolean> {
   const run = await deps.docker(valkeyRunArgs(name, port))
   if (run.status === 0) {
-    pushStartUndo(() => stopValkeySidecar(name, deps.docker))
+    pushStartUndo(() => stopValkeySidecar(name, deps.docker), { container: `the Valkey sidecar container (${name})` })
     return true
   }
   console.warn(

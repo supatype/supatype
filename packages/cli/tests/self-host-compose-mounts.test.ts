@@ -207,6 +207,14 @@ describe("self-host compose functions worker", () => {
     expect(block).toContain("\n    stop_grace_period: 10s")
   })
 
+  // Round 6b N29: the worker drained for its 4 s default, sized for dev, so a function with more
+  // left was cut off at every restart though Docker allowed 10 s. Its drain is set under the grace.
+  it("has the worker drain for 9 s, under its 10 s stop grace", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(envValues(block, "SUPATYPE_FUNCTIONS_DRAIN_MS")).toEqual(['"9000"'])
+  })
+
   // Review: `functions env set` wrote the control plane's file, and nothing told the worker of it, so
   // no value set ever reached a function. The worker is named the file the control plane writes.
   it("reads the function env the control plane writes", () => {
