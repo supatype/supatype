@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { targetFetch } from "../src/target-client.js"
+import { targetFetch, targetStream } from "../src/target-client.js"
 
 /**
  * Review of round 5: the functions commands moved onto targetFetch, which had no timeout, so list,
@@ -83,5 +83,32 @@ describe("a Cloud session renewed during a request", () => {
   it("gives the resent request its own time, not what the refresh left of it", async () => {
     expiringSession({ refreshMs: 250, resendMs: 100 })
     await expect(expiredRequest(300)).resolves.toEqual(["ok"])
+  }, 3000)
+})
+
+// Review of round 5: a stream given a time limit was cut off mid-stream when it ran out. The limit
+// covers the wait for the answer to start, never the body.
+describe("targetStream with a time limit", () => {
+  it("keeps streaming past the limit once the answer has started", async () => {
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason))
+          setTimeout(() => {
+            controller.enqueue(new TextEncoder().encode("late line"))
+            controller.close()
+          }, 300)
+        },
+      })
+      return Promise.resolve(new Response(body))
+    })
+    const stream = await targetStream("https://sh.example.test", "/admin/v1", { method: "GET", path: "/functions/logs/tail", token: "k", timeoutMs: 100 })
+    expect(await new Response(stream).text()).toBe("late line")
+  }, 3000)
+
+  it("gives up when the answer does not start within the limit", async () => {
+    stalledTarget()
+    const stream = targetStream("https://sh.example.test", "/admin/v1", { method: "GET", path: "/functions/logs/tail", token: "k", timeoutMs: 50 })
+    await expect(stream).rejects.toThrow("GET https://sh.example.test/admin/v1/functions/logs/tail did not answer within 0.05 s")
   }, 3000)
 })

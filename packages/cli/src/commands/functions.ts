@@ -57,6 +57,11 @@ const NOT_LINKED = "No linked project. Run: supatype link"
  */
 const TARGET_TIMEOUT_MS = 10_000
 const RESTART_TIMEOUT_MS = 60_000
+/**
+ * More time for each function a deploy carries: Supatype Cloud syncs them in turn within the one
+ * request, so a fixed limit timed a large deploy out while the server deployed every function.
+ */
+const PER_FUNCTION_TIMEOUT_MS = 30_000
 
 /** One request to the linked project's functions API. */
 interface TargetCall {
@@ -65,6 +70,8 @@ interface TargetCall {
   body?: unknown
   /** Whether the route restarts the worker before it answers. */
   restartsWorker?: boolean
+  /** How many functions the call carries, each given {@link PER_FUNCTION_TIMEOUT_MS} more. */
+  functions?: number
 }
 
 // ─── Registration ────────────────────────────────────────────────────────────
@@ -493,13 +500,14 @@ function requireLinkedTarget(cwd: string): DeployTarget {
   return target
 }
 
-/** Asks `target` for `subpath` of its project, ending the command with `what` and the reason when it fails. */
 /** `call` to the target's project, with the time limit its route needs. */
 function targetRequest(target: DeployTarget, call: TargetCall): TargetFetchOptions {
-  const timeoutMs = call.restartsWorker === true ? RESTART_TIMEOUT_MS : TARGET_TIMEOUT_MS
+  const base = call.restartsWorker === true ? RESTART_TIMEOUT_MS : TARGET_TIMEOUT_MS
+  const timeoutMs = base + (call.functions ?? 0) * PER_FUNCTION_TIMEOUT_MS
   return { ...projectRequest(target, call.method, call.subpath, call.body), timeoutMs }
 }
 
+/** Asks `target` for `subpath` of its project, ending the command with `what` and the reason when it fails. */
 async function askTarget<T>(target: DeployTarget, what: string, call: TargetCall, guard: Guard<T>): Promise<T> {
   try {
     return await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call), guard)
@@ -523,7 +531,8 @@ async function deployViaTarget(cwd: string, target: DeployTarget, fns: Discovere
   const start = Date.now()
   const body = { functions: sent, serviceRole }
   try {
-    await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, { method: "POST", subpath: "/functions/deploy", body, restartsWorker: true }))
+    const call = { method: "POST", subpath: "/functions/deploy", body, restartsWorker: true, functions: sent.length }
+    await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call))
   } catch (err) {
     for (const fn of sent) plain(`  ${fn.name} ✗ ${errorMessage(err)}`)
     return [...failed, ...sent.map((fn) => fn.name)]
@@ -541,9 +550,7 @@ interface DeployedSource {
 
 /**
  * Each function's source, as the deploy request carries it; one that cannot be read is said and
- * failed here, and the rest are still sent. The service-role list goes with them every deploy and is
- * replaced wholesale by the platform: the config file is the whole truth, so a name removed from it
- * must stop being entitled to the service-role key.
+ * failed here, and the rest are still sent.
  */
 function readSources(fns: DiscoveredFunctionRoute[]): { sent: DeployedSource[]; failed: string[] } {
   const sent: DeployedSource[] = []

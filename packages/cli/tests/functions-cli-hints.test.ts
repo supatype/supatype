@@ -260,3 +260,27 @@ describe("functions invoke on a Cloud link with no session", () => {
     expect(seen).toEqual([])
   })
 })
+
+// Review of round 5: a deploy sends every function in one request, and Supatype Cloud syncs them in
+// turn, so one 60 s limit timed a large deploy out, reporting every function failed while the
+// server deployed them.
+describe("a deploy of several functions in one request", () => {
+  it("waits longer for each function it carries", async () => {
+    writeConfig(project.dir)
+    writeFunction(project.dir)
+    mkdirSync(join(project.dir, "functions", "bye"), { recursive: true })
+    writeFileSync(join(project.dir, "functions", "bye", "index.ts"), "export default () => new Response('bye')\n")
+    linkToCloud(project.dir)
+    vi.stubEnv("SUPATYPE_ACCESS_TOKEN", "token")
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ data: {} }), { headers: { "Content-Type": "application/json" } }))
+    const asked: number[] = []
+    const real = AbortSignal.timeout.bind(AbortSignal)
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+      asked.push(ms)
+      return real(ms)
+    })
+    await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+    vi.restoreAllMocks()
+    expect(asked).toEqual([60_000 + 2 * 30_000])
+  })
+})

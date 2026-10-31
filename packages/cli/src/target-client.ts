@@ -146,15 +146,15 @@ async function answerOf(res: Response): Promise<FetchAnswer> {
  * share `opts.timeoutMs`, the renewal timed apart, so a renewed request ends within that and the
  * renewal's own limit.
  */
-async function acceptedResponse(url: string, opts: TargetFetchOptions): Promise<Response> {
+async function acceptedResponse(url: string, opts: TargetFetchOptions, signal?: AbortSignal): Promise<Response> {
   const started = Date.now()
-  let res = await send(url, opts, opts.token, budgetSignal(opts.timeoutMs))
+  let res = await send(url, opts, opts.token, signal ?? budgetSignal(opts.timeoutMs))
   if (res.ok) return res
   let answer = await answerOf(res)
   if (opts.authRefresh && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
     const spent = Date.now() - started
     const token = await refreshAccessToken(opts.authRefresh)
-    res = await send(url, opts, token, budgetSignal(opts.timeoutMs === undefined ? undefined : opts.timeoutMs - spent))
+    res = await send(url, opts, token, signal ?? budgetSignal(opts.timeoutMs === undefined ? undefined : opts.timeoutMs - spent))
     if (res.ok) return res
     answer = await answerOf(res)
   }
@@ -222,7 +222,8 @@ async function timedAnswer(url: string, opts: TargetFetchOptions): Promise<Fetch
 
 /**
  * A request whose answer is a stream, such as a live log tail: the body as it arrives. The request
- * is made, renewed and refused as `targetFetch` does, so a refusal says the same things.
+ * is made, renewed and refused as `targetFetch` does, so a refusal says the same things. Its
+ * `timeoutMs` covers the wait for the answer to start, never the body, which runs until stopped.
  */
 export async function targetStream(
   baseUrl: string,
@@ -230,7 +231,26 @@ export async function targetStream(
   opts: TargetFetchOptions,
 ): Promise<ReadableStream<Uint8Array>> {
   const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
-  const res = await acceptedResponse(url, opts)
+  const res = await streamStart(url, opts)
   if (res.body === null) throw new Error(`${url} answered with no body to stream`)
   return res.body
+}
+
+/**
+ * The accepted response to a stream's request, within `opts.timeoutMs` when it is set. Its own
+ * controller, not a timeout signal, so nothing aborts the body once the answer has started.
+ */
+async function streamStart(url: string, opts: TargetFetchOptions): Promise<Response> {
+  const limit = opts.timeoutMs
+  if (limit === undefined) return acceptedResponse(url, opts)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), limit)
+  try {
+    return await acceptedResponse(url, opts, controller.signal)
+  } catch (err) {
+    if (!isTimeout(err)) throw err
+    throw new Error(`${opts.method} ${url} did not answer within ${limit / 1000} s`, { cause: err })
+  } finally {
+    clearTimeout(timer)
+  }
 }
