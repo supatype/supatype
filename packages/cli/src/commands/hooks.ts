@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
-import { declaredHooks, hooksReport } from "../model-hooks.js"
+import { declaredHooks, hookTableOf, hooksReport } from "../model-hooks.js"
 import { error, info, plain } from "../ui/messages.js"
 
 export function registerHooks(program: Command): void {
@@ -64,7 +64,8 @@ function scaffoldHook(cwd: string, name: string): void {
   const declared = declaredHooks(ast).filter((hook) => hook.function === name)
 
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "index.ts"), handlerTemplate(name, declared), "utf8")
+  const table = declared[0] === undefined ? undefined : hookTableOf(ast, declared[0].model)
+  writeFileSync(join(dir, "index.ts"), handlerTemplate(name, declared, table), "utf8")
 
   info(`Created hook: ${relative(cwd, join(dir, "index.ts"))}`)
   if (declared.length === 0) {
@@ -89,9 +90,12 @@ function scaffoldHook(cwd: string, name: string): void {
  * honest state: the types come from the schema, and a handler typed against a model that has not been
  * pushed is a handler typed against a guess.
  */
-function handlerTemplate(name: string, declared: { model: string; event: string }[]): string {
+function handlerTemplate(name: string, declared: { model: string; event: string }[], table: string | undefined): string {
   const event = declared[0]?.event ?? "beforeChange"
   const model = declared[0]?.model ?? "YourModel"
+  // The table of the model that names the hook, as the generated types key it; a placeholder only
+  // when no model names it yet.
+  const tableType = JSON.stringify(table ?? "your_table")
 
   if (event.startsWith("after")) {
     return `// ${name}: model hook (${event})
@@ -101,7 +105,7 @@ function handlerTemplate(name: string, declared: { model: string; event: string 
 
 import { hook, type AfterChange } from "../_supatype/hooks.ts"
 
-const handler: AfterChange<"your_table"> = async (ctx) => {
+const handler: AfterChange<${tableType}> = async (ctx) => {
   console.log(\`\${ctx.table} \${ctx.operation} by \${ctx.user?.sub ?? "anon"}\`)
 }
 
@@ -119,7 +123,7 @@ export default hook(handler)
 
 import { hook, type BeforeChange } from "../_supatype/hooks.ts"
 
-const handler: BeforeChange<"your_table"> = async (ctx) => {
+const handler: BeforeChange<${tableType}> = async (ctx) => {
   if (ctx.operation === "insert") {
     // \`ctx.rows\` is the submitted rows, typed from the model.
     return { rows: ctx.rows }

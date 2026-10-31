@@ -69,14 +69,13 @@ An anonymous sign-in creates a real user with a user id and a session. Turn it o
 Each provider is switched on with environment variables named after it. For GitHub:
 
 ```ini title=".env"
-# Replace http://localhost:18471 with your API URL (API_EXTERNAL_URL)
 SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
 SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
 SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
-SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18471/auth/v1/callback
+SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=<your API URL>/auth/v1/callback
 ```
 
-The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.
+The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Your API URL is `API_EXTERNAL_URL` in `.env`: under Docker, the project's gateway (`http://localhost:` and its `SUPATYPE_KONG_PORT`); with the native provider, the server itself (`http://localhost:18471` unless you set `server.port`). Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.
 
 Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin_oidc`, `notion`, `slack_oidc`, `snapchat`, `spotify`, `twitch`, `twitter`, `x`, `workos` and `zoom`. The auth server also accepts `vercel_marketplace`, and the older `linkedin` and `slack`, which the `_oidc` versions replace. Upper-case the name for the variable, so `linkedin_oidc` becomes `SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED`.
 

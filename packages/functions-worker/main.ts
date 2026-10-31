@@ -73,15 +73,29 @@ function hooksRoot(): string {
 /** Route prefix for hook handlers. The gateway refuses this prefix on the public path. */
 const HOOKS_ROUTE_PREFIX = "hooks/"
 
+/** The comma-separated route list, from the routes file when one is named, else the environment. */
+function serviceRoleRoutesText(): string {
+  const file = Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES_FILE")
+  if (!file) return Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? ""
+  try {
+    return Deno.readTextFileSync(file)
+  } catch {
+    return ""
+  }
+}
+
 /**
- * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, from
- * `SUPATYPE_SERVICE_ROLE_ROUTES`.
+ * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, from the file
+ * `SUPATYPE_SERVICE_ROLE_ROUTES_FILE` names when it is set, else `SUPATYPE_SERVICE_ROLE_ROUTES`.
+ * Native dev uses the file: it is read again on each `--watch` reload, so a change to
+ * `functions.serviceRole` applies without restarting dev, where the environment is fixed at spawn.
+ * A file that cannot be read grants nothing.
  *
  * Hooks do not appear here: they get the key by default (see serviceRoleGranted). This list is for
  * the public surface, where the default is nothing.
  */
 function serviceRoleRoutes(): Set<string> {
-  const raw = (Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? "").trim()
+  const raw = serviceRoleRoutesText().trim()
   if (!raw) return new Set()
   return new Set(
     raw

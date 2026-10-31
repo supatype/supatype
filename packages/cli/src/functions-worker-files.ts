@@ -136,3 +136,21 @@ export function functionsWorkerEnv(project: FunctionsWorkerProject): Record<stri
     ...(keyPath !== undefined && { SUPATYPE_SERVICE_ROLE_KEY_FILE: keyPath }),
   }
 }
+
+/** Where native dev keeps `functions.serviceRole` for its worker, which reads it on every reload. */
+export function devServiceRoleRoutesPath(cwd: string): string {
+  return join(resolve(cwd, ".supatype"), "service-role-routes")
+}
+
+/** Writes the routes `functions.serviceRole` grants the key, comma-separated, as the worker reads them. */
+export function writeServiceRoleRoutesFile(path: string, routes: readonly string[]): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, routes.join(","), "utf8")
+}
+
+/** Writes `config`'s `functions.serviceRole` to native dev's routes file, returning its path. */
+export function writeDevServiceRoleRoutes(cwd: string, config: SupatypeProjectConfig): string {
+  const path = devServiceRoleRoutesPath(cwd)
+  writeServiceRoleRoutesFile(path, serviceRoleRoutes(config))
+  return path
+}

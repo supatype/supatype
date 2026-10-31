@@ -123,13 +123,17 @@ export type StorageWrite =
   | { kind: "failed"; status: number | null; text: string }
 
 /** POSTs `body` to `url` and says what it came to. */
-export async function postToStorage(url: string, headers: Record<string, string>, body: string | Buffer): Promise<StorageWrite> {
+export async function postToStorage(
+  url: string,
+  headers: Record<string, string>,
+  body: string | Uint8Array<ArrayBuffer>,
+): Promise<StorageWrite> {
   let res: Response
   try {
-    // A Buffer is a Uint8Array, but the DOM's BodyInit type (as the integration package reads it) does not say so.
-    // A view over the same bytes would not copy, but its type is still Uint8Array<ArrayBufferLike>,
-    // which BodyInit refuses; the copy is the one form both type checks accept.
-    res = await fetch(url, { method: "POST", headers, body: typeof body === "string" ? body : new Uint8Array(body) })
+    // Sent as given. A Uint8Array over a plain ArrayBuffer is a BodyInit under both the CLI's types and
+    // the DOM lib the integration package reads; readFileSync's Buffer is one (Buffer<ArrayBuffer>).
+    // Only a view that may be over a SharedArrayBuffer is refused, and none is passed here.
+    res = await fetch(url, { method: "POST", headers, body })
   } catch (err) {
     return { kind: "failed", status: null, text: errorMessage(err) }
   }

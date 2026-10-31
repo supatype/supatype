@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 import { hasEnvValue, readDotEnvFiles } from "../env-file.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
-import { loadConfig } from "../config.js"
+import { loadConfig, PROJECT_CONFIG_FILES } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
 import {
   bucketSpecsFromAst,
@@ -49,10 +49,11 @@ import {
   REALTIME_PORT_ENV,
   resolveRuntimeProvider,
   schemaPathFromProject,
+  serviceRoleRoutes,
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
-import { functionsWorkerEnv } from "../functions-worker-files.js"
+import { devServiceRoleRoutesPath, functionsWorkerEnv, writeDevServiceRoleRoutes } from "../functions-worker-files.js"
 import { devServiceRoleKeyPath } from "../service-role-key-file.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
@@ -533,6 +534,8 @@ export function registerDev(program: Command): void {
         ...functionsWorkerEnv({ cwd, config, functionsDir: worker.functionsDir, keyPath: devServiceRoleKeyPath(cwd) }),
         // The server reaches the worker on 127.0.0.1; nothing else on the network should.
         SUPATYPE_FUNCTIONS_HOST: "127.0.0.1",
+        // Read again on every reload, so a functions.serviceRole change applies without a restart.
+        SUPATYPE_SERVICE_ROLE_ROUTES_FILE: writeDevServiceRoleRoutes(cwd, config),
         SUPATYPE_URL: `http://localhost:${serverPort}`,
         // Natively the server is the gateway, so the address functions call is the one a browser
         // opens. The server passes its environment on to the Deno child that runs them.
@@ -706,9 +709,14 @@ export function registerDev(program: Command): void {
         console.log(`[supatype] Watching ${schemaDir} for changes...`)
 
         // Deno reloads the worker when a file it imported changes, but not for a function added later.
-        const { watchNativeFunctions } = await import("../native-functions-watch.js")
+        const { watchNativeFunctions, watchServiceRoleRoutes } = await import("../native-functions-watch.js")
         const { functionsDir, hooksDir, workerMain, routes } = worker
         const functionsWatch = watchNativeFunctions({ cwd, functionsDir, hooksDir, workerMain }, routes)
+        watchServiceRoleRoutes(cwd, PROJECT_CONFIG_FILES, {
+          routesPath: devServiceRoleRoutesPath(cwd),
+          readRoutes: () => serviceRoleRoutes(loadConfig(cwd)),
+          reload: functionsWatch.reload,
+        }, serviceRoleRoutes(config))
         const { watchDevSchema } = await import("../dev-schema-watch.js")
         watchDevSchema({
           dir: schemaDir,

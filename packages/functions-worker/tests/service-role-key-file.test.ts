@@ -49,3 +49,25 @@ Deno.test("a key file that cannot be read gives no function the key", async () =
   })
   expectEqual(reports.admin, JSON.stringify({ ctxKey: null, envKey: null }), "admin")
 })
+
+// Native dev rewrites this file when functions.serviceRole changes in supatype.config.ts and reloads
+// the worker. The environment is fixed when Deno starts, so a list read from it held the old routes
+// until `supatype dev` was restarted.
+Deno.test("the routes come from SUPATYPE_SERVICE_ROLE_ROUTES_FILE when it is set", async () => {
+  const keyFile = await Deno.makeTempFile()
+  const routesFile = await Deno.makeTempFile()
+  try {
+    await Deno.writeTextFile(keyFile, "from-file\n")
+    await Deno.writeTextFile(routesFile, "admin\n")
+    const reports = await keyReports({
+      SUPATYPE_SERVICE_ROLE_KEY_FILE: keyFile,
+      SUPATYPE_SERVICE_ROLE_ROUTES: "hello",
+      SUPATYPE_SERVICE_ROLE_ROUTES_FILE: routesFile,
+    })
+    expectEqual(reports.admin, JSON.stringify({ ctxKey: "from-file", envKey: null }), "admin")
+    expectEqual(reports.hello, JSON.stringify({ ctxKey: null, envKey: null }), "hello")
+  } finally {
+    await Deno.remove(keyFile)
+    await Deno.remove(routesFile)
+  }
+})

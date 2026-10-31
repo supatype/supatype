@@ -113,8 +113,12 @@ export function registerFunctions(program: Command): void {
     .description("Invoke a local or deployed function")
     .option("--data <json>", "JSON body to send", "{}")
     .option("--auth", "Include a test JWT in the request")
-    .option("--local", "Invoke the local dev server (default if serve is running)")
-    .action(async (name: string, opts: { data: string; auth?: boolean; local?: boolean }) => {
+    .option(
+      "--local",
+      "Invoke locally: a running `functions serve` on --port if one answers, otherwise the dev API (the default when no Cloud project is linked)",
+    )
+    .option("--port <port>", "Port of the local `functions serve` to try first", String(FUNCTIONS_SERVE_PORT))
+    .action(async (name: string, opts: { data: string; auth?: boolean; local?: boolean; port: string }) => {
       await invoke(process.cwd(), name, opts)
     })
 
@@ -703,7 +707,72 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
 
 // ─── Logs ────────────────────────────────────────────────────────────────────
 
+/**
+ * A function's logs from wherever the project is linked. A self-hosted server relays the worker's
+ * live stream, so that is tailed until Ctrl+C. Supatype Cloud answers a window of past lines.
+ */
 async function functionLogs(cwd: string, name: string, opts: { since: string }): Promise<void> {
+  const target = linkedDeployTarget(cwd, undefined)
+  if (target && target.mode !== "cloud") return tailServerLogs(target, name)
+  return cloudFunctionLogs(cwd, name, opts)
+}
+
+/** Tails the linked server's relay of the worker's log stream, printing `name`'s lines. */
+async function tailServerLogs(target: ReturnType<typeof resolveTarget>, name: string): Promise<void> {
+  const url = `${target.apiBaseUrl}/admin/v1/functions/logs/tail`
+  info(`Tailing logs for "${name}" on ${target.apiBaseUrl}. Press Ctrl+C to stop.`)
+  let res: Response
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${target.token ?? ""}` } })
+  } catch (err) {
+    error(`Could not reach ${url}: ${errorMessage(err)}`)
+    process.exit(1)
+  }
+  if (!res.ok || res.body === null) {
+    error(`Failed to tail logs: ${await responseFailureText(res)}`)
+    process.exit(1)
+  }
+  await printLogStream(res.body, name)
+}
+
+/** Prints `name`'s lines from a server-sent event stream as they arrive, until it ends. */
+async function printLogStream(body: ReadableStream<Uint8Array>, name: string): Promise<void> {
+  const decoder = new TextDecoder()
+  const reader = body.getReader()
+  let pending = ""
+  // A reader rather than `for await`: the DOM lib the integration package compiles against gives a
+  // ReadableStream no async iterator.
+  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+    pending += decoder.decode(chunk.value, { stream: true })
+    const lines = pending.split("\n")
+    pending = lines.pop() ?? ""
+    for (const line of lines) printLogEvent(line, name)
+  }
+  printLogEvent(pending, name)
+}
+
+const isLogEvent = isShape({ timestamp: isString, level: isString, message: optional(nullable(isString)), function: optional(isString) })
+
+/** One `data:` line of the worker's stream, printed when it is `name`'s. Others are skipped. */
+function printLogEvent(line: string, name: string): void {
+  if (!line.startsWith("data: ")) return
+  let event: unknown
+  try {
+    event = JSON.parse(line.slice("data: ".length))
+  } catch {
+    return
+  }
+  if (isLogEvent(event) && event.function === name) plain(formatLogLine(event))
+}
+
+/** A log line as both paths print it: time of day, level, message. */
+function formatLogLine(entry: { timestamp: string; level: string; message?: string | null | undefined }): string {
+  const ts = new Date(entry.timestamp).toISOString().slice(11, 23)
+  return `${ts} [${entry.level.toUpperCase().padEnd(5)}] ${entry.message ?? ""}`
+}
+
+/** Supatype Cloud's window of a function's past log lines. */
+async function cloudFunctionLogs(cwd: string, name: string, opts: { since: string }): Promise<void> {
   const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
   const linked = getLinkedProject(cwd)
 
@@ -742,11 +811,7 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
       return
     }
 
-    for (const entry of data) {
-      const ts = new Date(entry.timestamp).toISOString().slice(11, 23)
-      const level = entry.level.toUpperCase().padEnd(5)
-      plain(`${ts} [${level}] ${entry.message}`)
-    }
+    for (const entry of data) plain(formatLogLine(entry))
   } catch (err) {
     error(`Error: ${errorMessage(err)}`)
     process.exit(1)
@@ -758,16 +823,14 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
 async function invoke(
   cwd: string,
   name: string,
-  opts: { data: string; auth?: boolean; local?: boolean },
+  opts: { data: string; auth?: boolean; local?: boolean; port: string },
 ): Promise<void> {
   let url: string
   const headers: Record<string, string> = { "Content-Type": "application/json" }
 
-  // The project's own gateway, as every other command that calls the API finds it. A fixed
-  // localhost port reached whatever else on the machine listened there.
-  const localUrl = `${resolveProjectApiUrl(cwd)}/functions/v1/${name}`
+  const localUrl = async (): Promise<string> => `${await localFunctionsBase(cwd, opts.port)}/${name}`
   if (opts.local) {
-    url = localUrl
+    url = await localUrl()
   } else {
     const { getLinkedProject, getCloudToken } = await loadCloudHelpers()
     const linked = getLinkedProject(cwd)
@@ -778,7 +841,7 @@ async function invoke(
         headers["Authorization"] = `Bearer ${token}`
       }
     } else {
-      url = localUrl
+      url = await localUrl()
     }
   }
 
@@ -1039,5 +1102,33 @@ async function loadCloudHelpers(): Promise<CloudHelpers> {
       if (link?.cloudApiUrl) return link.cloudApiUrl
       return process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
     },
+  }
+}
+
+/**
+ * Where a local invoke goes: a running `functions serve` on `port` when one answers, otherwise the
+ * project's own dev API, as every other command that calls the API finds it. A fixed localhost port
+ * reached whatever else on the machine listened there.
+ */
+async function localFunctionsBase(cwd: string, port: string): Promise<string> {
+  return (await runningServeBase(port)) ?? `${resolveProjectApiUrl(cwd)}/functions/v1`
+}
+
+/** The functions worker's answer to a bare request: a 404 listing the functions it serves. */
+const isServeListing = isShape({ available: isArrayOf(isString) })
+
+/**
+ * The base URL of the `functions serve` listening on `port`, or undefined when none answers. A bare
+ * request is how the worker is recognised: it answers 404 with the list of functions it serves,
+ * which nothing else on that port would.
+ */
+export async function runningServeBase(port: string): Promise<string | undefined> {
+  const base = `http://127.0.0.1:${port}/functions/v1`
+  try {
+    const res = await fetch(`${base}/`, { signal: AbortSignal.timeout(1000) })
+    const body: unknown = await res.json()
+    return isServeListing(body) ? base : undefined
+  } catch {
+    return undefined
   }
 }

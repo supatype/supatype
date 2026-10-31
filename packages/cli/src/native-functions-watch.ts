@@ -14,7 +14,7 @@
 import { existsSync, watch as fsWatch } from "node:fs"
 import { basename, dirname } from "node:path"
 import { errorMessage } from "./error-message.js"
-import { localWorkerRoutes, writeDevFunctionsEntry } from "./functions-worker-files.js"
+import { localWorkerRoutes, writeDevFunctionsEntry, writeServiceRoleRoutesFile } from "./functions-worker-files.js"
 import type { WatchFn } from "./dev-functions-watch.js"
 
 /** Windows fires several events per save; one rewrite covers them all. */
@@ -56,7 +56,7 @@ export function watchNativeFunctions(
   target: NativeFunctionsTarget,
   initial: readonly string[],
   watch: WatchFn = fsWatch,
-): { close: () => void; refresh: () => void } {
+): { close: () => void; refresh: () => void; reload: () => void } {
   let known = [...initial]
   let timer: ReturnType<typeof setTimeout> | null = null
   const refresh = (): void => {
@@ -73,6 +73,8 @@ export function watchNativeFunctions(
   const watchers = watchDirsAsMade(dirs, onChange, watch)
   return {
     refresh,
+    // The entry written again as it is: Deno's --watch restarts the worker, which re-reads its files.
+    reload: () => writeDevFunctionsEntry(target.cwd, known, target.workerMain),
     close: () => {
       if (timer) clearTimeout(timer)
       for (const watcher of watchers) watcher.close()
@@ -101,4 +103,57 @@ function watchDirsAsMade(dirs: readonly string[], onChange: () => void, watch: W
     }))
   }
   return watchers
+}
+
+/** What native dev needs to keep the worker's `functions.serviceRole` in step with the config. */
+export interface ServiceRoleRoutesTarget {
+  routesPath: string
+  /** `functions.serviceRole` as the config says now. */
+  readRoutes: () => string[]
+  /** Restarts the worker, which reads the routes file again. */
+  reload: () => void
+}
+
+/**
+ * When the config's `functions.serviceRole` differs from `known`, writes the routes file and reloads
+ * the worker, saying so. Returns the list now in force, or null when nothing changed. Without this a
+ * change waited, silently, for `supatype dev` to be restarted.
+ */
+export function refreshServiceRoleRoutes(target: ServiceRoleRoutesTarget, known: readonly string[]): string[] | null {
+  let routes: string[]
+  try {
+    routes = target.readRoutes()
+  } catch (err) {
+    console.warn(`[supatype] Could not read functions.serviceRole: ${errorMessage(err)}`)
+    return null
+  }
+  if (routes.join(",") === known.join(",")) return null
+  writeServiceRoleRoutesFile(target.routesPath, routes)
+  target.reload()
+  console.log(`[supatype] functions.serviceRole changed (${routes.join(", ") || "none"}); Deno reloads the worker.`)
+  return routes
+}
+
+/**
+ * Watches `dir` for a change to any of `configFiles` (the directory, as editors replace the file) and
+ * applies a `functions.serviceRole` change.
+ */
+export function watchServiceRoleRoutes(
+  dir: string,
+  configFiles: readonly string[],
+  target: ServiceRoleRoutesTarget,
+  initial: readonly string[],
+  watch: WatchFn = fsWatch,
+): { close: () => void } {
+  let known = [...initial]
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const watcher = watch(dir, { recursive: false }, (_event, filename) => {
+    if (typeof filename !== "string" || !configFiles.includes(filename)) return
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = null
+      known = refreshServiceRoleRoutes(target, known) ?? known
+    }, DEBOUNCE_MS)
+  })
+  return { close: () => { if (timer) clearTimeout(timer); watcher.close() } }
 }

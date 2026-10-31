@@ -1504,14 +1504,13 @@ Each provider is switched on with environment variables named after it. For GitH
 `.env`:
 
 ```ini
-# Replace http://localhost:18471 with your API URL (API_EXTERNAL_URL)
 SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
 SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
 SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
-SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18471/auth/v1/callback
+SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=<your API URL>/auth/v1/callback
 ```
 
-The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.
+The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Your API URL is `API_EXTERNAL_URL` in `.env`: under Docker, the project's gateway (`http://localhost:` and its `SUPATYPE_KONG_PORT`); with the native provider, the server itself (`http://localhost:18471` unless you set `server.port`). Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.
 
 Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin_oidc`, `notion`, `slack_oidc`, `snapchat`, `spotify`, `twitch`, `twitter`, `x`, `workos` and `zoom`. The auth server also accepts `vercel_marketplace`, and the older `linkedin` and `slack`, which the `_oidc` versions replace. Upper-case the name for the variable, so `linkedin_oidc` becomes `SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED`.
 
@@ -2298,7 +2297,7 @@ $ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'
 ```
 
-`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. `--auth` adds a test token to the request.
+`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
 
 ### Self-host
 
@@ -4108,7 +4107,7 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | --- | --- | --- |
 | `functions new <name>` | Scaffold a new edge function |  |
 | `functions serve` | Start a local Deno server that serves all functions with hot reload | `--port <port>` (default 18472), `--env-file <path>` (default `.env.local`) |
-| `functions invoke <name>` | Invoke a local or deployed function | `--data <json>`, `--auth`, `--local` |
+| `functions invoke <name>` | Invoke a local or deployed function | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
 | `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
 | `functions delete <name>` **Cloud** | Remove a deployed function |  |

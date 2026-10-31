@@ -1,6 +1,6 @@
 import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
 import { readAuthAnswer } from "./auth-answer.js"
-import { bodyReason } from "./error-message.js"
+import { bodyReason, httpFailureText } from "./error-message.js"
 
 export interface TargetFetchOptions {
   method: string
@@ -65,11 +65,22 @@ async function refreshAccessToken(
   return answer.accessToken
 }
 
-/** One response: its status and its body, which is `{}` when the body is not JSON. */
+/** One response: its status, its body as sent, and that body read as JSON (`{}` when it is not). */
 interface FetchAnswer {
   ok: boolean
   status: number
+  statusText: string
+  text: string
   json: unknown
+}
+
+/** A body read as JSON, or `{}` when it is not JSON. */
+function parsedBody(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return {}
+  }
 }
 
 /** A string field of the body, for reading an error's `message`, `error` and `code`. */
@@ -91,14 +102,20 @@ async function fetchOnce(url: string, opts: TargetFetchOptions, token: string): 
     headers,
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
   })
-  return { ok: res.ok, status: res.status, json: await res.json().catch(() => ({})) }
+  const text = await res.text().catch(() => "")
+  return { ok: res.ok, status: res.status, statusText: res.statusText, text, json: parsedBody(text) }
 }
 
-/** The error a refused request throws, naming an expired session when that is the reason. */
+/**
+ * The error a refused request throws, naming an expired session when that is the reason. It says
+ * the status, then the body's message when it is JSON with one, else the body as sent, or that it
+ * was empty: a plain-text or empty refusal used to show only `API error: 500 <url>`. The URL is
+ * added when the body names no reason of its own, so an anonymous failure says where it came from.
+ */
 function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): TargetApiError {
   const code = bodyString(result.json, "code")
-  const message =
-    bodyReason(result.json) ?? `API error: ${result.status} ${url}`
+  const said = httpFailureText(result.status, result.statusText, result.text)
+  const message = bodyReason(result.json) === undefined ? `${said} (${url})` : said
   if (isAuthExpiry(result.status, code, message) && !opts.authRefresh) {
     return new TargetApiError(`${message}. Session expired, run: supatype login`, result.status, code)
   }

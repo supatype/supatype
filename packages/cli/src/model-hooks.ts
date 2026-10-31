@@ -29,6 +29,12 @@ export function declaredHooks(ast: unknown): DeclaredHook[] {
     .sort((a, b) => `${a.model}.${a.event}`.localeCompare(`${b.model}.${b.event}`))
 }
 
+/** The table `model`'s writes land in, which hooks are typed and looked up by; undefined when unnamed. */
+export function hookTableOf(ast: unknown, model: string): string | undefined {
+  const found = modelFunctions(ast, "hooks").find((entry) => entry.model === model)
+  return typeof found?.table === "string" ? found.table : undefined
+}
+
 /** One entry of a model's hook or validator map that names a function. */
 interface FunctionEntry {
   /** The event (`beforeInsert`) or the field the entry is for. */
