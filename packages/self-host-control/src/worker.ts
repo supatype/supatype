@@ -64,6 +64,30 @@ function owe(owed: boolean): void {
   writeFileSync(restartOwedPath(), `${new Date().toISOString()}\n`, "utf8")
 }
 
+/** The functions-worker containers of this stack, stopped ones included, or why Docker could not list them. */
+async function workerContainers(): Promise<{ listed: true; ids: string[] } | { listed: false; why: string }> {
+  const found = await docker([
+    "ps", "-a", "-q",
+    "--filter", `label=com.docker.compose.project=${composeProject()}`,
+    "--filter", "label=com.docker.compose.service=functions-worker",
+  ])
+  if (found.status !== 0) return { listed: false, why: found.stderr.trim() }
+  return { listed: true, ids: found.stdout.split(/\s+/).filter((id) => id !== "") }
+}
+
+/**
+ * When the worker last started, in milliseconds, or null when Docker cannot say (no container, or
+ * no answer). A handler file written after it is one the worker has not loaded.
+ */
+export async function workerStartedAt(): Promise<number | null> {
+  const found = await workerContainers()
+  if (!found.listed || found.ids.length === 0) return null
+  const inspected = await docker(["inspect", "-f", "{{.State.StartedAt}}", ...found.ids])
+  if (inspected.status !== 0) return null
+  const starts = inspected.stdout.split(/\s+/).filter((at) => at !== "").map((at) => Date.parse(at))
+  return starts.length === 0 || starts.some(Number.isNaN) ? null : Math.min(...starts)
+}
+
 /**
  * Restarts the functions worker, which loads its functions and hooks when it starts. The container
  * is found by the labels compose gives it and restarted with plain `docker`: the control-plane image
@@ -76,20 +100,15 @@ function owe(owed: boolean): void {
  */
 export async function restartFunctionsWorker(): Promise<void> {
   const project = composeProject()
-  const found = await docker([
-    "ps", "-a", "-q",
-    "--filter", `label=com.docker.compose.project=${project}`,
-    "--filter", "label=com.docker.compose.service=functions-worker",
-  ])
-  const ids = found.status === 0 ? found.stdout.split(/\s+/).filter((id) => id !== "") : []
+  const found = await workerContainers()
   owe(true)
-  if (found.status !== 0) {
-    throw new HttpError(502, "worker_restart_failed", `The files are written, but Docker could not list the functions worker: ${found.stderr.trim()}`)
+  if (found.listed === false) {
+    throw new HttpError(502, "worker_restart_failed", `The files are written, but Docker could not list the functions worker: ${found.why}`)
   }
-  if (ids.length === 0) {
+  if (found.ids.length === 0) {
     throw new HttpError(502, "worker_restart_failed", `The files are written, but no functions-worker container exists for compose project ${project}; is the stack up?`)
   }
-  const restarted = await docker(["restart", ...ids])
+  const restarted = await docker(["restart", ...found.ids])
   if (restarted.status !== 0) {
     throw new HttpError(502, "worker_restart_failed", `The files are written, but the functions worker did not restart: ${restarted.stderr.trim() || `docker exited ${String(restarted.status)}`}`)
   }

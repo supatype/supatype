@@ -935,6 +935,9 @@ ${dbDependency}
 ${storageDependency}
   functions-worker:
     image: ${inRepoImage("functions-worker")}
+    # An init as PID 1 passes the stop signal on: without one the worker ignored SIGTERM, and every
+    # restart a deploy made waited out the whole stop timeout.
+    init: true
     expose:
       - "8001"
 ${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:

@@ -50,32 +50,41 @@ describe("the hook deploy body", () => {
   }
 })
 
-// Review: Cloud now got the body on every push, so a member who may push schema but not deploy hooks
-// failed every push, under "Deploying 0 hook(s)".
 describe("an empty hook deploy", () => {
-  it("says no hook count, and takes a 403 as nothing to deploy", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-body-"))
-    dirs.push(cwd)
-    const said: string[] = []
-    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
-    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
-    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
-    sent.refuse = 403
-    const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
-    await deployHooksToTarget(cwd, projectConfig(), target, { models: [] })
-    expect(process.exitCode).toBeUndefined()
-    expect(said.join("\n")).not.toMatch(/0 hook\(s\)/)
-    expect(said.join("\n")).toMatch(/nothing to deploy/)
-  })
+  const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
 
-  it("still fails a hook deploy refused with 403 when it carries hooks", async () => {
+  function project(): string {
     const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-body-"))
     dirs.push(cwd)
     vi.spyOn(console, "log").mockImplementation(() => undefined)
     vi.spyOn(console, "error").mockImplementation(() => undefined)
+    return cwd
+  }
+
+  // Review: Cloud got a hook deploy on every push, so a member who may push a schema but not deploy
+  // hooks failed every push, under "Deploying 0 hook(s)".
+  it("is not sent when nothing is declared and nothing was deployed to that target", async () => {
+    const cwd = project()
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, { models: [] })).toBe(false)
+    expect(sent.bodies).toEqual([])
+  })
+
+  // Review: an empty deploy that clears hooks deployed before is a real change, so a 403 for it fails.
+  it("is sent to clear what the target was last given, and fails when the target refuses it", async () => {
+    const cwd = project()
+    const hooked = { models: [{ name: "Note", fields: {}, annotations: { db: { tableName: "note" }, platform: { cache: { enabled: true } } } }] }
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(false)
+    sent.bodies.length = 0
     sent.refuse = 403
-    const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
-    await uploadHooks(target, { handlers: [{ name: "h", source: "x" }], map: {} }, 1)
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, { models: [] })).toBe(true)
+    expect(sent.bodies).toEqual([{ handlers: [], map: {}, validators: {}, cache: {} }])
+    expect(process.exitCode).toBe(1)
+  })
+
+  it("still fails a hook deploy refused with 403 when it carries hooks", async () => {
+    project()
+    sent.refuse = 403
+    expect(await uploadHooks(target, { handlers: [{ name: "h", source: "x" }], map: {} }, 1)).toBe(true)
     expect(process.exitCode).toBe(1)
   })
 })

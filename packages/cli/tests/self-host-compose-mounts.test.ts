@@ -178,3 +178,16 @@ describe("self-host compose functions directory", () => {
     )
   })
 })
+
+/**
+ * The functions worker ran as PID 1 with no init, so the SIGTERM a restart sends was ignored and
+ * `docker restart` waited out its whole stop timeout on every self-host deploy.
+ */
+describe("self-host compose functions worker", () => {
+  it("runs with an init, which passes the stop signal on", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(block).toContain("functions-worker:")
+    expect(block).toContain("\n    init: true")
+  })
+})

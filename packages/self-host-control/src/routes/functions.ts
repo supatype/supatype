@@ -4,7 +4,7 @@ import { isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject, projectRoot } from "../project.js"
-import { childDir, restartFunctionsWorker } from "../worker.js"
+import { childDir, restartFunctionsWorker, workerRestartOwed } from "../worker.js"
 
 interface DeployedFunction {
   name: string
@@ -107,7 +107,7 @@ export function registerFunctionRoutes(
   })
 
   // `supatype functions env unset` on a self-host link: refused until now, since there was no route.
-  // A key not set changes nothing, so the worker is not restarted for it.
+  // A key not set changes nothing, so the worker is restarted for it only when a restart is owed.
   route(routes, "DELETE", "/projects/:ref/functions/env/:key", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const key = decodedParam(ctx.params["key"]!)
@@ -116,8 +116,8 @@ export function registerFunctionRoutes(
     if (removed) {
       delete current[key]
       writeFunctionEnv(current)
-      await restartFunctionsWorker()
     }
+    if (removed || workerRestartOwed()) await restartFunctionsWorker()
     sendJson(ctx.res, 200, { data: { key, removed } })
   })
 }

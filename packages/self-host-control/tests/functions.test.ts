@@ -120,6 +120,17 @@ describe("functions routes", () => {
     assert.match(String(res.json["message"]), /no such container/)
   })
 
+  test("env unset of a key not set still makes a restart owed by one that failed", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "K3", value: "v" })
+    docker.restartStatus = 1
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "K3", value: "w" })
+    docker.restartStatus = 0
+    docker.calls.length = 0
+    const res = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/NEVER_SET`)
+    assert.equal(res.status, 200)
+    assert.ok(docker.calls.some((args) => args[0] === "restart"))
+  })
+
   const routes: Array<[string, string, unknown?]> = [
     ["GET", "/functions"],
     ["POST", "/functions/deploy", { functions: [{ name: "other", source: "x" }] }],

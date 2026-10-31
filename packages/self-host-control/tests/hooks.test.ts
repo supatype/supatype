@@ -56,6 +56,7 @@ describe("hooks deploy route", () => {
     docker.calls.length = 0
     docker.containers = ["worker-1"]
     docker.exited = false
+    docker.startedAt = "2000-01-01T00:00:00Z"
     docker.restartStatus = 0
     rmSync(projectDir, { recursive: true, force: true })
     mkdirSync(join(projectDir, ".supatype"), { recursive: true })
@@ -159,7 +160,7 @@ describe("hooks deploy route", () => {
   })
 
   // Every push restarted the worker and rewrote every file, though nothing had changed.
-  test("writes nothing that is already there, but restarts the worker for the handlers it carries", async () => {
+  test("writes nothing that is already there, but restarts a worker started before a handler it carries", async () => {
     // On a stack run from the project's own checkout an edited hook is on disk already, and the
     // worker (no --watch) serves the module it loaded: only a restart serves the edit.
     const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP, validators: {}, cache: {} }
@@ -172,6 +173,16 @@ describe("hooks deploy route", () => {
     assert.equal(again.status, 200)
     assert.equal(dataOf(again.json)["restarted"], true)
     assert.deepEqual([statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs], before)
+  })
+
+  // Restarting for every push that carries handlers took every function down on each push.
+  test("restarts nothing when the worker started after every handler it carries was written", async () => {
+    const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP, validators: {}, cache: {} }
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    docker.startedAt = new Date(Date.now() + 60_000).toISOString()
+    const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    assert.equal(again.status, 200)
+    assert.equal(dataOf(again.json)["restarted"], false)
   })
 
   test("restarts nothing for a deploy with no handlers whose maps are already there", async () => {
