@@ -3,17 +3,14 @@ import { dirname, join } from "node:path"
 import { isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
-import { assertProject, projectRoot } from "../project.js"
-import { childDir, restartFunctionsWorker, workerRestartOwed } from "../worker.js"
+import { assertProject } from "../project.js"
+import { childDir, ensureWorkerCurrent, functionEnvPath, functionsRoot } from "../worker.js"
 
 interface DeployedFunction {
   name: string
   source: string
 }
 
-function functionsRoot(): string {
-  return process.env["SUPATYPE_FUNCTIONS_ROOT"] ?? join(projectRoot(), "functions")
-}
 
 /** The directory of the function `name`, refused unless it may be one (worker.ts `childDir`). */
 function functionDir(name: unknown): string {
@@ -35,17 +32,14 @@ function deployedFunctions(body: unknown): Array<DeployedFunction & { dir: strin
   })
 }
 
-function envPath(): string {
-  return join(projectRoot(), ".supatype", "function-env.json")
-}
 
 const isFunctionEnv = isRecordOf(isString)
 
 /** The env file `POST /functions/env` writes: refused, rather than overwritten, when it is not one. */
 function readFunctionEnv(): Record<string, string> {
-  if (!existsSync(envPath())) return {}
-  const env = JSON.parse(readFileSync(envPath(), "utf8"))
-  if (!isFunctionEnv(env)) throw new Error(`${envPath()} is not a map of names to string values`)
+  if (!existsSync(functionEnvPath())) return {}
+  const env = JSON.parse(readFileSync(functionEnvPath(), "utf8"))
+  if (!isFunctionEnv(env)) throw new Error(`${functionEnvPath()} is not a map of names to string values`)
   return env
 }
 
@@ -75,7 +69,7 @@ export function registerFunctionRoutes(
       writeFileSync(join(fn.dir, "index.ts"), fn.source, "utf8")
     }
 
-    await restartFunctionsWorker()
+    await ensureWorkerCurrent()
     sendJson(ctx.res, 200, { data: { message: "Functions deployed", count: functions.length } })
   })
 
@@ -83,7 +77,7 @@ export function registerFunctionRoutes(
     assertProject(ctx.params["ref"]!)
     const name = ctx.params["name"]!
     rmSync(functionDir(name), { recursive: true, force: true })
-    await restartFunctionsWorker()
+    await ensureWorkerCurrent()
     sendJson(ctx.res, 200, { data: { deleted: name } })
   })
 
@@ -102,12 +96,12 @@ export function registerFunctionRoutes(
     const current = readFunctionEnv()
     current[body.key] = body.value ?? ""
     writeFunctionEnv(current)
-    await restartFunctionsWorker()
+    await ensureWorkerCurrent()
     sendJson(ctx.res, 200, { data: { key: body.key } })
   })
 
   // `supatype functions env unset` on a self-host link: refused until now, since there was no route.
-  // A key not set changes nothing, so the worker is restarted for it only when a restart is owed.
+  // A key not set changes nothing, so the worker is restarted for it only when it is stale anyway.
   route(routes, "DELETE", "/projects/:ref/functions/env/:key", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const key = decodedParam(ctx.params["key"]!)
@@ -117,15 +111,15 @@ export function registerFunctionRoutes(
       delete current[key]
       writeFunctionEnv(current)
     }
-    if (removed || workerRestartOwed()) await restartFunctionsWorker()
+    await ensureWorkerCurrent()
     sendJson(ctx.res, 200, { data: { key, removed } })
   })
 }
 
 /** Writes the function env file. */
 function writeFunctionEnv(env: Record<string, string>): void {
-  mkdirSync(dirname(envPath()), { recursive: true })
-  writeFileSync(envPath(), `${JSON.stringify(env, null, 2)}\n`, "utf8")
+  mkdirSync(dirname(functionEnvPath()), { recursive: true })
+  writeFileSync(functionEnvPath(), `${JSON.stringify(env, null, 2)}\n`, "utf8")
 }
 
 /** A path parameter as the caller encoded it (encodeURIComponent); a 400 when it cannot be decoded. */

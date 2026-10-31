@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { provisionSchemaBuckets } from "../src/commands/push.js"
+import { provisionSchemaBuckets, reportLocalPush } from "../src/commands/push.js"
 
 /**
  * Local test round 4: `supatype push` exited 0 when every bucket the schema declares failed to
@@ -40,5 +40,23 @@ describe("a push whose buckets the storage service refuses", () => {
     vi.stubGlobal("fetch", async () => Response.json({ name: "x" }))
     await provisionSchemaBuckets(buckets, "http://127.0.0.1:1/storage/v1", "key")
     expect(process.exitCode).toBeUndefined()
+  })
+})
+
+// Review B4: the local push ignored the bucket failure and ended with the Studio link, which read as
+// success below it; it ends as a linked target's push does.
+describe("how a push to the project's own stack ends", () => {
+  const local = { mode: "local", environment: "dev" } as const
+
+  it("says it did not finish, with no Studio link, when its buckets failed", () => {
+    reportLocalPush(local, "http://127.0.0.1:54321/studio", true)
+    const out = said.join("\n")
+    expect(out).toContain("The push to local (dev) did not finish: the schema is applied, but a step after it failed (above).")
+    expect(out).not.toContain("Studio:")
+  })
+
+  it("gives the Studio link when every step finished", () => {
+    reportLocalPush(local, "http://127.0.0.1:54321/studio", false)
+    expect(said.join("\n")).toContain("Studio: http://127.0.0.1:54321/studio")
   })
 })

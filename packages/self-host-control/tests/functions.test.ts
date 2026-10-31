@@ -107,7 +107,8 @@ describe("functions routes", () => {
     docker.calls.length = 0
     const again = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/NEVER_SET`)
     assert.equal(again.status, 200)
-    assert.deepEqual(docker.calls, [])
+    // It looks the worker up, and finds it already serves what is on disk.
+    assert.equal(docker.calls.some((args) => args[0] === "restart"), false)
   })
 
   test("env unset answers 502 with the reason when the worker cannot be restarted", async () => {

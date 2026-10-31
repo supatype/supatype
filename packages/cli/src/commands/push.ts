@@ -45,7 +45,6 @@ import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.
 import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
 import { postApplyFailed } from "../post-apply.js"
-import { recordHooksDeploy, targetHasDeployedHooks } from "../hooks-deploy-record.js"
 import { isJsonObject, type HookDeployBody } from "@supatype/shared"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
@@ -319,10 +318,7 @@ function reportTargetPush(
   pushResult: Awaited<ReturnType<typeof targetSchemaPush>>,
   stepFailed: boolean,
 ): void {
-  if (stepFailed) {
-    error(`The push to ${target.mode} (${target.environment}) did not finish: the schema is applied, but a step after it failed (above).`)
-    return
-  }
+  if (saidUnfinished(target, stepFailed)) return
   info(`Pushed to ${target.mode} (${target.environment}).`)
   // Cloud only. A self-host control plane has tiers too and they mean nothing there, so the same
   // sentence would be telling a self-hosted project to upgrade something it already has.
@@ -334,6 +330,21 @@ function reportTargetPush(
   if (envUrl) {
     plain(`\nProject API: ${envUrl}`)
   }
+}
+
+/**
+ * Says a push did not finish when a step after the schema failed; true when it said so. Ended that
+ * way rather than with what a finished push ends with, which read as success below the failure.
+ */
+function saidUnfinished(target: Pick<DeployTarget, "mode" | "environment">, stepFailed: boolean): boolean {
+  if (stepFailed) error(`The push to ${target.mode} (${target.environment}) did not finish: the schema is applied, but a step after it failed (above).`)
+  return stepFailed
+}
+
+/** How a push to the project's own stack ends: unfinished, or with its Studio link when it has one. */
+export function reportLocalPush(target: Pick<DeployTarget, "mode" | "environment">, studioUrl: string | undefined, stepFailed: boolean): void {
+  if (saidUnfinished(target, stepFailed)) return
+  if (studioUrl !== undefined) plain(`\nStudio: ${studioUrl}`)
 }
 
 /**
@@ -407,12 +418,12 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
     const { followRecordedTier } = await import("../dev-compose.js")
     followRecordedTier(cwd, config, { recreate: true })
   }
-  if (stackUrl !== undefined) await provisionLocalStorage(ast, config, stackUrl)
+  const storageFailed = stackUrl !== undefined && (await provisionLocalStorage(ast, config, stackUrl))
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
     await waitForRestReady(stackUrl, devApiKeys(cwd).anonKey)
   }
   reportCacheSeeding(cwd, ast)
-  if (studioUrl !== undefined) plain(`\nStudio: ${studioUrl}`)
+  reportLocalPush(target, studioUrl, storageFailed)
 }
 
 /**
@@ -465,18 +476,14 @@ export async function deployHooksToTarget(
     return true
   }
   // One body for every target, the manifest's three maps in it: a self-host stack learns the
-  // validator and cache maps only here, as a local push writes them (applied-ast-artifacts.ts). An
-  // empty one goes only to clear what the target was last given (hooks-deploy-record.ts).
+  // validator and cache maps only here, as a local push writes them (applied-ast-artifacts.ts). It
+  // is sent on every push, empty when the schema declares nothing, so it clears what the target was
+  // given before from wherever that push came: a record kept on one machine missed a fresh clone's.
   const adapter = readGeneratedAdapter(hooksDir)
   const named = upload?.handlers ?? []
   const handlers = adapter === null || named.length === 0 ? named : [...named, adapter]
   const { hooks, validators, cache } = manifestMaps(ast)
-  const body = { handlers, map: hooks, validators, cache }
-  const gaveAnything = !emptyDeploy(body)
-  if (!gaveAnything && !targetHasDeployedHooks(cwd, target)) return false
-  const failed = await uploadHooks(target, body, named.length)
-  if (!failed) recordHooksDeploy(cwd, target, gaveAnything)
-  return failed
+  return uploadHooks(target, { handlers, map: hooks, validators, cache }, named.length)
 }
 
 /**
@@ -485,7 +492,7 @@ export async function deployHooksToTarget(
  * whole push failing (local test round 4, N23).
  */
 export async function uploadHooks(target: DeployTarget, body: HookDeployBody, count: number): Promise<boolean> {
-  // Nothing to deploy, sent to clear what the target was last given.
+  // Nothing declared: sent to clear whatever the target holds.
   const empty = count === 0 && emptyDeploy(body)
   try {
     await withSpinner(empty ? "Clearing hooks the schema no longer declares" : `Deploying ${count} hook(s)`, () =>

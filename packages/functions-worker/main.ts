@@ -426,9 +426,7 @@ const publicUrl = resolvePublicUrl()
 // a Loki label, so every startup would appear in the dashboards as an error.
 // Every address in its container; `functions serve` and native dev name 127.0.0.1.
 const hostname = Deno.env.get("SUPATYPE_FUNCTIONS_HOST") ?? "0.0.0.0"
-// A restart of its container waited out the stop timeout without this (stop.ts).
-exitOnStop()
-Deno.serve({
+const server = Deno.serve({
   hostname,
   port,
   onListen: ({ hostname, port: bound }) => {
@@ -497,3 +495,6 @@ Deno.serve({
     return jsonError("function_error", message, 500)
   }
 })
+// A restart of its container waited out the stop timeout without this, and must not cut off the
+// requests in flight (stop.ts).
+exitOnStop(() => server.shutdown())

@@ -76,10 +76,8 @@ export interface FakeDocker {
   calls: string[][]
   /** The worker containers `docker ps` finds. */
   containers: string[]
-  /** The containers are stopped, so only `docker ps -a` lists them. */
+  /** The containers have stopped: `docker ps -a` lists them as exited. */
   exited: boolean
-  /** When the worker last started, as `docker inspect` gives `.State.StartedAt`. */
-  startedAt: string
   /** What `docker restart` exits with, and says when it fails. */
   restartStatus: number
   restartSays: string
@@ -90,15 +88,18 @@ export interface FakeDocker {
  * no compose plugin, so the restart must not need one, and a test must not reach a real daemon.
  */
 export function fakeDocker(): FakeDocker {
-  const fake: FakeDocker = { calls: [], containers: ["worker-1"], exited: false, startedAt: "2000-01-01T00:00:00Z", restartStatus: 0, restartSays: "" }
+  const fake: FakeDocker = { calls: [], containers: ["worker-1"], exited: false, restartStatus: 0, restartSays: "" }
   setDockerRunnerForTests(async (args) => {
     fake.calls.push([...args])
     if (args[0] === "ps") {
       const listed = !fake.exited || args.includes("-a") ? fake.containers : []
-      return { status: 0, stdout: listed.join("\n"), stderr: "" }
+      const state = fake.exited ? "exited" : "running"
+      return { status: 0, stdout: listed.map((id) => (args.includes("--format") ? `${id} ${state}` : id)).join("\n"), stderr: "" }
     }
-    if (args[0] === "restart") return { status: fake.restartStatus, stdout: "", stderr: fake.restartSays }
-    if (args[0] === "inspect") return { status: 0, stdout: `${fake.startedAt}\n`, stderr: "" }
+    if (args[0] === "restart") {
+      if (fake.restartStatus === 0) fake.exited = false
+      return { status: fake.restartStatus, stdout: "", stderr: fake.restartSays }
+    }
     return { status: 1, stdout: "", stderr: `unknown command: ${args.join(" ")}` }
   })
   return fake

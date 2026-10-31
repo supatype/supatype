@@ -56,7 +56,6 @@ describe("hooks deploy route", () => {
     docker.calls.length = 0
     docker.containers = ["worker-1"]
     docker.exited = false
-    docker.startedAt = "2000-01-01T00:00:00Z"
     docker.restartStatus = 0
     rmSync(projectDir, { recursive: true, force: true })
     mkdirSync(join(projectDir, ".supatype"), { recursive: true })
@@ -160,31 +159,37 @@ describe("hooks deploy route", () => {
   })
 
   // Every push restarted the worker and rewrote every file, though nothing had changed.
-  test("writes nothing that is already there, but restarts a worker started before a handler it carries", async () => {
-    // On a stack run from the project's own checkout an edited hook is on disk already, and the
-    // worker (no --watch) serves the module it loaded: only a restart serves the edit.
+  // Review: staleness by content, not file times, which clock skew and rsync-kept mtimes defeated.
+  test("restarts nothing for a deploy of what the worker already loaded, and writes nothing", async () => {
     const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP, validators: {}, cache: {} }
     await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
     const handler = join(projectDir, "hooks", "tag-note", "index.ts")
     const manifestFile = join(projectDir, ".supatype", "manifest.json")
     const before = [statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs]
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
-    assert.equal(again.status, 200)
-    assert.equal(dataOf(again.json)["restarted"], true)
-    assert.deepEqual([statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs], before)
-  })
-
-  // Restarting for every push that carries handlers took every function down on each push.
-  test("restarts nothing when the worker started after every handler it carries was written", async () => {
-    const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP, validators: {}, cache: {} }
-    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
-    docker.startedAt = new Date(Date.now() + 60_000).toISOString()
     const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
     assert.equal(again.status, 200)
     assert.equal(dataOf(again.json)["restarted"], false)
+    assert.deepEqual([statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs], before)
   })
 
+  test("restarts for a hook edited on disk before the push, though the push writes nothing", async () => {
+    // A stack run from the project's own checkout has the edit before the push sends it.
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    const edited = { name: "tag-note", source: `${TAG_NOTE.source}// edited\n` }
+    writeFileSync(join(projectDir, "hooks", "tag-note", "index.ts"), edited.source.split("./_supatype-hooks.ts").join("../_supatype/hooks.ts"))
+    const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [edited, ADAPTER], map: MAP })
+    assert.equal(dataOf(again.json)["restarted"], true)
+  })
+
+  test("restarts for a map someone else changed in the manifest", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    const edited = manifest(projectDir)
+    writeFileSync(join(projectDir, ".supatype", "manifest.json"), JSON.stringify({ ...edited, validators: { note: { title: { function: "tag-note" } } } }))
+    const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    assert.equal(dataOf(again.json)["restarted"], true)
+  })
+
+  // Restarting for every push that carries handlers took every function down on each push.
   test("restarts nothing for a deploy with no handlers whose maps are already there", async () => {
     const body = { handlers: [], map: {}, validators: {}, cache: {} }
     await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
@@ -194,13 +199,16 @@ describe("hooks deploy route", () => {
 
   // The server reads the cache map; the worker does not, so a restart buys nothing.
   test("writes a cache-only change without restarting the worker", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {} })
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {}, cache: { note: { enabled: true } } })
     assert.equal(dataOf(res.json)["restarted"], false)
     assert.deepEqual(manifest(projectDir)["cache"], { note: { enabled: true } })
   })
 
-  test("starts a worker that has stopped, which only `docker ps -a` lists", async () => {
+  test("starts a worker that has stopped, though what it loads has not changed", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
     docker.exited = true
+    docker.calls.length = 0
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.deepEqual(docker.calls.find((args) => args[0] === "restart"), ["restart", "worker-1"])

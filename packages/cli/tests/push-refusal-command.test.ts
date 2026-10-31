@@ -52,8 +52,6 @@ vi.mock("../src/schema-sources.js", () => ({
 // Waiting for the linked server's REST API is rest-ready.test.ts's subject, not this one's.
 vi.mock("../src/rest-ready.js", () => ({ waitForRestReady: async () => true }))
 // A self-host push sends its hook, validator and cache maps after the schema; the stack takes them.
-// Kept out of the repository: the push runs in this package's folder.
-vi.mock("../src/hooks-deploy-record.js", () => ({ targetHasDeployedHooks: () => false, recordHooksDeploy: () => undefined }))
 const hooksDeploy = vi.hoisted(() => ({ fails: false }))
 vi.mock("../src/target-client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/target-client.js")>()),

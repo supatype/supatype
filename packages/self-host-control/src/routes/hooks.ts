@@ -16,11 +16,11 @@
  * importing `../_supatype/hooks.ts`), which on a stack run from the project's own checkout is the
  * file it already has, and the maps go into `.supatype/manifest.json` as a local push writes them.
  * Everything is checked before anything is written, and only what differs from the disk is written.
- * The worker is restarted when a handler or the hook or validator map changed, when a handler it
- * carries is newer than the worker, or when a restart is owed; not for a cache-only change. A handler the schema no longer names is left on
+ * The worker is restarted when what it loads differs from what it last loaded, when it is not
+ * running, or when a restart is owed (worker.ts); not for a cache-only change. A handler the schema no longer names is left on
  * disk: no map names it, so nothing calls it, and on that same checkout it may be one being written.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import {
   ADAPTER_NAME,
@@ -35,8 +35,8 @@ import {
 } from "@supatype/shared"
 import { badRequest, bodyOf, HttpError, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
-import { assertProject, projectRoot } from "../project.js"
-import { childDir, restartFunctionsWorker, workerRestartOwed, workerStartedAt } from "../worker.js"
+import { assertProject } from "../project.js"
+import { childDir, ensureWorkerCurrent, hooksRoot, manifestPath } from "../worker.js"
 
 /** Where a project keeps the generated adapter under its hooks root. */
 const ADAPTER_PATH = join("_supatype", "hooks.ts")
@@ -45,14 +45,6 @@ const ADAPTER_PATH = join("_supatype", "hooks.ts")
 interface HookFile {
   path: string
   source: string
-}
-
-function hooksRoot(): string {
-  return process.env["SUPATYPE_HOOKS_ROOT"] ?? join(projectRoot(), "hooks")
-}
-
-function manifestPath(): string {
-  return join(projectRoot(), ".supatype", "manifest.json")
 }
 
 function checkedHookMap(map: unknown, key: "map" | "validators"): HookMap {
@@ -107,28 +99,13 @@ function deployFiles(handlers: ReadonlyArray<{ name: unknown; source: string }>)
   return { files, names: named.map((handler) => String(handler.name)).sort() }
 }
 
-/** Writes each file whose contents differ from the disk, and leaves the rest untouched; true when any did. */
-function writeChanged(files: readonly HookFile[]): boolean {
-  let wrote = false
+/** Writes each file whose contents differ from the disk, and leaves the rest untouched. */
+function writeChanged(files: readonly HookFile[]): void {
   for (const file of files) {
     if (existsSync(file.path) && readFileSync(file.path, "utf8") === file.source) continue
     mkdirSync(dirname(file.path), { recursive: true })
     writeFileSync(file.path, file.source, "utf8")
-    wrote = true
   }
-  return wrote
-}
-
-/**
- * Whether the worker may serve something other than `files`: one was written after it last started,
- * or Docker cannot say when that was. On a stack run from the project's own checkout an edited hook
- * is on disk before the push, so nothing "changed", and the worker (no --watch) serves the module it
- * loaded; a restart for every push that carried handlers took every function down each time.
- */
-async function workerOlderThan(files: readonly HookFile[]): Promise<boolean> {
-  if (files.length === 0) return false
-  const startedAt = await workerStartedAt()
-  return startedAt === null || files.some((file) => statSync(file.path).mtimeMs > startedAt)
 }
 
 export function registerHookRoutes(routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }>): void {
@@ -141,13 +118,11 @@ export function registerHookRoutes(routes: Array<{ method: string; pattern: RegE
     if (missing.length > 0) throw badRequest(`The maps name functions that were not uploaded: ${missing.join(", ")}`)
     const manifest = readManifest()
     // Handlers before the maps, so a map never names a handler not yet on disk.
-    const wroteFiles = writeChanged(files)
-    // Hooks and validators are the worker's to serve; the cache map is the server's alone.
-    const workerMaps = applyManifestMaps(manifest, { hooks: maps.hooks, validators: maps.validators })
-    const cacheMap = applyManifestMaps(manifest, { cache: maps.cache })
-    if (workerMaps || cacheMap) writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
-    const restarted = wroteFiles || workerMaps || workerRestartOwed() || (await workerOlderThan(files))
-    if (restarted) await restartFunctionsWorker()
+    writeChanged(files)
+    if (applyManifestMaps(manifest, maps)) writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
+    // The worker is restarted when what it loads differs from what it last loaded (worker.ts); the
+    // cache map is not part of that, since the server reads it and the worker does not.
+    const restarted = await ensureWorkerCurrent()
     sendJson(ctx.res, 200, { data: { handlers: names, tables: Object.keys(maps.hooks).sort(), restarted } })
   })
 }

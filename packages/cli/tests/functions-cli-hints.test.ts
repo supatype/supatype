@@ -155,14 +155,33 @@ describe("functions deploy to Cloud when a function fails", () => {
     })
   }
 
-  it("names the failed function, counts only those deployed, and exits non-zero", async () => {
+  // Review B4: one request carries every function, so the worker restarts once a deploy; a refusal
+  // of that request fails every function it carried.
+  it("sends every function in one request", async () => {
+    linkAndLogIn()
+    const bodies: string[] = []
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      bodies.push(String(init?.body ?? ""))
+      return new Response(JSON.stringify({ data: {} }), { headers: { "Content-Type": "application/json" } })
+    })
+
+    const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toContain(`"name":"hello"`)
+    expect(bodies[0]).toContain(`"name":"bye"`)
+    expect(run.output).toContain("Deployed 2 function(s)")
+  })
+
+  it("names every function the refused request carried, and exits non-zero", async () => {
     linkAndLogIn()
     platformRefusing("bye")
 
     const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
 
     expect(run.output).toContain("bye ✗ HTTP 422: bundle too large")
-    expect(run.output).toContain("1 of 2 function(s) failed to deploy: bye")
+    expect(run.output).toContain("hello ✗ HTTP 422: bundle too large")
+    expect(run.output).toContain("2 of 2 function(s) failed to deploy: bye, hello")
     expect(run.output).not.toContain("Deployed 2 function(s)")
     expect(run.exitCode).toBe(1)
   })
@@ -177,7 +196,7 @@ describe("functions deploy to Cloud when a function fails", () => {
     const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
 
     expect(run.output).toContain("Deploying to cloud project: acme-ref")
-    expect(run.output).toContain("1 of 2 function(s) failed to deploy: bye")
+    expect(run.output).toContain("2 of 2 function(s) failed to deploy: bye, hello")
     expect(run.output).not.toContain("Deploying to project: acme-ref")
     expect(run.exitCode).toBe(1)
   })

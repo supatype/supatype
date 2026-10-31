@@ -1,13 +1,38 @@
 /**
- * What the functions and hooks routes share about the stack's functions worker: where a function's
- * or hook's directory may be, and restarting the worker, which loads what it serves when it starts.
+ * What the functions and hooks routes share about the stack's functions worker: where its functions,
+ * hooks and env live, where a function's or hook's directory may be, and keeping the worker serving
+ * what is on disk, which it loads when it starts (it runs with no --watch).
+ *
+ * Whether the worker is stale is decided by content, not clocks: a hash of everything it loads (every
+ * file under the functions and hooks roots, the manifest's hook and validator maps, the function env
+ * file) is recorded when a restart succeeds, and a deploy restarts it when the hash differs, when it
+ * is not running, or when a restart failed since. File times could not say: a hook edited in the
+ * project's own checkout, a manifest changed by someone else, clock skew and rsync-kept mtimes all
+ * left the worker serving old code.
  */
 import { spawn } from "node:child_process"
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
-import { FUNCTION_NAME_RULE, isFunctionName } from "@supatype/shared"
+import { createHash } from "node:crypto"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { dirname, join, relative, resolve } from "node:path"
+import { FUNCTION_NAME_RULE, isFunctionName, parseJsonObject } from "@supatype/shared"
 import { badRequest, HttpError } from "./http.js"
 import { projectRoot } from "./project.js"
+
+export function functionsRoot(): string {
+  return process.env["SUPATYPE_FUNCTIONS_ROOT"] ?? join(projectRoot(), "functions")
+}
+
+export function hooksRoot(): string {
+  return process.env["SUPATYPE_HOOKS_ROOT"] ?? join(projectRoot(), "hooks")
+}
+
+export function functionEnvPath(): string {
+  return join(projectRoot(), ".supatype", "function-env.json")
+}
+
+export function manifestPath(): string {
+  return join(projectRoot(), ".supatype", "manifest.json")
+}
 
 function composeProject(): string {
   return process.env["COMPOSE_PROJECT_NAME"] ?? "supatype-project"
@@ -41,78 +66,86 @@ export function setDockerRunnerForTests(runner: DockerRunner | null): void {
   docker = runner ?? runDocker
 }
 
-/**
- * Marks a restart owed by one that failed, so the next deploy restarts the worker though it writes
- * nothing. A file in the project's .supatype, not memory: the control plane restarting in between
- * would otherwise forget, and the worker would keep serving old routes.
- */
-function restartOwedPath(): string {
-  return join(projectRoot(), ".supatype", "functions-worker-restart-owed")
+/** The control plane's record of the worker, in the project's .supatype so a restart of it keeps them. */
+function statePath(name: "restart-owed" | "loaded"): string {
+  return join(projectRoot(), ".supatype", `functions-worker-${name}`)
 }
 
-/** Whether a restart failed since the last that worked: the worker may still serve old routes. */
-export function workerRestartOwed(): boolean {
-  return existsSync(restartOwedPath())
+function readState(name: "restart-owed" | "loaded"): string | null {
+  return existsSync(statePath(name)) ? readFileSync(statePath(name), "utf8").trim() : null
 }
 
-function owe(owed: boolean): void {
-  if (!owed) {
-    rmSync(restartOwedPath(), { force: true })
+function writeState(name: "restart-owed" | "loaded", value: string | null): void {
+  if (value === null) {
+    rmSync(statePath(name), { force: true })
     return
   }
-  mkdirSync(dirname(restartOwedPath()), { recursive: true })
-  writeFileSync(restartOwedPath(), `${new Date().toISOString()}\n`, "utf8")
+  mkdirSync(dirname(statePath(name)), { recursive: true })
+  writeFileSync(statePath(name), `${value}\n`, "utf8")
 }
 
-/** The functions-worker containers of this stack, stopped ones included, or why Docker could not list them. */
-async function workerContainers(): Promise<{ listed: true; ids: string[] } | { listed: false; why: string }> {
+/** Every file under `root`, by path relative to it, sorted, so the hash does not depend on the order read. */
+function filesUnder(root: string): string[] {
+  if (!existsSync(root)) return []
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name))
+    .sort()
+}
+
+/** A hash of everything the worker loads; see the file's comment. */
+export function workerContentHash(): string {
+  const hash = createHash("sha256")
+  for (const [label, root] of [["functions", functionsRoot()], ["hooks", hooksRoot()]] as const) {
+    for (const file of filesUnder(resolve(root))) {
+      hash.update(`${label}:${relative(root, file)}\0`).update(readFileSync(file)).update("\0")
+    }
+  }
+  const manifest = existsSync(manifestPath()) ? parseJsonObject(readFileSync(manifestPath(), "utf8")) : null
+  const maps = manifest?.ok === true ? { hooks: manifest.value["hooks"], validators: manifest.value["validators"] } : {}
+  hash.update(`maps:${JSON.stringify(maps)}\0`)
+  hash.update(`env:${existsSync(functionEnvPath()) ? readFileSync(functionEnvPath(), "utf8") : ""}`)
+  return hash.digest("hex")
+}
+
+/** The worker's containers, with whether each runs; one `docker ps` a deploy. */
+async function workerContainers(): Promise<Array<{ id: string; running: boolean }>> {
   const found = await docker([
-    "ps", "-a", "-q",
+    "ps", "-a",
     "--filter", `label=com.docker.compose.project=${composeProject()}`,
     "--filter", "label=com.docker.compose.service=functions-worker",
+    "--format", "{{.ID}} {{.State}}",
   ])
-  if (found.status !== 0) return { listed: false, why: found.stderr.trim() }
-  return { listed: true, ids: found.stdout.split(/\s+/).filter((id) => id !== "") }
+  if (found.status !== 0) {
+    throw new HttpError(502, "worker_restart_failed", `The files are written, but Docker could not list the functions worker: ${found.stderr.trim()}`)
+  }
+  return found.stdout.split("\n").map((line) => line.trim().split(/\s+/)).filter(([id]) => id !== undefined && id !== "")
+    .map(([id = "", state = ""]) => ({ id, running: state === "running" }))
 }
 
 /**
- * When the worker last started, in milliseconds, or null when Docker cannot say (no container, or
- * no answer). A handler file written after it is one the worker has not loaded.
+ * Restarts the functions worker when it may serve something other than what is on disk (see the
+ * file's comment); true when it did. The container is found by the labels compose gives it and
+ * restarted with plain `docker`: the control-plane image has Docker without the compose plugin
+ * (local test round 5), and `docker restart` also starts one that has exited. A restart that fails
+ * throws a 502 naming why, after the files are written, and is owed to the next deploy.
  */
-export async function workerStartedAt(): Promise<number | null> {
-  const found = await workerContainers()
-  if (!found.listed || found.ids.length === 0) return null
-  const inspected = await docker(["inspect", "-f", "{{.State.StartedAt}}", ...found.ids])
-  if (inspected.status !== 0) return null
-  const starts = inspected.stdout.split(/\s+/).filter((at) => at !== "").map((at) => Date.parse(at))
-  return starts.length === 0 || starts.some(Number.isNaN) ? null : Math.min(...starts)
-}
-
-/**
- * Restarts the functions worker, which loads its functions and hooks when it starts. The container
- * is found by the labels compose gives it and restarted with plain `docker`: the control-plane image
- * has Docker without the compose plugin, so `docker compose -p ... restart` failed there, unreported,
- * and the worker kept serving its old routes (local test round 5). A restart that fails throws a 502
- * naming why, after the files are written, so the deploy is reported as failed and the next one
- * restarts the worker. Stopped containers are listed too (`-a`): `docker restart` starts a worker that
- * had exited, which `ps` alone never found, so every deploy failed. Asynchronous, so it holds no
- * other request to the control plane.
- */
-export async function restartFunctionsWorker(): Promise<void> {
-  const project = composeProject()
-  const found = await workerContainers()
-  owe(true)
-  if (found.listed === false) {
-    throw new HttpError(502, "worker_restart_failed", `The files are written, but Docker could not list the functions worker: ${found.why}`)
+export async function ensureWorkerCurrent(): Promise<boolean> {
+  const content = workerContentHash()
+  const containers = await workerContainers()
+  const stale = content !== readState("loaded") || containers.some((c) => !c.running) || readState("restart-owed") !== null
+  if (!stale && containers.length > 0) return false
+  writeState("restart-owed", new Date().toISOString())
+  if (containers.length === 0) {
+    throw new HttpError(502, "worker_restart_failed", `The files are written, but no functions-worker container exists for compose project ${composeProject()}; is the stack up?`)
   }
-  if (found.ids.length === 0) {
-    throw new HttpError(502, "worker_restart_failed", `The files are written, but no functions-worker container exists for compose project ${project}; is the stack up?`)
-  }
-  const restarted = await docker(["restart", ...found.ids])
+  const restarted = await docker(["restart", ...containers.map((c) => c.id)])
   if (restarted.status !== 0) {
     throw new HttpError(502, "worker_restart_failed", `The files are written, but the functions worker did not restart: ${restarted.stderr.trim() || `docker exited ${String(restarted.status)}`}`)
   }
-  owe(false)
+  writeState("loaded", content)
+  writeState("restart-owed", null)
+  return true
 }
 
 /**

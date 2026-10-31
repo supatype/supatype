@@ -52,32 +52,34 @@ describe("the hook deploy body", () => {
 
 describe("an empty hook deploy", () => {
   const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
+  const said: string[] = []
 
   function project(): string {
     const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-body-"))
     dirs.push(cwd)
-    vi.spyOn(console, "log").mockImplementation(() => undefined)
-    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    said.length = 0
+    for (const stream of ["log", "error"] as const) {
+      vi.spyOn(console, stream).mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
+    }
     return cwd
   }
 
-  // Review: Cloud got a hook deploy on every push, so a member who may push a schema but not deploy
-  // hooks failed every push, under "Deploying 0 hook(s)".
-  it("is not sent when nothing is declared and nothing was deployed to that target", async () => {
+  // Nic's decision (a): a per-machine record of which targets were given hooks missed every target a
+  // fresh clone or another machine had deployed to, which kept hooks the schema no longer declares.
+  // Every push sends the full body, empty when nothing is declared, so the target holds what the
+  // schema says wherever it was pushed from.
+  it("is sent from a fresh clone that never deployed, clearing the target's hooks", async () => {
     const cwd = project()
     expect(await deployHooksToTarget(cwd, projectConfig(), target, { models: [] })).toBe(false)
-    expect(sent.bodies).toEqual([])
+    expect(sent.bodies).toEqual([{ handlers: [], map: {}, validators: {}, cache: {} }])
+    expect(said.join("\n")).not.toMatch(/\d+ hook\(s\)/)
   })
 
-  // Review: an empty deploy that clears hooks deployed before is a real change, so a 403 for it fails.
-  it("is sent to clear what the target was last given, and fails when the target refuses it", async () => {
+  // An empty deploy that clears hooks is a real change, so a refusal of it, 403 included, fails.
+  it("fails the push when the target refuses it, 403 included", async () => {
     const cwd = project()
-    const hooked = { models: [{ name: "Note", fields: {}, annotations: { db: { tableName: "note" }, platform: { cache: { enabled: true } } } }] }
-    expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(false)
-    sent.bodies.length = 0
     sent.refuse = 403
     expect(await deployHooksToTarget(cwd, projectConfig(), target, { models: [] })).toBe(true)
-    expect(sent.bodies).toEqual([{ handlers: [], map: {}, validators: {}, cache: {} }])
     expect(process.exitCode).toBe(1)
   })
 
