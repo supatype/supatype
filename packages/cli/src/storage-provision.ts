@@ -65,15 +65,27 @@ export function bucketSpecsFromAst(ast: ParsedBuckets): BucketSpec[] {
   }))
 }
 
+/** How many buckets a schema declares, and the ids of those the service does not have afterwards. */
+export interface BucketProvisioning {
+  total: number
+  failed: string[]
+}
+
+/** Creates the buckets `ast` declares; which of them are not there afterwards, each said why. */
 export async function provisionBucketsFromAst(
   ast: ParsedBuckets,
   storageApiUrl: string,
   serviceRoleKey: string,
-): Promise<void> {
+): Promise<BucketProvisioning> {
   const buckets = bucketSpecsFromAst(ast)
-  if (buckets.length === 0) return
+  if (buckets.length === 0) return { total: 0, failed: [] }
   console.log("[supatype] Provisioning storage buckets...")
-  await provisionBuckets(storageApiUrl, serviceRoleKey, buckets)
+  return { total: buckets.length, failed: await provisionBuckets(storageApiUrl, serviceRoleKey, buckets) }
+}
+
+/** The line for buckets a provisioning left out, or null when it left none out. */
+export function unprovisionedBuckets({ total, failed }: BucketProvisioning): string | null {
+  return failed.length === 0 ? null : `${failed.length} of ${total} bucket(s) were not provisioned: ${failed.join(", ")}`
 }
 
 /**

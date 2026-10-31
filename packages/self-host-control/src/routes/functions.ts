@@ -1,10 +1,10 @@
 import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
-import { spawnSync } from "node:child_process"
-import { FUNCTION_NAME_RULE, isFunctionName, isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { dirname, join } from "node:path"
+import { isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject, projectRoot } from "../project.js"
+import { childDir, restartFunctionsWorker } from "../worker.js"
 
 interface DeployedFunction {
   name: string
@@ -15,42 +15,9 @@ function functionsRoot(): string {
   return process.env["SUPATYPE_FUNCTIONS_ROOT"] ?? join(projectRoot(), "functions")
 }
 
-function composeProject(): string {
-  return process.env["COMPOSE_PROJECT_NAME"] ?? "supatype-project"
-}
-
-/** Restarts the functions worker, which loads what it serves (functions and hooks) when it starts. */
-export function restartFunctionsWorker(): void {
-  spawnSync(
-    "docker",
-    ["compose", "-p", composeProject(), "restart", "functions-worker"],
-    { stdio: "inherit" },
-  )
-}
-
-/**
- * `name` when it passes the function-name rule the CLI also checks (`@supatype/shared`); a 400
- * otherwise. Nothing the rule allows can name a parent, a separator or a hidden entry.
- */
-function checkedName(name: unknown): string {
-  if (!isFunctionName(name)) {
-    throw badRequest(`Invalid function name ${JSON.stringify(name)}: ${FUNCTION_NAME_RULE}`)
-  }
-  return name
-}
-
-/**
- * The directory of the function `name`, refused unless the name passes the rule and the path is a
- * direct child of the functions directory. The second check is a backstop for the first: whatever
- * the rule lets through, nothing outside `functions/` is ever written or removed.
- */
-function functionDir(name: string): string {
-  const root = resolve(functionsRoot())
-  const dir = resolve(root, name)
-  if (dirname(dir) !== root) {
-    throw badRequest(`Function name ${JSON.stringify(name)} resolves outside the functions directory`)
-  }
-  return dir
+/** The directory of the function `name`, refused unless it may be one (worker.ts `childDir`). */
+function functionDir(name: unknown): string {
+  return childDir(functionsRoot(), name, "function")
 }
 
 /** The functions a deploy body names, every one checked before anything is written. */
@@ -60,10 +27,11 @@ function deployedFunctions(body: unknown): Array<DeployedFunction & { dir: strin
   if (!Array.isArray(list)) throw badRequest("functions must be an array")
   return list.map((entry) => {
     const fn = isJsonObject(entry) ? entry : {}
-    const name = checkedName(fn["name"])
+    const dir = functionDir(fn["name"])
+    const name = String(fn["name"])
     const source = fn["source"]
     if (typeof source !== "string") throw badRequest(`Function ${name} has no source`)
-    return { name, source, dir: functionDir(name) }
+    return { name, source, dir }
   })
 }
 
@@ -107,15 +75,15 @@ export function registerFunctionRoutes(
       writeFileSync(join(fn.dir, "index.ts"), fn.source, "utf8")
     }
 
-    restartFunctionsWorker()
+    await restartFunctionsWorker()
     sendJson(ctx.res, 200, { data: { message: "Functions deployed", count: functions.length } })
   })
 
   route(routes, "DELETE", "/projects/:ref/functions/:name", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const name = ctx.params["name"]!
-    rmSync(functionDir(checkedName(name)), { recursive: true, force: true })
-    restartFunctionsWorker()
+    rmSync(functionDir(name), { recursive: true, force: true })
+    await restartFunctionsWorker()
     sendJson(ctx.res, 200, { data: { deleted: name } })
   })
 
@@ -135,7 +103,7 @@ export function registerFunctionRoutes(
     current[body.key] = body.value ?? ""
     mkdirSync(dirname(envPath()), { recursive: true })
     writeFileSync(envPath(), `${JSON.stringify(current, null, 2)}\n`, "utf8")
-    restartFunctionsWorker()
+    await restartFunctionsWorker()
     sendJson(ctx.res, 200, { data: { key: body.key } })
   })
 }

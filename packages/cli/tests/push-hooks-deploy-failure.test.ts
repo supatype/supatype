@@ -21,15 +21,17 @@ describe("a hook upload the target refuses", () => {
     const said: string[] = []
     vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
     vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
-    vi.spyOn(process, "exit").mockImplementation((code?: string | number | null) => {
-      throw new Error(`exit ${String(code)}`)
-    })
+    process.exitCode = undefined
     const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
 
-    await expect(uploadHooks(target, { handlers: [], map: {} }, 2)).rejects.toThrow("exit 1")
+    // Ends non-zero and carries on, as a bucket the stack refused does: one exit policy after the schema.
+    await uploadHooks(target, { handlers: [], map: {} }, 2)
+    expect(process.exitCode).toBe(1)
+    process.exitCode = undefined
 
     const text = said.join("\n")
     expect(text).toContain("The schema was applied, but its 2 hook(s) were not deployed to https://stack.example.test")
     expect(text).toContain("Route not found")
+    expect(text).toContain("Run `supatype push` again")
   })
 })

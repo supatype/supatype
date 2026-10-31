@@ -17,7 +17,7 @@ vi.mock("../src/model-versioning.js", () => ({ withPublishing: (ast: unknown) =>
 vi.mock("../src/model-hooks.js", () => ({
   validateModelHooks: () => [],
   validateModelValidators: () => [],
-  manifestValidators: () => ({}),
+  manifestMaps: () => ({ hooks: {}, validators: {}, cache: {} }),
   syncManifestHooks: () => false,
   writeHooksModule: () => null,
 }))

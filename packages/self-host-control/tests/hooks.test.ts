@@ -1,10 +1,10 @@
 import { strict as assert } from "node:assert"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { after, before, beforeEach, describe, test } from "node:test"
 import { isJsonObject } from "@supatype/shared"
-import { dataOf, request, startServer, type ControlPlaneServer } from "./helpers.js"
+import { dataOf, fakeDocker, request, startServer, type ControlPlaneServer, type FakeDocker } from "./helpers.js"
 
 /**
  * Local test round 4 (N23): `supatype push` to a project linked to a self-host stack applied the
@@ -40,6 +40,7 @@ describe("hooks deploy route", () => {
   let server: ControlPlaneServer
   let tmp: string
   let projectDir: string
+  let docker: FakeDocker
 
   before(async () => {
     tmp = mkdtempSync(join(tmpdir(), "sh-hooks-test-"))
@@ -47,10 +48,14 @@ describe("hooks deploy route", () => {
     process.env["SUPATYPE_PROJECT_ROOT"] = projectDir
     process.env["SUPATYPE_PROJECT_REF"] = PROJECT
     process.env["COMPOSE_PROJECT_NAME"] = "supatype-self-host-control-test-none"
+    docker = fakeDocker()
     ;({ server, baseUrl } = await startServer())
   })
 
   beforeEach(() => {
+    docker.calls.length = 0
+    docker.containers = ["worker-1"]
+    docker.restartStatus = 0
     rmSync(projectDir, { recursive: true, force: true })
     mkdirSync(join(projectDir, ".supatype"), { recursive: true })
     writeFileSync(join(projectDir, ".supatype", "manifest.json"), JSON.stringify({ functions_enabled: true }))
@@ -150,6 +155,60 @@ describe("hooks deploy route", () => {
   test("refuses a cache map whose settings are not the manifest's", async () => {
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {}, cache: { note: { maxTtl: "60" } } })
     assert.equal(res.status, 400)
+  })
+
+  // Every push restarted the worker and rewrote every file, though nothing had changed.
+  test("writes nothing and restarts nothing when the stack already has what the push sends", async () => {
+    const body = { handlers: [TAG_NOTE, ADAPTER], map: MAP, validators: {}, cache: {} }
+    const first = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    assert.equal(dataOf(first.json)["restarted"], true)
+    const handler = join(projectDir, "hooks", "tag-note", "index.ts")
+    const manifestFile = join(projectDir, ".supatype", "manifest.json")
+    const before = [statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs]
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, body)
+    assert.equal(again.status, 200)
+    assert.equal(dataOf(again.json)["restarted"], false)
+    assert.deepEqual([statSync(handler).mtimeMs, statSync(manifestFile).mtimeMs], before)
+  })
+
+  test("answers a manifest that is not JSON with 409, as one that is not an object", async () => {
+    writeFileSync(join(projectDir, ".supatype", "manifest.json"), "{ not json")
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {} })
+    assert.equal(res.status, 409)
+  })
+
+  // Local test round 5: the control-plane image has Docker without the compose plugin, so `docker
+  // compose -p ... restart` failed, unreported: the push said its hooks were deployed and the worker
+  // kept serving its old routes.
+  test("restarts the worker container its compose labels name, without compose", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    assert.ok(docker.calls.every((args) => !args.includes("compose")), JSON.stringify(docker.calls))
+    const ps = docker.calls.find((args) => args[0] === "ps") ?? []
+    assert.ok(ps.includes("label=com.docker.compose.project=supatype-self-host-control-test-none"))
+    assert.ok(ps.includes("label=com.docker.compose.service=functions-worker"))
+    assert.deepEqual(docker.calls.find((args) => args[0] === "restart"), ["restart", "worker-1"])
+  })
+
+  test("answers 502 with the reason when the worker cannot be restarted, and restarts it next time", async () => {
+    docker.restartStatus = 1
+    docker.restartSays = "Error response from daemon: no such container"
+    const failed = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    assert.equal(failed.status, 502)
+    assert.match(String(failed.json["message"]), /no such container/)
+    // The files are written by then; the next deploy, though nothing changed, restarts the worker.
+    docker.restartStatus = 0
+    docker.calls.length = 0
+    const again = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    assert.equal(again.status, 200)
+    assert.equal(dataOf(again.json)["restarted"], true)
+  })
+
+  test("answers 502 when no worker container is running", async () => {
+    docker.containers = []
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+    assert.equal(res.status, 502)
+    assert.match(String(res.json["message"]), /functions-worker/)
   })
 
   test("answers another project ref as unknown", async () => {

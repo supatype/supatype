@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readdirSync, rmSync, existsSync, writeFileSync 
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { test, describe, before, after } from "node:test"
-import { request, startServer, type ControlPlaneServer } from "./helpers.js"
+import { fakeDocker, request, startServer, type ControlPlaneServer } from "./helpers.js"
 
 const PROJECT = "test-project"
 
@@ -32,6 +32,7 @@ describe("functions routes", () => {
     // The worker restart shells out to docker compose; point it at a project that does not exist.
     process.env["COMPOSE_PROJECT_NAME"] = "supatype-self-host-control-test-none"
 
+    fakeDocker()
     ;({ server, baseUrl } = await startServer())
   })
 

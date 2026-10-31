@@ -8,31 +8,17 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 
-import { declaredHooks, declaredValidators, manifestHooks, type ManifestHookEntry } from "./model-hooks.js"
+import { ADAPTER_IMPORT, ADAPTER_NAME, FLATTENED_ADAPTER_IMPORT, flattenHookSource, type HookMap } from "@supatype/shared"
+import { declaredHooks, declaredValidators, manifestHooks } from "./model-hooks.js"
 
-/** The generated adapter, flattened. `_`-prefixed, so the worker never routes to it. */
-export const ADAPTER_KEY = "_supatype-hooks.ts"
-
-/** What the handlers import locally, and what has to be rewritten to reach the flattened name. */
-const ADAPTER_IMPORT = "../_supatype/hooks.ts"
+/** The generated adapter, flattened (@supatype/shared). `_`-prefixed, so the worker never routes to it. */
+export const ADAPTER_KEY = `${ADAPTER_NAME}.ts`
 
 export interface HookUpload {
   /** Handler name → its source, flattened and import-rewritten. */
   handlers: Array<{ name: string; source: string }>
   /** table → event → config, exactly as the manifest would carry it. */
-  map: Record<string, Record<string, ManifestHookEntry>>
-}
-
-/**
- * Rewrite the one import a hook handler is generated to make.
- *
- * `../_supatype/hooks.ts` is a path that cannot survive flattening, and it is the specifier our own
- * scaffold writes: so it is rewritten rather than refused. Any *other* relative import is refused
- * below: it would resolve to nothing on the worker, and a hook that fails to import is a hooked table
- * whose writes all start failing.
- */
-function rewriteAdapterImport(source: string): string {
-  return source.split(ADAPTER_IMPORT).join(`./${ADAPTER_KEY}`)
+  map: HookMap
 }
 
 /** Relative specifiers a flattened layout cannot honour, so the caller can refuse with a real reason. */
@@ -41,7 +27,7 @@ function unsupportedImports(source: string): string[] {
   // Matches `from "…"` and `import("…")`, which is every form that resolves against the file's own path.
   for (const match of source.matchAll(/(?:from|import)\s*\(?\s*["'](\.[^"']*)["']/g)) {
     const specifier = match[1]!
-    if (specifier === ADAPTER_IMPORT || specifier === `./${ADAPTER_KEY}`) continue
+    if (specifier === ADAPTER_IMPORT || specifier === FLATTENED_ADAPTER_IMPORT) continue
     found.add(specifier)
   }
   return [...found].sort()
@@ -96,7 +82,9 @@ export function readHookUpload(cwd: string, hooksDir: string, ast: unknown): Hoo
       )
     }
 
-    handlers.push({ name, source: rewriteAdapterImport(source) })
+    // `../_supatype/hooks.ts` cannot survive flattening, and it is the specifier our own scaffold
+    // writes, so it is rewritten (@supatype/shared); any other relative import was refused above.
+    handlers.push({ name, source: flattenHookSource(source) })
   }
 
   return { handlers, map: manifestHooks(ast) }
@@ -104,5 +92,5 @@ export function readHookUpload(cwd: string, hooksDir: string, ast: unknown): Hoo
 
 /** The generated adapter as a handler-shaped entry, so it travels with them. */
 export function adapterEntry(module: string): { name: string; source: string } {
-  return { name: ADAPTER_KEY.replace(/\.ts$/, ""), source: module }
+  return { name: ADAPTER_NAME, source: module }
 }

@@ -40,3 +40,20 @@ export {
   type Optional,
   type ParsedJsonObject,
 } from "./json.js"
+export {
+  ADAPTER_IMPORT,
+  ADAPTER_NAME,
+  FLATTENED_ADAPTER_IMPORT,
+  applyManifestMaps,
+  flattenHookSource,
+  isCacheMap,
+  isHookDeployBody,
+  isHookMap,
+  unflattenHookSource,
+  type CacheMap,
+  type HookDeployBody,
+  type HookMap,
+  type ManifestCacheEntry,
+  type ManifestHookEntry,
+  type ManifestMaps,
+} from "./manifest-maps.js"

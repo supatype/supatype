@@ -14,7 +14,7 @@ import { generateHooksModule } from "./hooks-generator.js"
 import { manifestCache } from "./model-cache.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
-import { isJsonObject, keptName } from "@supatype/shared"
+import { applyManifestMaps, isJsonObject, keptName, type ManifestHookEntry, type ManifestMaps } from "@supatype/shared"
 
 export interface DeclaredHook {
   model: string
@@ -164,11 +164,12 @@ export function writeHooksModule(cwd: string, hooksDir: string, ast: unknown): s
   return relative(cwd, file) || file
 }
 
-/** Per-table hook config, in the shape `proxy.RouteManifest` reads. */
-export interface ManifestHookEntry {
-  function: string
-  timeout?: number
-  onUnavailable?: "reject" | "log"
+/** Per-table hook config, in the shape `proxy.RouteManifest` reads (@supatype/shared). */
+export type { ManifestHookEntry } from "@supatype/shared"
+
+/** The manifest's three maps for `ast`: what a local push writes and a linked push sends. */
+export function manifestMaps(ast: unknown): ManifestMaps {
+  return { hooks: manifestHooks(ast), validators: manifestValidators(ast), cache: manifestCache(ast) }
 }
 
 /**
@@ -284,10 +285,7 @@ export function syncManifestHooks(cwd: string, ast: unknown): boolean {
   const parsed = readJsonObjectFile(manifestPath)
   if (parsed === undefined) return false
 
-  const changedHooks = applyManifestMap(parsed, "hooks", manifestHooks(ast))
-  const changedValidators = applyManifestMap(parsed, "validators", manifestValidators(ast))
-  const changedCache = applyManifestMap(parsed, "cache", manifestCache(ast))
-  if (!changedHooks && !changedValidators && !changedCache) return false
+  if (!applyManifestMaps(parsed, manifestMaps(ast))) return false
 
   writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
   return true
@@ -295,34 +293,6 @@ export function syncManifestHooks(cwd: string, ast: unknown): boolean {
 
 /** Said when the manifest's hook, validator and cache maps were rewritten. */
 export const HOOK_MAPS_WRITTEN = "Hook and validator maps written to .supatype/manifest.json"
-
-/**
- * Set one manifest key to `map`, or remove it when the schema declares none.
- *
- * Removing rather than writing `{}` matters: the server distinguishes "no map" from "an empty map"
- * when it decides whether the manifest predates the feature, and an empty object left behind by a
- * schema that no longer declares any is not the same statement.
- */
-/**
- * `Record<string, unknown>` rather than a hook map: this never looks inside a value, it compares
- * the serialised form and swaps it. It was typed to hooks only because hooks were the first caller,
- * and that narrowness is what a third key would otherwise have had to work around.
- */
-function applyManifestMap(
-  manifest: Record<string, unknown>,
-  key: string,
-  map: Record<string, unknown>,
-): boolean {
-  const next = JSON.stringify(map)
-  if (next === JSON.stringify(manifest[key] ?? {})) return false
-
-  if (Object.keys(map).length === 0) {
-    delete manifest[key]
-  } else {
-    manifest[key] = map
-  }
-  return true
-}
 
 export interface HooksReport {
   declared: DeclaredHook[]

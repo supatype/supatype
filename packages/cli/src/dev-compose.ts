@@ -103,7 +103,7 @@ import {
 } from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
-import { provisionBucketsFromAst } from "./storage-provision.js"
+import { provisionBucketsFromAst, unprovisionedBuckets } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { demoDataHint, publishDevReady } from "./dev-ready-panel.js"
@@ -649,12 +649,18 @@ async function waitStorageApiReady(
   )
 }
 
+/**
+ * The schema's buckets on the dev stack. One the service did not take is said in one line, with what
+ * it means: dev carries on, and only uploads to that bucket fail. They were dropped without a word
+ * past each bucket's own warning.
+ */
 async function provisionDockerStorageBuckets(
   ast: ExtractedSchemaAstV2,
   kongPort: number,
   serviceRoleKey: string,
 ): Promise<void> {
-  await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey)
+  const left = unprovisionedBuckets(await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey))
+  if (left !== null) console.warn(`[supatype] ⚠  ${left}; uploads to them fail until a later push takes them.`)
 }
 
 let _lastPushedAst: string | null = null

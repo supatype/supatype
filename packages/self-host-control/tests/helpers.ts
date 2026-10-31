@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert"
 import { isJsonObject, isString } from "@supatype/shared"
 import { createControlPlaneServer } from "../src/server.js"
 import { CONTROL_PLANE_SECRET_HEADER } from "../src/auth.js"
+import { setDockerRunnerForTests } from "../src/worker.js"
 
 /** The secret every test server is started with, and every test request presents by default. */
 export const TEST_SECRET = "control-plane-test-secret-0123456789abcdef"
@@ -68,4 +69,29 @@ export function dataStrings(json: Record<string, unknown>, key: string): string[
   const value = dataOf(json)[key]
   if (!Array.isArray(value) || !value.every(isString)) assert.fail(`expected strings at data.${key}, got ${JSON.stringify(value)}`)
   return value
+}
+
+/** What a {@link fakeDocker} was asked, and how it answers. */
+export interface FakeDocker {
+  calls: string[][]
+  /** The worker containers `docker ps` finds. */
+  containers: string[]
+  /** What `docker restart` exits with, and says when it fails. */
+  restartStatus: number
+  restartSays: string
+}
+
+/**
+ * Docker for the control plane's worker restart, in this process: the real control-plane image has
+ * no compose plugin, so the restart must not need one, and a test must not reach a real daemon.
+ */
+export function fakeDocker(): FakeDocker {
+  const fake: FakeDocker = { calls: [], containers: ["worker-1"], restartStatus: 0, restartSays: "" }
+  setDockerRunnerForTests(async (args) => {
+    fake.calls.push([...args])
+    if (args[0] === "ps") return { status: 0, stdout: fake.containers.join("\n"), stderr: "" }
+    if (args[0] === "restart") return { status: fake.restartStatus, stdout: "", stderr: fake.restartSays }
+    return { status: 1, stdout: "", stderr: `unknown command: ${args.join(" ")}` }
+  })
+  return fake
 }

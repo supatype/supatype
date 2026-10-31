@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { isJsonObject } from "@supatype/shared"
 import { CONTROL_PLANE_SECRET_HEADER } from "../../self-host-control/src/auth.js"
 import { createControlPlaneServer } from "../../self-host-control/src/server.js"
+import { setDockerRunnerForTests } from "../../self-host-control/src/worker.js"
 import { deployHooksToTarget, uploadHooks } from "../src/commands/push.js"
 import { portOf } from "./support/ports.js"
 import { projectConfig } from "./support/project-config.js"
@@ -46,12 +47,14 @@ beforeAll(() => {
   vi.stubEnv("SUPATYPE_PROJECT_ROOT", projectDir)
   vi.stubEnv("SUPATYPE_PROJECT_REF", "demo")
   vi.stubEnv("SUPATYPE_HOOKS_ROOT", join(projectDir, "hooks"))
-  // The worker restart shells out to docker compose; point it at a project that does not exist.
   vi.stubEnv("COMPOSE_PROJECT_NAME", "supatype-push-hooks-self-host-test-none")
+  // The worker restart, answered here: one worker container, restarted.
+  setDockerRunnerForTests(async (args) => ({ status: 0, stdout: args[0] === "ps" ? "worker-1" : "", stderr: "" }))
 })
 
 afterAll(() => {
   for (const server of servers.splice(0)) server.close()
+  setDockerRunnerForTests(null)
   vi.unstubAllEnvs()
   rmSync(tmp, { recursive: true, force: true })
 })

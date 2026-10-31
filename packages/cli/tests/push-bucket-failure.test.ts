@@ -33,7 +33,7 @@ describe("a push whose buckets the storage service refuses", () => {
     )
     await provisionSchemaBuckets(buckets, "http://127.0.0.1:1/storage/v1", "key")
     expect(process.exitCode).toBe(1)
-    expect(said.join("\n")).toContain("1 of 2 bucket(s) were not provisioned: pics")
+    expect(said.join("\n")).toContain("The schema was applied, but 1 of 2 bucket(s) were not provisioned: pics")
   })
 
   it("ends as it was when every bucket is there", async () => {

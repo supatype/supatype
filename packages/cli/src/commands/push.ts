@@ -5,11 +5,11 @@ import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import {
   validateModelHooks,
-  manifestValidators,
+  manifestMaps,
   validateModelValidators,
   writeHooksModule,
 } from "../model-hooks.js"
-import { manifestCache, rowCacheChangeNote } from "../model-cache.js"
+import { rowCacheChangeNote } from "../model-cache.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
 import { adapterEntry, readHookUpload } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
@@ -43,7 +43,9 @@ import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from 
 import { adoptKeysNeed, OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
-import { bucketSpecsFromAst, isParsedBuckets, provisionBuckets, type ParsedBuckets } from "../storage-provision.js"
+import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
+import { postApplyFailed } from "../post-apply.js"
+import type { HookDeployBody } from "@supatype/shared"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
@@ -67,7 +69,7 @@ import {
   cacheSchemaSourcesLocally,
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
-import { error, info, plain } from "../ui/messages.js"
+import { info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -441,21 +443,18 @@ export async function deployHooksToTarget(
   try {
     upload = readHookUpload(cwd, hooksDir, ast)
   } catch (err) {
-    // Refused rather than partially uploaded: the schema is already applied, so the honest thing is to
-    // say the hooks did not deploy and why, leaving the previous ones in place.
-    fatalError(errorMessage(err))
+    // Refused rather than partially uploaded, leaving the previous hooks in place.
+    postApplyFailed(`its hooks were not deployed: ${errorMessage(err)}`)
     return
   }
-  // A self-host stack's manifest learns the validator and cache maps only here, as a local push
-  // writes them (applied-ast-artifacts.ts); a schema with none of either still clears what is there.
-  const selfHost = target.mode === "self-host"
-  if (upload === null && !selfHost) return
-
+  // One body for every target, the manifest's three maps in it, sent whatever the schema declares,
+  // so a schema with none clears what the stack had: a self-host stack learns the validator and cache
+  // maps only here, as a local push writes them (applied-ast-artifacts.ts). Cloud reads what it uses.
   const adapter = readGeneratedAdapter(hooksDir)
   const named = upload?.handlers ?? []
   const handlers = adapter === null || named.length === 0 ? named : [...named, adapter]
-  const maps = selfHost ? { validators: manifestValidators(ast), cache: manifestCache(ast) } : {}
-  await uploadHooks(target, { handlers, map: upload?.map ?? {}, ...maps }, named.length)
+  const { hooks, validators, cache } = manifestMaps(ast)
+  await uploadHooks(target, { handlers, map: hooks, validators, cache }, named.length)
 }
 
 /**
@@ -463,7 +462,7 @@ export async function deployHooksToTarget(
  * so it says that, which target refused and what it answered: `Route not found` alone read as the
  * whole push failing (local test round 4, N23).
  */
-export async function uploadHooks(target: DeployTarget, body: { handlers: unknown[]; map: unknown; validators?: unknown; cache?: unknown }, count: number): Promise<void> {
+export async function uploadHooks(target: DeployTarget, body: HookDeployBody, count: number): Promise<void> {
   try {
     await withSpinner(`Deploying ${count} hook(s)`, () =>
       targetFetch(target.apiBaseUrl, target.apiPrefix, {
@@ -476,10 +475,11 @@ export async function uploadHooks(target: DeployTarget, body: { handlers: unknow
       }),
     )
   } catch (err) {
-    fatalError(
-      `The schema was applied, but its ${count} hook(s) were not deployed to ${target.apiBaseUrl}: ${errorMessage(err)}`,
-      ["The hooks deployed before, if any, are still the ones that run. Run `supatype push` again once the target takes them."],
+    postApplyFailed(
+      `its ${count} hook(s) were not deployed to ${target.apiBaseUrl}: ${errorMessage(err)}`,
+      "The hooks deployed before, if any, are still the ones that run.",
     )
+    return
   }
   info(`Deployed ${count} hook(s)`)
 }
@@ -544,20 +544,11 @@ async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig
 
 /**
  * Creates the schema's buckets. One the stack does not have afterwards ends the push non-zero,
- * named, as the hooks and the database checks do: it exited 0 with every bucket refused (local
- * test round 4). The schema is applied by then, so the line says that too.
+ * named (post-apply.ts): it exited 0 with every bucket refused (local test round 4).
  */
 export async function provisionSchemaBuckets(parsed: ParsedBuckets, storageApiUrl: string, serviceRoleKey: string): Promise<void> {
-  const buckets = bucketSpecsFromAst(parsed)
-  if (buckets.length === 0) return
-  console.log("[supatype] Provisioning storage buckets...")
-  const failed = await provisionBuckets(storageApiUrl, serviceRoleKey, buckets)
-  if (failed.length === 0) return
-  error(
-    `${failed.length} of ${buckets.length} bucket(s) were not provisioned: ${failed.join(", ")}. ` +
-      "The schema was applied; push again once the storage service takes them.",
-  )
-  process.exitCode = 1
+  const left = unprovisionedBuckets(await provisionBucketsFromAst(parsed, storageApiUrl, serviceRoleKey))
+  if (left !== null) postApplyFailed(left)
 }
 
 /**
