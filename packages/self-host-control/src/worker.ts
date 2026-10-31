@@ -3,12 +3,16 @@
  * hooks and env live, where a function's or hook's directory may be, and keeping the worker serving
  * what is on disk, which it loads when it starts (it runs with no --watch).
  *
- * Whether the worker is stale is decided by content, not clocks: a hash of everything it loads (the
- * source and env files under the functions and hooks roots, the manifest's hook and validator maps,
- * the function env file) is recorded when a restart succeeds, and a deploy restarts it when the hash
- * differs or when a restart failed since. File times could not say: a hook edited in the
- * project's own checkout, a manifest changed by someone else, clock skew and rsync-kept mtimes all
- * left the worker serving old code.
+ * Whether the worker is stale is decided by content, not clocks: a hash of everything it loads once,
+ * at start (the source files under the functions and hooks roots, the manifest's hook and validator
+ * maps), is recorded when a restart succeeds, and a deploy restarts it when the hash differs or when
+ * a restart failed since. File times could not say: a hook edited in the project's own checkout, a
+ * manifest changed by someone else, clock skew and rsync-kept mtimes all left the worker serving old
+ * code.
+ *
+ * Env values are not in it. The worker reads every env file on each call (the function env file
+ * `functions env set` writes, `.env.local`, `.env.<function>.local`), so a change is seen on the
+ * next call, and a restart for one only took every function down (round 6b, N28a).
  */
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
@@ -87,18 +91,19 @@ function writeState(name: "restart-owed" | "loaded", value: string | null): void
 
 /** Sources the worker imports: a handler and the modules and JSON it imports. */
 const SOURCE_FILE = /\.(?:ts|tsx|mts|js|jsx|mjs|json)$/
-/** The env files the worker reads beside the functions: `.env.local` and `.env.<function>.local`. */
-const ENV_FILE = /^\.env(?:\.[^.]+)?\.local$/
 
-/** Whether the worker loads the file `name`, which is in a directory it may load from. */
+/**
+ * Whether the worker loads the file `name` at start: a source, never a dotfile. The env files
+ * beside the functions are dotfiles, and the worker reads them on each call instead.
+ */
 function workerLoads(name: string): boolean {
-  return ENV_FILE.test(name) || (!name.startsWith(".") && SOURCE_FILE.test(name))
+  return !name.startsWith(".") && SOURCE_FILE.test(name)
 }
 
 /**
  * The files under `root` the worker loads, by path relative to it, sorted so the hash does not
  * depend on the order read. Dot directories (.git, an editor's) are skipped, and so is anything that
- * is not a source or env file: a README or an editor's temp file changes no code the worker runs.
+ * is not a source file: a README or an editor's temp file changes no code the worker runs.
  */
 async function loadedFilesUnder(root: string): Promise<string[]> {
   const entries = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => [])
@@ -122,8 +127,7 @@ export async function workerContentHash(): Promise<string> {
   }
   const manifest = parseJsonObject(await textOf(manifestPath()))
   const maps = manifest.ok ? { hooks: manifest.value["hooks"], validators: manifest.value["validators"] } : {}
-  hash.update(`maps:${JSON.stringify(maps)}\0`)
-  hash.update(`env:${await textOf(functionEnvPath())}`)
+  hash.update(`maps:${JSON.stringify(maps)}`)
   return hash.digest("hex")
 }
 

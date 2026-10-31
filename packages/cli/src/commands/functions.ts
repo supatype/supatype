@@ -54,8 +54,9 @@ const NOT_LOGGED_IN = "Not logged in. Run: supatype login"
 const NOT_LINKED = "No linked project. Run: supatype link"
 
 /**
- * How long a request to the linked target may take. A deploy, a delete and an env change restart
- * the worker before they answer, which often takes more than 10 s, so they get longer.
+ * How long a request to the linked target may take. A deploy and a delete can restart the worker
+ * before they answer, which often takes more than 10 s, so they get longer. So does an env change:
+ * it restarts nothing itself, but starts a worker that stopped and pays a restart a failed deploy owes.
  */
 const TARGET_TIMEOUT_MS = 10_000
 const RESTART_TIMEOUT_MS = 60_000

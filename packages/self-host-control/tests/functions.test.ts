@@ -95,7 +95,7 @@ describe("functions routes", () => {
   })
 
   // `supatype functions env unset` on a self-host link was refused: the control plane had no route.
-  test("env unset removes the key and restarts the worker, and does neither for a key not set", async () => {
+  test("env unset removes the key, and only checks the worker runs", async () => {
     const envFile = join(projectDir, ".supatype", "function-env.json")
     await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "GONE SOON", value: "1" })
     await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "KEPT", value: "2" })
@@ -103,11 +103,25 @@ describe("functions routes", () => {
     const res = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/${encodeURIComponent("GONE SOON")}`)
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.deepEqual(JSON.parse(readFileSync(envFile, "utf8")), { KEPT: "2" })
-    assert.ok(docker.calls.some((args) => args[0] === "restart"))
-    docker.calls.length = 0
-    const again = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/NEVER_SET`)
-    assert.equal(again.status, 200)
     assert.deepEqual(docker.calls.map((args) => args[0]), ["ps"])
+  })
+
+  // Nic's decision on N28a (a): the worker reads every env file on each call, so an env change is
+  // seen on the next call (functions-worker env-file.test.ts) and restarting for it only took every
+  // function down. Code it loads once at start still restarts it.
+  test("restarts nothing for an env change, in the control plane's file or the env files, and still restarts for code", async () => {
+    const deploy = (source: string) =>
+      request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, { functions: [{ name: "env-reader", source }] })
+    await deploy("export default 1")
+    docker.calls.length = 0
+    assert.equal((await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "API_KEY", value: "new" })).status, 200)
+    assert.equal((await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/API_KEY`)).status, 200)
+    writeFileSync(join(projectDir, "functions", ".env.local"), "SHARED=1\n")
+    writeFileSync(join(projectDir, "functions", ".env.env-reader.local"), "OWN=1\n")
+    await deploy("export default 1")
+    assert.deepEqual(docker.calls.filter((args) => args[0] === "restart"), [])
+    await deploy("export default 2")
+    assert.deepEqual(docker.calls.filter((args) => args[0] === "restart").length, 1)
   })
 
   // Review: the worker reads this file (SUPATYPE_FUNCTION_ENV_FILE), so it must be a map of names
@@ -131,20 +145,21 @@ describe("functions routes", () => {
     assert.match(String(dataOf(res.json)["warning"]), /Cannot connect to the Docker daemon/)
   })
 
-  test("env unset answers 502 with the reason when the worker cannot be restarted", async () => {
+  test("env unset answers 502 with the reason when a stopped worker cannot be started", async () => {
     await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "K2", value: "v" })
+    docker.exited = true
     docker.restartStatus = 1
     docker.restartSays = "Error response from daemon: no such container"
     const res = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/K2`)
     docker.restartStatus = 0
+    docker.exited = false
     assert.equal(res.status, 502)
     assert.match(String(res.json["message"]), /no such container/)
   })
 
   test("env unset of a key not set still makes a restart owed by one that failed", async () => {
-    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "K3", value: "v" })
     docker.restartStatus = 1
-    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "K3", value: "w" })
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, { functions: [{ name: "owed", source: "export default 3" }] })
     docker.restartStatus = 0
     docker.calls.length = 0
     const res = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/NEVER_SET`)

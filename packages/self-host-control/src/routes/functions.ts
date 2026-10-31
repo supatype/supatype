@@ -96,7 +96,8 @@ export function registerFunctionRoutes(
   })
 
   // `supatype functions env unset` on a self-host link: refused until now, since there was no route.
-  // A key not set changes nothing, so the worker is restarted for it only when it is stale anyway.
+  // An env change restarts nothing, since the worker reads the file on each call (worker.ts); the
+  // worker is still started if it stopped, or restarted for a restart a failed deploy owes.
   route(routes, "DELETE", "/projects/:ref/functions/env/:key", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const key = decodedParam(ctx.params["key"]!)
