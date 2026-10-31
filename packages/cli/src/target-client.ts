@@ -89,21 +89,41 @@ function bodyString(json: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined
 }
 
-async function fetchOnce(url: string, opts: TargetFetchOptions, token: string): Promise<FetchAnswer> {
+/** One request with `token`, its body unread. */
+function send(url: string, opts: TargetFetchOptions, token: string): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
   }
   if (opts.orgId) headers["X-Org-Id"] = opts.orgId
   if (opts.environment) headers["X-Supatype-Environment"] = opts.environment
-
-  const res = await fetch(url, {
+  return fetch(url, {
     method: opts.method,
     headers,
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
   })
+}
+
+/** A response's status and body, read whole. */
+async function answerOf(res: Response): Promise<FetchAnswer> {
   const text = await res.text().catch(() => "")
   return { ok: res.ok, status: res.status, statusText: res.statusText, text, json: parsedBody(text) }
+}
+
+/**
+ * The accepted response to a request, its body unread. A session that expired is renewed once and
+ * the request sent again, when the target can renew it; a refusal throws, saying why.
+ */
+async function acceptedResponse(url: string, opts: TargetFetchOptions): Promise<Response> {
+  let res = await send(url, opts, opts.token)
+  if (res.ok) return res
+  let answer = await answerOf(res)
+  if (opts.authRefresh && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
+    res = await send(url, opts, await refreshAccessToken(opts.authRefresh))
+    if (res.ok) return res
+    answer = await answerOf(res)
+  }
+  throw refusal(answer, url, opts)
 }
 
 /**
@@ -144,14 +164,23 @@ export async function targetFetch(
   guard: Guard<unknown> = isUnknown,
 ): Promise<unknown> {
   const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
-  let result = await fetchOnce(url, opts, opts.token)
-  const reason = bodyReason(result.json)
-  if (!result.ok && opts.authRefresh && isAuthExpiry(result.status, bodyString(result.json, "code"), reason)) {
-    result = await fetchOnce(url, opts, await refreshAccessToken(opts.authRefresh))
-  }
-  if (!result.ok) throw refusal(result, url, opts)
-
+  const result = await answerOf(await acceptedResponse(url, opts))
   const answer = isJsonObject(result.json) && result.json["data"] !== undefined ? result.json["data"] : result.json
   if (!guard(answer)) throw new Error(`Unexpected response from ${url} (HTTP ${result.status})`)
   return answer
+}
+
+/**
+ * A request whose answer is a stream, such as a live log tail: the body as it arrives. The request
+ * is made, renewed and refused as `targetFetch` does, so a refusal says the same things.
+ */
+export async function targetStream(
+  baseUrl: string,
+  apiPrefix: "/api/v1" | "/platform/v1" | "/admin/v1",
+  opts: TargetFetchOptions,
+): Promise<ReadableStream<Uint8Array>> {
+  const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
+  const res = await acceptedResponse(url, opts)
+  if (res.body === null) throw new Error(`${url} answered with no body to stream`)
+  return res.body
 }

@@ -1,5 +1,5 @@
 import type { Command } from "commander"
-import { errorMessage, responseFailureText } from "../error-message.js"
+import { errorMessage } from "../error-message.js"
 import {
   existsSync,
   mkdirSync,
@@ -30,10 +30,9 @@ import {
 } from "../functions-worker-files.js"
 import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
 import { loadProjectLink } from "../link.js"
-import { resolveCloudAccessToken } from "../cloud-credentials.js"
-import { resolveTarget } from "../resolve-target.js"
-import { targetFetch } from "../target-client.js"
-import { isArrayOf, isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
+import { projectRequest, resolveTarget, targetFunctions, type DeployTarget } from "../resolve-target.js"
+import { targetFetch, targetStream } from "../target-client.js"
+import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, type Guard } from "@supatype/shared"
 import {
   ensureFunctionsDenoTypes,
   sharedFunctionsReadmeSource,
@@ -402,11 +401,12 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
     return
   }
 
-  // Ended outside the target's lookup, whose failure falls through to the other paths: a failed
-  // deploy must not be taken for one, and deployed again another way.
-  const target = linkedDeployTarget(cwd, opts.env)
+  // Ended outside the target's lookup: a failed deploy must not be taken for one, and deployed
+  // again another way.
+  const target = linkedTarget(cwd, opts.env)
   if (target !== null) {
     finishDeploy(fns.length, await deployViaTarget(cwd, target, fns))
+    info(`Invoke: ${targetFunctions(target).invokeBase}/<name>`)
     return
   }
 
@@ -415,8 +415,8 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
     deploySelfHosted(cwd, resolveFunctionsDir(cwd, "read"), fns, FUNCTIONS_WORKER_RESTART_COMMAND)
     return
   }
-
-  await deployCloud(cwd, fns, opts.env)
+  error(NOT_LINKED)
+  process.exit(1)
 }
 
 /**
@@ -445,35 +445,54 @@ function deploySelfHosted(
   plain("\nKong → supatype-server → functions-worker (per-project worker).")
 }
 
-/** The linked project's target, when it has a token to deploy with; null to deploy another way. */
-function linkedDeployTarget(cwd: string, env: string | undefined): ReturnType<typeof resolveTarget> | null {
+/**
+ * The linked project's target, or null when the project is not linked. A link that cannot be used,
+ * with no session or an environment that is not linked, ends the command and says why: it is never
+ * taken for no link, which would send the work somewhere else.
+ */
+function linkedTarget(cwd: string, env: string | undefined): DeployTarget | null {
   if (!loadProjectLink(cwd)) return null
+  let target: DeployTarget
   try {
-    const target = resolveTarget(cwd, { env })
-    return target.mode !== "direct" && target.token ? target : null
-  } catch {
-    return null
+    target = resolveTarget(cwd, { env })
+  } catch (err) {
+    error(errorMessage(err))
+    process.exit(1)
+  }
+  if (!target.token) {
+    error(NOT_LOGGED_IN)
+    process.exit(1)
+  }
+  return target
+}
+
+/** {@link linkedTarget}, ending the command when the project is not linked. */
+function requireLinkedTarget(cwd: string): DeployTarget {
+  const target = linkedTarget(cwd, undefined)
+  if (target === null) {
+    error(NOT_LINKED)
+    process.exit(1)
+  }
+  return target
+}
+
+/** Asks `target` for `subpath` of its project, ending the command with `what` and the reason when it fails. */
+async function askTarget<T>(target: DeployTarget, what: string, method: string, subpath: string, guard: Guard<T>, body?: unknown): Promise<T> {
+  try {
+    return await targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, method, subpath, body), guard)
+  } catch (err) {
+    error(`${what}: ${errorMessage(err)}`)
+    process.exit(1)
   }
 }
 
 /** Deploys through the linked target, saying how each went. Returns the names that failed. */
-async function deployViaTarget(
-  cwd: string,
-  target: ReturnType<typeof resolveTarget>,
-  fns: DiscoveredFunctionRoute[],
-): Promise<string[]> {
+async function deployViaTarget(cwd: string, target: DeployTarget, fns: DiscoveredFunctionRoute[]): Promise<string[]> {
   info(`Deploying to ${target.mode} project: ${target.projectRef} (${target.environment})`)
   plain()
   const serviceRole = serviceRoleRoutesFor(cwd)
   return deployEach(fns, async (fn, source) => {
-    await targetFetch(target.apiBaseUrl, target.apiPrefix, {
-      method: "POST",
-      path: `/projects/${target.projectRef}/functions/deploy`,
-      body: deployRequestBody(fn, source, serviceRole),
-      token: target.token!,
-      orgId: target.orgId,
-      environment: target.mode === "cloud" ? target.environment : undefined,
-    })
+    await targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "POST", "/functions/deploy", deployRequestBody(fn, source, serviceRole)))
   })
 }
 
@@ -491,37 +510,6 @@ function deployRequestBody(fn: DiscoveredFunctionRoute, source: string, serviceR
   }
 }
 
-async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: string): Promise<void> {
-  const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
-  const linked = getLinkedProject(cwd)
-
-  if (!linked) {
-    error(NOT_LINKED)
-    process.exit(1)
-  }
-
-  const token = getCloudToken(cwd)
-  if (!token) {
-    error(NOT_LOGGED_IN)
-    process.exit(1)
-  }
-
-  const apiUrl = getCloudApiUrl(cwd)
-  info(`Deploying to project: ${linked.ref}`)
-  plain()
-  const serviceRole = serviceRoleRoutesFor(cwd)
-  const failed = await deployEach(fns, async (fn, source) => {
-    const res = await fetch(`${apiUrl}/api/v1/projects/${linked.ref}/functions/deploy`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Org-Id": linked.orgId ?? "" },
-      body: JSON.stringify(deployRequestBody(fn, source, serviceRole)),
-      signal: AbortSignal.timeout(60_000),
-    })
-    if (!res.ok) throw new Error(await responseFailureText(res))
-  })
-  finishDeploy(fns.length, failed)
-  info(`Invoke: https://${linked.ref}.supatype.dev/functions/v1/<name>`)
-}
 
 /** Deploys each function with `deployOne`, saying how each went. Returns the names that failed. */
 async function deployEach(
@@ -568,21 +556,17 @@ export function serviceRoleRoutesFor(cwd: string): string[] | undefined {
 }
 
 /** `GET /functions`: each deployed function, with its last day's use. */
-const isDeployedFunctions = isShape({
-  data: isArrayOf(
-    isShape({
-      name: isString,
-      deployedAt: optional(nullable(isString)),
-      invocations24h: optional(nullable(isNumber)),
-      avgDurationMs: optional(nullable(isNumber)),
-    }),
-  ),
-})
+const isDeployedFunctions = isArrayOf(
+  isShape({
+    name: isString,
+    deployedAt: optional(nullable(isString)),
+    invocations24h: optional(nullable(isNumber)),
+    avgDurationMs: optional(nullable(isNumber)),
+  }),
+)
 
 /** `GET /functions/:name/logs`: the newest entries first. */
-const isFunctionLogs = isShape({
-  data: isArrayOf(isShape({ timestamp: isString, level: isString, message: optional(nullable(isString)) })),
-})
+const isFunctionLogs = isArrayOf(isShape({ timestamp: isString, level: isString, message: optional(nullable(isString)) }))
 
 function readFunctionSource(fn: DiscoveredFunctionRoute): string {
   const stat = statSync(fn.path)
@@ -605,134 +589,68 @@ function readFunctionSource(fn: DiscoveredFunctionRoute): string {
 // ─── List ────────────────────────────────────────────────────────────────────
 
 async function listFunctions(cwd: string): Promise<void> {
-  const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
-  const linked = getLinkedProject(cwd)
-
-  if (!linked) {
-    // Show local functions instead
-    const fns = discoverFunctions(cwd)
-    if (fns.length === 0) {
-      info("No functions found locally or remotely.")
-      return
-    }
-    plain("Local functions (not linked to a cloud project):\n")
-    for (const fn of fns) {
-      plain(`  ${fn.name.padEnd(30)} ${relative(cwd, fn.entrypoint)}`)
-    }
+  const target = linkedTarget(cwd, undefined)
+  if (target === null) return listLocalFunctions(cwd)
+  const data = await askTarget(target, "Failed to list functions", "GET", "/functions", isDeployedFunctions)
+  if (data.length === 0) {
+    info("No deployed functions.")
     return
   }
-
-  const token = getCloudToken(cwd)
-  if (!token) {
-    error(NOT_LOGGED_IN)
-    process.exit(1)
+  plain("Deployed functions:\n")
+  plain(`  ${"Name".padEnd(28)} ${"Last Deployed".padEnd(24)} ${"Invocations (24h)".padEnd(20)} Avg Duration`)
+  plain(`  ${"─".repeat(28)} ${"─".repeat(24)} ${"─".repeat(20)} ${"─".repeat(12)}`)
+  for (const fn of data) {
+    const deployed = fn.deployedAt ? new Date(fn.deployedAt).toLocaleString() : "-"
+    plain(`  ${fn.name.padEnd(28)} ${deployed.padEnd(24)} ${String(fn.invocations24h ?? 0).padEnd(20)} ${fn.avgDurationMs ?? 0}ms`)
   }
+}
 
-  try {
-    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Org-Id": linked.orgId ?? "",
-      },
-      signal: AbortSignal.timeout(10_000),
-    })
-
-    if (!res.ok) {
-      error(`Failed to list functions: ${await responseFailureText(res)}`)
-      process.exit(1)
-    }
-
-    const { data } = await readJson(res, isDeployedFunctions)
-
-    if (data.length === 0) {
-      info("No deployed functions.")
-      return
-    }
-
-    plain("Deployed functions:\n")
-    plain(`  ${"Name".padEnd(28)} ${"Last Deployed".padEnd(24)} ${"Invocations (24h)".padEnd(20)} Avg Duration`)
-    plain(`  ${"─".repeat(28)} ${"─".repeat(24)} ${"─".repeat(20)} ${"─".repeat(12)}`)
-
-    for (const fn of data) {
-      const deployed = fn.deployedAt ? new Date(fn.deployedAt).toLocaleString() : "-"
-      plain(
-        `  ${fn.name.padEnd(28)} ${deployed.padEnd(24)} ${String(fn.invocations24h ?? 0).padEnd(20)} ${fn.avgDurationMs ?? 0}ms`,
-      )
-    }
-  } catch (err) {
-    error(`Error: ${errorMessage(err)}`)
-    process.exit(1)
+/** The functions on disk, for a project that is not linked. */
+function listLocalFunctions(cwd: string): void {
+  const fns = discoverFunctions(cwd)
+  if (fns.length === 0) {
+    info("No functions found locally or remotely.")
+    return
   }
+  plain("Local functions (not linked to a project):\n")
+  for (const fn of fns) plain(`  ${fn.name.padEnd(30)} ${relative(cwd, fn.entrypoint)}`)
 }
 
 // ─── Delete ──────────────────────────────────────────────────────────────────
 
 async function deleteFunction(cwd: string, name: string): Promise<void> {
-  const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
-  const linked = getLinkedProject(cwd)
-
-  if (!linked) {
-    error(NOT_LINKED)
-    process.exit(1)
-  }
-
-  const token = getCloudToken(cwd)
-  if (!token) {
-    error(NOT_LOGGED_IN)
-    process.exit(1)
-  }
-
-  try {
-    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/${name}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Org-Id": linked.orgId ?? "",
-      },
-      signal: AbortSignal.timeout(10_000),
-    })
-
-    if (!res.ok) {
-      const reason = await responseFailureText(res)
-      error(`Failed to delete "${name}": ${reason}`)
-      process.exit(1)
-    }
-
-    info(`Function "${name}" deleted. It will return 404 immediately.`)
-  } catch (err) {
-    error(`Error: ${errorMessage(err)}`)
-    process.exit(1)
-  }
+  const target = requireLinkedTarget(cwd)
+  await askTarget(target, `Failed to delete "${name}"`, "DELETE", `/functions/${encodeURIComponent(name)}`, isUnknown)
+  info(`Function "${name}" deleted. It will return 404 immediately.`)
 }
 
 // ─── Logs ────────────────────────────────────────────────────────────────────
 
 /**
- * A function's logs from wherever the project is linked. A self-hosted server relays the worker's
- * live stream, so that is tailed until Ctrl+C. Supatype Cloud answers a window of past lines.
+ * A function's logs from the linked target: a window of past lines from Supatype Cloud, or the
+ * worker's live stream from a server, tailed until Ctrl+C.
  */
 async function functionLogs(cwd: string, name: string, opts: { since: string }): Promise<void> {
-  const target = linkedDeployTarget(cwd, undefined)
-  if (target && target.mode !== "cloud") return tailServerLogs(target, name)
-  return cloudFunctionLogs(cwd, name, opts)
+  const target = requireLinkedTarget(cwd)
+  if (targetFunctions(target).logs === "tail") return tailServerLogs(target, name)
+  const lines = await askTarget(
+    target, "Failed to fetch logs", "GET", `/functions/${encodeURIComponent(name)}/logs?since=${encodeURIComponent(opts.since)}`, isFunctionLogs,
+  )
+  if (lines.length === 0) info(`No logs for "${name}" in the last ${opts.since}.`)
+  for (const entry of lines) plain(formatLogLine(entry))
 }
 
 /** Tails the linked server's relay of the worker's log stream, printing `name`'s lines. */
-async function tailServerLogs(target: ReturnType<typeof resolveTarget>, name: string): Promise<void> {
-  const url = `${target.apiBaseUrl}/admin/v1/functions/logs/tail`
+async function tailServerLogs(target: DeployTarget, name: string): Promise<void> {
   info(`Tailing logs for "${name}" on ${target.apiBaseUrl}. Press Ctrl+C to stop.`)
-  let res: Response
+  let body: ReadableStream<Uint8Array>
   try {
-    res = await fetch(url, { headers: { Authorization: `Bearer ${target.token ?? ""}` } })
+    body = await targetStream(target.apiBaseUrl, "/admin/v1", { method: "GET", path: "/functions/logs/tail", token: target.token ?? "" })
   } catch (err) {
-    error(`Could not reach ${url}: ${errorMessage(err)}`)
+    error(`Failed to tail logs: ${errorMessage(err)}`)
     process.exit(1)
   }
-  if (!res.ok || res.body === null) {
-    error(`Failed to tail logs: ${await responseFailureText(res)}`)
-    process.exit(1)
-  }
-  await printLogStream(res.body, name)
+  await printLogStream(body, name)
 }
 
 /** Prints `name`'s lines from a server-sent event stream as they arrive, until it ends. */
@@ -771,52 +689,6 @@ function formatLogLine(entry: { timestamp: string; level: string; message?: stri
   return `${ts} [${entry.level.toUpperCase().padEnd(5)}] ${entry.message ?? ""}`
 }
 
-/** Supatype Cloud's window of a function's past log lines. */
-async function cloudFunctionLogs(cwd: string, name: string, opts: { since: string }): Promise<void> {
-  const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
-  const linked = getLinkedProject(cwd)
-
-  if (!linked) {
-    error(NOT_LINKED)
-    process.exit(1)
-  }
-
-  const token = getCloudToken(cwd)
-  if (!token) {
-    error(NOT_LOGGED_IN)
-    process.exit(1)
-  }
-
-  try {
-    const res = await fetch(
-      `${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/${name}/logs?since=${opts.since}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Org-Id": linked.orgId ?? "",
-        },
-        signal: AbortSignal.timeout(10_000),
-      },
-    )
-
-    if (!res.ok) {
-      error(`Failed to fetch logs: ${await responseFailureText(res)}`)
-      process.exit(1)
-    }
-
-    const { data } = await readJson(res, isFunctionLogs)
-
-    if (data.length === 0) {
-      info(`No logs for "${name}" in the last ${opts.since}.`)
-      return
-    }
-
-    for (const entry of data) plain(formatLogLine(entry))
-  } catch (err) {
-    error(`Error: ${errorMessage(err)}`)
-    process.exit(1)
-  }
-}
 
 // ─── Invoke ──────────────────────────────────────────────────────────────────
 
@@ -832,16 +704,13 @@ async function invoke(
   if (opts.local) {
     url = await localUrl()
   } else {
-    const { getLinkedProject, getCloudToken } = await loadCloudHelpers()
-    const linked = getLinkedProject(cwd)
-    if (linked) {
-      url = `https://${linked.ref}.supatype.dev/functions/v1/${name}`
-      const token = getCloudToken(cwd)
-      if (token && opts.auth) {
-        headers["Authorization"] = `Bearer ${token}`
-      }
-    } else {
+    const target = linkedTarget(cwd, undefined)
+    if (target === null) {
       url = await localUrl()
+    } else {
+      const fns = targetFunctions(target)
+      url = `${fns.invokeBase}/${name}`
+      if (opts.auth && fns.invokeToken) headers["Authorization"] = `Bearer ${fns.invokeToken}`
     }
   }
 
@@ -895,65 +764,34 @@ async function invoke(
 // ─── Env management ──────────────────────────────────────────────────────────
 
 async function envList(cwd: string): Promise<void> {
-  const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
-  const linked = getLinkedProject(cwd)
-
-  if (!linked) {
-    // Show local env vars
-    const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
-    if (!existsSync(envPath)) {
-      info("No environment variables configured.")
-      return
-    }
-
-    const lines = readFileSync(envPath, "utf8").split("\n")
-    plain("Local environment variables:\n")
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith("#")) continue
-      const eqIdx = trimmed.indexOf("=")
-      if (eqIdx > 0) {
-        const key = trimmed.slice(0, eqIdx)
-        plain(`  ${key} = ••••••••`)
-      }
-    }
+  const target = linkedTarget(cwd, undefined)
+  if (target === null) return listLocalEnv(cwd)
+  const listed = await askTarget(target, "Failed to list env vars", "GET", "/functions/env", isEnvListing)
+  // Cloud lists the names; a self-hosted server answers the names with their values.
+  const keys = Array.isArray(listed) ? listed : Object.keys(listed)
+  if (keys.length === 0) {
+    info("No environment variables set.")
     return
   }
+  plain("Environment variables (values masked):\n")
+  for (const key of keys) plain(`  ${key} = ••••••••`)
+}
 
-  const token = getCloudToken(cwd)
-  if (!token) {
-    error(NOT_LOGGED_IN)
-    process.exit(1)
+const isEnvListing = (value: unknown): value is string[] | Record<string, unknown> =>
+  isArrayOf(isString)(value) || isJsonObject(value)
+
+/** The variables in the functions' local env file, for a project that is not linked. */
+function listLocalEnv(cwd: string): void {
+  const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
+  if (!existsSync(envPath)) {
+    info("No environment variables configured.")
+    return
   }
-
-  try {
-    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/env`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Org-Id": linked.orgId ?? "",
-      },
-      signal: AbortSignal.timeout(10_000),
-    })
-
-    if (!res.ok) {
-      error(`Failed to list env vars: ${await responseFailureText(res)}`)
-      process.exit(1)
-    }
-
-    const { data } = await readJson(res, isShape({ data: isArrayOf(isString) }))
-
-    if (data.length === 0) {
-      info("No environment variables set.")
-      return
-    }
-
-    plain("Environment variables (values masked):\n")
-    for (const key of data) {
-      plain(`  ${key} = ••••••••`)
-    }
-  } catch (err) {
-    error(`Error: ${errorMessage(err)}`)
-    process.exit(1)
+  plain("Local environment variables:\n")
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const trimmed = line.trim()
+    const eqIdx = trimmed.indexOf("=")
+    if (trimmed && !trimmed.startsWith("#") && eqIdx > 0) plain(`  ${trimmed.slice(0, eqIdx)} = ••••••••`)
   }
 }
 
@@ -963,146 +801,40 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
     error("Invalid format. Use: npx supatype functions env set KEY=value")
     process.exit(1)
   }
-
   const key = keyvalue.slice(0, eqIdx)
   const value = keyvalue.slice(eqIdx + 1)
+  const target = linkedTarget(cwd, undefined)
+  if (target === null) return setLocalEnv(cwd, key, value)
+  await askTarget(target, "Failed to set env var", "POST", "/functions/env", isUnknown, { key, value })
+  info(`Set ${key} for project ${target.projectRef}.`)
+}
 
-  const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
-  const linked = getLinkedProject(cwd)
-
-  if (!linked) {
-    // Set in local env file
-    const envPath = resolve(resolveFunctionsDir(cwd, "write"), ENV_LOCAL)
-    let content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-
-    // Replace existing or append
-    const regex = new RegExp(`^${key}=.*$`, "m")
-    if (regex.test(content)) {
-      content = content.replace(regex, `${key}=${value}`)
-    } else {
-      content = content.trimEnd() + `\n${key}=${value}\n`
-    }
-
-    writeFileSync(envPath, content, "utf8")
-    info(`Set ${key} in local env file.`)
-    return
-  }
-
-  const token = getCloudToken(cwd)
-  if (!token) {
-    error(NOT_LOGGED_IN)
-    process.exit(1)
-  }
-
-  try {
-    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/env`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "X-Org-Id": linked.orgId ?? "",
-      },
-      body: JSON.stringify({ key, value }),
-      signal: AbortSignal.timeout(10_000),
-    })
-
-    if (!res.ok) {
-      const reason = await responseFailureText(res)
-      error(`Failed to set env var: ${reason}`)
-      process.exit(1)
-    }
-
-    info(`Set ${key} for project ${linked.ref}.`)
-  } catch (err) {
-    error(`Error: ${errorMessage(err)}`)
-    process.exit(1)
-  }
+/** Sets `key` in the functions' local env file, replacing its line or adding one. */
+function setLocalEnv(cwd: string, key: string, value: string): void {
+  const envPath = resolve(resolveFunctionsDir(cwd, "write"), ENV_LOCAL)
+  let content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
+  const regex = new RegExp(`^${key}=.*$`, "m")
+  content = regex.test(content) ? content.replace(regex, `${key}=${value}`) : content.trimEnd() + `\n${key}=${value}\n`
+  writeFileSync(envPath, content, "utf8")
+  info(`Set ${key} in local env file.`)
 }
 
 async function envUnset(cwd: string, key: string): Promise<void> {
-  const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
-  const linked = getLinkedProject(cwd)
-
-  if (!linked) {
-    const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
-    if (!existsSync(envPath)) {
-      error("No local env file found.")
-      process.exit(1)
-    }
-
-    let content = readFileSync(envPath, "utf8")
-    const regex = new RegExp(`^${key}=.*\n?`, "m")
-    content = content.replace(regex, "")
-    writeFileSync(envPath, content, "utf8")
-    info(`Removed ${key} from local env file.`)
-    return
-  }
-
-  const token = getCloudToken(cwd)
-  if (!token) {
-    error(NOT_LOGGED_IN)
-    process.exit(1)
-  }
-
-  try {
-    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/env/${key}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Org-Id": linked.orgId ?? "",
-      },
-      signal: AbortSignal.timeout(10_000),
-    })
-
-    if (!res.ok) {
-      const reason = await responseFailureText(res)
-      error(`Failed to unset env var: ${reason}`)
-      process.exit(1)
-    }
-
-    info(`Removed ${key} for project ${linked.ref}.`)
-  } catch (err) {
-    error(`Error: ${errorMessage(err)}`)
-    process.exit(1)
-  }
+  const target = linkedTarget(cwd, undefined)
+  if (target === null) return unsetLocalEnv(cwd, key)
+  await askTarget(target, "Failed to unset env var", "DELETE", `/functions/env/${encodeURIComponent(key)}`, isUnknown)
+  info(`Removed ${key} for project ${target.projectRef}.`)
 }
 
-// ─── Cloud helpers (lazy loaded) ─────────────────────────────────────────────
-
-interface CloudHelpers {
-  getLinkedProject(cwd: string): { ref: string; orgId?: string | undefined; kind?: string } | null
-  getCloudToken(cwd: string): string | null
-  getCloudApiUrl(cwd: string): string
-}
-
-async function loadCloudHelpers(): Promise<CloudHelpers> {
-  return {
-  getLinkedProject(cwd: string): { ref: string; orgId?: string | undefined; kind?: string } | null {
-      const link = loadProjectLink(cwd)
-      if (!link?.projectRef) return null
-      return {
-        ref: link.projectRef,
-        kind: link.kind,
-        ...(link.orgId !== undefined ? { orgId: link.orgId } : {}),
-      }
-    },
-
-    getCloudToken(cwd: string): string | null {
-      if (process.env["SUPATYPE_ACCESS_TOKEN"]) {
-        return process.env["SUPATYPE_ACCESS_TOKEN"]
-      }
-      // The link's own token, else the session `supatype login` saved. This used to read
-      // ~/.supatype/token, which nothing writes, so a fresh login still read as logged out.
-      const link = loadProjectLink(cwd)
-      return link === null ? null : resolveCloudAccessToken(link) ?? null
-    },
-
-    getCloudApiUrl(cwd: string): string {
-      const link = loadProjectLink(cwd)
-      if (link?.cloudApiUrl) return link.cloudApiUrl
-      return process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
-    },
+/** Removes `key` from the functions' local env file. */
+function unsetLocalEnv(cwd: string, key: string): void {
+  const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
+  if (!existsSync(envPath)) {
+    error("No local env file found.")
+    process.exit(1)
   }
+  writeFileSync(envPath, readFileSync(envPath, "utf8").replace(new RegExp(`^${key}=.*\n?`, "m"), ""), "utf8")
+  info(`Removed ${key} from local env file.`)
 }
 
 /**

@@ -11,14 +11,13 @@
  * the server's environment is fixed at spawn, so a project with neither directory when dev started
  * used to need `supatype dev` restarted for its first one (local test round 3d, N19).
  */
-import { existsSync, watch as fsWatch } from "node:fs"
-import { basename, dirname } from "node:path"
+import { createHash } from "node:crypto"
+import { existsSync, readFileSync, watch as fsWatch } from "node:fs"
+import { basename, dirname, join } from "node:path"
+import { debounce } from "./debounce.js"
 import { errorMessage } from "./error-message.js"
 import { localWorkerRoutes, writeDevFunctionsEntry, writeServiceRoleRoutesFile } from "./functions-worker-files.js"
 import type { WatchFn } from "./dev-functions-watch.js"
-
-/** Windows fires several events per save; one rewrite covers them all. */
-const DEBOUNCE_MS = 300
 
 /** Native dev's worker: the project it serves and the worker main.ts its entry imports. */
 export interface NativeFunctionsTarget {
@@ -34,16 +33,35 @@ export interface NativeFunctionsTarget {
  * rewrote, and null when nothing changed or the directories could not be read as handlers.
  */
 export function refreshNativeFunctionsEntry(target: NativeFunctionsTarget, known: readonly string[]): string[] | null {
+  return refreshIfChanged(
+    () => localWorkerRoutes(target.functionsDir, target.hooksDir),
+    (routes) => writeDevFunctionsEntry(target.cwd, routes, target.workerMain),
+    "Functions",
+    known,
+  )
+}
+
+/**
+ * Reads a list and, when it differs from `known`, applies it, saying so. Returns the list now in
+ * force, or null when nothing changed or it could not be read or applied. It runs from a watcher's
+ * timer, where a throw would end `supatype dev`, so a failure is a warning.
+ */
+function refreshIfChanged(
+  read: () => string[],
+  apply: (routes: string[]) => void,
+  label: string,
+  known: readonly string[],
+): string[] | null {
   let routes: string[]
   try {
-    routes = localWorkerRoutes(target.functionsDir, target.hooksDir)
+    routes = read()
     if (routes.join("\n") === known.join("\n")) return null
-    writeDevFunctionsEntry(target.cwd, routes, target.workerMain)
+    apply(routes)
   } catch (err) {
-    console.warn(`[supatype] Could not reload the functions worker: ${errorMessage(err)}`)
+    console.warn(`[supatype] Could not reload the functions worker for a ${label} change: ${errorMessage(err)}`)
     return null
   }
-  console.log(`[supatype] Functions changed (${routes.join(", ")}); Deno reloads the worker.`)
+  console.log(`[supatype] ${label} changed (${routes.join(", ") || "none"}); Deno reloads the worker.`)
   return routes
 }
 
@@ -58,25 +76,18 @@ export function watchNativeFunctions(
   watch: WatchFn = fsWatch,
 ): { close: () => void; refresh: () => void; reload: () => void } {
   let known = [...initial]
-  let timer: ReturnType<typeof setTimeout> | null = null
   const refresh = (): void => {
     known = refreshNativeFunctionsEntry(target, known) ?? known
   }
-  const onChange = (): void => {
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
-      timer = null
-      refresh()
-    }, DEBOUNCE_MS)
-  }
+  const onChange = debounce(refresh)
   const dirs = [target.functionsDir, target.hooksDir].filter((dir): dir is string => dir !== undefined)
-  const watchers = watchDirsAsMade(dirs, onChange, watch)
+  const watchers = watchDirsAsMade(dirs, onChange.trigger, watch)
   return {
     refresh,
     // The entry written again as it is: Deno's --watch restarts the worker, which re-reads its files.
     reload: () => writeDevFunctionsEntry(target.cwd, known, target.workerMain),
     close: () => {
-      if (timer) clearTimeout(timer)
+      onChange.cancel()
       for (const watcher of watchers) watcher.close()
     },
   }
@@ -120,40 +131,55 @@ export interface ServiceRoleRoutesTarget {
  * change waited, silently, for `supatype dev` to be restarted.
  */
 export function refreshServiceRoleRoutes(target: ServiceRoleRoutesTarget, known: readonly string[]): string[] | null {
-  let routes: string[]
-  try {
-    routes = target.readRoutes()
-  } catch (err) {
-    console.warn(`[supatype] Could not read functions.serviceRole: ${errorMessage(err)}`)
-    return null
+  const apply = (routes: string[]): void => {
+    writeServiceRoleRoutesFile(target.routesPath, routes)
+    target.reload()
   }
-  if (routes.join(",") === known.join(",")) return null
-  writeServiceRoleRoutesFile(target.routesPath, routes)
-  target.reload()
-  console.log(`[supatype] functions.serviceRole changed (${routes.join(", ") || "none"}); Deno reloads the worker.`)
-  return routes
+  return refreshIfChanged(target.readRoutes, apply, "functions.serviceRole", known)
+}
+
+/** The project's config watched for a `functions.serviceRole` change. */
+export interface ServiceRoleRoutesWatch extends ServiceRoleRoutesTarget {
+  /** The project directory, which holds the config. */
+  dir: string
+  /** The names the config may have in `dir`. */
+  configFiles: readonly string[]
+  /** `functions.serviceRole` as the worker was started with. */
+  initial: readonly string[]
 }
 
 /**
- * Watches `dir` for a change to any of `configFiles` (the directory, as editors replace the file) and
- * applies a `functions.serviceRole` change.
+ * Watches `opts.dir` for a change to any of its config files (the directory, as editors replace the
+ * file) and applies a `functions.serviceRole` change. The config is loaded again only when a file's
+ * bytes changed: loading runs the config, and a save of the same text, or an editor touching the
+ * file, changed nothing.
  */
-export function watchServiceRoleRoutes(
-  dir: string,
-  configFiles: readonly string[],
-  target: ServiceRoleRoutesTarget,
-  initial: readonly string[],
-  watch: WatchFn = fsWatch,
-): { close: () => void } {
-  let known = [...initial]
-  let timer: ReturnType<typeof setTimeout> | null = null
-  const watcher = watch(dir, { recursive: false }, (_event, filename) => {
-    if (typeof filename !== "string" || !configFiles.includes(filename)) return
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
-      timer = null
-      known = refreshServiceRoleRoutes(target, known) ?? known
-    }, DEBOUNCE_MS)
+export function watchServiceRoleRoutes(opts: ServiceRoleRoutesWatch, watch: WatchFn = fsWatch): { close: () => void } {
+  let known = [...opts.initial]
+  let snapshot = configSnapshot(opts.dir, opts.configFiles)
+  const onChange = debounce(() => {
+    const now = configSnapshot(opts.dir, opts.configFiles)
+    if (now !== null && now === snapshot) return
+    snapshot = now
+    known = refreshServiceRoleRoutes(opts, known) ?? known
   })
-  return { close: () => { if (timer) clearTimeout(timer); watcher.close() } }
+  const watcher = watch(opts.dir, { recursive: false }, (_event, filename) => {
+    if (typeof filename === "string" && opts.configFiles.includes(filename)) onChange.trigger()
+  })
+  return { close: () => { onChange.cancel(); watcher.close() } }
+}
+
+/**
+ * A hash of each config file's bytes, empty for one not there, or null when one could not be read
+ * (an editor mid-replace): then the config is loaded, which says what is wrong if anything is.
+ */
+function configSnapshot(dir: string, configFiles: readonly string[]): string | null {
+  try {
+    return configFiles
+      .map((file) => join(dir, file))
+      .map((path) => (existsSync(path) ? createHash("sha256").update(readFileSync(path)).digest("hex") : ""))
+      .join(",")
+  } catch {
+    return null
+  }
 }

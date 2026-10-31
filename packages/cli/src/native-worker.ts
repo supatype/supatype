@@ -14,6 +14,7 @@
  * at rest, ready in about half a second, and Deno downloaded once on a project's first dev.
  */
 import { relative } from "node:path"
+import { cachedVersionOf } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
 import { errorMessage } from "./error-message.js"
 import { installFunctionsWorker, localWorkerRoutesOrExit, writeDevFunctionsEntry } from "./functions-worker-files.js"
@@ -49,12 +50,25 @@ export async function prepareNativeWorker(cwd: string, config: SupatypeProjectCo
   return { functionsDir, hooksDir, workerMain, entry, routes, denoBin }
 }
 
-/** Deno, fetched on first use, or undefined, said why, when it cannot be. */
+/**
+ * What the server is told about Deno. Unset, its default is `deno` from PATH, so a dev whose Deno
+ * could not be provisioned ran another one while its routes said functions were off (local test
+ * round 5, N25). Empty runs none.
+ */
+export function nativeWorkerDenoEnv(worker: Pick<NativeWorker, "denoBin">): { SUPATYPE_DENO_PATH: string } {
+  return { SUPATYPE_DENO_PATH: worker.denoBin ?? "" }
+}
+
+/**
+ * Deno, fetched on first use, or undefined, said why, when it cannot be. Its version is read from
+ * the binary found: asking the CDN for it again, when the cached one was found because the CDN
+ * failed, turned functions off (N25).
+ */
 async function provisionDeno(config: SupatypeProjectConfig): Promise<string | undefined> {
   try {
     const denoBin = await ensureBinary("deno", config)
-    const version = await (await import("./binary-cache.js")).resolveVersionFor("deno", config)
-    console.log(`[supatype] Deno runtime: ${denoBin} (v${version})`)
+    const version = cachedVersionOf("deno", denoBin)
+    console.log(`[supatype] Deno runtime: ${denoBin}${version !== undefined ? ` (v${version})` : ""}`)
     return denoBin
   } catch (err) {
     console.warn(

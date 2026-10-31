@@ -5,7 +5,7 @@ import { withDatabaseRetry } from "./db-retry.js"
 import * as bucketRoutes from "./routes/buckets.js"
 import * as objectRoutes from "./routes/objects.js"
 import { getDefaultCorsHeaders } from "./middleware/cors.js"
-import { shapeMismatches, type Guard, type Shape } from "./json.js"
+import { isShape, shapeMismatches, type FromShape, type Shape } from "./json.js"
 
 export interface RequestContext {
   req: IncomingMessage
@@ -237,10 +237,10 @@ export class InvalidBody extends Error {
 }
 
 /**
- * The request's JSON body when the guard accepts it; an `InvalidBody` when it is not JSON or not that.
- * Given the guard's `shape`, the refusal names the fields whose type it cannot read.
+ * The request's JSON body when it has `shape`; an `InvalidBody` when it is not JSON or not that,
+ * naming the fields whose type does not match.
  */
-export async function readJson<T>(req: IncomingMessage, guard: Guard<T>, shape?: Shape): Promise<T> {
+export async function readShapedJson<S extends Shape>(req: IncomingMessage, shape: S): Promise<FromShape<S>> {
   const text = (await readBody(req)).toString("utf8")
   let body: unknown
   try {
@@ -248,8 +248,8 @@ export async function readJson<T>(req: IncomingMessage, guard: Guard<T>, shape?:
   } catch {
     throw new InvalidBody("The request body must be JSON")
   }
-  if (guard(body)) return body
-  const fields = shape === undefined ? [] : shapeMismatches(shape, body)
+  if (isShape(shape)(body)) return body
+  const fields = shapeMismatches(shape, body)
   throw new InvalidBody(
     fields.length > 0
       ? `The request body's ${fields.join(", ")} ${fields.length === 1 ? "does" : "do"} not have the type this route reads`

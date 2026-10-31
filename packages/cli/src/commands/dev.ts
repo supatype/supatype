@@ -53,7 +53,7 @@ import {
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
-import { devServiceRoleRoutesPath, functionsWorkerEnv, writeDevServiceRoleRoutes } from "../functions-worker-files.js"
+import { devServiceRoleRoutesPath, functionsWorkerEnv, writeServiceRoleRoutesFile } from "../functions-worker-files.js"
 import { devServiceRoleKeyPath } from "../service-role-key-file.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
@@ -106,7 +106,7 @@ import {
   waitForDevShutdown,
 } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
-import { prepareNativeWorker } from "../native-worker.js"
+import { nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { extractArchive } from "../archive-extract.js"
@@ -515,6 +515,9 @@ export function registerDev(program: Command): void {
       // What an env("NAME") in auth.providers resolves against: the shell over .env, as for the config.
       const providerEnvironment = { ...dotEnv, ...process.env }
       warnMissingAuthProviderSecrets(config, providerEnvironment)
+      // functions.serviceRole as the worker starts with it; the config watch below keeps it current.
+      const serviceRole = { routesPath: devServiceRoleRoutesPath(cwd), initial: serviceRoleRoutes(config) }
+      writeServiceRoleRoutesFile(serviceRole.routesPath, serviceRole.initial)
       const serverEnv: Record<string, string> = {
         ...nativeServerCoreEnv({
           mode: config.server.mode ?? "dev",
@@ -527,7 +530,7 @@ export function registerDev(program: Command): void {
           databaseUrl: dbURL,
         }),
         SUPATYPE_DENO_FUNCTIONS_DIR: worker.functionsDir,
-        ...(worker.denoBin !== undefined ? { SUPATYPE_DENO_PATH: worker.denoBin } : {}),
+        ...nativeWorkerDenoEnv(worker),
         SUPATYPE_DENO_SERVE_SCRIPT: worker.entry,
         // The server passes its environment on to Deno: the worker's, as compose gives the image,
         // functions.serviceRole included, so a function relying on the key unlisted fails here first.
@@ -535,7 +538,7 @@ export function registerDev(program: Command): void {
         // The server reaches the worker on 127.0.0.1; nothing else on the network should.
         SUPATYPE_FUNCTIONS_HOST: "127.0.0.1",
         // Read again on every reload, so a functions.serviceRole change applies without a restart.
-        SUPATYPE_SERVICE_ROLE_ROUTES_FILE: writeDevServiceRoleRoutes(cwd, config),
+        SUPATYPE_SERVICE_ROLE_ROUTES_FILE: serviceRole.routesPath,
         SUPATYPE_URL: `http://localhost:${serverPort}`,
         // Natively the server is the gateway, so the address functions call is the one a browser
         // opens. The server passes its environment on to the Deno child that runs them.
@@ -712,11 +715,13 @@ export function registerDev(program: Command): void {
         const { watchNativeFunctions, watchServiceRoleRoutes } = await import("../native-functions-watch.js")
         const { functionsDir, hooksDir, workerMain, routes } = worker
         const functionsWatch = watchNativeFunctions({ cwd, functionsDir, hooksDir, workerMain }, routes)
-        watchServiceRoleRoutes(cwd, PROJECT_CONFIG_FILES, {
-          routesPath: devServiceRoleRoutesPath(cwd),
+        watchServiceRoleRoutes({
+          ...serviceRole,
+          dir: cwd,
+          configFiles: PROJECT_CONFIG_FILES,
           readRoutes: () => serviceRoleRoutes(loadConfig(cwd)),
           reload: functionsWatch.reload,
-        }, serviceRoleRoutes(config))
+        })
         const { watchDevSchema } = await import("../dev-schema-watch.js")
         watchDevSchema({
           dir: schemaDir,

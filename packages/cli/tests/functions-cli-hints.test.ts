@@ -96,15 +96,17 @@ describe("functions deploy on a self-host compose stack", () => {
 
 describe("functions commands against a cloud link", () => {
   it("names supatype login, not a cloud subcommand that does not exist", async () => {
+    writeConfig(project.dir)
     linkToCloud(project.dir)
     const run = await runCommand(registerFunctions, ["functions", "list"], project.dir)
 
     expect(run.exitCode).toBe(1)
-    expect(run.output).toContain("Not logged in. Run: supatype login")
+    expect(run.output).toContain("Run: supatype login")
     expect(run.output).not.toContain("cloud login")
   })
 
   it("uses the session supatype login saved", async () => {
+    writeConfig(project.dir)
     linkToCloud(project.dir)
     writeFileSync(
       join(fakeHome, ".supatype", "credentials.json"),

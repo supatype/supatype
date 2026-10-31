@@ -4,13 +4,29 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { projectConfig } from "./support/project-config.js"
 
-vi.mock("../src/ensure-binary.js", () => ({ ensureBinary: async () => "/cache/deno/2.2.0/deno" }))
+/** The Deno the cache holds, and whether it could be had at all. */
+const deno = vi.hoisted(() => ({ available: true }))
+vi.mock("../src/ensure-binary.js", async () => {
+  const { cacheRoot } = await import("../src/binary-cache.js")
+  const { join } = await import("node:path")
+  return {
+    ensureBinary: async () => {
+      if (!deno.available) throw new Error("no deno for this platform")
+      return join(cacheRoot(), "deno", "2.2.0", "deno")
+    },
+  }
+})
+// releases.supatype.com answering 504, as in local test round 5 (N25).
 vi.mock("../src/binary-cache.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/binary-cache.js")>()),
-  resolveVersionFor: async () => "2.2.0",
+  resolveVersionFor: async () => {
+    throw new Error("Failed to fetch latest version for deno: HTTP 504")
+  },
 }))
 
-const { prepareNativeWorker } = await import("../src/native-worker.js")
+const { cacheRoot } = await import("../src/binary-cache.js")
+const { nativeWorkerDenoEnv, prepareNativeWorker } = await import("../src/native-worker.js")
+const cachedDeno = join(cacheRoot(), "deno", "2.2.0", "deno")
 
 /**
  * Local test round 3d (N19): native dev started no functions worker in a project with no functions/
@@ -23,6 +39,7 @@ const logs: string[] = []
 
 beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), "supatype-native-worker-"))
+  deno.available = true
   logs.length = 0
   vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void logs.push(args.join(" ")))
 })
@@ -35,7 +52,7 @@ afterEach(() => {
 describe("native dev's functions worker", () => {
   it("is set up in a project with no functions and no hooks yet, on the directories it would have", async () => {
     const worker = await prepareNativeWorker(cwd, projectConfig({ provider: "native" }))
-    expect(worker).toMatchObject({ functionsDir: join(cwd, "functions"), hooksDir: join(cwd, "hooks"), routes: [], denoBin: "/cache/deno/2.2.0/deno" })
+    expect(worker).toMatchObject({ functionsDir: join(cwd, "functions"), hooksDir: join(cwd, "hooks"), routes: [], denoBin: cachedDeno })
     expect(existsSync(worker.entry)).toBe(true)
     expect(readFileSync(worker.entry, "utf8")).toContain(`import "file:///`)
     expect(logs.join("\n")).toContain("no functions or hooks yet; one added while dev runs is served")
@@ -47,5 +64,33 @@ describe("native dev's functions worker", () => {
     const worker = await prepareNativeWorker(cwd, projectConfig({ provider: "native" }))
     expect(worker.routes).toEqual(["hooks/audit"])
     expect(readFileSync(worker.entry, "utf8")).toContain("// Routes: hooks/audit")
+  })
+})
+
+/**
+ * Local test round 5 (N25): with releases.supatype.com answering 504 and Deno cached, the cached
+ * Deno was found, then the CDN asked again only to print its version, and that failure turned
+ * functions and hooks off. The server, given no Deno, then ran the one on PATH anyway.
+ */
+describe("native dev's Deno while the release CDN fails", () => {
+  it("runs the cached Deno, naming its version without asking the CDN", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const worker = await prepareNativeWorker(cwd, projectConfig({ provider: "native" }))
+    expect(worker.denoBin).toBe(cachedDeno)
+    expect(logs.join("\n")).toContain(`Deno runtime: ${cachedDeno} (v2.2.0)`)
+  })
+
+  it("tells the server to run no Deno when none could be provisioned", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    deno.available = false
+    const worker = await prepareNativeWorker(cwd, projectConfig({ provider: "native" }))
+    expect(worker.denoBin).toBeUndefined()
+    // Unset, the server's default is `deno` from PATH; empty is none.
+    expect(nativeWorkerDenoEnv(worker)).toEqual({ SUPATYPE_DENO_PATH: "" })
+  })
+
+  it("tells the server which Deno to run", async () => {
+    const worker = await prepareNativeWorker(cwd, projectConfig({ provider: "native" }))
+    expect(nativeWorkerDenoEnv(worker)).toEqual({ SUPATYPE_DENO_PATH: cachedDeno })
   })
 })

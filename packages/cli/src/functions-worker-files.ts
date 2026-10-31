@@ -147,10 +147,3 @@ export function writeServiceRoleRoutesFile(path: string, routes: readonly string
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, routes.join(","), "utf8")
 }
-
-/** Writes `config`'s `functions.serviceRole` to native dev's routes file, returning its path. */
-export function writeDevServiceRoleRoutes(cwd: string, config: SupatypeProjectConfig): string {
-  const path = devServiceRoleRoutesPath(cwd)
-  writeServiceRoleRoutesFile(path, serviceRoleRoutes(config))
-  return path
-}

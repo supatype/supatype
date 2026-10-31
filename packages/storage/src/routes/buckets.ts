@@ -1,7 +1,7 @@
 import type { RequestContext } from "../server.js"
-import { sendJson, readJson } from "../server.js"
+import { sendJson, readShapedJson } from "../server.js"
 import * as db from "../db.js"
-import { isArrayOf, isBoolean, isNumber, isOneOf, isShape, isString, nullable, optional } from "../json.js"
+import { isArrayOf, isBoolean, isNumber, isOneOf, isString, nullable, optional, type FromShape } from "../json.js"
 import {
   ensureBucket as ensureS3Bucket,
   deleteBucket as deleteS3Bucket,
@@ -31,8 +31,7 @@ const BUCKET_BODY = {
   access_mode: optional(isAccessMode),
   s3_bucket_policy: optional(nullable(isString)),
 } as const
-const isCreateBucketBody = isShape(BUCKET_BODY)
-const isUpdateBucketBody = isCreateBucketBody
+type BucketBody = FromShape<typeof BUCKET_BODY>
 
 /** Answers 400 with `problem` and says so, or does nothing when there is none. */
 function refused(ctx: RequestContext, problem: string | null): boolean {
@@ -41,15 +40,12 @@ function refused(ctx: RequestContext, problem: string | null): boolean {
   return true
 }
 
-type CreateBucketBody = typeof isCreateBucketBody extends (value: unknown) => value is infer T ? T : never
-type UpdateBucketBody = typeof isUpdateBucketBody extends (value: unknown) => value is infer T ? T : never
-
 /**
  * The bucket's row, then its S3 policy. Only once the row exists: a name already taken answers 409
  * before the policy of the bucket holding it is touched. Public on S3 exactly when the mode says
  * so, since a custom bucket's rules decide who reads it, and a new private bucket has no policy.
  */
-async function createBucketAndPolicy(id: string, body: CreateBucketBody & { name: string }): Promise<db.BucketRow> {
+async function createBucketAndPolicy(id: string, body: BucketBody & { name: string }): Promise<db.BucketRow> {
   const accessMode: BucketAccessMode = body.access_mode ?? (body.public ? "public" : "private")
   await ensureS3Bucket(id)
   const bucket = await db.createBucket(id, body.name, accessMode, body.file_size_limit, body.allowed_mime_types, body.s3_bucket_policy)
@@ -60,7 +56,7 @@ async function createBucketAndPolicy(id: string, body: CreateBucketBody & { name
 }
 
 export async function create(ctx: RequestContext): Promise<void> {
-  const body = await readJson(ctx.req, isCreateBucketBody, BUCKET_BODY)
+  const body = await readShapedJson(ctx.req, BUCKET_BODY)
   if (refused(ctx, bucketFieldsProblem(body))) return
 
   if (!body.name) {
@@ -98,7 +94,7 @@ export async function get(ctx: RequestContext): Promise<void> {
 }
 
 export async function update(ctx: RequestContext): Promise<void> {
-  const body = await readJson(ctx.req, isUpdateBucketBody, BUCKET_BODY)
+  const body = await readShapedJson(ctx.req, BUCKET_BODY)
   if (refused(ctx, bucketFieldsProblem(body) ?? bucketSettingsProblem(body))) return
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)
@@ -115,7 +111,7 @@ export async function update(ctx: RequestContext): Promise<void> {
  * A public flag moves the mode, which decides every read; setting the flag alone left it where it
  * was. A row whose stored pair is not yet the mode's is written as well, NULL mode included.
  */
-async function applyUpdate(id: string, existing: db.BucketRow, body: UpdateBucketBody): Promise<boolean> {
+async function applyUpdate(id: string, existing: db.BucketRow, body: BucketBody): Promise<boolean> {
   const accessMode = nextAccessMode(accessModeOf(existing), body)
   const isPublic = accessMode === "public"
   const accessChanged = accessMode !== existing.access_mode || isPublic !== existing.public

@@ -39,7 +39,7 @@ import {
 } from "node:fs"
 import { chmod } from "node:fs/promises"
 import { homedir } from "node:os"
-import { basename, join, resolve, isAbsolute } from "node:path"
+import { basename, dirname, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "./link.js"
 import { releasePublicKey } from "./release-public-key.js"
@@ -168,6 +168,15 @@ export function cachePath(component: Component, version: string): string {
 
 export function cachedBinaryPath(component: Component, version: string, platform: PlatformId): string {
   return join(cachePath(component, version), binaryName(component, version, platform))
+}
+
+/**
+ * The version of a binary in the cache, read from its path (`<cache>/<component>/<version>/<file>`),
+ * or undefined for one elsewhere, such as an override. No lookup: the binary in hand is what runs.
+ */
+export function cachedVersionOf(component: Component, binPath: string): string | undefined {
+  const versionDir = dirname(binPath)
+  return dirname(versionDir) === join(cacheRoot(), component) ? basename(versionDir) : undefined
 }
 
 /** True when the platform binary for `version` is present and passes format checks. */

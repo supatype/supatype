@@ -366,14 +366,19 @@ export function pgServerOptions(opts: PgOptions): string {
  * start that names its port elsewhere (the systemd unit's postgresql.conf).
  */
 export function pgServerSettings(opts: PgSettingsOptions): string {
+  return pgServerSettingPairs(opts).map(([name, value]) => `-c ${name}=${value}`).join(" ")
+}
+
+/** {@link pgServerSettings} as name and value pairs, in the order they are given. */
+export function pgServerSettingPairs(opts: PgSettingsOptions): [string, string][] {
   const libs = preloadedLibraries(opts)
   // Room for pg_cron's and pg_net's background workers beside Postgres's own, as the image has.
-  const parts = ["-c wal_level=logical", "-c max_worker_processes=16"]
-  if (libs.length > 0) parts.push(`-c shared_preload_libraries=${libs.join(",")}`)
-  if (libs.includes("pg_keyspace")) parts.push(...keyspaceOptions(opts))
-  if (libs.includes("pg_cron")) parts.push(...databaseOption("cron.database_name", opts), "-c cron.use_background_workers=on")
-  if (libs.includes("pg_net")) parts.push(...databaseOption("pg_net.database_name", opts), "-c pg_net.batch_size=200")
-  return parts.join(" ")
+  const pairs: [string, string][] = [["wal_level", "logical"], ["max_worker_processes", "16"]]
+  if (libs.length > 0) pairs.push(["shared_preload_libraries", libs.join(",")])
+  if (libs.includes("pg_keyspace")) pairs.push(...keyspaceSettings(opts))
+  if (libs.includes("pg_cron")) pairs.push(...databaseSetting("cron.database_name", opts), ["cron.use_background_workers", "on"])
+  if (libs.includes("pg_net")) pairs.push(...databaseSetting("pg_net.database_name", opts), ["pg_net.batch_size", "200"])
+  return pairs
 }
 
 /** `shared_preload_libraries` in the supatype/postgres image, outermost last. */
@@ -395,18 +400,18 @@ function preloadedLibraries(opts: PgSettingsOptions): string[] {
 }
 
 /** `name` set to the project's database, which pg_cron and pg_net run their jobs in; none without one. */
-function databaseOption(name: string, opts: PgSettingsOptions): string[] {
-  return opts.database ? [`-c ${name}=${opts.database}`] : []
+function databaseSetting(name: string, opts: PgSettingsOptions): [string, string][] {
+  return opts.database ? [[name, opts.database]] : []
 }
 
-function keyspaceOptions(opts: PgSettingsOptions): string[] {
+function keyspaceSettings(opts: PgSettingsOptions): [string, string][] {
   return [
-    `-c pg_keyspace.port=${opts.keyspacePort}`,
-    "-c pg_keyspace.durability=ephemeral",
-    "-c pg_keyspace.keys=50000",
-    "-c pg_keyspace.ring_mb=8",
-    "-c pg_keyspace.rowcache_mb=1",
-    ...(opts.keyspaceDatabase ? [`-c pg_keyspace.database=${opts.keyspaceDatabase}`] : []),
+    ["pg_keyspace.port", String(opts.keyspacePort)],
+    ["pg_keyspace.durability", "ephemeral"],
+    ["pg_keyspace.keys", "50000"],
+    ["pg_keyspace.ring_mb", "8"],
+    ["pg_keyspace.rowcache_mb", "1"],
+    ...(opts.keyspaceDatabase ? [["pg_keyspace.database", opts.keyspaceDatabase] satisfies [string, string]] : []),
   ]
 }
 
@@ -448,11 +453,9 @@ const CLUSTER_SETTINGS_FILE = "supatype.conf"
 export function writeClusterSettings(opts: PgSettingsOptions & { dataDir: string }): void {
   const confPath = join(opts.dataDir, "postgresql.conf")
   if (!existsSync(confPath)) return
-  const lines = [...pgServerSettings(opts).matchAll(/-c (\S+?)=(\S+)/g)].flatMap(([, name = "", value = ""]) => {
-    if (name.startsWith("pg_keyspace.")) return []
-    const kept = name === "shared_preload_libraries" ? value.split(",").filter((lib) => lib !== "pg_keyspace").join(",") : value
-    return kept === "" ? [] : [`${name} = '${kept}'`]
-  })
+  // No keyspace port, so none of the keyspace's settings, nor pg_keyspace among the libraries.
+  const settled = { pgBinDir: opts.pgBinDir, ...(opts.database !== undefined && { database: opts.database }) }
+  const lines = pgServerSettingPairs(settled).map(([name, value]) => `${name} = '${value}'`)
   const header = "# Written by supatype dev at every start of this cluster; edits are replaced. See postgres-ctl.ts."
   writeFileSync(join(opts.dataDir, CLUSTER_SETTINGS_FILE), `${[header, ...lines].join("\n")}\n`)
   const include = `include_if_exists = '${CLUSTER_SETTINGS_FILE}'`

@@ -192,8 +192,9 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     )
   }
 
+  // SUPATYPE_ACCESS_TOKEN first for a Cloud link, as `supatype link` and the cloud commands read it.
   const token =
-    (link.kind === "cloud" ? resolveCloudAccessToken(link) : undefined) ??
+    (link.kind === "cloud" ? cloudEnvToken() ?? resolveCloudAccessToken(link) : undefined) ??
     resolveEnvironmentToken(link, envTarget)
   if (!token) {
     throw new Error(
@@ -270,6 +271,42 @@ function apiFetchOpts(
 
 function projectPath(target: DeployTarget, subpath: string): string {
   return `/projects/${target.projectRef}${subpath}`
+}
+
+/** A Cloud access token set in the environment, for CI; undefined when unset or empty. */
+function cloudEnvToken(): string | undefined {
+  const token = process.env["SUPATYPE_ACCESS_TOKEN"]?.trim()
+  return token ? token : undefined
+}
+
+/**
+ * A request to the target's project API, at `/projects/<ref><subpath>`, carrying its token, org and
+ * environment, and renewing a Cloud session that expired.
+ */
+export function projectRequest(target: DeployTarget, method: string, subpath: string, body?: unknown): TargetFetchOptions {
+  return apiFetchOpts(target, method, projectPath(target, subpath), body)
+}
+
+/** How a target serves the project's functions. */
+export interface TargetFunctions {
+  /** Where a function is invoked: `<invokeBase>/<name>`. */
+  invokeBase: string
+  /** The token an authenticated invoke carries, when the target has one to give. */
+  invokeToken: string | undefined
+  /** Cloud answers a window of past log lines; a server relays the worker's live stream. */
+  logs: "window" | "tail"
+}
+
+/**
+ * The target's functions: Supatype Cloud serves them on the project's own host and keeps past log
+ * lines; a self-hosted or local server serves them under its API and relays a live tail. The link's
+ * service-role key there is not handed to an invoke.
+ */
+export function targetFunctions(target: DeployTarget): TargetFunctions {
+  if (target.mode === "cloud") {
+    return { invokeBase: `https://${target.projectRef}.supatype.dev/functions/v1`, invokeToken: target.token, logs: "window" }
+  }
+  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken: undefined, logs: "tail" }
 }
 
 /**

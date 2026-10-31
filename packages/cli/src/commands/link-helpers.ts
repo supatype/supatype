@@ -44,13 +44,15 @@ async function selfHostLinkToken(opts: LinkTokenOptions, cwd: string): Promise<s
   const given = opts.token ?? opts.serviceRoleKey ?? nonBlank(readEnvFile(cwd)["SERVICE_ROLE_KEY"]) ?? nonBlank(process.env["SERVICE_ROLE_KEY"])
   if (given !== undefined || !isInteractive()) return given
   const asked = await runClackFlow(async () =>
-    ensureNotCancelled(await p.password({ message: "The self-host stack's SERVICE_ROLE_KEY" })).trim(),
+    ensureNotCancelled(await p.password({ message: "The self-host stack's SERVICE_ROLE_KEY" })),
   )
   return nonBlank(asked)
 }
 
+/** `value` trimmed, or undefined when there is nothing left. */
 function nonBlank(value: string | undefined): string | undefined {
-  return value === undefined || value.trim() === "" ? undefined : value.trim()
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
 }
 
 async function probeSelfHostLink(apiUrl: string, projectRef: string, token: string): Promise<void> {

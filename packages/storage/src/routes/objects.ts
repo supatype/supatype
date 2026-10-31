@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { RequestContext } from "../server.js"
-import { sendJson, readBodyUpTo, readJson } from "../server.js"
+import { sendJson, readBodyUpTo, readShapedJson } from "../server.js"
 import * as db from "../db.js"
 import * as store from "../object-store.js"
 import { parseTransformParams, transformImage, UnrenderableImageError } from "../transform.js"
@@ -11,7 +11,7 @@ import type { JwtPayload } from "../auth.js"
 import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
 import { applyCorsHeaders } from "../middleware/cors.js"
 import { servesAnonymously } from "../bucket-access.js"
-import { isNumber, isShape, isString, isUnknown, optional } from "../json.js"
+import { isNumber, isString, isUnknown, optional } from "../json.js"
 
 // ─── MIME type inference ─────────────────────────────────────────────────────────
 
@@ -309,7 +309,7 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
   const objectPath = ctx.params["wildcard"]!
 
-  const body = await readJson(ctx.req, isShape({ expiresIn: optional(isNumber) }))
+  const body = await readShapedJson(ctx.req, { expiresIn: optional(isNumber) })
   const expiresIn = body.expiresIn ?? config.defaultSignedUrlExpiry
 
   if (expiresIn < 1 || expiresIn > config.maxSignedUrlExpiry) {
@@ -354,7 +354,7 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
 
 export async function removeObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const { prefixes } = await readJson(ctx.req, isShape({ prefixes: optional(isUnknown) }))
+  const { prefixes } = await readShapedJson(ctx.req, { prefixes: optional(isUnknown) })
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
@@ -380,12 +380,12 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
 
 // ─── List objects ───────────────────────────────────────────────────────────────
 
-const isListRequest = isShape({
+const LIST_REQUEST = {
   prefix: optional(isString),
   limit: optional(isNumber),
   offset: optional(isNumber),
   search: optional(isString),
-})
+} as const
 
 /** The folder a list prefix names: "" for the bucket root, else its path ending in "/". */
 export function folderOf(prefix: string): string {
@@ -400,7 +400,7 @@ export function folderOf(prefix: string): string {
  */
 export async function listObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const body = await readJson(ctx.req, isListRequest)
+  const body = await readShapedJson(ctx.req, LIST_REQUEST)
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })

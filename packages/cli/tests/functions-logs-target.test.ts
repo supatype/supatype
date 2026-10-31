@@ -51,3 +51,18 @@ describe("functions logs on a self-host link", () => {
     expect(run.output).not.toContain("not this one")
   })
 })
+
+// Every functions command resolves the same linked target. invoke used to send a self-host-linked
+// project to https://<ref>.supatype.dev with the Cloud token.
+describe("functions invoke on a self-host link", () => {
+  it("calls the linked server, never Supatype Cloud, and never sends the Cloud token", async () => {
+    vi.stubEnv("SUPATYPE_ACCESS_TOKEN", "cloud-token")
+    try {
+      await runCommand(registerFunctions, ["functions", "invoke", "hello", "--auth"], project.dir)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+    expect(requests.map((r) => r.url)).toEqual(["https://sh.example.test/functions/v1/hello"])
+    expect(requests.some((r) => r.url.includes("supatype.dev") || r.auth === "Bearer cloud-token")).toBe(false)
+  })
+})
