@@ -168,7 +168,8 @@ describe("self-host compose functions directory", () => {
     const out = writeSelfHostCompose(cwd, { ...config, supatype: { root: "backend" } })
     const compose = readFileSync(out.composePath, "utf8")
     for (const value of envValues(compose, "SUPATYPE_FUNCTIONS_ROOT")) expect(value).toBe("/project/backend/functions")
-    expect(envValues(compose, "SUPATYPE_HOOKS_ROOT")).toEqual(["/project/backend/hooks"])
+    // The worker serves hooks from there, and the control plane writes them there when a push sends them.
+    expect(envValues(compose, "SUPATYPE_HOOKS_ROOT")).toEqual(["/project/backend/hooks", "/project/backend/hooks"])
   })
 
   it("refuses a functions.path outside the project, which the stack cannot mount", () => {

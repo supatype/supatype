@@ -19,7 +19,8 @@ function composeProject(): string {
   return process.env["COMPOSE_PROJECT_NAME"] ?? "supatype-project"
 }
 
-function restartFunctionsWorker(): void {
+/** Restarts the functions worker, which loads what it serves (functions and hooks) when it starts. */
+export function restartFunctionsWorker(): void {
   spawnSync(
     "docker",
     ["compose", "-p", composeProject(), "restart", "functions-worker"],

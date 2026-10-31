@@ -997,6 +997,8 @@ ${mounts.projectWritable}
       SUPATYPE_PROJECT_ROOT: /project
       DATABASE_URL: "${ownerUrl}"
       SUPATYPE_FUNCTIONS_ROOT: ${functionsDir}
+      # Where \`push\` deploys hooks to (POST /projects/:ref/hooks/deploy): the worker's hooks root.
+      SUPATYPE_HOOKS_ROOT: ${hooksDir}
       SUPATYPE_STATIC_ROOT: /project/${staticDir.replace(/^\.\//, "")}
       SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
       COMPOSE_PROJECT_NAME: ${composeProject}
