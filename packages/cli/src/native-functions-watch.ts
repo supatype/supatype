@@ -146,17 +146,20 @@ export interface ServiceRoleRoutesWatch extends ServiceRoleRoutesTarget {
   configFiles: readonly string[]
   /** `functions.serviceRole` as the worker was started with. */
   initial: readonly string[]
+  /** {@link configSnapshot} of the config `initial` was read from, taken before it was read. */
+  baseline: string | null
 }
 
 /**
  * Watches `opts.dir` for a change to any of its config files (the directory, as editors replace the
  * file) and applies a `functions.serviceRole` change. The config is loaded again only when a file's
  * bytes changed: loading runs the config, and a save of the same text, or an editor touching the
- * file, changed nothing.
+ * file, changed nothing. Bytes that differ from `opts.baseline` already are applied at once: the
+ * watch starts well after dev read the config, and an edit in between was otherwise never seen.
  */
 export function watchServiceRoleRoutes(opts: ServiceRoleRoutesWatch, watch: WatchFn = fsWatch): { close: () => void } {
   let known = [...opts.initial]
-  let snapshot = configSnapshot(opts.dir, opts.configFiles)
+  let snapshot = opts.baseline
   const onChange = debounce(() => {
     const now = configSnapshot(opts.dir, opts.configFiles)
     if (now !== null && now === snapshot) return
@@ -166,6 +169,7 @@ export function watchServiceRoleRoutes(opts: ServiceRoleRoutesWatch, watch: Watc
   const watcher = watch(opts.dir, { recursive: false }, (_event, filename) => {
     if (typeof filename === "string" && opts.configFiles.includes(filename)) onChange.trigger()
   })
+  onChange.trigger()
   return { close: () => { onChange.cancel(); watcher.close() } }
 }
 
@@ -173,7 +177,7 @@ export function watchServiceRoleRoutes(opts: ServiceRoleRoutesWatch, watch: Watc
  * A hash of each config file's bytes, empty for one not there, or null when one could not be read
  * (an editor mid-replace): then the config is loaded, which says what is wrong if anything is.
  */
-function configSnapshot(dir: string, configFiles: readonly string[]): string | null {
+export function configSnapshot(dir: string, configFiles: readonly string[]): string | null {
   try {
     return configFiles
       .map((file) => join(dir, file))

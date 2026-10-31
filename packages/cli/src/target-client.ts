@@ -10,6 +10,11 @@ export interface TargetFetchOptions {
   orgId?: string | undefined
   environment?: string | undefined
   /**
+   * Give up after this many milliseconds, with an error saying so. None when unset: a push can run
+   * for minutes. A stream ({@link targetStream}) is never cut off.
+   */
+  timeoutMs?: number
+  /**
    * Cloud-only: renew short-lived access JWT via control-plane `/auth/refresh`.
    * Self-host SERVICE_ROLE_KEY links omit this.
    */
@@ -89,8 +94,8 @@ function bodyString(json: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined
 }
 
-/** One request with `token`, its body unread. */
-function send(url: string, opts: TargetFetchOptions, token: string): Promise<Response> {
+/** One request with `token`, its body unread, aborted by `signal` when one is given. */
+function send(url: string, opts: TargetFetchOptions, token: string, signal: AbortSignal | undefined): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
@@ -101,12 +106,21 @@ function send(url: string, opts: TargetFetchOptions, token: string): Promise<Res
     method: opts.method,
     headers,
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
+    ...(signal !== undefined ? { signal } : {}),
   })
+}
+
+/** Whether `err` is the abort of a request that ran out of time. */
+function isTimeout(err: unknown): boolean {
+  return err instanceof Error && err.name === "TimeoutError"
 }
 
 /** A response's status and body, read whole. */
 async function answerOf(res: Response): Promise<FetchAnswer> {
-  const text = await res.text().catch(() => "")
+  const text = await res.text().catch((err: unknown) => {
+    if (isTimeout(err)) throw err
+    return ""
+  })
   return { ok: res.ok, status: res.status, statusText: res.statusText, text, json: parsedBody(text) }
 }
 
@@ -114,12 +128,12 @@ async function answerOf(res: Response): Promise<FetchAnswer> {
  * The accepted response to a request, its body unread. A session that expired is renewed once and
  * the request sent again, when the target can renew it; a refusal throws, saying why.
  */
-async function acceptedResponse(url: string, opts: TargetFetchOptions): Promise<Response> {
-  let res = await send(url, opts, opts.token)
+async function acceptedResponse(url: string, opts: TargetFetchOptions, signal?: AbortSignal): Promise<Response> {
+  let res = await send(url, opts, opts.token, signal)
   if (res.ok) return res
   let answer = await answerOf(res)
   if (opts.authRefresh && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
-    res = await send(url, opts, await refreshAccessToken(opts.authRefresh))
+    res = await send(url, opts, await refreshAccessToken(opts.authRefresh), signal)
     if (res.ok) return res
     answer = await answerOf(res)
   }
@@ -164,10 +178,21 @@ export async function targetFetch(
   guard: Guard<unknown> = isUnknown,
 ): Promise<unknown> {
   const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
-  const result = await answerOf(await acceptedResponse(url, opts))
+  const result = await timedAnswer(url, opts)
   const answer = isJsonObject(result.json) && result.json["data"] !== undefined ? result.json["data"] : result.json
   if (!guard(answer)) throw new Error(`Unexpected response from ${url} (HTTP ${result.status})`)
   return answer
+}
+
+/** The whole answer to a request, within `opts.timeoutMs` when it is set. */
+async function timedAnswer(url: string, opts: TargetFetchOptions): Promise<FetchAnswer> {
+  const signal = opts.timeoutMs !== undefined ? AbortSignal.timeout(opts.timeoutMs) : undefined
+  try {
+    return await answerOf(await acceptedResponse(url, opts, signal))
+  } catch (err) {
+    if (!isTimeout(err) || opts.timeoutMs === undefined) throw err
+    throw new Error(`${opts.method} ${url} did not answer within ${opts.timeoutMs / 1000} s`, { cause: err })
+  }
 }
 
 /**

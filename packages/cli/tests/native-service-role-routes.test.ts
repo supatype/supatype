@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { refreshServiceRoleRoutes, watchServiceRoleRoutes } from "../src/native-functions-watch.js"
+import { configSnapshot, refreshServiceRoleRoutes, watchServiceRoleRoutes } from "../src/native-functions-watch.js"
 import type { WatchFn } from "../src/dev-functions-watch.js"
 
 /**
@@ -74,6 +74,7 @@ describe("watchServiceRoleRoutes", () => {
     const watcher = watchServiceRoleRoutes({
       dir, configFiles: ["supatype.config.ts"], routesPath: t.routesPath,
       readRoutes: () => { reads++; return ["admin-report"] }, reload: t.reload, initial: ["admin-report"],
+      baseline: configSnapshot(dir, ["supatype.config.ts"]),
     }, watch)
     fire("change", "supatype.config.ts")
     vi.advanceTimersByTime(1000)
@@ -82,6 +83,30 @@ describe("watchServiceRoleRoutes", () => {
     fire("change", "supatype.config.ts")
     vi.advanceTimersByTime(1000)
     expect(reads).toBe(1)
+    watcher.close()
+    vi.useRealTimers()
+  })
+})
+
+describe("a config edit made while dev was starting", () => {
+  // Review of round 5: dev reads functions.serviceRole as it starts, and the watch started minutes
+  // later took the bytes then as its baseline, so an edit in between was never applied.
+  it("is applied when the watch starts, with no further save", () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    const t = target(["admin-report", "billing"])
+    const dir = join(t.routesPath, "..")
+    writeFileSync(join(dir, "supatype.config.ts"), "export default {}\n")
+    const baseline = configSnapshot(dir, ["supatype.config.ts"])
+    writeFileSync(join(dir, "supatype.config.ts"), "export default { functions: { serviceRole: ['billing'] } }\n")
+    const watch: WatchFn = () => ({ close: () => undefined })
+    const watcher = watchServiceRoleRoutes({
+      dir, configFiles: ["supatype.config.ts"], routesPath: t.routesPath,
+      readRoutes: t.readRoutes, reload: t.reload, initial: ["admin-report"], baseline,
+    }, watch)
+    vi.advanceTimersByTime(1000)
+    expect(readFileSync(t.routesPath, "utf8")).toBe("admin-report,billing")
+    expect(t.reloads()).toBe(1)
     watcher.close()
     vi.useRealTimers()
   })

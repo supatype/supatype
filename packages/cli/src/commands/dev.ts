@@ -107,6 +107,7 @@ import {
 } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
 import { nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
+import { configSnapshot } from "../native-functions-watch.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { extractArchive } from "../archive-extract.js"
@@ -252,6 +253,8 @@ export function registerDev(program: Command): void {
       const cwd = process.cwd()
 
       // ── 1. Load project config (before TUI, fatal errors must hit real stderr) ──
+      // Its bytes first: the functions.serviceRole watch, started much later, applies any edit since.
+      const configBaseline = configSnapshot(cwd, PROJECT_CONFIG_FILES)
       const config = loadConfig(cwd)
       const provider = resolveRuntimeProvider(config)
 
@@ -719,6 +722,7 @@ export function registerDev(program: Command): void {
           ...serviceRole,
           dir: cwd,
           configFiles: PROJECT_CONFIG_FILES,
+          baseline: configBaseline,
           readRoutes: () => serviceRoleRoutes(loadConfig(cwd)),
           reload: functionsWatch.reload,
         })

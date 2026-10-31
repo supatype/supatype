@@ -65,6 +65,8 @@ export interface ResolveTargetFlags {
   direct?: boolean
   local?: boolean
   connection?: string | undefined
+  /** Resolve a linked target with no session or token too, for a call that may go without one. */
+  tokenOptional?: boolean
 }
 
 export type TargetMode = "cloud" | "self-host" | "local" | "direct"
@@ -196,7 +198,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
   const token =
     (link.kind === "cloud" ? cloudEnvToken() ?? resolveCloudAccessToken(link) : undefined) ??
     resolveEnvironmentToken(link, envTarget)
-  if (!token) {
+  if (!token && flags.tokenOptional !== true) {
     throw new Error(
       link.kind === "cloud"
         ? `No cloud session for environment "${envName}". Run: supatype login`

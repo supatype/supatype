@@ -51,6 +51,10 @@ const ENV_PRODUCTION = ".env.production"
 const NOT_LOGGED_IN = "Not logged in. Run: supatype login"
 const NOT_LINKED = "No linked project. Run: supatype link"
 
+/** How long a request to the linked target may take: a deploy uploads a bundle, so it gets longer. */
+const TARGET_TIMEOUT_MS = 10_000
+const DEPLOY_TIMEOUT_MS = 60_000
+
 // ─── Registration ────────────────────────────────────────────────────────────
 
 export function registerFunctions(program: Command): void {
@@ -448,18 +452,19 @@ function deploySelfHosted(
 /**
  * The linked project's target, or null when the project is not linked. A link that cannot be used,
  * with no session or an environment that is not linked, ends the command and says why: it is never
- * taken for no link, which would send the work somewhere else.
+ * taken for no link, which would send the work somewhere else. `needsToken` false is for invoke,
+ * which calls a public function and needs no session.
  */
-function linkedTarget(cwd: string, env: string | undefined): DeployTarget | null {
+function linkedTarget(cwd: string, env: string | undefined, needsToken = true): DeployTarget | null {
   if (!loadProjectLink(cwd)) return null
   let target: DeployTarget
   try {
-    target = resolveTarget(cwd, { env })
+    target = resolveTarget(cwd, { env, tokenOptional: !needsToken })
   } catch (err) {
     error(errorMessage(err))
     process.exit(1)
   }
-  if (!target.token) {
+  if (needsToken && !target.token) {
     error(NOT_LOGGED_IN)
     process.exit(1)
   }
@@ -479,7 +484,8 @@ function requireLinkedTarget(cwd: string): DeployTarget {
 /** Asks `target` for `subpath` of its project, ending the command with `what` and the reason when it fails. */
 async function askTarget<T>(target: DeployTarget, what: string, method: string, subpath: string, guard: Guard<T>, body?: unknown): Promise<T> {
   try {
-    return await targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, method, subpath, body), guard)
+    const request = { ...projectRequest(target, method, subpath, body), timeoutMs: TARGET_TIMEOUT_MS }
+    return await targetFetch(target.apiBaseUrl, target.apiPrefix, request, guard)
   } catch (err) {
     error(`${what}: ${errorMessage(err)}`)
     process.exit(1)
@@ -492,7 +498,8 @@ async function deployViaTarget(cwd: string, target: DeployTarget, fns: Discovere
   plain()
   const serviceRole = serviceRoleRoutesFor(cwd)
   return deployEach(fns, async (fn, source) => {
-    await targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "POST", "/functions/deploy", deployRequestBody(fn, source, serviceRole)))
+    const request = projectRequest(target, "POST", "/functions/deploy", deployRequestBody(fn, source, serviceRole))
+    await targetFetch(target.apiBaseUrl, target.apiPrefix, { ...request, timeoutMs: DEPLOY_TIMEOUT_MS })
   })
 }
 
@@ -697,27 +704,12 @@ async function invoke(
   name: string,
   opts: { data: string; auth?: boolean; local?: boolean; port: string },
 ): Promise<void> {
-  let url: string
+  const target = opts.local ? null : linkedTarget(cwd, undefined, false)
+  const { url, token } = target === null
+    ? { url: `${await localFunctionsBase(cwd, opts.port)}/${name}`, token: LOCAL_TEST_JWT }
+    : { url: `${targetFunctions(target).invokeBase}/${name}`, token: opts.auth ? remoteInvokeToken(target) : undefined }
   const headers: Record<string, string> = { "Content-Type": "application/json" }
-
-  const localUrl = async (): Promise<string> => `${await localFunctionsBase(cwd, opts.port)}/${name}`
-  if (opts.local) {
-    url = await localUrl()
-  } else {
-    const target = linkedTarget(cwd, undefined)
-    if (target === null) {
-      url = await localUrl()
-    } else {
-      const fns = targetFunctions(target)
-      url = `${fns.invokeBase}/${name}`
-      if (opts.auth && fns.invokeToken) headers["Authorization"] = `Bearer ${fns.invokeToken}`
-    }
-  }
-
-  if (opts.auth && !headers["Authorization"]) {
-    // Generate a test JWT for local invocation
-    headers["Authorization"] = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlhdCI6MTcwMDAwMDAwMH0.test"
-  }
+  if (opts.auth) headers["Authorization"] = `Bearer ${token}`
 
   try {
     let body: string | undefined
@@ -759,6 +751,22 @@ async function invoke(
     }
     process.exit(1)
   }
+}
+
+/** A placeholder user token for a function served on this machine; never sent to a linked server. */
+const LOCAL_TEST_JWT =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlhdCI6MTcwMDAwMDAwMH0.test"
+
+/**
+ * The token `invoke --auth` sends to a linked target, or the command ends saying why there is none.
+ * The local placeholder is never sent there, and nor is a self-hosted link's service-role key.
+ */
+function remoteInvokeToken(target: DeployTarget): string {
+  const token = targetFunctions(target).invokeToken
+  if (token !== undefined) return token
+  if (target.mode === "cloud") error(`--auth sends your Supatype Cloud session. ${NOT_LOGGED_IN}`)
+  else error(`--auth has no user token for ${target.apiBaseUrl}. Call the function with a signed-in user's access token instead.`)
+  process.exit(1)
 }
 
 // ─── Env management ──────────────────────────────────────────────────────────
