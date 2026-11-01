@@ -5,7 +5,7 @@
  */
 
 import { parseEnvText } from "./dotenv.ts"
-import { FUNCTION_ENTRY_FILE, functionRouteName } from "./routes.ts"
+import { FUNCTION_ENTRY_FILE, functionRouteName, isHookName } from "./routes.ts"
 import { exitOnStop } from "./stop.ts"
 import {
   currentHookDepth,
@@ -129,9 +129,6 @@ async function serviceRoleRoutes(): Promise<Set<string>> {
   return fromFile ?? parseRoutes(Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? "")
 }
 
-/** The manifest as last read: kept while its modification time and size are unchanged. */
-let manifestRead: { mtime: number; size: number; names: Set<string> } | null = null
-
 /** The function every entry of a hook or validator map names (table, then event or column, then the entry). */
 function functionsNamed(map: unknown): string[] {
   if (typeof map !== "object" || map === null) return []
@@ -145,31 +142,35 @@ function functionsNamed(map: unknown): string[] {
 }
 
 /**
- * The hooks the stack's manifest maps (its `hooks` and `validators`), read from the file
- * `SUPATYPE_MANIFEST_PATH` names, the one the server reads: a hook route with no code is a 503 only
- * for one of these. None when no manifest is named or it cannot be read; read again only when the
- * file's modification time or size changed.
+ * The hooks the stack's manifest maps (its `hooks` and `validators`), from the file
+ * `SUPATYPE_MANIFEST_PATH` names, the one the server reads; read on each call, which only a hook
+ * route with no code makes. Null when no manifest is named (Cloud's worker), or the one named cannot
+ * be read or parsed (caught mid-rewrite, say): the caller then fails closed.
  */
-async function mappedHookNames(): Promise<Set<string>> {
+async function mappedHookNames(): Promise<Set<string> | null> {
   const path = (Deno.env.get("SUPATYPE_MANIFEST_PATH") ?? "").trim()
-  if (!path) return new Set()
-  let info: Deno.FileInfo
-  try {
-    info = await Deno.stat(path)
-  } catch {
-    return new Set()
-  }
-  const mtime = info.mtime?.getTime() ?? -1
-  if (manifestRead !== null && manifestRead.mtime === mtime && manifestRead.size === info.size) return manifestRead.names
+  if (!path) return null
   let parsed: unknown
   try {
     parsed = JSON.parse(await Deno.readTextFile(path))
   } catch {
-    return new Set()
+    return null
   }
-  const maps = typeof parsed === "object" && parsed !== null ? [("hooks" in parsed ? parsed.hooks : undefined), ("validators" in parsed ? parsed.validators : undefined)] : []
-  manifestRead = { mtime, size: info.size, names: new Set(maps.flatMap(functionsNamed)) }
-  return manifestRead.names
+  if (typeof parsed !== "object" || parsed === null) return null
+  const maps = ["hooks" in parsed ? parsed.hooks : undefined, "validators" in parsed ? parsed.validators : undefined]
+  return new Set(maps.flatMap(functionsNamed))
+}
+
+/**
+ * Whether a hook route the worker has no code for answers 503 (the hook cannot be reached, and the
+ * server refuses the write for it) rather than 404 (no such hook). With the manifest's map, only a
+ * name it maps. Without one, every name that passes the hook-name rule: it fails closed, since a 404
+ * is read by the server as the hook rejecting the write.
+ */
+async function unreachableHook(name: string): Promise<boolean> {
+  const mapped = await mappedHookNames()
+  if (mapped !== null) return mapped.has(name)
+  return isHookName(name)
 }
 
 /**
@@ -516,7 +517,9 @@ const server = Deno.serve({
 }, async (req: Request): Promise<Response> => {
   const url = new URL(req.url)
   const pathParts = url.pathname.replace(/^\/functions\/v1\/?/, "").split("/").filter(Boolean)
-  // A hook is addressed as `hooks/<name>`, so the first segment alone is not the handler key.
+  // A hook is addressed as `hooks/<name>`, so the first segment alone is not the handler key. With no
+  // second segment no hook name is built: the path is looked up as the plain route "hooks", a 404
+  // unless a function has that name, so `hooks/<name>` always carries a name the request sent.
   const fnName =
     pathParts[0] === "hooks" && pathParts[1]
       ? HOOKS_ROUTE_PREFIX + pathParts[1]
@@ -530,10 +533,11 @@ const server = Deno.serve({
 
   // A hook the map names with no code here (a new hook whose deploy failed) cannot be reached: 503,
   // which the server's hook dispatch treats as unavailable and refuses the write for. A 404 read as
-  // the hook rejecting the write, with a "not found" message. Any other name stays a 404.
+  // the hook rejecting the write, with a "not found" message. Any other name stays a 404
+  // (unreachableHook).
   if (fnName.startsWith(HOOKS_ROUTE_PREFIX) && !handlers[fnName]) {
     const hook = fnName.slice(HOOKS_ROUTE_PREFIX.length)
-    if ((await mappedHookNames()).has(hook)) return jsonError("hook_unavailable", `Hook "${hook}" is not deployed`, 503)
+    if (await unreachableHook(hook)) return jsonError("hook_unavailable", `Hook "${hook}" is not deployed`, 503)
   }
   if (!fnName || !handlers[fnName]) {
     const message = fnName ? `Function "${fnName}" not found` : "No function specified"

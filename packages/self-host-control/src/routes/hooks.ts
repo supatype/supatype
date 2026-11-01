@@ -49,6 +49,7 @@ import {
   writeChanged,
   writeRoot,
   type DeployFile,
+  type FileSnapshot,
   type WriteRoot,
 } from "../deploy-files.js"
 import { answerWithWorkerCurrent, childDir, hooksRoot, manifestPath } from "../worker.js"
@@ -177,8 +178,16 @@ interface Refusal {
  * cannot be, it is refused as broken, and the answer says locked.
  */
 async function writeHook(root: WriteRoot, write: HookWrite): Promise<Refusal | undefined> {
-  const stale = await write.stale()
-  const before = await snapshotFiles([...write.files.map((file) => file.path), ...stale])
+  // Inside this hook's own try: a file that cannot be listed or read refuses this hook only, before
+  // anything of it is written.
+  let before: FileSnapshot
+  let stale: string[]
+  try {
+    stale = await write.stale()
+    before = await snapshotFiles([...write.files.map((file) => file.path), ...stale])
+  } catch (err) {
+    return { name: write.name, reason: reasonOf(err) }
+  }
   try {
     await writeChanged(write.files)
     await removeAll(stale)
@@ -205,10 +214,13 @@ function servedNow(root: WriteRoot, name: string): boolean {
   return existsSync(join(root.path, name, FUNCTION_ENTRY_FILE)) || existsSync(join(root.path, `${name}.ts`))
 }
 
-/** The manifest as the file the deploy writes, checked like every other (deploy-files.ts). */
+/**
+ * The manifest as the file the deploy writes, checked like every other (deploy-files.ts), and written
+ * whole: the worker and the server read it while a deploy may be rewriting it.
+ */
 function manifestFile(manifest: Record<string, unknown>): DeployFile {
   const root = writeRoot(dirname(manifestPath()), "The stack's .supatype", { mayBeLink: true })
-  return fileUnder(root, basename(manifestPath()), `${JSON.stringify(manifest, null, 2)}\n`)
+  return { atomic: true, ...fileUnder(root, basename(manifestPath()), `${JSON.stringify(manifest, null, 2)}\n`) }
 }
 
 /**

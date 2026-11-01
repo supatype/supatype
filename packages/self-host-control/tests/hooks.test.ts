@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { after, before, beforeEach, describe, test, type TestContext } from "node:test"
 import { isJsonObject, workerLoadsFile } from "@supatype/shared"
 import { dataOf, fakeDocker, request, startServer, type ControlPlaneServer, type FakeDocker } from "./helpers.js"
-import { setFileWriterForTests } from "../src/deploy-files.js"
+import { setFileReaderForTests, setFileWriterForTests } from "../src/deploy-files.js"
 
 /**
  * Local test round 4 (N23): `supatype push` to a project linked to a self-host stack applied the
@@ -284,6 +284,27 @@ describe("hooks deploy route", () => {
         assert.equal(existsSync(join(dir(), "lib", "b.ts")), false)
       })
 
+      // Review: a file that could not be read was noted as absent, and a rollback would then have
+      // deleted a file that was there; and the note was taken outside the hook's own try, so it
+      // failed the whole request. It refuses that hook only, before anything of it is written.
+      test("refuses a hook whose files cannot be read before writing, and still deploys the others", async () => {
+        assert.equal((await deployFiles(FIRST)).status, 200)
+        setFileReaderForTests((path) => (path.endsWith("a.ts") ? Promise.reject(Object.assign(new Error("permission denied"), { code: "EACCES" })) : undefined))
+        const check = { name: "check-title", source: TAG_NOTE.source }
+        const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, {
+          handlers: [{ ...TAG_NOTE, files: SECOND }, check, ADAPTER],
+          map: { ...MAP, memo: { beforeChange: { function: "check-title" } } },
+        })
+        setFileReaderForTests(null)
+        assert.equal(res.status, 200, JSON.stringify(res.json))
+        assert.deepEqual(refusedNames(res.json), ["tag-note"])
+        assert.deepEqual(dataOf(res.json)["kept"], ["tag-note"])
+        assert.equal(readFileSync(join(dir(), "index.ts"), "utf8"), FIRST["index.ts"])
+        assert.equal(readFileSync(join(dir(), "lib", "a.ts"), "utf8"), FIRST["lib/a.ts"])
+        assert.equal(existsSync(join(dir(), "lib", "b.ts")), false)
+        assert.ok(existsSync(join(projectDir, "hooks", "check-title", "index.ts")))
+      })
+
       test("says locked, not kept, when its files cannot be put back", async () => {
         assert.equal((await deployFiles(FIRST)).status, 200)
         // The new files fail, and so does putting the old index.ts back.
@@ -297,6 +318,17 @@ describe("hooks deploy route", () => {
         assert.equal(dataOf(res.json)["kept"], undefined)
         assert.match(JSON.stringify(dataOf(res.json)["refused"]), /could not be put back/)
       })
+    })
+
+    // Review: the worker reads the manifest on every missing hook route, and one read while it was
+    // rewritten in place parsed as nothing. It is replaced whole (a new file, renamed over the old).
+    test("replaces the manifest whole rather than rewriting it in place", async () => {
+      const manifestFile = join(projectDir, ".supatype", "manifest.json")
+      const before = statSync(manifestFile, { bigint: true }).ino
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [CHECK, ADAPTER], map: { memo: { beforeChange: { function: "check-title" } } } })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.notEqual(statSync(manifestFile, { bigint: true }).ino, before)
+      assert.deepEqual(readdirSync(join(projectDir, ".supatype")).filter((name) => name.includes(".tmp")), [])
     })
 
     test("still refuses a map naming a hook neither sent nor kept", async () => {

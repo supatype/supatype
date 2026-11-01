@@ -22,3 +22,20 @@ export function functionRouteName(entry: string, kind: "directory" | "file"): st
   if (kind === "directory") return entry
   return entry.endsWith(".ts") && !entry.endsWith(".d.ts") ? entry.slice(0, -".ts".length) : undefined
 }
+
+/**
+ * A hook name: letters of either case, digits, `-` and `_`, starting with a letter or digit. Wider
+ * than a function name, because the CLI and Cloud take a hook's name from the schema and its folder
+ * as written (`onUserCreate`): Cloud stores it as a ConfigMap key, and the worker skips a name that
+ * starts with `_` or `.`. Still one path segment: nothing in it can name a parent, a separator or a
+ * hidden entry.
+ */
+export const HOOK_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+
+/** The hook rule, said for a person. */
+export const HOOK_NAME_RULE = 'use letters, digits, "-" and "_", starting with a letter or digit'
+
+/** Whether `name` passes the hook-name rule. */
+export function isHookName(name: unknown): name is string {
+  return typeof name === "string" && HOOK_NAME.test(name)
+}

@@ -14,19 +14,6 @@ export function isFunctionName(name: unknown): name is string {
   return typeof name === "string" && FUNCTION_NAME.test(name)
 }
 
-/**
- * A hook name: letters of either case, digits, `-` and `_`, starting with a letter or digit. Wider
- * than a function name, because the CLI and Cloud take a hook's name from the schema and its folder
- * as written (`onUserCreate`): Cloud stores it as a ConfigMap key, and the worker skips a name that
- * starts with `_` or `.`. Still one path segment: nothing in it can name a parent, a separator or a
- * hidden entry.
- */
-export const HOOK_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
-
-/** The hook rule, said for a person. */
-export const HOOK_NAME_RULE = 'use letters, digits, "-" and "_", starting with a letter or digit'
-
-/** Whether `name` passes the hook-name rule. */
-export function isHookName(name: unknown): name is string {
-  return typeof name === "string" && HOOK_NAME.test(name)
-}
+// The hook rule lives with the route rule, which the functions worker gets a copy of, so the worker
+// judges a hook name as the control plane does.
+export { HOOK_NAME, HOOK_NAME_RULE, isHookName } from "./function-routes.js"

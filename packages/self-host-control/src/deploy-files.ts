@@ -15,8 +15,9 @@
  * written back in the form the project keeps it: `<name>.ts` or `<name>/`, never both.
  */
 import { constants, lstatSync, realpathSync, type Stats } from "node:fs"
-import { lstat, mkdir, open, readdir, readFile, realpath, rm, rmdir } from "node:fs/promises"
-import { dirname, join, posix, relative, resolve, win32 } from "node:path"
+import { randomUUID } from "node:crypto"
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir } from "node:fs/promises"
+import { basename, dirname, join, posix, relative, resolve, win32 } from "node:path"
 import { FUNCTION_NAME_RULE, isFunctionName, isRecordOf, isString, parseJsonObject, pathInside, workerLoadsFile } from "@supatype/shared"
 import { badRequest } from "./http.js"
 
@@ -36,12 +37,19 @@ export interface DeployFile {
   source: string
   root: string
   rootReal: string | null
+  /**
+   * Written to a new file beside it and renamed over it, so a reader never sees it half-written:
+   * the manifest, which the worker and the server read while a deploy may be rewriting it.
+   */
+  atomic?: true
 }
 
 const ENTRY = "index.ts"
 const isFileMap = isRecordOf(isString)
 /** Opens for writing without following a link at the file itself, where the platform has the flag. */
 const WRITE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0)
+/** A temporary file for an atomic write: created new, never over anything already there. */
+const TEMP_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0)
 
 /** What is at `path` itself, a link not followed; undefined when nothing is; refused when it cannot be asked. */
 function entryAt(path: string, label: string): Stats | undefined {
@@ -127,11 +135,29 @@ async function writeOne(file: DeployFile): Promise<void> {
   if (parent !== base && !pathInside(base, parent)) throw badRequest(`${file.path} would be written outside its directory`)
   const entry = await lstat(file.path).catch(() => undefined)
   if (entry !== undefined && !entry.isFile()) throw badRequest(`${file.path} exists and is not a regular file`)
-  const handle = await open(file.path, WRITE_FLAGS, 0o644)
+  if (file.atomic === true) return writeReplacing(file)
+  await writeTo(file.path, WRITE_FLAGS, file.source)
+}
+
+/** Writes `source` to `path` opened with `flags`. */
+async function writeTo(path: string, flags: number, source: string): Promise<void> {
+  const handle = await open(path, flags, 0o644)
   try {
-    await handle.writeFile(file.source, "utf8")
+    await handle.writeFile(source, "utf8")
   } finally {
     await handle.close()
+  }
+}
+
+/** Writes `file` to a new file in its directory and renames that over it; the new file is removed if this fails. */
+async function writeReplacing(file: DeployFile): Promise<void> {
+  const temp = join(dirname(file.path), `.${basename(file.path)}.tmp-${process.pid}-${randomUUID()}`)
+  try {
+    await writeTo(temp, TEMP_FLAGS, file.source)
+    await rename(temp, file.path)
+  } catch (err) {
+    await rm(temp, { force: true })
+    throw err
   }
 }
 
@@ -268,7 +294,20 @@ export type FileSnapshot = ReadonlyArray<{ path: string; was: string | null }>
 
 /** The text at each of `paths` now, so a write that fails part-way can be undone ({@link restoreFiles}). */
 export async function snapshotFiles(paths: readonly string[]): Promise<FileSnapshot> {
-  return Promise.all(paths.map(async (path) => ({ path, was: await readFile(path, "utf8").catch(() => null) })))
+  return Promise.all(paths.map(async (path) => ({ path, was: await textBefore(path) })))
+}
+
+/**
+ * The text at `path`, or null when nothing is there (ENOENT) and nothing else. Any other failure to
+ * read rejects: noting it as absent would have a rollback delete a file that was there.
+ */
+async function textBefore(path: string): Promise<string | null> {
+  try {
+    return await (fileReader?.(path) ?? readFile(path, "utf8"))
+  } catch (err) {
+    if (typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT") return null
+    throw new Error(`${path} could not be read (${err instanceof Error ? err.message : String(err)}), so it was not written over`)
+  }
 }
 
 /**
@@ -282,4 +321,14 @@ export async function restoreFiles(snapshot: FileSnapshot, root: WriteRoot): Pro
       was === null ? rm(path, { force: true }) : writeOne({ path, source: was, root: root.path, rootReal: root.real }),
     ),
   )
+}
+
+/** A stand-in for reading a file's text before a hook is written: a promise to use, or undefined to read it. */
+type FileReader = (path: string) => Promise<string | null> | undefined
+
+let fileReader: FileReader | null = null
+
+/** @internal Tests: fail a read, as a file the control plane may not read would, without one. */
+export function setFileReaderForTests(reader: FileReader | null): void {
+  fileReader = reader
 }
