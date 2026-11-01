@@ -158,10 +158,14 @@
     <p>The types come from <code>supatype/generated/seed.ts</code>, which is gitignored. <code>supatype generate</code>, <code>dev</code> and <code>push</code> write it, and a project made by <code>supatype init</code> also rebuilds it on install.</p>
     <p>The context also has <code>expr</code> (values the database computes), <code>log</code> (print a line) and <code>environment</code> (the <code>--environment</code> name, if given).</p>
     <p><code>db.$if(condition, body)</code> runs <code>body</code> only when the database says so. The builder never connects, so the engine checks the condition when the seed runs. Use a plain <code>if</code> for anything your own code can decide.</p>
-    <div class="cb"><div class="cb-bar"><span>seeds/01-blog.ts</span><button type="button" class="cb-copy">Copy</button></div>
-<pre>db.$if({ notExists: { model: <span class="s">"Tag"</span> } }, () =&gt; {
-  db.tag.create({ name: <span class="s">"general"</span> })
-})</pre></div>
+    <div class="cb"><div class="cb-bar"><span>seeds/02-tags.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import type</span> { <span class="t">SeedContext</span> } <span class="k">from</span> <span class="s">"@supatype/cli/seed"</span>
+
+<span class="k">export default async function</span> seed({ db }: <span class="t">SeedContext</span>) {
+  db.$if({ notExists: { model: <span class="s">"Tag"</span> } }, () =&gt; {
+    db.tag.create({ name: <span class="s">"general"</span> })
+  })
+}</pre></div>
     <p>The condition is <code>{ exists }</code> or <code>{ notExists }</code>, naming a model and an optional <code>where</code>, or <code>{ environment: "staging" }</code>.</p>
     <p>A file can also export a <code>config</code>. <code>runOnce: true</code> applies the file at most once, for a one-time backfill. It covers the whole run: if one file sets it, every file in that run gets it, with a warning.</p>
     <div class="cb"><div class="cb-bar"><span>seeds/01-blog.ts</span><button type="button" class="cb-copy">Copy</button></div>

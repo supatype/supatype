@@ -111,6 +111,8 @@ An integer field can be an identity column. `Int<{ identity: "always" }>`, or `I
 `Generated<T, "sql">` is a stored generated column, such as `Generated<string, "lower(name)">`. Most types also take it as an option: `Float<{ generated: "price * quantity" }>`.
 
 ```ts title="schema/index.ts"
+import type { Model, PrimaryKey, Int, Float, Generated } from "@supatype/types"
+
 export type LineItem = Model<{
   id: PrimaryKey<Int<{ identity: "always" }>>
   price: Float

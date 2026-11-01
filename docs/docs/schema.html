@@ -199,7 +199,9 @@
     <p><code>AutoIncrement&lt;number&gt;</code> is <code>Identity&lt;number, "by-default"&gt;</code>. Before 0.7.0 it was a <code>SERIAL</code>. A serial column pushed then is left as it is.</p>
     <p><code>Generated&lt;T, "sql"&gt;</code> is a stored generated column, such as <code>Generated&lt;string, "lower(name)"&gt;</code>. Most types also take it as an option: <code>Float&lt;{ generated: "price * quantity" }&gt;</code>.</p>
     <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="k">export</span> <span class="k">type</span> <span class="t">LineItem</span> = <span class="t">Model</span>&lt;{
+<pre><span class="k">import type</span> { <span class="t">Model</span>, <span class="t">PrimaryKey</span>, <span class="t">Int</span>, <span class="t">Float</span>, <span class="t">Generated</span> } <span class="k">from</span> <span class="s">"@supatype/types"</span>
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">LineItem</span> = <span class="t">Model</span>&lt;{
   id: <span class="t">PrimaryKey</span>&lt;<span class="t">Int</span>&lt;{ identity: <span class="s">"always"</span> }&gt;&gt;
   price: <span class="t">Float</span>
   quantity: <span class="t">Int</span>

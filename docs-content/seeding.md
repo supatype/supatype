@@ -67,10 +67,14 @@ The context also has `expr` (values the database computes), `log` (print a line)
 
 `db.$if(condition, body)` runs `body` only when the database says so. The builder never connects, so the engine checks the condition when the seed runs. Use a plain `if` for anything your own code can decide.
 
-```ts title="seeds/01-blog.ts"
-db.$if({ notExists: { model: "Tag" } }, () => {
-  db.tag.create({ name: "general" })
-})
+```ts title="seeds/02-tags.ts"
+import type { SeedContext } from "@supatype/cli/seed"
+
+export default async function seed({ db }: SeedContext) {
+  db.$if({ notExists: { model: "Tag" } }, () => {
+    db.tag.create({ name: "general" })
+  })
+}
 ```
 
 The condition is `{ exists }` or `{ notExists }`, naming a model and an optional `where`, or `{ environment: "staging" }`.
