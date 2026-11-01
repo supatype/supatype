@@ -14,6 +14,7 @@ vi.mock("../src/target-client.js", async (importOriginal) => {
       // What the target says it supports, asked before a hook upload; not a deploy body.
       if (opts.path.endsWith("/schema/capabilities")) {
         if (sent.features.includes("capabilities-fail")) throw new actual.TargetApiError("Failed to spawn engine", 500)
+        if (sent.features.includes("capabilities-404")) throw new actual.TargetApiError("Route not found", 404)
         return { features: sent.features }
       }
       sent.bodies.push(opts.body)
@@ -147,11 +148,11 @@ describe("a hook of more than one file", () => {
     })
   }
 
-  it("is refused for Supatype Cloud, saying what to do, and sends nothing", async () => {
+  it("is refused for Supatype Cloud, saying what to do, and kept as it is there", async () => {
     const cwd = project()
     const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
     expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
-    expect(sent.bodies).toEqual([])
+    expect(sent.bodies).toMatchObject([{ handlers: [], keep: ["tag-note"] }])
     const output = said.join("\n")
     expect(output).toContain("Supatype Cloud serves each hook as its one module")
     expect(output).toContain("Move what it needs into hooks/tag-note/index.ts")
@@ -160,11 +161,12 @@ describe("a hook of more than one file", () => {
   // Review of round 8, item C-2: an older self-hosted control plane dropped `files` without a word
   // and the push reported success. A server that does not say it takes them is sent the entry alone,
   // so a hook of more than one file is refused before anything is sent.
-  it("is refused for a server that does not say it takes hook files, and sends nothing", async () => {
+  it("is refused for a server that does not say it takes hook files, and kept as it is there", async () => {
     const cwd = project()
     const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
     expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
-    expect(sent.bodies).toEqual([])
+    expect(sent.bodies).toMatchObject([{ handlers: [], keep: ["tag-note"] }])
+    expect(JSON.stringify(sent.bodies)).not.toContain('"files"')
     expect(said.join("\n")).toContain("has more than one file")
   })
 
@@ -174,25 +176,97 @@ describe("a hook of more than one file", () => {
     writeFileSync(join(cwd, "hooks", "tag-note", "index.ts"), 'import { x } from "../shared/x.ts"\nexport default () => x\n')
     const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
     expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
-    expect(sent.bodies).toEqual([])
+    expect(sent.bodies).toMatchObject([{ handlers: [], keep: ["tag-note"] }])
     expect(said.join("\n")).toContain("../shared/x.ts")
   })
 })
 
+// Per-hook deploys, step 4: a target with no capabilities route (404) is an older stack, which takes
+// a hook's entry alone. Any other failure to ask is a real error: the hooks are not deployed, and
+// the push says why.
 describe("a hook upload to a target that cannot say what it takes", () => {
-  it("sends a hook of one file as its entry", async () => {
+  const said: string[] = []
+  function oneHook(): string {
     const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-files-"))
     dirs.push(cwd)
     mkdirSync(join(cwd, "hooks", "tag-note"), { recursive: true })
     writeFileSync(join(cwd, "hooks", "tag-note", "index.ts"), "export default () => ({})\n")
-    vi.spyOn(console, "log").mockImplementation(() => undefined)
-    sent.features = ["capabilities-fail"]
-    const ast = {
-      models: [{ name: "Note", fields: {}, annotations: { db: { tableName: "note" }, platform: { hooks: { beforeChange: { function: "tag-note" } } } } }],
+    said.length = 0
+    for (const stream of ["log", "warn", "error"] as const) {
+      vi.spyOn(console, stream).mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
     }
-    const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
+    return cwd
+  }
+  const ast = {
+    models: [{ name: "Note", fields: {}, annotations: { db: { tableName: "note" }, platform: { hooks: { beforeChange: { function: "tag-note" } } } } }],
+  }
+  const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
+
+  it("sends a hook of one file as its entry to a stack with no capabilities route", async () => {
+    const cwd = oneHook()
+    sent.features = ["capabilities-404"]
     expect(await deployHooksToTarget(cwd, projectConfig(), target, ast)).toBe(false)
     expect(sent.bodies).toMatchObject([{ handlers: [{ name: "tag-note" }, { name: "_supatype-hooks" }] }])
     expect(JSON.stringify(sent.bodies)).not.toContain('"files"')
+  })
+
+  it("deploys no hook when the stack's capabilities fail, and says why", async () => {
+    const cwd = oneHook()
+    sent.features = ["capabilities-fail"]
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, ast)).toBe(true)
+    expect(sent.bodies).toEqual([])
+    expect(said.join("\n")).toContain("its hooks were not deployed")
+    expect(said.join("\n")).toContain("Failed to spawn engine")
+    expect(process.exitCode).toBe(1)
+  })
+})
+
+// Per-hook deploys (Nic, 2026-11-01): each hook passes or fails on its own. The good ones deploy, a
+// failed one is kept on the target, and the push names each, kept or locked, and exits 1.
+describe("a push whose hooks partly fail", () => {
+  const said: string[] = []
+  const twoHooks = {
+    models: [
+      { name: "Note", fields: {}, annotations: { db: { tableName: "note" }, platform: { hooks: { beforeChange: { function: "good-hook" } } } } },
+      { name: "Memo", fields: {}, annotations: { db: { tableName: "memo" }, platform: { hooks: { beforeChange: { function: "bad-hook" } } } } },
+    ],
+  }
+  const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
+  function project(): string {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-partial-"))
+    dirs.push(cwd)
+    mkdirSync(join(cwd, "hooks", "good-hook"), { recursive: true })
+    writeFileSync(join(cwd, "hooks", "good-hook", "index.ts"), "export default () => ({})\n")
+    mkdirSync(join(cwd, "hooks", "bad-hook"), { recursive: true })
+    writeFileSync(join(cwd, "hooks", "bad-hook", "index.ts"), 'import { x } from "./x.ts"\nexport default () => x\n')
+    writeFileSync(join(cwd, "hooks", "bad-hook", "x.ts"), "export const x = 1\n")
+    said.length = 0
+    for (const stream of ["log", "warn", "error"] as const) {
+      vi.spyOn(console, stream).mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
+    }
+    return cwd
+  }
+
+  it("deploys the good hook, keeps the failed one, and says a new one locks its tables", async () => {
+    const cwd = project()
+    sent.answer = { handlers: ["good-hook"], tables: ["memo", "note"], locked: ["bad-hook"] }
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, twoHooks)).toBe(true)
+    expect(sent.bodies).toMatchObject([{ handlers: [{ name: "good-hook" }, { name: "_supatype-hooks" }], keep: ["bad-hook"] }])
+    const output = said.join("\n")
+    expect(output).toContain("1 hook(s) were not deployed")
+    expect(output).toContain("bad-hook")
+    expect(output).toContain("writes to memo are refused until it deploys")
+    expect(process.exitCode).toBe(1)
+  })
+
+  it("says a hook the target refused kept its previous version", async () => {
+    const cwd = project()
+    writeFileSync(join(cwd, "hooks", "bad-hook", "index.ts"), "export default () => ({})\n")
+    sent.answer = { handlers: ["bad-hook"], tables: ["memo", "note"], refused: [{ name: "good-hook", reason: "Hooks: good-hook/index.ts exists and is not a regular file" }], kept: ["good-hook"] }
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, twoHooks)).toBe(true)
+    const output = said.join("\n")
+    expect(output).toContain("good-hook: Hooks: good-hook/index.ts exists and is not a regular file")
+    expect(output).toContain("its previous version still runs")
+    expect(process.exitCode).toBe(1)
   })
 })

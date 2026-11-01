@@ -11,7 +11,7 @@ import {
 } from "../model-hooks.js"
 import { rowCacheChangeNote } from "../model-cache.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
-import { adapterEntry, readHookUpload } from "../hook-upload.js"
+import { adapterEntry, readHookUpload, type HookFailure } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
 import { fatalError } from "../ui/fatal.js"
 import {
@@ -45,7 +45,7 @@ import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.
 import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
 import { postApplyFailed } from "../post-apply.js"
-import { isJsonObject, type HookDeployBody } from "@supatype/shared"
+import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
@@ -57,6 +57,7 @@ import {
   requireTargetFeatures,
   resolveTarget,
   targetHookFiles,
+  type HookFiles,
   targetSchemaAdopt,
   targetSchemaDiff,
   targetSchemaPush,
@@ -483,14 +484,16 @@ export async function deployHooksToTarget(
   const hooksPath = writeHooksModule(cwd, hooksDir, ast)
   if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
 
-  let upload: ReturnType<typeof readHookUpload>
+  let hookFiles: HookFiles
   try {
-    upload = readHookUpload(cwd, hooksDir, ast, await targetHookFiles(target))
+    hookFiles = await targetHookFiles(target)
   } catch (err) {
-    // Refused rather than partially uploaded, leaving the previous hooks in place.
-    postApplyFailed(`its hooks were not deployed: ${errorMessage(err)}`)
+    // Nothing is sent to a target that could not say what it takes: the hooks deployed before stay.
+    postApplyFailed(`its hooks were not deployed: ${target.apiBaseUrl} could not say what it takes (${errorMessage(err)})`)
     return true
   }
+  // Each hook is checked on its own: a failed one is kept on the target as it is (`keep`).
+  const upload = readHookUpload(cwd, hooksDir, ast, hookFiles)
   // One body for every target, the manifest's three maps in it: a self-host stack learns the
   // validator and cache maps only here, as a local push writes them (applied-ast-artifacts.ts). It
   // is sent on every push, empty when the schema declares nothing, so it clears what the target was
@@ -499,7 +502,9 @@ export async function deployHooksToTarget(
   const named = upload?.handlers ?? []
   const handlers = adapter === null || named.length === 0 ? named : [...named, adapter]
   const { hooks, validators, cache } = manifestMaps(ast)
-  return uploadHooks(target, { handlers, map: hooks, validators, cache }, named.length)
+  const failed = upload?.failed ?? []
+  const keep = failed.length > 0 ? { keep: failed.map((hook) => hook.name) } : {}
+  return uploadHooks(target, { handlers, map: hooks, validators, cache, ...keep }, named.length, failed)
 }
 
 /**
@@ -507,11 +512,17 @@ export async function deployHooksToTarget(
  * handlers has. A refusal comes after the schema was applied, so it says that, which target refused
  * and what it answered.
  */
-export async function uploadHooks(target: DeployTarget, body: HookDeployBody, count: number): Promise<boolean> {
+export async function uploadHooks(
+  target: DeployTarget,
+  body: HookDeployBody,
+  count: number,
+  failed: readonly HookFailure[] = [],
+): Promise<boolean> {
   // Nothing declared: sent to clear whatever the target holds.
-  const empty = count === 0 && emptyDeploy(body)
+  const empty = count === 0 && failed.length === 0 && emptyDeploy(body)
+  let answer: unknown
   try {
-    const answer = await withSpinner(empty ? "Clearing hooks the schema no longer declares" : `Deploying ${count} hook(s)`, () =>
+    answer = await withSpinner(empty ? "Clearing hooks the schema no longer declares" : `Deploying ${count} hook(s)`, () =>
       targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, { method: "POST", subpath: "/hooks/deploy", body, restartsWorker: true, handlers: count })),
     )
     sayTargetWarning(answer)
@@ -524,8 +535,48 @@ export async function uploadHooks(target: DeployTarget, body: HookDeployBody, co
     )
     return true
   }
+  const notDeployed = [...failed, ...(isHookDeployAnswer(answer) ? (answer.refused ?? []) : [])]
+  if (notDeployed.length > 0) return reportHooksNotDeployed(target, body, notDeployed, isHookDeployAnswer(answer) ? answer : undefined)
   if (!empty) info(`Deployed ${count} hook(s)`)
   return false
+}
+
+/**
+ * Names each hook not deployed, why, and what that means on the target, as its answer says: kept (its
+ * previous version still runs) or locked (it had none: writes to the tables that map it are refused
+ * until it deploys). Ends the push non-zero (post-apply.ts). Always true: a step after the schema failed.
+ */
+function reportHooksNotDeployed(
+  target: DeployTarget,
+  body: HookDeployBody,
+  notDeployed: readonly HookFailure[],
+  answer: HookDeployAnswer | undefined,
+): true {
+  const lines = notDeployed.flatMap(({ name, reason }) => [`${name}: ${reason}`, `  ${hookOutcome(name, body, answer)}`])
+  postApplyFailed(`${notDeployed.length} hook(s) were not deployed to ${target.apiBaseUrl}:`, lines.join("\n  "))
+  return true
+}
+
+/** What a hook not deployed means on the target, by its answer. */
+function hookOutcome(name: string, body: HookDeployBody, answer: HookDeployAnswer | undefined): string {
+  if (answer?.kept?.includes(name) === true) return "kept: its previous version still runs"
+  if (answer?.locked?.includes(name) === true) {
+    const tables = tablesNaming(name, [body.map, body.validators])
+    return `new: writes to ${tables.length > 0 ? tables.join(", ") : "the tables that map it"} are refused until it deploys`
+  }
+  return "the target did not say whether a previous version of it is kept"
+}
+
+/** The tables whose hook or validator map names the function `name`. */
+function tablesNaming(name: string, maps: readonly unknown[]): string[] {
+  const tables = new Set<string>()
+  for (const map of maps) {
+    if (!isHookMap(map)) continue
+    for (const [table, entries] of Object.entries(map)) {
+      if (Object.values(entries).some((entry) => entry.function === name)) tables.add(table)
+    }
+  }
+  return [...tables].sort()
 }
 
 /** Whether a deploy body carries no handler and no map entry. */

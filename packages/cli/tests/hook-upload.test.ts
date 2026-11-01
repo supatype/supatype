@@ -92,16 +92,20 @@ describe("readHookUpload", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", HANDLER, { "helpers.ts": "export const x = 1\n" })
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry"))
-      .toThrow(/more than one file \(helpers\.ts\)/)
+    // Per-hook deploys: the hook is not sent, and why is said; the others still go.
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
+    expect(upload?.handlers).toEqual([])
+    expect(upload?.failed.map((f) => f.name)).toEqual(["moderate-post"])
+    expect(upload?.failed[0]?.reason).toMatch(/more than one file \(helpers\.ts\)/)
   })
 
   it("refuses a relative import it cannot resolve after flattening", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", `import { x } from "./helpers.ts"\nexport default () => x\n`)
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry"))
-      .toThrow(/imports \.\/helpers\.ts/)
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
+    expect(upload?.failed.map((f) => f.name)).toEqual(["moderate-post"])
+    expect(upload?.failed[0]?.reason).toMatch(/imports \.\/helpers\.ts/)
   })
 
   it("leaves bare specifiers and URLs alone", () => {
@@ -120,8 +124,24 @@ describe("readHookUpload", () => {
   it("names the missing handler when a declared hook has no source", () => {
     const { cwd, hooks } = project()
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry"))
-      .toThrow(/moderate-post/)
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
+    expect(upload?.failed.map((f) => f.name)).toEqual(["moderate-post"])
+    expect(upload?.failed[0]?.reason).toMatch(/moderate-post\/index\.ts/)
+  })
+
+  // Per-hook deploys (Nic, 2026-11-01): each hook passes or fails on its own.
+  it("checks each hook on its own: a bad one fails, the good one is still sent", () => {
+    const { cwd, hooks } = project()
+    writeHook(hooks, "good-hook", HANDLER)
+    writeHook(hooks, "bad-hook", HANDLER, { "helpers.ts": "export const x = 1\n" })
+    const ast = { models: [
+      { name: "Post", fields: {}, annotations: { db: { tableName: "posts" }, platform: { hooks: { beforeChange: { function: "good-hook" } } } } },
+      { name: "Memo", fields: {}, annotations: { db: { tableName: "memos" }, platform: { hooks: { beforeChange: { function: "bad-hook" } } } } },
+    ] }
+    const upload = readHookUpload(cwd, hooks, ast, "entry")
+    expect(upload?.handlers.map((h) => h.name)).toEqual(["good-hook"])
+    expect(upload?.failed.map((f) => f.name)).toEqual(["bad-hook"])
+    expect(Object.keys(upload?.map ?? {}).sort()).toEqual(["memos", "posts"])
   })
 })
 

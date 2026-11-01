@@ -29,6 +29,13 @@ function tree(dir: string, prefix = ""): string[] {
   })
 }
 
+/** The names in an answer's `refused`. */
+function refusedNames(json: Record<string, unknown>): string[] {
+  const refused = dataOf(json)["refused"]
+  if (!Array.isArray(refused)) return []
+  return refused.map((entry: unknown) => (isJsonObject(entry) && typeof entry["name"] === "string" ? entry["name"] : "")).sort()
+}
+
 function manifest(projectDir: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(readFileSync(join(projectDir, ".supatype", "manifest.json"), "utf8"))
   if (!isJsonObject(parsed)) assert.fail("the manifest is not a JSON object")
@@ -94,10 +101,14 @@ describe("hooks deploy route", () => {
       }
     }
 
-    test("refuses a hook directory that is a link out of the project", async (t) => {
+    // Per-hook deploys: the hook in the way is refused on its own, and reported; nothing is written
+    // through the link.
+    test("refuses a hook directory that is a link out of the project, that hook only", async (t) => {
       if (!linkOrSkip(t, outside(), join(projectDir, "hooks", "tag-note"), "junction")) return
       const res = await deploy()
-      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.deepEqual(refusedNames(res.json), ["tag-note"])
+      assert.deepEqual(dataOf(res.json)["locked"], ["tag-note"])
       assert.deepEqual(readdirSync(outside()), [])
     })
 
@@ -108,11 +119,12 @@ describe("hooks deploy route", () => {
       assert.deepEqual(readdirSync(outside()), [])
     })
 
-    test("refuses a handler's index.ts that is a link leading nowhere", async (t) => {
+    test("refuses a handler's index.ts that is a link leading nowhere, that hook only", async (t) => {
       mkdirSync(join(projectDir, "hooks", "tag-note"), { recursive: true })
       if (!linkOrSkip(t, join(outside(), "evil.ts"), join(projectDir, "hooks", "tag-note", "index.ts"), "file")) return
       const res = await deploy()
-      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.deepEqual(refusedNames(res.json), ["tag-note"])
       assert.deepEqual(readdirSync(outside()), [])
     })
 
@@ -185,22 +197,72 @@ describe("hooks deploy route", () => {
     })
 
     // Review r9 A-3: files with no index.ts wrote no entry, and the sweep then removed the old one.
-    test("refuses files with no index.ts, and writes nothing", async () => {
+    test("refuses files with no index.ts, that hook only, and keeps its previous version", async () => {
       await deploy({ "index.ts": INDEX, "lib/tag.ts": LIB })
       const before = tree(tmp)
       const res = await deploy({ "lib/tag.ts": LIB })
-      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.deepEqual(refusedNames(res.json), ["tag-note"])
+      assert.deepEqual(dataOf(res.json)["kept"], ["tag-note"])
       assert.deepEqual(tree(tmp), before)
     })
 
     for (const path of ["../escape.ts", "/abs.ts", "C:\\abs.ts", "lib/../../escape.ts", ""]) {
-      test(`refuses the file path ${JSON.stringify(path)} and writes nothing`, async () => {
-        const before = tree(tmp)
+      test(`refuses the file path ${JSON.stringify(path)}, that hook only, and writes none of it`, async () => {
         const res = await deploy({ "index.ts": INDEX, [path]: LIB })
-        assert.equal(res.status, 400, JSON.stringify(res.json))
-        assert.deepEqual(tree(tmp), before)
+        assert.equal(res.status, 200, JSON.stringify(res.json))
+        assert.deepEqual(refusedNames(res.json), ["tag-note"])
+        assert.deepEqual(dataOf(res.json)["locked"], ["tag-note"])
+        assert.equal(existsSync(join(projectDir, "hooks", "tag-note")), false)
       })
     }
+  })
+
+  // Per-hook deploys (Nic, 2026-11-01): each hook passes or fails on its own. A hook the sender could
+  // not deploy comes in `keep`: its code stays as it is, and the answer says kept or locked.
+  describe("per-hook deploys", () => {
+    const CHECK = { name: "check-title", source: TAG_NOTE.source }
+    const MAP2 = { ...MAP, memo: { beforeChange: { function: "check-title" } } }
+    const hookFile = (name: string): string => join(projectDir, "hooks", name, "index.ts")
+
+    test("leaves a kept hook exactly as it is, never sweeps it, and deploys the others", async () => {
+      const multi = { ...TAG_NOTE, files: { "index.ts": 'import { hook } from "../_supatype/hooks.ts"\nexport default hook(async () => ({}))\n', "lib/a.ts": "export {}\n" } }
+      await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [multi, CHECK, ADAPTER], map: MAP2 })
+      const before = statSync(hookFile("tag-note")).mtimeMs
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, {
+        handlers: [{ ...CHECK, source: `${CHECK.source}// v2\n` }, ADAPTER],
+        map: MAP2,
+        keep: ["tag-note"],
+      })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.deepEqual(dataOf(res.json)["handlers"], ["check-title"])
+      assert.deepEqual(dataOf(res.json)["kept"], ["tag-note"])
+      assert.equal(statSync(hookFile("tag-note")).mtimeMs, before)
+      assert.ok(existsSync(join(projectDir, "hooks", "tag-note", "lib", "a.ts")))
+      assert.match(readFileSync(hookFile("check-title"), "utf8"), /\/\/ v2/)
+    })
+
+    test("locks a new hook it was told to keep, and takes a map that names it", async () => {
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [CHECK, ADAPTER], map: MAP2, keep: ["tag-note"] })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.deepEqual(dataOf(res.json)["locked"], ["tag-note"])
+      assert.deepEqual(manifest(projectDir)["hooks"], MAP2)
+      assert.ok(existsSync(hookFile("check-title")))
+    })
+
+    test("writes the other hooks when the target refuses one", async () => {
+      const bad = { ...TAG_NOTE, files: { "index.ts": "x", "../escape.ts": "x" } }
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [bad, CHECK, ADAPTER], map: MAP2 })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.deepEqual(refusedNames(res.json), ["tag-note"])
+      assert.deepEqual(dataOf(res.json)["handlers"], ["check-title"])
+      assert.ok(existsSync(hookFile("check-title")))
+    })
+
+    test("still refuses a map naming a hook neither sent nor kept", async () => {
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [CHECK, ADAPTER], map: MAP2 })
+      assert.equal(res.status, 400, JSON.stringify(res.json))
+    })
   })
 
   // Review r8 A7: hook names were held to the lowercase function rule, which the CLI and Cloud do not

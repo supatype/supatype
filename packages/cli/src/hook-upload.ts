@@ -26,10 +26,18 @@ export interface HookHandlerUpload {
   files?: Record<string, string>
 }
 
+/** A hook that failed the checks before upload, and why, said for the person who pushed it. */
+export interface HookFailure {
+  name: string
+  reason: string
+}
+
 export interface HookUpload {
   handlers: HookHandlerUpload[]
-  /** table → event → config, exactly as the manifest would carry it. */
+  /** table → event → config, exactly as the manifest would carry it: every hook, failed or not. */
   map: HookMap
+  /** The hooks that failed the checks, which the deploy keeps on the target as they are. */
+  failed: HookFailure[]
 }
 
 /** A hook's directory, and how to name it in a message. */
@@ -57,9 +65,10 @@ function relativeSpecifiers(source: string): string[] {
  * holding the service-role key with nothing able to call it. Uploading it buys nothing and widens what
  * runs with that credential.
  *
- * Throws with a message meant for a terminal when a handler cannot be uploaded faithfully, the
- * alternative is a deploy that succeeds and a hook that fails to import, which reads to the caller as
- * the table's writes being broken for no visible reason.
+ * Each hook is checked on its own. One that cannot be uploaded faithfully (no index.ts, a file it
+ * imports that would not be sent, a file that cannot be read) is in `failed` with why, said for a
+ * terminal, and the others are still sent: uploading it anyway would deploy a hook that fails to
+ * import, which reads to the caller as the table's writes being broken for no visible reason.
  */
 export function readHookUpload(
   cwd: string,
@@ -71,12 +80,23 @@ export function readHookUpload(
   if (declared.length === 0) return null
   const names = [...new Set(declared.map((hook) => hook.function))].sort()
   const root = relative(cwd, hooksDir) || hooksDir
-  const handlers = names.map((name) => {
+  const handlers: HookHandlerUpload[] = []
+  const failed: HookFailure[] = []
+  for (const name of names) {
     const hook = { name, dir: join(hooksDir, name), where: posix.join(root.replace(/\\/g, "/"), name) }
-    if (!existsSync(join(hook.dir, "index.ts"))) throw new Error(`Hook "${name}" has no ${hook.where}/index.ts`)
-    return hookFiles === "directory" ? directoryHandler(hook) : entryHandler(hook)
-  })
-  return { handlers, map: manifestHooks(ast) }
+    try {
+      handlers.push(checkedHandler(hook, hookFiles))
+    } catch (err) {
+      failed.push({ name, reason: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  return { handlers, map: manifestHooks(ast), failed }
+}
+
+/** One hook as `hookFiles` says the target takes it; throws why when it cannot be uploaded faithfully. */
+function checkedHandler(hook: HookDir, hookFiles: HookFiles): HookHandlerUpload {
+  if (!existsSync(join(hook.dir, "index.ts"))) throw new Error(`Hook "${hook.name}" has no ${hook.where}/index.ts`)
+  return hookFiles === "directory" ? directoryHandler(hook) : entryHandler(hook)
 }
 
 /** A hook as Supatype Cloud takes it: its index.ts alone, refused when it needs anything beside it. */

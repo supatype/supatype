@@ -99,7 +99,15 @@ export function registerSchemaRoutes(
   // what the control plane itself takes: a hook of several files (HOOK_FILES_FEATURE).
   route(routes, "GET", "/projects/:ref/schema/capabilities", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const { features } = await runEngineCapabilities()
+    // The control plane's own features do not depend on the engine: an engine that cannot be run lists
+    // none of its own, and the list still loads on any working stack.
+    const features = await runEngineCapabilities().then(
+      (answer) => answer.features,
+      (err: unknown) => {
+        console.error(`[control-plane] the engine's capabilities could not be read: ${err instanceof Error ? err.message : String(err)}`)
+        return []
+      },
+    )
     sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE] } })
   })
 

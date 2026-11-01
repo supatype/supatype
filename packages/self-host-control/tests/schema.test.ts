@@ -58,6 +58,25 @@ describe("schema routes (mock engine)", () => {
     assert.ok(features.includes("adopt_none"))
   })
 
+  // Per-hook deploys: hook_files is the control plane's own. A stack whose engine cannot be run still
+  // takes hook files, so the list still loads, with no engine features.
+  test("GET /schema/capabilities lists hook_files when the engine cannot be run", async () => {
+    resetEngineCapabilities()
+    const bin = process.env["SUPATYPE_ENGINE_BIN"]
+    delete process.env["SUPATYPE_ENGINE_MOCK"]
+    process.env["SUPATYPE_ENGINE_BIN"] = join(dirname(MOCK_ENGINE), "no-such-engine-binary")
+    try {
+      const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.deepEqual(res.json.data, { features: ["hook_files"] })
+    } finally {
+      process.env["SUPATYPE_ENGINE_MOCK"] = MOCK_ENGINE
+      if (bin === undefined) delete process.env["SUPATYPE_ENGINE_BIN"]
+      else process.env["SUPATYPE_ENGINE_BIN"] = bin
+      resetEngineCapabilities()
+    }
+  })
+
   // Review r9 A-2: a CLI sends a hook's several files only to a control plane that says it takes them.
   test("GET /schema/capabilities lists hook_files, which this control plane takes", async () => {
     resetEngineCapabilities()

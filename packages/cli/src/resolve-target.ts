@@ -311,18 +311,12 @@ export type HookFiles = "entry" | "directory"
 /**
  * What a hook upload to `target` may carry: every file of a hook only when the target says it takes
  * them ({@link HOOK_FILES_FEATURE} in its capabilities). Anything else, Cloud, an older self-hosted
- * control plane or one with no capabilities route, takes the entry alone: an older stack dropped
- * `files` without a word and the push reported success (round 8, C-2). A target that could not be
- * asked is taken as the entry alone too: that only ever refuses a hook of more than one file,
- * saying why, and never drops one.
+ * control plane or one with no capabilities route (404), takes the entry alone: an older stack
+ * dropped `files` without a word and the push reported success. Any other failure to ask rejects:
+ * the caller does not deploy hooks it cannot describe to the target, and says why.
  */
 export async function targetHookFiles(target: DeployTarget): Promise<HookFiles> {
-  let features: ReadonlySet<string>
-  try {
-    features = (await targetCapabilities(target)).features
-  } catch {
-    return "entry"
-  }
+  const { features } = await targetCapabilities(target)
   return features.has(HOOK_FILES_FEATURE) ? "directory" : "entry"
 }
 

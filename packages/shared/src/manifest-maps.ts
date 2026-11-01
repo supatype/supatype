@@ -53,17 +53,44 @@ const HOOK_DEPLOY_BODY = {
   map: optional(isUnknown),
   validators: optional(isUnknown),
   cache: optional(isUnknown),
+  keep: optional(isArrayOf(isString)),
 } as const
 
 /**
  * `POST /projects/:ref/hooks/deploy`: `handlers`, each a name and its flattened source, the adapter
  * among them as {@link ADAPTER_NAME}, and for a hook of more than one file sent to a target that
- * takes them, `files`: every file of its directory by `/` path, as written; `map`, the hook map; `validators` and `cache`, the manifest's
- * other two maps. The maps are checked with {@link isHookMap} and {@link isCacheMap} by the reader,
- * which says which is wrong.
+ * takes them, `files`: every file of its directory by `/` path, as written; `map`, the hook map;
+ * `validators` and `cache`, the manifest's other two maps; and `keep`, the hooks the sender could
+ * not deploy (they failed its checks), whose code on the target stays exactly as it is. The maps are
+ * checked with {@link isHookMap} and {@link isCacheMap} by the reader, which says which is wrong.
+ *
+ * Each hook passes or fails on its own: a hook that fails keeps its last good version where it has
+ * one, and a new one leaves the tables that map it refusing writes until it deploys. A write never
+ * skips a hook.
  */
 export const isHookDeployBody = isShape(HOOK_DEPLOY_BODY)
 export type HookDeployBody = FromShape<typeof HOOK_DEPLOY_BODY>
+
+const HOOK_DEPLOY_ANSWER = {
+  handlers: isArrayOf(isString),
+  tables: isArrayOf(isString),
+  refused: optional(isArrayOf(isShape({ name: isString, reason: isString }))),
+  kept: optional(isArrayOf(isString)),
+  locked: optional(isArrayOf(isString)),
+  restarted: optional(isBoolean),
+  warning: optional(isString),
+} as const
+
+/**
+ * The answer's `data` to a hooks deploy. `handlers`: the hooks deployed; `tables`: the tables the
+ * hook map names. `refused`: hooks the target itself refused, each with why. Every hook not deployed,
+ * whether the sender kept it (`keep`) or the target refused it, is in exactly one of `kept` (its
+ * previous version stays and still runs) or `locked` (it had none: writes to the tables that map it
+ * are refused until it deploys). `restarted` and `warning` are a self-hosted stack's, about its
+ * worker. Cloud mirrors this shape (it cannot import this package).
+ */
+export const isHookDeployAnswer = isShape(HOOK_DEPLOY_ANSWER)
+export type HookDeployAnswer = FromShape<typeof HOOK_DEPLOY_ANSWER>
 
 /**
  * Sets each manifest key `maps` names to its map, removing the key when the map is empty; a key whose

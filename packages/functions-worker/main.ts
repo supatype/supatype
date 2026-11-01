@@ -485,6 +485,12 @@ const server = Deno.serve({
     if (fnName === "_logs") return tailResponse()
   }
 
+  // A hook the map names with no code here (a new hook whose deploy failed) cannot be reached: 503,
+  // which the server's hook dispatch treats as unavailable and refuses the write for. A 404 read as
+  // the hook rejecting the write, with a "not found" message.
+  if (fnName.startsWith(HOOKS_ROUTE_PREFIX) && !handlers[fnName]) {
+    return jsonError("hook_unavailable", `Hook "${fnName.slice(HOOKS_ROUTE_PREFIX.length)}" is not deployed`, 503)
+  }
   if (!fnName || !handlers[fnName]) {
     const message = fnName ? `Function "${fnName}" not found` : "No function specified"
     return jsonError("not_found", message, 404, { available: Object.keys(handlers) })
