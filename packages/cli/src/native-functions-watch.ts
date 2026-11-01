@@ -16,7 +16,7 @@ import { basename, dirname } from "node:path"
 import { configSnapshot } from "./config-snapshot.js"
 import { debounce } from "./debounce.js"
 import { errorMessage } from "./error-message.js"
-import { localWorkerRoutes, writeDevFunctionsEntry, writeServiceRoleRoutesFile } from "./functions-worker-files.js"
+import { entryAdapterHash, hooksAdapterHash, localWorkerRoutes, writeDevFunctionsEntry, writeServiceRoleRoutesFile } from "./functions-worker-files.js"
 import type { WatchFn } from "./dev-functions-watch.js"
 
 /** Native dev's worker: the project it serves and the worker main.ts its entry imports. */
@@ -29,15 +29,18 @@ export interface NativeFunctionsTarget {
 }
 
 /**
- * Rewrite the entry when the routes on disk differ from `known`. Returns the new routes when it
- * rewrote, and null when nothing changed or the directories could not be read as handlers.
+ * Rewrite the entry when the routes on disk differ from `known`, or the generated hooks adapter
+ * differs from the one the entry was written with: a hook that failed to import the adapter before
+ * a push wrote it is loaded again only then (round 6c, N30). Returns the routes when it rewrote, and
+ * null when nothing changed or the directories could not be read as handlers.
  */
 export function refreshNativeFunctionsEntry(target: NativeFunctionsTarget, known: readonly string[]): string[] | null {
   return refreshIfChanged({
     read: () => localWorkerRoutes(target.functionsDir, target.hooksDir),
-    apply: (routes) => writeDevFunctionsEntry(target.cwd, routes, target.workerMain),
+    apply: (routes) => writeDevFunctionsEntry(target.cwd, routes, target.workerMain, target.hooksDir),
     label: "Functions",
     known,
+    stale: () => hooksAdapterHash(target.hooksDir) !== entryAdapterHash(target.cwd),
   })
 }
 
@@ -49,6 +52,8 @@ interface RouteRefresh {
   label: string
   /** The list in force now. */
   known: readonly string[]
+  /** Whether to apply the list though it equals `known`, for something it is applied with. */
+  stale?: () => boolean
 }
 
 /**
@@ -56,11 +61,11 @@ interface RouteRefresh {
  * force, or null when nothing changed or it could not be read or applied. It runs from a watcher's
  * timer, where a throw would end `supatype dev`, so a failure is a warning.
  */
-function refreshIfChanged({ read, apply, label, known }: RouteRefresh): string[] | null {
+function refreshIfChanged({ read, apply, label, known, stale }: RouteRefresh): string[] | null {
   let routes: string[]
   try {
     routes = read()
-    if (routes.join("\n") === known.join("\n")) return null
+    if (routes.join("\n") === known.join("\n") && stale?.() !== true) return null
     apply(routes)
   } catch (err) {
     console.warn(`[supatype] Could not reload the functions worker for a ${label} change: ${errorMessage(err)}`)
@@ -90,7 +95,7 @@ export function watchNativeFunctions(
   return {
     refresh,
     // The entry written again as it is: Deno's --watch restarts the worker, which re-reads its files.
-    reload: () => writeDevFunctionsEntry(target.cwd, known, target.workerMain),
+    reload: () => writeDevFunctionsEntry(target.cwd, known, target.workerMain, target.hooksDir),
     close: () => {
       onChange.cancel()
       for (const watcher of watchers) watcher.close()

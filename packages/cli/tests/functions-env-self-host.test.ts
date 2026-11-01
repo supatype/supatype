@@ -75,12 +75,12 @@ afterEach(() => {
 })
 
 describe("functions env unset on a self-host link", () => {
-  it("removes the key on the stack and restarts its worker", async () => {
+  it("removes the key on the stack without restarting its worker", async () => {
     const run = await runCommand(registerFunctions, ["functions", "env", "unset", "API_KEY"], project.dir)
     expect(run.exitCode).toBeUndefined()
     expect(run.output).toContain("Removed API_KEY for project acme.")
     expect(JSON.parse(readFileSync(join(project.dir, "stack", ".supatype", "function-env.json"), "utf8"))).toEqual({ KEEP: "y" })
-    expect(restarts).toEqual([["restart", "-t", "10", "worker-1"]])
+    expect(restarts).toEqual([])
   }, 30_000)
 })
 
@@ -94,7 +94,8 @@ describe("a self-host call whose stack cannot reach Docker, with nothing to rest
   ]
   for (const args of commands) {
     it(`says the warning and succeeds: ${args.join(" ")}`, async () => {
-      await runCommand(registerFunctions, ["functions", "env", "unset", "API_KEY"], project.dir)
+      // A call that hashes the worker's sources, so the one under test owes no restart.
+      await runCommand(registerFunctions, ["functions", "delete", "warm-up"], project.dir)
       docker.down = true
       const run = await runCommand(registerFunctions, args, project.dir)
       expect(run.exitCode).toBeUndefined()

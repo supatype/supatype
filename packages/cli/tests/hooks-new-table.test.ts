@@ -41,3 +41,35 @@ export type BlogPost = Model<{ id: UUID }, { tableName: "posts"; hooks: { afterC
     expect(handlerOf("index-post")).toContain(`AfterChange<"posts">`)
   })
 })
+
+// Local test round 6c, N30: a hook made before any model named it imports `../_supatype/hooks.ts`,
+// which only a push wrote, so in native dev it failed to load until the hook file was edited.
+describe("hooks new and the generated adapter", () => {
+  const adapterPath = (): string => join(project.dir, "hooks", "_supatype", "hooks.ts")
+
+  it("writes the adapter when it is missing, though no model names the hook yet", async () => {
+    writeFileSync(join(project.dir, "schema", "index.ts"), `import type { Model, UUID } from "@supatype/types"
+export type Note = Model<{ id: UUID; body: string }>
+`)
+    await runCommand(registerHooks, ["hooks", "new", "tag-note"], project.dir)
+    expect(readFileSync(adapterPath(), "utf8")).toMatch(/export function hook\b/)
+  })
+
+  it("writes the adapter for the current schema's hooked tables", async () => {
+    writeFileSync(join(project.dir, "schema", "index.ts"), `import type { Model, UUID } from "@supatype/types"
+export type Note = Model<{ id: UUID; body: string }, { hooks: { beforeChange: "tag-note" } }>
+`)
+    await runCommand(registerHooks, ["hooks", "new", "tag-note"], project.dir)
+    expect(readFileSync(adapterPath(), "utf8")).toContain(`"note": {`)
+  })
+
+  it("leaves an adapter that is already there alone", async () => {
+    writeFileSync(join(project.dir, "schema", "index.ts"), `import type { Model, UUID } from "@supatype/types"
+export type Note = Model<{ id: UUID; body: string }>
+`)
+    mkdirSync(join(project.dir, "hooks", "_supatype"), { recursive: true })
+    writeFileSync(adapterPath(), "// pushed\n")
+    await runCommand(registerHooks, ["hooks", "new", "tag-note"], project.dir)
+    expect(readFileSync(adapterPath(), "utf8")).toBe("// pushed\n")
+  })
+})

@@ -51,7 +51,7 @@ export default hook(moderate)
 describe("readHookUpload", () => {
   it("is null when the schema names no hooks", () => {
     const { cwd, hooks } = project()
-    expect(readHookUpload(cwd, hooks, astWith({}))).toBeNull()
+    expect(readHookUpload(cwd, hooks, astWith({}), "entry")).toBeNull()
   })
 
   it("rewrites the generated adapter import to the flattened name", () => {
@@ -59,7 +59,7 @@ describe("readHookUpload", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", HANDLER)
 
-    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
     expect(upload?.handlers).toHaveLength(1)
     expect(upload?.handlers[0]?.source).toContain(FLATTENED_ADAPTER_IMPORT)
     expect(upload?.handlers[0]?.source).not.toContain("../_supatype/hooks.ts")
@@ -72,7 +72,7 @@ describe("readHookUpload", () => {
     writeHook(hooks, "moderate-post", HANDLER)
     writeHook(hooks, "abandoned", HANDLER)
 
-    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
     expect(upload?.handlers.map((h) => h.name)).toEqual(["moderate-post"])
   })
 
@@ -82,7 +82,7 @@ describe("readHookUpload", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", HANDLER)
 
-    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
     expect(upload?.map["posts"]?.["beforeChange"]?.function).toBe("moderate-post")
   })
 
@@ -92,7 +92,7 @@ describe("readHookUpload", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", HANDLER, { "helpers.ts": "export const x = 1\n" })
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" })))
+    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry"))
       .toThrow(/more than one file \(helpers\.ts\)/)
   })
 
@@ -100,7 +100,7 @@ describe("readHookUpload", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", `import { x } from "./helpers.ts"\nexport default () => x\n`)
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" })))
+    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry"))
       .toThrow(/imports \.\/helpers\.ts/)
   })
 
@@ -113,14 +113,14 @@ describe("readHookUpload", () => {
       `import { z } from "npm:zod"\nimport { j } from "https://esm.sh/joi"\n` + HANDLER,
     )
 
-    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
     expect(upload?.handlers).toHaveLength(1)
   })
 
   it("names the missing handler when a declared hook has no source", () => {
     const { cwd, hooks } = project()
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" })))
+    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry"))
       .toThrow(/moderate-post/)
   })
 })
@@ -146,8 +146,20 @@ describe("readHookUpload with validators", () => {
   it("uploads the function a validator names, with no hook declared", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "check-title", HANDLER)
-    const upload = readHookUpload(cwd, hooks, astWithValidator())
+    const upload = readHookUpload(cwd, hooks, astWithValidator(), "entry")
     expect(upload?.handlers.map((handler) => handler.name)).toEqual(["check-title"])
     expect(upload?.map).toEqual({})
+  })
+})
+
+// Review of round 7, item C6: a server writes the hook's directory back as the project keeps it.
+describe("readHookUpload for a target that takes a hook's directory", () => {
+  it("sends every file, the adapter import as the project writes it", () => {
+    const { cwd, hooks } = project()
+    writeHook(hooks, "moderate-post", `import { x } from "./helpers.ts"\n` + HANDLER, { "helpers.ts": "export const x = 1\n" })
+
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "directory")
+    expect(Object.keys(upload?.handlers[0]?.files ?? {}).sort()).toEqual(["helpers.ts", "index.ts"])
+    expect(upload?.handlers[0]?.files?.["index.ts"]).toContain("../_supatype/hooks.ts")
   })
 })

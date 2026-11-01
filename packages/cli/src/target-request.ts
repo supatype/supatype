@@ -2,7 +2,7 @@
  * A request to the linked project's API, with the time limit its route needs: one policy for every
  * command that calls the target, so a functions deploy and a hook upload wait alike.
  */
-import { projectRequest, type DeployTarget } from "./resolve-target.js"
+import { apiFetchOpts, projectRequest, type DeployTarget } from "./resolve-target.js"
 import type { TargetFetchOptions } from "./target-client.js"
 
 /**
@@ -35,4 +35,13 @@ export function targetRequest(target: DeployTarget, call: TargetCall): TargetFet
   const base = call.restartsWorker === true ? RESTART_TIMEOUT_MS : TARGET_TIMEOUT_MS
   const timeoutMs = base + (call.handlers ?? 0) * PER_HANDLER_TIMEOUT_MS
   return { ...projectRequest(target, call.method, call.subpath, call.body), timeoutMs }
+}
+
+/**
+ * A stream from the target, such as a function log tail, at `path` on its API. The limit is the
+ * one a request has, on the answer starting: a server that never answers fails as any request to
+ * it does, and nothing cuts the body off once it has started (`targetStream`).
+ */
+export function targetStreamRequest(target: DeployTarget, path: string): TargetFetchOptions {
+  return { ...apiFetchOpts(target, "GET", path), timeoutMs: TARGET_TIMEOUT_MS }
 }

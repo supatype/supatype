@@ -172,7 +172,7 @@ function startDeno(args: readonly string[], env: Record<string, string>): Runnin
 
 /** Native dev's worker: the entry the CLI writes, run as the server runs it. */
 function startDevWorker(p: Project): RunningWorker {
-  const entry = writeDevFunctionsEntry(p.cwd, localWorkerRoutes(p.functionsDir, p.hooksDir), p.workerMain)
+  const entry = writeDevFunctionsEntry(p.cwd, localWorkerRoutes(p.functionsDir, p.hooksDir), p.workerMain, p.hooksDir)
   return startDeno(["run", "--watch", "--allow-net", "--allow-env", "--allow-read", entry], devEnv(p))
 }
 
@@ -276,7 +276,7 @@ describe.skipIf(!denoAvailable)("native dev's worker under Deno", () => {
     for (const [name, message] of Object.entries(failures)) {
       const res = await fetch(`${base}/functions/v1/${name}`)
       expect(res.status).toBe(500)
-      expect(await res.json()).toMatchObject({ error: "function_load_failed", message: expect.stringMatching(message) })
+      expect(await res.json()).toMatchObject({ error: "function_load_failed", message: expect.stringMatching(message) as unknown })
     }
   }, 60_000)
 

@@ -63,6 +63,39 @@ describe("native dev functions entry", () => {
     expect(refreshNativeFunctionsEntry(target(true), ["hello"])).toBeNull()
   })
 
+  // Local test round 6c, N30: a hook made before any model named it imports
+  // `../_supatype/hooks.ts`, which only a push writes, so it failed to load. The push then wrote the
+  // adapter, which changed no route, and Deno does not watch a module that failed to import, so
+  // nothing reloaded the worker and every write to the table answered 503.
+  describe("when the generated hooks adapter changes", () => {
+    const adapter = (): string => join(cwd, "hooks", "_supatype", "hooks.ts")
+    function writeAdapter(text: string): void {
+      mkdirSync(join(cwd, "hooks", "_supatype"), { recursive: true })
+      writeFileSync(adapter(), text)
+    }
+
+    beforeEach(() => {
+      addHandler("hooks", "tag-note")
+      // Dev's entry as it started: the hook there, its adapter not yet.
+      expect(refreshNativeFunctionsEntry(target(true), ["hello"])).toEqual(["hello", "hooks/tag-note"])
+    })
+
+    it("is rewritten when a push writes the adapter for the first time", () => {
+      const before = readFileSync(devFunctionsEntryPath(cwd), "utf8")
+      writeAdapter("export const hook = (h) => h\n")
+      expect(refreshNativeFunctionsEntry(target(true), ["hello", "hooks/tag-note"])).toEqual(["hello", "hooks/tag-note"])
+      expect(readFileSync(devFunctionsEntryPath(cwd), "utf8")).not.toBe(before)
+    })
+
+    it("is rewritten when the adapter's content changes, and left alone when it has not", () => {
+      writeAdapter("export const hook = (h) => h\n")
+      refreshNativeFunctionsEntry(target(true), ["hello", "hooks/tag-note"])
+      expect(refreshNativeFunctionsEntry(target(true), ["hello", "hooks/tag-note"])).toBeNull()
+      writeAdapter("export const hook = (h) => h // changed\n")
+      expect(refreshNativeFunctionsEntry(target(true), ["hello", "hooks/tag-note"])).toEqual(["hello", "hooks/tag-note"])
+    })
+  })
+
   it("is watched in both the functions and the hooks directory", () => {
     addHandler("hooks", "audit")
     const watched: string[] = []

@@ -9,8 +9,8 @@
  * and the extractor is a leaf that reads type syntax and nothing else.
  */
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
-import { join, relative } from "node:path"
-import { generateHooksModule } from "./hooks-generator.js"
+import { dirname, join, relative } from "node:path"
+import { generateHooksModule, hooksModuleSource } from "./hooks-generator.js"
 import { manifestCache } from "./model-cache.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
@@ -151,15 +151,34 @@ export function validateModelHooks(
  */
 export function writeHooksModule(cwd: string, hooksDir: string, ast: unknown): string | null {
   const module = generateHooksModule(ast)
-  const dir = join(hooksDir, "_supatype")
-  const file = join(dir, "hooks.ts")
+  const file = hooksModulePath(hooksDir)
 
   if (module === null) {
     if (existsSync(file)) rmSync(file, { force: true })
     return null
   }
+  return writeModule(cwd, file, module)
+}
 
-  mkdirSync(dir, { recursive: true })
+/**
+ * `hooks/_supatype/hooks.ts` for a handler just scaffolded, when there is none yet: the module a push
+ * writes for `ast`, with no table when no model names a hook. The handler imports it, and without
+ * it the handler failed to load until a push wrote it (round 6c, N30). One already there is left
+ * as the last push wrote it. Returns the project-relative path written, or null.
+ */
+export function ensureHooksModule(cwd: string, hooksDir: string, ast: unknown): string | null {
+  const file = hooksModulePath(hooksDir)
+  if (existsSync(file)) return null
+  return writeModule(cwd, file, hooksModuleSource(ast))
+}
+
+function hooksModulePath(hooksDir: string): string {
+  return join(hooksDir, "_supatype", "hooks.ts")
+}
+
+/** Writes `module` to `file`, making its directory, and returns the path relative to `cwd`. */
+function writeModule(cwd: string, file: string, module: string): string {
+  mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, module, "utf8")
   return relative(cwd, file) || file
 }

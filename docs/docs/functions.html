@@ -219,6 +219,7 @@
 <li><code>functions/.env.&lt;name&gt;.local</code> applies to one function and overrides the shared file.</li>
 </ul>
 <p>Read them from <code>ctx.env</code>. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.</p>
+<p>Every value set with <code>supatype functions env set</code>, in <code>.env.local</code> or in <code>.env.&lt;name&gt;.local</code> arrives in <code>ctx.env</code> on each call, never in <code>Deno.env</code>: <code>Deno.env</code> is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. <code>Deno.env.get("RESEND_API_KEY")</code> finds nothing.</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list

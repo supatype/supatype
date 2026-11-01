@@ -104,12 +104,16 @@ export function loadBranchContext(cwd: string): BranchContext | null {
   return readJsonFileOrThrow(path, isBranchContext, "a branch context")
 }
 
-function resolveBranchDefaults(cwd: string, configEnvDefault?: string): string | undefined {
-  if (configEnvDefault) return configEnvDefault
+/**
+ * The environment `config` names for this checkout: its default, else the one its branch defaults
+ * give the current git branch. From the config the caller already read: reading it runs it in a
+ * child process, and a second read made every linked command half a second slower.
+ */
+function resolveBranchDefaults(cwd: string, config: SupatypeProjectConfig): string | undefined {
+  if (config.environments?.default) return config.environments.default
+  const branchDefaults = config.environments?.branchDefaults
+  if (!branchDefaults) return undefined
   try {
-    const config = loadConfig(cwd)
-    const branchDefaults = config.environments?.branchDefaults
-    if (!branchDefaults) return undefined
     const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8" }).trim()
     return branchDefaults[branch]
   } catch {
@@ -186,7 +190,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
 
   const envName = resolveEnvironmentName(
     link,
-    flags.env ?? resolveBranchDefaults(cwd, config.environments?.default),
+    flags.env ?? resolveBranchDefaults(cwd, config),
   )
   const envTarget = getEnvironmentTarget(link, envName)
   if (!envTarget) {
@@ -254,7 +258,11 @@ function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh
   }
 }
 
-function apiFetchOpts(
+/**
+ * A request to `path` on the target, carrying its token, org and environment, and renewing a Cloud
+ * session that expired.
+ */
+export function apiFetchOpts(
   target: DeployTarget,
   method: string,
   path: string,
@@ -290,24 +298,38 @@ export interface TargetFunctions {
   invokeBase: string
   /** The token an authenticated invoke carries, when the target has one to give. */
   invokeToken: string | undefined
-  /** Cloud answers a window of past log lines; a server relays the worker's live stream. */
-  logs: "window" | "tail"
+  /** Cloud answers a window of past log lines; a server relays the worker's live stream from `tail`. */
+  logs: { kind: "window" } | { kind: "tail"; tail: TargetStreamPath }
+  /**
+   * What a hook upload may carry: Cloud serves each hook as its one entry module; a server writes
+   * the hook's directory back as the project keeps it, so it takes every file.
+   */
+  hookFiles: "entry" | "directory"
+}
+
+/** Where a stream is served on the target: `<baseUrl><apiPrefix><path>`. */
+export interface TargetStreamPath {
+  baseUrl: string
+  apiPrefix: "/admin/v1"
+  path: string
 }
 
 /**
  * The target's functions: Supatype Cloud serves them on the project's own host and keeps past log
- * lines; a self-hosted or local server serves them under its API and relays a live tail. An
- * authenticated invoke carries the Cloud session, or a local link's key; a self-hosted link's
- * service-role key is never handed to it.
+ * lines; a self-hosted or local server serves them under its API and relays a live tail from its
+ * admin API. An authenticated invoke carries the Cloud session, or a local link's key; a
+ * self-hosted link's service-role key is never handed to it.
  */
 export function targetFunctions(target: DeployTarget): TargetFunctions {
   if (target.mode === "cloud") {
-    return { invokeBase: `https://${target.projectRef}.supatype.dev/functions/v1`, invokeToken: target.token, logs: "window" }
+    const invokeBase = `https://${target.projectRef}.supatype.dev/functions/v1`
+    return { invokeBase, invokeToken: target.token, logs: { kind: "window" }, hookFiles: "entry" }
   }
   // A local link is this machine's own server, and its key goes with an authenticated invoke there.
   // A self-hosted link's service-role key is not handed to a function.
   const invokeToken = target.mode === "local" ? target.token : undefined
-  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs: "tail" }
+  const tail: TargetStreamPath = { baseUrl: target.apiBaseUrl, apiPrefix: "/admin/v1", path: "/functions/logs/tail" }
+  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs: { kind: "tail", tail }, hookFiles: "directory" }
 }
 
 /**

@@ -74,27 +74,49 @@ export function devFunctionsEntryPath(cwd: string): string {
   return join(resolve(cwd, ".supatype"), "functions-worker.ts")
 }
 
+const ADAPTER_LINE = "// Hooks adapter: "
+
 /**
  * The entry native dev's server runs: an import of the worker, and the routes (functions and
  * hooks) it found. The server runs Deno with a fixed `--watch` on this file, which reloads when a
  * file the worker imported changes; a function or hook added later was imported by nothing, so the
  * routes are rewritten when the set changes, and that change is what makes Deno reload and find it.
+ *
+ * It names the generated hooks adapter's content too ({@link hooksAdapterHash}): a hook made before
+ * any model named it failed to import the adapter, which only a push writes, and Deno does not
+ * watch a module that failed to import, so the push's adapter reloaded nothing (round 6c, N30).
  */
-export function devFunctionsEntrySource(routes: readonly string[], workerMain: string): string {
+export function devFunctionsEntrySource(routes: readonly string[], workerMain: string, adapter = "none"): string {
   return [
     "// Written by supatype dev, do not edit. Runs packages/functions-worker, as the deployed image does.",
     `// Routes: ${routes.join(", ")}`,
+    `${ADAPTER_LINE}${adapter}`,
     `import ${JSON.stringify(pathToFileURL(workerMain).href)}`,
     "",
   ].join("\n")
 }
 
 /** Writes {@link devFunctionsEntrySource} to {@link devFunctionsEntryPath} and returns that path. */
-export function writeDevFunctionsEntry(cwd: string, routes: readonly string[], workerMain: string): string {
+export function writeDevFunctionsEntry(cwd: string, routes: readonly string[], workerMain: string, hooksDir: string): string {
   const path = devFunctionsEntryPath(cwd)
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, devFunctionsEntrySource(routes, workerMain), "utf8")
+  writeFileSync(path, devFunctionsEntrySource(routes, workerMain, hooksAdapterHash(hooksDir)), "utf8")
   return path
+}
+
+/** A short hash of `hooks/_supatype/hooks.ts` under `hooksDir`, or "none" when there is none. */
+export function hooksAdapterHash(hooksDir: string): string {
+  const file = join(hooksDir, "_supatype", "hooks.ts")
+  if (!existsSync(file)) return "none"
+  return createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 16)
+}
+
+/** The adapter hash the entry in `cwd` was written with: "none" when it names none or is not there. */
+export function entryAdapterHash(cwd: string): string {
+  const path = devFunctionsEntryPath(cwd)
+  if (!existsSync(path)) return "none"
+  const line = readFileSync(path, "utf8").split(/\r?\n/).find((l) => l.startsWith(ADAPTER_LINE))
+  return line === undefined ? "none" : line.slice(ADAPTER_LINE.length).trim()
 }
 
 /**

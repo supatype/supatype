@@ -4,7 +4,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   statSync,
   writeFileSync,
 } from "node:fs"
@@ -12,7 +11,7 @@ import { resolve, join, relative, isAbsolute } from "node:path"
 import { execSync } from "node:child_process"
 import { runUntilStopped } from "../run-until-stopped.js"
 import { fetchWithin } from "../fetch-within.js"
-import { targetRequest, type TargetCall } from "../target-request.js"
+import { targetRequest, targetStreamRequest, type TargetCall } from "../target-request.js"
 import { parseEnvText } from "../dotenv-parse.js"
 import { withEnvValue, withoutEnvValue } from "../env-lines.js"
 import { STOP_SIGNALS } from "../stop-signals.js"
@@ -36,14 +35,15 @@ import {
 } from "../functions-worker-files.js"
 import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
 import { loadProjectLink } from "../link.js"
-import { projectRequest, resolveTarget, targetFunctions, type DeployTarget } from "../resolve-target.js"
+import { projectRequest, resolveTarget, targetFunctions, type DeployTarget, type TargetStreamPath } from "../resolve-target.js"
 import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
-import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, toPosixPath, workerLoadsFile, type FunctionDeployBody, type FunctionDeployEntry, type Guard } from "@supatype/shared"
+import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, type FunctionDeployBody, type FunctionDeployEntry, type Guard } from "@supatype/shared"
 import {
   ensureFunctionsDenoTypes,
   sharedFunctionsReadmeSource,
 } from "../functions-deno-types.js"
 import { functionTemplateSource } from "../functions-template.js"
+import { readWorkerFiles } from "../worker-module-files.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { DENO_ENV } from "../native-dev-env.js"
@@ -56,13 +56,21 @@ const ENV_PRODUCTION = ".env.production"
 // The commands that exist: there is no `supatype cloud` group, login and link are top level.
 const NOT_LOGGED_IN = "Not logged in. Run: supatype login"
 const NOT_LINKED = "No linked project. Run: supatype link"
+/**
+ * Where a function reads its env values, said in every help that sets them: a function reading
+ * `Deno.env.get` finds nothing, and help is where a user looks first.
+ */
+const ENV_HELP =
+  "Values set with `functions env set`, in .env.local or in .env.<name>.local arrive in `ctx.env` " +
+  "on each call, never in Deno.env, which every call running at once shares."
 
 // ─── Registration ────────────────────────────────────────────────────────────
 
 export function registerFunctions(program: Command): void {
   const fnCmd = program
     .command("functions")
-    .description("Manage Supatype Edge Functions (Deno-based serverless TypeScript)")
+    .summary("Manage Supatype Edge Functions (Deno-based serverless TypeScript)")
+    .description(`Manage Supatype Edge Functions (Deno-based serverless TypeScript).\n\n${ENV_HELP}`)
 
   fnCmd
     .command("new <name>")
@@ -129,7 +137,8 @@ export function registerFunctions(program: Command): void {
 
   const envCmd = fnCmd
     .command("env")
-    .description("Manage function environment variables")
+    .summary("Manage function environment variables")
+    .description(`Manage function environment variables: on the linked project, else in the functions directory's .env.local.\n\n${ENV_HELP}`)
 
   envCmd
     .command("list")
@@ -140,7 +149,8 @@ export function registerFunctions(program: Command): void {
 
   envCmd
     .command("set <keyvalue>")
-    .description("Set an environment variable (KEY=value)")
+    .summary("Set an environment variable (KEY=value)")
+    .description(`Set an environment variable (KEY=value).\n\n${ENV_HELP}`)
     .action(async (keyvalue: string) => {
       await envSet(process.cwd(), keyvalue)
     })
@@ -578,17 +588,11 @@ const isFunctionLogs = isArrayOf(isShape({ timestamp: isString, level: isString,
 /**
  * A function's source as the deploy request carries it. A file function is its own entry. A
  * directory function's entry is its index.ts, and every file under it the worker loads
- * ({@link workerLoadsFile}) goes in `files`, by a path with `/` on every OS.
+ * ({@link readWorkerFiles}) goes in `files`, by a path with `/` on every OS.
  */
 function readFunctionFiles(fn: DiscoveredFunctionRoute): { source: string; files?: Record<string, string> } {
   if (statSync(fn.path).isFile()) return { source: readFileSync(fn.path, "utf8") }
-  const files: Record<string, string> = {}
-  for (const entry of readdirSync(fn.path, { recursive: true, encoding: "utf8" })) {
-    const fullPath = join(fn.path, entry)
-    if (workerLoadsFile(entry) && statSync(fullPath).isFile()) {
-      files[toPosixPath(entry)] = readFileSync(fullPath, "utf8")
-    }
-  }
+  const files = readWorkerFiles(fn.path)
   return { source: files["index.ts"] ?? "", files }
 }
 
@@ -639,19 +643,20 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
  */
 async function functionLogs(cwd: string, name: string, opts: { since: string }): Promise<void> {
   const target = requireLinkedTarget(cwd)
-  if (targetFunctions(target).logs === "tail") return tailServerLogs(target, name)
+  const { logs } = targetFunctions(target)
+  if (logs.kind === "tail") return tailServerLogs(target, logs.tail, name)
   const subpath = `/functions/${encodeURIComponent(name)}/logs?since=${encodeURIComponent(opts.since)}`
   const lines = await askTarget(target, "Failed to fetch logs", { method: "GET", subpath }, isFunctionLogs)
   if (lines.length === 0) info(`No logs for "${name}" in the last ${opts.since}.`)
   for (const entry of lines) plain(formatLogLine(entry))
 }
 
-/** Tails the linked server's relay of the worker's log stream, printing `name`'s lines. */
-async function tailServerLogs(target: DeployTarget, name: string): Promise<void> {
-  info(`Tailing logs for "${name}" on ${target.apiBaseUrl}. Press Ctrl+C to stop.`)
+/** Tails the linked server's relay of the worker's log stream at `tail`, printing `name`'s lines. */
+async function tailServerLogs(target: DeployTarget, tail: TargetStreamPath, name: string): Promise<void> {
+  info(`Tailing logs for "${name}" on ${tail.baseUrl}. Press Ctrl+C to stop.`)
   let body: ReadableStream<Uint8Array>
   try {
-    body = await targetStream(target.apiBaseUrl, "/admin/v1", { method: "GET", path: "/functions/logs/tail", token: target.token ?? "" })
+    body = await targetStream(tail.baseUrl, tail.apiPrefix, targetStreamRequest(target, tail.path))
   } catch (err) {
     error(`Failed to tail logs: ${errorMessage(err)}`)
     process.exit(1)

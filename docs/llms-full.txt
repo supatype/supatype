@@ -2259,6 +2259,8 @@ Variables for functions live in env files inside the functions directory:
 
 Read them from `ctx.env`. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.
 
+Every value set with `supatype functions env set`, in `.env.local` or in `.env.<name>.local` arrives in `ctx.env` on each call, never in `Deno.env`: `Deno.env` is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. `Deno.env.get("RESEND_API_KEY")` finds nothing.
+
 ```sh
 $ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list

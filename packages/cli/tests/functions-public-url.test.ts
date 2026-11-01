@@ -140,7 +140,7 @@ describe("the function template", () => {
 
   it("returns publicUrl and no longer echoes the internal url", () => {
     expect(source).toContain("const { publicUrl } = ctx")
-    expect(source).toMatch(/JSON\.stringify\(\{ message: "Hello from hello!", publicUrl \}\)/)
+    expect(source).toMatch(/json\(\{ message: "Hello from hello!", publicUrl \}\)/)
     expect(source).not.toMatch(/[{,]\s*url\s*[},]/)
     expect(source).not.toContain("ctx.url")
   })

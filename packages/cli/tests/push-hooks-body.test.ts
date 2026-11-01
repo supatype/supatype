@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -97,5 +97,62 @@ describe("an empty hook deploy", () => {
     sent.refuse = 403
     expect(await uploadHooks(target, { handlers: [{ name: "h", source: "x" }], map: {} }, 1)).toBe(true)
     expect(process.exitCode).toBe(1)
+  })
+})
+
+// Review of round 7, item C6: a hook of more than one file was refused on every target, telling the
+// user to run it on a self-hosted stack, which was the target refusing it. A server writes the hook's
+// directory back as the project keeps it, so it takes every file; only Supatype Cloud, which serves
+// a hook as its one module, refuses, and says what to do instead.
+describe("a hook of more than one file", () => {
+  const hooked = {
+    models: [{ name: "Note", fields: {}, annotations: { db: { tableName: "note" }, platform: { hooks: { beforeChange: { function: "tag-note" } } } } }],
+  }
+  const said: string[] = []
+
+  function project(): string {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-files-"))
+    dirs.push(cwd)
+    mkdirSync(join(cwd, "hooks", "tag-note", "lib"), { recursive: true })
+    writeFileSync(join(cwd, "hooks", "tag-note", "index.ts"), 'import { tag } from "./lib/tag.ts"\nexport default () => ({ tag })\n')
+    writeFileSync(join(cwd, "hooks", "tag-note", "lib", "tag.ts"), 'export const tag = "t"\n')
+    said.length = 0
+    for (const stream of ["log", "warn", "error"] as const) {
+      vi.spyOn(console, stream).mockImplementation((...args: unknown[]) => void said.push(args.join(" ")))
+    }
+    return cwd
+  }
+
+  for (const mode of ["self-host", "local"] as const) {
+    it(`is sent whole to a ${mode} target`, async () => {
+      const cwd = project()
+      const target = { mode, environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
+      expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(false)
+      expect(sent.bodies).toMatchObject([{
+        handlers: [{
+          name: "tag-note",
+          files: { "index.ts": 'import { tag } from "./lib/tag.ts"\nexport default () => ({ tag })\n', "lib/tag.ts": 'export const tag = "t"\n' },
+        }, { name: "_supatype-hooks" }],
+      }])
+    })
+  }
+
+  it("is refused for Supatype Cloud, saying what to do, and sends nothing", async () => {
+    const cwd = project()
+    const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
+    expect(sent.bodies).toEqual([])
+    const output = said.join("\n")
+    expect(output).toContain("Supatype Cloud serves each hook as its one module")
+    expect(output).toContain("Move what it needs into hooks/tag-note/index.ts")
+  })
+
+  it("is refused for a server when it imports a file outside its directory, which is not sent", async () => {
+    const cwd = project()
+    writeFileSync(join(cwd, "hooks", "tag-note", "index.ts"), 'import { x } from "../shared/x.ts"\nexport default () => x\n')
+    const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
+    expect(sent.bodies).toEqual([])
+    expect(said.join("\n")).toContain("../shared/x.ts")
   })
 })

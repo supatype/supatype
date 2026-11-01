@@ -47,11 +47,34 @@ describe("functions logs on a self-host link", () => {
   it("tails the linked server with its service-role key, showing only that function", async () => {
     const run = await runCommand(registerFunctions, ["functions", "logs", "hello"], project.dir)
     expect(requests.map(({ url, auth }) => ({ url, auth }))).toEqual([{ url: "https://sh.example.test/admin/v1/functions/logs/tail", auth: "Bearer svc-key" }])
-    // A tail runs until Ctrl+C: no timeout cuts it off.
-    expect(requests[0]?.signal).toBeUndefined()
+    // A tail runs until Ctrl+C: the limit is on the answer starting, and nothing cuts the body off.
+    expect(requests[0]?.signal?.aborted).toBe(false)
     expect(run.output).toContain("first")
     expect(run.output).toContain("second")
     expect(run.output).not.toContain("not this one")
+  })
+
+  // Review of round 7, item C10: the tail's request had no time limit, so a server that never
+  // answered left `functions logs` waiting forever, with nothing said.
+  it("gives up when the server does not start answering, saying so", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    let asked = false
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+      asked = true
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))
+      })
+    })
+    try {
+      const running = runCommand(registerFunctions, ["functions", "logs", "hello"], project.dir)
+      while (!asked) await new Promise((resolve) => setImmediate(resolve))
+      await vi.advanceTimersByTimeAsync(10_000)
+      const run = await running
+      expect(run.exitCode).toBe(1)
+      expect(run.output).toContain("Failed to tail logs: GET https://sh.example.test/admin/v1/functions/logs/tail did not answer within 10 s")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

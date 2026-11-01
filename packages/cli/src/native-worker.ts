@@ -41,7 +41,7 @@ export async function prepareNativeWorker(cwd: string, config: SupatypeProjectCo
   const hooksDir = hooksPathFromProject(config, cwd)
   const routes = localWorkerRoutesOrExit(functionsDir, hooksDir)
   const workerMain = installFunctionsWorker()
-  const entry = writeDevFunctionsEntry(cwd, routes, workerMain)
+  const entry = writeDevFunctionsEntry(cwd, routes, workerMain, hooksDir)
   const denoBin = await provisionDeno(config)
   const served = routes.length > 0
     ? `${routes.length} route(s): ${routes.join(", ")}`

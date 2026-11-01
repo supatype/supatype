@@ -56,6 +56,7 @@ import type { SupatypeProjectConfig } from "../project-config.js"
 import {
   requireTargetFeatures,
   resolveTarget,
+  targetFunctions,
   targetSchemaAdopt,
   targetSchemaDiff,
   targetSchemaPush,
@@ -484,7 +485,7 @@ export async function deployHooksToTarget(
 
   let upload: ReturnType<typeof readHookUpload>
   try {
-    upload = readHookUpload(cwd, hooksDir, ast)
+    upload = readHookUpload(cwd, hooksDir, ast, targetFunctions(target).hookFiles)
   } catch (err) {
     // Refused rather than partially uploaded, leaving the previous hooks in place.
     postApplyFailed(`its hooks were not deployed: ${errorMessage(err)}`)
