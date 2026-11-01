@@ -9,6 +9,7 @@ import { getEffectiveMaxUploadSize, oversizeRefusal, uploadRefusal, validateFile
 import { checkReadAccess } from "../middleware/access-control.js"
 import type { JwtPayload } from "../auth.js"
 import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
+import { folderOf, objectName, refusedName } from "../object-names.js"
 import { applyCorsHeaders } from "../middleware/cors.js"
 import { servesAnonymously } from "../bucket-access.js"
 import { isNumber, isString, isUnknown, optional } from "../json.js"
@@ -38,9 +39,6 @@ function inferMime(path: string, headerValue: string): string {
 
 export async function upload(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  // Already decoded by the router. Decoding it again threw on a name holding "%".
-  const objectPath = ctx.params["wildcard"]!
-
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
@@ -48,6 +46,8 @@ export async function upload(ctx: RequestContext): Promise<void> {
   }
 
   applyCorsHeaders(ctx.res, bucket)
+  const objectPath = routeName(ctx)
+  if (objectPath === null) return
   const jwt = callerOf(ctx)
 
   const contentType = inferMime(objectPath, ctx.req.headers["content-type"] ?? "")
@@ -222,11 +222,34 @@ async function refusingWhenUngranted<T>(ctx: RequestContext, run: () => Promise<
   }
 }
 
+// ─── Object names ───────────────────────────────────────────────────────────────
+
+/**
+ * Each of `sent` as an object name (object-names.ts), or null once the request has answered 400
+ * naming the first one refused, as the client sent it.
+ */
+function namesOrRefuse(ctx: RequestContext, sent: readonly string[]): string[] | null {
+  const names: string[] = []
+  for (const one of sent) {
+    const name = objectName(one)
+    if (name === null) {
+      sendJson(ctx.res, 400, { error: refusedName(one) })
+      return null
+    }
+    names.push(name)
+  }
+  return names
+}
+
+/** The object a route names, already decoded by the router, or null once it has answered 400. */
+function routeName(ctx: RequestContext): string | null {
+  return namesOrRefuse(ctx, [ctx.params["wildcard"]!])?.[0] ?? null
+}
+
 // ─── Download (public bucket) ───────────────────────────────────────────────────
 
 export async function downloadPublic(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
 
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
@@ -237,20 +260,20 @@ export async function downloadPublic(ctx: RequestContext): Promise<void> {
   // Apply bucket-specific CORS headers (task 46)
   applyCorsHeaders(ctx.res, bucket)
 
+  // Before the name, so a request with no access learns nothing about which names would be taken.
   if (!servesAnonymously(bucket)) {
     sendJson(ctx.res, 403, { error: "Bucket is not public" })
     return
   }
 
-  await serveObject(ctx, bucketId, objectPath)
+  const objectPath = routeName(ctx)
+  if (objectPath !== null) await serveObject(ctx, bucketId, objectPath)
 }
 
 // ─── Download (authenticated) ───────────────────────────────────────────────────
 
 export async function downloadAuthenticated(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
-
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
@@ -259,6 +282,8 @@ export async function downloadAuthenticated(ctx: RequestContext): Promise<void> 
 
   // Apply bucket-specific CORS headers (task 46)
   applyCorsHeaders(ctx.res, bucket)
+  const objectPath = routeName(ctx)
+  if (objectPath === null) return
 
   // ── Access control (task 44) ────────────────────────────────────────────────
   const access = await checkReadAccess(bucket, objectPath, ctx.jwt)
@@ -273,57 +298,57 @@ export async function downloadAuthenticated(ctx: RequestContext): Promise<void> 
 // ─── Download (signed URL) ──────────────────────────────────────────────────────
 
 export async function downloadSigned(ctx: RequestContext): Promise<void> {
-  const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
-
-  const token = ctx.url.searchParams.get("token")
-  if (!token) {
-    sendJson(ctx.res, 400, { error: "Missing token parameter" })
-    return
-  }
-
-  const bucket = await db.getBucket(bucketId)
-  if (!bucket) {
-    sendJson(ctx.res, 404, { error: "Bucket not found" })
-    return
-  }
-
-  // ── Pre-signed URL verification (task 45) ──────────────────────────────────
-  // Only this service's own HMAC token. Anything else used to be passed through "for S3 to
-  // validate", but the object was then fetched with the service's own credentials, so nothing
-  // validated it and `?token=x` read any private object with no session at all.
-  if (!verifySignedToken(token, bucketId, objectPath)) {
-    sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
-    return
-  }
+  const bucket = await signedBucket(ctx)
+  if (!bucket) return
+  // A token signed for a name the service refuses still names no object of its own.
+  const objectPath = routeName(ctx)
+  if (objectPath === null) return
 
   // No CORS for private bucket signed URLs (task 46)
   applyCorsHeaders(ctx.res, bucket)
 
-  await serveObject(ctx, bucketId, objectPath)
+  await serveObject(ctx, bucket.id, objectPath)
+}
+
+/**
+ * The bucket a signed download names, once its token is checked against the bucket and the name as
+ * sent, or null once it has answered: 400 with no token, 404 for no bucket, 403 for a bad token.
+ * Only this service's own HMAC token (task 45). Anything else used to be passed through "for S3 to
+ * validate", but the object was then fetched with the service's own credentials, so nothing
+ * validated it and `?token=x` read any private object with no session at all.
+ */
+async function signedBucket(ctx: RequestContext): Promise<db.BucketRow | null> {
+  const token = ctx.url.searchParams.get("token")
+  if (!token) {
+    sendJson(ctx.res, 400, { error: "Missing token parameter" })
+    return null
+  }
+  const bucket = await db.getBucket(ctx.params["bucket"]!)
+  if (!bucket) {
+    sendJson(ctx.res, 404, { error: "Bucket not found" })
+    return null
+  }
+  if (!verifySignedToken(token, bucket.id, ctx.params["wildcard"]!)) {
+    sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
+    return null
+  }
+  return bucket
 }
 
 // ─── Create signed URL ──────────────────────────────────────────────────────────
 
 export async function createSignedUrl(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
-
-  const body = await readShapedJson(ctx.req, { expiresIn: optional(isNumber) })
-  const expiresIn = body.expiresIn ?? config.defaultSignedUrlExpiry
-
-  if (expiresIn < 1 || expiresIn > config.maxSignedUrlExpiry) {
-    sendJson(ctx.res, 400, {
-      error: `expiresIn must be between 1 and ${config.maxSignedUrlExpiry} seconds`,
-    })
-    return
-  }
+  const expiresIn = await signingExpiry(ctx)
+  if (expiresIn === null) return
 
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
+  const objectPath = routeName(ctx)
+  if (objectPath === null) return
 
   // ── Access control: check read permission before signing (task 44) ──────────
   const access = await checkReadAccess(bucket, objectPath, ctx.jwt)
@@ -339,15 +364,31 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
     return
   }
 
-  // This service's HMAC token for every bucket (task 45), served through this service, which
-  // resolves the object's live version when the URL is used. A public bucket used to get an S3
-  // presigned URL to one version's key, which stopped working the moment the object was
-  // overwritten and its old version deleted.
-  // The path the router decoded, encoded again per segment: put back as decoded, a name holding `?`
-  // or `#` cut the URL short and the token with it.
+  sendJson(ctx.res, 200, { signedURL: signedUrlFor(bucketId, objectPath, expiresIn) })
+}
+
+/** The life a signing request asks for, or null once it has answered 400 for one out of range. */
+async function signingExpiry(ctx: RequestContext): Promise<number | null> {
+  const body = await readShapedJson(ctx.req, { expiresIn: optional(isNumber) })
+  const expiresIn = body.expiresIn ?? config.defaultSignedUrlExpiry
+  if (expiresIn < 1 || expiresIn > config.maxSignedUrlExpiry) {
+    sendJson(ctx.res, 400, { error: `expiresIn must be between 1 and ${config.maxSignedUrlExpiry} seconds` })
+    return null
+  }
+  return expiresIn
+}
+
+/**
+ * This service's HMAC-signed URL for an object (task 45), served through this service, which
+ * resolves the object's live version when the URL is used. A public bucket used to get an S3
+ * presigned URL to one version's key, which stopped working once the object was overwritten and
+ * its old version deleted. The name is encoded again per segment: put back as decoded, a name
+ * holding `?` or `#` cut the URL short and the token with it.
+ */
+function signedUrlFor(bucketId: string, objectPath: string, expiresIn: number): string {
   const token = createSignedToken(bucketId, objectPath, expiresIn)
   const urlPath = [bucketId, ...objectPath.split("/")].map(encodeURIComponent).join("/")
-  sendJson(ctx.res, 200, { signedURL: `/object/sign/${urlPath}?token=${token}` })
+  return `/object/sign/${urlPath}?token=${token}`
 }
 
 // ─── Remove objects ─────────────────────────────────────────────────────────────
@@ -367,11 +408,14 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
     sendJson(ctx.res, 400, { error: "prefixes array is required" })
     return
   }
+  // Every name before anything is deleted: one refused name refuses the whole remove.
+  const names = namesOrRefuse(ctx, prefixes)
+  if (names === null) return
 
   // The rows first, as the caller, so the bucket's `delete` rule decides; then the bytes, for only
   // the objects Postgres deleted. The response lists those and no others, so an object the caller
   // may not delete is left in place and simply absent from the answer.
-  const deleted = await refusingWhenUngranted(ctx, () => db.deleteObjectsAs(jwt, bucketId, prefixes))
+  const deleted = await refusingWhenUngranted(ctx, () => db.deleteObjectsAs(jwt, bucketId, names))
   if (deleted === undefined) return
   await discard(bucketId, deleted)
 
@@ -387,12 +431,6 @@ const LIST_REQUEST = {
   search: optional(isString),
 } as const
 
-/** The folder a list prefix names: "" for the bucket root, else its path ending in "/". */
-export function folderOf(prefix: string): string {
-  const path = prefix.replace(/^\/+|\/+$/g, "")
-  return path === "" ? "" : `${path}/`
-}
-
 /**
  * A folder's direct children: its subfolders, then its objects, named relative to it, optionally
  * searched by name, a page at a time, with how many match in X-Total-Count. It used to answer every
@@ -406,7 +444,12 @@ export async function listObjects(ctx: RequestContext): Promise<void> {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
-  const query = { folder: folderOf(body.prefix ?? ""), search: body.search ?? "", limit: body.limit ?? 100, offset: body.offset ?? 0 }
+  const folder = folderOf(body.prefix ?? "")
+  if (folder === null) {
+    sendJson(ctx.res, 400, { error: refusedName(body.prefix ?? "") })
+    return
+  }
+  const query = { folder, search: body.search ?? "", limit: body.limit ?? 100, offset: body.offset ?? 0 }
 
   // As the caller, so the list holds only what their read rule allows. It used to run on the
   // service's connection after a check that asked about the prefix as if it were an object, found

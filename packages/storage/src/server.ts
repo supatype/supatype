@@ -74,6 +74,16 @@ function matchRoute(
   return null
 }
 
+/**
+ * The request's path as the client sent it. URL.pathname resolves "." and ".." parts (and %2E with
+ * them) away, so "x/../a" was routed as "a" and wrote over it: an object name is judged as written
+ * (object-names.ts). A request line naming a whole URL falls back to its pathname.
+ */
+function pathAsSent(requestUrl: string | undefined, url: URL): string {
+  const path = (requestUrl ?? "/").split("?")[0] ?? "/"
+  return path.startsWith("/") ? path : url.pathname
+}
+
 /** The matching route, or "malformed" when the path's percent-encoding cannot be decoded. */
 function matchedOrMalformed(method: string, pathname: string): ReturnType<typeof matchRoute> | "malformed" {
   try {
@@ -150,7 +160,7 @@ export function createServer() {
       return
     }
 
-    const matched = matchedOrMalformed(method, url.pathname)
+    const matched = matchedOrMalformed(method, pathAsSent(req.url, url))
     if (matched === "malformed") {
       sendJson(res, 400, { error: "Malformed percent-encoding in the path" })
       return
