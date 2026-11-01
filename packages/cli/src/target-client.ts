@@ -7,7 +7,8 @@ export interface TargetFetchOptions {
   method: string
   path: string
   body?: unknown
-  token: string
+  /** The bearer token; with none, the request carries no Authorization header. */
+  token?: string | undefined
   orgId?: string | undefined
   environment?: string | undefined
   /**
@@ -110,12 +111,10 @@ function bodyString(json: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined
 }
 
-/** One request with `token`, its body unread, aborted by `signal` when one is given. */
-function send(url: string, opts: TargetFetchOptions, token: string, signal: AbortSignal | undefined): Promise<Response> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  }
+/** One request with `token` when there is one, its body unread, aborted by `signal` when one is given. */
+function send(url: string, opts: TargetFetchOptions, token: string | undefined, signal: AbortSignal | undefined): Promise<Response> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (token !== undefined && token !== "") headers["Authorization"] = `Bearer ${token}`
   if (opts.orgId) headers["X-Org-Id"] = opts.orgId
   if (opts.environment) headers["X-Supatype-Environment"] = opts.environment
   return fetch(url, {

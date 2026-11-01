@@ -18,7 +18,7 @@ import type { EnginePushResult } from "./engine-push-output.js"
 import type { DoctorReport } from "./commands/doctor.js"
 import type { DatabaseStateJson } from "./pull-utils.js"
 import { readJsonFileOrThrow } from "./json-file.js"
-import { isShape, isString, optional, type Guard } from "@supatype/shared"
+import { HOOK_FILES_FEATURE, isShape, isString, optional, type Guard } from "@supatype/shared"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import type { AppliedRenameRecord } from "./rename-journal.js"
 import { pushAuditFields } from "./push-audit.js"
@@ -272,7 +272,7 @@ export function apiFetchOpts(
   return {
     method,
     path,
-    token: target.token!,
+    ...(target.token !== undefined ? { token: target.token } : {}),
     ...(body !== undefined ? { body } : {}),
     ...(target.orgId !== undefined ? { orgId: target.orgId } : {}),
     ...(target.mode === "cloud" ? { environment: target.environment } : {}),
@@ -300,11 +300,30 @@ export interface TargetFunctions {
   invokeToken: string | undefined
   /** Cloud answers a window of past log lines; a server relays the worker's live stream from `tail`. */
   logs: { kind: "window" } | { kind: "tail"; tail: TargetStreamPath }
-  /**
-   * What a hook upload may carry: Cloud serves each hook as its one entry module; a server writes
-   * the hook's directory back as the project keeps it, so it takes every file.
-   */
-  hookFiles: "entry" | "directory"
+}
+
+/**
+ * What a hook upload may carry: the entry module alone, or every file of the hook's directory, which
+ * a server writes back as the project keeps it.
+ */
+export type HookFiles = "entry" | "directory"
+
+/**
+ * What a hook upload to `target` may carry: every file of a hook only when the target says it takes
+ * them ({@link HOOK_FILES_FEATURE} in its capabilities). Anything else, Cloud, an older self-hosted
+ * control plane or one with no capabilities route, takes the entry alone: an older stack dropped
+ * `files` without a word and the push reported success (round 8, C-2). A target that could not be
+ * asked is taken as the entry alone too: that only ever refuses a hook of more than one file,
+ * saying why, and never drops one.
+ */
+export async function targetHookFiles(target: DeployTarget): Promise<HookFiles> {
+  let features: ReadonlySet<string>
+  try {
+    features = (await targetCapabilities(target)).features
+  } catch {
+    return "entry"
+  }
+  return features.has(HOOK_FILES_FEATURE) ? "directory" : "entry"
 }
 
 /** Where a stream is served on the target: `<baseUrl><apiPrefix><path>`. */
@@ -323,13 +342,13 @@ export interface TargetStreamPath {
 export function targetFunctions(target: DeployTarget): TargetFunctions {
   if (target.mode === "cloud") {
     const invokeBase = `https://${target.projectRef}.supatype.dev/functions/v1`
-    return { invokeBase, invokeToken: target.token, logs: { kind: "window" }, hookFiles: "entry" }
+    return { invokeBase, invokeToken: target.token, logs: { kind: "window" } }
   }
   // A local link is this machine's own server, and its key goes with an authenticated invoke there.
   // A self-hosted link's service-role key is not handed to a function.
   const invokeToken = target.mode === "local" ? target.token : undefined
   const tail: TargetStreamPath = { baseUrl: target.apiBaseUrl, apiPrefix: "/admin/v1", path: "/functions/logs/tail" }
-  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs: { kind: "tail", tail }, hookFiles: "directory" }
+  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs: { kind: "tail", tail } }
 }
 
 /**

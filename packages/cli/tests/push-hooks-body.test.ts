@@ -2,14 +2,20 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { HOOK_FILES_FEATURE } from "@supatype/shared"
 import { projectConfig } from "./support/project-config.js"
 
-const sent = vi.hoisted(() => ({ bodies: [] as unknown[], refuse: 0, answer: {} as Record<string, unknown> }))
+const sent = vi.hoisted(() => ({ bodies: [] as unknown[], refuse: 0, answer: {} as Record<string, unknown>, features: [] as string[] }))
 vi.mock("../src/target-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/target-client.js")>()
   return {
     ...actual,
-    targetFetch: async (_base: string, _prefix: string, opts: { body?: unknown }) => {
+    targetFetch: async (_base: string, _prefix: string, opts: { path: string; body?: unknown }) => {
+      // What the target says it supports, asked before a hook upload; not a deploy body.
+      if (opts.path.endsWith("/schema/capabilities")) {
+        if (sent.features.includes("capabilities-fail")) throw new actual.TargetApiError("Failed to spawn engine", 500)
+        return { features: sent.features }
+      }
       sent.bodies.push(opts.body)
       if (sent.refuse !== 0) throw new actual.TargetApiError("Forbidden", sent.refuse)
       return sent.answer
@@ -18,6 +24,7 @@ vi.mock("../src/target-client.js", async (importOriginal) => {
 })
 
 const { deployHooksToTarget, uploadHooks } = await import("../src/commands/push.js")
+const { forgetServerCapabilities } = await import("../src/resolve-target.js")
 
 /**
  * The hook deploy body was built differently per target: the maps only for self-host, and nothing at
@@ -29,6 +36,8 @@ afterEach(() => {
   sent.bodies.length = 0
   sent.refuse = 0
   sent.answer = {}
+  sent.features = []
+  forgetServerCapabilities()
   process.exitCode = undefined
   vi.restoreAllMocks()
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
@@ -124,7 +133,8 @@ describe("a hook of more than one file", () => {
   }
 
   for (const mode of ["self-host", "local"] as const) {
-    it(`is sent whole to a ${mode} target`, async () => {
+    it(`is sent whole to a ${mode} target that says it takes hook files`, async () => {
+      sent.features = [HOOK_FILES_FEATURE]
       const cwd = project()
       const target = { mode, environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
       expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(false)
@@ -147,12 +157,42 @@ describe("a hook of more than one file", () => {
     expect(output).toContain("Move what it needs into hooks/tag-note/index.ts")
   })
 
+  // Review of round 8, item C-2: an older self-hosted control plane dropped `files` without a word
+  // and the push reported success. A server that does not say it takes them is sent the entry alone,
+  // so a hook of more than one file is refused before anything is sent.
+  it("is refused for a server that does not say it takes hook files, and sends nothing", async () => {
+    const cwd = project()
+    const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
+    expect(sent.bodies).toEqual([])
+    expect(said.join("\n")).toContain("has more than one file")
+  })
+
   it("is refused for a server when it imports a file outside its directory, which is not sent", async () => {
+    sent.features = [HOOK_FILES_FEATURE]
     const cwd = project()
     writeFileSync(join(cwd, "hooks", "tag-note", "index.ts"), 'import { x } from "../shared/x.ts"\nexport default () => x\n')
     const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
     expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
     expect(sent.bodies).toEqual([])
     expect(said.join("\n")).toContain("../shared/x.ts")
+  })
+})
+
+describe("a hook upload to a target that cannot say what it takes", () => {
+  it("sends a hook of one file as its entry", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-hooks-files-"))
+    dirs.push(cwd)
+    mkdirSync(join(cwd, "hooks", "tag-note"), { recursive: true })
+    writeFileSync(join(cwd, "hooks", "tag-note", "index.ts"), "export default () => ({})\n")
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    sent.features = ["capabilities-fail"]
+    const ast = {
+      models: [{ name: "Note", fields: {}, annotations: { db: { tableName: "note" }, platform: { hooks: { beforeChange: { function: "tag-note" } } } } }],
+    }
+    const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, ast)).toBe(false)
+    expect(sent.bodies).toMatchObject([{ handlers: [{ name: "tag-note" }, { name: "_supatype-hooks" }] }])
+    expect(JSON.stringify(sent.bodies)).not.toContain('"files"')
   })
 })

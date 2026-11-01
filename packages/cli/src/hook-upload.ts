@@ -3,7 +3,7 @@
  * the network: Cloud, or a linked self-host stack (whose control plane writes them back into the
  * project's layout).
  *
- * What a hook may be depends on the target ({@link TargetFunctions.hookFiles}). A managed project
+ * What a hook may be depends on the target (`targetHookFiles`). A managed project
  * has no directory, its worker reads a ConfigMap, whose keys may only contain alphanumerics, `-`,
  * `_` and `.`, so Cloud takes each hook as its one module, flattened here, where it can be checked
  * and explained, rather than in the deploy route where a dropped file would be silent. A server
@@ -14,7 +14,7 @@ import { join, posix, relative } from "node:path"
 
 import { ADAPTER_IMPORT, ADAPTER_NAME, FLATTENED_ADAPTER_IMPORT, flattenHookSource, type HookMap } from "@supatype/shared"
 import { declaredHooks, declaredValidators, manifestHooks } from "./model-hooks.js"
-import type { TargetFunctions } from "./resolve-target.js"
+import type { HookFiles } from "./resolve-target.js"
 import { readWorkerFiles } from "./worker-module-files.js"
 
 /** One handler as the deploy body carries it: its entry, flattened, and for a server every file of it. */
@@ -65,7 +65,7 @@ export function readHookUpload(
   cwd: string,
   hooksDir: string,
   ast: unknown,
-  hookFiles: TargetFunctions["hookFiles"],
+  hookFiles: HookFiles,
 ): HookUpload | null {
   const declared = [...declaredHooks(ast), ...declaredValidators(ast)]
   if (declared.length === 0) return null

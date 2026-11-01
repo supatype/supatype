@@ -288,6 +288,28 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
     expect(existsSync(join(functionsDir, "_supatype", "hooks.ts"))).toBe(false)
   })
 
+  // Review of round 8, item C-1: `hooks new` wrote a table-less module for a handler no model names
+  // yet, and the next push removed it, so the handler failed to load again. While any handler is
+  // there the module is kept, without the tables no model hooks any more.
+  it("keeps a table-less module while a hook handler is there, though no model names a hook", () => {
+    const { dir, ast } = project(`
+import type { Model, UUID } from "@supatype/types"
+
+export type Post = Model<{ id: UUID }, { tableName: "posts" }>
+`)
+    const hooksDir = join(dir, "hooks")
+    mkdirSync(join(hooksDir, "tag-note"), { recursive: true })
+    writeFileSync(join(hooksDir, "tag-note", "index.ts"), "export default () => ({})\n", "utf8")
+    mkdirSync(join(hooksDir, "_supatype"), { recursive: true })
+    writeFileSync(join(hooksDir, "_supatype", "hooks.ts"), "export type Stale = true", "utf8")
+
+    expect(writeHooksModule(dir, hooksDir, ast)).toContain(join("hooks", "_supatype", "hooks.ts"))
+    const module = readFileSync(join(hooksDir, "_supatype", "hooks.ts"), "utf8")
+    expect(module).toMatch(/export function hook\b/)
+    expect(module).not.toContain("Stale")
+    expect(module).not.toContain(`"posts": {`)
+  })
+
   it("writes the module beside the functions that import it", () => {
     const { dir, ast } = project(`
 import type { Model, UUID } from "@supatype/types"

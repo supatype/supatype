@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, relative } from "node:path"
 import { generateHooksModule, hooksModuleSource } from "./hooks-generator.js"
+import { discoverHandlersInDir } from "./functions-discovery.js"
 import { manifestCache } from "./model-cache.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
@@ -145,19 +146,19 @@ export function validateModelHooks(
  *
  * Removal matters as much as writing: deleting the last hook from a schema should leave no typed
  * module behind claiming tables are hooked, and a handler importing it should start failing to
- * compile rather than sitting there dead.
+ * compile rather than sitting there dead. While a handler is still there, though, the module stays,
+ * with no table: a handler `hooks new` made before any model names it imports it, and without it
+ * that handler failed to load again on the next push (round 8, C-1).
  *
  * Returns the project-relative path written, or null when there was nothing to write.
  */
 export function writeHooksModule(cwd: string, hooksDir: string, ast: unknown): string | null {
   const module = generateHooksModule(ast)
   const file = hooksModulePath(hooksDir)
-
-  if (module === null) {
-    if (existsSync(file)) rmSync(file, { force: true })
-    return null
-  }
-  return writeModule(cwd, file, module)
+  if (module !== null) return writeModule(cwd, file, module)
+  if (discoverHandlersInDir(hooksDir).length > 0) return writeModule(cwd, file, hooksModuleSource(ast))
+  if (existsSync(file)) rmSync(file, { force: true })
+  return null
 }
 
 /**
