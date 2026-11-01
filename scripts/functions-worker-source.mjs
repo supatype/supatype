@@ -11,7 +11,10 @@
  * checkout has, so a Windows working tree and a Linux runner generate the same file.
  *
  * It first writes the worker's dotenv parser, packages/functions-worker/dotenv.ts, from the CLI's
- * (packages/cli/src/dotenv-parse.ts), so the two read a `.env` file with one set of rules.
+ * (packages/cli/src/dotenv-parse.ts), so the two read a `.env` file with one set of rules; and the
+ * worker's route rule, packages/functions-worker/routes.ts, from @supatype/shared's
+ * (packages/shared/src/function-routes.ts), so a self-hosted control plane lists exactly the routes
+ * the worker serves.
  *
  * Usage:
  *   node scripts/functions-worker-source.mjs generate [--check]
@@ -27,6 +30,8 @@ const WORKER_DIR = join(ROOT, "packages", "functions-worker")
 const GENERATED = join(ROOT, "packages", "cli", "src", "generated", "functions-worker-source.ts")
 const DOTENV_SOURCE = join(ROOT, "packages", "cli", "src", "dotenv-parse.ts")
 const WORKER_DOTENV = join(WORKER_DIR, "dotenv.ts")
+const ROUTES_SOURCE = join(ROOT, "packages", "shared", "src", "function-routes.ts")
+const WORKER_ROUTES = join(WORKER_DIR, "routes.ts")
 
 function die(message) {
   console.error(`functions-worker-source: ${message}`)
@@ -73,6 +78,15 @@ function workerDotenv() {
   ].join("\n")
 }
 
+/** The worker's routes.ts: the shared route rule under a header saying where it comes from. */
+function workerRoutes() {
+  return [
+    "// Generated from packages/shared/src/function-routes.ts by scripts/functions-worker-source.mjs. Do",
+    "// not edit: change that file and run the script, so the worker and the control plane agree.",
+    lf(readFileSync(ROUTES_SOURCE, "utf8")),
+  ].join("\n")
+}
+
 /** Writes `text` to `path` when it differs; with `check`, exits 1 instead of writing. */
 function writeGenerated(path, text, check) {
   if (readText(path) === text) return
@@ -83,6 +97,7 @@ function writeGenerated(path, text, check) {
 
 function generate(check) {
   writeGenerated(WORKER_DOTENV, workerDotenv(), check)
+  writeGenerated(WORKER_ROUTES, workerRoutes(), check)
   writeGenerated(GENERATED, render(workerFiles()), check)
 }
 
