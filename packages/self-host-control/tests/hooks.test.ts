@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { after, before, beforeEach, describe, test, type TestContext } from "node:test"
 import { isJsonObject, workerLoadsFile } from "@supatype/shared"
 import { dataOf, fakeDocker, request, startServer, type ControlPlaneServer, type FakeDocker } from "./helpers.js"
+import { setFileWriterForTests } from "../src/deploy-files.js"
 
 /**
  * Local test round 4 (N23): `supatype push` to a project linked to a self-host stack applied the
@@ -257,6 +258,45 @@ describe("hooks deploy route", () => {
       assert.deepEqual(refusedNames(res.json), ["tag-note"])
       assert.deepEqual(dataOf(res.json)["handlers"], ["check-title"])
       assert.ok(existsSync(hookFile("check-title")))
+    })
+
+    // Review: a hook whose write failed part-way kept the files already written, and the answer still
+    // said "kept: its previous version still runs". Its files are put back as they were.
+    describe("when one of a hook's writes fails", () => {
+      const FIRST = { "index.ts": 'import { a } from "./lib/a.ts"\nexport default () => ({ a })\n', "lib/a.ts": "export const a = 1\n" }
+      const SECOND = { "index.ts": 'import { b } from "./lib/b.ts"\nexport default () => ({ b })\n', "lib/b.ts": "export const b = 2\n" }
+      const deployFiles = (files: Record<string, string>) =>
+        request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [{ ...TAG_NOTE, files }, ADAPTER], map: MAP })
+      const dir = (): string => join(projectDir, "hooks", "tag-note")
+
+      after(() => setFileWriterForTests(null))
+
+      test("puts its files back as they were, so kept is true", async () => {
+        assert.equal((await deployFiles(FIRST)).status, 200)
+        setFileWriterForTests((file) => (file.path.endsWith("b.ts") ? Promise.reject(new Error("disk full")) : undefined))
+        const res = await deployFiles(SECOND)
+        setFileWriterForTests(null)
+        assert.equal(res.status, 200, JSON.stringify(res.json))
+        assert.deepEqual(refusedNames(res.json), ["tag-note"])
+        assert.deepEqual(dataOf(res.json)["kept"], ["tag-note"])
+        assert.equal(readFileSync(join(dir(), "index.ts"), "utf8"), FIRST["index.ts"])
+        assert.equal(readFileSync(join(dir(), "lib", "a.ts"), "utf8"), FIRST["lib/a.ts"])
+        assert.equal(existsSync(join(dir(), "lib", "b.ts")), false)
+      })
+
+      test("says locked, not kept, when its files cannot be put back", async () => {
+        assert.equal((await deployFiles(FIRST)).status, 200)
+        // The new files fail, and so does putting the old index.ts back.
+        setFileWriterForTests((file) =>
+          file.path.endsWith("b.ts") || file.source === FIRST["index.ts"] ? Promise.reject(new Error("disk full")) : undefined,
+        )
+        const res = await deployFiles(SECOND)
+        setFileWriterForTests(null)
+        assert.equal(res.status, 200, JSON.stringify(res.json))
+        assert.deepEqual(dataOf(res.json)["locked"], ["tag-note"])
+        assert.equal(dataOf(res.json)["kept"], undefined)
+        assert.match(JSON.stringify(dataOf(res.json)["refused"]), /could not be put back/)
+      })
     })
 
     test("still refuses a map naming a hook neither sent nor kept", async () => {

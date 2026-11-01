@@ -868,6 +868,27 @@ describe.skipIf(!dockerAvailable)("object names that step through folders (N31)"
     expect(res).toEqual({ status: 400, text: refusalOf(sent) })
   })
 
+  // Review: the token was checked against the name as sent ("/x") and the name served was "x", so a
+  // token signed for "/x" served "x". It is checked against the name served, which is what is signed.
+  it("checks a signed URL's token against the name it serves, not the name as sent", async () => {
+    const dir = await namesFolder()
+    const { createSignedToken } = await import("../src/middleware/signed-urls.js")
+    const forSent = createSignedToken("avatars", `/${dir}/a`, 60)
+    const res = await rawRequest({ method: "GET", path: `/object/sign/avatars//${dir}/a?token=${forSent}` })
+    expect(res.status).toBe(403)
+  })
+
+  it("signs the name it serves, so a URL signed for one sent with a leading slash works", async () => {
+    const dir = await namesFolder()
+    const signed = await rawRequest({ method: "POST", path: `/object/sign/avatars//${dir}/a`, token: SERVICE, body: '{"expiresIn":60}' })
+    expect(signed.status).toBe(200)
+    const url: unknown = JSON.parse(signed.text)
+    const signedURL = typeof url === "object" && url !== null && "signedURL" in url && typeof url.signedURL === "string" ? url.signedURL : ""
+    expect(signedURL).toContain(`/object/sign/avatars/${dir}/a?token=`)
+    const res = await rawRequest({ method: "GET", path: signedURL })
+    expect(res).toEqual({ status: 200, text: "real" })
+  })
+
   it("refuses a remove naming one, naming it as sent, and removes nothing", async () => {
     const dir = await namesFolder()
     const sent = `/${dir}/x/../a`

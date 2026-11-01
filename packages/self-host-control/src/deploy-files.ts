@@ -107,8 +107,20 @@ export function fileUnder(root: WriteRoot, path: string, source: string): Deploy
   return { path: target, source, root: root.path, rootReal: root.real }
 }
 
+/** A stand-in for a file's write: a promise to use instead of writing, or undefined to write it. */
+type FileWriter = (file: DeployFile) => Promise<void> | undefined
+
+let fileWriter: FileWriter | null = null
+
+/** @internal Tests: fail a write, as a full disk would, without one. */
+export function setFileWriterForTests(writer: FileWriter | null): void {
+  fileWriter = writer
+}
+
 /** Writes `file`, checking once more that nothing on its way became a link out of its root. */
 async function writeOne(file: DeployFile): Promise<void> {
+  const injected = fileWriter?.(file)
+  if (injected !== undefined) return injected
   if ((await readFile(file.path, "utf8").catch(() => null)) === file.source) return
   await mkdir(dirname(file.path), { recursive: true })
   const [base, parent] = await Promise.all([file.rootReal ?? realpath(file.root), realpath(dirname(file.path))])
@@ -123,9 +135,15 @@ async function writeOne(file: DeployFile): Promise<void> {
   }
 }
 
-/** Writes each file whose contents differ from the disk, together, and leaves the rest untouched. */
+/**
+ * Writes each file whose contents differ from the disk, together, and leaves the rest untouched.
+ * Every write has finished before it rejects with the first failure, so a caller that undoes the
+ * writes never races one still in flight.
+ */
 export async function writeChanged(files: readonly DeployFile[]): Promise<void> {
-  await Promise.all(files.map(writeOne))
+  const results = await Promise.allSettled(files.map(writeOne))
+  const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+  if (failed !== undefined) throw failed.reason
 }
 
 /** The map of files an older CLI sent as a directory function's `source`, or null when it is a module. */
@@ -243,4 +261,25 @@ export async function removeAll(paths: readonly string[]): Promise<void> {
  */
 export async function writeFileIn(dir: string, name: string, text: string): Promise<void> {
   await writeChanged([fileUnder(writeRoot(dir, dir, { mayBeLink: true }), name, text)])
+}
+
+/** What was at each path before a write: its text, or null when nothing was there. */
+export type FileSnapshot = ReadonlyArray<{ path: string; was: string | null }>
+
+/** The text at each of `paths` now, so a write that fails part-way can be undone ({@link restoreFiles}). */
+export async function snapshotFiles(paths: readonly string[]): Promise<FileSnapshot> {
+  return Promise.all(paths.map(async (path) => ({ path, was: await readFile(path, "utf8").catch(() => null) })))
+}
+
+/**
+ * Puts every path of `snapshot` back as it was under `root`: a file that was there is written again,
+ * with the same checks as every deploy write, and one that was not is removed. Rejects when any could
+ * not be put back.
+ */
+export async function restoreFiles(snapshot: FileSnapshot, root: WriteRoot): Promise<void> {
+  await Promise.all(
+    snapshot.map(({ path, was }) =>
+      was === null ? rm(path, { force: true }) : writeOne({ path, source: was, root: root.path, rootReal: root.real }),
+    ),
+  )
 }

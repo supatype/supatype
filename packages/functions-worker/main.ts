@@ -129,6 +129,49 @@ async function serviceRoleRoutes(): Promise<Set<string>> {
   return fromFile ?? parseRoutes(Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? "")
 }
 
+/** The manifest as last read: kept while its modification time and size are unchanged. */
+let manifestRead: { mtime: number; size: number; names: Set<string> } | null = null
+
+/** The function every entry of a hook or validator map names (table, then event or column, then the entry). */
+function functionsNamed(map: unknown): string[] {
+  if (typeof map !== "object" || map === null) return []
+  return Object.values(map).flatMap((entries: unknown) =>
+    typeof entries !== "object" || entries === null
+      ? []
+      : Object.values(entries).flatMap((entry: unknown) =>
+          typeof entry === "object" && entry !== null && "function" in entry && typeof entry.function === "string" ? [entry.function] : [],
+        ),
+  )
+}
+
+/**
+ * The hooks the stack's manifest maps (its `hooks` and `validators`), read from the file
+ * `SUPATYPE_MANIFEST_PATH` names, the one the server reads: a hook route with no code is a 503 only
+ * for one of these. None when no manifest is named or it cannot be read; read again only when the
+ * file's modification time or size changed.
+ */
+async function mappedHookNames(): Promise<Set<string>> {
+  const path = (Deno.env.get("SUPATYPE_MANIFEST_PATH") ?? "").trim()
+  if (!path) return new Set()
+  let info: Deno.FileInfo
+  try {
+    info = await Deno.stat(path)
+  } catch {
+    return new Set()
+  }
+  const mtime = info.mtime?.getTime() ?? -1
+  if (manifestRead !== null && manifestRead.mtime === mtime && manifestRead.size === info.size) return manifestRead.names
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await Deno.readTextFile(path))
+  } catch {
+    return new Set()
+  }
+  const maps = typeof parsed === "object" && parsed !== null ? [("hooks" in parsed ? parsed.hooks : undefined), ("validators" in parsed ? parsed.validators : undefined)] : []
+  manifestRead = { mtime, size: info.size, names: new Set(maps.flatMap(functionsNamed)) }
+  return manifestRead.names
+}
+
 /**
  * Whether a route may see the service-role key.
  *
@@ -487,9 +530,10 @@ const server = Deno.serve({
 
   // A hook the map names with no code here (a new hook whose deploy failed) cannot be reached: 503,
   // which the server's hook dispatch treats as unavailable and refuses the write for. A 404 read as
-  // the hook rejecting the write, with a "not found" message.
+  // the hook rejecting the write, with a "not found" message. Any other name stays a 404.
   if (fnName.startsWith(HOOKS_ROUTE_PREFIX) && !handlers[fnName]) {
-    return jsonError("hook_unavailable", `Hook "${fnName.slice(HOOKS_ROUTE_PREFIX.length)}" is not deployed`, 503)
+    const hook = fnName.slice(HOOKS_ROUTE_PREFIX.length)
+    if ((await mappedHookNames()).has(hook)) return jsonError("hook_unavailable", `Hook "${hook}" is not deployed`, 503)
   }
   if (!fnName || !handlers[fnName]) {
     const message = fnName ? `Function "${fnName}" not found` : "No function specified"

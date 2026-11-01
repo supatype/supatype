@@ -298,11 +298,16 @@ export async function downloadAuthenticated(ctx: RequestContext): Promise<void> 
 // ─── Download (signed URL) ──────────────────────────────────────────────────────
 
 export async function downloadSigned(ctx: RequestContext): Promise<void> {
-  const bucket = await signedBucket(ctx)
-  if (!bucket) return
+  const token = ctx.url.searchParams.get("token")
+  if (!token) {
+    sendJson(ctx.res, 400, { error: "Missing token parameter" })
+    return
+  }
   // A token signed for a name the service refuses still names no object of its own.
   const objectPath = routeName(ctx)
   if (objectPath === null) return
+  const bucket = await signedBucket(ctx, token, objectPath)
+  if (!bucket) return
 
   // No CORS for private bucket signed URLs (task 46)
   applyCorsHeaders(ctx.res, bucket)
@@ -311,24 +316,21 @@ export async function downloadSigned(ctx: RequestContext): Promise<void> {
 }
 
 /**
- * The bucket a signed download names, once its token is checked against the bucket and the name as
- * sent, or null once it has answered: 400 with no token, 404 for no bucket, 403 for a bad token.
- * Only this service's own HMAC token (task 45). Anything else used to be passed through "for S3 to
- * validate", but the object was then fetched with the service's own credentials, so nothing
- * validated it and `?token=x` read any private object with no session at all.
+ * The bucket a signed download names, once `token` is checked against the bucket and `objectPath`,
+ * the name it serves, or null once it has answered: 404 for no bucket, 403 for a bad token. The name
+ * served is the one createSignedUrl signs, so the two can never differ: a token checked against the
+ * name as sent ("/x") served another ("x"). Only this service's own HMAC token (task 45). Anything
+ * else used to be passed through "for S3 to validate", but the object was then fetched with the
+ * service's own credentials, so nothing validated it and `?token=x` read any private object with no
+ * session at all.
  */
-async function signedBucket(ctx: RequestContext): Promise<db.BucketRow | null> {
-  const token = ctx.url.searchParams.get("token")
-  if (!token) {
-    sendJson(ctx.res, 400, { error: "Missing token parameter" })
-    return null
-  }
+async function signedBucket(ctx: RequestContext, token: string, objectPath: string): Promise<db.BucketRow | null> {
   const bucket = await db.getBucket(ctx.params["bucket"]!)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return null
   }
-  if (!verifySignedToken(token, bucket.id, ctx.params["wildcard"]!)) {
+  if (!verifySignedToken(token, bucket.id, objectPath)) {
     sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
     return null
   }

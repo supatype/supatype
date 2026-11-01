@@ -38,7 +38,19 @@ import {
 import { badRequest, bodyOf, HttpError, route } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
-import { fileUnder, filesInDir, keptPaths, removeAll, sourcesNotKept, writeChanged, writeRoot, type DeployFile, type WriteRoot } from "../deploy-files.js"
+import {
+  fileUnder,
+  filesInDir,
+  keptPaths,
+  removeAll,
+  restoreFiles,
+  snapshotFiles,
+  sourcesNotKept,
+  writeChanged,
+  writeRoot,
+  type DeployFile,
+  type WriteRoot,
+} from "../deploy-files.js"
 import { answerWithWorkerCurrent, childDir, hooksRoot, manifestPath } from "../worker.js"
 
 /** Where a project keeps the generated adapter under its hooks root. */
@@ -152,23 +164,40 @@ function planHooks(handlers: readonly SentHook[], keep: readonly string[]): Hook
   return { root, writes, refused, keep: kept, adapter }
 }
 
+/** A hook the deploy refused, and whether its previous files could not be put back (it is then broken). */
+interface Refusal {
+  name: string
+  reason: string
+  broken?: true
+}
+
 /**
- * Writes each hook, together; a hook whose write fails is refused, the others are written. Its stale
- * sweep runs only once its own files are written, and never touches a hook it was not sent.
+ * Writes one hook, then sweeps the source files it no longer sends. When any of that fails, the hook
+ * is refused and its files are put back as they were (restoreFiles), so "kept" is true; when they
+ * cannot be, it is refused as broken, and the answer says locked.
  */
-async function writeHooks(writes: readonly HookWrite[]): Promise<Array<{ name: string; reason: string }>> {
-  const outcomes = await Promise.all(
-    writes.map(async (write) => {
-      try {
-        await writeChanged(write.files)
-        await removeAll(await write.stale())
-        return undefined
-      } catch (err) {
-        return { name: write.name, reason: reasonOf(err) }
-      }
-    }),
-  )
-  return outcomes.filter((outcome): outcome is { name: string; reason: string } => outcome !== undefined)
+async function writeHook(root: WriteRoot, write: HookWrite): Promise<Refusal | undefined> {
+  const stale = await write.stale()
+  const before = await snapshotFiles([...write.files.map((file) => file.path), ...stale])
+  try {
+    await writeChanged(write.files)
+    await removeAll(stale)
+    return undefined
+  } catch (err) {
+    const reason = reasonOf(err)
+    try {
+      await restoreFiles(before, root)
+      return { name: write.name, reason }
+    } catch (restoreErr) {
+      return { name: write.name, reason: `${reason}; its previous files could not be put back (${reasonOf(restoreErr)})`, broken: true }
+    }
+  }
+}
+
+/** Writes each hook, together; a hook whose write fails is refused, the others are written. */
+async function writeHooks(root: WriteRoot, writes: readonly HookWrite[]): Promise<Refusal[]> {
+  const outcomes = await Promise.all(writes.map((write) => writeHook(root, write)))
+  return outcomes.filter((outcome): outcome is Refusal => outcome !== undefined)
 }
 
 /** Whether the worker has a route for the hook `name` on disk: `<name>/index.ts` or `<name>.ts`. */
@@ -187,15 +216,18 @@ function manifestFile(manifest: Record<string, unknown>): DeployFile {
  * deployed, sent to keep or refused here, as kept (its previous version still runs) or locked (it
  * had none, so writes to the tables that map it are refused until it deploys).
  */
-function deployAnswer(plan: HookPlan, refused: ReadonlyArray<{ name: string; reason: string }>, tables: string[]): Record<string, unknown> {
+function deployAnswer(plan: HookPlan, refused: readonly Refusal[], tables: string[]): Record<string, unknown> {
   const notDeployed = new Set([...plan.keep, ...refused.map((r) => r.name)])
   const deployed = plan.writes.map((write) => write.name).filter((name) => !notDeployed.has(name)).sort()
-  const kept = [...notDeployed].filter((name) => servedNow(plan.root, name)).sort()
-  const locked = [...notDeployed].filter((name) => !servedNow(plan.root, name)).sort()
+  // A hook whose files could not be put back is never "kept": what is on disk is not a version it had.
+  const broken = new Set(refused.filter((r) => r.broken === true).map((r) => r.name))
+  const isKept = (name: string): boolean => !broken.has(name) && servedNow(plan.root, name)
+  const kept = [...notDeployed].filter(isKept).sort()
+  const locked = [...notDeployed].filter((name) => !isKept(name)).sort()
   return {
     handlers: deployed,
     tables,
-    ...(refused.length > 0 && { refused: [...refused].sort((a, b) => a.name.localeCompare(b.name)) }),
+    ...(refused.length > 0 && { refused: refused.map(({ name, reason }) => ({ name, reason })).sort((a, b) => a.name.localeCompare(b.name)) }),
     ...(kept.length > 0 && { kept }),
     ...(locked.length > 0 && { locked }),
   }
@@ -217,7 +249,7 @@ export function registerHookRoutes(routes: Array<{ method: string; pattern: RegE
     const manifestWrite = manifestFile(manifest)
     if (plan.adapter !== undefined) await writeChanged([plan.adapter])
     // Handlers before the maps, so a map never names a handler not yet on disk.
-    const refused = [...plan.refused, ...(await writeHooks(plan.writes))]
+    const refused = [...plan.refused, ...(await writeHooks(plan.root, plan.writes))]
     if (changed) await writeChanged([manifestWrite])
     // The worker is restarted when what it loads differs from what it last loaded (worker.ts); the
     // cache map is not part of that, since the server reads it and the worker does not.
