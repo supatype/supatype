@@ -76,40 +76,57 @@ function hooksRoot(): string {
 /** Route prefix for hook handlers. The gateway refuses this prefix on the public path. */
 const HOOKS_ROUTE_PREFIX = "hooks/"
 
+/** A comma-separated route list as a set, empty entries dropped. */
+function parseRoutes(text: string): Set<string> {
+  return new Set(
+    text
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  )
+}
+
+/** The routes file as last read: kept while its modification time and size are unchanged. */
+let routesFileRead: { mtime: number; size: number; routes: Set<string> } | null = null
+
 /**
- * The comma-separated route list: the routes file when one is named and has been written, else the
- * environment. A routes file that is there but cannot be read grants nothing.
+ * The routes in `file`, read again only when its modification time or size changed: one stat a
+ * call. Undefined when it has not been written (the environment's list applies); none when it is
+ * there but cannot be read.
  */
-async function serviceRoleRoutesText(): Promise<string> {
-  const fromEnv = Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? ""
-  const file = Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES_FILE")
-  if (!file) return fromEnv
+async function routesFromFile(file: string): Promise<Set<string> | undefined> {
+  let info: Deno.FileInfo
   try {
-    return await Deno.readTextFile(file)
+    info = await Deno.stat(file)
   } catch (err) {
-    return err instanceof Deno.errors.NotFound ? fromEnv : ""
+    return err instanceof Deno.errors.NotFound ? undefined : new Set()
   }
+  const mtime = info.mtime?.getTime() ?? -1
+  if (routesFileRead !== null && routesFileRead.mtime === mtime && routesFileRead.size === info.size) return routesFileRead.routes
+  try {
+    routesFileRead = { mtime, size: info.size, routes: parseRoutes(await Deno.readTextFile(file)) }
+  } catch {
+    routesFileRead = null
+    return new Set()
+  }
+  return routesFileRead.routes
 }
 
 /**
- * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, read on every call: from the
- * file `SUPATYPE_SERVICE_ROLE_ROUTES_FILE` names once it is written, else
+ * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, looked up on every call: from
+ * the file `SUPATYPE_SERVICE_ROLE_ROUTES_FILE` names once it is written, else
  * `SUPATYPE_SERVICE_ROLE_ROUTES`. Native dev writes the file when `functions.serviceRole` changes,
  * and a self-hosted control plane on every deploy, so a route taken off the list loses the key on its
- * next call, with no restart; the environment is fixed when the worker starts.
+ * next call, with no restart; the environment is fixed when the worker starts. A routes file that is
+ * there but cannot be read grants nothing.
  *
  * Hooks do not appear here: they get the key by default (see serviceRoleGranted). This list is for
  * the public surface, where the default is nothing.
  */
 async function serviceRoleRoutes(): Promise<Set<string>> {
-  const raw = (await serviceRoleRoutesText()).trim()
-  if (!raw) return new Set()
-  return new Set(
-    raw
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0),
-  )
+  const file = Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES_FILE")
+  const fromFile = file ? await routesFromFile(file) : undefined
+  return fromFile ?? parseRoutes(Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? "")
 }
 
 /**

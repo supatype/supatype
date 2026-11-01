@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http"
-import { isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { HOOK_FILES_FEATURE, isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
@@ -95,10 +95,12 @@ export function registerSchemaRoutes(
     sendJson(ctx.res, 200, { data })
   })
 
-  // What the engine behind this control plane supports, so a CLI refuses a flag it would drop.
+  // What the engine behind this control plane supports, so a CLI refuses a flag it would drop, and
+  // what the control plane itself takes: a hook of several files (HOOK_FILES_FEATURE).
   route(routes, "GET", "/projects/:ref/schema/capabilities", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    sendJson(ctx.res, 200, { data: await runEngineCapabilities() })
+    const { features } = await runEngineCapabilities()
+    sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE] } })
   })
 
   route(routes, "POST", "/projects/:ref/schema/push", async (ctx) => {

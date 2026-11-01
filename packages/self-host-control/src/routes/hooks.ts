@@ -37,7 +37,7 @@ import {
 import { badRequest, bodyOf, HttpError, route } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
-import { fileUnder, filesInDir, removeAll, sourcesNotKept, writeChanged, writeRoot, type DeployFile, type WriteRoot } from "../deploy-files.js"
+import { fileUnder, filesInDir, keptPaths, removeAll, sourcesNotKept, writeChanged, writeRoot, type DeployFile, type WriteRoot } from "../deploy-files.js"
 import { answerWithWorkerCurrent, childDir, hooksRoot, manifestPath } from "../worker.js"
 
 /** Where a project keeps the generated adapter under its hooks root. */
@@ -112,15 +112,15 @@ interface SentHook {
   files?: Record<string, string> | undefined
 }
 
-/** A hook's files: every one it sent, as written, or its one module, as the project keeps it. */
+/**
+ * A hook's files: every one it sent, as written, or its one module, as the project keeps it. Files
+ * with no index.ts are refused: the hook would have no entry, and the sweep for files no longer sent
+ * would remove the one it had.
+ */
 function hookFiles(root: WriteRoot, name: string, handler: SentHook): DeployFile[] {
-  if (handler.files !== undefined) return filesInDir(root, name, handler.files)
-  return [fileUnder(root, `${name}/index.ts`, unflattenHookSource(handler.source))]
-}
-
-/** The paths of `files` with `/` between their parts, as the walk for stale files names them. */
-function keptPaths(files: Readonly<Record<string, string>>): Set<string> {
-  return new Set(Object.keys(files).map((path) => path.split(/[\\/]/).join("/")))
+  if (handler.files === undefined) return [fileUnder(root, `${name}/index.ts`, unflattenHookSource(handler.source))]
+  if (!keptPaths(handler.files).has("index.ts")) throw badRequest(`Hook ${name}: its files have no index.ts, the module the worker runs`)
+  return filesInDir(root, name, handler.files)
 }
 
 /** The manifest as the file the deploy writes, checked like every other (deploy-files.ts). */

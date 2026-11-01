@@ -15,7 +15,7 @@ import {
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
-import { functionFiles, removeAll, writeChanged, writeFileIn, writeRoot, type FunctionWrite } from "../deploy-files.js"
+import { clearAll, functionFiles, removeAll, writeChanged, writeFileIn, writeRoot, type FunctionWrite, type WriteRoot } from "../deploy-files.js"
 import { answerWithWorkerCurrent, childDir, functionEnvPath, functionsRoot } from "../worker.js"
 
 /**
@@ -45,16 +45,14 @@ function functionDir(name: unknown): string {
  * What a deploy body's functions write and remove, every function and path checked before anything
  * is written (deploy-files.ts). Its count of functions comes with them.
  */
-function deployedFiles(body: unknown): { count: number; writes: FunctionWrite[]; serviceRole: string[] | undefined } {
+function deployedFiles(body: unknown): { root: WriteRoot; count: number; writes: FunctionWrite[]; serviceRole: string[] | undefined } {
   const { functions, serviceRole } = bodyOf(body, isFunctionDeployBody)
   const refused = (serviceRole ?? []).filter((name) => !isFunctionName(name))
   if (refused.length > 0) throw badRequest(`serviceRole names ${refused.map((name) => JSON.stringify(name)).join(", ")}, which are not function names: ${FUNCTION_NAME_RULE}`)
   const root = writeRoot(functionsRoot(), "Functions", { mayBeLink: true })
-  const writes = functions.map((fn) => {
-    functionDir(fn.name)
-    return functionFiles(root, { name: fn.name, source: fn.source, files: fn.files })
-  })
-  return { count: functions.length, writes, serviceRole }
+  // functionFiles refuses a name outside the function-name rule before it builds any path from it.
+  const writes = functions.map((fn) => functionFiles(root, { name: fn.name, source: fn.source, files: fn.files }))
+  return { root, count: functions.length, writes, serviceRole }
 }
 
 
@@ -80,10 +78,11 @@ export function registerFunctionRoutes(
 
   route(routes, "POST", "/projects/:ref/functions/deploy", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const { count, writes, serviceRole } = deployedFiles(ctx.body)
-    // Written before the other form is removed, so the function is never missing in between.
+    const { root, count, writes, serviceRole } = deployedFiles(ctx.body)
+    // Written before anything is removed or cleared, so the function is never missing in between.
     await writeChanged(writes.flatMap((write) => write.files))
     await removeAll(writes.flatMap((write) => write.remove))
+    await clearAll(root, writes)
     // The list replaces the last wholesale, as on Cloud; the worker reads it on every call, so a
     // route taken off it loses the key on its next call. A deploy that sends none leaves it alone.
     if (serviceRole !== undefined) await writeFileIn(dirname(functionEnvPath()), SERVICE_ROLE_ROUTES_FILE, serviceRole.join(","))

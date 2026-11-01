@@ -102,3 +102,11 @@ export function flattenHookSource(source: string): string {
 export function unflattenHookSource(source: string): string {
   return source.split(FLATTENED_ADAPTER_IMPORT).join(ADAPTER_IMPORT)
 }
+
+/**
+ * The feature a target lists in `GET /projects/:ref/schema/capabilities` (`data.features`) when its
+ * hooks deploy takes `handlers[].files`, a hook of more than one file written as sent. A self-hosted
+ * control plane lists it; one from before it, and Cloud, do not, and a CLI sends such a hook only
+ * where it is listed.
+ */
+export const HOOK_FILES_FEATURE = "hook_files"

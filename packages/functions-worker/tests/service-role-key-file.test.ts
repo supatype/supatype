@@ -113,3 +113,30 @@ Deno.test("a routes file not written yet leaves SUPATYPE_SERVICE_ROLE_ROUTES in 
     await Deno.remove(keyFile)
   }
 })
+
+// Review r9 A-7: the list was read on every call. It is kept until the file's modification time or
+// size changes, one stat a call. Shown here by swapping the content for another of the same size and
+// putting the time back: the worker still serves the list it read, so it did not read the file again.
+Deno.test("an unchanged routes file is not read again on each call", async () => {
+  const keyFile = await Deno.makeTempFile()
+  const routesFile = await Deno.makeTempFile()
+  await Deno.writeTextFile(keyFile, "from-file\n")
+  await Deno.writeTextFile(routesFile, "admin")
+  const worker = await startWorker({ admin: REPORTS_KEY, hello: REPORTS_KEY }, {
+    ...Deno.env.toObject(),
+    SUPATYPE_SERVICE_ROLE_KEY_FILE: keyFile,
+    SUPATYPE_SERVICE_ROLE_ROUTES_FILE: routesFile,
+  })
+  try {
+    const keyOf = async (name: string): Promise<string> => JSON.stringify(await (await fetch(`${worker.origin}/functions/v1/${name}`)).json())
+    expectEqual(await keyOf("admin"), JSON.stringify({ ctxKey: "from-file", envKey: null }), "admin, listed")
+    const { mtime } = await Deno.stat(routesFile)
+    await Deno.writeTextFile(routesFile, "hello")
+    if (mtime !== null) await Deno.utime(routesFile, mtime, mtime)
+    expectEqual(await keyOf("hello"), JSON.stringify({ ctxKey: null, envKey: null }), "hello, from a file not read again")
+  } finally {
+    await worker.stop()
+    await Deno.remove(keyFile)
+    await Deno.remove(routesFile)
+  }
+})

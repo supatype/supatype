@@ -15,9 +15,9 @@
  * written back in the form the project keeps it: `<name>.ts` or `<name>/`, never both.
  */
 import { constants, lstatSync, realpathSync, type Stats } from "node:fs"
-import { lstat, mkdir, open, readdir, readFile, realpath, rm } from "node:fs/promises"
+import { lstat, mkdir, open, readdir, readFile, realpath, rm, rmdir } from "node:fs/promises"
 import { dirname, join, posix, relative, resolve, win32 } from "node:path"
-import { isRecordOf, isString, parseJsonObject, pathInside, workerLoadsFile } from "@supatype/shared"
+import { FUNCTION_NAME_RULE, isFunctionName, isRecordOf, isString, parseJsonObject, pathInside, workerLoadsFile } from "@supatype/shared"
 import { badRequest } from "./http.js"
 
 /** A directory a deploy writes under: where it is, its real path once it exists, and what to call it. */
@@ -27,11 +27,15 @@ export interface WriteRoot {
   label: string
 }
 
-/** A file a deploy writes: where, what, and the directory it must stay inside. */
+/**
+ * A file a deploy writes: where, what, and the directory it must stay inside, with that directory's
+ * real path when it already existed (looked up once, by {@link writeRoot}).
+ */
 export interface DeployFile {
   path: string
   source: string
   root: string
+  rootReal: string | null
 }
 
 const ENTRY = "index.ts"
@@ -100,14 +104,14 @@ function assertLandsInside(root: WriteRoot, target: string): void {
 export function fileUnder(root: WriteRoot, path: string, source: string): DeployFile {
   const target = join(root.path, ...safeSegments(root.label, path))
   assertLandsInside(root, target)
-  return { path: target, source, root: root.path }
+  return { path: target, source, root: root.path, rootReal: root.real }
 }
 
 /** Writes `file`, checking once more that nothing on its way became a link out of its root. */
 async function writeOne(file: DeployFile): Promise<void> {
   if ((await readFile(file.path, "utf8").catch(() => null)) === file.source) return
   await mkdir(dirname(file.path), { recursive: true })
-  const [base, parent] = await Promise.all([realpath(file.root), realpath(dirname(file.path))])
+  const [base, parent] = await Promise.all([file.rootReal ?? realpath(file.root), realpath(dirname(file.path))])
   if (parent !== base && !pathInside(base, parent)) throw badRequest(`${file.path} would be written outside its directory`)
   const entry = await lstat(file.path).catch(() => undefined)
   if (entry !== undefined && !entry.isFile()) throw badRequest(`${file.path} exists and is not a regular file`)
@@ -138,10 +142,15 @@ export interface DeployedFunction {
   files?: Record<string, string> | undefined
 }
 
-/** What a deploy of one function does: the files it writes, and the other form of it it removes. */
+/**
+ * What a deploy of one function does: the files it writes; the `<name>.ts` it removes when the
+ * function is now a directory; and the source files under `<name>/` it clears: those `kept` does not
+ * name, and with `pruneEmpty` the directory too once nothing is left in it.
+ */
 export interface FunctionWrite {
   files: DeployFile[]
   remove: string[]
+  clear?: { name: string; kept: ReadonlySet<string>; pruneEmpty: boolean } | undefined
 }
 
 /**
@@ -151,16 +160,47 @@ export interface FunctionWrite {
  * directory's index.ts. The other form, if it is there, is removed, so a name is never two routes.
  */
 export function functionFiles(root: WriteRoot, fn: DeployedFunction): FunctionWrite {
+  if (!isFunctionName(fn.name)) throw badRequest(`Invalid function name ${JSON.stringify(fn.name)}: ${FUNCTION_NAME_RULE}`)
   const map = fn.files ?? legacyFileMap(fn.source)
   const single = join(root.path, `${fn.name}.ts`)
   const dir = join(root.path, fn.name)
   const hasSingle = entryAt(single, root.label) !== undefined
   const hasDir = entryAt(dir, root.label) !== undefined
   if (map === null && (hasSingle || !hasDir)) {
-    return { files: [fileUnder(root, `${fn.name}.ts`, fn.source)], remove: hasDir ? [dir] : [] }
+    // The directory form goes, but only what the worker loads from it: notes and data stay.
+    const clear = hasDir ? { name: fn.name, kept: new Set<string>(), pruneEmpty: true } : undefined
+    return { files: [fileUnder(root, `${fn.name}.ts`, fn.source)], remove: [], clear }
   }
   const withEntry = map === null ? { [ENTRY]: fn.source } : isString(map[ENTRY]) ? map : { ...map, [ENTRY]: fn.source }
-  return { files: filesInDir(root, fn.name, withEntry), remove: hasSingle ? [single] : [] }
+  // A redeploy of fewer files leaves no source the worker would still load.
+  const clear = map === null ? undefined : { name: fn.name, kept: keptPaths(withEntry), pruneEmpty: false }
+  return { files: filesInDir(root, fn.name, withEntry), remove: hasSingle ? [single] : [], clear }
+}
+
+/** The paths of `files` with `/` between their parts, as {@link sourcesNotKept} names them. */
+export function keptPaths(files: Readonly<Record<string, string>>): Set<string> {
+  return new Set(Object.keys(files).map((path) => path.split(/[\\/]/).join("/")))
+}
+
+/**
+ * Clears what each write's `clear` names: the sources under its directory it does not keep, then,
+ * with `pruneEmpty`, every directory left empty there, its own last.
+ */
+export async function clearAll(root: WriteRoot, writes: readonly FunctionWrite[]): Promise<void> {
+  await Promise.all(
+    writes.map(async ({ clear }) => {
+      if (clear === undefined) return
+      await removeAll(await sourcesNotKept(root, clear.name, clear.kept))
+      if (clear.pruneEmpty) await pruneEmptyDirs(join(root.path, clear.name))
+    }),
+  )
+}
+
+/** Removes `dir` and every directory under it left empty, deepest first; never enters a link. */
+async function pruneEmptyDirs(dir: string): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+  await Promise.all(entries.filter((entry) => entry.isDirectory()).map((entry) => pruneEmptyDirs(join(dir, entry.name))))
+  await rmdir(dir).catch(() => undefined)
 }
 
 /**

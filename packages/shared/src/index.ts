@@ -52,6 +52,7 @@ export {
 export {
   ADAPTER_IMPORT,
   ADAPTER_NAME,
+  HOOK_FILES_FEATURE,
   FLATTENED_ADAPTER_IMPORT,
   applyManifestMaps,
   flattenHookSource,

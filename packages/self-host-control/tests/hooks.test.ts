@@ -184,6 +184,15 @@ describe("hooks deploy route", () => {
       assert.equal(existsSync(join(hookDir(), "README.md")), true)
     })
 
+    // Review r9 A-3: files with no index.ts wrote no entry, and the sweep then removed the old one.
+    test("refuses files with no index.ts, and writes nothing", async () => {
+      await deploy({ "index.ts": INDEX, "lib/tag.ts": LIB })
+      const before = tree(tmp)
+      const res = await deploy({ "lib/tag.ts": LIB })
+      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.deepEqual(tree(tmp), before)
+    })
+
     for (const path of ["../escape.ts", "/abs.ts", "C:\\abs.ts", "lib/../../escape.ts", ""]) {
       test(`refuses the file path ${JSON.stringify(path)} and writes nothing`, async () => {
         const before = tree(tmp)

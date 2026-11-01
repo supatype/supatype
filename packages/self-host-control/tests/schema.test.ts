@@ -58,13 +58,21 @@ describe("schema routes (mock engine)", () => {
     assert.ok(features.includes("adopt_none"))
   })
 
-  test("GET /schema/capabilities is empty for an engine from before the subcommand", async () => {
+  // Review r9 A-2: a CLI sends a hook's several files only to a control plane that says it takes them.
+  test("GET /schema/capabilities lists hook_files, which this control plane takes", async () => {
+    resetEngineCapabilities()
+    const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
+    assert.ok(dataStrings(res.json, "features").includes("hook_files"))
+  })
+
+  test("GET /schema/capabilities has only the control plane's features for an engine from before the subcommand", async () => {
     resetEngineCapabilities()
     process.env["MOCK_ENGINE_NO_CAPABILITIES"] = "1"
     try {
       const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
       assert.equal(res.status, 200)
-      assert.deepEqual(res.json.data, { features: [] })
+      // The engine lists nothing; the control plane's own features are still there.
+      assert.deepEqual(res.json.data, { features: ["hook_files"] })
     } finally {
       delete process.env["MOCK_ENGINE_NO_CAPABILITIES"]
       resetEngineCapabilities()

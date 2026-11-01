@@ -167,6 +167,31 @@ describe("functions routes", () => {
       assert.equal(existsSync(join(fns(), "both")), false)
     })
 
+    // Review r9 A-5: the other form's directory was removed whole, notes and data included. Only what
+    // the worker loads goes, and the directory only when nothing is left in it.
+    test("a single file where the project has both keeps the directory's files the worker does not load", async () => {
+      writeFileSync(join(fns(), "both-notes.ts"), "export default 0\n")
+      mkdirSync(join(fns(), "both-notes", "lib"), { recursive: true })
+      writeFileSync(join(fns(), "both-notes", "index.ts"), "export default 0\n")
+      writeFileSync(join(fns(), "both-notes", "lib", "a.ts"), "export const a = 0\n")
+      writeFileSync(join(fns(), "both-notes", "README.md"), "notes\n")
+      writeFileSync(join(fns(), "both-notes", "rates.csv"), "a,1\n")
+      assert.equal((await deploy({ name: "both-notes", source: "export default 1\n" })).status, 200)
+      for (const gone of ["index.ts", "lib/a.ts"]) assert.equal(existsSync(join(fns(), "both-notes", gone)), false, gone)
+      for (const kept of ["README.md", "rates.csv"]) assert.equal(existsSync(join(fns(), "both-notes", kept)), true, kept)
+    })
+
+    // Review r9 A-4: a redeploy of fewer files left the old ones, which the worker still loaded.
+    test("a directory redeploy removes the source files it no longer sends, and keeps the rest", async () => {
+      const files = { "index.ts": "export default 1\n", "lib/old.ts": "export const old = 1\n" }
+      assert.equal((await deploy({ name: "shrinks", source: files["index.ts"], files })).status, 200)
+      writeFileSync(join(fns(), "shrinks", "README.md"), "notes\n")
+      assert.equal((await deploy({ name: "shrinks", source: files["index.ts"], files: { "index.ts": files["index.ts"] } })).status, 200)
+      assert.equal(existsSync(join(fns(), "shrinks", "lib", "old.ts")), false)
+      assert.equal(existsSync(join(fns(), "shrinks", "README.md")), true)
+      assert.equal(existsSync(join(fns(), "shrinks", "index.ts")), true)
+    })
+
     // Review r8 A2: deleting a single-file function removed only <name>/, so <name>.ts stayed served.
     test("delete removes the function in whichever form it is kept, both when both are there", async () => {
       writeFileSync(join(fns(), "gone-file.ts"), "export default 0\n")

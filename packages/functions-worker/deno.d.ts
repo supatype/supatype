@@ -36,6 +36,7 @@ declare namespace Deno {
 
   function readDir(path: string): AsyncIterable<DirEntry>
   function stat(path: string): Promise<FileInfo>
+  function utime(path: string, atime: Date | number, mtime: Date | number): Promise<void>
   function readTextFile(path: string | URL): Promise<string>
 
   /** What `serve` returns: stopping it (stop.ts) waits for the requests in flight. */
