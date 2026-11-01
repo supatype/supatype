@@ -16,8 +16,15 @@ import { STOP_SIGNALS } from "../src/stop-signals.js"
  * A Ctrl+C on any prompt is now the command's own Ctrl+C.
  */
 
-function fakeStdin(): PassThrough & { isTTY: true } {
-  return Object.assign(new PassThrough(), { isTTY: true as const, setRawMode: () => undefined, ref: () => undefined, unref: () => undefined })
+function fakeStdin(): PassThrough & { isTTY: true; rawModes: boolean[] } {
+  const rawModes: boolean[] = []
+  return Object.assign(new PassThrough(), {
+    isTTY: true as const,
+    rawModes,
+    setRawMode: (mode: boolean) => void rawModes.push(mode),
+    ref: () => undefined,
+    unref: () => undefined,
+  })
 }
 
 function isTtyInput(stream: object): stream is NodeJS.ReadStream {
@@ -40,22 +47,59 @@ function mountFlow(stdin: PassThrough): Promise<{ controller: FlowController; un
   })
 }
 
-const added: Array<{ signal: NodeJS.Signals; listener: (...args: unknown[]) => void }> = []
+/**
+ * `process.exit`, recorded and left there: the process goes on, as nothing after the exit runs in
+ * the code under test. A throw would land in the shutdown's own catch, which exits again, unhandled.
+ */
+function recordExits(): { codes: number[]; first: Promise<number> } {
+  const codes: number[] = []
+  const first = new Promise<number>((resolve) => {
+    function recordExit(code?: string | number | null): never
+    function recordExit(code?: string | number | null): void {
+      codes.push(Number(code ?? 0))
+      resolve(Number(code ?? 0))
+    }
+    vi.spyOn(process, "exit").mockImplementation(recordExit)
+  })
+  return { codes, first }
+}
 
-/** Removes the signal listeners the test added, dev's hooks among them. */
-function removeAddedListeners(before: Map<NodeJS.Signals, readonly unknown[]>): void {
+/** What the test writes to stderr, captured. */
+function captureStderr(): string[] {
+  const said: string[] = []
+  vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+    said.push(String(chunk))
+    return true
+  })
+  return said
+}
+
+let before = new Map<NodeJS.Signals, readonly unknown[]>()
+
+/** Removes the signal listeners a test added, dev's hooks among them. */
+function removeAddedListeners(): void {
   for (const signal of STOP_SIGNALS) {
     for (const listener of process.listeners(signal)) {
       if (!(before.get(signal) ?? []).includes(listener)) process.removeListener(signal, listener)
     }
   }
-  added.length = 0
 }
 
 afterEach(() => {
   vi.restoreAllMocks()
   resetDevShutdownForTests()
+  removeAddedListeners()
 })
+
+/** A flow showing dev's "Save port" prompt, and Ctrl+C typed into it. */
+async function ctrlCOnPrompt(stdin: ReturnType<typeof fakeStdin>): Promise<() => void> {
+  before = new Map(STOP_SIGNALS.map((signal) => [signal, [...process.listeners(signal)]] as const))
+  const { controller, unmount } = await mountFlow(stdin)
+  void controller.waitForPrompt({ kind: "confirm", message: "Save port 54339 to .env?", initialValue: false })
+  await tick(30)
+  stdin.write("\x03")
+  return unmount
+}
 
 describe("Ctrl+C on a prompt", () => {
   it("is mounted so that Ink does not end the process on it", () => {
@@ -63,58 +107,64 @@ describe("Ctrl+C on a prompt", () => {
     expect(source).toMatch(/exitOnCtrlC: false/)
   })
 
-  it("is heard as the command's own Ctrl+C", async () => {
-    const heard: string[] = []
-    const listener = (): void => void heard.push("SIGINT")
-    process.on("SIGINT", listener)
-    const stdin = fakeStdin()
-    const { controller, unmount } = await mountFlow(stdin)
-    try {
-      void controller.waitForPrompt({ kind: "confirm", message: "Save port 54339 to .env?", initialValue: false })
-      await tick(30)
-      stdin.write("\x03")
-      await tick(30)
-      expect(heard).toEqual(["SIGINT"])
-    } finally {
-      unmount()
-      process.removeListener("SIGINT", listener)
-    }
-  })
-
   it("during dev's start stops what the start began, waits for it, says so and exits 130", async () => {
-    const before = new Map(STOP_SIGNALS.map((signal) => [signal, [...process.listeners(signal)]] as const))
-    const said: string[] = []
-    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
-      said.push(String(chunk))
-      return true
-    })
-    let postgresStopped = false
-    const exited = new Promise<number | undefined>((resolve) => {
-      // Recorded and left there: the process goes on, as nothing after the exit in dev runs. A throw
-      // would land in the shutdown's own catch, which exits again, unhandled.
-      function recordExit(code?: string | number | null): never
-      function recordExit(code?: string | number | null): void {
-        resolve(code === null || code === undefined ? undefined : Number(code))
-      }
-      vi.spyOn(process, "exit").mockImplementation(recordExit)
-    })
+    const said = captureStderr()
+    const exits = recordExits()
     ensureDevShutdownHooks()
+    let postgresStopped = false
     pushStartUndoLast(async () => {
       await tick(100)
       postgresStopped = true
     })
-    const stdin = fakeStdin()
-    const { controller, unmount } = await mountFlow(stdin)
+    const unmount = await ctrlCOnPrompt(fakeStdin())
     try {
-      void controller.waitForPrompt({ kind: "confirm", message: "Save port 54339 to .env?", initialValue: false })
-      await tick(30)
-      stdin.write("\x03")
-      expect(await exited).toBe(130)
+      expect(await exits.first).toBe(130)
       expect(postgresStopped).toBe(true)
       expect(said.join("")).toContain("Stopped during start.")
     } finally {
       unmount()
-      removeAddedListeners(before)
+    }
+  })
+
+  // Review of round 7: on Windows a real SIGINT can arrive beside the key. Taken as a second Ctrl+C,
+  // it force-quit the shutdown and cut Postgres off after all.
+  it("is not taken twice when the terminal also sends SIGINT", async () => {
+    const said = captureStderr()
+    const exits = recordExits()
+    ensureDevShutdownHooks()
+    let postgresStopped = false
+    pushStartUndoLast(async () => {
+      await tick(200)
+      postgresStopped = true
+    })
+    const unmount = await ctrlCOnPrompt(fakeStdin())
+    try {
+      await tick(20)
+      process.emit("SIGINT", "SIGINT")
+      expect(await exits.first).toBe(130)
+      expect(postgresStopped).toBe(true)
+      expect(said.join("")).not.toContain("Forced quit")
+    } finally {
+      unmount()
+    }
+  })
+
+  // Review of round 7: any SIGINT listener was taken for the CLI's own shutdown. One that does not
+  // end the process (signal-exit, a child's forwarding) left the prompt pending, in raw mode, forever.
+  it("with no shutdown of the CLI's own, ends the command with 130 and gives the terminal back", async () => {
+    const heard: string[] = []
+    const foreign = (): void => void heard.push("SIGINT")
+    process.on("SIGINT", foreign)
+    const exits = recordExits()
+    const stdin = fakeStdin()
+    const unmount = await ctrlCOnPrompt(stdin)
+    try {
+      expect(await exits.first).toBe(130)
+      expect(heard).toEqual([])
+      expect(stdin.rawModes.at(-1)).toBe(false)
+    } finally {
+      unmount()
+      process.removeListener("SIGINT", foreign)
     }
   })
 })

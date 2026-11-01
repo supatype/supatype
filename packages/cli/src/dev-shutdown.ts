@@ -281,6 +281,11 @@ export function isDevShuttingDown(): boolean {
   return shuttingDown
 }
 
+/** Whether dev's own Ctrl+C handling is in place (ensureDevShutdownHooks), so a Ctrl+C is dev's to take. */
+export function devShutdownHooksRegistered(): boolean {
+  return hooksRegistered
+}
+
 /** @internal Tests: reset module state between cases. */
 export function resetDevShutdownForTests(): void {
   shutdownWork = null

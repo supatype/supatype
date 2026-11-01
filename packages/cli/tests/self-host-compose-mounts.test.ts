@@ -216,6 +216,15 @@ describe("self-host compose functions worker", () => {
     expect(envValues(block, "SUPATYPE_SERVICE_ROLE_ROUTES")).toHaveLength(1)
   })
 
+  // The worker answers 503 only for a hook the manifest names, reading the manifest the server reads.
+  // The project is mounted read-only at /project, its .supatype among it.
+  it("names the manifest the server reads to the worker, under the project mount", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(envValues(block, "SUPATYPE_MANIFEST_PATH")).toEqual(["/project/.supatype/manifest.json"])
+    expect(block).toMatch(/target: \/project\n\s+read_only: true/)
+  })
+
   // Round 6b N29: the worker drained for its 4 s default, sized for dev, so a function with more
   // left was cut off at every restart though Docker allowed 10 s. Its drain is set under the grace.
   it("has the worker drain for 9 s, under its 10 s stop grace", () => {

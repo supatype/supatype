@@ -983,6 +983,9 @@ ${mounts.projectReadOnly}
       # The list every deploy writes (functions.serviceRole), read on every call, so a route taken off
       # it loses the key on its next call; the list above applies until the first deploy writes it.
       SUPATYPE_SERVICE_ROLE_ROUTES_FILE: /project/.supatype/${SERVICE_ROLE_ROUTES_FILE}
+      # The manifest the server reads: a hook route with no code is a 503 only when it names that
+      # hook, so a hook the server would call is never taken for one it would not.
+      SUPATYPE_MANIFEST_PATH: /project/.supatype/manifest.json
       # A direct database connection for functions, off unless asked for.
       #
       # The worker reads SUPATYPE_DB_URL and exposes it as \`ctx.dbUrl\`, and nothing here ever set

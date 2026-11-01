@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react"
-import { Box, useInput, useStdin } from "ink"
+import { Box, useApp, useInput, useStdin } from "ink"
 import { PromptPanel } from "../components/PromptPanel.js"
 import { CLACK_CANCEL } from "../runtime/cancel.js"
 import { interruptFromPrompt } from "../runtime/prompt-interrupt.js"
+import { restoreStdinAfterInk } from "../runtime/stdin-after-ink.js"
 import {
   ActiveFlowPromptView,
   FlowLogPane,
@@ -32,9 +33,17 @@ function useHeldRawMode(): void {
 
 export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
   useHeldRawMode()
-  // Raw mode turns Ctrl+C into a key; it is handed on as the command's own Ctrl+C.
+  // Raw mode turns Ctrl+C into a key; it is handed on as the command's own Ctrl+C. A command that is
+  // not dev exits at once, so the terminal is given back first: raw mode off now, as an unmount's
+  // effects would only turn it off on a later tick, and the flow ended.
+  const { exit } = useApp()
+  const { stdin } = useStdin()
   useInput((input, key) => {
-    if ((key.ctrl && input === "c") || input === "\x03") interruptFromPrompt()
+    if (!((key.ctrl && input === "c") || input === "\x03")) return
+    interruptFromPrompt(() => {
+      restoreStdinAfterInk({ isTTY: stdin.isTTY, isRaw: true, setRawMode: (mode) => stdin.setRawMode(mode), pause: () => stdin.pause() })
+      exit()
+    })
   })
   const [logLines, setLogLines] = useState<FlowLogLine[]>([])
   const [spinner, setSpinner] = useState<string | null>(null)
