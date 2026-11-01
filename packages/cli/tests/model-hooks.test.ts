@@ -286,6 +286,23 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
 
     expect(writeHooksModule(dir, functionsDir, ast)).toBeNull()
     expect(existsSync(join(functionsDir, "_supatype", "hooks.ts"))).toBe(false)
+    // Round 7: the folder was left behind, empty. It goes with its last file.
+    expect(existsSync(join(functionsDir, "_supatype"))).toBe(false)
+  })
+
+  it("leaves the folder when something else is in it", () => {
+    const { dir, ast } = project(`
+import type { Model, UUID } from "@supatype/types"
+
+export type Post = Model<{ id: UUID }, { tableName: "posts" }>
+`)
+    const hooksDir = join(dir, "hooks")
+    mkdirSync(join(hooksDir, "_supatype"), { recursive: true })
+    writeFileSync(join(hooksDir, "_supatype", "hooks.ts"), "export type Stale = true", "utf8")
+    writeFileSync(join(hooksDir, "_supatype", "notes.md"), "mine", "utf8")
+
+    expect(writeHooksModule(dir, hooksDir, ast)).toBeNull()
+    expect(existsSync(join(hooksDir, "_supatype", "notes.md"))).toBe(true)
   })
 
   // Review of round 8, item C-1: `hooks new` wrote a table-less module for a handler no model names

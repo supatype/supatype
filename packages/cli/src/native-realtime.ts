@@ -192,15 +192,40 @@ function announceRealtime(opts: NativeRealtimeOptions, state: RealtimeState): vo
   // Enabled in every case here: the socket answers, so broadcast and presence work whatever the
   // database can do, and the gateway's own health probe asks only whether it is up.
   patchRouteManifest(opts.manifestPath, { realtime_enabled: true, realtime_url: opts.url })
-  if (state.kind === "unsupported") {
-    console.warn(
-      `[supatype] ⚠  Realtime is up at ${opts.url} for broadcast and presence, but database changes are off: ` +
-        `${state.reason}. Run \`supatype db check\` for the remedy.`,
-    )
+  if (state.kind === "unsupported") return warnChangesOff(opts.url, state.reason)
+  if (state.kind !== "connecting") {
+    console.log(`[supatype] Realtime service: ${opts.url}`)
     return
   }
-  const connecting = state.kind === "connecting" ? " (still connecting to the database)" : ""
-  console.log(`[supatype] Realtime service: ${opts.url}${connecting}`)
+  console.log(`[supatype] Realtime service: ${opts.url} (still connecting to the database)`)
+  void followConnecting(opts.url)
+}
+
+/** Say that realtime serves broadcast and presence but not database changes, and why. */
+function warnChangesOff(url: string, reason: string): void {
+  console.warn(
+    `[supatype] ⚠  Realtime is up at ${url} for broadcast and presence, but database changes are off: ` +
+      `${reason}. Run \`supatype db check\` for the remedy.`,
+  )
+}
+
+/** How long a realtime announced while connecting is followed until it settles. */
+const SETTLE_TIMEOUT_MS = 60_000
+
+/**
+ * A realtime announced while still connecting, asked until it settles: when it finds the database
+ * cannot stream changes (no wal2json, say), that is said then. Only the connecting line was shown,
+ * and round 6's "database changes are off" never came (local test round 7, 3b-22). The polling holds
+ * nothing open: dev may stop while it runs, and a realtime that has gone answers nothing, which ends it.
+ */
+async function followConnecting(url: string): Promise<void> {
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    await sleep(READY_POLL_MS, undefined, { ref: false })
+    const state = await probeReady(url)
+    if (state.kind === "unsupported") return warnChangesOff(url, state.reason)
+    if (state.kind !== "connecting") return
+  }
 }
 
 /** Record that realtime is not running, say why, and answer null for the caller to hold. */

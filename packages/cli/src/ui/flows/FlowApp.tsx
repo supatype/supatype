@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react"
-import { Box, useStdin } from "ink"
+import { Box, useInput, useStdin } from "ink"
 import { PromptPanel } from "../components/PromptPanel.js"
 import { CLACK_CANCEL } from "../runtime/cancel.js"
+import { interruptFromPrompt } from "../runtime/prompt-interrupt.js"
 import {
   ActiveFlowPromptView,
   FlowLogPane,
@@ -31,6 +32,10 @@ function useHeldRawMode(): void {
 
 export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
   useHeldRawMode()
+  // Raw mode turns Ctrl+C into a key; it is handed on as the command's own Ctrl+C.
+  useInput((input, key) => {
+    if ((key.ctrl && input === "c") || input === "\x03") interruptFromPrompt()
+  })
   const [logLines, setLogLines] = useState<FlowLogLine[]>([])
   const [spinner, setSpinner] = useState<string | null>(null)
   const [prompt, setPrompt] = useState<ActiveFlowPrompt | null>(null)

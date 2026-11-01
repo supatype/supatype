@@ -45,6 +45,7 @@ import {
 import { functionTemplateSource } from "../functions-template.js"
 import { readWorkerFiles } from "../worker-module-files.js"
 import { error, info, plain } from "../ui/messages.js"
+import { withSpinner } from "../ui/progress.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { DENO_ENV } from "../native-dev-env.js"
 
@@ -468,18 +469,19 @@ function deploySelfHosted(
  * which calls a public function and needs no session.
  */
 function linkedTarget(cwd: string, env: string | undefined, needsToken = true): DeployTarget | null {
-  if (!loadProjectLink(cwd)) return null
-  let target: DeployTarget
   try {
-    target = resolveTarget(cwd, { env, tokenOptional: !needsToken })
+    return resolveLinkedTarget(cwd, env, needsToken)
   } catch (err) {
     error(errorMessage(err))
     process.exit(1)
   }
-  if (needsToken && !target.token) {
-    error(NOT_LOGGED_IN)
-    process.exit(1)
-  }
+}
+
+/** {@link linkedTarget}, throwing rather than ending the command, for work under a spinner. */
+function resolveLinkedTarget(cwd: string, env: string | undefined, needsToken: boolean): DeployTarget | null {
+  if (!loadProjectLink(cwd)) return null
+  const target = resolveTarget(cwd, { env, tokenOptional: !needsToken })
+  if (needsToken && !target.token) throw new Error(NOT_LOGGED_IN)
   return target
 }
 
@@ -800,10 +802,48 @@ function invokeToken(target: DeployTarget): string {
 
 // ─── Env management ──────────────────────────────────────────────────────────
 
+/** Where an env command did its work: the linked target and its answer, or the local functions directory. */
+type EnvOutcome<T> = { kind: "target"; target: DeployTarget; answer: T } | { kind: "local"; functionsDir: string }
+
+/** What an env command shows while it works, says when it fails, and asks the target or reads locally. */
+interface EnvWork<T> {
+  spinner: string
+  failed: string
+  call: TargetCall
+  guard: Guard<T>
+  /** How the local functions directory is found when the project is not linked. */
+  local: "read" | "write"
+}
+
+/**
+ * An env command's work under one spinner, from the start (reading the link and the config, which
+ * runs it in a child process) to the target's answer, for every target: on a self-hosted stack it
+ * takes seconds, and nothing on screen said it was working. A failure ends the command once the
+ * spinner has stopped, saying what failed and why.
+ */
+async function envWork<T>(cwd: string, work: EnvWork<T>): Promise<EnvOutcome<T>> {
+  let outcome: EnvOutcome<T>
+  try {
+    outcome = await withSpinner(work.spinner, async (): Promise<EnvOutcome<T>> => {
+      const target = resolveLinkedTarget(cwd, undefined, true)
+      if (target === null) return { kind: "local", functionsDir: resolveFunctionsDir(cwd, work.local) }
+      const answer = await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, work.call), work.guard)
+      return { kind: "target", target, answer }
+    })
+  } catch (err) {
+    error(`${work.failed}: ${errorMessage(err)}`)
+    process.exit(1)
+  }
+  if (outcome.kind === "target") sayTargetWarning(outcome.answer)
+  return outcome
+}
+
 async function envList(cwd: string): Promise<void> {
-  const target = linkedTarget(cwd, undefined)
-  if (target === null) return listLocalEnv(cwd)
-  const listed = await askTarget(target, "Failed to list env vars", { method: "GET", subpath: "/functions/env" }, isEnvListing)
+  const call = { method: "GET", subpath: "/functions/env" }
+  const work = { spinner: "Listing environment variables", failed: "Failed to list env vars", call, guard: isEnvListing, local: "read" } as const
+  const outcome = await envWork(cwd, work)
+  if (outcome.kind === "local") return listLocalEnv(outcome.functionsDir)
+  const listed = outcome.answer
   // Every target lists the names. An older self-hosted control plane answers a map of names to
   // values, read here for its names alone.
   const keys = Array.isArray(listed) ? listed : Object.keys(listed)
@@ -819,8 +859,8 @@ const isEnvListing = (value: unknown): value is string[] | Record<string, unknow
   isArrayOf(isString)(value) || isJsonObject(value)
 
 /** The variables in the functions' local env file, for a project that is not linked. */
-function listLocalEnv(cwd: string): void {
-  const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
+function listLocalEnv(functionsDir: string): void {
+  const envPath = resolve(functionsDir, ENV_LOCAL)
   if (!existsSync(envPath)) {
     info("No environment variables configured.")
     return
@@ -837,34 +877,33 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
   }
   const key = keyvalue.slice(0, eqIdx)
   const value = keyvalue.slice(eqIdx + 1)
-  const target = linkedTarget(cwd, undefined)
-  if (target === null) return setLocalEnv(cwd, key, value)
   const call = { method: "POST", subpath: "/functions/env", body: { key, value }, restartsWorker: true }
-  await askTarget(target, "Failed to set env var", call, isUnknown)
-  info(`Set ${key} for project ${target.projectRef}.`)
+  const outcome = await envWork(cwd, { spinner: `Setting ${key}`, failed: "Failed to set env var", call, guard: isUnknown, local: "write" })
+  if (outcome.kind === "local") return setLocalEnv(outcome.functionsDir, key, value)
+  info(`Set ${key} for project ${outcome.target.projectRef}.`)
 }
 
 /** Sets `key` in the functions' local env file, replacing its line or adding one. */
-function setLocalEnv(cwd: string, key: string, value: string): void {
-  const envPath = resolve(resolveFunctionsDir(cwd, "write"), ENV_LOCAL)
+function setLocalEnv(functionsDir: string, key: string, value: string): void {
+  const envPath = resolve(functionsDir, ENV_LOCAL)
   const content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
   writeFileSync(envPath, withEnvValue(content, key, value), "utf8")
   info(`Set ${key} in local env file.`)
 }
 
 async function envUnset(cwd: string, key: string): Promise<void> {
-  const target = linkedTarget(cwd, undefined)
-  if (target === null) return unsetLocalEnv(cwd, key)
   const call = { method: "DELETE", subpath: `/functions/env/${encodeURIComponent(key)}`, restartsWorker: true }
-  const answer = await askTarget(target, "Failed to unset env var", call, isUnknown)
+  const outcome = await envWork(cwd, { spinner: `Removing ${key}`, failed: "Failed to unset env var", call, guard: isUnknown, local: "read" })
+  if (outcome.kind === "local") return unsetLocalEnv(outcome.functionsDir, key)
+  const { answer, target } = outcome
   // A self-hosted server says whether the key was there to remove.
   if (isJsonObject(answer) && answer["removed"] === false) info(`${key} was not set for project ${target.projectRef}.`)
   else info(`Removed ${key} for project ${target.projectRef}.`)
 }
 
 /** Removes `key` from the functions' local env file. */
-function unsetLocalEnv(cwd: string, key: string): void {
-  const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
+function unsetLocalEnv(functionsDir: string, key: string): void {
+  const envPath = resolve(functionsDir, ENV_LOCAL)
   if (!existsSync(envPath)) {
     error("No local env file found.")
     process.exit(1)

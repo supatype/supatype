@@ -157,8 +157,15 @@ export function writeHooksModule(cwd: string, hooksDir: string, ast: unknown): s
   const file = hooksModulePath(hooksDir)
   if (module !== null) return writeModule(cwd, file, module)
   if (discoverHandlersInDir(hooksDir).length > 0) return writeModule(cwd, file, hooksModuleSource(ast))
-  if (existsSync(file)) rmSync(file, { force: true })
+  removeModule(file)
   return null
+}
+
+/** Removes the module at `file`, and its folder when nothing else is left in it. */
+function removeModule(file: string): void {
+  if (existsSync(file)) rmSync(file, { force: true })
+  const dir = dirname(file)
+  if (existsSync(dir) && readdirSync(dir).length === 0) rmSync(dir, { recursive: true, force: true })
 }
 
 /**

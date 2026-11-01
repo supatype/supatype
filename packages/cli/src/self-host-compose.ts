@@ -1546,13 +1546,21 @@ export function askDockerCompose(
 const DAEMON_PULL_ERROR = /^Error response from daemon: /
 
 /**
- * Whether a line compose's pull writes is shown: all but its closing daemon errors. Each image that
- * failed is pulled again on its own (compose-image-pull.ts), which says why, and one kept from this
- * machine is no failure; compose printed them three times for an image `update` then said it kept
- * (local test round 4).
+ * compose's own line for one image's pull that failed, or that it stopped when another failed:
+ * ` Image <ref> Error <why>` and ` Image <ref> Interrupted` (Compose v5), or the same with a status
+ * mark and the service name before it (older Compose v2).
+ */
+const IMAGE_PULL_FAILED = /^\s*(?:\S\s+)?(?:Image\s+)?\S+\s+(?:Error|Interrupted)(?:\s|$)/
+
+/**
+ * Whether a line compose's pull writes is shown: its progress, but not its closing daemon errors,
+ * its per-image errors or the pulls it interrupted. Each image whose pull did not finish is pulled
+ * again on its own (compose-image-pull.ts), which says why when it fails, and one kept from this
+ * machine is no failure; compose printed its errors for an image `update` then said it kept (local
+ * test rounds 4 and 7).
  */
 export function shownPullLine(line: string): boolean {
-  return !DAEMON_PULL_ERROR.test(line)
+  return !DAEMON_PULL_ERROR.test(line) && !IMAGE_PULL_FAILED.test(line)
 }
 
 /** `docker compose pull` for the project, its progress shown as it runs ({@link shownPullLine}); its exit status. */

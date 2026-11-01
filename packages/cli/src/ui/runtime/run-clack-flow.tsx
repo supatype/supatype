@@ -47,7 +47,8 @@ export async function runClackFlow<T>(run: (api: ClackApi) => Promise<T>): Promi
           reject(err)
         }}
       />,
-      { patchConsole: false },
+      // A Ctrl+C is the command's own, not Ink's to end the process on (prompt-interrupt.ts).
+      { patchConsole: false, exitOnCtrlC: false },
     )
   })
 }

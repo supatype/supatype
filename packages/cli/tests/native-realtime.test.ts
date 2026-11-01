@@ -155,6 +155,24 @@ require("node:http").createServer((req, res) => res.end("{}")).listen(Number(pro
     await vi.waitFor(() => expect(manifest()).toEqual({ realtime_enabled: false }), { timeout: 5_000 })
   }, 10_000)
 
+  // Local test round 7 (3b-22): on a Postgres without wal2json, realtime answers "connecting" first
+  // and "unsupported" once it has asked the database. Dev printed only the connecting line, and the
+  // "database changes are off" line round 6 showed never came.
+  it("says database changes are off when a realtime announced as connecting finds it cannot stream them", async () => {
+    const launch = fakeRealtime(`
+const http = require("node:http")
+const begun = Date.now()
+http.createServer((req, res) => {
+  const settled = Date.now() - begun > 1000
+  res.writeHead(503, { "Content-Type": "application/json" })
+  res.end(JSON.stringify(settled ? { status: "unsupported", reason: "wal2json is not installed" } : { status: "connecting" }))
+}).listen(Number(process.env.PORT), "127.0.0.1")
+`)
+    expect(await start(launch)).not.toBeNull()
+    expect(logs.join("\n")).toContain("(still connecting to the database)")
+    await vi.waitFor(() => expect(warnings.join("\n")).toMatch(/Realtime is up at .* but database changes are off: wal2json is not installed/), { timeout: 6_000 })
+  }, 10_000)
+
   it("disables realtime when it exits after starting", async () => {
     await start(answering(200, { status: "ok" }, 500))
     expect(manifest()["realtime_enabled"]).toBe(true)
