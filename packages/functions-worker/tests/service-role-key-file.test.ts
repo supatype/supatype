@@ -71,3 +71,45 @@ Deno.test("the routes come from SUPATYPE_SERVICE_ROLE_ROUTES_FILE when it is set
     await Deno.remove(routesFile)
   }
 })
+
+// Review r8 A1: a self-hosted deploy sends functions.serviceRole, and the control plane writes it to
+// the routes file. The worker read the list once, at start, so a route taken off it kept the key
+// until a restart. It reads the file on every call.
+Deno.test("a route taken off the routes file loses the key on its next call, with no restart", async () => {
+  const keyFile = await Deno.makeTempFile()
+  const routesFile = await Deno.makeTempFile()
+  await Deno.writeTextFile(keyFile, "from-file\n")
+  await Deno.writeTextFile(routesFile, "admin")
+  const worker = await startWorker({ admin: REPORTS_KEY }, {
+    ...Deno.env.toObject(),
+    SUPATYPE_SERVICE_ROLE_KEY_FILE: keyFile,
+    SUPATYPE_SERVICE_ROLE_ROUTES_FILE: routesFile,
+  })
+  try {
+    const admin = async (): Promise<string> => JSON.stringify(await (await fetch(`${worker.origin}/functions/v1/admin`)).json())
+    expectEqual(await admin(), JSON.stringify({ ctxKey: "from-file", envKey: null }), "admin while listed")
+    await Deno.writeTextFile(routesFile, "")
+    expectEqual(await admin(), JSON.stringify({ ctxKey: null, envKey: null }), "admin once taken off")
+  } finally {
+    await worker.stop()
+    await Deno.remove(keyFile)
+    await Deno.remove(routesFile)
+  }
+})
+
+// Before the first deploy writes the file, the list compose rendered from the config applies.
+Deno.test("a routes file not written yet leaves SUPATYPE_SERVICE_ROLE_ROUTES in force", async () => {
+  const keyFile = await Deno.makeTempFile()
+  try {
+    await Deno.writeTextFile(keyFile, "from-file\n")
+    const reports = await keyReports({
+      SUPATYPE_SERVICE_ROLE_KEY_FILE: keyFile,
+      SUPATYPE_SERVICE_ROLE_ROUTES: "admin",
+      SUPATYPE_SERVICE_ROLE_ROUTES_FILE: `${await Deno.makeTempDir()}/not-written-yet`,
+    })
+    expectEqual(reports.admin, JSON.stringify({ ctxKey: "from-file", envKey: null }), "admin")
+    expectEqual(reports.hello, JSON.stringify({ ctxKey: null, envKey: null }), "hello")
+  } finally {
+    await Deno.remove(keyFile)
+  }
+})

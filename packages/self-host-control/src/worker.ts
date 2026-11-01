@@ -18,7 +18,15 @@ import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-import { FUNCTION_NAME_RULE, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, isFunctionName, parseJsonObject, workerLoadsFile } from "@supatype/shared"
+import {
+  FUNCTION_NAME_RULE,
+  FUNCTIONS_WORKER_STOP_GRACE_SECONDS,
+  HOOK_NAME_RULE,
+  isFunctionName,
+  isHookName,
+  parseJsonObject,
+  workerLoadsFile,
+} from "@supatype/shared"
 import type { ServerResponse } from "node:http"
 import { badRequest, HttpError, sendJson } from "./http.js"
 import { projectRoot } from "./project.js"
@@ -177,9 +185,12 @@ interface WorkerCheck {
  * why, after the files are written; a restart is then owed to the next deploy. A deploy that needed
  * nothing done while Docker could not be reached answers with a warning: the worker already serves it.
  */
-async function ensureWorkerCurrent(): Promise<WorkerCheck> {
-  const content = await workerContentHash()
-  const stale = content !== readState("loaded") || readState("restart-owed") !== null
+async function ensureWorkerCurrent(opts: { codeUnchanged?: boolean } = {}): Promise<WorkerCheck> {
+  const owed = readState("restart-owed") !== null
+  // A call that changed no code the worker loads (an env change) does not hash it, unless a restart
+  // is owed, which needs the hash to record what it loads.
+  const content = opts.codeUnchanged === true && !owed ? null : await workerContentHash()
+  const stale = owed || (content !== null && content !== readState("loaded"))
   if (stale) writeState("restart-owed", new Date().toISOString())
   const listed = await workerContainers()
   if ("failed" in listed) {
@@ -189,7 +200,7 @@ async function ensureWorkerCurrent(): Promise<WorkerCheck> {
   if (listed.containers.length === 0) {
     throw new HttpError(502, "worker_restart_failed", `The files are written, but no functions-worker container exists for compose project ${composeProject()}; is the stack up?`)
   }
-  if (stale) return restartWorker(listed.containers, content)
+  if (stale) return restartWorker(listed.containers, content ?? (await workerContentHash()))
   const stopped = listed.containers.filter((c) => !c.running).map((c) => c.id)
   if (stopped.length > 0) await dockerOrThrow({ verb: "start", ids: stopped })
   return { restarted: stopped.length > 0 }
@@ -199,13 +210,15 @@ async function ensureWorkerCurrent(): Promise<WorkerCheck> {
  * The tail every deploying route ends with: brings the worker current (ensureWorkerCurrent), then
  * answers 200 with `data`, the warning when Docker could not be asked, and with `sayRestarted`
  * whether the worker was restarted. A restart that fails throws, and the router answers its 502.
+ * With `codeUnchanged` (the env routes: the worker reads env on every call) the code is not hashed;
+ * a stopped worker is still started, and a restart a failed deploy owes is still paid.
  */
 export async function answerWithWorkerCurrent(
   res: ServerResponse,
   data: Record<string, unknown>,
-  opts: { sayRestarted?: boolean } = {},
+  opts: { sayRestarted?: boolean; codeUnchanged?: boolean } = {},
 ): Promise<void> {
-  const worker = await ensureWorkerCurrent()
+  const worker = await ensureWorkerCurrent({ ...(opts.codeUnchanged !== undefined && { codeUnchanged: opts.codeUnchanged }) })
   sendJson(res, 200, {
     data: {
       ...data,
@@ -225,12 +238,13 @@ async function restartWorker(containers: readonly WorkerContainer[], content: st
 
 /**
  * The directory of the function or hook `name` under `root`: refused (400) unless the name passes
- * the function-name rule the CLI also checks, and the path is a direct child of `root`. The second
- * check is a backstop for the first: whatever the rule lets through, nothing outside `root` is ever
- * written or removed.
+ * its rule (the function-name rule, or the wider hook-name rule; @supatype/shared), and the path is
+ * a direct child of `root`. The second check is a backstop for the first: whatever a rule lets
+ * through, nothing outside `root` is ever written or removed.
  */
 export function childDir(root: string, name: unknown, kind: "function" | "hook"): string {
-  if (!isFunctionName(name)) throw badRequest(`Invalid ${kind} name ${JSON.stringify(name)}: ${FUNCTION_NAME_RULE}`)
+  const [allowed, rule] = kind === "hook" ? [isHookName(name), HOOK_NAME_RULE] : [isFunctionName(name), FUNCTION_NAME_RULE]
+  if (!allowed || typeof name !== "string") throw badRequest(`Invalid ${kind} name ${JSON.stringify(name)}: ${rule}`)
   const base = resolve(root)
   const dir = resolve(base, name)
   if (dirname(dir) !== base) throw badRequest(`The ${kind} name ${JSON.stringify(name)} resolves outside the ${kind}s directory`)

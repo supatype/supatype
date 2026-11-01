@@ -49,7 +49,7 @@ export const isCacheMap = isRecordOf(
 )
 
 const HOOK_DEPLOY_BODY = {
-  handlers: optional(isArrayOf(isShape({ name: isUnknown, source: isString }))),
+  handlers: optional(isArrayOf(isShape({ name: isUnknown, source: isString, files: optional(isRecordOf(isString)) }))),
   map: optional(isUnknown),
   validators: optional(isUnknown),
   cache: optional(isUnknown),
@@ -57,7 +57,8 @@ const HOOK_DEPLOY_BODY = {
 
 /**
  * `POST /projects/:ref/hooks/deploy`: `handlers`, each a name and its flattened source, the adapter
- * among them as {@link ADAPTER_NAME}; `map`, the hook map; `validators` and `cache`, the manifest's
+ * among them as {@link ADAPTER_NAME}, and for a hook of more than one file sent to a target that
+ * takes them, `files`: every file of its directory by `/` path, as written; `map`, the hook map; `validators` and `cache`, the manifest's
  * other two maps. The maps are checked with {@link isHookMap} and {@link isCacheMap} by the reader,
  * which says which is wrong.
  */

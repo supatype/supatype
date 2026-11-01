@@ -1,11 +1,40 @@
-import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs"
-import { dirname } from "node:path"
-import { isFunctionDeployBody, isRecordOf, isShape, isString, optional } from "@supatype/shared"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { basename, dirname, join } from "node:path"
+import {
+  FUNCTION_ENTRY_FILE,
+  FUNCTION_NAME_RULE,
+  functionRouteName,
+  isFunctionDeployBody,
+  isFunctionName,
+  isRecordOf,
+  isShape,
+  isString,
+  optional,
+  SERVICE_ROLE_ROUTES_FILE,
+} from "@supatype/shared"
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
-import { functionFiles, writeChanged, type DeployFile } from "../deploy-files.js"
+import { functionFiles, removeAll, writeChanged, writeFileIn, writeRoot, type FunctionWrite } from "../deploy-files.js"
 import { answerWithWorkerCurrent, childDir, functionEnvPath, functionsRoot } from "../worker.js"
+
+/**
+ * The functions under `root` the worker serves, sorted: found by the rule it discovers its routes by
+ * (`functionRouteName`, @supatype/shared), so `_shared`, dot directories, a directory with no
+ * index.ts and a declaration file are not listed, and a function kept as `<name>.ts` is.
+ */
+function servedFunctions(root: string): string[] {
+  if (!existsSync(root)) return []
+  return readdirSync(root, { withFileTypes: true })
+    .map((entry) => {
+      const kind = entry.isDirectory() ? "directory" : entry.isFile() ? "file" : undefined
+      const name = kind === undefined ? undefined : functionRouteName(entry.name, kind)
+      if (name === undefined) return undefined
+      return kind === "file" || existsSync(join(root, entry.name, FUNCTION_ENTRY_FILE)) ? name : undefined
+    })
+    .filter((name): name is string => name !== undefined)
+    .sort()
+}
 
 /** The directory of the function `name`, refused unless it may be one (worker.ts `childDir`). */
 function functionDir(name: unknown): string {
@@ -13,13 +42,19 @@ function functionDir(name: unknown): string {
 }
 
 /**
- * The files a deploy body's functions write, every function and path checked before anything is
- * written (deploy-files.ts). Its count of functions comes with them.
+ * What a deploy body's functions write and remove, every function and path checked before anything
+ * is written (deploy-files.ts). Its count of functions comes with them.
  */
-function deployedFiles(body: unknown): { count: number; files: DeployFile[] } {
-  const { functions } = bodyOf(body, isFunctionDeployBody)
-  const files = functions.flatMap((fn) => functionFiles({ name: fn.name, dir: functionDir(fn.name), source: fn.source, files: fn.files }))
-  return { count: functions.length, files }
+function deployedFiles(body: unknown): { count: number; writes: FunctionWrite[]; serviceRole: string[] | undefined } {
+  const { functions, serviceRole } = bodyOf(body, isFunctionDeployBody)
+  const refused = (serviceRole ?? []).filter((name) => !isFunctionName(name))
+  if (refused.length > 0) throw badRequest(`serviceRole names ${refused.map((name) => JSON.stringify(name)).join(", ")}, which are not function names: ${FUNCTION_NAME_RULE}`)
+  const root = writeRoot(functionsRoot(), "Functions", { mayBeLink: true })
+  const writes = functions.map((fn) => {
+    functionDir(fn.name)
+    return functionFiles(root, { name: fn.name, source: fn.source, files: fn.files })
+  })
+  return { count: functions.length, writes, serviceRole }
 }
 
 
@@ -40,28 +75,27 @@ export function registerFunctionRoutes(
 ): void {
   route(routes, "GET", "/projects/:ref/functions", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const root = functionsRoot()
-    if (!existsSync(root)) {
-      sendJson(ctx.res, 200, { data: [] })
-      return
-    }
-    const names = readdirSync(root, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => ({ name: d.name }))
-    sendJson(ctx.res, 200, { data: names })
+    sendJson(ctx.res, 200, { data: servedFunctions(functionsRoot()).map((name) => ({ name })) })
   })
 
   route(routes, "POST", "/projects/:ref/functions/deploy", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const { count, files } = deployedFiles(ctx.body)
-    await writeChanged(files)
+    const { count, writes, serviceRole } = deployedFiles(ctx.body)
+    // Written before the other form is removed, so the function is never missing in between.
+    await writeChanged(writes.flatMap((write) => write.files))
+    await removeAll(writes.flatMap((write) => write.remove))
+    // The list replaces the last wholesale, as on Cloud; the worker reads it on every call, so a
+    // route taken off it loses the key on its next call. A deploy that sends none leaves it alone.
+    if (serviceRole !== undefined) await writeFileIn(dirname(functionEnvPath()), SERVICE_ROLE_ROUTES_FILE, serviceRole.join(","))
     await answerWithWorkerCurrent(ctx.res, { message: "Functions deployed", count })
   })
 
   route(routes, "DELETE", "/projects/:ref/functions/:name", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const name = ctx.params["name"]!
-    rmSync(functionDir(name), { recursive: true, force: true })
+    // Whichever form the project keeps it in, both when both are there.
+    const dir = functionDir(name)
+    await removeAll([dir, `${dir}.ts`])
     await answerWithWorkerCurrent(ctx.res, { deleted: name })
   })
 
@@ -80,12 +114,13 @@ export function registerFunctionRoutes(
     }
     const current = readFunctionEnv()
     current[body.key] = body.value ?? ""
-    writeFunctionEnv(current)
-    await answerWithWorkerCurrent(ctx.res, { key: body.key })
+    await writeFunctionEnv(current)
+    await answerWithWorkerCurrent(ctx.res, { key: body.key }, { codeUnchanged: true })
   })
 
-  // `supatype functions env unset` on a self-host link. An env change restarts nothing, since the worker reads the file on each call (worker.ts); the
-  // worker is still started if it stopped, or restarted for a restart a failed deploy owes.
+  // `supatype functions env unset` on a self-host link. An env change restarts nothing, since the
+  // worker reads the file on each call (worker.ts); the worker is still started if it stopped, or
+  // restarted for a restart a failed deploy owes.
   route(routes, "DELETE", "/projects/:ref/functions/env/:key", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const key = decodedParam(ctx.params["key"]!)
@@ -93,16 +128,15 @@ export function registerFunctionRoutes(
     const removed = Object.hasOwn(current, key)
     if (removed) {
       delete current[key]
-      writeFunctionEnv(current)
+      await writeFunctionEnv(current)
     }
-    await answerWithWorkerCurrent(ctx.res, { key, removed })
+    await answerWithWorkerCurrent(ctx.res, { key, removed }, { codeUnchanged: true })
   })
 }
 
-/** Writes the function env file. */
-function writeFunctionEnv(env: Record<string, string>): void {
-  mkdirSync(dirname(functionEnvPath()), { recursive: true })
-  writeFileSync(functionEnvPath(), `${JSON.stringify(env, null, 2)}\n`, "utf8")
+/** Writes the function env file, a link there refused rather than followed (deploy-files.ts). */
+async function writeFunctionEnv(env: Record<string, string>): Promise<void> {
+  await writeFileIn(dirname(functionEnvPath()), basename(functionEnvPath()), `${JSON.stringify(env, null, 2)}\n`)
 }
 
 /** A path parameter as the caller encoded it (encodeURIComponent); a 400 when it cannot be decoded. */

@@ -83,15 +83,119 @@ describe("functions routes", () => {
       functions: [{ name: "hello-world_2", source: "export default 1" }],
     })
     assert.equal(deployed.status, 200)
-    assert.ok(existsSync(join(projectDir, "functions", "hello-world_2", "index.ts")))
+    assert.ok(existsSync(join(projectDir, "functions", "hello-world_2.ts")))
 
     const listed = await request(baseUrl, "GET", `/projects/${PROJECT}/functions`)
     assert.deepEqual(listed.json["data"], [{ name: "hello-world_2" }])
 
     const deleted = await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/hello-world_2`)
     assert.equal(deleted.status, 200)
-    assert.ok(!existsSync(join(projectDir, "functions", "hello-world_2")))
+    assert.ok(!existsSync(join(projectDir, "functions", "hello-world_2.ts")))
     assert.ok(existsSync(join(projectDir, "keep.txt")))
+  })
+
+  // Review r8 C13: every env call hashed the worker's code, which took the env commands seconds on a
+  // large project. An env change never needs a restart, so the env routes only check the worker runs.
+  test("env set does not look at the code, even code changed on disk; the next deploy does", async () => {
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, { functions: [{ name: "edited-on-disk", source: "export default 1" }] })
+    writeFileSync(join(projectDir, "functions", "edited-on-disk.ts"), "export default 2\n")
+    docker.calls.length = 0
+    assert.equal((await request(baseUrl, "POST", `/projects/${PROJECT}/functions/env`, { key: "C13", value: "v" })).status, 200)
+    assert.deepEqual(docker.calls.map((args) => args[0]), ["ps"])
+    await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, { functions: [{ name: "edited-on-disk", source: "export default 2\n" }] })
+    assert.equal(docker.calls.filter((args) => args[0] === "restart").length, 1)
+    await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/env/C13`)
+  })
+
+  // Review r8 A1: the deploy ignored serviceRole, so a route taken off functions.serviceRole kept the
+  // key on a self-hosted stack. It writes the list the worker reads on every call, wholesale.
+  test("deploy writes the service-role list it carries, an empty one too, and leaves it when none is sent", async () => {
+    const routesFile = join(projectDir, ".supatype", "service-role-routes")
+    const deploy = (extra: Record<string, unknown>) =>
+      request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, { functions: [{ name: "granted", source: "export default 1" }], ...extra })
+    assert.equal((await deploy({ serviceRole: ["granted", "other"] })).status, 200)
+    assert.equal(readFileSync(routesFile, "utf8"), "granted,other")
+    assert.equal((await deploy({})).status, 200)
+    assert.equal(readFileSync(routesFile, "utf8"), "granted,other")
+    assert.equal((await deploy({ serviceRole: [] })).status, 200)
+    assert.equal(readFileSync(routesFile, "utf8"), "")
+  })
+
+  test("deploy refuses a service-role entry that is not a function name, and writes nothing", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, {
+      functions: [{ name: "granted", source: "export default 1" }],
+      serviceRole: ["a,b"],
+    })
+    assert.equal(res.status, 400, JSON.stringify(res.json))
+  })
+
+  // Review r8 A3: a single-file function was written back as <name>/index.ts beside the project's
+  // <name>.ts, two routes for one name. It is written in the form the project keeps, never both.
+  describe("the form a function is written back in", () => {
+    const fns = (): string => join(projectDir, "functions")
+    const deploy = (fn: Record<string, unknown>) => request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, { functions: [fn] })
+
+    test("a single file where the project keeps <name>.ts, and no directory beside it", async () => {
+      writeFileSync(join(fns(), "kept-file.ts"), "export default 0\n")
+      assert.equal((await deploy({ name: "kept-file", source: "export default 1\n" })).status, 200)
+      assert.equal(readFileSync(join(fns(), "kept-file.ts"), "utf8"), "export default 1\n")
+      assert.equal(existsSync(join(fns(), "kept-file")), false)
+    })
+
+    test("a single file where the project keeps <name>/: its index.ts", async () => {
+      mkdirSync(join(fns(), "kept-dir"), { recursive: true })
+      writeFileSync(join(fns(), "kept-dir", "index.ts"), "export default 0\n")
+      assert.equal((await deploy({ name: "kept-dir", source: "export default 1\n" })).status, 200)
+      assert.equal(readFileSync(join(fns(), "kept-dir", "index.ts"), "utf8"), "export default 1\n")
+      assert.equal(existsSync(join(fns(), "kept-dir.ts")), false)
+    })
+
+    test("a directory deploy where the project keeps <name>.ts: the directory, and no <name>.ts", async () => {
+      writeFileSync(join(fns(), "grew.ts"), "export default 0\n")
+      const res = await deploy({ name: "grew", source: "export default 1\n", files: { "index.ts": "export default 1\n", "lib/a.ts": "export const a = 1\n" } })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.equal(readFileSync(join(fns(), "grew", "lib", "a.ts"), "utf8"), "export const a = 1\n")
+      assert.equal(existsSync(join(fns(), "grew.ts")), false)
+    })
+
+    test("a single file where the project has both: <name>.ts, and the directory is gone", async () => {
+      writeFileSync(join(fns(), "both.ts"), "export default 0\n")
+      mkdirSync(join(fns(), "both"), { recursive: true })
+      writeFileSync(join(fns(), "both", "index.ts"), "export default 0\n")
+      assert.equal((await deploy({ name: "both", source: "export default 1\n" })).status, 200)
+      assert.equal(readFileSync(join(fns(), "both.ts"), "utf8"), "export default 1\n")
+      assert.equal(existsSync(join(fns(), "both")), false)
+    })
+
+    // Review r8 A2: deleting a single-file function removed only <name>/, so <name>.ts stayed served.
+    test("delete removes the function in whichever form it is kept, both when both are there", async () => {
+      writeFileSync(join(fns(), "gone-file.ts"), "export default 0\n")
+      writeFileSync(join(fns(), "gone-both.ts"), "export default 0\n")
+      mkdirSync(join(fns(), "gone-both"), { recursive: true })
+      writeFileSync(join(fns(), "gone-both", "index.ts"), "export default 0\n")
+      for (const name of ["gone-file", "gone-both"]) {
+        assert.equal((await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/${name}`)).status, 200)
+      }
+      for (const left of ["gone-file.ts", "gone-both.ts", "gone-both"]) assert.equal(existsSync(join(fns(), left)), false, left)
+    })
+
+    // Review r8 A9: the list named every directory (_shared, .git, one with no index.ts) and missed
+    // the functions kept as <name>.ts. It names what the worker serves.
+    test("list names exactly the functions the worker serves", async () => {
+      mkdirSync(join(fns(), "_shared"), { recursive: true })
+      writeFileSync(join(fns(), "_shared", "util.ts"), "export {}\n")
+      mkdirSync(join(fns(), ".git"), { recursive: true })
+      mkdirSync(join(fns(), "no-entry"), { recursive: true })
+      writeFileSync(join(fns(), "types.d.ts"), "export {}\n")
+      writeFileSync(join(fns(), "listed-file.ts"), "export default 0\n")
+      mkdirSync(join(fns(), "listed-dir"), { recursive: true })
+      writeFileSync(join(fns(), "listed-dir", "index.ts"), "export default 0\n")
+      const listed: unknown = (await request(baseUrl, "GET", `/projects/${PROJECT}/functions`)).json["data"]
+      assert.ok(Array.isArray(listed), JSON.stringify(listed))
+      const names = listed.map((entry: unknown) => (typeof entry === "object" && entry !== null && "name" in entry ? entry.name : entry))
+      for (const name of ["listed-file", "listed-dir"]) assert.ok(names.includes(name), `${name} in ${JSON.stringify(names)}`)
+      for (const name of ["_shared", ".git", "no-entry", "types", "types.d"]) assert.ok(!names.includes(name), `${name} not in ${JSON.stringify(names)}`)
+    })
   })
 
   // `supatype functions env unset` on a self-host link was refused: the control plane had no route.
@@ -241,6 +345,26 @@ describe("functions routes", () => {
       })
       assert.equal(res.status, 400, JSON.stringify(res.json))
       assert.equal(existsSync(join(outside, "greet.ts")), false)
+    })
+
+    // Review r8 A4 (security): a link that leads nowhere passed the check, which asked existsSync
+    // and was told nothing is there, and the write then followed it out of the project.
+    test("refuses to write through a link that leads nowhere, and creates nothing at its target", async (t) => {
+      const outside = join(tmp, "outside-dangling")
+      mkdirSync(dirOf("dangling"), { recursive: true })
+      try {
+        symlinkSync(join(outside, "evil.ts"), join(dirOf("dangling"), "index.ts"), "file")
+      } catch {
+        t.skip("this machine cannot make a file link")
+        return
+      }
+      mkdirSync(outside, { recursive: true })
+      rmSync(join(outside, "evil.ts"), { force: true })
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/functions/deploy`, {
+        functions: [{ name: "dangling", source: ENTRY, files: { "index.ts": ENTRY, "lib/greet.ts": LIB } }],
+      })
+      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.equal(existsSync(join(outside, "evil.ts")), false)
     })
   })
 

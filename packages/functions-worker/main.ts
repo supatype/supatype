@@ -5,6 +5,7 @@
  */
 
 import { parseEnvText } from "./dotenv.ts"
+import { FUNCTION_ENTRY_FILE, functionRouteName } from "./routes.ts"
 import { exitOnStop } from "./stop.ts"
 import {
   currentHookDepth,
@@ -75,29 +76,33 @@ function hooksRoot(): string {
 /** Route prefix for hook handlers. The gateway refuses this prefix on the public path. */
 const HOOKS_ROUTE_PREFIX = "hooks/"
 
-/** The comma-separated route list, from the routes file when one is named, else the environment. */
-function serviceRoleRoutesText(): string {
+/**
+ * The comma-separated route list: the routes file when one is named and has been written, else the
+ * environment. A routes file that is there but cannot be read grants nothing.
+ */
+async function serviceRoleRoutesText(): Promise<string> {
+  const fromEnv = Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? ""
   const file = Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES_FILE")
-  if (!file) return Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? ""
+  if (!file) return fromEnv
   try {
-    return Deno.readTextFileSync(file)
-  } catch {
-    return ""
+    return await Deno.readTextFile(file)
+  } catch (err) {
+    return err instanceof Deno.errors.NotFound ? fromEnv : ""
   }
 }
 
 /**
- * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, from the file
- * `SUPATYPE_SERVICE_ROLE_ROUTES_FILE` names when it is set, else `SUPATYPE_SERVICE_ROLE_ROUTES`.
- * Native dev uses the file: it is read again on each `--watch` reload, so a change to
- * `functions.serviceRole` applies without restarting dev, where the environment is fixed at spawn.
- * A file that cannot be read grants nothing.
+ * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, read on every call: from the
+ * file `SUPATYPE_SERVICE_ROLE_ROUTES_FILE` names once it is written, else
+ * `SUPATYPE_SERVICE_ROLE_ROUTES`. Native dev writes the file when `functions.serviceRole` changes,
+ * and a self-hosted control plane on every deploy, so a route taken off the list loses the key on its
+ * next call, with no restart; the environment is fixed when the worker starts.
  *
  * Hooks do not appear here: they get the key by default (see serviceRoleGranted). This list is for
  * the public surface, where the default is nothing.
  */
-function serviceRoleRoutes(): Set<string> {
-  const raw = serviceRoleRoutesText().trim()
+async function serviceRoleRoutes(): Promise<Set<string>> {
+  const raw = (await serviceRoleRoutesText()).trim()
   if (!raw) return new Set()
   return new Set(
     raw
@@ -119,9 +124,9 @@ function serviceRoleRoutes(): Set<string> {
  * ambient admin credential there is read and write access past every access rule in the schema,
  * handed to code the internet can call.
  */
-function serviceRoleGranted(route: string): boolean {
+async function serviceRoleGranted(route: string): Promise<boolean> {
   if (route.startsWith(HOOKS_ROUTE_PREFIX)) return true
-  return serviceRoleAllowed.has(route)
+  return (await serviceRoleRoutes()).has(route)
 }
 
 /**
@@ -171,26 +176,17 @@ async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
   // does not exist is ordinary, a project with functions but no hooks has no hooks directory, and
   // letting it throw would fail startup and take that project's working functions down with it.
   try {
+    // routes.ts is the rule a self-hosted control plane lists functions by too.
     for await (const entry of Deno.readDir(root)) {
-      if (entry.name.startsWith("_") || entry.name.startsWith(".")) continue
-
       const fullPath = `${root}/${entry.name}`
-
-      if (entry.isDirectory) {
-        const indexTs = `${fullPath}/index.ts`
-        try {
-          await Deno.stat(indexTs)
-          if (!single || entry.name === single) {
-            out.push({ name: entry.name, entrypoint: indexTs })
-          }
-        } catch {
-          // no index.ts
-        }
-      } else if (entry.isFile && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
-        const name = entry.name.replace(/\.ts$/, "")
-        if (!single || name === single) {
-          out.push({ name, entrypoint: fullPath })
-        }
+      const name = entry.isDirectory || entry.isFile ? functionRouteName(entry.name, entry.isDirectory ? "directory" : "file") : undefined
+      if (name === undefined || (single && name !== single)) continue
+      const entrypoint = entry.isDirectory ? `${fullPath}/${FUNCTION_ENTRY_FILE}` : fullPath
+      try {
+        await Deno.stat(entrypoint)
+        out.push({ name, entrypoint })
+      } catch {
+        // A directory with no entry module is not a route.
       }
     }
   } catch (err) {
@@ -289,7 +285,6 @@ function jsonError(code: string, message: string, status: number, extra: Record<
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
 // Order matters: withhold, then import. See withholdServiceRoleKey.
 const serviceRoleKey = await withholdServiceRoleKey()
-const serviceRoleAllowed = serviceRoleRoutes()
 const root = functionsRoot()
 const routes = root ? await discoverRoutes(root) : []
 const handlers = await loadHandlers(routes)
@@ -491,7 +486,7 @@ const server = Deno.serve({
     anonKey: Deno.env.get("SUPATYPE_ANON_KEY") ?? "",
     // From the closure, not the environment: the key was withheld before any handler was imported,
     // and only a route the project granted it receives it here.
-    ...(serviceRoleKey && serviceRoleGranted(fnName) && { serviceRoleKey }),
+    ...(serviceRoleKey && (await serviceRoleGranted(fnName)) && { serviceRoleKey }),
     ...(dbUrl !== undefined && { dbUrl }),
     region: Deno.env.get("SUPATYPE_REGION") ?? "local",
     env: await scopedEnvForFunction(fnName),

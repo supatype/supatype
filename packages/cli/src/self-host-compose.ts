@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { createInterface } from "node:readline"
-import { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS } from "@supatype/shared"
+import { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, SERVICE_ROLE_ROUTES_FILE } from "@supatype/shared"
 import { composeHostPath } from "./compose-host-path.js"
 export { composeHostPath } from "./compose-host-path.js"
 import { ENGINE_SERVICE } from "./compose-engine-service.js"
@@ -980,6 +980,9 @@ ${mounts.projectReadOnly}
       # each one able to read past every access rule in the schema.
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SERVICE_ROLE_ROUTES: "${serviceRoleRoutes(config).join(",")}"
+      # The list every deploy writes (functions.serviceRole), read on every call, so a route taken off
+      # it loses the key on its next call; the list above applies until the first deploy writes it.
+      SUPATYPE_SERVICE_ROLE_ROUTES_FILE: /project/.supatype/${SERVICE_ROLE_ROUTES_FILE}
       # A direct database connection for functions, off unless asked for.
       #
       # The worker reads SUPATYPE_DB_URL and exposes it as \`ctx.dbUrl\`, and nothing here ever set

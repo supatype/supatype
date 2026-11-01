@@ -207,6 +207,15 @@ describe("self-host compose functions worker", () => {
     expect(block).toContain("\n    stop_grace_period: 10s")
   })
 
+  // Review r8 A1: the control plane writes the service-role list on every deploy; the worker reads it
+  // on every call from the file compose names, the config's list in force until the first deploy.
+  it("reads the service-role list from the file the control plane writes", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(envValues(block, "SUPATYPE_SERVICE_ROLE_ROUTES_FILE")).toEqual(["/project/.supatype/service-role-routes"])
+    expect(envValues(block, "SUPATYPE_SERVICE_ROLE_ROUTES")).toHaveLength(1)
+  })
+
   // Round 6b N29: the worker drained for its 4 s default, sized for dev, so a function with more
   // left was cut off at every restart though Docker allowed 10 s. Its drain is set under the grace.
   it("has the worker drain for 9 s, under its 10 s stop grace", () => {

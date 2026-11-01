@@ -12,3 +12,12 @@ export const FUNCTIONS_WORKER_STOP_GRACE_SECONDS = 10
  * manager kills it after 5 s; in a stack it cut off every function with more left (round 6b, N29).
  */
 export const FUNCTIONS_WORKER_DRAIN_MS = (FUNCTIONS_WORKER_STOP_GRACE_SECONDS - 1) * 1000
+
+/**
+ * The file in a stack's .supatype that names the public functions given the service-role key,
+ * comma-separated. A self-hosted control plane writes it on every deploy from the `serviceRole` the
+ * deploy carries, replacing the list wholesale as Cloud does, and the worker reads it on every call
+ * (`SUPATYPE_SERVICE_ROLE_ROUTES_FILE`, which compose points here), so a route taken off the list
+ * loses the key on its next call.
+ */
+export const SERVICE_ROLE_ROUTES_FILE = "service-role-routes"

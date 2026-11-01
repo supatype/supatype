@@ -11,14 +11,15 @@ export {
   rememberCapabilitiesSync,
   type CapabilitiesCache,
 } from "./capabilities-cache.js"
-export { FUNCTION_NAME, FUNCTION_NAME_RULE, isFunctionName } from "./function-name.js"
+export { FUNCTION_NAME, FUNCTION_NAME_RULE, HOOK_NAME, HOOK_NAME_RULE, isFunctionName, isHookName } from "./function-name.js"
+export { FUNCTION_ENTRY_FILE, functionRouteName } from "./function-routes.js"
 export {
   isFunctionDeployBody,
   isFunctionDeployEntry,
   type FunctionDeployBody,
   type FunctionDeployEntry,
 } from "./function-deploy.js"
-export { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS } from "./functions-worker.js"
+export { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, SERVICE_ROLE_ROUTES_FILE } from "./functions-worker.js"
 export { workerLoadsFile } from "./worker-files.js"
 export {
   MAX_IDENTIFIER_BYTES,

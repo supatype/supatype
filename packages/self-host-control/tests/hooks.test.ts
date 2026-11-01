@@ -1,8 +1,8 @@
 import { strict as assert } from "node:assert"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { after, before, beforeEach, describe, test } from "node:test"
+import { after, before, beforeEach, describe, test, type TestContext } from "node:test"
 import { isJsonObject, workerLoadsFile } from "@supatype/shared"
 import { dataOf, fakeDocker, request, startServer, type ControlPlaneServer, type FakeDocker } from "./helpers.js"
 
@@ -70,6 +70,63 @@ describe("hooks deploy route", () => {
     delete process.env["COMPOSE_PROJECT_NAME"]
   })
 
+  // Review r8 A5 (security): the route built each path with the name check alone, and never asked
+  // where a link in the way led. The control plane mounts the Docker socket, so a write that a link
+  // carries out of the project can end as root on the host.
+  describe("a link in the hooks directory", () => {
+    const outside = (): string => join(tmp, "outside-hooks")
+    const deploy = () => request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
+
+    beforeEach(() => {
+      rmSync(outside(), { recursive: true, force: true })
+      mkdirSync(outside(), { recursive: true })
+      mkdirSync(join(projectDir, "hooks"), { recursive: true })
+    })
+
+    /** Makes the link, or skips the test where this machine cannot: never a silent pass. */
+    function linkOrSkip(t: TestContext, target: string, path: string, kind: "junction" | "file"): boolean {
+      try {
+        symlinkSync(target, path, kind)
+        return true
+      } catch {
+        t.skip(`this machine cannot make a ${kind} link`)
+        return false
+      }
+    }
+
+    test("refuses a hook directory that is a link out of the project", async (t) => {
+      if (!linkOrSkip(t, outside(), join(projectDir, "hooks", "tag-note"), "junction")) return
+      const res = await deploy()
+      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.deepEqual(readdirSync(outside()), [])
+    })
+
+    test("refuses a _supatype directory that is a link out of the project", async (t) => {
+      if (!linkOrSkip(t, outside(), join(projectDir, "hooks", "_supatype"), "junction")) return
+      const res = await deploy()
+      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.deepEqual(readdirSync(outside()), [])
+    })
+
+    test("refuses a handler's index.ts that is a link leading nowhere", async (t) => {
+      mkdirSync(join(projectDir, "hooks", "tag-note"), { recursive: true })
+      if (!linkOrSkip(t, join(outside(), "evil.ts"), join(projectDir, "hooks", "tag-note", "index.ts"), "file")) return
+      const res = await deploy()
+      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.deepEqual(readdirSync(outside()), [])
+    })
+
+    test("refuses a manifest that is a link to a file out of the project, and leaves that file alone", async (t) => {
+      const elsewhere = join(outside(), "manifest.json")
+      writeFileSync(elsewhere, JSON.stringify({ functions_enabled: true }))
+      rmSync(join(projectDir, ".supatype", "manifest.json"))
+      if (!linkOrSkip(t, elsewhere, join(projectDir, ".supatype", "manifest.json"), "file")) return
+      const res = await deploy()
+      assert.equal(res.status, 400, JSON.stringify(res.json))
+      assert.equal(readFileSync(elsewhere, "utf8"), JSON.stringify({ functions_enabled: true }))
+    })
+  })
+
   test("writes each handler where the worker serves hooks, the adapter beside them, and the map", async () => {
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP })
     assert.equal(res.status, 200, JSON.stringify(res.json))
@@ -102,6 +159,50 @@ describe("hooks deploy route", () => {
       assert.deepEqual(tree(tmp), before)
     })
   }
+
+  // Review r8 C6: the CLI sends a hook of several files as `files`; it was refused everywhere.
+  describe("a hook of several files", () => {
+    const INDEX = 'import { hook } from "../_supatype/hooks.ts"\nimport { tag } from "./lib/tag.ts"\nexport default hook(async () => ({ tag }))\n'
+    const LIB = 'export const tag = "t"\n'
+    const hookDir = (): string => join(projectDir, "hooks", "tag-note")
+    const deploy = (files: Record<string, string>) =>
+      request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [{ ...TAG_NOTE, files }, ADAPTER], map: MAP })
+
+    test("writes each file as sent under the hook's directory", async () => {
+      const res = await deploy({ "index.ts": INDEX, "lib/tag.ts": LIB })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.equal(readFileSync(join(hookDir(), "index.ts"), "utf8"), INDEX)
+      assert.equal(readFileSync(join(hookDir(), "lib", "tag.ts"), "utf8"), LIB)
+    })
+
+    test("removes a source file a previous deploy wrote that is no longer sent, and keeps the rest", async () => {
+      await deploy({ "index.ts": INDEX, "lib/tag.ts": LIB })
+      writeFileSync(join(hookDir(), "README.md"), "notes\n")
+      const res = await deploy({ "index.ts": INDEX.replace('import { tag } from "./lib/tag.ts"\n', "").replace("({ tag })", "({})") })
+      assert.equal(res.status, 200, JSON.stringify(res.json))
+      assert.equal(existsSync(join(hookDir(), "lib", "tag.ts")), false)
+      assert.equal(existsSync(join(hookDir(), "README.md")), true)
+    })
+
+    for (const path of ["../escape.ts", "/abs.ts", "C:\\abs.ts", "lib/../../escape.ts", ""]) {
+      test(`refuses the file path ${JSON.stringify(path)} and writes nothing`, async () => {
+        const before = tree(tmp)
+        const res = await deploy({ "index.ts": INDEX, [path]: LIB })
+        assert.equal(res.status, 400, JSON.stringify(res.json))
+        assert.deepEqual(tree(tmp), before)
+      })
+    }
+  })
+
+  // Review r8 A7: hook names were held to the lowercase function rule, which the CLI and Cloud do not
+  // apply to hooks: a hook named onUserCreate deployed everywhere but here.
+  test("accepts a hook name the CLI and Cloud accept, such as onUserCreate", async () => {
+    const hook = { name: "onUserCreate", source: TAG_NOTE.source }
+    const map = { note: { afterChange: { function: "onUserCreate" } } }
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [hook, ADAPTER], map })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.ok(existsSync(join(projectDir, "hooks", "onUserCreate", "index.ts")))
+  })
 
   test("refuses a map naming a handler that was not uploaded, and writes nothing", async () => {
     const before = tree(tmp)
