@@ -137,3 +137,11 @@ export function unflattenHookSource(source: string): string {
  * where it is listed.
  */
 export const HOOK_FILES_FEATURE = "hook_files"
+
+/**
+ * The feature a target lists in its capabilities (`data.features`) when its hooks deploy takes
+ * `keep` and deploys hook by hook (HookDeployAnswer: refused, kept, locked). A CLI deploys per hook
+ * only where it is listed; anywhere else a failed hook means no hook is sent, and the hooks deployed
+ * before stay as they were.
+ */
+export const HOOK_KEEP_FEATURE = "hook_keep"

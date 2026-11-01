@@ -3,7 +3,7 @@
  * the network: Cloud, or a linked self-host stack (whose control plane writes them back into the
  * project's layout).
  *
- * What a hook may be depends on the target (`targetHookFiles`). A managed project
+ * What a hook may be depends on the target (`targetHookSupport`). A managed project
  * has no directory, its worker reads a ConfigMap, whose keys may only contain alphanumerics, `-`,
  * `_` and `.`, so Cloud takes each hook as its one module, flattened here, where it can be checked
  * and explained, rather than in the deploy route where a dropped file would be silent. A server

@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http"
-import { HOOK_FILES_FEATURE, isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
@@ -96,7 +96,8 @@ export function registerSchemaRoutes(
   })
 
   // What the engine behind this control plane supports, so a CLI refuses a flag it would drop, and
-  // what the control plane itself takes: a hook of several files (HOOK_FILES_FEATURE).
+  // what the control plane itself takes: a hook of several files (HOOK_FILES_FEATURE), and a hooks
+  // deploy hook by hook, with `keep` (HOOK_KEEP_FEATURE).
   route(routes, "GET", "/projects/:ref/schema/capabilities", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     // The control plane's own features do not depend on the engine: an engine that cannot be run lists
@@ -108,7 +109,7 @@ export function registerSchemaRoutes(
         return []
       },
     )
-    sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE] } })
+    sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE] } })
   })
 
   route(routes, "POST", "/projects/:ref/schema/push", async (ctx) => {

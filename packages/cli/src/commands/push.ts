@@ -56,7 +56,7 @@ import type { SupatypeProjectConfig } from "../project-config.js"
 import {
   requireTargetFeatures,
   resolveTarget,
-  targetHookFiles,
+  targetHookSupport,
   type HookFiles,
   targetSchemaAdopt,
   targetSchemaDiff,
@@ -484,16 +484,19 @@ export async function deployHooksToTarget(
   const hooksPath = writeHooksModule(cwd, hooksDir, ast)
   if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
 
-  let hookFiles: HookFiles
+  let support: { files: HookFiles; keep: boolean }
   try {
-    hookFiles = await targetHookFiles(target)
+    support = await targetHookSupport(target)
   } catch (err) {
     // Nothing is sent to a target that could not say what it takes: the hooks deployed before stay.
     postApplyFailed(`its hooks were not deployed: ${target.apiBaseUrl} could not say what it takes (${errorMessage(err)})`)
     return true
   }
-  // Each hook is checked on its own: a failed one is kept on the target as it is (`keep`).
-  const upload = readHookUpload(cwd, hooksDir, ast, hookFiles)
+  // Each hook is checked on its own: a failed one is kept on the target as it is (`keep`), where the
+  // target deploys hook by hook; anywhere else a failed one means none is sent.
+  const upload = readHookUpload(cwd, hooksDir, ast, support.files)
+  const failed = upload?.failed ?? []
+  if (failed.length > 0 && !support.keep) return reportNoneSent(target, failed)
   // One body for every target, the manifest's three maps in it: a self-host stack learns the
   // validator and cache maps only here, as a local push writes them (applied-ast-artifacts.ts). It
   // is sent on every push, empty when the schema declares nothing, so it clears what the target was
@@ -502,7 +505,6 @@ export async function deployHooksToTarget(
   const named = upload?.handlers ?? []
   const handlers = adapter === null || named.length === 0 ? named : [...named, adapter]
   const { hooks, validators, cache } = manifestMaps(ast)
-  const failed = upload?.failed ?? []
   const keep = failed.length > 0 ? { keep: failed.map((hook) => hook.name) } : {}
   return uploadHooks(target, { handlers, map: hooks, validators, cache, ...keep }, named.length, failed)
 }
@@ -557,26 +559,44 @@ function reportHooksNotDeployed(
   return true
 }
 
+/**
+ * A target that does not deploy hook by hook (no {@link HOOK_KEEP_FEATURE}) takes all of a push's
+ * hooks or none: with one failed, none is sent, and the ones deployed before still run. Ends the push
+ * non-zero, naming each failed hook and why.
+ */
+function reportNoneSent(target: DeployTarget, failed: readonly HookFailure[]): true {
+  const lines = failed.map(({ name, reason }) => `${name}: ${reason}`)
+  lines.push("The hooks deployed before, if any, are still the ones that run.")
+  postApplyFailed(`${failed.length} hook(s) failed their checks, so no hooks were sent to ${target.apiBaseUrl}:`, lines.join("\n  "))
+  return true
+}
+
 /** What a hook not deployed means on the target, by its answer. */
 function hookOutcome(name: string, body: HookDeployBody, answer: HookDeployAnswer | undefined): string {
   if (answer?.kept?.includes(name) === true) return "kept: its previous version still runs"
-  if (answer?.locked?.includes(name) === true) {
-    const tables = tablesNaming(name, [body.map, body.validators])
-    return `new: writes to ${tables.length > 0 ? tables.join(", ") : "the tables that map it"} are refused until it deploys`
-  }
-  return "the target did not say whether a previous version of it is kept"
+  if (answer?.locked?.includes(name) !== true) return "the target did not say whether a previous version of it is kept"
+  const { refusing, logging } = tablesNaming(name, [body.map, body.validators])
+  // A table whose map says onUnavailable "log" lets a write through a hook that cannot be reached.
+  const parts = [
+    ...(refusing.length > 0 || logging.length === 0 ? [`writes to ${refusing.length > 0 ? refusing.join(", ") : "the tables that map it"} are refused until it deploys`] : []),
+    ...(logging.length > 0 ? [`writes to ${logging.join(", ")} go through without it until it deploys (onUnavailable: log)`] : []),
+  ]
+  return `new: ${parts.join("; ")}`
 }
 
-/** The tables whose hook or validator map names the function `name`. */
-function tablesNaming(name: string, maps: readonly unknown[]): string[] {
-  const tables = new Set<string>()
+/** The tables whose hook or validator map names the function `name`, by what a write does while it cannot be reached. */
+function tablesNaming(name: string, maps: readonly unknown[]): { refusing: string[]; logging: string[] } {
+  const refusing = new Set<string>()
+  const logging = new Set<string>()
   for (const map of maps) {
     if (!isHookMap(map)) continue
     for (const [table, entries] of Object.entries(map)) {
-      if (Object.values(entries).some((entry) => entry.function === name)) tables.add(table)
+      for (const entry of Object.values(entries)) {
+        if (entry.function === name) (entry.onUnavailable === "log" ? logging : refusing).add(table)
+      }
     }
   }
-  return [...tables].sort()
+  return { refusing: [...refusing].sort(), logging: [...logging].sort() }
 }
 
 /** Whether a deploy body carries no handler and no map entry. */

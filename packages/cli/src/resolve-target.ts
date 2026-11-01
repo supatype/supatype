@@ -18,7 +18,7 @@ import type { EnginePushResult } from "./engine-push-output.js"
 import type { DoctorReport } from "./commands/doctor.js"
 import type { DatabaseStateJson } from "./pull-utils.js"
 import { readJsonFileOrThrow } from "./json-file.js"
-import { HOOK_FILES_FEATURE, isShape, isString, optional, type Guard } from "@supatype/shared"
+import { HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, isShape, isString, optional, type Guard } from "@supatype/shared"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import type { AppliedRenameRecord } from "./rename-journal.js"
 import { pushAuditFields } from "./push-audit.js"
@@ -309,15 +309,21 @@ export interface TargetFunctions {
 export type HookFiles = "entry" | "directory"
 
 /**
- * What a hook upload to `target` may carry: every file of a hook only when the target says it takes
- * them ({@link HOOK_FILES_FEATURE} in its capabilities). Anything else, Cloud, an older self-hosted
- * control plane or one with no capabilities route (404), takes the entry alone: an older stack
- * dropped `files` without a word and the push reported success. Any other failure to ask rejects:
- * the caller does not deploy hooks it cannot describe to the target, and says why.
+ * What a hooks deploy to `target` may do, from one (cached) capabilities answer.
+ *
+ * `files`: every file of a hook only when the target says it takes them ({@link HOOK_FILES_FEATURE}).
+ * Anything else, Cloud, an older self-hosted control plane or one with no capabilities route (404),
+ * takes the entry alone: an older stack dropped `files` without a word and the push reported success.
+ *
+ * `keep`: whether it deploys hook by hook and takes `keep` ({@link HOOK_KEEP_FEATURE}). A target that
+ * does not list it takes all of a push's hooks or none.
+ *
+ * Any other failure to ask rejects: the caller does not deploy hooks it cannot describe to the target,
+ * and says why.
  */
-export async function targetHookFiles(target: DeployTarget): Promise<HookFiles> {
+export async function targetHookSupport(target: DeployTarget): Promise<{ files: HookFiles; keep: boolean }> {
   const { features } = await targetCapabilities(target)
-  return features.has(HOOK_FILES_FEATURE) ? "directory" : "entry"
+  return { files: features.has(HOOK_FILES_FEATURE) ? "directory" : "entry", keep: features.has(HOOK_KEEP_FEATURE) }
 }
 
 /** Where a stream is served on the target: `<baseUrl><apiPrefix><path>`. */

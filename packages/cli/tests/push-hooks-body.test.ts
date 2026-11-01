@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { HOOK_FILES_FEATURE } from "@supatype/shared"
+import { HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE } from "@supatype/shared"
 import { projectConfig } from "./support/project-config.js"
 
 const sent = vi.hoisted(() => ({ bodies: [] as unknown[], refuse: 0, answer: {} as Record<string, unknown>, features: [] as string[] }))
@@ -148,11 +148,12 @@ describe("a hook of more than one file", () => {
     })
   }
 
-  it("is refused for Supatype Cloud, saying what to do, and kept as it is there", async () => {
+  // A target that does not list hook_keep takes all or none: a failed hook means none is sent.
+  it("is refused for Supatype Cloud, saying what to do, and sends nothing", async () => {
     const cwd = project()
     const target = { mode: "cloud", environment: "production", projectRef: "demo", apiBaseUrl: "https://api.example.test", apiPrefix: "/api/v1", token: "key", link: null } as const
     expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
-    expect(sent.bodies).toMatchObject([{ handlers: [], keep: ["tag-note"] }])
+    expect(sent.bodies).toEqual([])
     const output = said.join("\n")
     expect(output).toContain("Supatype Cloud serves each hook as its one module")
     expect(output).toContain("Move what it needs into hooks/tag-note/index.ts")
@@ -161,12 +162,11 @@ describe("a hook of more than one file", () => {
   // Review of round 8, item C-2: an older self-hosted control plane dropped `files` without a word
   // and the push reported success. A server that does not say it takes them is sent the entry alone,
   // so a hook of more than one file is refused before anything is sent.
-  it("is refused for a server that does not say it takes hook files, and kept as it is there", async () => {
+  it("is refused for a server that does not say it takes hook files, and sends nothing", async () => {
     const cwd = project()
     const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
     expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
-    expect(sent.bodies).toMatchObject([{ handlers: [], keep: ["tag-note"] }])
-    expect(JSON.stringify(sent.bodies)).not.toContain('"files"')
+    expect(sent.bodies).toEqual([])
     expect(said.join("\n")).toContain("has more than one file")
   })
 
@@ -176,7 +176,7 @@ describe("a hook of more than one file", () => {
     writeFileSync(join(cwd, "hooks", "tag-note", "index.ts"), 'import { x } from "../shared/x.ts"\nexport default () => x\n')
     const target = { mode: "self-host", environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
     expect(await deployHooksToTarget(cwd, projectConfig(), target, hooked)).toBe(true)
-    expect(sent.bodies).toMatchObject([{ handlers: [], keep: ["tag-note"] }])
+    expect(sent.bodies).toEqual([])
     expect(said.join("\n")).toContain("../shared/x.ts")
   })
 })
@@ -249,6 +249,7 @@ describe("a push whose hooks partly fail", () => {
 
   it("deploys the good hook, keeps the failed one, and says a new one locks its tables", async () => {
     const cwd = project()
+    sent.features = [HOOK_KEEP_FEATURE]
     sent.answer = { handlers: ["good-hook"], tables: ["memo", "note"], locked: ["bad-hook"] }
     expect(await deployHooksToTarget(cwd, projectConfig(), target, twoHooks)).toBe(true)
     expect(sent.bodies).toMatchObject([{ handlers: [{ name: "good-hook" }, { name: "_supatype-hooks" }], keep: ["bad-hook"] }])
@@ -262,11 +263,42 @@ describe("a push whose hooks partly fail", () => {
   it("says a hook the target refused kept its previous version", async () => {
     const cwd = project()
     writeFileSync(join(cwd, "hooks", "bad-hook", "index.ts"), "export default () => ({})\n")
+    sent.features = [HOOK_KEEP_FEATURE]
     sent.answer = { handlers: ["bad-hook"], tables: ["memo", "note"], refused: [{ name: "good-hook", reason: "Hooks: good-hook/index.ts exists and is not a regular file" }], kept: ["good-hook"] }
     expect(await deployHooksToTarget(cwd, projectConfig(), target, twoHooks)).toBe(true)
     const output = said.join("\n")
     expect(output).toContain("good-hook: Hooks: good-hook/index.ts exists and is not a regular file")
     expect(output).toContain("its previous version still runs")
     expect(process.exitCode).toBe(1)
+  })
+
+  // Nic: a target that does not list hook_keep keeps the old all-or-nothing deploy.
+  it("sends no hook to a target without hook_keep when one fails, and says the previous hooks stay", async () => {
+    const cwd = project()
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, twoHooks)).toBe(true)
+    expect(sent.bodies).toEqual([])
+    const output = said.join("\n")
+    expect(output).toContain("bad-hook")
+    expect(output).toContain("no hooks were sent")
+    expect(output).toContain("The hooks deployed before, if any, are still the ones that run.")
+    expect(process.exitCode).toBe(1)
+  })
+
+  // Nic: onUnavailable "log" lets a write through a hook that cannot be reached; the developer chose
+  // it, so the push says so rather than "refused".
+  it("says writes go through without a locked hook on a table whose map says log", async () => {
+    const cwd = project()
+    sent.features = [HOOK_KEEP_FEATURE]
+    sent.answer = { handlers: ["good-hook"], tables: ["memo", "note"], locked: ["bad-hook"] }
+    const logged = {
+      models: [
+        twoHooks.models[0]!,
+        { name: "Memo", fields: {}, annotations: { db: { tableName: "memo" }, platform: { hooks: { beforeChange: { function: "bad-hook", onUnavailable: "log" } } } } },
+      ],
+    }
+    expect(await deployHooksToTarget(cwd, projectConfig(), target, logged)).toBe(true)
+    const output = said.join("\n")
+    expect(output).toContain("writes to memo go through without it")
+    expect(output).not.toContain("writes to memo are refused")
   })
 })
