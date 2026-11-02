@@ -2,6 +2,6 @@
 // `bash scripts/pin.sh set <engine|server|postgres> <tag>`, which rewrites both.
 export const PINNED_IMAGES = {
   engine: { image: "supatype/schema-engine", tag: "v0.8.0", commit: "878b4980e53dfd959ad65eecf9df4224f4d611d6" },
-  server: { image: "supatype/server", tag: "v2.2.1", commit: "b0498e9606b3f0bf18b0b29b8e1f3ffba92d1916" },
-  postgres: { image: "supatype/postgres", tag: "17.2.10", commit: "821ef480971d4c6ed4b4143916beec77161caa31" },
+  server: { image: "supatype/server", tag: "v2.2.2", commit: "00f0ad3e782dbcf5fbb3d2e607aa044d66ba0138" },
+  postgres: { image: "supatype/postgres", tag: "17.2.12", commit: "ab9020f7691dced4875634dc88dfe500968faa5a" },
 } as const
