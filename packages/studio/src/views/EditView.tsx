@@ -6,7 +6,7 @@ import { useLocale } from "../hooks/useLocale.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
 import { PublishBar } from "../components/PublishBar.js"
 import { SlidePanel } from "../components/SlidePanel.js"
-import { Button, DestructiveAnswers, Dialog } from "../components/ui.js"
+import { Button, DestructiveAnswers, Dialog, PageError } from "../components/ui.js"
 import { previewUrlFor } from "../lib/preview-url.js"
 import { appOrigin } from "../lib/membership-url.js"
 import type { FieldConfig, ModelConfig } from "../config.js"
@@ -48,6 +48,8 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   const { currentLocale, defaultLocale } = useLocale()
   const [values, setValues] = useState<Record<string, unknown>>(draft?.values ?? {})
   const [loading, setLoading] = useState(!!recordId)
+  // The id names no record (no row has it, or it is not an id at all): a not-found page, not a form.
+  const [notFound, setNotFound] = useState(false)
   // Field errors are keyed by column. Both sources land there: a bound or constraint Studio checked
   // itself, and the server's refusal, which names the column it refused where it can.
   const refusal = useRefusal(draft?.fieldErrors ?? {})
@@ -121,6 +123,8 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
         // The live row is what the world sees, and opening it would show the author their own
         // unsaved-to-the-world content replaced by what they last published.
         const loaded = await fetchRecordForEditing(client, model, recordId)
+        setNotFound(loaded.notFound)
+        if (loaded.notFound) return
         if (loaded.error !== null) {
           setError(loaded.error)
         } else if (loaded.values !== null) {
@@ -236,6 +240,9 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
 
   if (loading) {
     return <div className="st-edit-view st-edit-loading">Loading...</div>
+  }
+  if (notFound && recordId !== undefined) {
+    return <PageError>{model.label} &quot;{recordId}&quot; not found</PageError>
   }
 
   // Publishing lives in the sidebar beside the record's other metadata rather than as a banner

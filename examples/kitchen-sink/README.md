@@ -89,6 +89,10 @@ pnpm mode:none        # supatype app remove
 dirty config after switching, and do not commit it unless you meant to. The committed default is
 the SPA, because that is the deployment most projects ship.
 
+**Restart `supatype dev` after switching.** The mode is read when the stack starts, so a running
+`dev` keeps serving the old app at `/` until you stop it (Ctrl+C) and run `pnpm dev` again. The
+e2e below does the same: it stops the stack, switches, and starts it again.
+
 `tests/integration/scripts/kitchen-sink-e2e.sh` walks that in CI: `static` serves the SPA and a
 path with no file behind it falls back to the shell, `none` returns 404 while the API keeps
 answering, and switching back works. `proxy` is not in the walk yet. It needs `next dev` beside
@@ -159,14 +163,14 @@ From the monorepo root:
 pnpm install
 pnpm build           # the CLI and the libraries run from their dist/
 cd examples/kitchen-sink
-cp .env.example .env # `supatype keys --write` needs a JWT_SECRET; it does not invent one
+cp .env.example .env # `supatype keys` writes into .env only when there is one
 pnpm keys            # mints ANON_KEY / SERVICE_ROLE_KEY into .env
 pnpm build:app       # app.mode is "static", so the SPA must exist before the stack serves it
 pnpm dev             # Postgres, the schema, the whole stack
 ```
 
-The `.env` copy is not optional and the order is not arbitrary. `supatype keys` reads
-`JWT_SECRET` and fails without one, and the SPA reads `VITE_SUPATYPE_ANON_KEY` at **build**
+The `.env` copy is not optional and the order is not arbitrary. `supatype keys` only
+prints the keys when there is no `.env` to write them to, and the SPA reads `VITE_SUPATYPE_ANON_KEY` at **build**
 time, so a build that runs before the keys exist ships `anonKey: undefined` and every request
 it makes is rejected by the gateway. Rebuild after re-minting keys.
 

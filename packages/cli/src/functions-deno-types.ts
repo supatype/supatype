@@ -75,7 +75,7 @@ declare namespace Deno {
 }
 
 /**
- * The slice of Node's async_hooks the functions router uses. Deno provides the module at runtime;
+ * The slice of Node's async_hooks a function may use. Deno provides the module at runtime;
  * a functions tsconfig loads no Node types, so without it the import resolves to nothing.
  */
 declare module "node:async_hooks" {
@@ -158,7 +158,14 @@ export interface FunctionContext {
    */
   readonly dbUrl?: string
   readonly region: string
-  /** Values from .env and .env.<function>.local. */
+  /**
+   * Values from the functions directory's .env.local (or SUPATYPE_SHARED_ENV_FILE), then those
+   * "supatype functions env set" gave a self-hosted project, then .env.<function>.local, which
+   * wins. The project's own .env is not read for these. They are read again on every call.
+   *
+   * They are here, never in Deno.env: that is the worker's one process environment, shared by every
+   * call running at once, so a value put there for one function would reach every other.
+   */
   readonly env: Readonly<Record<string, string>>
 }
 `

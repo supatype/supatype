@@ -46,7 +46,7 @@ supatype dev                               # terminal 1: Docker Compose (Kong :1
 npm run vite                               # terminal 2: if app.vite_dev_url is set
 ```
 
-Plain `supatype keys` prints the keys and writes nothing; `--write` puts them in `.env`.
+Plain `supatype keys` fills the blank keys in `.env` when there is one (`--write` is the same), signed with that `.env`'s `JWT_SECRET`; `--print` only prints.
 
 `supatype dev` keeps running. It pushes the schema when it starts and on every save, and
 regenerates the typed client each time; there is no separate `push` step locally. `push` is for
@@ -70,7 +70,7 @@ npm install @supatype/cli@latest @supatype/client@latest @supatype/types@latest
 
 Pin all `@supatype/*` packages to the **same version** to avoid client/type skew.
 
-Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
+Omit `versions` in `supatype.config.ts` to run the exact images the installed CLI release was tested with.
 
 **Scaffold:** run `supatype init` and answer its prompts (production target, local runtime, schema
 path, front end), or pass `--defaults` to take the defaults. `--mode dev | standalone` still works
@@ -89,7 +89,7 @@ for older scripts. For wiring a front end, see [references/frontend.md](referenc
 ## Core facts
 
 - **Default provider:** `"docker"`, scaffolded in `supatype.config.ts` and used when no provider is set
-- **Native alternative:** `provider: "native"`: host Postgres :5432, supatype-server :54321
+- **Native alternative:** `provider: "native"`: host Postgres :5432, supatype-server :18471. Not everything the Docker stack has: pg_graphql and `/graphql/v1` are Docker-only, pg_net is not on Windows, and PostGIS is not on macOS for now (see [config.md](references/config.md#switching-to-native-dev))
 - **Schema API:** `@supatype/types` `Model<>` types, not `@supatype/schema`
 - **Config:** `supatype.config.ts` + `defineConfig`; TOML unsupported
 - **Docker API URL:** `http://localhost:18473` (or `SUPATYPE_KONG_PORT` in `.env`)

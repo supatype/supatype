@@ -19,6 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
 CONFORMANCE_DIR="$ROOT_DIR/tests/integration/conformance"
 source "$SCRIPT_DIR/lib/compose-reset.sh"
 # Scaffolded outside the repo, and unique per run.
@@ -145,7 +146,7 @@ echo "  REST answering with HTTP ${REST_CODE:-000}"
 sleep 10
 
 # A value from the project's generated .env.
-env_value() { grep -E "^$1=" "$PROJECT_DIR/.env" | cut -d= -f2-; }
+env_value() { env_file_value "$PROJECT_DIR/.env" "$1"; }
 
 ANON_KEY="$(env_value ANON_KEY)"
 [[ -n "$ANON_KEY" ]] || { echo "ERROR: no ANON_KEY in the generated .env" >&2; exit 1; }

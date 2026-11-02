@@ -3,6 +3,7 @@
  * A second CLI process waits for an in-flight download instead of racing the CDN.
  */
 
+import { setTimeout as sleep } from "node:timers/promises"
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { isNumber, isOneOf, isShape, isString, type Guard } from "@supatype/shared"
@@ -34,10 +35,6 @@ const isDownloadLock: Guard<DownloadLockPayload> = isShape({
 
 function lockPath(component: Component, version: string): string {
   return join(cachePath(component, version), ".downloading")
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function isPidAlive(pid: number): boolean {

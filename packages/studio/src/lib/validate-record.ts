@@ -1,4 +1,5 @@
 import type { FieldConfig, FieldValidation } from "../config.js"
+import { countOf } from "./inflect.js"
 import { isJsonObject } from "./json.js"
 import { lengthOf } from "./measure-value.js"
 import { widgetInputMessage } from "./widget-input.js"
@@ -55,12 +56,12 @@ function lengthMessage(rules: FieldValidation, value: unknown): string | null {
   const length = lengthOf(value)
   if (length === undefined) return null
   if (rules.maxLength !== undefined && length > rules.maxLength) {
-    return `must be ${rules.maxLength} characters or fewer (currently ${length})`
+    return `must be ${countOf(rules.maxLength, "character")} or fewer (currently ${length})`
   }
   // An empty string reaches the API as NULL, and a CHECK against NULL passes, so a blank optional
   // field is absent rather than short. Requiredness is a separate rule this does not police.
   if (rules.minLength !== undefined && length > 0 && length < rules.minLength) {
-    return `must be at least ${rules.minLength} characters (currently ${length})`
+    return `must be at least ${countOf(rules.minLength, "character")} (currently ${length})`
   }
   return null
 }
@@ -69,10 +70,10 @@ function itemsMessage(rules: FieldValidation, value: unknown): string | null {
   if (!Array.isArray(value)) return null
   const { length } = value
   if (rules.maxItems !== undefined && length > rules.maxItems) {
-    return `must have ${rules.maxItems} item${rules.maxItems === 1 ? "" : "s"} or fewer (currently ${length})`
+    return `must have ${countOf(rules.maxItems, "item")} or fewer (currently ${length})`
   }
   if (rules.minItems !== undefined && length < rules.minItems) {
-    return `must have at least ${rules.minItems} item${rules.minItems === 1 ? "" : "s"} (currently ${length})`
+    return `must have at least ${countOf(rules.minItems, "item")} (currently ${length})`
   }
   return null
 }

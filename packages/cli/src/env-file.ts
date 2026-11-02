@@ -1,5 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { parseEnvText, splitAssignment } from "./dotenv-parse.js"
+
+export { parseEnvText }
 
 /**
  * Marks a value the CLI wrote from `supatype.config.ts`: an image pin from `versions`, or
@@ -16,9 +19,18 @@ export const MANAGED_MARKER = "# supatype:managed, value from supatype.config.ts
 /** The marker's wording when it only ever introduced image pins, still in `.env` files it wrote. */
 const LEGACY_MANAGED_MARKER = "# supatype:managed, value from versions in supatype.config.ts"
 
+/**
+ * The label above a `DATABASE_URL` the CLI owns. Not a value copied from the config, as
+ * {@link MANAGED_MARKER} says of the rest: the CLI builds the URL from the provider and port the
+ * config gives and the POSTGRES_ values `init` writes beneath it, and rebuilds it when they change.
+ */
+export const DATABASE_URL_MARKER = "# supatype:managed, built from supatype.config.ts and the POSTGRES_ values below"
+
+/** Every label that marks a value as the CLI's, older wordings included. */
+const MARKERS: ReadonlySet<string> = new Set([MANAGED_MARKER, LEGACY_MANAGED_MARKER, DATABASE_URL_MARKER])
+
 function isMarker(text: string | undefined): boolean {
-  const trimmed = text?.trim()
-  return trimmed === MANAGED_MARKER || trimmed === LEGACY_MANAGED_MARKER
+  return MARKERS.has(text?.trim() ?? "")
 }
 
 interface EnvLine {
@@ -44,9 +56,8 @@ function parseLines(text: string): EnvLine[] {
       out.push({ text: raw, managed: false })
       continue
     }
-    const eq = raw.indexOf("=")
-    const key = eq > 0 ? raw.slice(0, eq).trim() : undefined
-    const isAssignment = key !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+    const key = splitAssignment(raw)?.key
+    const isAssignment = key !== undefined
     out.push({ ...(isAssignment && { key }), text: raw, managed: isAssignment && markerPending })
     if (!isAssignment && trimmed !== "") markerPending = false
     else if (isAssignment) markerPending = false
@@ -63,6 +74,8 @@ export interface UpsertOptions {
   removeManaged?: readonly string[]
   /** Keys in `updates` that come from config and may later be cleaned up. Written with the marker. */
   managed?: readonly string[]
+  /** The marker the `managed` keys are written under: {@link MANAGED_MARKER} unless given. */
+  label?: string
   /** Keys to delete outright, whoever wrote them. For secrets being rotated out. */
   remove?: readonly string[]
 }
@@ -89,6 +102,7 @@ export function upsertEnvFile(
   const removeManaged = new Set(opts.removeManaged ?? [])
   const removeAlways = new Set(opts.remove ?? [])
   const managed = new Set(opts.managed ?? [])
+  const label = opts.label ?? MANAGED_MARKER
 
   const envPath = join(cwd, ".env")
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
@@ -112,14 +126,16 @@ export function upsertEnvFile(
       continue
     }
 
+    if (key in updates && written.has(key)) {
+      // A second assignment of a key already rewritten above. Compose reads the last one, so
+      // leaving it would put back the value this write replaced.
+      if (line.managed && isMarker(kept[kept.length - 1]?.text)) kept.pop()
+      continue
+    }
+
     if (key in updates) {
       const wantsMarker = managed.has(key)
-      if (wantsMarker && !isMarker(kept[kept.length - 1]?.text)) {
-        kept.push({ text: MANAGED_MARKER, managed: false })
-      }
-      if (!wantsMarker && line.managed && isMarker(kept[kept.length - 1]?.text)) {
-        kept.pop()
-      }
+      relabel(kept, wantsMarker ? label : undefined)
       kept.push({ key, text: `${key}=${updates[key]}`, managed: wantsMarker })
       written.add(key)
       continue
@@ -131,7 +147,7 @@ export function upsertEnvFile(
   const appended: string[] = []
   for (const [key, value] of Object.entries(updates)) {
     if (written.has(key)) continue
-    if (managed.has(key)) appended.push(MANAGED_MARKER)
+    if (managed.has(key)) appended.push(label)
     appended.push(`${key}=${value}`)
   }
 
@@ -144,55 +160,53 @@ export function upsertEnvFile(
 }
 
 /**
- * Parse a project `.env` into key/value pairs.
- *
- * Deliberately small: `KEY=value`, `#` comments, one optional layer of surrounding quotes. No
- * interpolation and no `export` handling, because Compose's own parser does not do those either and
- * a `.env` that means two different things depending on who reads it is worse than a limited one.
+ * Put `label` above the assignment about to be written at the end of `kept`, in place of any marker
+ * there; with no label, take the marker away. A marker in an older wording is brought up to date.
  */
-export function readEnvFile(cwd: string): Record<string, string> {
-  const envPath = join(cwd, ".env")
-  if (!existsSync(envPath)) return {}
+function relabel(kept: EnvLine[], label: string | undefined): void {
+  const above = kept[kept.length - 1]?.text
+  if (label !== undefined && above?.trim() === label) return
+  if (isMarker(above)) kept.pop()
+  if (label !== undefined) kept.push({ text: label, managed: false })
+}
 
-  const out: Record<string, string> = {}
-  for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (trimmed.length === 0 || trimmed.startsWith("#")) continue
-    const eq = trimmed.indexOf("=")
-    if (eq <= 0) continue
-    const key = trimmed.slice(0, eq).trim()
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue
-    let value = trimmed.slice(eq + 1).trim()
-    if (
-      value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'")))
-    ) {
-      value = value.slice(1, -1)
-    }
-    out[key] = value
+/** Parse a project `.env` into key/value pairs. See {@link parseEnvText}. */
+export function readEnvFile(cwd: string): Record<string, string> {
+  const text = envText(cwd)
+  return text === null ? {} : parseEnvText(text)
+}
+
+/**
+ * `.env` then `.env.local`, the later file winning, each read through {@link parseEnvText}: what
+ * native dev lays over the server's environment.
+ */
+export function readDotEnvFiles(cwd: string): Record<string, string> {
+  const vars: Record<string, string> = {}
+  for (const name of [".env", ".env.local"]) {
+    const envPath = join(cwd, name)
+    if (existsSync(envPath)) Object.assign(vars, parseEnvText(readFileSync(envPath, "utf8")))
   }
-  return out
+  return vars
 }
 
 /**
  * `.env`'s text, or null when there is none, without the byte order mark Windows tools write.
- * Left in, it hid the first key from the `^KEY=` matches below.
+ * Left in, it hid the first key from the single-key readers below.
  */
 function envText(cwd: string): string | null {
   const envPath = join(cwd, ".env")
   return existsSync(envPath) ? readFileSync(envPath, "utf8").replace(/^\uFEFF/, "") : null
 }
 
+/** `key`'s value in `.env`, or `fallback` when it is absent or blank. */
 export function readEnvValue(cwd: string, key: string, fallback: string): string {
-  const m = envText(cwd)?.match(new RegExp(`^${key}=(.+)$`, "m"))
-  return m?.[1] ? m[1].trim() : fallback
+  const value = readEnvFile(cwd)[key]
+  return value !== undefined && value !== "" ? value : fallback
 }
 
 /** Whether `.env` carries a non-empty value for `key`. Distinguishes absent from defaulted. */
 export function hasEnvValue(cwd: string, key: string): boolean {
-  const text = envText(cwd)
-  return text !== null && new RegExp(`^${key}=(.+)$`, "m").test(text)
+  return (readEnvFile(cwd)[key] ?? "") !== ""
 }
 
 /**
@@ -200,11 +214,28 @@ export function hasEnvValue(cwd: string, key: string): boolean {
  * or null when `.env` has no such key.
  */
 export function envValueOwner(cwd: string, key: string): "cli" | "operator" | null {
-  const text = envText(cwd)
-  // The last assignment, as compose reads it.
-  const line = text === null ? undefined : parseLines(text).filter((l) => l.key === key).pop()
-  if (line === undefined) return null
-  return line.managed ? "cli" : "operator"
+  const env = readEnvSnapshot(cwd)
+  if (!(key in env.values)) return null
+  return env.managed.has(key) ? "cli" : "operator"
+}
+
+/** `.env` read once: its values, and the keys the CLI wrote, by the marker above their last assignment. */
+export interface EnvSnapshot {
+  values: Readonly<Record<string, string>>
+  managed: ReadonlySet<string>
+}
+
+/** `.env` as an {@link EnvSnapshot}; empty when there is no `.env`. */
+export function readEnvSnapshot(cwd: string): EnvSnapshot {
+  const text = envText(cwd) ?? ""
+  const managed = new Set<string>()
+  // The last assignment of each key, as compose reads it.
+  for (const line of parseLines(text)) {
+    if (line.key === undefined) continue
+    if (line.managed) managed.add(line.key)
+    else managed.delete(line.key)
+  }
+  return { values: parseEnvText(text), managed }
 }
 
 export function readEnvInt(cwd: string, key: string): number | null {
@@ -215,11 +246,16 @@ export function readEnvInt(cwd: string, key: string): number | null {
  * A port as `docker compose --env-file .env` resolves it: the caller's environment first, then
  * `.env`. The CLI waits on the port compose binds, so it has to read it the way compose does: an
  * exported SUPATYPE_KONG_PORT used to be bound by compose while dev and push waited on the one in
- * `.env`.
+ * `.env`. The one rule for a port the shell can override: a shell value that is not a port is
+ * passed over for `.env`'s. `env` is the shell, given by tests.
  */
-export function readComposeEnvInt(cwd: string, key: string): number | null {
-  const shell = process.env[key]?.trim()
-  return shell ? portNumber(shell) : readEnvInt(cwd, key)
+export function readComposeEnvInt(cwd: string, key: string, env: NodeJS.ProcessEnv = process.env): number | null {
+  return shellEnvInt(key, env) ?? readEnvInt(cwd, key)
+}
+
+/** `key` from `env` (the shell unless given) as a port, or null when it is unset, blank or not a port. */
+export function shellEnvInt(key: string, env: NodeJS.ProcessEnv = process.env): number | null {
+  return portNumber(env[key]?.trim() ?? "")
 }
 
 function portNumber(raw: string): number | null {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { hasEnvValue, MANAGED_MARKER, readEnvFile, readEnvInt, readEnvValue, upsertEnvFile } from "../src/env-file.js"
+import { hasEnvValue, MANAGED_MARKER, readComposeEnvInt, readEnvFile, readEnvInt, readEnvValue, upsertEnvFile } from "../src/env-file.js"
 
 /**
  * `.env` is a file operators edit by hand, and the CLI rewrites it on every compose run.
@@ -134,5 +134,76 @@ describe("a .env saved with a byte order mark", () => {
     expect(readEnvValue(dir, "SUPATYPE_DEV_DB_PORT", "")).toBe("55660")
     expect(hasEnvValue(dir, "SUPATYPE_DEV_DB_PORT")).toBe(true)
     expect(readEnvInt(dir, "SUPATYPE_DEV_DB_PORT")).toBe(55660)
+  })
+})
+
+describe(".env values read the way Docker Compose reads them", () => {
+  // Compose (compose-go's dotenv parser) cuts an unquoted value at the first space followed by `#`
+  // and trims what is left; a quoted value keeps its `#` and may carry a comment after the closing
+  // quote. The CLI kept ` # note` as part of the value, so `JWT_SECRET=x  # note` signed keys with a
+  // secret the stack, reading the same line through compose, did not have.
+  const cases: ReadonlyArray<[string, string]> = [
+    ["A=x  # note", "x"],
+    ["A=x # note", "x"],
+    ["A=x#not-a-comment", "x#not-a-comment"],
+    ['A="x # kept"  # trailing', "x # kept"],
+    ["A='y # kept'", "y # kept"],
+    ["A=a b c", "a b c"],
+    ["export A=exported", "exported"],
+    ["A=  # only a comment", "# only a comment"],
+  ]
+
+  for (const [line, expected] of cases) {
+    it(`reads ${JSON.stringify(line)} as ${JSON.stringify(expected)}`, () => {
+      write(`${line}\n`)
+      expect(readEnvFile(dir)["A"]).toBe(expected)
+      expect(readEnvValue(dir, "A", "fallback")).toBe(expected)
+    })
+  }
+
+  it("lets the last assignment of a key win, as compose does", () => {
+    // F14: SUPATYPE_DEV_DB_PORT appended a second time was bound by compose and ignored by the CLI,
+    // which read the first.
+    write("SUPATYPE_DEV_DB_PORT=54329\nOTHER=1\nSUPATYPE_DEV_DB_PORT=55555\n")
+    expect(readEnvFile(dir)["SUPATYPE_DEV_DB_PORT"]).toBe("55555")
+    expect(readEnvValue(dir, "SUPATYPE_DEV_DB_PORT", "")).toBe("55555")
+    expect(readEnvInt(dir, "SUPATYPE_DEV_DB_PORT")).toBe(55555)
+  })
+
+  it("does not count a blank value as present", () => {
+    write("A=\nB=   \n")
+    expect(hasEnvValue(dir, "A")).toBe(false)
+    expect(hasEnvValue(dir, "B")).toBe(false)
+    expect(readEnvValue(dir, "B", "fallback")).toBe("fallback")
+  })
+})
+
+describe("upsertEnvFile with a key assigned more than once", () => {
+  it("updates the existing assignment and leaves one line for the key", () => {
+    write("A=1\nB=2\nA=3\n")
+    upsertEnvFile(dir, { A: "9" })
+    expect(read()).toBe("A=9\nB=2\n")
+    expect(readEnvFile(dir)["A"]).toBe("9")
+  })
+
+  it("updates an `export` assignment rather than appending a second one", () => {
+    write("export A=1\n")
+    upsertEnvFile(dir, { A: "2" })
+    expect(read()).toBe("A=2\n")
+  })
+})
+
+/**
+ * Every port the shell can override (Kong, the database, Deno) is read through this one rule, so a
+ * value that is not a port is passed over the same way for each of them.
+ */
+describe("readComposeEnvInt", () => {
+  it("takes the shell's port over .env's, and .env's when the shell's is blank or not a port", () => {
+    write("SUPATYPE_KONG_PORT=18474\n")
+    expect(readComposeEnvInt(dir, "SUPATYPE_KONG_PORT", {})).toBe(18474)
+    expect(readComposeEnvInt(dir, "SUPATYPE_KONG_PORT", { SUPATYPE_KONG_PORT: " 18490 " })).toBe(18490)
+    expect(readComposeEnvInt(dir, "SUPATYPE_KONG_PORT", { SUPATYPE_KONG_PORT: " " })).toBe(18474)
+    expect(readComposeEnvInt(dir, "SUPATYPE_KONG_PORT", { SUPATYPE_KONG_PORT: "not a port" })).toBe(18474)
+    expect(readComposeEnvInt(dir, "SUPATYPE_DENO_PORT", {})).toBeNull()
   })
 })

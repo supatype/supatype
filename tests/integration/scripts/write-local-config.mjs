@@ -52,7 +52,7 @@ addBin("server", process.env["SUPATYPE_SERVER"])
 addBin("realtime", process.env["SUPATYPE_REALTIME"])
 
 const integrationDir = dirname(resolve(out))
-const defaultRealtime = resolve(integrationDir, "../../packages/realtime/dist/index.js")
+const defaultRealtime = resolve(integrationDir, "../../packages/realtime/dist/main.js")
 if (!o["realtime"] && existsSync(defaultRealtime)) {
   o["realtime"] = defaultRealtime.replace(/\\/g, "/")
 }

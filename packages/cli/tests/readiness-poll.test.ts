@@ -38,6 +38,10 @@ async function blackHole(): Promise<number> {
 const devCompose = (): string =>
   readFileSync(fileURLToPath(new URL("../src/dev-compose.ts", import.meta.url)), "utf8")
 
+/** The timed fetch every poll loop uses. */
+const fetchWithinSource = (): string =>
+  readFileSync(fileURLToPath(new URL("../src/fetch-within.ts", import.meta.url)), "utf8")
+
 describe("a readiness attempt against a port that accepts and never answers", () => {
   it("ends promptly when it carries a deadline", async () => {
     const port = await blackHole()
@@ -57,8 +61,9 @@ describe("the polls the CLI actually runs", () => {
     const source = devCompose()
     // `fetchWithin` is the only way to reach the gateway from a poll loop. A bare `fetch` inside
     // one is the bug: the loop's iteration count stops being its real bound.
-    const helper = source.match(/async function fetchWithin\(/g) ?? []
+    const helper = fetchWithinSource().match(/async function fetchWithin\(/g) ?? []
     expect(helper.length, "the timeout helper should exist").toBe(1)
+    expect(source).toMatch(/import \{ fetchWithin \} from "\.\/fetch-within\.js"/)
 
     const kongPoll = source.slice(
       source.indexOf("async function waitKongReady("),

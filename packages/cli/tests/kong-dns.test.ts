@@ -10,8 +10,13 @@ import { DENO_RELEASE_PIN } from "../src/release-pins.js"
  * EXT-N1 and CE1. After a push recreated the server, Kong kept sending to the old container's
  * address and sign-in answered 502 until Kong was restarted. Shortening Kong's DNS TTLs was tried
  * and broke Studio from its dev server: Kong dropped the hosts-file entry for host.docker.internal
- * after 5 s. So the compose file leaves Kong's DNS alone, and the CLI reloads Kong whenever it
- * recreates a container behind it.
+ * after 5 s. So the compose file leaves Kong's DNS cache times alone, and the CLI reloads Kong
+ * whenever it recreates a container behind it.
+ *
+ * The one DNS setting is the order. Kong 3.6 asked for SRV records first, which Docker's DNS never
+ * answers, so each nginx worker's first upstream lookup waited about 4 s, and the first realtime
+ * subscribe with it. Without SRV the hosts file still answers first: a Kong 3.6 with this order and
+ * the host-gateway entry reached a server on the host at 0, 10, 30 and 70 s.
  */
 const spawnSync = vi.hoisted(() => vi.fn<(cmd: string, args: string[]) => { status: number | undefined; stdout: string; stderr?: string }>())
 vi.mock("node:child_process", async (importOriginal) => ({
@@ -45,9 +50,10 @@ function kongBlock(compose: string): string {
 
 describe("Kong's DNS cache", () => {
   for (const devLocal of [true, false]) {
-    it(`is left at Kong's defaults, so hosts-file entries keep resolving (${devLocal ? "dev" : "self-host"})`, () => {
+    it(`keeps Kong's cache times and skips SRV, so hosts-file entries keep resolving (${devLocal ? "dev" : "self-host"})`, () => {
       const kong = kongBlock(renderSelfHostCompose(config, process.cwd(), { devLocal }))
-      expect(kong).not.toMatch(/KONG_DNS_/)
+      // Every KONG_DNS_ setting there is, so a TTL (STALE_TTL, NOT_FOUND_TTL, ERROR_TTL...) fails it.
+      expect(kong.match(/^\s+KONG_DNS_\w+:.*$/gm)?.map((line) => line.trim())).toEqual(['KONG_DNS_ORDER: "LAST,A,CNAME"'])
       expect(kong).toContain('"host.docker.internal:host-gateway"')
     })
   }

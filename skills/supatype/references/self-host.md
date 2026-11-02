@@ -95,6 +95,14 @@ compose project (`name: supatype-<project.name>`), so a hand-run
 `docker compose -f .supatype/self-host/docker-compose.yml --env-file .env ...` reaches the same
 stack. Every `self-host compose` command renders it again, so a project that moved is picked up there.
 
+**Images are the ones the CLI release was tested with, never `:latest`.** Studio, storage,
+realtime, functions-worker and the control plane run at the CLI's own version; the engine, server
+and Postgres run the releases pinned for that CLI. A newer CLI moves them: upgrade the CLI, then
+`supatype update` (or `self-host compose up -d`) pulls the new tags. To run another image, set its
+`SUPATYPE_*_IMAGE` in `.env` (for example `SUPATYPE_SERVER_IMAGE=supatype/server:v2.3.0`) or pin
+`versions.engine`, `versions.server` or `versions.postgres` in config; both win over the release's
+pins.
+
 **`compose up` checks `JWT_SECRET`.** Shorter than 32 characters stops it with
 `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` (PostgREST 14 would
 otherwise restart in a loop). Fix: `openssl rand -base64 48` into `.env` as `JWT_SECRET`, then
@@ -141,6 +149,18 @@ this, a standalone server with no `SUPATYPE_CORS_ALLOW_ORIGINS` allowed every or
 production web app's origin before upgrading. On Cloud, `api.corsOrigins` is not deployed: the
 project's own URL and Cloud Studio are always allowed, and owners, admins and developers edit
 the rest in Studio's CORS tab.
+
+## Storage limits
+
+A self-hosted or local project has no plan, so storage sets no quota and no per-file limit. Set
+any of these in `.env`, in bytes, with `-1` for unlimited (the default):
+
+- `STORAGE_QUOTA`: the total every bucket together may hold.
+- `TIER_MAX_UPLOAD_SIZE`: the largest single file.
+- `MAX_UPLOAD_SIZE`: the largest single file when `TIER_MAX_UPLOAD_SIZE` is `-1`.
+
+A bucket's own `maxSize` still wins over both file limits. Run `supatype self-host compose restart
+storage` after changing them.
 
 ## Studio roles
 
@@ -262,7 +282,7 @@ and with TLS on Kong cannot store its certificate. So the image decides:
 
 | `versions.postgres` / `database.image` | Image run | Default cache |
 |---|---|---|
-| unset | `supatype/postgres:latest` | pg_keyspace |
+| unset | the release this CLI pins | pg_keyspace |
 | `"17"`, `"17.2"`, `"17-latest"` | `supatype/postgres:17-latest` | pg_keyspace |
 | `"17.2.9"` or later, published | that exact tag | pg_keyspace |
 | `"17.2.8"` or earlier, published | that exact tag | Valkey |

@@ -4,10 +4,11 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
 import { buildKongDeclarative } from "../src/kong-config.js"
-import { composeDockerImageEnv, composeHostPath, composePullNeedsIgnoreFailures, hasLocalVersionPins, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
+import { composeDockerImageEnv, composeHostPath, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
 import { updateAppConfigInProject, updateServerConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
+import { RELEASE_IMAGES } from "../src/release-images.js"
 import { CONTROL_PLANE_SECRET_ENV, seedMissingLocalSecrets } from "../src/local-secrets.js"
 import { isArrayOf, isJsonObject, isShape, isString } from "@supatype/shared"
 import { parseJsonAs } from "./support/json.js"
@@ -114,6 +115,14 @@ describe("runtime contract", () => {
     expect(kong).toContain("- /")
   })
 
+  // With API_EXTERNAL_URL unset, every service was told its public address was on 18473 while Kong
+  // was published on SUPATYPE_KONG_PORT, so auth links named another project's gateway.
+  it("self-host compose falls back to the published Kong port for the public address", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("${API_EXTERNAL_URL:-http://localhost:${SUPATYPE_KONG_PORT:-18473}}")
+    expect(compose).not.toContain("${API_EXTERNAL_URL:-http://localhost:18473}")
+  })
+
   it("self-host compose render is deterministic for same config", () => {
     const first = renderSelfHostCompose({ ...baseConfig, app: { mode: "proxy", upstream: "http://app:3000" } })
     const second = renderSelfHostCompose({ ...baseConfig, app: { mode: "proxy", upstream: "http://app:3000" } })
@@ -164,7 +173,7 @@ describe("runtime contract", () => {
     const compose = renderSelfHostCompose(baseConfig)
     expect(compose).toContain("\n  schema-engine:\n")
     expect(compose).toContain('profiles: ["tools"]')
-    expect(compose).toContain("supatype/schema-engine:latest")
+    expect(compose).toContain(RELEASE_IMAGES.engine)
   })
 
   // PostgREST must connect as `authenticator`, never as POSTGRES_USER. POSTGRES_USER is
@@ -272,40 +281,6 @@ describe("runtime contract", () => {
     expect(isRegistryPullableImageRef("supatype/server:keepsake-local")).toBe(false)
   })
 
-  it("composePullNeedsIgnoreFailures is false for semver pins only", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "supatype-pull-"))
-    try {
-      writeFileSync(
-        join(cwd, ".env"),
-        "SUPATYPE_ENGINE_IMAGE=supatype/schema-engine:v0.4.2\n",
-        "utf8",
-      )
-      expect(hasLocalVersionPins(baseConfig)).toBe(false)
-      expect(composePullNeedsIgnoreFailures(baseConfig, cwd)).toBe(false)
-    } finally {
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("composePullNeedsIgnoreFailures is true for versions.local or custom tags", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "supatype-pull-local-"))
-    try {
-      writeFileSync(
-        join(cwd, ".env"),
-        "SUPATYPE_CONTROL_PLANE_IMAGE=supatype/control-plane:local\n",
-        "utf8",
-      )
-      expect(
-        composePullNeedsIgnoreFailures(
-          { ...baseConfig, versions: { engine: "local" } },
-          cwd,
-        ),
-      ).toBe(true)
-      expect(composePullNeedsIgnoreFailures(baseConfig, cwd)).toBe(true)
-    } finally {
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
 
   // Where the project, kong.yml and s3.json are mounted from is pinned in
   // self-host-compose-mounts.test.ts: absolute host paths, so a hand-run compose agrees (SA3).
@@ -441,6 +416,40 @@ describe("runtime contract", () => {
       // Values `push` put there survive: the schema is not "public" and must stay as found.
       expect(manifest["schema"]).toBe("tenant_7")
       expect(manifest["postgrest_url"]).toBe("http://pg:3000")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("routes realtime, functions and storage to the stack's own services after native dev ran", () => {
+    // Local test D: native dev records its realtime on 127.0.0.1 and drops the worker URL. Docker
+    // dev then repaired only the functions flag, so the server proxied every subscription to a
+    // host port nothing in the stack listened on and realtime answered 502. Round 3 N2: the same
+    // for native's storage service, so every /storage/v1 call answered 502.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-native-to-docker-"))
+    try {
+      mkdirSync(join(dir, ".supatype"), { recursive: true })
+      writeFileSync(
+        join(dir, ".supatype", "manifest.json"),
+        JSON.stringify({
+          schema: "public",
+          realtime_enabled: true,
+          realtime_url: "http://127.0.0.1:18493",
+          functions_enabled: true,
+          functions_worker_url: "http://127.0.0.1:18494",
+          storage_url: "http://127.0.0.1:18495",
+        }),
+        "utf8",
+      )
+
+      writeSelfHostCompose(dir, baseConfig)
+
+      const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
+      expect(manifest["realtime_enabled"]).toBe(true)
+      expect(manifest["realtime_url"]).toBe("http://realtime:4000")
+      expect(manifest["functions_enabled"]).toBe(true)
+      expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+      expect(manifest["storage_url"]).toBe("http://storage:5000")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -706,9 +715,9 @@ export default defineConfig({
       const compose = readFileSync(out.composePath, "utf8")
       // baseConfig pins postgres "17.2", which runs the major's latest.
       expect(compose).toContain("${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:17-latest}")
-      expect(compose).toContain("${SUPATYPE_SERVER_IMAGE:-${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}")
-      expect(compose).toContain("${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}")
-      expect(compose).toContain("${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}")
+      expect(compose).toContain(`\${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-${RELEASE_IMAGES.server}}}`)
+      expect(compose).toContain(`\${SUPATYPE_STORAGE_IMAGE:-${RELEASE_IMAGES.storage}}`)
+      expect(compose).toContain(`\${SUPATYPE_STUDIO_IMAGE:-${RELEASE_IMAGES.studio}}`)
       // SeaweedFS is the object store, and the only one: MinIO's community edition is archived and
       // its image was withdrawn, so a stack that still named it could not start at all.
       expect(compose).toContain("  seaweedfs:")

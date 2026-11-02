@@ -23,6 +23,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
 SUITE_DIR="$ROOT_DIR/tests/integration/extension-schema"
 PROJECT_DIR="${EXTENSION_SCHEMA_PROJECT_DIR:-${TMPDIR:-/tmp}/supatype-extension-schema-$$}"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
@@ -106,7 +107,7 @@ wait_for_first_push() {
 wait_for_first_push
 echo "  pushed after the stack came up"
 
-ANON_KEY="$(grep -E '^ANON_KEY=' "$PROJECT_DIR/.env" | cut -d= -f2-)"
+ANON_KEY="$(env_file_value "$PROJECT_DIR/.env" ANON_KEY)"
 [[ -n "$ANON_KEY" ]] || fail "no ANON_KEY in the generated .env"
 
 # One request as anon: "<status> <seconds>", bounded well past the anon statement timeout so a
@@ -172,8 +173,8 @@ root_answers_at_once || FAILED=1
 # A query against the project's database, through the container: nothing publishes its port.
 db_query() {
   local env="$PROJECT_DIR/.env"
-  docker exec -e PGPASSWORD="$(grep -E '^POSTGRES_PASSWORD=' "$env" | cut -d= -f2-)" "${COMPOSE_PROJECT}-db-1" \
-    psql -U "$(grep -E '^POSTGRES_USER=' "$env" | cut -d= -f2-)" -d "$(grep -E '^POSTGRES_DB=' "$env" | cut -d= -f2-)" \
+  docker exec -e PGPASSWORD="$(env_file_value "$env" POSTGRES_PASSWORD)" "${COMPOSE_PROJECT}-db-1" \
+    psql -U "$(env_file_value "$env" POSTGRES_USER)" -d "$(env_file_value "$env" POSTGRES_DB)" \
     -tAc "$1"
 }
 

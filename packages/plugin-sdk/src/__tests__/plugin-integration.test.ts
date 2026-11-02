@@ -21,6 +21,7 @@ import {
   PLUGIN_API_VERSION,
   // Types
   type FieldTypeDefinition,
+  type CompositeDefinition,
   type ProviderDefinition,
   type EmailProvider,
 } from "../index.js"
@@ -114,8 +115,6 @@ describe("composite plugin lifecycle", () => {
         { name: "no_index", type: "boolean", defaultValue: false },
       ],
       adminGroup: { collapsible: true, defaultCollapsed: true },
-      installSQL: "CREATE INDEX idx_seo ON content USING gin(meta_title)",
-      uninstallSQL: "DROP INDEX IF EXISTS idx_seo",
     })
 
   it("should register and appear in getPluginsByType('composite')", () => {
@@ -148,10 +147,15 @@ describe("composite plugin lifecycle", () => {
     expect(seo.adminGroup).toEqual({ collapsible: true, defaultCollapsed: true })
   })
 
-  it("should preserve installSQL and uninstallSQL", () => {
-    const seo = makeSeoPlugin()
-    expect(seo.installSQL).toBe("CREATE INDEX idx_seo ON content USING gin(meta_title)")
-    expect(seo.uninstallSQL).toBe("DROP INDEX IF EXISTS idx_seo")
+  it("refuses install or uninstall SQL, which a composite no longer supports", () => {
+    // A JavaScript author, or a build against an older SDK, can still pass them.
+    const withSql: CompositeDefinition = Object.assign(
+      { name: "seo", label: "SEO Meta", fields: [] },
+      { installSQL: "CREATE INDEX idx_seo ON content USING gin(meta_title)" },
+    )
+    expect(() => defineComposite(withSql)).toThrow(
+      'Composite "seo" sets installSQL, which is not supported: Supatype does not run SQL a plugin ships.',
+    )
   })
 })
 

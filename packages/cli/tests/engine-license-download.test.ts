@@ -93,15 +93,16 @@ describe("engine download keeps its licence", () => {
 
   it("does not repeat the notice when the engine is already cached", async () => {
     stubRelease({ manifestListsLicense: true, licenseBody: LICENSE })
-    await download("engine", VERSION, PLATFORM)
+    expect((await download("engine", VERSION, PLATFORM)).fetched).toBe(true)
     logs = []
-    await download("engine", VERSION, PLATFORM)
+    // `update` reports from this: a cached engine is not said to be downloaded.
+    expect((await download("engine", VERSION, PLATFORM)).fetched).toBe(false)
     expect(notices()).toEqual([])
   })
 
   it("still installs an older release that published no LICENSE, with one warning", async () => {
     stubRelease({ manifestListsLicense: false, licenseBody: null })
-    const path = await download("engine", VERSION, PLATFORM)
+    const { path } = await download("engine", VERSION, PLATFORM)
 
     expect(existsSync(path)).toBe(true)
     expect(existsSync(licensePath())).toBe(false)
@@ -111,7 +112,7 @@ describe("engine download keeps its licence", () => {
 
   it("refuses a LICENSE that does not match the signed checksum, without failing the engine", async () => {
     stubRelease({ manifestListsLicense: true, licenseBody: "something else entirely\n" })
-    const path = await download("engine", VERSION, PLATFORM)
+    const { path } = await download("engine", VERSION, PLATFORM)
 
     expect(existsSync(path)).toBe(true)
     expect(existsSync(licensePath())).toBe(false)
