@@ -82,7 +82,9 @@ export class ProcessManager {
   /** Stop the process and clear the PID file. */
   async stop(): Promise<void> {
     this.stopped = true
-    if (!this.child || this.child.killed) {
+    // Already exited: there is no "exit" event left to wait for, and waiting for one held every stop
+    // of a process that had ended on its own for the full five seconds below.
+    if (!this.child || this.child.killed || this.child.exitCode !== null || this.child.signalCode !== null) {
       await this.clearPid()
       return
     }

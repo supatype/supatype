@@ -6,7 +6,7 @@ import { errorMessage } from "../error-message.js"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { composeContext, composeServices } from "../compose-services.js"
-import { localKongBaseUrl } from "../local-gateway.js"
+import { localPublicApiUrl } from "../local-gateway.js"
 import { loadLocalEnvironment, loadProjectLink } from "../link.js"
 import { resolveTarget, targetStatus } from "../resolve-target.js"
 import { error, info, plain, warn } from "../ui/messages.js"
@@ -36,7 +36,7 @@ export function registerStatus(program: Command): void {
         }
       }
 
-      printLocalStackStatus(cwd)
+      await printLocalStackStatus(cwd)
     })
 }
 
@@ -78,7 +78,7 @@ async function printLinkedStatus(target: ReturnType<typeof resolveTarget>): Prom
  * that has not existed since those services moved in-process behind
  * supatype-server.
  */
-function printLocalStackStatus(cwd: string): void {
+async function printLocalStackStatus(cwd: string): Promise<void> {
   const ctx = composeContext(cwd)
   if (!ctx) {
     plain("Supatype local stack\n")
@@ -88,7 +88,7 @@ function printLocalStackStatus(cwd: string): void {
     return
   }
 
-  const services = composeServices(ctx)
+  const services = await composeServices(ctx)
   plain(`Supatype local stack (${ctx.projectName})\n`)
 
   if (services.length === 0) {
@@ -108,7 +108,7 @@ function printLocalStackStatus(cwd: string): void {
 
   if (running.length > 0) {
     const localEnv = loadLocalEnvironment(cwd)
-    plain(`\nAPI URL:    ${localEnv?.apiUrl ?? localKongBaseUrl()}`)
+    plain(`\nAPI URL:    ${localEnv?.apiUrl ?? localPublicApiUrl(cwd)}`)
     if (localEnv?.databaseUrl) {
       plain(`Database:   ${localEnv.databaseUrl}`)
     }

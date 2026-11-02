@@ -150,8 +150,7 @@
 
     <div class="step"><span class="step-num">3</span><h3>Develop, then push to GitHub</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
-<pre><span class="pr">$</span> supatype dev
-<span class="pr">$</span> supatype push</pre></div>
+<pre><span class="pr">$</span> supatype dev</pre></div>
     <p>Optionally proxy to Vite from a gitignored <code>supatype.local.config.ts</code> while production stays <code>static</code>. See <a href="/docs/#deploy-changes">Deploy changes</a>.</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> git init
@@ -187,6 +186,7 @@ AUTHENTICATOR_PASSWORD=CHANGE_ME
 SUPATYPE_SQL_EDITOR_PASSWORD=CHANGE_ME
 SUPATYPE_CONTROL_PLANE_SECRET=CHANGE_ME
 JWT_SECRET=CHANGE_ME            <span class="c"># at least 32 characters</span>
+<span class="c"># Leave both keys blank. compose up mints them from JWT_SECRET.</span>
 ANON_KEY=
 SERVICE_ROLE_KEY=
 API_EXTERNAL_URL=https://example.com
@@ -197,12 +197,11 @@ SITE_URL=https://example.com</pre></div>
     <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> cd /opt/my-blog
 <span class="pr">$</span> npm install
-<span class="pr">$</span> supatype self-host compose render
 <span class="pr">$</span> supatype self-host compose up -d
 <span class="pr">$</span> supatype push
 <span class="pr">$</span> npm run build
-<span class="pr">$</span> supatype self-host compose render
 <span class="pr">$</span> supatype self-host compose up -d</pre></div>
+    <p><code>compose up</code> writes the compose file itself, so there is no separate render step.</p>
     <p>Before this, point an A record for <code>example.com</code> at the VM and open ports 80 and 443 in its firewall. Then open <code>https://example.com</code>, with Studio at <code>/studio/</code>. Without a domain in <code>supatype.config.ts</code>, the gateway is on <code>http://YOUR_VM_IP:18473</code> instead. Backups, logs and rollbacks are covered in <a href="/docs/#production">Running in production</a>.</p>
 
     <h2 id="secrets">Repository secrets</h2>
@@ -250,12 +249,15 @@ jobs:
             npm ci
             supatype push
             npm run build
-            supatype self-host compose render
             supatype self-host compose up -d</pre></div>
     <p>On every push to <code>main</code> the VM pulls the latest code, applies schema migrations, rebuilds <code>public/</code> and refreshes Compose.</p>
     <div class="callout">
       <span class="callout-label">NOTE</span>
       <p><code>supatype push</code> reads <code>DATABASE_URL</code> from the VM's <code>.env</code>, which points at the Compose Postgres on <code>localhost:5432</code>. If you would rather not install the CLI globally on the VM, use <code>npx @supatype/cli</code> in the script.</p>
+    </div>
+    <div class="callout">
+      <span class="callout-label">CHANGES THAT NEED A YES</span>
+      <p>The push in CI has no terminal to ask in. A change that needs your consent, such as a drop, an undeclared rename or a large table rewrite, fails the job, and the log prints the command to run. Record renames with <code>supatype rename</code> and commit <code>supatype/renames.json</code>. After a Supatype upgrade, run the first push by hand over SSH.</p>
     </div>
 
     <h2 id="verify">Verify the pipeline</h2>
@@ -271,8 +273,8 @@ jobs:
       <thead><tr><th scope="col">Symptom</th><th scope="col">Check</th></tr></thead>
       <tbody>
         <tr><td>SSH fails</td><td>The firewall allows port 22, and <code>VM_SSH_KEY</code> matches the VM's <code>authorized_keys</code>.</td></tr>
-        <tr><td><code>supatype push</code> fails</td><td>Compose is up, and <code>DATABASE_URL</code> points at <code>localhost:5432</code>.</td></tr>
-        <tr><td>Site unchanged</td><td><code>npm run build</code> writes to the directory in <code>app.static_dir</code>, then re-run <code>compose render</code> and <code>up -d</code>.</td></tr>
+        <tr><td><code>supatype push</code> fails</td><td>Compose is up, and <code>DATABASE_URL</code> points at <code>localhost:5432</code>. If it refused a change that needs your consent, see <a href="#workflow">The workflow</a>.</td></tr>
+        <tr><td>Site unchanged</td><td><code>npm run build</code> writes to the directory in <code>app.static_dir</code>, then re-run <code>supatype self-host compose up -d</code>.</td></tr>
       </tbody>
     </table></div>
 
@@ -298,7 +300,7 @@ jobs:
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

@@ -7,12 +7,16 @@
  * it, or PostgREST would be pointed at the wrong schemas for the tier the push will use.
  */
 
+import { devApiKeys, type DevApiKeys } from "./dev-api-keys.js"
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
+import { nativeMailerAutoconfirmEnv } from "./mailer-autoconfirm.js"
+import { mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides } from "./mailer-env.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
-import { postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
+import { DENO_PORT_ENV, postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
+import { devServiceRoleKeyPath, writeServiceRoleKeyFileUntilExit } from "./service-role-key-file.js"
 
 /** Inputs to the outer layer of supatype-server's environment on the native path. */
 export interface NativeServerCoreInput {
@@ -29,11 +33,21 @@ export interface NativeServerCoreInput {
 }
 
 /**
+ * What every Deno the CLI or compose starts is given: no colour. Deno colours the text of an error,
+ * a missing module's location among it, whether or not it writes to a terminal, and a function's
+ * error reaches its caller as JSON. The routers still strip escape codes, for a Deno started some
+ * other way. The compose worker's template says the same in YAML (self-host-compose.ts).
+ */
+export const DENO_ENV = { NO_COLOR: "1" } as const
+
+/**
  * supatype-server's outer layer: mode, cache, manifest paths, PostgREST and GraphQL, and the
- * database as this machine reaches it, without its password, for Studio's connection strings.
+ * database as this machine reaches it, without its password, for Studio's connection strings. The
+ * server passes its environment to the Deno child that runs functions, so {@link DENO_ENV} too.
  */
 export function nativeServerCoreEnv(input: NativeServerCoreInput): Record<string, string> {
   return {
+    ...DENO_ENV,
     SUPATYPE_MODE: input.mode,
     ...(input.valkeyAddr ? { SUPATYPE_VALKEY_ADDR: input.valkeyAddr } : {}),
     SUPATYPE_MANAGED_PROJECT_REF: input.projectRef,
@@ -68,4 +82,68 @@ export function nativePostgrestSchemaEnv(
 /** The roles script for a new native database, with the mask extension only when the install has it. */
 export function nativeDevRolesSql(pgBinDir: string | null): string {
   return nativeRolesSql(nativeMaskLibraryPresent(pgBinDir))
+}
+
+/** The send-email hook's signing secret in native dev, in the server's symmetric format. Override via .env. */
+const LOCAL_SEND_EMAIL_HOOK_SECRETS = "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567"
+
+/** `email.send_email_hook` as the server's hook settings, aimed at this server unless the config names a target. */
+function nativeSendEmailHookEnv(email: SupatypeProjectConfig["email"], serverPort: string): Record<string, string> {
+  if (email?.send_email_hook !== true) return {}
+  return {
+    SUPATYPE_HOOK_SEND_EMAIL_ENABLED: "true",
+    SUPATYPE_HOOK_SEND_EMAIL_URI:
+      email.send_email_hook_uri?.trim() || `http://127.0.0.1:${serverPort}/internal/v0hooks/send-email`,
+    SUPATYPE_HOOK_SEND_EMAIL_SECRETS: email.send_email_hook_secrets?.trim() || LOCAL_SEND_EMAIL_HOOK_SECRETS,
+  }
+}
+
+/**
+ * The auth server's external URL and mailer on the native path, where the server is the gateway
+ * and the auth routes sit under `/auth/v1`. The verify paths are what make emailed links land
+ * there: without them the server's default `/verify` resolved to the origin's root, a 404.
+ */
+export function nativeAuthMailerEnv(email: SupatypeProjectConfig["email"], serverPort: string): Record<string, string> {
+  return {
+    SUPATYPE_API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
+    ...mailerUrlPathsEnv(),
+    ...mailerProviderEnv(email),
+    ...nativeSendEmailHookEnv(email, serverPort),
+  }
+}
+
+/** What {@link nativeServerDotEnvLayer} lays over the server's environment. */
+export interface NativeDotEnvLayerInput {
+  /** `.env` then `.env.local`, the later file winning. */
+  dotEnv: Record<string, string>
+  config: SupatypeProjectConfig
+  cwd: string
+  /** The Deno port dev checked was free. */
+  denoPort: number
+}
+
+/** The last layer of supatype-server's environment on the native path: `.env` and what follows it. */
+export function nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }: NativeDotEnvLayerInput): Record<string, string> {
+  return {
+    // A blank mailer value init scaffolded into .env does not erase the config's.
+    ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email)),
+    // After .env: auth.email.enableConfirmations, unless the developer set their own value.
+    ...nativeMailerAutoconfirmEnv(cwd, config),
+    // Last, so the port dev checked is the port Deno gets: a value in .env or .env.local, blank
+    // included, would otherwise replace it.
+    [DENO_PORT_ENV]: String(denoPort),
+  }
+}
+
+/**
+ * The anon and service-role keys native dev starts the server with, the service-role key also
+ * written to the file the functions worker reads it from, until dev exits.
+ *
+ * The keys in `.env` while they verify, as Docker dev uses. A pair signed afresh each run left
+ * `.env`'s SERVICE_ROLE_KEY refused by the admin API, which compares the key as a string.
+ */
+export function nativeDevApiKeys(cwd: string): DevApiKeys {
+  const keys = devApiKeys(cwd)
+  writeServiceRoleKeyFileUntilExit(devServiceRoleKeyPath(cwd), keys.serviceRoleKey)
+  return keys
 }

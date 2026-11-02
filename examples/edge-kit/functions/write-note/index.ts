@@ -3,8 +3,8 @@ import { apiBaseUrl } from "../_shared/api.ts"
 import { handleOptions, json } from "../_shared/cors.ts"
 
 /**
- * Inserts a Note row via PostgREST using the service-role key from Deno.env.
- * Exercises env injection + outbound fetch from the worker.
+ * Inserts a Note row via PostgREST using the service-role key the worker hands this call
+ * (ctx.serviceRoleKey). Exercises that key and an outbound fetch from the worker.
  */
 export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   const preflight = handleOptions(req)

@@ -5,9 +5,9 @@ export default defineConfig({
   database: {
     provider: "docker",
   },
+  // No `port`: compose does not use it. The API is published through Kong on SUPATYPE_KONG_PORT.
   server: {
     mode: "standalone",
-    port: 54321,
   },
   app: {
     mode: "proxy",

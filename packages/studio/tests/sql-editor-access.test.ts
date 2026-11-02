@@ -4,7 +4,7 @@ import { databaseSectionFor } from "../src/components/SecondaryPanel.js"
 import { jumpTargetsFor } from "../src/components/JumpToSearch.js"
 
 /**
- * RX1: the SQL editor keeps full access (it runs as the project's owning role, so row level
+ * RX1: the SQL editor keeps full access (it signs in as supatype_sql_editor, a member of the database owner, so row level
  * security does not apply) and is for owners, admins and developers. Editors, billing members and
  * viewers are not offered it on either host: the server refuses their queries, so a nav entry would
  * lead to an editor that cannot run anything.

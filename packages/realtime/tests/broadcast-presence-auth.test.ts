@@ -61,7 +61,8 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
     stranger.send({ type: "broadcast", channel: CHANNEL, event: "msg", payload: { text: "spoofed" } })
     const refusal = await stranger.next(isSystem("error"))
 
-    expect(refusal).toMatchObject({ type: "system", status: "error" })
+    // Naming the channel, so the client fails that channel and not every other one on the socket.
+    expect(refusal).toMatchObject({ type: "system", status: "error", channel: CHANNEL })
     await settle(listener)
     expect(relayed(listener)).toEqual([])
   })
@@ -80,13 +81,19 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
     expect(relayed(listener)).toEqual([])
   })
 
+  it.runIf(secureChannels)("refuses a subscribe before authenticating, naming the channel", async () => {
+    const stranger = await open()
+    stranger.send({ type: "subscribe", channel: CHANNEL })
+    expect(await stranger.next(isSystem("error", "authenticate before subscribing"))).toMatchObject({ channel: CHANNEL })
+  })
+
   it("refuses a broadcast to a channel the sender has not joined", async () => {
     const listener = await open(userToken("listener-c"))
     await subscribe(listener)
     const outsider = await open(userToken("outsider"))
 
     outsider.send({ type: "broadcast", channel: CHANNEL, event: "msg", payload: { text: "hi" } })
-    await outsider.next(isSystem("error"))
+    expect(await outsider.next(isSystem("error"))).toMatchObject({ channel: CHANNEL })
     outsider.send({ type: "presence_track", channel: CHANNEL, payload: {} })
     await outsider.next((m) => isSystem("error")(m) && outsider.frames.filter(isSystem("error")).length >= 2)
 

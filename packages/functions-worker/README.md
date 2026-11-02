@@ -9,7 +9,7 @@ External Deno runtime for edge functions. **supatype-server** proxies `/function
 | unset | **Per-project**, discover and serve all handlers under `SUPATYPE_FUNCTIONS_ROOT` |
 | set | **Per-function**, load only that handler (shared pool / dedicated single-function workers) |
 
-Local `supatype dev` does **not** use this image; the CLI starts an in-process Deno subprocess via the server **unless** Compose sets `SUPATYPE_FUNCTIONS_WORKER_URL` (Docker provider).
+`supatype dev` on the Docker provider (the default) runs this image, as self-host Compose does. Only the native provider (`provider: "native"`) runs functions in a Deno subprocess started by the server instead.
 
 ## Environment
 
@@ -58,8 +58,8 @@ GRANT SELECT ON public.orders TO functions_reader;
 SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:a-long-random-password@db:5432/my-project
 ```
 
-Then re-render and restart the stack (`supatype self-host compose render` and `up -d`, or restart
-`supatype dev`). In the function, treat the URL as a credential: never return it or log it.
+Then run `supatype self-host compose up -d` (it renders the file again), or restart
+`supatype dev`. In the function, treat the URL as a credential: never return it or log it.
 
 ```ts
 import postgres from "npm:postgres@3.4.5"

@@ -40,3 +40,29 @@ describe("init's next steps", () => {
     expect(steps.join("\n")).not.toMatch(/or push/)
   })
 })
+
+/**
+ * `init --mode standalone --defaults` sets the project up for its own server, and its next steps
+ * led with `supatype dev`. They lead with the self-host steps; local development comes after.
+ */
+describe("init's next steps for a self-host project", () => {
+  const selfHost = (domain: string): InitStepsArgs => args({ result: { ...args().result, productionTarget: "self-host", domain } })
+
+  it("leads with the self-host steps, not supatype dev", () => {
+    const steps = commands(initFirstSteps(selfHost("")))
+    expect(steps[0]).toBe("cd acme")
+    expect(steps[1]).toMatch(/server\.domain/)
+    expect(steps).toContain("supatype self-host compose up -d")
+    expect(steps).not.toContain("supatype dev")
+  })
+
+  it("keeps the setup steps ahead of the self-host ones", () => {
+    const steps = commands(initFirstSteps({ ...selfHost("api.example.com"), installed: false }))
+    expect(steps.slice(0, 2)).toEqual(["cd acme", "pnpm install"])
+  })
+
+  it("still leads with supatype dev when production is decided later", () => {
+    const steps = commands(initFirstSteps(args({ result: { ...args().result, productionTarget: "later" } })))
+    expect(steps).toEqual(["cd acme", "supatype dev"])
+  })
+})

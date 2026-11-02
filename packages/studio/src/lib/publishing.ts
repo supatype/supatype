@@ -1,4 +1,4 @@
-import { DRAFT_SCHEMA, type SupatypeClient } from "@supatype/client"
+import { DRAFT_SCHEMA, PostgrestErrorCodes, type SupatypeClient } from "@supatype/client"
 import type { ModelConfig, ModelVersionsConfig } from "../config.js"
 import {
   isJsonObject,
@@ -645,10 +645,10 @@ export async function fetchRecordForEditing(
   client: SupatypeClient,
   model: ModelConfig,
   recordId: string,
-): Promise<{ values: Record<string, unknown> | null; fromDraft: boolean; error: string | null }> {
+): Promise<RecordForEditing> {
   if (model.versions?.drafts === true) {
     const draft = await fetchDraft(client, model, recordId)
-    if (draft !== null) return { values: draft, fromDraft: true, error: null }
+    if (draft !== null) return { values: draft, fromDraft: true, error: null, notFound: false }
   }
 
   const result = await client
@@ -658,16 +658,31 @@ export async function fetchRecordForEditing(
     .single()
 
   if (result.error !== null) {
-    return { values: null, fromDraft: false, error: result.error.message }
+    const notFound = result.error.code !== undefined && NOT_A_RECORD.has(result.error.code)
+    return { values: null, fromDraft: false, error: result.error.message, notFound }
   }
   // A proxy may drop `Accept: object+json` and answer with a one-row array.
   const raw: unknown = result.data
   const row = Array.isArray(raw) ? raw[0] : raw
   if (!isJsonObject(row)) {
-    return { values: null, fromDraft: false, error: "Record not found" }
+    return { values: null, fromDraft: false, error: "Record not found", notFound: true }
   }
-  return { values: row, fromDraft: false, error: null }
+  return { values: row, fromDraft: false, error: null, notFound: false }
 }
+
+/** What an edit form opens. `notFound`: there is no such record, so there is no form to show. */
+export interface RecordForEditing {
+  values: Record<string, unknown> | null
+  fromDraft: boolean
+  error: string | null
+  notFound: boolean
+}
+
+/**
+ * Refusals that mean the id names no record: no row has it, or it is not a value the key column
+ * can hold (`/models/post/access` reads `access` as an id, and Postgres refuses it as a uuid).
+ */
+const NOT_A_RECORD = new Set<string>([PostgrestErrorCodes.NOT_FOUND, PostgrestErrorCodes.INVALID_INPUT])
 
 /**
  * What each of these records is, for a list that has to say so without opening any of them.

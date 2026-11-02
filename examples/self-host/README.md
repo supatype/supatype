@@ -1,6 +1,6 @@
 # Self-Host Example (maintainer fixture)
 
-> **End users:** follow [supatype.github.io/supatype/#self-host](https://supatype.github.io/supatype/#self-host) in your own project, this directory is a maintainer fixture only.
+> **End users:** follow [supatype.com/docs/#self-host](https://www.supatype.com/docs/#self-host) in your own project, this directory is a maintainer fixture only.
 
 This example shows the compose-first self-host flow for Supatype.
 
@@ -13,6 +13,8 @@ This example shows the compose-first self-host flow for Supatype.
 
 ## Quick start
 
+Running this outside the repo? See [Running an example](../README.md#running-an-example).
+
 1. Copy env template:
 
 ```bash
@@ -20,7 +22,10 @@ cp .env.example .env
 ```
 
 Set `POSTGRES_PASSWORD`, `AUTHENTICATOR_PASSWORD`, `SUPATYPE_SQL_EDITOR_PASSWORD`
-and `JWT_SECRET` to values of your own. Leave `ANON_KEY` and `SERVICE_ROLE_KEY` blank: they are JWTs signed
+and `JWT_SECRET` to values of your own. Make each password with `openssl rand -hex 24`: 0.7.0
+does not encode these passwords when it puts them in connection URLs.
+
+Leave `ANON_KEY` and `SERVICE_ROLE_KEY` blank: they are JWTs signed
 with `JWT_SECRET`, so `selfhost:up` mints them on first start and leaves any
 value you set alone. `SUPATYPE_CONTROL_PLANE_SECRET` is generated the same way:
 only the API server and the control plane receive it, and the control plane
@@ -38,7 +43,39 @@ Supatype image overrides in `.env` let you pin beta tags:
 
 If unset, compose defaults are used.
 
-### Direct database access for functions
+2. From the monorepo root:
+
+```bash
+pnpm install
+pnpm build   # the CLI and the libraries run from their dist/
+```
+
+3. From this example directory, start self-host compose (it renders the compose file first):
+
+```bash
+pnpm run selfhost:up
+```
+
+4. Wait until services are healthy:
+
+```bash
+pnpm exec supatype self-host compose status
+```
+
+5. Push schema:
+
+```bash
+pnpm run push
+```
+
+6. Tail logs (optional):
+
+```bash
+pnpm run selfhost:status
+pnpm run selfhost:logs
+```
+
+## Direct database access for functions
 
 `SUPATYPE_FUNCTIONS_DB_URL` hands every function a raw Postgres URL as `ctx.dbUrl`. It is **off by
 default** (commented out in `.env.example`), and separate from `DATABASE_URL` on purpose. When the
@@ -61,54 +98,20 @@ GRANT SELECT ON public.todo TO functions_reader;
 SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:change-me@db:5432/self_host_example
 ```
 
-Then `pnpm run selfhost:render` and `pnpm run selfhost:up`. In a function, check
+Then `pnpm run selfhost:up`. In a function, check
 `ctx.dbUrl !== undefined` before connecting, and never return or log the URL.
-
-2. Install dependencies (from repo root):
-
-```bash
-pnpm install
-```
-
-3. From this example directory, render and start self-host compose:
-
-```bash
-pnpm run selfhost:render
-pnpm run selfhost:up
-```
-
-4. Wait until services are healthy:
-
-```bash
-supatype self-host compose status
-```
-
-5. Push schema:
-
-```bash
-pnpm run push
-```
-
-6. Tail logs (optional):
-
-```bash
-pnpm run selfhost:status
-pnpm run selfhost:logs
-```
 
 ## Where is Studio?
 
-Studio is available at:
-
-- Direct: `http://localhost:3002`
-- Through gateway: `http://localhost:18473/studio/`
+Studio is at `http://localhost:18473/studio/`, through the gateway. The Studio container is not
+published on a host port of its own.
 
 **Authentication (production self-host):** Studio requires an admin login. The browser never receives `service_role`; privileged API calls go through `supatype-server` at `/studio/proxy/*` after your JWT is verified.
 
 1. Create an admin user (first push may prompt, or run explicitly):
 
 ```bash
-supatype admin create-user --email admin@example.com --password 'your-secure-password'
+pnpm exec supatype admin create-user --email admin@example.com --password 'your-secure-password' --role admin
 ```
 
 2. Open `/studio/` and sign in with that account.
@@ -120,9 +123,9 @@ Studio asks for this sign-in in local docker dev (`supatype dev`) too. There is 
 If Studio is not loading:
 
 ```bash
-supatype self-host compose status
-supatype self-host compose logs --service studio
-supatype self-host compose logs --service kong
+pnpm exec supatype self-host compose status
+pnpm exec supatype self-host compose logs --service studio
+pnpm exec supatype self-host compose logs --service kong
 ```
 
 Equivalent script command:
@@ -134,8 +137,7 @@ pnpm run selfhost:logs -- --service studio
 ## Endpoints
 
 - API gateway: `http://localhost:18473`
-- Studio (direct): `http://localhost:3002`
-- Studio (gateway): `http://localhost:18473/studio/`
+- Studio: `http://localhost:18473/studio/`
 - REST: `http://localhost:18473/rest/v1/`
 - Auth: `http://localhost:18473/auth/v1/`
 - Storage: `http://localhost:18473/storage/v1/`
@@ -146,11 +148,11 @@ pnpm run selfhost:logs -- --service studio
 To serve this stack on a real domain with automatic Let's Encrypt TLS:
 
 ```bash
-supatype add domain demo.example.com --email you@example.com
-supatype self-host compose up -d
+pnpm exec supatype add domain demo.example.com --email you@example.com
+pnpm exec supatype self-host compose up -d
 ```
 
-This sets `server.mode = "standalone"` + `server.domain` + `server.tls` in `supatype.config.ts`, then re-renders compose so Kong publishes `:80`/`:443`, a Valkey service stores the certs, and the `acme` plugin issues a certificate on the first HTTPS request. Point the domain's DNS A record at the host and open ports 80 and 443 first.
+This sets `server.mode = "standalone"` + `server.domain` + `server.tls` in `supatype.config.ts`. Kong then serves `:80` and `:443` and issues a Let's Encrypt certificate on the first HTTPS request (stored in Postgres in this example). Point the domain's DNS A record at the host and open ports 80 and 443 first.
 
 ## App routing
 
@@ -170,10 +172,9 @@ app: {
 }
 ```
 
-This example already includes `public/index.html`. After switching config, re-render and restart:
+This example already includes `public/index.html`. After switching config, restart the stack:
 
 ```bash
-pnpm run selfhost:render
 pnpm run selfhost:down
 pnpm run selfhost:up
 ```

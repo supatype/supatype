@@ -13,10 +13,16 @@ idiom and nothing else. Where it turns out to be more than the idiom, that is a 
 
 ## Running it
 
+Running this outside the repo? See [Running an example](../README.md#running-an-example).
+
+From the monorepo root:
+
 ```bash
 pnpm install
-pnpm keys              # writes ANON_KEY / VITE_SUPATYPE_ANON_KEY into .env
-pnpm dev               # Postgres, the schema, the stack
+pnpm build             # the CLI and the libraries run from their dist/
+
+cd examples/framework-parity
+pnpm dev               # Postgres, the schema, the stack; writes .env and the keys
 
 pnpm dev:vue           # in another terminal, or dev:svelte, dev:solid
 ```

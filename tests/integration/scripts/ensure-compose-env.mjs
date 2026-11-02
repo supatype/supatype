@@ -9,18 +9,23 @@
  * examples/validation runs the same compose stack, and hand-rolling a second copy of the secret
  * list there missed AUTHENTICATOR_PASSWORD, which compose refuses to interpolate without.
  *
- * Run after `pnpm build` (imports packages/cli/dist/jwt.js).
+ * Run after `pnpm build` (imports packages/cli/dist/jwt.js, env-file.js and local-secrets.js).
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { signJwt } from "../../../packages/cli/dist/jwt.js"
+import { readEnvFile } from "../../../packages/cli/dist/env-file.js"
+import { generateJwtSecret } from "../../../packages/cli/dist/local-secrets.js"
 
 const integrationDir = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const targetDir = process.argv[2] ? resolve(process.argv[2]) : integrationDir
 const envPath = resolve(targetDir, ".env")
 
-const JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
+// The project's own secret when .env has one, else a generated one, as `supatype dev` does. The
+// published fallback this used to write is gone from the CLI, and a fixed secret here would replace
+// the one a stack already running against this .env signs with.
+const JWT_SECRET = readEnvFile(targetDir).JWT_SECRET || generateJwtSecret()
 const kongPort = Number(process.env.SUPATYPE_KONG_PORT ?? process.env.COMPOSE_KONG_PORT ?? 18473)
 const apiUrl = process.env.API_EXTERNAL_URL ?? `http://localhost:${kongPort}`
 

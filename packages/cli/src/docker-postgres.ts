@@ -6,11 +6,20 @@
  * named Docker volume (supatype-{projectName}-data) across restarts.
  */
 
-import { spawnSync } from "node:child_process"
+import { setTimeout as sleep } from "node:timers/promises"
+import {
+  askDocker,
+  askDockerSync,
+  DOCKER_EXEC_TIMEOUT_MS,
+  DOCKER_PULL_TIMEOUT_MS,
+  DOCKER_QUERY_TIMEOUT_MS,
+  type DockerAnswer,
+} from "./docker-exec.js"
+import { spawnFailureText } from "./error-message.js"
 import { dockerEnv } from "./docker-env.js"
 
 export interface DockerPgOptions {
-  /** Docker image to run. Defaults to supatype/postgres:latest. */
+  /** Docker image to run. Required: the caller resolves it (`postgresImageFor`, `RELEASE_IMAGES`). */
   image: string
   /** Project name: used to derive the container and volume names. */
   projectName: string
@@ -24,22 +33,11 @@ const PG_USER = "supatype_admin"
 /** Must match `dockerPgStart` default `POSTGRES_PASSWORD`. */
 const DEFAULT_DEV_PASSWORD = "postgres"
 
-function dockerPgPsql(
-  name: string,
-  db: string,
-  sql: string,
-  password = DEFAULT_DEV_PASSWORD,
-) {
+function dockerPgPsql(name: string, db: string, sql: string, password = DEFAULT_DEV_PASSWORD): Promise<DockerAnswer> {
   const secrets = dockerEnv({ PGPASSWORD: password })
-  return spawnSync(
-    "docker",
-    [
-      "exec",
-      ...secrets.args,
-      name,
-      "psql", "--no-password", "-U", PG_USER, "-d", db, "-tAc", sql,
-    ],
-    { encoding: "utf8", stdio: "pipe", env: secrets.env },
+  return askDocker(
+    ["exec", ...secrets.args, name, "psql", "--no-password", "-U", PG_USER, "-d", db, "-tAc", sql],
+    { env: secrets.env, timeoutMs: DOCKER_EXEC_TIMEOUT_MS },
   )
 }
 
@@ -59,32 +57,22 @@ export function dockerPgStart(opts: DockerPgOptions): void {
   const volume = `${name}-data`
 
   // Remove any stopped container from a previous session.
-  spawnSync("docker", ["rm", "-f", name], { encoding: "utf8" })
+  askDockerSync(["rm", "-f", name], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
 
   const secrets = dockerEnv({
     POSTGRES_USER: PG_USER,
     POSTGRES_PASSWORD: password,
     POSTGRES_DB: projectName,
   })
-  const result = spawnSync(
-    "docker",
-    [
-      "run", "-d",
-      "--name", name,
-      ...secrets.args,
-      "-p", `${port}:5432`,
-      "-v", `${volume}:/var/lib/postgresql/data`,
-      image,
-    ],
-    { encoding: "utf8", stdio: "pipe", env: secrets.env },
+  // `run` pulls the image first when this machine does not have it.
+  const result = askDockerSync(
+    ["run", "-d", "--name", name, ...secrets.args, "-p", `${port}:5432`, "-v", `${volume}:/var/lib/postgresql/data`, image],
+    { env: secrets.env, timeoutMs: DOCKER_PULL_TIMEOUT_MS },
   )
 
   if (result.status !== 0) {
-    const detail = (result.stderr ?? result.stdout ?? "").trim()
     throw new Error(
-      `Failed to start Docker container "${name}".\n` +
-        (detail ? `  docker: ${detail}\n` : "") +
-        `  Is Docker running?  docker info`,
+      `Failed to start Docker container "${name}".\n  docker: ${spawnFailureText(result)}\n  Is Docker running?  docker info`,
     )
   }
 }
@@ -94,26 +82,19 @@ export function dockerPgStart(opts: DockerPgOptions): void {
  * Safe to call even if the container is not running.
  */
 export function dockerPgStop(projectName: string): void {
-  spawnSync("docker", ["stop", containerName(projectName)], { encoding: "utf8" })
+  askDockerSync(["stop", containerName(projectName)], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
 }
 
-function dockerPgLogsTail(name: string, tail = 120): string {
-  const logs = spawnSync(
-    "docker",
-    ["logs", "--tail", String(tail), name],
-    { encoding: "utf8" },
-  )
-  return `${logs.stdout ?? ""}${logs.stderr ?? ""}`
+async function dockerPgLogsTail(name: string, tail = 120): Promise<string> {
+  const logs = await askDocker(["logs", "--tail", String(tail), name], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
+  return `${logs.stdout}${logs.stderr}`
 }
 
-function dockerPgHealthStatus(name: string): string | undefined {
-  const inspect = spawnSync(
-    "docker",
-    ["inspect", "-f", "{{if .State.Health}}{{.State.Health.Status}}{{end}}", name],
-    { encoding: "utf8", stdio: "pipe" },
-  )
+async function dockerPgHealthStatus(name: string): Promise<string | undefined> {
+  const format = "{{if .State.Health}}{{.State.Health.Status}}{{end}}"
+  const inspect = await askDocker(["inspect", "-f", format, name], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
   if (inspect.status !== 0) return undefined
-  const status = inspect.stdout?.trim()
+  const status = inspect.stdout.trim()
   return status === "" ? undefined : status
 }
 
@@ -142,24 +123,16 @@ function psqlTruthy(stdout: string | undefined): boolean {
 
 const ANON_ROLE_SQL = "SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')"
 
-function dockerPgHasAnonRole(
-  name: string,
-  projectName: string,
-  password = DEFAULT_DEV_PASSWORD,
-): boolean {
+async function dockerPgHasAnonRole(name: string, projectName: string, password = DEFAULT_DEV_PASSWORD): Promise<boolean> {
   for (const db of [projectName, "postgres"]) {
-    const result = dockerPgPsql(name, db, ANON_ROLE_SQL, password)
+    const result = await dockerPgPsql(name, db, ANON_ROLE_SQL, password)
     if (result.status === 0 && psqlTruthy(result.stdout)) return true
   }
   return false
 }
 
-function dockerPgExecReady(name: string): boolean {
-  const ready = spawnSync(
-    "docker",
-    ["exec", name, "pg_isready", "-U", PG_USER, "-q"],
-    { encoding: "utf8", stdio: "pipe" },
-  )
+async function dockerPgExecReady(name: string): Promise<boolean> {
+  const ready = await askDocker(["exec", name, "pg_isready", "-U", PG_USER, "-q"], { timeoutMs: DOCKER_EXEC_TIMEOUT_MS })
   return ready.status === 0
 }
 
@@ -175,48 +148,60 @@ export async function dockerPgWaitReady(
 ): Promise<void> {
   const name = containerName(projectName)
   const deadline = Date.now() + timeoutMs
-  let servingWithoutAnonMs = 0
-  let lastPsqlDetail = ""
-
+  const wait: InitWait = { servingWithoutAnonMs: 0, lastPsqlDetail: "" }
   while (Date.now() < deadline) {
-    const health = dockerPgHealthStatus(name)
-    const logs = dockerPgLogsTail(name)
-    const serving =
-      health === "healthy" ||
-      dockerPgPostInitServing(logs) ||
-      dockerPgExecReady(name)
-
-    if (serving && !migrateStillRunning(logs)) {
-      if (dockerPgHasAnonRole(name, projectName, password)) return
-
-      const probe = dockerPgPsql(name, projectName, ANON_ROLE_SQL, password)
-      lastPsqlDetail = [
-        probe.status !== 0 ? `psql exit ${probe.status}` : "",
-        probe.stderr?.trim(),
-        probe.stdout?.trim() ? `stdout=${probe.stdout.trim()}` : "",
-      ]
-        .filter(Boolean)
-        .join("; ")
-
-      const reusedVolume =
-        logs.includes("database system is ready to accept connections") &&
-        !logs.includes("PostgreSQL init process complete")
-
-      if (reusedVolume) {
-        servingWithoutAnonMs += 500
-        if (servingWithoutAnonMs >= 5_000) throw staleVolumeError(name)
-      } else {
-        servingWithoutAnonMs = 0
-      }
-    } else {
-      servingWithoutAnonMs = 0
-    }
-
+    if (await initFinished(name, projectName, password, wait)) return
     await sleep(500)
   }
+  throw await initTimeoutError(name, timeoutMs, wait.lastPsqlDetail)
+}
 
-  const logs = dockerPgLogsTail(name, 80)
-  throw new Error(
+/** What {@link dockerPgWaitReady} carries between polls. */
+interface InitWait {
+  /** How long a reused volume has served without the API roles. */
+  servingWithoutAnonMs: number
+  /** What the last anon-role probe said, for the timeout's message. */
+  lastPsqlDetail: string
+}
+
+/** One poll: true once Postgres serves with the API roles; throws for a volume that never gets them. */
+async function initFinished(name: string, projectName: string, password: string, wait: InitWait): Promise<boolean> {
+  const health = await dockerPgHealthStatus(name)
+  const logs = await dockerPgLogsTail(name)
+  const serving = health === "healthy" || dockerPgPostInitServing(logs) || (await dockerPgExecReady(name))
+  if (!serving || migrateStillRunning(logs)) {
+    wait.servingWithoutAnonMs = 0
+    return false
+  }
+  if (await dockerPgHasAnonRole(name, projectName, password)) return true
+  wait.lastPsqlDetail = anonProbeDetail(await dockerPgPsql(name, projectName, ANON_ROLE_SQL, password))
+  const reusedVolume =
+    logs.includes("database system is ready to accept connections") &&
+    !logs.includes("PostgreSQL init process complete")
+  if (!reusedVolume) {
+    wait.servingWithoutAnonMs = 0
+    return false
+  }
+  wait.servingWithoutAnonMs += 500
+  if (wait.servingWithoutAnonMs >= 5_000) throw staleVolumeError(name)
+  return false
+}
+
+/** What an anon-role probe said, in one line. */
+function anonProbeDetail(probe: { status: number | null; stdout: string; stderr: string }): string {
+  return [
+    probe.status !== 0 ? `psql exit ${probe.status}` : "",
+    probe.stderr.trim(),
+    probe.stdout.trim() ? `stdout=${probe.stdout.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join("; ")
+}
+
+/** Image init did not finish in time: what is known, and the volume to remove after an upgrade. */
+async function initTimeoutError(name: string, timeoutMs: number, lastPsqlDetail: string): Promise<Error> {
+  const logs = await dockerPgLogsTail(name, 80)
+  return new Error(
     `Docker Postgres "${name}" did not finish image init within ${timeoutMs}ms.\n` +
       "  API roles (anon, authenticated, service_role) are created by the supatype/postgres\n" +
       "  entrypoint (99-supatype-migrate.sh), not by the CLI.\n" +
@@ -239,7 +224,7 @@ function staleVolumeError(name: string): Error {
 /** Connection string for the Docker container (local dev credentials). */
 export function dockerDbUrl(projectName: string, port: number, password = DEFAULT_DEV_PASSWORD): string {
   // Host → published port. sqlx/libpq "prefer" can mis-handle SSL on some hosts (e.g. Docker Desktop on Windows).
-  return `postgres://${PG_USER}:${password}@127.0.0.1:${port}/${projectName}?sslmode=disable`
+  return `postgres://${PG_USER}:${encodeURIComponent(password)}@127.0.0.1:${port}/${projectName}?sslmode=disable`
 }
 
 /**
@@ -248,14 +233,8 @@ export function dockerDbUrl(projectName: string, port: number, password = DEFAUL
  * container where pg_hba grants trust, avoids host-published-port SCRAM/SSL issues.
  */
 export function dockerPgLoopbackDbUrl(projectName: string, password = DEFAULT_DEV_PASSWORD): string {
-  return `postgres://${PG_USER}:${password}@127.0.0.1:5432/${projectName}?sslmode=disable`
+  return `postgres://${PG_USER}:${encodeURIComponent(password)}@127.0.0.1:5432/${projectName}?sslmode=disable`
 }
-
-/**
- * Published Hub tag for local dev when CDN server version is not on Docker Hub yet.
- * Keep in sync with tests/integration/scripts/compose-smoke.sh.
- */
-export const DEFAULT_SERVER_DOCKER_IMAGE = "supatype/server:latest"
 
 /**
  * Run `supatype-server migrate` on the Postgres container network (loopback trust).
@@ -267,28 +246,14 @@ export function runAuthMigrationsViaDocker(
   migrateEnv: Record<string, string>,
 ): void {
   const secrets = dockerEnv(migrateEnv)
-  const result = spawnSync(
-    "docker",
-    [
-      "run", "--rm",
-      "--network", `container:${pgContainerName}`,
-      ...secrets.args,
-      serverImage,
-      "migrate",
-    ],
-    { encoding: "utf8", stdio: "pipe", env: secrets.env },
+  // `run` may pull the server image first.
+  const result = askDockerSync(
+    ["run", "--rm", "--network", `container:${pgContainerName}`, ...secrets.args, serverImage, "migrate"],
+    { env: secrets.env, timeoutMs: DOCKER_PULL_TIMEOUT_MS },
   )
   if (result.status !== 0) {
-    const detail = (result.stderr ?? result.stdout ?? "").trim()
-    throw new Error(
-      `auth migrations failed in Docker (exit ${result.status ?? "unknown"})` +
-        (detail ? `:\n${detail}` : ""),
-    )
+    throw new Error(`auth migrations failed in Docker (exit ${result.status ?? "unknown"}):\n${spawnFailureText(result)}`)
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function indent(s: string): string {

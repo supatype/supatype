@@ -338,8 +338,6 @@ export interface CompositeExpansion {
     required: boolean
     defaultValue?: unknown | undefined
   }>
-  installSQL?: string | undefined
-  uninstallSQL?: string | undefined
 }
 
 /** Built-in type-to-pgType mapping for common types. */
@@ -388,11 +386,7 @@ export function expandPluginComposites(): Map<string, CompositeExpansion> {
       }
     })
 
-    result.set(def.name, {
-      fields,
-      ...(def.installSQL !== undefined ? { installSQL: def.installSQL } : {}),
-      ...(def.uninstallSQL !== undefined ? { uninstallSQL: def.uninstallSQL } : {}),
-    })
+    result.set(def.name, { fields })
   }
 
   return result

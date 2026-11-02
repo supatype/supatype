@@ -7,9 +7,9 @@ import {
   readdirSync,
   rmSync,
 } from "node:fs"
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { dirname, isAbsolute, join } from "node:path"
 import { randomUUID } from "node:crypto"
-import { isArrayOf, isBoolean, isShape, isString, isUnknown, optional, type FromShape } from "@supatype/shared"
+import { isArrayOf, isBoolean, isShape, isString, isUnknown, optional, resolveInside, type FromShape } from "@supatype/shared"
 import { badRequest, bodyOf, HttpError, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject, projectRoot } from "../project.js"
@@ -56,11 +56,8 @@ function fileInside(root: string, path: unknown): string {
   if (typeof path !== "string" || path === "" || isAbsolute(path)) {
     throw badRequest(`Invalid file path ${JSON.stringify(path)}`)
   }
-  const target = resolve(root, path)
-  const rel = relative(resolve(root), target)
-  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
-    throw badRequest(`File path ${JSON.stringify(path)} resolves outside the deployment`)
-  }
+  const target = resolveInside(root, path)
+  if (target === undefined) throw badRequest(`File path ${JSON.stringify(path)} resolves outside the deployment`)
   return target
 }
 

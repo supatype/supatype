@@ -24,15 +24,15 @@
  * explicitly; `supatype db check` reports the mismatch either way.
  */
 
-import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
+import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS, dockerHasImage } from "./docker-exec.js"
 // Statically imported: these packages are ESM, where `require` does not exist. The first attempt used
 // it for a lazy import and every command that generates compose would have thrown at runtime, caught
 // by the tests that run the built binary rather than the source.
 import { loadSchemaAst } from "./config.js"
 import { astModels, isNonEmptyObject, objectAt } from "./ast-read.js"
 export { nativeMaskLibraryPresent } from "./postgres-ctl.js"
-import { postgresImageFor } from "./postgres-image.js"
+import { runningPostgresImage } from "./postgres-image.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import {
   resolveRuntimeProvider,
@@ -42,14 +42,13 @@ import {
 
 export type FieldMaskingTier = "none" | "extension" | "views"
 
-
 /** Postgres image this project would run, when it runs one at all. */
 function postgresImage(config: SupatypeProjectConfig): string | undefined {
   if (usesExternalDatabase(config)) return undefined
   if (config.database.provider !== "docker" && resolveRuntimeProvider(config) !== "docker") {
     return undefined
   }
-  return postgresImageFor(config).ref ?? "supatype/postgres:latest"
+  return runningPostgresImage(config)
 }
 
 /** True when the Postgres this project runs is one that carries `supatype_mask`. */
@@ -73,11 +72,12 @@ const maskLibraryIn = new Map<string, boolean>()
 function imageCarriesMaskLibrary(image: string): boolean | undefined {
   const known = maskLibraryIn.get(image)
   if (known !== undefined) return known
-  if (spawnSync("docker", ["image", "inspect", image], { stdio: "ignore" }).status !== 0) return undefined
-  const probe = spawnSync(
-    "docker",
+  if (!dockerHasImage(image)) return undefined
+  // Synchronous because the tier is decided while compose is rendered, which is synchronous. The
+  // image is already here, so the container needs no pull: a query's limit is enough.
+  const probe = askDockerSync(
     ["run", "--rm", "--entrypoint", "sh", image, "-c", 'test -f "$(pg_config --pkglibdir)/supatype_mask.so"'],
-    { stdio: "ignore" },
+    { stdio: "ignore", timeoutMs: DOCKER_QUERY_TIMEOUT_MS },
   )
   // 0 found, 1 not found; anything else is Docker failing, which says nothing about the image.
   if (probe.status !== 0 && probe.status !== 1) return undefined

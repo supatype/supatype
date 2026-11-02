@@ -9,7 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
 import { tmpdir } from "node:os"
 import {
   nativeDevRolesSql,
@@ -66,6 +66,7 @@ describe("supatype-server's outer environment on the native path", () => {
   it("carries the rest of the outer layer unchanged", () => {
     installLibrary("pg_graphql")
     expect(nativeServerCoreEnv(coreInput(binDir))).toEqual({
+      NO_COLOR: "1",
       SUPATYPE_MODE: "dev",
       SUPATYPE_VALKEY_ADDR: "127.0.0.1:6379",
       SUPATYPE_MANAGED_PROJECT_REF: "acme",
@@ -74,6 +75,16 @@ describe("supatype-server's outer environment on the native path", () => {
       SUPATYPE_POSTGREST_URL: "http://127.0.0.1:3001",
       SUPATYPE_DB_PUBLIC_URL: "postgres://postgres@127.0.0.1:5433/acme?sslmode=disable",
     })
+  })
+
+  // The functions worker reads the manifest the server reads, to answer 503 only for a hook it names.
+  // Natively the server passes its environment on to the Deno child that runs the worker, so the
+  // worker is told the same absolute path; dev builds it from process.cwd().
+  it("names the manifest by its absolute path, which the worker the server runs inherits", () => {
+    const manifestPath = join(root, ".supatype", "manifest.json")
+    const env = nativeServerCoreEnv({ ...coreInput(binDir), manifestPath })
+    expect(env["SUPATYPE_MANIFEST_PATH"]).toBe(manifestPath)
+    expect(isAbsolute(env["SUPATYPE_MANIFEST_PATH"] ?? "")).toBe(true)
   })
 
   it("omits the cache address when there is none", () => {

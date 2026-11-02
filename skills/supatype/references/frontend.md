@@ -36,7 +36,7 @@ export default defineConfig({
   database: { provider: "docker" },
   server: {
     mode: "standalone",
-    port: 54321,
+    port: 18471,
     domain: "demo.supatype.com",
     tls: { email: "you@example.com", provider: "kong" },
   },
@@ -81,7 +81,7 @@ export const supatype = createClient({
 })
 ```
 
-`supatype keys` writes `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks.
+`supatype keys` writes `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_`, `EXPO_PUBLIC_` and `NEXT_PUBLIC_` copies for other frameworks.
 
 Call `createClient` with no type argument: the generated client already carries the schema's types.
 `createClient<Database>` loses the drafts typing (`update(..., { publish: true })` stops compiling)
@@ -322,7 +322,7 @@ const client = useSupatype<Database>() // escape hatch
 // on the platform origin, so name it.
 const { data: post, isPreview } = useLivePreview({
   initialData: serverPost,
-  model: "post",
+  model: "Post", // the model name Studio sends, as the schema declares it
   studioOrigin: "https://studio.supatype.com",
 })
 ```

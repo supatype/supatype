@@ -18,7 +18,7 @@ import {
   nativeKeyspaceLibraryPresent,
 } from "./postgres-ctl.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
-import { probeTcp } from "./valkey-sidecar.js"
+import { answersPing } from "./valkey-sidecar.js"
 
 /** What the native keyspace decision asks of the machine before Postgres starts. */
 export interface NativeKeyspaceChecks {
@@ -63,7 +63,7 @@ export async function nativeKeyspacePort(
  */
 export async function nativeKeyspaceAddr(
   keyspacePort: number | null,
-  respAnswers: (port: number) => Promise<boolean> = (port) => probeTcp("127.0.0.1", port),
+  respAnswers: (port: number) => Promise<boolean> = (port) => answersPing("127.0.0.1", port),
 ): Promise<string | null> {
   if (keyspacePort === null) return null
   if (await respAnswers(keyspacePort)) return `127.0.0.1:${keyspacePort}`

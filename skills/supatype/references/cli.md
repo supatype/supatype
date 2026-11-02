@@ -16,13 +16,13 @@ release publishes none; the engine still installs).
 
 | Command | Purpose |
 |---------|---------|
-| `supatype init [name]` | Scaffold project. Flags: `--mode dev \| standalone` |
-| `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` (printed; `--write` fills blanks in `.env`, `--write --force` replaces them). `JWT_SECRET` must be at least 32 characters: `dev` and `self-host compose up` refuse a shorter one with `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` |
+| `supatype init [name]` | Scaffold a project. Interactive in a terminal: it asks where the project will run in production and whether to create a first Studio admin, and writes the keys. Flags: `-y`/`--defaults` (no prompts, sensible defaults), `--no-install`, `--no-keys`, `--admin-email <email>`, `--admin-password <password>`, `--no-admin`, `--mode dev \| standalone` (kept for older scripts; prefer the prompts or `--defaults`) |
+| `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` (fills blanks in `.env` when there is one, `--force` replaces them; `--print`, or no `.env`, only prints, and `--print` with no secret anywhere exits 1 rather than inventing one; `--write` is accepted for older scripts). The `JWT_SECRET` rule, shared by `keys`, `dev`, `init` and `self-host compose up`: `.env`'s always wins; a shell `JWT_SECRET` is used only when `.env` has none, and is then written into it; a shell one that differs from `.env`'s gets one warning line saying `.env`'s is used, never a refusal; only a `--secret` that differs from `.env`'s is refused. When a `JWT_SECRET` is newly written into `.env`, both keys are signed again with it. Every docker compose command runs without the shell's `JWT_SECRET`, `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines them. `JWT_SECRET` must be at least 32 characters, and one written into `.env` must hold no whitespace, `#` or quotes; the secret is checked before anything is written, and `dev`, `keys` and `self-host compose up` refuse a shorter one in `.env` with `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` (`init` warns and generates one instead of using an unusable shell secret.) |
 | `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Watches the schema, and `functions/` and `hooks/`: a saved function or hook restarts the functions worker, so the next call runs the new code (native dev reloads through `deno run --watch`). Flags: `--no-watch` (no schema watch, and no worker restarts under Docker), `--stream`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY), `--overwrite-drift` (every push of the session puts back access changed outside Supatype). Renders `auth.providers` for the auth server and warns about an enabled provider whose secret is set nowhere (config.md, OAuth providers). Native: Postgres checks passwords (`scram-sha-256`, `.env`'s `POSTGRES_PASSWORD` and `AUTHENTICATOR_PASSWORD`, generated when missing); a `trust` data directory from an older CLI is converted on its next start, printing "This Postgres trusted every local connection; it now checks passwords." `supatype pg psql` passes the password |
 | `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct`, `--overwrite-drift`. Against the project's compose stack or a linked self-host server it then waits (at most 40 s, printing `[supatype] Waiting for the REST API to load the new schema (PostgREST answers 503 until it does)...`) until `/rest/v1/` stops answering 503; giving up does not fail the push. On the Docker provider a push the engine refuses over access changed outside Supatype shows each object and, in a terminal, asks before putting it back. On every path, declining keeps the hand edits, applies nothing and exits 1. A change that rewrites a table of more than 100k estimated rows (a type change that is not binary-compatible, say) locks it while it runs: the plan says so with the table's size, and the push asks in a terminal, applies it with `--yes`, and refuses it anywhere else. Each attempt waits at most 3 seconds for a table lock and the push tries again a few times; if a session still holds the table, it fails naming the table and that session's pid, state and age, having applied nothing. A new index on a table with rows is built concurrently, and a new foreign key or check validated, after the migration commits, so neither stops the application's writes |
 | `supatype diff` | Dry-run schema changes. Flags: `--connection`, `--env`, `--direct` |
 | `supatype generate` | Regenerate types without migration |
-| `supatype seed [file]` | Apply seed data in one transaction. Flags: `--atomic`, `--status`, `--connection`, `--environment`, `--force`. See [references/seeding.md](references/seeding.md) |
+| `supatype seed [file]` | Apply seed data, one transaction per file, so a failure leaves the earlier files committed. Flags: `--atomic` (every file in one transaction), `--status`, `--connection`, `--environment`, `--force`. See [seeding.md](seeding.md) |
 
 ## Linking (unified)
 
@@ -31,7 +31,7 @@ All targets use `.supatype/link.json` with an `environments` map:
 | Command | Purpose |
 |---------|---------|
 | `supatype link --project <ref>` | Link to Supatype Cloud (uses platform access token) |
-| `supatype link --url <api> --token <key>` | Link to self-host (`SERVICE_ROLE_KEY` from `supatype keys`) |
+| `supatype link --url <api> --token <key>` | Link to self-host (the server's `SERVICE_ROLE_KEY`, which `supatype keys --write` puts in its `.env`) |
 | `supatype link --env staging --url ... --token ...` | Add another environment |
 | `supatype envs list` | List linked environments |
 | `supatype envs use <name>` | Set default environment |
@@ -48,13 +48,14 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 |---------|---------|
 | `supatype doctor` | What a push would find: missing, drifted, stale, conflicting, unmanaged and released objects. Flags: `--env`, `--direct`, `--strict` (fail when a push would change or refuse something), `--rebaseline` (record drifted objects as they are now, changing nothing; after a Postgres upgrade; shows them and asks, `--yes` when not interactive; policies, grants, labels and RLS only with `--accept-access-drift` too, else listed as not rebaselined; `--overwrite-drift` is push's flag and doctor refuses it, pointing here) |
 | `supatype adopt` | Hand Supatype the objects a push refuses because their names are taken; records ownership, never edits the object. Agreed at the prompt, it adopts only what its preview listed; `--yes` alone adopts every conflict there is and lists what it took; `--key kind:table.name` (repeatable) adopts only those. If an object it was to adopt is no longer a conflict, it writes nothing and exits 1 asking you to run it again. `--release kind:table.name` makes every push leave an object alone, and `--reclaim kind:table.name` hands it back. `--key column:table.name` adopts a column added outside Supatype (one the schema does not declare, e.g. one doctor or push says has no write grant), and adopted means managed: the CLI then adds the field to the model whose table it is, keyed by the column name, with the field type whose column is exactly the live one (an identity column as `Identity<number>`, `Identity<bigint, "by-default">` or `SmallInt<{ identity: … }>`, a generated one as `Generated<T, "<expression>">`), and regenerates types, so the next `push` treats it as declared. In a terminal it shows the file, model and field line and asks (y/N) first; `--yes` edits without asking, CI included. If the model cannot be found, its fields are not written inline, or the column's type has no exact field type (for example `varchar`, `timestamp` without time zone, an unbounded `numeric`, or a generated `jsonb` column), or the field's import would clash with a name the file already has, or you decline, or the file changed while you were asked, the file is left alone and it prints the field line and where to add it; the adopt still succeeds and it exits 0. Flags: `--env`, `--yes` (required when not interactive), `--release`, `--reclaim`, `--key` (each checked against the server or engine first). `push` and `dev` offer to run it when they find unmanaged tables |
-| `supatype introspect` | Introspect live Postgres. Flags: `--env`, `--json`, `--direct` |
+| `supatype introspect` | Introspect live Postgres. Flags: `--connection`, `--env`, `--json`, `--out <path>` (write the JSON to a file), `--direct` |
 | `supatype migrate` | Write the SQL a push would apply, without applying it. Plain, it is planned without taking any lock your application waits on, and the file records nothing: applied by hand, it writes no migration history and no record of which objects are Supatype's, so the next `push` finds the tables unmanaged (its header says so). `--record` rehearses the push in a transaction that is rolled back, so the file also records the history and the ledger and applying it by hand is the push; while it rehearses it takes the table locks a push takes. A new index on a table with rows is built with `CREATE INDEX CONCURRENTLY`, and a new foreign key or check is added `NOT VALID` and validated, after the file's transaction (plain only). Flags: `--connection`, `--record`, `--force` (destructive changes and rewrites of large tables), `-o, --output <file>` |
 | `supatype rollback` | Undo the last applied migration (linked or direct). Flags: `--env`, `--connection`, `--direct`, `--sync-schema`, `--no-sync-schema` |
 | `supatype migrations list` | List applied migrations with snapshot metadata. Flags: `--env`, `--connection`, `--direct` |
 | `supatype rename <from> <to>` | Record a rename in `supatype/renames.json` (commit it): `member.name member.title` for a column, `member members` for a table. Every push replays the journal, so each database renames instead of dropping. `--prune` removes entries the target already applied. In a terminal, `dev` and `push` offer to record a likely rename before asking to drop data |
 | `supatype db connection-string` | Show DB URL (cloud linked projects) |
 | `supatype db reset-password` | Reset cloud project DB password |
+| `supatype db check` | Check whether a Postgres you run yourself has what Supatype needs. Flags: `--connection <url>`, `--schema <name>`, `--emit` (print the SQL that fixes it), `--fix` (apply that SQL in one transaction), `--authenticator-password <password>` |
 | `supatype pg start` / `stop` / `reset` / `psql [db]` | Native Postgres helpers; `psql` passes `.env`'s `POSTGRES_PASSWORD` |
 | `supatype pull` | Draft `schema/index.ts` from live DB introspection (review before push); identity and generated columns are declared as such. Flags: `--connection`, `--out`, `--dry-run` |
 
@@ -65,13 +66,13 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype app add` | Add static or proxy app to compose (e.g. `--static ./public`) |
 | `supatype app remove` | Remove app from compose |
 | `supatype add domain [domain]` | Add a custom domain with automatic HTTPS (self-host). Interactive, or pass `--email <addr>`. Sets `server.mode=standalone` + `domain` + `tls`; apply with `compose up -d` |
-| `supatype self-host compose render` | Write docker-compose.yml |
-| `supatype self-host compose up -d` | Start production stack |
-| `supatype self-host compose down` | Stop stack |
+| `supatype self-host compose render` | Write docker-compose.yml without starting anything (`up` and the other compose commands render it themselves) |
+| `supatype self-host compose up -d` | Start production stack. Fills blank keys in `.env`, signed with its `JWT_SECRET` (both signed again when a `JWT_SECRET` is newly written there); a shell `JWT_SECRET` that differs from `.env`'s is warned about and not used |
+| `supatype self-host compose down` | Stop stack. `down`, `status` and `logs` run against the compose file already on disk instead of rewriting it, so they skip the URL-safe password check that only the commands starting containers make (`dev` at startup, `self-host compose up`, `render`, `restart`), and a stack started with an older password can still be stopped (with no file on disk yet they render one, without the check). `update`, push and diff never refuse over it either |
 | `supatype self-host compose status` | Health check |
 | `supatype self-host compose restart <service>` | Recreate one service (e.g. `server`, `functions-worker`) with the current config and `.env`; the others keep running |
 | `supatype self-host compose logs` | Follow logs. `--service <name>` for one service |
-| `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only`, `--overwrite-drift` (without it a deploy refuses on access changed outside Supatype) |
+| `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only`, `--app-only` (static site only), `--skip-build` (deploy the existing build), `--preview` (a temporary preview URL), `--yes` (skip confirmations), `--overwrite-drift` (without it a deploy refuses on access changed outside Supatype) |
 | `supatype deploy status` | Current static deployment |
 | `supatype deploy rollback` | Roll back static deployment. Flags: `--env`, `--to <deployment-id>` |
 
@@ -80,10 +81,11 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | Command | Purpose |
 |---------|---------|
 | `supatype functions new <name>` | Scaffold `functions/<name>/index.ts` plus Deno IDE types (`functions/deno.d.ts`, `functions/tsconfig.json`) |
-| `supatype functions serve` | Local Deno server for all functions |
+| `supatype functions serve` | Local Deno server for all functions, on port 18472 unless `--port` moves it |
 | `supatype functions deploy` | Deploy edge functions via control plane when linked. On a self-host compose stack nothing is uploaded (the worker reads `functions/` from disk): run `supatype self-host compose restart functions-worker` to load changes (`supatype dev` does that on save) |
 | `supatype functions list` | List deployed functions |
-| `supatype plugins` | Plugin scaffolding |
+| `supatype functions env set KEY=value` / `list` / `unset KEY` | A function's env values: on the linked project, else `functions/.env.local`. With `functions/.env.<name>.local` (one function, wins), every value arrives in `ctx.env`, read again on each call, never in `Deno.env`: that is the worker's one process environment, shared by every call running at once, so `Deno.env.get` finds none of them |
+| `supatype plugins` | Plugin scaffolding. A plugin cannot run SQL: the SDK has no `installSQL` or `uninstallSQL`, and `defineComposite` refuses either |
 | `supatype types` | Type utilities |
 
 A handler is `(req, ctx)`, with `ctx` typed by `functions/_shared/context.ts` (rewritten by `init`, `functions new`, `push` and `dev`). `ctx.url` is for calling the API from inside the function (under Docker, `http://kong:8000`, which no browser can open); `ctx.publicUrl` is the project's public address, for links you give to people. The scaffolded function returns `publicUrl`.
@@ -162,7 +164,3 @@ supatype self-host compose up -d                              # publishes :80/:4
 supatype link --url https://demo.example.com --token $SERVICE_ROLE_KEY
 supatype deploy
 ```
-
-## Branch environments (Phase 22)
-
-Ephemeral branch environments are not implemented in v1. Design hooks: `.supatype/branch.json` and `resolveTarget()` branch mode. Full PR preview provisioning is deferred to Phase 22.
