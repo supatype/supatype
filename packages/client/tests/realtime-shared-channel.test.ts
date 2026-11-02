@@ -16,18 +16,12 @@ const CHANNEL = "x"
 
 let harness: SocketSwapHarness
 
-function socket(): SocketSwapHarness["sockets"][number] {
-  const ws = harness.sockets[harness.sockets.length - 1]
-  if (ws === undefined) throw new Error("no socket has been opened")
-  return ws
-}
-
 function unsubscribeFrames(): Array<Record<string, unknown>> {
-  return sentFrames(socket()).filter((frame) => frame["type"] === "unsubscribe" && frame["channel"] === CHANNEL)
+  return sentFrames(harness.socket()).filter((frame) => frame["type"] === "unsubscribe" && frame["channel"] === CHANNEL)
 }
 
 function deliverInsert(id: number): void {
-  simulateServerMessage(socket(), {
+  simulateServerMessage(harness.socket(), {
     type: "change",
     channel: CHANNEL,
     event: "INSERT",
@@ -67,7 +61,7 @@ describe("two handles on one channel name", () => {
 
     a.unsubscribe()
     expect(unsubscribeFrames()).toEqual([])
-    expect(socket().close).not.toHaveBeenCalled()
+    expect(harness.socket().close).not.toHaveBeenCalled()
 
     b.unsubscribe()
     expect(unsubscribeFrames()).toHaveLength(1)
@@ -99,8 +93,8 @@ describe("two handles on one channel name", () => {
     harness.ackJoins()
 
     a.unsubscribe()
-    simulateServerMessage(socket(), { type: "broadcast", channel: CHANNEL, event: "ping", payload: {} })
-    simulateServerMessage(socket(), { type: "presence", channel: CHANNEL, joins: [{ user_id: "u" }], leaves: [] })
+    simulateServerMessage(harness.socket(), { type: "broadcast", channel: CHANNEL, event: "ping", payload: {} })
+    simulateServerMessage(harness.socket(), { type: "presence", channel: CHANNEL, joins: [{ user_id: "u" }], leaves: [] })
 
     expect(heard).toEqual(["b", "b-presence"])
   })
@@ -131,11 +125,11 @@ describe("rows on a channel whose joining handle has left", () => {
 })
 
 function subscribeFrames(): Array<Record<string, unknown>> {
-  return sentFrames(socket()).filter((frame) => frame["type"] === "subscribe" && frame["channel"] === CHANNEL)
+  return sentFrames(harness.socket()).filter((frame) => frame["type"] === "subscribe" && frame["channel"] === CHANNEL)
 }
 
 function ackJoin(channel: string): void {
-  simulateServerMessage(socket(), { type: "system", status: "ok", message: `subscribed to ${channel}` })
+  simulateServerMessage(harness.socket(), { type: "system", status: "ok", message: `subscribed to ${channel}` })
 }
 
 /**
@@ -201,7 +195,7 @@ describe("rows on a channel joined before any row listener", () => {
 
     handle.on("postgres_changes", { event: "*", table: "invoices" }, (p) => invoices.push(p))
     handle.on("postgres_changes", { event: "*", table: "orders" }, (p) => orders.push(p))
-    simulateServerMessage(socket(), {
+    simulateServerMessage(harness.socket(), {
       type: "change",
       channel: name,
       event: "INSERT",
