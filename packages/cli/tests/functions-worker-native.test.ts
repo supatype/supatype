@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import { FUNCTIONS_WORKER_SOURCE } from "../src/generated/functions-worker-source.js"
@@ -216,9 +216,14 @@ describe("the worker the CLI ships", () => {
     expect(readFileSync(main, "utf8")).toBe(FUNCTIONS_WORKER_SOURCE["main.ts"])
   })
 
+  // PR #293 CI: this passed a Windows path on every OS, and on Linux and macOS pathToFileURL read
+  // "C:\cache\..." as a relative name in the working directory. The path is this machine's own, as
+  // the worker's cache path always is: C:\cache\... on Windows, /cache/... elsewhere.
   it("is what native dev's entry imports, by file URL, with the functions it found named", () => {
-    const source = devFunctionsEntrySource(["admin", "hello"], "C:\\cache\\functions-worker\\abc\\main.ts")
-    expect(source).toContain('import "file:///C:/cache/functions-worker/abc/main.ts"')
+    const main = resolve(sep, "cache", "functions-worker", "abc", "main.ts")
+    const source = devFunctionsEntrySource(["admin", "hello"], main)
+    expect(source).toMatch(/^import "file:\/\/\/(?:[A-Za-z]:\/)?cache\/functions-worker\/abc\/main\.ts"$/m)
+    expect(source).not.toContain("%5C")
     expect(source).toContain("// Routes: admin, hello")
   })
 

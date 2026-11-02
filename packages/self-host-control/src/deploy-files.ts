@@ -74,10 +74,14 @@ export function writeRoot(path: string, label: string, opts: { mayBeLink?: boole
   return { path: abs, real: entry === undefined ? null : realOf(abs, label, abs), label }
 }
 
-/** The real path of `path`, refused (400) when a link on the way leads nowhere. */
+/**
+ * The real path of `path`, refused (400) when a link on the way leads nowhere. The native resolver,
+ * as fs.promises.realpath is (writeOne compares the two): the JavaScript one leaves a Windows 8.3
+ * short name (`RUNNER~1`) as it is, and the comparison then refused every write under one.
+ */
 function realOf(path: string, label: string, shown: string): string {
   try {
-    return realpathSync(path)
+    return realpathSync.native(path)
   } catch {
     throw badRequest(`${label}: ${shown} is a link that leads nowhere`)
   }
