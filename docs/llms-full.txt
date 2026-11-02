@@ -179,7 +179,7 @@ kill "$DEV_PID"; wait "$DEV_PID"
 
 If `dev` itself is killed (its process ended, or its window closed before it finished stopping), the stack can be left running. The next `supatype dev` finds it and offers to stop it, and `supatype self-host compose down` stops it now.
 
-The gateway serves REST at `/rest/v1/`, auth at `/auth/v1/`, storage and realtime. With Docker it listens on `http://localhost:<gateway-port>`: init picks a free port per project and writes the URL to `.env` as `API_EXTERNAL_URL` (the port alone is `SUPATYPE_KONG_PORT`). With Native it listens on `http://localhost:54321`.
+The gateway serves REST at `/rest/v1/`, auth at `/auth/v1/`, storage and realtime. With Docker it listens on `http://localhost:<gateway-port>`: init picks a free port per project and writes the URL to `.env` as `API_EXTERNAL_URL` (the port alone is `SUPATYPE_KONG_PORT`). With Native it listens on `http://localhost:18471`, `server.port` in `supatype.config.ts`.
 
 For direct SQL, Docker publishes Postgres on `127.0.0.1` at `SUPATYPE_DEV_DB_PORT` (54329 unless set), and `dev` points `DATABASE_URL` in `.env` at it. Native Postgres listens on port 5432 and checks passwords: connect as `postgres` with `POSTGRES_PASSWORD` from `.env`, or run `supatype pg psql`, which passes it for you.
 
@@ -297,7 +297,7 @@ $ supatype push
 
 > **PORTS:** Only the gateway is published on every interface, at `SUPATYPE_KONG_PORT`, or on ports 80 and 443 once HTTPS is on. Postgres (`SUPATYPE_DB_PORT`, default 5432), the API server (`SUPATYPE_SERVER_PORT`, default 9999) and SeaweedFS (`SUPATYPE_SEAWEEDFS_PORT`, default 8333) bind `127.0.0.1`, so they are reachable from the server itself and nowhere else. To reach them from other machines, set `SUPATYPE_PUBLISH_ADDRESS=0.0.0.0` (or one interface's address) in `.env` and run `supatype self-host compose up -d`. Put a firewall in front first. `supatype init` lists these variables, commented out, in `.env`.
 
-Images come from Docker Hub at `:latest`: `supatype/postgres`, `supatype/server`, `supatype/realtime`, `supatype/storage`, `supatype/studio`, `supatype/schema-engine`, `supatype/functions-worker` and `supatype/control-plane`. The stack also runs `postgrest/postgrest`, `kong` and SeaweedFS, and Valkey when the cache does not run inside Postgres. Pin versions with `SUPATYPE_*_IMAGE` in `.env`, or with `versions` in `supatype.config.ts`.
+Images come from Docker Hub, and each CLI release runs the exact images it was tested with, never `:latest`: `supatype/studio`, `supatype/storage`, `supatype/realtime`, `supatype/functions-worker` and `supatype/control-plane` at the CLI's own version, and `supatype/schema-engine`, `supatype/server` and `supatype/postgres` at the releases pinned for it. The stack also runs `postgrest/postgrest`, `kong` and SeaweedFS, and Valkey when the cache does not run inside Postgres. Upgrading the CLI moves them; `supatype update` pulls the new tags. To run another image, set its `SUPATYPE_*_IMAGE` in `.env` (for example `SUPATYPE_SERVER_IMAGE=supatype/server:v2.3.0`), or pin `versions.engine`, `versions.server` or `versions.postgres` in `supatype.config.ts`.
 
 To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: { external: { url: process.env.DATABASE_URL! } }` in `supatype.config.ts`. The stack then starts no `db` service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in `supatype/postgres`. Realtime needs `wal_level = logical`, a free replication slot, the `wal2json` plugin and a role with `REPLICATION`. `supatype db check --connection "$DATABASE_URL"` reports what a database lacks, and `--emit` prints the SQL that fixes what it can.
 
@@ -1453,7 +1453,7 @@ Auth is built into the Supatype server. It signs users in, issues the tokens eve
 The auth service is part of `supatype-server`, the same process that serves REST, GraphQL, storage and functions. It answers under `/auth/v1` on your project's API URL. It keeps its users, identities and sessions in the `auth` schema of your project's database and runs its own migrations when the server starts.
 
 - `supatype dev` with `database.provider: "docker"` (what `supatype init` writes): the server runs in the Compose stack behind Kong. Your API URL is `API_EXTERNAL_URL` in the project's `.env`.
-- `supatype dev` with `database.provider: "native"`: the server runs as a local process on `server.port`, `54321` by default.
+- `supatype dev` with `database.provider: "native"`: the server runs as a local process on `server.port`, `18471` by default.
 - Self-host: `supatype self-host compose up` runs the same server image. It needs `JWT_SECRET` in `.env` and fills in a blank `ANON_KEY` or `SERVICE_ROLE_KEY` from it. See [Self-hosting](https://www.supatype.com/docs/#self-host).
 
 In local dev, sign-ups are confirmed automatically, so a new user gets a session straight away with no email round trip.
@@ -1504,14 +1504,13 @@ Each provider is switched on with environment variables named after it. For GitH
 `.env`:
 
 ```ini
-# Replace http://localhost:54321 with your API URL (API_EXTERNAL_URL)
 SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
 SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
 SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
-SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:54321/auth/v1/callback
+SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=<your API URL>/auth/v1/callback
 ```
 
-The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.
+The redirect URI is the auth service's callback: `/auth/v1/callback` on your API URL. Your API URL is `API_EXTERNAL_URL` in `.env`: under Docker, the project's gateway (`http://localhost:` and its `SUPATYPE_KONG_PORT`); with the native provider, the server itself (`http://localhost:18471` unless you set `server.port`). Register the same URL with the provider. A provider with no client id, secret or redirect URI is refused when someone tries to use it.
 
 Supported provider names: `apple`, `azure`, `bitbucket`, `discord`, `facebook`, `figma`, `fly`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin_oidc`, `notion`, `slack_oidc`, `snapchat`, `spotify`, `twitch`, `twitter`, `x`, `workos` and `zoom`. The auth server also accepts `vercel_marketplace`, and the older `linkedin` and `slack`, which the `_oidc` versions replace. Upper-case the name for the variable, so `linkedin_oidc` becomes `SUPATYPE_EXTERNAL_LINKEDIN_OIDC_ENABLED`.
 
@@ -2260,6 +2259,8 @@ Variables for functions live in env files inside the functions directory:
 
 Read them from `ctx.env`. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.
 
+Every value set with `supatype functions env set`, in `.env.local` or in `.env.<name>.local` arrives in `ctx.env` on each call, never in `Deno.env`: `Deno.env` is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. `Deno.env.get("RESEND_API_KEY")` finds nothing.
+
 ```sh
 $ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list
@@ -2298,7 +2299,7 @@ $ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'
 ```
 
-`serve` listens on port `54321` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. `--auth` adds a test token to the request.
+`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
 
 ### Self-host
 
@@ -4107,8 +4108,8 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | Command | Description | Useful flags |
 | --- | --- | --- |
 | `functions new <name>` | Scaffold a new edge function |  |
-| `functions serve` | Start a local Deno server that serves all functions with hot reload | `--port <port>` (default 54321), `--env-file <path>` (default `.env.local`) |
-| `functions invoke <name>` | Invoke a local or deployed function | `--data <json>`, `--auth`, `--local` |
+| `functions serve` | Start a local Deno server that serves all functions with hot reload | `--port <port>` (default 18472), `--env-file <path>` (default `.env.local`) |
+| `functions invoke <name>` | Invoke a local or deployed function | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
 | `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
 | `functions delete <name>` **Cloud** | Remove a deployed function |  |

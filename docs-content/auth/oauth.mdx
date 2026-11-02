@@ -77,8 +77,10 @@ GOOGLE_SECRET=...
 SUPATYPE_EXTERNAL_GITHUB_ENABLED=true
 SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID=your-client-id
 SUPATYPE_EXTERNAL_GITHUB_SECRET=your-client-secret
-SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18473/auth/v1/callback
+SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=<your API URL>/auth/v1/callback
 ```
+
+Your API URL is `API_EXTERNAL_URL` in `.env`: under Docker, the project's gateway (`http://localhost:` and its `SUPATYPE_KONG_PORT`); with the native provider, the server itself (`http://localhost:18471` unless you set `server.port`).
 
 ### 3. Trigger the OAuth flow
 

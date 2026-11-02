@@ -10,6 +10,7 @@ import {
   requiredHostComponents,
 } from "./required-host-components.js"
 import { resolveRuntimeProvider } from "./project-config.js"
+import { errorMessage } from "./error-message.js"
 import { error, info, warn } from "./ui/messages.js"
 
 export interface ComponentBinaryFailure {
@@ -50,7 +51,7 @@ export async function ensureComponentBinaries(
       await ensureBinary(component, config)
       info(`${component} ready.`)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       failures.push({ component, message })
       error(`Could not prepare ${component}: ${message}`)
     }

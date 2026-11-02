@@ -21,8 +21,8 @@ import { testClient, testConfig } from "./support.js"
  * tests rather than a workaround for them: effects run, so a hook reading a context that is not
  * there, or an unguarded `document` access in an effect, fails here and passes there.
  *
- * Twelve files import SlidePanel: every `database/` view, AuthManagement, LogsViewer,
- * ConnectModal. This covers one of them and unblocks the rest.
+ * Many files import SlidePanel: every `database/` view, AuthManagement, ConnectModal. This
+ * covers one of them and unblocks the rest.
  */
 
 const client = testClient({ url: "http://localhost:8000/studio/proxy" })

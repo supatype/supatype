@@ -16,10 +16,12 @@
  *   The only escape hatch is the explicit SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1.
  */
 
+import { setTimeout as sleep } from "node:timers/promises"
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
 import { isJsonObject } from "@supatype/shared"
 import { errorMessage } from "./error-message.js"
 import { readJsonObjectFile } from "./json-file.js"
+import { progress } from "./ui/messages.js"
 import {
   closeSync,
   copyFileSync,
@@ -37,10 +39,11 @@ import {
 } from "node:fs"
 import { chmod } from "node:fs/promises"
 import { homedir } from "node:os"
-import { basename, join, resolve, isAbsolute } from "node:path"
+import { basename, dirname, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "./link.js"
 import { releasePublicKey } from "./release-public-key.js"
+import { defaultComponentVersion } from "./release-images.js"
 import {
   isDownloadInProgress,
   releaseDownloadLock,
@@ -90,6 +93,7 @@ export function describeActiveOverrides(config: SupatypeProjectConfig): string[]
   add("postgres_dir", o.postgres_dir)
   add("deno", o.deno)
   add("realtime", o.realtime)
+  add("storage", o.storage)
   add("studio", o.studio)
   add("postgrest", o.postgrest)
   return lines
@@ -146,15 +150,6 @@ export function postgresArchiveTag(version: string): string {
   return version.split(".")[0]!
 }
 
-// CDN path templates per component.
-const CDN_PATHS: Record<Component, (version: string, platform: PlatformId) => string> = {
-  engine:   (v, p) => `/engine/v${v}/supatype-engine-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-  server:   (v, p) => `/server/v${v}/supatype-server-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-  postgres: (v, p) => `/postgres/v${v}/supatype-pg-${postgresArchiveTag(v)}-${p.os}-${p.arch}${p.os === "windows" ? ".zip" : ".tar.gz"}`,
-  deno:     (v, p) => `/deno/v${v}/deno-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-  realtime: (v, p) => `/realtime/v${v}/supatype-realtime-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-}
-
 // Checksums file path (one per version directory, covers all platform binaries).
 const checksumsDirPath = (component: Component, version: string): string =>
   `/${component}/v${version}/checksums.sha256`
@@ -175,6 +170,15 @@ export function cachedBinaryPath(component: Component, version: string, platform
   return join(cachePath(component, version), binaryName(component, version, platform))
 }
 
+/**
+ * The version of a binary in the cache, read from its path (`<cache>/<component>/<version>/<file>`),
+ * or undefined for one elsewhere, such as an override. No lookup: the binary in hand is what runs.
+ */
+export function cachedVersionOf(component: Component, binPath: string): string | undefined {
+  const versionDir = dirname(binPath)
+  return dirname(versionDir) === join(cacheRoot(), component) ? basename(versionDir) : undefined
+}
+
 /** True when the platform binary for `version` is present and passes format checks. */
 export function isCachedBinaryReady(
   component: Component,
@@ -193,6 +197,7 @@ function binaryName(component: Component, version: string, platform: PlatformId)
     case "postgres": return `supatype-pg-${postgresArchiveTag(version)}-${platform.os}-${platform.arch}${win ? ".zip" : ".tar.gz"}`
     case "deno":     return `deno-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
     case "realtime": return `supatype-realtime-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
+    case "storage":  return `supatype-storage-${platform.os}-${platform.arch}${win ? ".zip" : ".tar.gz"}`
   }
 }
 
@@ -319,7 +324,7 @@ export async function resolveBinary(
     // Only an unpinned project looks anything up, so this is `latest` being unreachable.
     const cached = newestCachedVersion(component, platform)
     if (cached !== undefined) return cachedBinaryPath(component, cached, platform)
-    const reason = err instanceof Error ? err.message : String(err)
+    const reason = errorMessage(err)
     const key = component === "postgres" ? "postgres_dir" : component
     throw new Error(
       `Could not look up the latest ${component} release (${reason}), and no ${component} binary is cached. ` +
@@ -373,7 +378,7 @@ export async function ensureCachedBinary(
   version: string,
   platform: PlatformId,
 ): Promise<string> {
-  return download(component, version, platform)
+  return (await download(component, version, platform)).path
 }
 
 async function acquireDownloadSlot(
@@ -389,11 +394,9 @@ async function acquireDownloadSlot(
     if (tryAcquireDownloadLock(component, version)) return
 
     if (isDownloadInProgress(component, version)) {
-      console.log(
-        `[supatype] ${component} v${version} is downloading in another process, waiting...`,
-      )
+      progress(`${component} v${version} is downloading in another process, waiting...`)
       const outcome = await waitForComponentDownload(component, version, isReady, (c) => {
-        console.log(`[supatype] Still waiting for ${c} download...`)
+        progress(`Still waiting for ${c} download...`)
       })
       if (outcome === "ready") return
       if (outcome === "timeout") {
@@ -415,70 +418,99 @@ async function acquireDownloadSlot(
   )
 }
 
+/** Where a downloaded component is, and whether this call fetched it or found it already there. */
+export interface Downloaded {
+  path: string
+  fetched: boolean
+}
+
 export async function download(
   component: Component,
   version: string,
   platform: PlatformId,
-): Promise<string> {
-  if (version === VERSION_PIN_LOCAL) {
-    throw new Error(
-      `cannot download CDN binary when version is "${VERSION_PIN_LOCAL}": set overrides.${component === "postgres" ? "postgres_dir" : component} or pin a semver`,
-    )
-  }
-
+): Promise<Downloaded> {
+  assertDownloadableVersion(component, version)
   const dir = cachePath(component, version)
   mkdirSync(dir, { recursive: true })
 
-  const name = binaryName(component, version, platform)
-  const destPath = join(dir, name)
-
-  if (existsSync(destPath)) {
-    if (cachedArtifactLooksValid(component, destPath)) {
-      console.log(`[supatype] ${component} v${version} already cached.`)
-      return destPath
-    }
-    console.warn(
-      `[supatype] ${component} v${version} cache invalid, re-downloading (${destPath}).`,
-    )
-    unlinkSync(destPath)
-  }
+  const destPath = join(dir, binaryName(component, version, platform))
+  if (keepCachedArtifact(component, version, destPath)) return { path: destPath, fetched: false }
 
   await acquireDownloadSlot(component, version, platform)
-  if (isCachedBinaryReady(component, version, platform)) {
-    return destPath
-  }
+  // Another process fetched it while this one waited for the lock.
+  if (isCachedBinaryReady(component, version, platform)) return { path: destPath, fetched: false }
 
-  console.log(`[supatype] Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
+  progress(`Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
+  const manifest = await fetchLeavingNoEmptyDir(component, version, platform, { dir, destPath })
+  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version), dir)
+  return { path: destPath, fetched: true }
+}
 
-  const tmpPath = destPath + ".tmp"
-  let manifest: string
+/** Refuse `local`, which names an override rather than a release the CDN has. */
+function assertDownloadableVersion(component: Component, version: string): void {
+  if (version !== VERSION_PIN_LOCAL) return
+  throw new Error(
+    `cannot download CDN binary when version is "${VERSION_PIN_LOCAL}": set overrides.${component === "postgres" ? "postgres_dir" : component} or pin a semver`,
+  )
+}
+
+/** {@link fetchIntoCache}, removing the version directory again when the fetch fails. */
+async function fetchLeavingNoEmptyDir(
+  component: Component,
+  version: string,
+  platform: PlatformId,
+  where: { dir: string; destPath: string },
+): Promise<string> {
   try {
-    manifest = await fetchVerifiedArtifact(component, version, platform, destPath, tmpPath)
+    return await fetchIntoCache(component, version, platform, where.destPath)
   } catch (err) {
-    // Never leave a partial binary or an empty version directory behind: a stale
-    // empty dir makes the next resolve look fine while silently lacking a binary.
+    // Never leave an empty version directory behind: a stale empty dir makes the next resolve
+    // look fine while silently lacking a binary. Only now, with the lock released: its file is in
+    // this directory, and removing the directory before it was gone failed every time.
+    try { rmdirSync(where.dir) } catch { /* not empty, or already removed */ }
+    throw err
+  }
+}
+
+/** True when `destPath` is a valid cached artifact; an invalid one is deleted for the download to replace. */
+function keepCachedArtifact(component: Component, version: string, destPath: string): boolean {
+  if (!existsSync(destPath)) return false
+  if (cachedArtifactLooksValid(component, destPath)) {
+    progress(`${component} v${version} already cached.`)
+    return true
+  }
+  progress(`${component} v${version} cache invalid, re-downloading (${destPath}).`, "warn")
+  unlinkSync(destPath)
+  return false
+}
+
+/**
+ * Fetch and verify `destPath`, holding the download lock, and release it whatever happens. On
+ * failure no partial binary is left, and the error keeps the one it wraps as its `cause`, so a
+ * caller can tell a release it cannot verify ({@link ReleaseVerificationError}) from a CDN it
+ * could not reach.
+ */
+async function fetchIntoCache(component: Component, version: string, platform: PlatformId, destPath: string): Promise<string> {
+  const tmpPath = destPath + ".tmp"
+  try {
+    return await fetchVerifiedArtifact(component, version, platform, destPath, tmpPath)
+  } catch (err) {
     try { if (existsSync(destPath)) unlinkSync(destPath) } catch { /* ignore */ }
-    try { rmdirSync(dir) } catch { /* dir not empty or already removed */ }
-    throw new Error(
-      `Failed to download ${component} v${version} from ${CDN_BASE}: ${errorMessage(err)}`,
-    )
+    throw new Error(`Failed to download ${component} v${version} from ${CDN_BASE}: ${errorMessage(err)}`, { cause: err })
   } finally {
     releaseDownloadLock(component, version)
     if (existsSync(tmpPath)) {
       try { unlinkSync(tmpPath) } catch { /* ignore */ }
     }
   }
-
-  if (component === "engine") await saveEngineLicense(manifest, releaseDirUrl(component, version, platform), dir)
-  return destPath
 }
 
 /**
- * The release directory on the CDN: from the path template, so a file is fetched under the name the
- * manifest gives it, and a release published under a legacy name is found under that name.
+ * The release directory on the CDN, `<component>/v<version>`: a file is fetched there under the name
+ * the manifest gives it, so a release published under a legacy name is found under that name.
  */
-function releaseDirUrl(component: Component, version: string, platform: PlatformId): string {
-  return `${CDN_BASE}${CDN_PATHS[component](version, platform).replace(/\/[^/]+$/, "")}`
+function releaseDirUrl(component: Component, version: string): string {
+  return `${CDN_BASE}/${component}/v${version}`
 }
 
 /**
@@ -499,7 +531,7 @@ async function fetchVerifiedArtifact(
   const manifest = await withRetry(() => fetchVerifiedChecksums(checksumsUrl, `${checksumsUrl}.minisig`))
   const match = extractChecksum(manifest, archiveNameCandidates(component, version, platform))
 
-  const binaryUrl = `${releaseDirUrl(component, version, platform)}/${match.filename}`
+  const binaryUrl = `${releaseDirUrl(component, version)}/${match.filename}`
   await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
   await verifyChecksum(tmpPath, match.checksum, component)
 
@@ -529,7 +561,7 @@ async function saveEngineLicense(manifest: string, releaseUrl: string, dir: stri
     console.warn(`[supatype] The engine's ${ENGINE_LICENSE_FILE} was not saved: ${problem}. The engine is licensed under BUSL-1.1.`)
     return
   }
-  console.log(`[supatype] Supatype engine is licensed under BUSL-1.1; see ${target}`)
+  progress(`Supatype engine is licensed under BUSL-1.1; see ${target}`)
 }
 
 /** Download and verify the LICENSE into `target`; the reason it could not be, or undefined. */
@@ -569,6 +601,20 @@ export async function fetchChecksums(
 }
 
 /**
+ * A release this CLI cannot verify, for a reason no retry changes: retried, it cost four seconds
+ * and three identical messages. `advice` is what to do instead of waiting for the CDN.
+ */
+export class ReleaseVerificationError extends Error {
+  constructor(
+    message: string,
+    readonly advice: string,
+  ) {
+    super(message)
+    this.name = "ReleaseVerificationError"
+  }
+}
+
+/**
  * The checksums manifest, its signature verified, as text. One release's manifest covers every file
  * in it, the engine's LICENSE included, so a caller that needs two entries fetches it once.
  */
@@ -591,11 +637,12 @@ async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string):
       )
       return checksumsText
     }
-    throw new Error(
+    throw new ReleaseVerificationError(
       "No minisign public key configured, so cannot verify release authenticity.\n" +
         "Published @supatype/cli builds embed the key automatically; if you are building " +
         "from source, set SUPATYPE_RELEASE_PUBLIC_KEY to the release public key, or set " +
         "SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1 to download with SHA256-only verification (unsafe).",
+      "Set SUPATYPE_RELEASE_PUBLIC_KEY to the release public key, then run `supatype update` again.",
     )
   }
 
@@ -808,17 +855,16 @@ export function validateArtifactFormat(
 /**
  * Per-component CDN artifact shapes:
  *   engine, server, deno, realtime: native executable (ELF / Mach-O / PE)
- *   postgres (unix)      .tar.gz (gzip)
- *   postgres (windows)   .zip
+ *   postgres, storage (unix)      .tar.gz (gzip)
+ *   postgres, storage (windows)   .zip
  */
 function assertArtifactFormat(
   component: Component,
   filePath: string,
   platform: PlatformId,
 ): void {
-  if (component === "postgres") {
-    if (platform.os === "windows") assertZipArchive(filePath)
-    else assertGzipArchive(filePath)
+  if (component === "postgres" || component === "storage") {
+    assertArchive(filePath, component, platform.os === "windows" ? "zip" : "gzip")
     return
   }
   if (EXECUTABLE_COMPONENTS.has(component)) {
@@ -827,32 +873,19 @@ function assertArtifactFormat(
   }
 }
 
-/** Reject HTML/error pages or corrupt postgres .tar.gz on CDN. */
-function assertGzipArchive(filePath: string): void {
-  const fd = openSync(filePath, "r")
-  try {
-    const magic = Buffer.alloc(2)
-    readSync(fd, magic, 0, 2, 0)
-    if (magic[0] !== 0x1f || magic[1] !== 0x8b) {
-      throw new Error(
-        "Downloaded postgres file is not a gzip archive (bad magic bytes). " +
-          "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
-      )
-    }
-  } finally {
-    closeSync(fd)
-  }
-}
+/** The first bytes of each archive format a component ships in. */
+const ARCHIVE_MAGIC = { gzip: [0x1f, 0x8b], zip: [0x50, 0x4b] } as const
 
-/** Reject corrupt postgres .zip on CDN (Windows bundles). */
-function assertZipArchive(filePath: string): void {
+/** Reject HTML/error pages or a corrupt archive on CDN: a .tar.gz, or a .zip for Windows. */
+function assertArchive(filePath: string, component: Component, kind: keyof typeof ARCHIVE_MAGIC): void {
+  const expected = ARCHIVE_MAGIC[kind]
   const fd = openSync(filePath, "r")
   try {
-    const magic = Buffer.alloc(4)
-    readSync(fd, magic, 0, 4, 0)
-    if (magic[0] !== 0x50 || magic[1] !== 0x4b) {
+    const magic = Buffer.alloc(expected.length)
+    readSync(fd, magic, 0, expected.length, 0)
+    if (expected.some((byte, i) => magic[i] !== byte)) {
       throw new Error(
-        "Downloaded postgres file is not a zip archive (bad magic bytes). " +
+        `Downloaded ${component} file is not a ${kind} archive (bad magic bytes). ` +
           "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
       )
     }
@@ -937,13 +970,13 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     try {
       return await fn()
     } catch (err) {
-      if (i === attempts) throw err
+      if (i === attempts || err instanceof ReleaseVerificationError) throw err
       const delay = Math.pow(3, i - 1) * 1_000 // 1 s, 3 s, 9 s
       console.error(
         `[supatype] Download attempt ${i}/${attempts} failed: ${errorMessage(err)}. ` +
           `Retrying in ${delay / 1_000}s...`,
       )
-      await new Promise((r) => setTimeout(r, delay))
+      await sleep(delay)
     }
   }
   throw new Error("unreachable")
@@ -977,14 +1010,19 @@ export function pinnedVersion(component: Component, config: SupatypeProjectConfi
   return trimmed === "" ? undefined : trimmed
 }
 
-/** Pinned version from config, or latest from CDN when unset. */
+/**
+ * Pinned version from config; else the version this CLI release was tested with (the engine, server
+ * and Postgres it pins, and a release's own realtime); else, for Deno and a non-release realtime,
+ * the CDN's latest. The engine used to come from the CDN's latest too, so a host binary moved under
+ * an unchanged CLI and disagreed with the engine image the compose push ran.
+ */
 export async function resolveVersionFor(
   component: Component,
   config: SupatypeProjectConfig,
 ): Promise<string> {
   const pinned = pinnedVersion(component, config)
   if (pinned) return pinned
-  return fetchLatestVersion(component)
+  return defaultComponentVersion(component) ?? fetchLatestVersion(component)
 }
 
 /** @deprecated Prefer {@link pinnedVersion} or {@link resolveVersionFor}. */
@@ -1090,7 +1128,7 @@ export async function downloadAll(
   const latest = await fetchAllLatestVersions()
 
   for (const component of components) {
-    const version = versions?.[component] ?? latest[component]
+    const version = versions?.[component] ?? defaultComponentVersion(component) ?? latest[component]
     if (!version || version === VERSION_PIN_LOCAL) continue
     try {
       await download(component, version, platform)

@@ -338,9 +338,23 @@ describe("scaffold()", () => {
     expect(config).toContain('email: { provider: "resend" }')
     expect(config).toContain('storage: { provider: "s3" }')
     const env = readFileSync(join(tmpRoot, ".env"), "utf8")
-    expect(env).toContain("RESEND_API_KEY=")
+    // The names the auth server reads; an unprefixed RESEND_API_KEY was never seen by it.
+    expect(env).toMatch(/^SUPATYPE_RESEND_API_KEY=$/m)
+    expect(env).toMatch(/^SUPATYPE_RESEND_FROM=/m)
+    expect(env).not.toMatch(/^RESEND_/m)
     expect(env).toContain("S3_BUCKET=")
     expect(env).toContain("local development and production")
+  })
+
+  it("scaffolds SES and SMTP settings under the names the auth server reads", () => {
+    for (const email of ["ses", "smtp"] as const) {
+      const root = join(tmpRoot, email)
+      mkdirSync(root, { recursive: true })
+      scaffold(root, { ...defaultScaffoldOptions("my-app"), email })
+      const env = readFileSync(join(root, ".env"), "utf8")
+      expect(env).not.toMatch(/^(SES_FROM|SMTP_[A-Z_]+)=/m)
+      expect(env).toMatch(email === "ses" ? /^SUPATYPE_SES_FROM=$/m : /^SUPATYPE_SMTP_HOST=$/m)
+    }
   })
 
   it("mixed local dev and s3 production writes both storage sections", () => {

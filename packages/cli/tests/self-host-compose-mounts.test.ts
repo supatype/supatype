@@ -129,3 +129,116 @@ describe("self-host compose bind mounts (SA3)", () => {
     expect(compose).toMatch(new RegExp(`^name: ${composeProjectName(config.project.name)}$`, "m"))
   })
 })
+
+/** Every `NAME: value` line for one variable across the rendered file. */
+function envValues(compose: string, name: string): string[] {
+  return compose
+    .split("\n")
+    .map((line) => new RegExp(`^\\s+${name}: (.+)$`).exec(line)?.[1]?.trim())
+    .filter((value): value is string => value !== undefined)
+}
+
+/**
+ * The stack mounts the project at /project, and the worker, the server and the control plane were
+ * all told the functions were at /project/functions whatever `functions.path` said, so a project
+ * keeping them in `api/functions` had every function answer 404.
+ */
+describe("self-host compose functions directory", () => {
+  it("points the worker, server and control plane at functions.path inside the project", () => {
+    const cwd = projectDir()
+    const out = writeSelfHostCompose(cwd, { ...config, functions: { path: "api/functions" } })
+    const compose = readFileSync(out.composePath, "utf8")
+
+    const values = [
+      ...envValues(compose, "SUPATYPE_FUNCTIONS_ROOT"),
+      ...envValues(compose, "SUPATYPE_DENO_FUNCTIONS_DIR"),
+    ]
+    expect(values.length).toBeGreaterThanOrEqual(4)
+    for (const value of values) expect(value).toBe("/project/api/functions")
+  })
+
+  it("keeps /project/functions when functions.path is unset", () => {
+    const out = writeSelfHostCompose(projectDir(), config)
+    const compose = readFileSync(out.composePath, "utf8")
+    for (const value of envValues(compose, "SUPATYPE_FUNCTIONS_ROOT")) expect(value).toBe("/project/functions")
+  })
+
+  it("follows the project root, where the hooks are too", () => {
+    const cwd = projectDir()
+    const out = writeSelfHostCompose(cwd, { ...config, supatype: { root: "backend" } })
+    const compose = readFileSync(out.composePath, "utf8")
+    for (const value of envValues(compose, "SUPATYPE_FUNCTIONS_ROOT")) expect(value).toBe("/project/backend/functions")
+    // The worker serves hooks from there, and the control plane writes them there when a push sends them.
+    expect(envValues(compose, "SUPATYPE_HOOKS_ROOT")).toEqual(["/project/backend/hooks", "/project/backend/hooks"])
+  })
+
+  it("refuses a functions.path outside the project, which the stack cannot mount", () => {
+    expect(() => writeSelfHostCompose(projectDir(), { ...config, functions: { path: "../shared/functions" } })).toThrow(
+      /functions\.path.*outside the project directory/,
+    )
+  })
+})
+
+/**
+ * The functions worker ran as PID 1 with no init, so the SIGTERM a restart sends was ignored and
+ * `docker restart` waited out its whole stop timeout on every self-host deploy.
+ */
+describe("self-host compose functions worker", () => {
+  it("runs with an init, which passes the stop signal on", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(block).toContain("functions-worker:")
+    expect(block).toContain("\n    init: true")
+  })
+
+  // Kong 3.6 asked for SRV records first, which Docker's DNS never answers: each nginx worker's first
+  // upstream lookup waited about 4 s, and the first realtime subscribe with it.
+  it("has Kong skip SRV lookups, keeping the hosts file's A records", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("\n  kong:")).split(/\n  [a-z]/)[1] ?? ""
+    expect(block).toContain('\n      KONG_DNS_ORDER: "LAST,A,CNAME"')
+    expect(block).toContain('\n      - "host.docker.internal:host-gateway"')
+  })
+
+  // Round 6 N29: a Docker that killed it 3 s after SIGTERM cut off its drain of requests in flight.
+  it("gives the worker a stop grace above its drain", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(block).toContain("\n    stop_grace_period: 10s")
+  })
+
+  // Review r8 A1: the control plane writes the service-role list on every deploy; the worker reads it
+  // on every call from the file compose names, the config's list in force until the first deploy.
+  it("reads the service-role list from the file the control plane writes", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(envValues(block, "SUPATYPE_SERVICE_ROLE_ROUTES_FILE")).toEqual(["/project/.supatype/service-role-routes"])
+    expect(envValues(block, "SUPATYPE_SERVICE_ROLE_ROUTES")).toHaveLength(1)
+  })
+
+  // The worker answers 503 only for a hook the manifest names, reading the manifest the server reads.
+  // The project is mounted read-only at /project, its .supatype among it.
+  it("names the manifest the server reads to the worker, under the project mount", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(envValues(block, "SUPATYPE_MANIFEST_PATH")).toEqual(["/project/.supatype/manifest.json"])
+    expect(block).toMatch(/target: \/project\n\s+read_only: true/)
+  })
+
+  // Round 6b N29: the worker drained for its 4 s default, sized for dev, so a function with more
+  // left was cut off at every restart though Docker allowed 10 s. Its drain is set under the grace.
+  it("has the worker drain for 9 s, under its 10 s stop grace", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+    expect(envValues(block, "SUPATYPE_FUNCTIONS_DRAIN_MS")).toEqual(['"9000"'])
+  })
+
+  // Review: `functions env set` wrote the control plane's file, and nothing told the worker of it, so
+  // no value set ever reached a function. The worker is named the file the control plane writes.
+  it("reads the function env the control plane writes", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const [controlPlaneRoot] = envValues(compose, "SUPATYPE_PROJECT_ROOT")
+    expect(controlPlaneRoot).toBe("/project")
+    expect(envValues(compose, "SUPATYPE_FUNCTION_ENV_FILE")).toEqual(["/project/.supatype/function-env.json"])
+  })
+})

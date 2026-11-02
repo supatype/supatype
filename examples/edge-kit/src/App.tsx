@@ -52,7 +52,7 @@ const scenarios: Scenario[] = [
   {
     id: "env-check",
     name: "env-check",
-    blurb: "Confirms Deno.env has Supatype keys (+ WEBHOOK_SECRET)",
+    blurb: "Confirms ctx has the Supatype keys (+ WEBHOOK_SECRET in ctx.env)",
     expect: "hasSupatypeUrl / hasAnonKey / hasServiceRoleKey true",
     run: async () => {
       const { data, error } = await client.functions.invoke("env-check", { method: "GET" })

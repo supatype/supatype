@@ -1,4 +1,5 @@
-# Publish standalone supatype CLI binaries to releases.supatype.com/cli/
+# Build, smoke test and publish standalone supatype CLI binaries to releases.supatype.com/cli/
+# (the publish itself is cli-publish.yml)
 #
 # Bun compiles the binaries, not esbuild + pkg. The CLI's TUI stack (ink, @clack/prompts,
 # yoga-layout) uses top-level await, which esbuild cannot emit as CJS, and in ESM it either
@@ -10,6 +11,8 @@ name: CLI release
 # npm packages and there is one "latest" per release. There is no cli-v* tag any more: a second
 # tag namespace meant two versions of one product, and self-update compares the running binary
 # against cli/latest.json, so the two could disagree about what the latest release was.
+#
+# release.yml passes publish: false and calls cli-publish.yml itself once the images are out.
 on:
   workflow_call:
     inputs:
@@ -17,12 +20,26 @@ on:
         description: Version to publish, without a leading v (e.g. 0.1.8)
         required: true
         type: string
+      publish:
+        description: Publish to the CDN after the smoke tests. false builds and runs the binaries only
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      version:
+        description: The version the build resolved, which names the uploaded artefact cli-<version>
+        value: ${{ jobs.build.outputs.version }}
   workflow_dispatch:
     inputs:
       version:
         description: Version to publish, without a leading v (e.g. 0.1.8)
         required: true
         type: string
+      publish:
+        description: Publish to the CDN after the smoke tests. Clear it to build and run the binaries only
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -132,9 +149,9 @@ jobs:
           path: artifacts/
           if-no-files-found: error
           # The input is already-compressed archives, about 320 MB of them. The default
-          # compression-level 6 spends a full single-threaded deflate pass saving nothing, and
-          # the CDN copy two steps later is the one that matters, so these are a short-lived
-          # debugging convenience rather than storage.
+          # compression-level 6 spends a full single-threaded deflate pass saving nothing. The
+          # publish job (cli-publish.yml) downloads this artefact and the CDN copy it makes is the
+          # one that matters, so this is short-lived rather than storage.
           compression-level: 0
           retention-days: 7
 
@@ -203,67 +220,13 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/w" -w /w "${{ matrix.container }}" sh -c             "apk add --no-cache bash ${{ matrix.container_deps }} >/dev/null 2>&1 &&              bash tests/integration/scripts/smoke-cli-artifact.sh                'artifacts/${{ matrix.archive }}' '${{ needs.build.outputs.version }}'"
 
+  # The CDN publish lives in cli-publish.yml so release.yml can hold it back until the images the
+  # CLI runs are out while this build and smoke run alongside them. Run on its own (a dispatch, or
+  # a caller that leaves publish at its default) this workflow still builds, runs and publishes.
   publish:
-    name: publish to the CDN
     needs: [build, smoke]
-    runs-on: ubuntu-24.04
-    # Job level, not step level: both CDN steps below need the same credentials and settings.
-    env:
-      CLI_VERSION: ${{ needs.build.outputs.version }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
-      # Hetzner needs path addressing and s3v4, and refuses instance metadata lookups.
-      # Copied from deno-releases.yml, which is the workflow that actually works against
-      # this bucket. Omitting them is how an upload fails on a real tag.
-      AWS_EC2_METADATA_DISABLED: "true"
-      AWS_RETRY_MODE: standard
-      AWS_MAX_ATTEMPTS: "10"
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: cli-${{ needs.build.outputs.version }}
-          path: artifacts
-
-      # Ordering matters. Archives and their checksums go up first and latest.json last: it is
-      # the only mutable object here, so nothing advertises a version until every file that
-      # version needs is already readable.
-      - name: Publish to the CDN
-        run: |
-          set -euo pipefail
-          aws configure set default.s3.addressing_style path >/dev/null
-          aws configure set default.s3.signature_version s3v4 >/dev/null
-
-          EP="${{ secrets.CDN_ENDPOINT }}"
-          EP="${EP%/}"
-          BUCKET="${{ secrets.CDN_BUCKET }}"
-          PREFIX="s3://${BUCKET}/cli/v${CLI_VERSION}"
-
-          # Versioned objects are immutable, matching the component archives. Nothing rewrites
-          # this prefix, so a client may cache an archive and its checksum for a year without
-          # them ever disagreeing. A rerun rebuilds archives with different bytes, so it keeps
-          # what is already published.
-          if aws s3 ls "${PREFIX}/checksums.sha256.minisig" --endpoint-url "${EP}" >/dev/null 2>&1; then
-            echo "::warning::cli/v${CLI_VERSION}/ is already published. Keeping it and uploading nothing."
-            exit 0
-          fi
-
-          aws s3 cp artifacts/ "${PREFIX}/" --recursive \
-            --endpoint-url "${EP}" --no-progress \
-            --cache-control "public, max-age=31536000, immutable"
-
-      # A prerelease publishes its archives but must not become `latest`: install.sh and
-      # `supatype self-update` both resolve the CLI through this file, so moving it to an rc
-      # would ship one to everyone who never asked for it. CLI_VERSION has already lost any
-      # leading v, so a '-' anywhere in it means a prerelease.
-      - name: Update cli/latest.json
-        if: ${{ !contains(needs.build.outputs.version, '-') }}
-        run: |
-          set -euo pipefail
-          EP="${{ secrets.CDN_ENDPOINT }}"
-          EP="${EP%/}"
-          printf '{"version":"%s","date":"%s"}\n' "${CLI_VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
-          aws s3 cp latest.json "s3://${{ secrets.CDN_BUCKET }}/cli/latest.json" \
-            --endpoint-url "${EP}" --cache-control "no-cache" --no-progress
+    if: inputs.publish
+    uses: ./.github/workflows/cli-publish.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+    secrets: inherit

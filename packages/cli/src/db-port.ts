@@ -17,9 +17,10 @@
  * localhost:5432."
  *
  * The variable compose binds for the stack's layout is the source of truth: `SUPATYPE_DB_PORT` for
- * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it.
+ * a self-host stack, `SUPATYPE_DEV_DB_PORT` for a dev one. The URL follows it, when the CLI wrote
+ * it: this file says where Postgres is published and reads connection strings, and the one writer
+ * of `.env`'s URL, which decides whose it is first, is database-url-owner.ts.
  */
-import { readEnvFile, upsertEnvFile } from "./env-file.js"
 
 /** The `.env` key that moves the published Postgres port for a self-host stack. */
 export const DB_PORT_ENV = "SUPATYPE_DB_PORT"
@@ -87,8 +88,8 @@ export function composeDbPublish(devLocal: boolean): ComposeDbPublish {
 /** Hosts whose port is ours to correct. Anything else is somebody else's database. */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
 
-/** The port Postgres is published on for this project in one layout, from `.env`. */
-export function publishedDbPort(env: Record<string, string>, devLocal: boolean): number {
+/** The port Postgres is published on for this project in one layout, from `.env` or the shell. */
+export function publishedDbPort(env: Readonly<Record<string, string | undefined>>, devLocal: boolean): number {
   const { envKey, defaultPort } = composeDbPublish(devLocal)
   const raw = (env[envKey] ?? "").trim()
   const port = Number(raw)
@@ -103,40 +104,29 @@ export interface DbPortSync {
   to: string
   /** The variable the new port was read from, which is what the report must name. */
   envKey: ComposeDbPublish["envKey"]
+  /** The port came from the shell, so the URL changed for this run only and `.env` did not. */
+  runOnly?: true
 }
 
 /** The line every caller prints for a {@link DbPortSync}, naming the variable it read. */
 export function databaseUrlSyncMessage(sync: DbPortSync): string {
-  return `DATABASE_URL port ${sync.from} -> ${sync.to} in .env, to match ${sync.envKey}.`
+  return sync.runOnly === true
+    ? `DATABASE_URL port ${sync.from} -> ${sync.to} for this run, to match ${sync.envKey} in your shell. .env is unchanged.`
+    : `DATABASE_URL port ${sync.from} -> ${sync.to} in .env, to match ${sync.envKey}.`
 }
 
-/**
- * Rewrite `DATABASE_URL`'s port to match the port the stack's layout publishes Postgres on, and
- * report it.
- *
- * `devLocal` is the layout of the stack the caller is working with, never a guess from which
- * variables happen to be in `.env`: a project that once ran `supatype dev` keeps
- * `SUPATYPE_DEV_DB_PORT` there, and preferring it on a self-host push repointed every host-side
- * command (seed, admin) at the dev database.
- *
- * Returns null when there is nothing to do, which is the common case.
- *
- * Only touches a URL pointing at this machine. A project whose `DATABASE_URL` names a managed
- * Postgres elsewhere has a port that is nothing to do with our compose mapping, and rewriting it
- * would repoint the whole project at a database that does not exist.
- */
-export function syncDatabaseUrlPort(cwd: string, devLocal: boolean): DbPortSync | null {
-  const env = readEnvFile(cwd)
-  const url = localDatabaseUrl(env["DATABASE_URL"])
+/** `value` with its port set to `port`, when it names this machine on a different port. */
+export function databaseUrlWithPort(
+  value: string | undefined,
+  port: number,
+): { url: string; from: string; to: string } | null {
+  const url = localDatabaseUrl(value)
   if (url === null) return null
-
-  const wanted = String(publishedDbPort(env, devLocal))
-  const current = url.port === "" ? String(DEFAULT_DB_PORT) : url.port
+  const wanted = String(port)
+  const current = String(urlPort(url))
   if (current === wanted) return null
-
   url.port = wanted
-  upsertEnvFile(cwd, { DATABASE_URL: url.toString() })
-  return { from: current, to: wanted, envKey: composeDbPublish(devLocal).envKey }
+  return { url: url.toString(), from: current, to: wanted }
 }
 
 /** True when `url` is a connection string to a database on this machine. */
@@ -145,15 +135,33 @@ export function isLocalDatabaseUrl(url: string): boolean {
 }
 
 /** `DATABASE_URL` parsed, when it names this machine; null when it is unset, malformed or remote. */
-function localDatabaseUrl(value: string | undefined): URL | null {
+export function localDatabaseUrl(value: string | undefined): URL | null {
+  const url = parsedDatabaseUrl(value)
+  return url !== null && LOCAL_HOSTS.has(url.hostname) ? url : null
+}
+
+/** The host and port a Postgres URL names, the port defaulting to 5432; undefined when it does not parse. */
+export function databaseUrlHostPort(value: string | undefined): { host: string; port: number } | undefined {
+  const url = parsedDatabaseUrl(value)
+  return url === null ? undefined : { host: url.hostname.replace(/^\[|\]$/g, ""), port: urlPort(url) }
+}
+
+/** The port `url` names, or the one Postgres listens on when it names none. */
+function urlPort(url: URL): number {
+  return url.port === "" ? DEFAULT_DB_PORT : Number(url.port)
+}
+
+/**
+ * A connection string parsed, or null when it is blank or malformed. Malformed is never ours to
+ * rewrite: a partial edit would turn a typo into a URL that parses and points somewhere wrong,
+ * which is harder to spot than the typo.
+ */
+function parsedDatabaseUrl(value: string | undefined): URL | null {
   const raw = (value ?? "").trim()
   if (raw === "") return null
   try {
-    const url = new URL(raw)
-    return LOCAL_HOSTS.has(url.hostname) ? url : null
+    return new URL(raw)
   } catch {
-    // Malformed, so not ours to rewrite: a partial edit here would turn a typo into a URL that
-    // parses and points somewhere wrong, which is harder to spot than the typo.
     return null
   }
 }

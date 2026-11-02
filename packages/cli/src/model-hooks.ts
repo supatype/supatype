@@ -9,12 +9,13 @@
  * and the extractor is a leaf that reads type syntax and nothing else.
  */
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
-import { join, relative } from "node:path"
-import { generateHooksModule } from "./hooks-generator.js"
+import { dirname, join, relative } from "node:path"
+import { generateHooksModule, hooksModuleSource } from "./hooks-generator.js"
+import { discoverHandlersInDir } from "./functions-discovery.js"
 import { manifestCache } from "./model-cache.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
-import { isJsonObject, keptName } from "@supatype/shared"
+import { applyManifestMaps, isJsonObject, keptName, type ManifestHookEntry, type ManifestMaps } from "@supatype/shared"
 
 export interface DeclaredHook {
   model: string
@@ -27,6 +28,12 @@ export function declaredHooks(ast: unknown): DeclaredHook[] {
   return modelFunctions(ast, "hooks")
     .flatMap(({ model, entries }) => entries.map((entry) => ({ model, event: entry.key, function: entry.function })))
     .sort((a, b) => `${a.model}.${a.event}`.localeCompare(`${b.model}.${b.event}`))
+}
+
+/** The table `model`'s writes land in, which hooks are typed and looked up by; undefined when unnamed. */
+export function hookTableOf(ast: unknown, model: string): string | undefined {
+  const found = modelFunctions(ast, "hooks").find((entry) => entry.model === model)
+  return typeof found?.table === "string" ? found.table : undefined
 }
 
 /** One entry of a model's hook or validator map that names a function. */
@@ -139,30 +146,54 @@ export function validateModelHooks(
  *
  * Removal matters as much as writing: deleting the last hook from a schema should leave no typed
  * module behind claiming tables are hooked, and a handler importing it should start failing to
- * compile rather than sitting there dead.
+ * compile rather than sitting there dead. While a handler is still there, though, the module stays,
+ * with no table: a handler `hooks new` made before any model names it imports it, and without it
+ * that handler failed to load again on the next push (round 8, C-1).
  *
  * Returns the project-relative path written, or null when there was nothing to write.
  */
 export function writeHooksModule(cwd: string, hooksDir: string, ast: unknown): string | null {
   const module = generateHooksModule(ast)
-  const dir = join(hooksDir, "_supatype")
-  const file = join(dir, "hooks.ts")
+  const file = hooksModulePath(hooksDir)
+  if (module !== null) return writeModule(cwd, file, module)
+  if (discoverHandlersInDir(hooksDir).length > 0) return writeModule(cwd, file, hooksModuleSource(ast))
+  removeModule(file)
+  return null
+}
 
-  if (module === null) {
-    if (existsSync(file)) rmSync(file, { force: true })
-    return null
-  }
+/** Removes the module at `file`, and its folder when nothing else is left in it. */
+function removeModule(file: string): void {
+  if (existsSync(file)) rmSync(file, { force: true })
+  const dir = dirname(file)
+  if (existsSync(dir) && readdirSync(dir).length === 0) rmSync(dir, { recursive: true, force: true })
+}
 
-  mkdirSync(dir, { recursive: true })
+/**
+ * `hooks/_supatype/hooks.ts` for a handler just scaffolded, when there is none yet: the module a push
+ * writes for `ast`, with no table when no model names a hook. The handler imports it, and without
+ * it the handler failed to load until a push wrote it (round 6c, N30). One already there is left
+ * as the last push wrote it. Returns the project-relative path written, or null.
+ */
+export function ensureHooksModule(cwd: string, hooksDir: string, ast: unknown): string | null {
+  const file = hooksModulePath(hooksDir)
+  if (existsSync(file)) return null
+  return writeModule(cwd, file, hooksModuleSource(ast))
+}
+
+function hooksModulePath(hooksDir: string): string {
+  return join(hooksDir, "_supatype", "hooks.ts")
+}
+
+/** Writes `module` to `file`, making its directory, and returns the path relative to `cwd`. */
+function writeModule(cwd: string, file: string, module: string): string {
+  mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, module, "utf8")
   return relative(cwd, file) || file
 }
 
-/** Per-table hook config, in the shape `proxy.RouteManifest` reads. */
-export interface ManifestHookEntry {
-  function: string
-  timeout?: number
-  onUnavailable?: "reject" | "log"
+/** The manifest's three maps for `ast`: what a local push writes and a linked push sends. */
+export function manifestMaps(ast: unknown): ManifestMaps {
+  return { hooks: manifestHooks(ast), validators: manifestValidators(ast), cache: manifestCache(ast) }
 }
 
 /**
@@ -278,42 +309,14 @@ export function syncManifestHooks(cwd: string, ast: unknown): boolean {
   const parsed = readJsonObjectFile(manifestPath)
   if (parsed === undefined) return false
 
-  const changedHooks = applyManifestMap(parsed, "hooks", manifestHooks(ast))
-  const changedValidators = applyManifestMap(parsed, "validators", manifestValidators(ast))
-  const changedCache = applyManifestMap(parsed, "cache", manifestCache(ast))
-  if (!changedHooks && !changedValidators && !changedCache) return false
+  if (!applyManifestMaps(parsed, manifestMaps(ast))) return false
 
   writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
   return true
 }
 
-/**
- * Set one manifest key to `map`, or remove it when the schema declares none.
- *
- * Removing rather than writing `{}` matters: the server distinguishes "no map" from "an empty map"
- * when it decides whether the manifest predates the feature, and an empty object left behind by a
- * schema that no longer declares any is not the same statement.
- */
-/**
- * `Record<string, unknown>` rather than a hook map: this never looks inside a value, it compares
- * the serialised form and swaps it. It was typed to hooks only because hooks were the first caller,
- * and that narrowness is what a third key would otherwise have had to work around.
- */
-function applyManifestMap(
-  manifest: Record<string, unknown>,
-  key: string,
-  map: Record<string, unknown>,
-): boolean {
-  const next = JSON.stringify(map)
-  if (next === JSON.stringify(manifest[key] ?? {})) return false
-
-  if (Object.keys(map).length === 0) {
-    delete manifest[key]
-  } else {
-    manifest[key] = map
-  }
-  return true
-}
+/** Said when the manifest's hook, validator and cache maps were rewritten. */
+export const HOOK_MAPS_WRITTEN = "Hook and validator maps written to .supatype/manifest.json"
 
 export interface HooksReport {
   declared: DeclaredHook[]

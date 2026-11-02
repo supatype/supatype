@@ -4,6 +4,9 @@
 
 ### Bug Fixes
 
+* **logs:** the API logs page says request logging is coming soon, as the other unbuilt log pages
+  do. It mounted a log table with search and filters over a list that never filled, which read as a
+  project nobody had called.
 * **records:** a record path whose id names no record shows "not found" in place of an edit form.
   `/models/post/access` read `access` as a record id and opened an empty form under Postgres's
   `invalid input syntax for type uuid: "access"`; a well-formed id with no row behind it opened the
@@ -11,10 +14,12 @@
 * **validation:** count messages agree with their number: "at least 1 item", "1 character or
   fewer", rather than "at least 1 items". Covers the Rules tab, the form's own bound checks and the
   database's too-long refusal.
-* **connect:** the Next.js server-client snippets write the session cookie in `setAll`, which
-  `@supatype/ssr` now calls when it refreshes a session. The App Router one had an empty `setAll`
-  that claimed middleware handled it; the Pages Router one wrote the value unencoded and dropped
-  `Max-Age` and `SameSite`.
+* **connect:** the Next.js server-client snippets match how `@supatype/ssr` refreshes. The App
+  Router one, for Server Components, has no `setAll`, so its client never refreshes the session and
+  spends no refresh token the browser holds; it had an empty `setAll` that claimed middleware
+  handled it. The Pages Router one writes the session cookie in `setAll`, which `@supatype/ssr`
+  calls when it refreshes a session; it wrote the value unencoded and dropped `Max-Age` and
+  `SameSite`.
 
 ## 0.7.0
 
