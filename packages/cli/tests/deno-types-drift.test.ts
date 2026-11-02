@@ -7,8 +7,8 @@ import { functionsDenoAmbientSource } from "../src/functions-deno-types.js"
 /**
  * The Deno ambient types exist twice: published as `@supatype/cli/deno` (`deno.d.ts` at the package
  * root) and written into a project's `functions/deno.d.ts` by the scaffold. Only their header
- * comments differ. A declaration added to one and not the other (the `node:async_hooks` slice the
- * router imports, say) types a function differently depending on which file its editor read.
+ * comments differ. A declaration added to one and not the other (the `node:async_hooks` slice, say)
+ * types a function differently depending on which file its editor read.
  */
 const FIRST_DECLARATION = "interface DenoEnv {"
 

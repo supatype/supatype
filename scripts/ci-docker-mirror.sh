@@ -20,10 +20,27 @@
 # earlier step, and the same edit is made to the daemon in the VM through `colima ssh`. Anywhere
 # else, or on macOS without a running Colima, the step says so and does nothing. Runs under bash
 # 3.2 as well (no ${var,,}, no mapfile).
+#
+# `bash scripts/ci-docker-mirror.sh store` changes nothing and prints `true` when the daemon keeps
+# images in containerd, else `false`. A build that exports its layer cache to GitHub's cache needs
+# that store, and the rest of this script only warns when it could not turn it on.
 set -uo pipefail
 
 mirror="https://mirror.gcr.io"
 daemon_json=/etc/docker/daemon.json
+
+# "true" when the daemon keeps images in containerd, which is what makes the mirror usable with a login.
+containerd_store() {
+  case "$(docker info --format '{{json .DriverStatus}}' 2>/dev/null)" in
+    *io.containerd.snapshotter*) echo true ;;
+    *) echo false ;;
+  esac
+}
+
+if [ "${1:-}" = store ]; then
+  containerd_store
+  exit 0
+fi
 
 case "$(uname -s)" in
   Linux)
@@ -49,14 +66,6 @@ esac
 
 mirrors() {
   docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null
-}
-
-# "true" when the daemon keeps images in containerd, which is what makes the mirror usable with a login.
-containerd_store() {
-  case "$(docker info --format '{{json .DriverStatus}}' 2>/dev/null)" in
-    *io.containerd.snapshotter*) echo true ;;
-    *) echo false ;;
-  esac
 }
 
 case "$(mirrors)" in

@@ -7,6 +7,7 @@
  */
 
 import { isArrayOf, isBoolean, isNumber, isOneOf, isShape, isString, nullable, optional, type Guard } from "@supatype/shared"
+import { errorMessage, responseFailureText } from "./error-message.js"
 
 export type { ExtractedStorageBucketAst as SchemaStorageBucketAst } from "./schema-ast-v2.js"
 
@@ -16,7 +17,8 @@ export type { ExtractedStorageBucketAst as SchemaStorageBucketAst } from "./sche
  */
 export interface ParsedStorageBucket {
   id: string
-  public: boolean
+  /** Absent, with `accessMode`, when the schema names no visibility. */
+  public?: boolean
   accessMode?: "public" | "private" | "custom" | null
   allowedMimeTypes?: string[] | null
   fileSizeLimit?: number | null
@@ -25,7 +27,7 @@ export interface ParsedStorageBucket {
 
 const isParsedStorageBucket: Guard<ParsedStorageBucket> = isShape({
   id: isString,
-  public: isBoolean,
+  public: optional(isBoolean),
   accessMode: optional(nullable(isOneOf(["public", "private", "custom"] as const))),
   allowedMimeTypes: optional(nullable(isArrayOf(isString))),
   fileSizeLimit: optional(nullable(isNumber)),
@@ -43,7 +45,8 @@ export const isParsedBuckets: Guard<ParsedBuckets> = isShape({
 
 export interface BucketSpec {
   id: string
-  public: boolean
+  /** Absent when the schema names no visibility: the storage service's own default applies. */
+  public?: boolean
   allowed_mime_types?: string[] | null
   file_size_limit?: number | null
   access_mode?: "public" | "private" | "custom" | null
@@ -53,7 +56,7 @@ export interface BucketSpec {
 export function bucketSpecsFromAst(ast: ParsedBuckets): BucketSpec[] {
   return (ast.storageBuckets ?? []).map((b) => ({
     id: b.id,
-    public: b.public,
+    ...(b.public !== undefined && { public: b.public }),
     ...(b.accessMode !== undefined && { access_mode: b.accessMode }),
     ...(b.allowedMimeTypes != null && { allowed_mime_types: b.allowedMimeTypes }),
     ...(b.fileSizeLimit != null && { file_size_limit: b.fileSizeLimit }),
@@ -62,60 +65,148 @@ export function bucketSpecsFromAst(ast: ParsedBuckets): BucketSpec[] {
   }))
 }
 
+/** How many buckets a schema declares, and the ids of those the service does not have afterwards. */
+export interface BucketProvisioning {
+  total: number
+  failed: string[]
+}
+
+/** Creates the buckets `ast` declares; which of them are not there afterwards, each said why. */
 export async function provisionBucketsFromAst(
   ast: ParsedBuckets,
   storageApiUrl: string,
   serviceRoleKey: string,
-): Promise<void> {
+): Promise<BucketProvisioning> {
   const buckets = bucketSpecsFromAst(ast)
-  if (buckets.length === 0) return
+  if (buckets.length === 0) return { total: 0, failed: [] }
   console.log("[supatype] Provisioning storage buckets...")
-  await provisionBuckets(storageApiUrl, serviceRoleKey, buckets)
+  return { total: buckets.length, failed: await provisionBuckets(storageApiUrl, serviceRoleKey, buckets) }
+}
+
+/** The line for buckets a provisioning left out, or null when it left none out. */
+export function unprovisionedBuckets({ total, failed }: BucketProvisioning): string | null {
+  return failed.length === 0 ? null : `${failed.length} of ${total} bucket(s) were not provisioned: ${failed.join(", ")}`
 }
 
 /**
  * Ensure all declared buckets exist in the storage server.
  *
- * @param storageApiUrl  Base URL of the storage API, e.g. "http://localhost:54321/storage/v1"
+ * @param storageApiUrl  Base URL of the storage API, e.g. "http://localhost:18473/storage/v1"
  * @param serviceRoleKey  A service_role JWT for the storage server
  * @param buckets  Buckets to provision (from the resolved AST)
+ * @returns The ids of the buckets that are not there: the API was unreachable or refused them.
  */
 export async function provisionBuckets(
   storageApiUrl: string,
   serviceRoleKey: string,
-  buckets: BucketSpec[],
-): Promise<void> {
+  buckets: readonly BucketSpec[],
+): Promise<string[]> {
   const base = storageApiUrl.replace(/\/$/, "")
-  const headers = {
-    "Authorization": `Bearer ${serviceRoleKey}`,
-    "Content-Type": "application/json",
-  }
-
+  const failed: string[] = []
   for (const bucket of buckets) {
-    const body = JSON.stringify({
-      id: bucket.id,
-      name: bucket.id,
-      public: bucket.public,
-      ...(bucket.allowed_mime_types != null && { allowed_mime_types: bucket.allowed_mime_types }),
-      ...(bucket.file_size_limit != null && { file_size_limit: bucket.file_size_limit }),
-      ...(bucket.access_mode != null && { access_mode: bucket.access_mode }),
-      ...(bucket.s3_bucket_policy != null &&
-        bucket.s3_bucket_policy !== "" && { s3_bucket_policy: bucket.s3_bucket_policy }),
-    })
-
-    const res = await fetch(`${base}/bucket`, { method: "POST", headers, body })
-      .catch(() => null)
-
-    if (res === null) {
-      console.warn(`[storage] Storage API unreachable, skipped bucket "${bucket.id}"`)
-      continue
-    }
-    if (res.status === 409) continue // already exists, fine
-    if (!res.ok) {
-      const msg = await res.text().catch(() => res.statusText)
-      console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${msg}`)
-      continue
-    }
-    console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
+    if (!(await provisionBucket(base, serviceRoleKey, bucket))) failed.push(bucket.id)
   }
+  return failed
+}
+
+/** The create request's body for `bucket`, leaving out what it does not set. */
+function bucketRequestBody(bucket: BucketSpec): string {
+  return JSON.stringify({
+    id: bucket.id,
+    name: bucket.id,
+    ...(bucket.public !== undefined && { public: bucket.public }),
+    ...(bucket.allowed_mime_types != null && { allowed_mime_types: bucket.allowed_mime_types }),
+    ...(bucket.file_size_limit != null && { file_size_limit: bucket.file_size_limit }),
+    ...(bucket.access_mode != null && { access_mode: bucket.access_mode }),
+    ...(bucket.s3_bucket_policy != null &&
+      bucket.s3_bucket_policy !== "" && { s3_bucket_policy: bucket.s3_bucket_policy }),
+  })
+}
+
+/**
+ * What a write to the storage service came to. 409 is there already; 400, 404, 413, 415 and 422
+ * are the service refusing this write for good; no answer (status null) or anything else (401 or
+ * 403 for a token it would not take, 408, 429, a 5xx) is the service failing, which is retried.
+ */
+export type StorageWrite =
+  | { kind: "created" }
+  | { kind: "held" }
+  | { kind: "refused"; status: number; text: string }
+  | { kind: "failed"; status: number | null; text: string }
+
+/** POSTs `body` to `url` and says what it came to. */
+export async function postToStorage(
+  url: string,
+  headers: Record<string, string>,
+  body: string | Uint8Array<ArrayBuffer>,
+): Promise<StorageWrite> {
+  let res: Response
+  try {
+    // Sent as given. A Uint8Array over a plain ArrayBuffer is a BodyInit under both the CLI's types and
+    // the DOM lib the integration package reads; readFileSync's Buffer is one (Buffer<ArrayBuffer>).
+    // Only a view that may be over a SharedArrayBuffer is refused, and none is passed here.
+    res = await fetch(url, { method: "POST", headers, body })
+  } catch (err) {
+    return { kind: "failed", status: null, text: errorMessage(err) }
+  }
+  if (res.ok) return { kind: "created" }
+  if (res.status === 409) return { kind: "held" }
+  // The status and the body, or why there is none: an empty error message gave a blank reason.
+  const text = await responseFailureText(res)
+  return REFUSALS.has(res.status) ? { kind: "refused", status: res.status, text } : { kind: "failed", status: res.status, text }
+}
+
+/** The statuses that refuse a write for good: what was sent is wrong, so sending it again is too. */
+const REFUSALS: ReadonlySet<number> = new Set([400, 404, 413, 415, 422])
+
+/** Creates `bucket` in the service at `base`, saying nothing. */
+export function createBucket(base: string, serviceRoleKey: string, bucket: BucketSpec): Promise<StorageWrite> {
+  const headers = { "Authorization": `Bearer ${serviceRoleKey}`, "Content-Type": "application/json" }
+  return postToStorage(`${base.replace(/\/$/, "")}/bucket`, headers, bucketRequestBody(bucket))
+}
+
+/** Creates `bucket`; true when it is there afterwards (created, or there already), with why when not. */
+async function provisionBucket(base: string, serviceRoleKey: string, bucket: BucketSpec): Promise<boolean> {
+  const write = await createBucket(base, serviceRoleKey, bucket)
+  if (write.kind === "failed" && write.status === null) {
+    console.warn(`[storage] Storage API unreachable, skipped bucket "${bucket.id}"`)
+    return false
+  }
+  if (write.kind === "refused" || write.kind === "failed") {
+    console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${write.text}`)
+    return false
+  }
+  if (write.kind === "created") console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
+  return true
+}
+
+/**
+ * A declared bucket as native dev writes it to the object store's `buckets.json`, created at `now`.
+ * `public` follows the access mode, true exactly when it is `public`, as the object store and the
+ * storage service write it: a custom bucket declared `public: true` was written public here.
+ */
+export function nativeBucketRow(bucket: ParsedStorageBucket, now: string): Record<string, unknown> {
+  const accessMode = bucket.accessMode ?? (bucket.public ? "public" : "private")
+  return {
+    id: bucket.id,
+    name: bucket.id,
+    public: accessMode === "public",
+    file_size_limit: bucket.fileSizeLimit ?? null,
+    allowed_mime_types: bucket.allowedMimeTypes ?? null,
+    access_mode: accessMode,
+    s3_bucket_policy: bucket.s3BucketPolicy ?? null,
+    created_at: now,
+    updated_at: now,
+  }
+}
+
+/**
+ * A `buckets.json` row with `public` brought into line with its access mode. Rows an earlier build
+ * wrote keep a custom bucket public otherwise, since the object store only corrects a row when the
+ * bucket is next updated. A row with no mode is left as it is: its flag is all it has.
+ */
+export function withPublicFromMode<T extends Record<string, unknown>>(row: T): T {
+  const mode = row["access_mode"]
+  if (mode !== "public" && mode !== "private" && mode !== "custom") return row
+  return { ...row, public: mode === "public" }
 }

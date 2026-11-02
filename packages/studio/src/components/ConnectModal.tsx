@@ -151,6 +151,10 @@ function getClientFile(fw: Framework, variant: NextVariant): { filename: string;
 import { cookies } from 'next/headers'
 import type { Database } from './types/supatype'
 
+// For Server Components, which cannot write cookies. Without setAll the client never refreshes
+// the session: a refresh would spend the browser's refresh token and the browser would never get
+// the new one. In a Route Handler or Server Action, add setAll and write each cookie with
+// cookieStore.set(name, value, options ?? {}).
 export async function createSupatypeClient() {
   const cookieStore = await cookies()
   return createServerClient<Database>(
@@ -159,7 +163,6 @@ export async function createSupatypeClient() {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll() { /* session refresh handled in middleware */ },
       },
     },
   )
@@ -187,15 +190,14 @@ export function createSupatypeClient(req: IncomingMessage, res: ServerResponse) 
           }))
         },
         setAll(toSet) {
-          toSet.forEach(({ name, value, options }) => {
-            const attrs = [
-              \`\${name}=\${value}\`,
-              \`Path=\${options?.path ?? '/'}\`,
-              options?.httpOnly ? 'HttpOnly' : '',
-              options?.secure  ? 'Secure'   : '',
-            ].filter(Boolean).join('; ')
-            res.setHeader('Set-Cookie', attrs)
-          })
+          res.setHeader('Set-Cookie', toSet.map(({ name, value, options }) => [
+            \`\${name}=\${encodeURIComponent(value)}\`,
+            \`Path=\${options?.path ?? '/'}\`,
+            options?.maxAge !== undefined ? \`Max-Age=\${options.maxAge}\` : '',
+            options?.sameSite ? \`SameSite=\${options.sameSite}\` : '',
+            options?.httpOnly ? 'HttpOnly' : '',
+            options?.secure  ? 'Secure'   : '',
+          ].filter(Boolean).join('; ')))
         },
       },
     },

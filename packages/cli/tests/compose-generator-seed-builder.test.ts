@@ -6,30 +6,28 @@ import { isJsonObject } from "@supatype/shared"
 import { projectConfig } from "./support/project-config.js"
 
 /**
- * C2 follow-up: `dev` falls back to the in-compose engine for its generated files when the host
- * engine cannot be fetched. That path wrote the types, the client and the admin config, and not
- * the seed builder, so a project on it kept a builder describing the schema as init left it.
+ * C2 follow-up: when the host engine cannot be fetched, a Docker project's generated files come
+ * from its compose engine image (generated-files-engine.ts), and that includes the seed builder:
+ * the fallback once wrote the types, the client and the admin config and not the builder, so a
+ * project on it kept a builder describing the schema as init left it.
  */
 const engineRequest = vi.hoisted(() => vi.fn<(endpoint: string, body: unknown, guard: unknown, engine: unknown) => Promise<unknown>>())
 
 vi.mock("../src/engine-client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/engine-client.js")>()),
   ensureEngine: async () => {
-    throw new Error("no host engine in this test")
+    const { BinaryUnavailable } = await import("../src/ensure-binary.js")
+    throw new BinaryUnavailable("no host engine in this test")
   },
   engineRequest,
-}))
-vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/compose-engine-run.js")>()),
-  spawnComposeEngine: () => ({ status: 1, stdout: "", stderr: "", pid: 0, output: [], signal: null }),
 }))
 vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/self-host-compose.js")>()),
   schemaEngineImageForPush: async () => "supatype/schema-engine:test",
 }))
 
-import { generateViaComposeEngine } from "../src/dev-compose.js"
-import { selfHostComposePaths } from "../src/self-host-compose.js"
+import { generatedFilesEngine } from "../src/generated-files-engine.js"
+import { projectOutputPaths, writeSeedBuilder } from "../src/type-generation.js"
 
 let cwd: string
 
@@ -48,10 +46,11 @@ afterEach(() => {
   rmSync(cwd, { recursive: true, force: true })
 })
 
-describe("dev's in-compose generator fallback", () => {
+describe("the engine image fallback for generated files", () => {
   it("writes the seed builder from the compose engine", async () => {
     const config = projectConfig({ provider: "docker" })
-    await generateViaComposeEngine(selfHostComposePaths(cwd), cwd, "acme", config, { version: 2, models: [] }, join(cwd, "admin.json"))
+    const { engine } = await generatedFilesEngine(cwd, config)
+    await writeSeedBuilder({ cwd, ast: { version: 2, models: [] }, ...projectOutputPaths(config.output), engine })
     expect(readFileSync(join(cwd, "supatype", "generated", "seed.ts"), "utf8")).toBe("export const seedBuilder = 1\n")
     const seedCall = engineRequest.mock.calls.find(([, body]) => isJsonObject(body) && body["artifact"] === "seed")
     expect(seedCall?.[3]).toMatchObject({ target: { engineImage: "supatype/schema-engine:test" } })

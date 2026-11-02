@@ -12,6 +12,9 @@
   is gone from `SeedConfig`. It was validated and never sent: every seed file runs in a transaction
   of its own (all of them in one with `--atomic`), and the engine cannot run one outside it. Any
   other key `config` does not have (a misspelt `runonce`, say) is refused too, rather than ignored.
+* **realtime:** the service's process entry is `dist/main.js`; `dist/index.js` only exports and no
+  longer starts a server, so an `overrides.realtime` naming `packages/realtime/dist/index.js` exits
+  at once. Point it at `packages/realtime/dist/main.js`.
 
 ### Features
 
@@ -57,6 +60,106 @@
   `EXPO_PUBLIC_` copies, and `NEXT_PUBLIC_SUPATYPE_URL` wherever the other URL copies are.
 
 ### Bug Fixes
+
+* **functions serve:** a project with `functions/.env.local` serves again. The file was handed to
+  Deno as `--env-file <path>`, two arguments, and Deno takes the value only after `=`, so it ran
+  `.env.local` as the script and served nothing. `functions new` creates that file, so every project
+  that had made a function with it was affected.
+* **dev:** native dev's port-in-use message says which port to move ("Move this project's database
+  port with ..."). It read "Move this project's with ...".
+* **dev, functions serve, functions worker:** a function that fails to load answers its own route
+  with a 500, `function_load_failed` and why, and every other function keeps serving. A module that
+  threw on import, did not parse, or exported no handler stopped the router (or the deployed
+  worker) starting, so every function answered 502.
+* **dev:** native dev writes a bucket declared `custom` as not public in the object store's
+  `buckets.json`. It copied `public: true` from the declaration, so the store listed a custom
+  bucket as public, which the store and the storage service never do.
+* **hooks:** the `beforeChange` scaffold from `supatype hooks new` no longer says the service role
+  bypasses hooks. The server fires them for every write through the API, service-role key included;
+  only direct SQL, seeds and migrations skip them.
+* **dev:** a blank mailer setting in `.env` no longer erases the one `email` in `supatype.config.ts`
+  sets. `init` scaffolds `SUPATYPE_SMTP_HOST=`, `SUPATYPE_RESEND_API_KEY=` and the rest blank, and
+  native `dev` applied `.env` over the config, so a project with its SMTP host or Resend key in the
+  config got the noop mailer and sent nothing. A value in `.env` still wins over the config.
+
+* **app, status, functions serve:** the local gateway address follows `.env`. `app add` printed the
+  app URL, `status` the API URL, and `functions serve` gave functions `SUPATYPE_URL`, all on the
+  default port 18473 whatever `SUPATYPE_KONG_PORT` said, so after `dev` moved Kong to another port
+  they pointed at whichever stack held 18473. They now use `.env`'s `API_EXTERNAL_URL`, else
+  `SUPATYPE_KONG_PORT`, as `ctx.publicUrl` already did.
+
+* **pull:** a uuid `id` column is drafted as `UUID`. Every one was drafted as `SupatypeAuthUserId`,
+  which declares the key to be an auth user's id; telling the two apart needs the schema of a foreign
+  key's table, which the engine does not report yet. A drafted model also names its table
+  (`tableName`) when its model name would not map back to it, as `HTTPLog` or `Orders` do, so a push
+  of the draft does not create a second, empty table.
+
+* **plugins:** `plugins add` and `plugins list` no longer claim a plugin is in use. `add` said
+  "installed and registered" and `list` showed every compatible plugin as "active", but nothing in
+  Supatype loads plugins yet. Both now say the plugin is installed and that it is not loaded.
+
+* **functions:** the scaffolded `functions/_shared/context.ts` says where `ctx.env` comes from: the
+  functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then `.env.<function>.local`,
+  which wins. It said `.env`, which is never read for it.
+
+* **dev, functions serve:** the local functions router loads and guards handlers as the deployed
+  worker does. It accepted only `export default`, so a function exporting a named `handler`, which the
+  worker serves, failed to load locally; a module with neither answers its own route with an error
+  naming it. It also gave every function the service-role key, in `ctx.serviceRoleKey` and in `Deno.env`, where the
+  worker takes the key out of the environment before importing any handler and grants it only to the
+  routes `functions.serviceRole` lists, and to hooks. The router now does the same, so a function that
+  relies on the key without being listed fails locally rather than once deployed. The key is still
+  granted after `--watch` reloads the router on a change, however the run before it ended: a function
+  that failed to load, an unhandled rejection or a crash no longer leaves every later reload without
+  the key until `dev` restarts. The router reads it from a file in `.supatype/`, readable by its owner
+  only, rather than from the environment it takes the key out of. The file is removed when `dev` or
+  `functions serve` stops, Ctrl+C included, and each `functions serve` has a file of its own.
+
+* **dev, functions serve:** native `dev` and `functions serve` run the functions worker the deployed
+  image runs (packages/functions-worker), not a router the CLI generated to copy its rules, so the
+  two can no longer drift: the copy had already differed on which exports it took, who got the
+  service-role key and which env files it read. The CLI carries the worker's source and writes it to
+  `~/.supatype/cache/functions-worker/`. Native `dev` now also serves model hooks from `hooks/`, as
+  the compose stack does, including in a project with hooks and no functions, and picks up a hook
+  added while it runs; `functions serve` picks up a function added while it runs.
+
+* **functions:** `ctx.env` reads `.env.local` and `.env.<function>.local` with the CLI's own dotenv
+  parser, so `KEY="value"` is `value`, an inline ` # comment` is dropped and `export KEY=` is read,
+  as the CLI and compose read a `.env`. The worker kept the quotes and the comment.
+
+* **dev (native):** runs the storage service (packages/storage) on this machine instead of the
+  server's built-in object store, so bucket rules, `maxSize`, `accept`, `access_mode`, caller rules
+  and image transforms are the ones a deployment enforces. Its objects live under
+  `~/.supatype/projects/<project>/storage-service/`; the first start imports the buckets and objects
+  the server's store held, and each later start imports what changed there since, so what the
+  server's store took while the service was down reaches it and an object deleted in the service
+  stays deleted. An object the service refuses is skipped and named once. The old files stay for
+  one release: the next CLI release removes them and says which, keeping and naming the objects the
+  service refused. The service comes
+  from a per-platform archive on the CDN (`storage/v<version>/`, signed like every component), or
+  `overrides.storage`; its port is `SUPATYPE_STORAGE_PORT` (default 8002). When it cannot start, dev
+  says so and the server's store answers as before.
+
+* **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
+  server and the control plane were all told `/project/functions` whatever the config said, so a
+  project keeping its functions elsewhere had every one answer 404; hooks were likewise fixed at
+  `/project/hooks` rather than following `supatype.root`. A `functions.path` or `supatype.root`
+  outside the project directory is refused with a message saying why, since the stack mounts only
+  the project. `functions deploy` names the real directory instead of a fixed `functions/`.
+
+* **dev, self-host, init:** Resend and SES settings reach the auth server. Native `dev` sent them as
+  `RESEND_API_KEY`, `RESEND_FROM` and `SES_FROM`, which the server does not read, docker `dev` sent
+  none of them, and the self-host compose file had no way to pass them, so `email.provider: "resend"`
+  or `"ses"` fell back to the noop mailer and sent nothing. All three now use
+  `SUPATYPE_RESEND_API_KEY`, `SUPATYPE_RESEND_FROM` and `SUPATYPE_SES_FROM`, and the compose file
+  passes them through from `.env`. `init` scaffolds the email settings under those names too, and
+  SMTP's as `SUPATYPE_SMTP_*`; the unprefixed `SMTP_HOST` and the rest it used to write were never
+  read either. Rename any of these already in a project's `.env`.
+
+* **dev:** magic-link, confirmation, invite and recovery links in native `dev` open the auth
+  server's verify endpoint. They pointed at `http://localhost:<port>/verify` and 404'd: the external
+  URL ends in `/auth/v1`, and the server's default `/verify` replaced that path rather than adding to
+  it. Native `dev` now sets the same `/auth/v1/verify` paths the compose file does.
 
 * **migrate:** restoring a migration's schema sources refuses a file that lands beside the project
   under a path starting with the project's own (`/srv/app2/x.ts` for `/srv/app`). The check compared
@@ -127,6 +230,33 @@
   `docker network prune` frees the unused ones.
 * **cli:** running the CLI from a monorepo checkout that has not been built says to run
   `pnpm install && pnpm build` at the repository root, rather than a bare "Cannot find module".
+* **self-host, dev:** storage has no quota and no per-file limit unless `.env` sets one.
+  `STORAGE_QUOTA`, `TIER_MAX_UPLOAD_SIZE`, `MAX_UPLOAD_SIZE` (bytes, `-1` for unlimited, the
+  default) and `PROJECT_TIER` now reach the storage service, which on its own applied the free
+  tier's 1 GiB quota and 50 MB file limit to every self-hosted and local project.
+* **dev, push, self-host:** `DATABASE_URL` follows a database port exported in the shell
+  (`SUPATYPE_DEV_DB_PORT`, or `SUPATYPE_DB_PORT` for a self-host stack). Compose binds the shell's
+  port, and the URL was reconciled against `.env` alone, so seeds and host-side commands reached a
+  port nothing listened on. The shell's port is the run's: the URL changes for that run and `.env`
+  keeps its own.
+* **dev, self-host:** a project moved from native dev to Docker routes realtime and functions to the
+  stack's own services. The compose render left native's `realtime_url` (a host port) in
+  `.supatype/manifest.json`, so every realtime request answered 502.
+* **dev:** native dev routes functions to the Deno the server runs. It kept the
+  `functions-worker:8001` URL `init` writes for the compose stack, so every function answered 502
+  with "lookup functions-worker: no such host".
+* **dev:** native dev checks the port functions run on (8001, or `SUPATYPE_DENO_PORT`) before it
+  starts, as it does Postgres, the server, PostgREST and realtime, and stops naming the variable
+  that moves it. With the port taken, Deno failed after the stack was up and every function
+  answered 502. The port checked is the port the server gets: an exported `SUPATYPE_DENO_PORT`,
+  else the one in `.env.local` or `.env`, else 8001. A blank `SUPATYPE_DENO_PORT=` in `.env` leaves
+  8001 rather than reaching the server as an empty port.
+* **update:** `supatype update` exits 1 naming each component it could not fetch. A run where every
+  download failed ended on "All components are up to date." with exit 0, and a pinned version was
+  written into `supatype.config.ts` even when its download had failed.
+* **init:** `supatype init` uses an exported `SUPATYPE_KONG_PORT` as the project's gateway port, in
+  `.env` and in what it prints, and the wizard does not ask for one. It chose its own port, so `.env`
+  and the "API on" line named a port the stack, which binds the shell's, never listened on.
 
 
 ## 0.7.0

@@ -8,6 +8,7 @@
  */
 
 import type { DockerBrandOptions } from "./docker-runtime.js"
+import { errorMessage } from "./error-message.js"
 import { exitComposeFailed } from "./self-host-compose.js"
 
 export interface DatabaseReadySteps {
@@ -24,7 +25,7 @@ export async function waitForDatabaseAfterUp(steps: DatabaseReadySteps): Promise
   try {
     await steps.waitHealthy()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorMessage(err)
     steps.onFailure?.()
     steps.dumpLogs("the stack came up without Postgres answering")
     exitComposeFailed(

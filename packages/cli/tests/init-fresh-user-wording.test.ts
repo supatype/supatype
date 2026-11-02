@@ -3,12 +3,13 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { defaultScaffoldOptions, printProductionSteps, scaffold } from "../src/commands/init.js"
+import { NATIVE_SERVER_PORT } from "../src/project-config.js"
 
 /**
  * Fresh-user test C11 and C12, what init writes and prints:
  * - the first admin is for Studio, at /studio/, not "/admin";
  * - a project that chose no app is not told how to serve a static frontend;
- * - a docker project's config does not carry `server.port: 54321`, which is the native server's
+ * - a docker project's config does not carry `server.port`, which is the native server's
  *   port: its API is on the gateway port, so the field only misled.
  */
 let dir: string
@@ -43,11 +44,11 @@ describe("init wording", () => {
 describe("init config server block", () => {
   it("leaves server.port out of a docker project's config", () => {
     scaffold(dir, defaultScaffoldOptions("d-app"))
-    expect(readFileSync(join(dir, "supatype.config.ts"), "utf8")).not.toMatch(/port: 54321/)
+    expect(readFileSync(join(dir, "supatype.config.ts"), "utf8")).not.toContain(`port: ${NATIVE_SERVER_PORT},`)
   })
 
   it("keeps it for a native project, whose server listens on it", () => {
     scaffold(dir, { ...defaultScaffoldOptions("n-app"), provider: "native" })
-    expect(readFileSync(join(dir, "supatype.config.ts"), "utf8")).toMatch(/port: 54321/)
+    expect(readFileSync(join(dir, "supatype.config.ts"), "utf8")).toContain(`port: ${NATIVE_SERVER_PORT},`)
   })
 })

@@ -29,6 +29,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/compose-reset.sh"
+source "$SCRIPT_DIR/lib/pinned-image.sh"
 
 PROJECT_NAME="${SUPATYPE_ZTR_PROJECT:-${SUPATYPE_E2E_PROJECT:-ztr-smoke}}"
 # `dev` names the stack after the project, normalised as the CLI does.
@@ -114,13 +115,20 @@ pull_hub_image() {
 
 prefetch_hub_images() {
   echo "==> Prefetching Docker Hub images (first run can take several minutes)..."
-  pull_hub_image "postgres" "${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}"
-  pull_hub_image "server" "${SUPATYPE_SERVER_IMAGE:-supatype/server:latest}"
+  # The images the CLI built from this checkout renders: the engine, server and Postgres pinned in
+  # release/images.json, and :latest for the images built here, since a checkout that is not a
+  # release has none of its own version.
+  local postgres server engine
+  postgres="${SUPATYPE_POSTGRES_IMAGE:-$(pinned_image postgres)}"
+  server="${SUPATYPE_SERVER_IMAGE:-$(pinned_image server)}"
+  engine="${SUPATYPE_ENGINE_IMAGE:-$(pinned_image engine)}"
+  pull_hub_image "postgres" "$postgres"
+  pull_hub_image "server" "$server"
   pull_hub_image "storage" "${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}"
   pull_hub_image "functions-worker" "${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}"
   pull_hub_image "realtime" "${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:latest}"
   pull_hub_image "studio" "${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}"
-  pull_hub_image "schema-engine" "${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:latest}"
+  pull_hub_image "schema-engine" "$engine"
   pull_hub_image "control-plane" "${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:latest}"
 }
 

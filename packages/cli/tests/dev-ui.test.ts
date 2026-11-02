@@ -173,19 +173,104 @@ describe("dev-shutdown", () => {
     expect(ran).toBe(true)
   })
 
-  it("warns on second interrupt then force-exits on third", async () => {
+  /** What the shutdown wrote to stderr, as one string. */
+  const said = (): string => stderrSpy.mock.calls.map((call) => String(call[0])).join("")
+
+  /** A compose stack's shutdown fallback, as Docker dev registers it. */
+  function composeStack(): { cwd: string; compose: { cwd: string; composePath: string; composeProject: string } } {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-shutdown-"))
+    const composePath = join(dir, "docker-compose.yml")
+    writeFileSync(composePath, "services: {}\n", "utf8")
+    return { cwd: dir, compose: { cwd: dir, composePath, composeProject: "supatype-test" } }
+  }
+
+  it("warns on second interrupt then force-exits on third, where there are Docker containers", async () => {
+    vi.resetModules()
+    const { registerDevShutdown, requestDevShutdown } = await import("../src/dev-shutdown.js")
+    registerDevShutdown(async () => {
+      await new Promise(() => undefined)
+    }, composeStack())
+    requestDevShutdown()
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledTimes(0))
+    requestDevShutdown()
+    expect(said()).toContain("press Ctrl+C again to force quit")
+    expect(exitSpy).toHaveBeenCalledTimes(0)
+    requestDevShutdown()
+    expect(exitSpy).toHaveBeenCalledWith(130)
+    expect(said()).toContain("Forced quit: Docker containers may still be running.")
+  })
+
+  // Round 6b, C10: native dev starts no Docker containers unless it runs a Valkey sidecar, so a
+  // second Ctrl+C only printed a notice naming Docker, and only a third one ended it.
+  it("force-exits on the second interrupt where no container was started, naming no Docker", async () => {
     vi.resetModules()
     const { registerDevShutdown, requestDevShutdown } = await import("../src/dev-shutdown.js")
     registerDevShutdown(async () => {
       await new Promise(() => undefined)
     })
     requestDevShutdown()
-    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledTimes(0))
-    requestDevShutdown()
-    expect(stderrSpy).toHaveBeenCalled()
-    expect(exitSpy).toHaveBeenCalledTimes(0)
     requestDevShutdown()
     expect(exitSpy).toHaveBeenCalledWith(130)
+    expect(said()).toContain("Forced quit.")
+    expect(said()).not.toMatch(/Docker/)
+  })
+
+  it("keeps three presses for a native dev with a container, and names that container", async () => {
+    vi.resetModules()
+    const { pushStartUndo, registerDevShutdown, requestDevShutdown } = await import("../src/dev-shutdown.js")
+    pushStartUndo(() => new Promise(() => undefined), { container: "the Valkey sidecar container" })
+    registerDevShutdown(async () => undefined)
+    requestDevShutdown()
+    requestDevShutdown()
+    expect(exitSpy).toHaveBeenCalledTimes(0)
+    expect(said()).not.toMatch(/Docker/)
+    requestDevShutdown()
+    expect(exitSpy).toHaveBeenCalledWith(130)
+    expect(said()).toContain("Forced quit: the Valkey sidecar container may still be running.")
+  })
+
+  it("says a failed native shutdown without naming Docker", async () => {
+    vi.resetModules()
+    const { registerDevShutdown, requestDevShutdown } = await import("../src/dev-shutdown.js")
+    registerDevShutdown(async () => {
+      throw new Error("server would not stop")
+    })
+    requestDevShutdown()
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
+    expect(said()).toContain("Shutdown failed: server would not stop")
+    expect(said()).not.toMatch(/Docker/)
+  })
+
+  // Round 6b, C10: Postgres's stop waited for the Valkey sidecar's `docker rm -f`, about 1 s on
+  // Docker Desktop, though nothing in Postgres needs the container gone first.
+  it("stops Postgres once the services have stopped, without waiting for a container", async () => {
+    vi.resetModules()
+    const { drainStartUndo, pushStartUndo, pushStartUndoLast } = await import("../src/dev-shutdown.js")
+    let postgresStopped = false
+    pushStartUndo(() => new Promise(() => undefined), { container: "the Valkey sidecar container" })
+    pushStartUndo(() => undefined)
+    pushStartUndoLast(() => {
+      postgresStopped = true
+    })
+    void drainStartUndo()
+    await vi.waitFor(() => expect(postgresStopped).toBe(true))
+  })
+
+  it("says how long each part of the shutdown took under SUPATYPE_DEBUG=1, and nothing without it", async () => {
+    vi.resetModules()
+    const { drainStartUndo, pushStartUndo, pushStartUndoLast } = await import("../src/dev-shutdown.js")
+    pushStartUndo(() => undefined)
+    pushStartUndoLast(() => undefined)
+    await drainStartUndo()
+    expect(said()).not.toContain("shutdown:")
+    vi.stubEnv("SUPATYPE_DEBUG", "1")
+    pushStartUndo(() => undefined)
+    pushStartUndo(() => undefined, { container: "a container" })
+    await drainStartUndo()
+    vi.unstubAllEnvs()
+    expect(said()).toMatch(/shutdown: services took \d+ ms/)
+    expect(said()).toMatch(/shutdown: Postgres and what else the services use took \d+ ms/)
+    expect(said()).toMatch(/shutdown: containers took \d+ ms/)
   })
 
   it("registers compose fallback for sync exit cleanup", async () => {

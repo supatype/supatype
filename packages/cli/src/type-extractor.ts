@@ -1374,13 +1374,12 @@ function buildExtractedBucketAst(
   id: string,
   parsed: Partial<ParsedBucketLiteral>,
 ): ExtractedStorageBucketAst {
-  const mode = parsed.accessMode ?? "private"
-  const pub = mode === "public"
-
+  // Visibility only when the schema names it: a push leaves an unnamed one as the live bucket has
+  // it, and a filled-in `private` named it, undoing a runtime change on every push.
+  const mode = parsed.accessMode
   const row: ExtractedStorageBucketAst = {
     id,
-    public: pub,
-    accessMode: mode,
+    ...(mode !== undefined && { public: mode === "public", accessMode: mode }),
     ...(parsed.allowedMimeTypes !== undefined && parsed.allowedMimeTypes.length > 0
       ? { allowedMimeTypes: parsed.allowedMimeTypes }
       : {}),
@@ -1426,8 +1425,8 @@ function parseBucketTypeLiteral(
       continue
     }
     if (key === "accept") {
-      const types = parseMimeAcceptList(member.type, sourceFile)
-      if (types !== undefined) out.allowedMimeTypes = types
+      const types = acceptList(member.type, sourceFile, bucketId)
+      if (types.length > 0) out.allowedMimeTypes = acceptedMimeTypes(bucketId, types)
       continue
     }
     if (key === "access") {
@@ -1461,30 +1460,54 @@ function parseJsonStringLiteral(typeNode: ts.TypeNode, sourceFile: ts.SourceFile
   return parseSizeStringLiteral(typeNode, sourceFile)
 }
 
-function parseMimeAcceptList(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): string[] | undefined {
+/**
+ * A MIME type a bucket can accept: `type/subtype` in RFC 6838's restricted names, or `type/*`. The
+ * storage service's own rule (`packages/storage/src/bucket-rules.ts`), so a type it would refuse at
+ * provisioning stops the schema here instead.
+ */
+export const BUCKET_MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$/i
+
+/** `types`, when each is a MIME type a bucket can accept; throws naming the first that is not. */
+function acceptedMimeTypes(bucketId: string, types: string[]): string[] {
+  const bad = types.find((type) => !BUCKET_MIME_TYPE.test(type))
+  if (bad === undefined) return types
+  throw new Error(
+    `Bucket "${bucketId}": accept holds "${bad}", which is not a MIME type. ` +
+      `Use "type/subtype" or "type/*", such as "image/png" or "image/*".`,
+  )
+}
+
+/**
+ * The MIME types a bucket's `accept` lists, an empty list meaning no limit. Any form but string
+ * literals written in place is refused: it was read as no list at all, so the bucket took every type.
+ */
+function acceptList(typeNode: ts.TypeNode, sourceFile: ts.SourceFile, bucketId: string): string[] {
+  const types = parseMimeAcceptList(typeNode)
+  if (types !== null) return types
+  throw new Error(
+    `Bucket "${bucketId}": could not read its \`accept\` list from \`${typeNode.getText(sourceFile)}\`.\n` +
+      `  accept lists MIME types as string literals in place, e.g. accept: ["image/png", "image/*"]`,
+  )
+}
+
+/** The string literals a tuple or a union lists, or null when it is written any other way. */
+function parseMimeAcceptList(typeNode: ts.TypeNode): string[] | null {
   if (ts.isTypeOperatorNode(typeNode) && typeNode.operator === ts.SyntaxKind.ReadonlyKeyword) {
-    return parseMimeAcceptList(typeNode.type, sourceFile)
+    return parseMimeAcceptList(typeNode.type)
   }
-  if (ts.isTupleTypeNode(typeNode)) {
-    const values: string[] = []
-    for (const el of typeNode.elements) {
-      const node: ts.TypeNode = ts.isNamedTupleMember(el) ? el.type : el
-      const s = literalStringType(node)
-      if (!s) return undefined
-      values.push(s)
-    }
-    return values.length > 0 ? values : undefined
+  const members = ts.isTupleTypeNode(typeNode)
+    ? typeNode.elements.map((el) => (ts.isNamedTupleMember(el) ? el.type : el))
+    : ts.isUnionTypeNode(typeNode)
+      ? [...typeNode.types]
+      : null
+  if (members === null) return null
+  const values: string[] = []
+  for (const node of members) {
+    const value = literalStringType(node)
+    if (!value) return null
+    values.push(value)
   }
-  if (ts.isUnionTypeNode(typeNode)) {
-    const values: string[] = []
-    for (const u of typeNode.types) {
-      const s = literalStringType(u)
-      if (!s) return undefined
-      values.push(s)
-    }
-    return values.length > 0 ? values : undefined
-  }
-  return undefined
+  return values
 }
 
 /** The operations a bucket's `access` may name, the same four a model's may. */
@@ -1528,22 +1551,33 @@ function parsePartialBucketAccess(
   return access
 }
 
-/** Parse human-readable size from schema types, e.g. `50MB`. */
+/** Each size unit `maxSize` reads, as a power of two. */
+const SIZE_UNIT_EXPONENTS: Readonly<Record<string, number>> = { B: 0, KB: 10, MB: 20, GB: 30 }
+
+/** The units `maxSize` reads, as a sentence names them: "B, KB, MB or GB". */
+function sizeUnitList(): string {
+  const units = Object.keys(SIZE_UNIT_EXPONENTS)
+  return `${units.slice(0, -1).join(", ")} or ${units.at(-1) ?? ""}`
+}
+
+/**
+ * Parse human-readable size from schema types, e.g. `50MB`. A number and a unit it does not read,
+ * or a size past the most bytes a number holds exactly, are each named as what they are: both used
+ * to say only "Invalid maxSize literal" (local test round 3b).
+ */
 function parseDataSizeBytes(lit: string): number {
-  const m = lit.trim().match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)$/i)
+  const m = lit.trim().match(/^(\d+(?:\.\d+)?)\s*([A-Za-z]+)$/)
   if (!m?.[1] || !m[2]) throw new Error(`Invalid maxSize literal: "${lit}". Use forms like "50MB", "100KB".`)
-  const n = Number(m[1])
-  if (!Number.isFinite(n) || n < 0) throw new Error(`Invalid maxSize number in: "${lit}"`)
-  const pow: Record<string, number> = {
-    B: 0,
-    KB: 10,
-    MB: 20,
-    GB: 30,
+  const exp = SIZE_UNIT_EXPONENTS[m[2].toUpperCase()]
+  if (exp === undefined) {
+    throw new Error(`Invalid maxSize "${lit}": "${m[2]}" is not a size unit here: use ${sizeUnitList()}.`)
   }
-  const unit = m[2].toUpperCase() as keyof typeof pow
-  const exp = pow[unit]
-  if (exp === undefined) throw new Error(`Unsupported maxSize unit in: "${lit}"`)
-  return Math.round(n * Math.pow(2, exp))
+  const bytes = Math.round(Number(m[1]) * Math.pow(2, exp))
+  if (!Number.isSafeInteger(bytes)) {
+    const largest = `${Math.floor(Number.MAX_SAFE_INTEGER / Math.pow(2, 30))}GB`
+    throw new Error(`maxSize "${lit}" is too big: the largest is ${largest} (${Number.MAX_SAFE_INTEGER} bytes).`)
+  }
+  return bytes
 }
 
 function stripQuotes(s: string): string {
@@ -1567,10 +1601,12 @@ function attachStorageFieldMeta(
   bucketsById: Map<string, ExtractedStorageBucketAst>,
 ): ParsedField {
   const cfg = bucketsById.get(bucketId)
-  if (cfg?.accessMode !== undefined) {
+  if (cfg !== undefined) {
+    // A bucket that names no mode reads as private, as the storage service treats one; only the
+    // bucket entry leaves it out, so a push keeps the live bucket's visibility.
     return {
       ...field,
-      kernel: { ...field.kernel, accessMode: cfg.accessMode },
+      kernel: { ...field.kernel, accessMode: cfg.accessMode ?? "private" },
     }
   }
   return field

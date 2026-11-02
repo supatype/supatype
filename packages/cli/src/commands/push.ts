@@ -4,13 +4,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import {
-  syncManifestHooks,
   validateModelHooks,
+  manifestMaps,
   validateModelValidators,
   writeHooksModule,
 } from "../model-hooks.js"
-import { rowCacheChangeNote, syncRowCacheEnv } from "../model-cache.js"
-import { adapterEntry, readHookUpload } from "../hook-upload.js"
+import { rowCacheChangeNote } from "../model-cache.js"
+import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
+import { adapterEntry, readHookUpload, type HookFailure } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
 import { fatalError } from "../ui/fatal.js"
 import {
@@ -42,18 +43,21 @@ import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from 
 import { adoptKeysNeed, OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
-import { isParsedBuckets, provisionBucketsFromAst } from "../storage-provision.js"
+import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
+import { postApplyFailed } from "../post-apply.js"
+import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
-import { refreshFunctionsContext } from "../functions-context-refresh.js"
 import { waitForRestReady } from "../rest-ready.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
   requireTargetFeatures,
   resolveTarget,
+  targetHookSupport,
+  type HookFiles,
   targetSchemaAdopt,
   targetSchemaDiff,
   targetSchemaPush,
@@ -62,15 +66,18 @@ import {
 } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
 import { targetFetch } from "../target-client.js"
+import { sayTargetWarning } from "../target-warning.js"
+import { targetRequest } from "../target-request.js"
 import {
   buildSchemaSourcesPayload,
   cacheSchemaSourcesLocally,
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
-import { info, plain } from "../ui/messages.js"
+import { error, info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
+import { errorMessage } from "../error-message.js"
 
 export function registerPush(program: Command): void {
   program
@@ -163,8 +170,7 @@ export function dockerApplyMessage(force: boolean, engine: DockerPushEngine): st
 /**
  * `supatype push` on a docker project with no local control plane. No diff is read first on this
  * path, so the engine's refusals are where drift, unmanaged tables and lost data show up, and each
- * is asked about here. The push used to be forced, so a change that dropped a column applied with
- * no question asked; now it needs a yes in a terminal, or `--yes`.
+ * is asked about here: a change that drops data needs a yes in a terminal, or `--yes`.
  */
 async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushRun): Promise<void> {
   const { composeAuditArgs, dockerDiff, dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } =
@@ -292,9 +298,9 @@ async function pushViaTarget(
   // The diff's were printed before applying; what is left is what the push found once applied.
   printPushWarnings(pushResult, diff.warnings ?? [])
 
-  if (target.mode === "cloud" || target.mode === "self-host") {
-    await deployHooksToTarget(cwd, config, target, ast)
-  }
+  const hooksFailed = target.mode === "cloud" || target.mode === "self-host"
+    ? await deployHooksToTarget(cwd, config, target, ast)
+    : false
   // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
   if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
 
@@ -303,7 +309,20 @@ async function pushViaTarget(
     return
   }
 
-  info(`Pushed to ${target.mode} (${target.environment}).`)
+  reportTargetPush(target, pushResult, hooksFailed)
+}
+
+/**
+ * How a push to a linked target ended. One whose step after the schema failed ends with that, not
+ * "Pushed to ..." and the API URL, which read as success above the failure.
+ */
+function reportTargetPush(
+  target: DeployTarget,
+  pushResult: Awaited<ReturnType<typeof targetSchemaPush>>,
+  stepFailed: boolean,
+): void {
+  if (saidUnfinished(target, stepFailed)) return
+  info(`Pushed to ${pushTargetName(target)}.`)
   // Cloud only. A self-host control plane has tiers too and they mean nothing there, so the same
   // sentence would be telling a self-hosted project to upgrade something it already has.
   if (target.mode === "cloud") {
@@ -314,6 +333,35 @@ async function pushViaTarget(
   if (envUrl) {
     plain(`\nProject API: ${envUrl}`)
   }
+}
+
+/**
+ * Says a push did not finish when a step after the schema failed; true when it said so. Ended that
+ * way rather than with what a finished push ends with, which read as success below the failure.
+ */
+function saidUnfinished(target: Pick<DeployTarget, "mode" | "environment">, stepFailed: boolean): boolean {
+  if (stepFailed) error(`The push to ${pushTargetName(target)} did not finish: the schema is applied, but a step after it failed (above).`)
+  return stepFailed
+}
+
+/** The push's target as the user knows it, rather than its internal mode and environment. */
+function pushTargetName(target: Pick<DeployTarget, "mode" | "environment">): string {
+  switch (target.mode) {
+    case "direct":
+      return "this project's database"
+    case "local":
+      return "this project's local stack"
+    case "cloud":
+      return `Supatype Cloud (${target.environment})`
+    case "self-host":
+      return `the self-hosted server (${target.environment})`
+  }
+}
+
+/** How a push to the project's own stack ends: unfinished, or with its Studio link when it has one. */
+export function reportLocalPush(target: Pick<DeployTarget, "mode" | "environment">, studioUrl: string | undefined, stepFailed: boolean): void {
+  if (saidUnfinished(target, stepFailed)) return
+  if (studioUrl !== undefined) plain(`\nStudio: ${studioUrl}`)
 }
 
 /**
@@ -371,8 +419,8 @@ function applyToTarget(
  * for the project's own running stack only, its storage buckets and Studio link.
  *
  * A push to some other database (`--connection`, or an external one) has no stack of this project
- * behind it. It used to provision buckets and print a Studio link on the default gateway port,
- * which is another project's on a machine running two (A3-N4, A4-N2).
+ * behind it, so it provisions no buckets and prints no Studio link: the default gateway port may be
+ * another project's on a machine running two.
  */
 async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<void> {
   await writeLocalAdminConfig(ast, config)
@@ -383,21 +431,21 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
   }
   await generateTypesLocal(ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
-    // A push to the running stack's database can change its tier (T2-N6), and PostgREST follows.
+    // A push to the running stack's database can change its tier, and PostgREST follows.
     const { followRecordedTier } = await import("../dev-compose.js")
     followRecordedTier(cwd, config, { recreate: true })
   }
-  if (stackUrl !== undefined) await provisionLocalStorage(ast, config, stackUrl)
+  const storageFailed = stackUrl !== undefined && (await provisionLocalStorage(ast, config, stackUrl))
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
     await waitForRestReady(stackUrl, devApiKeys(cwd).anonKey)
   }
   reportCacheSeeding(cwd, ast)
-  if (studioUrl !== undefined) plain(`\nStudio: ${studioUrl}`)
+  reportLocalPush(target, studioUrl, storageFailed)
 }
 
 /**
  * For a database this project does not run, whether it has what the push needs, saying what is
- * missing and how to add it when not (T2-N11). The project's own database always does.
+ * missing and how to add it when not. The project's own database always does.
  */
 async function databaseIsReady(
   cwd: string,
@@ -426,40 +474,135 @@ async function databaseIsReady(
  * this machine, and `hooks/_supatype/hooks.ts` is what makes them typed, it is generated, never
  * committed, so a fresh clone that has only ever pushed to cloud would otherwise have no types at all.
  */
-async function deployHooksToTarget(
+export async function deployHooksToTarget(
   cwd: string,
   config: SupatypeProjectConfig,
   target: DeployTarget,
   ast: unknown,
-): Promise<void> {
+): Promise<boolean> {
   const hooksDir = hooksPathFromProject(config, cwd)
   const hooksPath = writeHooksModule(cwd, hooksDir, ast)
   if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
 
-  let upload: ReturnType<typeof readHookUpload>
+  let support: { files: HookFiles; keep: boolean }
   try {
-    upload = readHookUpload(cwd, hooksDir, ast)
+    support = await targetHookSupport(target)
   } catch (err) {
-    // Refused rather than partially uploaded: the schema is already applied, so the honest thing is to
-    // say the hooks did not deploy and why, leaving the previous ones in place.
-    fatalError(err instanceof Error ? err.message : String(err))
-    return
+    // Nothing is sent to a target that could not say what it takes: the hooks deployed before stay.
+    postApplyFailed(`its hooks were not deployed: ${target.apiBaseUrl} could not say what it takes (${errorMessage(err)})`)
+    return true
   }
-  if (upload === null) return
-
+  // Each hook is checked on its own: a failed one is kept on the target as it is (`keep`), where the
+  // target deploys hook by hook; anywhere else a failed one means none is sent.
+  const upload = readHookUpload(cwd, hooksDir, ast, support.files)
+  const failed = upload?.failed ?? []
+  if (failed.length > 0 && !support.keep) return reportNoneSent(target, failed)
+  // One body for every target, the manifest's three maps in it: a self-host stack learns the
+  // validator and cache maps only here, as a local push writes them (applied-ast-artifacts.ts). It
+  // is sent on every push, empty when the schema declares nothing, so it clears what the target was
+  // given before from wherever that push came: a record kept on one machine missed a fresh clone's.
   const adapter = readGeneratedAdapter(hooksDir)
-  const handlers = adapter === null ? upload.handlers : [...upload.handlers, adapter]
+  const named = upload?.handlers ?? []
+  const handlers = adapter === null || named.length === 0 ? named : [...named, adapter]
+  const { hooks, validators, cache } = manifestMaps(ast)
+  const keep = failed.length > 0 ? { keep: failed.map((hook) => hook.name) } : {}
+  return uploadHooks(target, { handlers, map: hooks, validators, cache, ...keep }, named.length, failed)
+}
 
-  await withSpinner(`Deploying ${upload.handlers.length} hook(s)`, () =>
-    targetFetch(target.apiBaseUrl, target.apiPrefix, {
-      method: "POST",
-      path: `/projects/${target.projectRef}/hooks/deploy`,
-      body: { handlers, map: upload.map },
-      token: target.token!,
-      orgId: target.orgId,
-      environment: target.mode === "cloud" ? target.environment : undefined,
-    }),
-  ).then(() => info(`Deployed ${upload.handlers.length} hook(s)`))
+/**
+ * `POST /projects/:ref/hooks/deploy` on the target, with the time limit a deploy of that many
+ * handlers has. A refusal comes after the schema was applied, so it says that, which target refused
+ * and what it answered.
+ */
+export async function uploadHooks(
+  target: DeployTarget,
+  body: HookDeployBody,
+  count: number,
+  failed: readonly HookFailure[] = [],
+): Promise<boolean> {
+  // Nothing declared: sent to clear whatever the target holds.
+  const empty = count === 0 && failed.length === 0 && emptyDeploy(body)
+  let answer: unknown
+  try {
+    answer = await withSpinner(empty ? "Clearing hooks the schema no longer declares" : `Deploying ${count} hook(s)`, () =>
+      targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, { method: "POST", subpath: "/hooks/deploy", body, restartsWorker: true, handlers: count })),
+    )
+    sayTargetWarning(answer)
+  } catch (err) {
+    postApplyFailed(
+      empty
+        ? `the hooks it no longer declares were not cleared on ${target.apiBaseUrl}: ${errorMessage(err)}`
+        : `its ${count} hook(s) were not deployed to ${target.apiBaseUrl}: ${errorMessage(err)}`,
+      "The hooks deployed before, if any, are still the ones that run.",
+    )
+    return true
+  }
+  const notDeployed = [...failed, ...(isHookDeployAnswer(answer) ? (answer.refused ?? []) : [])]
+  if (notDeployed.length > 0) return reportHooksNotDeployed(target, body, notDeployed, isHookDeployAnswer(answer) ? answer : undefined)
+  if (!empty) info(`Deployed ${count} hook(s)`)
+  return false
+}
+
+/**
+ * Names each hook not deployed, why, and what that means on the target, as its answer says: kept (its
+ * previous version still runs) or locked (it had none: writes to the tables that map it are refused
+ * until it deploys). Ends the push non-zero (post-apply.ts). Always true: a step after the schema failed.
+ */
+function reportHooksNotDeployed(
+  target: DeployTarget,
+  body: HookDeployBody,
+  notDeployed: readonly HookFailure[],
+  answer: HookDeployAnswer | undefined,
+): true {
+  const lines = notDeployed.flatMap(({ name, reason }) => [`${name}: ${reason}`, `  ${hookOutcome(name, body, answer)}`])
+  postApplyFailed(`${notDeployed.length} hook(s) were not deployed to ${target.apiBaseUrl}:`, lines.join("\n  "))
+  return true
+}
+
+/**
+ * A target that does not deploy hook by hook (no {@link HOOK_KEEP_FEATURE}) takes all of a push's
+ * hooks or none: with one failed, none is sent, and the ones deployed before still run. Ends the push
+ * non-zero, naming each failed hook and why.
+ */
+function reportNoneSent(target: DeployTarget, failed: readonly HookFailure[]): true {
+  const lines = failed.map(({ name, reason }) => `${name}: ${reason}`)
+  lines.push("The hooks deployed before, if any, are still the ones that run.")
+  postApplyFailed(`${failed.length} hook(s) failed their checks, so no hooks were sent to ${target.apiBaseUrl}:`, lines.join("\n  "))
+  return true
+}
+
+/** What a hook not deployed means on the target, by its answer. */
+function hookOutcome(name: string, body: HookDeployBody, answer: HookDeployAnswer | undefined): string {
+  if (answer?.kept?.includes(name) === true) return "kept: its previous version still runs"
+  if (answer?.locked?.includes(name) !== true) return "the target did not say whether a previous version of it is kept"
+  const { refusing, logging } = tablesNaming(name, [body.map, body.validators])
+  // A table whose map says onUnavailable "log" lets a write through a hook that cannot be reached.
+  const parts = [
+    ...(refusing.length > 0 || logging.length === 0 ? [`writes to ${refusing.length > 0 ? refusing.join(", ") : "the tables that map it"} are refused until it deploys`] : []),
+    ...(logging.length > 0 ? [`writes to ${logging.join(", ")} go through without it until it deploys (onUnavailable: log)`] : []),
+  ]
+  return `new: ${parts.join("; ")}`
+}
+
+/** The tables whose hook or validator map names the function `name`, by what a write does while it cannot be reached. */
+function tablesNaming(name: string, maps: readonly unknown[]): { refusing: string[]; logging: string[] } {
+  const refusing = new Set<string>()
+  const logging = new Set<string>()
+  for (const map of maps) {
+    if (!isHookMap(map)) continue
+    for (const [table, entries] of Object.entries(map)) {
+      for (const entry of Object.values(entries)) {
+        if (entry.function === name) (entry.onUnavailable === "log" ? logging : refusing).add(table)
+      }
+    }
+  }
+  return { refusing: [...refusing].sort(), logging: [...logging].sort() }
+}
+
+/** Whether a deploy body carries no handler and no map entry. */
+function emptyDeploy(body: HookDeployBody): boolean {
+  const maps = [body.map, body.validators, body.cache]
+  return (body.handlers ?? []).length === 0 && maps.every((map) => map === undefined || (isJsonObject(map) && Object.keys(map).length === 0))
 }
 
 /**
@@ -487,25 +630,11 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, o
   // Independent of `output`: a project with hooks needs its handler types whether or not it asked
   // for client types, and the module is written next to the functions that import it.
   const cwd = process.cwd()
-  const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
-  if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
-
-  // `_shared/context.ts` too, for the same reason the hook module is here.
-  //
-  // It was written by `init` and `functions new` and by nothing else, so a project that predates
-  // the two-argument handler contract never received it: its functions had no `FunctionContext` to
-  // import, while the file itself claims "Regenerated by the CLI. Edits are overwritten." That
-  // claim was only true if you scaffolded again. `tests/integration` had four functions and no
-  // context module at all.
-  if (refreshFunctionsContext(cwd, config)) {
-    info("Function context type written to functions/_shared/context.ts")
-  }
-  // The server watches this file, so a changed hook takes effect without a restart.
-  if (syncManifestHooks(cwd, ast)) info("Hook map written to .supatype/manifest.json")
   // The row cache is configured at postmaster start, so this is the one cache setting a push
   // cannot make take effect on its own. Only for the project's own database: `.env` configures that
   // container, and a push to any other database has no container to recreate (A2-N4).
-  const rowCache = ownDatabase ? syncRowCacheEnv(cwd, ast) : null
+  const { lines, rowCache } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: ownDatabase })
+  for (const line of lines) info(line)
   if (rowCache !== null) {
     info(
       `${rowCacheChangeNote(rowCache)} Recreate the database container for it to take ` +
@@ -514,11 +643,8 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, o
     )
   }
 
-  // The CLI writes these, it does not ask the engine to. Passing types_path and client_path and
-  // reading only `message` meant the generated TypeScript was printed to the terminal and no file
-  // was ever created, so `push` reported success and produced nothing. Written at the default
-  // paths when `output` is not set: a client left describing the old schema compiles against
-  // columns that no longer exist.
+  // The CLI writes these from the AST, at the default paths when `output` is not set: a client
+  // left describing the old schema compiles against columns that no longer exist.
   const written = await withSpinner("Generating types", () =>
     writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output) }),
   )
@@ -526,12 +652,22 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, o
 }
 
 /** Create the schema's buckets on the project's own stack at `baseUrl`. */
-async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig, baseUrl: string): Promise<void> {
+async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig, baseUrl: string): Promise<boolean> {
   const serviceRoleKey = localServiceRoleKey(config)
-  if (!serviceRoleKey) return
+  if (!serviceRoleKey) return false
   await ensureEngine()
   const parsedAst = await engineRequest("/parse", { ast }, isParsedBuckets)
-  await provisionBucketsFromAst(parsedAst, `${baseUrl}/storage/v1`, serviceRoleKey)
+  return provisionSchemaBuckets(parsedAst, `${baseUrl}/storage/v1`, serviceRoleKey)
+}
+
+/**
+ * Creates the schema's buckets. One the stack does not have afterwards ends the push non-zero,
+ * named (post-apply.ts).
+ */
+export async function provisionSchemaBuckets(parsed: ParsedBuckets, storageApiUrl: string, serviceRoleKey: string): Promise<boolean> {
+  const left = unprovisionedBuckets(await provisionBucketsFromAst(parsed, storageApiUrl, serviceRoleKey))
+  if (left !== null) postApplyFailed(left)
+  return left !== null
 }
 
 /**
