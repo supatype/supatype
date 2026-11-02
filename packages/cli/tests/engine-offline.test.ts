@@ -87,12 +87,19 @@ describe("resolveBinary() offline", () => {
 
 describe("binaryCapabilities()", () => {
   it.skipIf(process.platform === "win32")("asks the binary that will run, falling back to its version", () => {
-    const bin = join(cwd, "old-engine")
-    writeFileSync(bin, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "supatype-engine 0.7.0"; exit 0; fi\nexit 2\n')
-    chmodSync(bin, 0o755)
-    const caps = binaryCapabilities(bin)
+    // A binary with no `capabilities` command is judged by its version: at the CLI's floor it gets
+    // the features that came before `capabilities`, and below the floor it is refused.
+    const versionOnly = join(cwd, "version-only-engine")
+    writeFileSync(versionOnly, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "supatype-engine 0.8.0"; exit 0; fi\nexit 2\n')
+    chmodSync(versionOnly, 0o755)
+    const caps = binaryCapabilities(versionOnly)
     expect(caps.features.has("overwrite_drift")).toBe(true)
     expect(caps.features.has("accept_access_drift")).toBe(false)
+
+    const old = join(cwd, "old-engine")
+    writeFileSync(old, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "supatype-engine 0.7.0"; exit 0; fi\nexit 2\n')
+    chmodSync(old, 0o755)
+    expect(() => binaryCapabilities(old)).toThrow(/needs Supatype engine 0\.8\.0 or newer/)
 
     const current = join(cwd, "new-engine")
     writeFileSync(current, '#!/bin/sh\nif [ "$1" = "capabilities" ]; then echo \'{"features":["accept_access_drift"]}\'; exit 0; fi\nexit 2\n')
