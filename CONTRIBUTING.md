@@ -38,8 +38,8 @@ The repository is a Turborepo with pnpm workspaces, and every package is ESM.
 ```bash
 pnpm install
 pnpm build
-pnpm turbo run typecheck
-pnpm turbo run lint
+pnpm typecheck
+pnpm lint
 pnpm --filter @supatype/<package> test
 ```
 

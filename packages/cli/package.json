@@ -27,15 +27,15 @@
       "types": "./dist/index.d.ts"
     },
     "./seed": {
-      "import": "./dist/seed.js",
-      "types": "./dist/seed.d.ts"
+      "types": "./dist/seed.d.ts",
+      "default": "./dist/seed.js"
     },
     "./deno": {
       "types": "./deno.d.ts"
     }
   },
   "scripts": {
-    "build": "tsc --project tsconfig.json && node --input-type=module -e \"import{cpSync,mkdirSync}from'node:fs';const a='dist/assets';mkdirSync(a,{recursive:true});cpSync('assets/supatype-logo-wordmark.ascii.txt',a+'/supatype-logo-wordmark.ascii.txt')\"",
+    "build": "node ../../scripts/release-images.mjs generate && node ../../scripts/functions-worker-source.mjs generate && tsc --project tsconfig.json && node --input-type=module -e \"import{cpSync,mkdirSync}from'node:fs';const a='dist/assets';mkdirSync(a,{recursive:true});cpSync('assets/supatype-logo-wordmark.ascii.txt',a+'/supatype-logo-wordmark.ascii.txt')\"",
     "dev": "tsc --project tsconfig.json --watch",
     "typecheck": "tsc --project tests/tsconfig.json --noEmit && tsc --project bin/tsconfig.json",
     "typecheck:tests": "tsc --project tests/tsconfig.json --noEmit",

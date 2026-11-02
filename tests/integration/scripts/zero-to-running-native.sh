@@ -51,9 +51,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The native server's port: SUPATYPE_ZTR_SERVER_PORT when set (a project whose server.port is not
+# the default), else the CLI's own default, read from its source so the two cannot drift. The
+# Docker gateway's port is not tried: this is the native path, and a Docker stack answering there
+# would pass it without the native server running.
+native_server_port() {
+  if [[ -n "${SUPATYPE_ZTR_SERVER_PORT:-}" ]]; then
+    printf '%s\n' "$SUPATYPE_ZTR_SERVER_PORT"
+    return
+  fi
+  local port
+  port="$(sed -n 's/^export const NATIVE_SERVER_PORT = \([0-9][0-9]*\).*/\1/p' "$ROOT/../../packages/cli/src/project-config.ts")"
+  if [[ -z "$port" ]]; then
+    echo "zero-to-running (native): NATIVE_SERVER_PORT not found in packages/cli/src/project-config.ts" >&2
+    exit 1
+  fi
+  printf '%s\n' "$port"
+}
+SERVER_PORT="$(native_server_port)"
+
 ztr_native_ready() {
-  http_ok http://127.0.0.1:54321/auth/v1/health \
-    || http_ok http://127.0.0.1:18473/auth/v1/health
+  http_ok "http://127.0.0.1:${SERVER_PORT}/auth/v1/health"
 }
 
 OK=0

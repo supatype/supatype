@@ -206,8 +206,8 @@ plain string as one paragraph, `{ "root": { "type": "root", "children": [{ "type
 `versions`, every row of `<table>_versions` holds a copy in `data` and needs the same move, with the
 snapshot table's triggers off for that `UPDATE` (its guard trigger silently keeps `data` as it
 was). Run the migration as the database superuser before anyone saves those records in Studio,
-which shows a flat entry's fields empty. The tested SQL is in the repo's `UPGRADING.md`, "Moving
-rows saved in the old shape".
+which shows a flat entry's fields empty. The tested SQL is in the upgrade notes:
+[Moving rows saved in the old shape](https://github.com/supatype/supatype/blob/v0.7.0/UPGRADING.md#moving-rows-saved-in-the-old-shape).
 
 ## Indexes, PostGIS and pgvector
 
@@ -242,7 +242,8 @@ one, write your own SQL function in `public` with `SET search_path = public, ext
 push leaves functions it did not make alone. On an upgraded project the first push moves `vector`,
 `unaccent` and `pgcrypto` out of `public` (a cautious change, asked for; `--yes` agrees). PostGIS
 cannot be moved by a push: it stays in `public` with a warning on every push, and moving it is the
-manual reload in UPGRADING.md, "Extensions move to the extensions schema" (docs:
+manual reload in the upgrade notes,
+[Extensions move to the extensions schema](https://github.com/supatype/supatype/blob/v0.7.0/UPGRADING.md#extensions-move-to-the-extensions-schema) (docs:
 `/docs/schema/fields#where-the-extensions-live`). Hand-written SQL must not prefix their objects with
 `public.`.
 
@@ -375,6 +376,8 @@ points you at the bucket's `maxSize` and `accept`.
 For a rule the type system cannot express, use a model `beforeChange` hook and return `{ reject }`:
 
 ```ts
+import { hook, type BeforeChange } from "../_supatype/hooks.ts"
+
 const validateProduct: BeforeChange<"products"> = async (ctx) => {
   for (const row of ctx.rows) {
     if (!Array.isArray(row.setup_items) || row.setup_items.length === 0) {

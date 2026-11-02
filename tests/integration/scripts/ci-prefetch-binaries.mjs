@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Download CDN component binaries for integration tests.
- * Fetches the latest available version for each component from the CDN's
- * `latest.json` manifest, then patches tests/integration/supatype.config.ts
- * so the integration tests resolve the same cached binaries.
+ * Takes the version this CLI runs when a project pins none (the engine, server and Postgres
+ * releases it pins, `defaultComponentVersion`), and the CDN's `latest.json` for the rest, then patches
+ * tests/integration/supatype.config.ts so the integration tests resolve the same cached binaries.
  * Components without a published latest.json are skipped (pre-first-release).
  *
  * Run after `pnpm build` (needs packages/cli/dist).
@@ -17,12 +17,16 @@ import {
   downloadAll,
   verifyCachedBinaries,
 } from "../../../packages/cli/dist/binary-cache.js"
+import { defaultComponentVersion } from "../../../packages/cli/dist/release-images.js"
 
 const integrationDir = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const configPath = resolve(integrationDir, "supatype.config.ts")
 
-console.log("[ci] Fetching latest component versions from CDN...")
-const versions = await fetchAllLatestVersions()
+console.log("[ci] Resolving component versions...")
+const latest = await fetchAllLatestVersions()
+const versions = Object.fromEntries(
+  BINARY_COMPONENTS.map((c) => [c, defaultComponentVersion(c) ?? latest[c]]).filter(([, v]) => v),
+)
 console.log(
   "[ci] Resolved versions:",
   Object.entries(versions).map(([k, v]) => `${k}@${v}`).join(", "),

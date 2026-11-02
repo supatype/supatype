@@ -8,10 +8,8 @@
  * had nothing to do, which read as dev hanging.
  */
 import { watch as fsWatch } from "node:fs"
+import { debounce } from "./debounce.js"
 import type { WatchFn } from "./dev-functions-watch.js"
-
-/** Windows fires several events per save; one push covers them all. */
-const DEBOUNCE_MS = 300
 
 export interface DevSchemaWatchOptions {
   /** The directory holding the schema entry point and the files it imports. */
@@ -30,20 +28,18 @@ export const CHANGED_WHILE_STARTING = "The schema changed while dev was starting
  * saved after the first push read it.
  */
 export function watchDevSchema(opts: DevSchemaWatchOptions, watch: WatchFn = fsWatch): { close: () => void } {
-  let timer: ReturnType<typeof setTimeout> | null = null
+  // The push names the last file of the burst.
+  let saved = ""
+  const push = debounce(() => opts.push(`Change detected in ${saved}`))
   const watcher = watch(opts.dir, { recursive: true }, (_event, filename) => {
     if (!filename?.endsWith(".ts")) return
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
-      timer = null
-      opts.push(`Change detected in ${filename}`)
-    }, DEBOUNCE_MS)
+    saved = filename
+    push.trigger()
   })
   void catchUpOnEarlierSave(opts)
   return {
     close: () => {
-      if (timer) clearTimeout(timer)
-      timer = null
+      push.cancel()
       watcher.close()
     },
   }

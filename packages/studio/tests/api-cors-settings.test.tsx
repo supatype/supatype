@@ -123,7 +123,7 @@ describe("the Allowed origins page", () => {
     await render({ schemaView: true }, () => DEFAULT)
     expect(container.querySelector("input")).toBeNull()
     expect(button("Remove")).toBeUndefined()
-    expect(container.textContent).toContain("Owners and admins can change this list.")
+    expect(container.textContent).toContain("Owners, admins and developers can change this list.")
   })
 
   it("says when dev mode is allowing every origin anyway", async () => {

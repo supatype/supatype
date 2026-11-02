@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
-vi.mock("../src/env-file.js", () => ({
-  readEnvValue: () => "test-service-role-key",
+vi.mock("../src/dev-api-keys.js", () => ({
+  configuredServiceRoleKey: () => "test-service-role-key",
 }))
 
 vi.mock("../src/resolve-api-url.js", () => ({

@@ -72,6 +72,21 @@ describe("the dev database port", () => {
   })
 })
 
+describe("the dev database port on a first run, and with .env edited by hand", () => {
+  it("is not taken blind: a busy default moves to the next free port, written to .env", async () => {
+    writeFileSync(join(dir, ".env"), "POSTGRES_PASSWORD=pw\n", "utf8")
+    isPortInUseMock.mockImplementation(async (port) => port === 54329)
+    await expect(ensureDevDbPort(dir, { composeProject: "supatype-demo", mayMove: true })).resolves.toBe(54330)
+    expect(readFileSync(join(dir, ".env"), "utf8")).toMatch(/^SUPATYPE_DEV_DB_PORT=54330$/m)
+  })
+
+  it("uses the last SUPATYPE_DEV_DB_PORT when .env assigns it twice, as compose does (F14)", async () => {
+    writeFileSync(join(dir, ".env"), `${ENV}SUPATYPE_DEV_DB_PORT=54600\n`, "utf8")
+    isPortInUseMock.mockResolvedValue(false)
+    await expect(ensureDevDbPort(dir, { composeProject: "supatype-demo" })).resolves.toBe(54600)
+  })
+})
+
 describe("the Kong port", () => {
   // Compose binds an exported SUPATYPE_KONG_PORT over `.env`, while dev and push waited for Kong on
   // the port in `.env`, so they timed out against a gateway that was up on another port.

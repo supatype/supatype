@@ -1,5 +1,6 @@
 import type { FieldConfig } from "../config.js"
 import { SQLSTATE, sqlstateInMessage, unquoteColumn } from "./database-error.js"
+import { countOf } from "./inflect.js"
 import { foreignKeyColumn } from "./recordValues.js"
 import { escapeRegExp } from "./utils.js"
 import { widgetFor } from "./widget-input.js"
@@ -130,8 +131,8 @@ const tooLong: Explainer = ({ error, fields, values }) => {
     return typeof value === "string" && value.length > limit
   })
   const [only] = long
-  if (long.length === 1 && only !== undefined) return { field: only, message: `must be ${limit} characters or fewer` }
-  return { banner: `A value is longer than the database allows (${limit} characters).` }
+  if (long.length === 1 && only !== undefined) return { field: only, message: `must be ${countOf(limit, "character")} or fewer` }
+  return { banner: `A value is longer than the database allows (${countOf(limit, "character")}).` }
 }
 
 /**

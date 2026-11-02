@@ -18,6 +18,12 @@ describe("shouldExcludeCommandChrome", () => {
     expect(shouldExcludeCommandChrome("self-host compose logs")).toBe(true)
   })
 
+  // Local test round 5: on a self-host link it tails until Ctrl+C, and inside the chrome, which holds
+  // stdin in raw mode, the first Ctrl+C was a key press rather than a stop.
+  it("excludes functions logs, which tails until Ctrl+C", () => {
+    expect(shouldExcludeCommandChrome("functions logs")).toBe(true)
+  })
+
   it("includes one-shot commands", () => {
     expect(shouldExcludeCommandChrome("push")).toBe(false)
     expect(shouldExcludeCommandChrome("doctor")).toBe(false)

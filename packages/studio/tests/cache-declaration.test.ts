@@ -10,7 +10,7 @@ import {
 
 /**
  * §13.2's rule, from the screen's side: the schema declares what is permitted, and Studio may only
- * narrow it. The server enforces that on both paths, so nothing here can widen anything — what it
+ * narrow it. The server enforces that on both paths, so nothing here can widen anything. What it
  * can get wrong is refusing without saying why, which is a control that looks broken.
  */
 
@@ -135,7 +135,7 @@ describe("the row cache, which is shown and never offered", () => {
     // These were the same line, and that cost a real diagnosis. `/admin/v1/cache/rowcache`
     // answered 502 on every database where the row cache was actually on, because the handler
     // scanned the view's boolean `registrations_loaded` into an int64. The view is EMPTY while
-    // decoding is off, so there was no row, no scan and no error — turning the feature on is what
+    // decoding is off, so there was no row, no scan and no error: turning the feature on is what
     // started the failure. The panel then reported the one working database as "not running",
     // which reads as "you have not configured this" and sends you to the schema.
     const line = rowCacheLine(
@@ -179,12 +179,13 @@ describe("the wire shape, against the side that writes it", () => {
   it("reads exactly the keys the CLI emits", async () => {
     // The declaration is written by `supatype push` (packages/cli), carried through the route
     // manifest by the server, and read here. Three processes, one shape, and a key renamed on the
-    // emitting side would not fail a typecheck anywhere — this screen would simply find nothing
-    // declared and report every table as uncacheable.
+    // emitting side would not fail a typecheck anywhere: this screen would simply find nothing
+    // declared and report every table as uncacheable. The shape is the shared contract's, which
+    // the CLI and the self-host control plane both use.
     const { readFileSync } = await import("node:fs")
     const { fileURLToPath } = await import("node:url")
     const src = readFileSync(
-      fileURLToPath(new URL("../../cli/src/model-cache.ts", import.meta.url)),
+      fileURLToPath(new URL("../../shared/src/manifest-maps.ts", import.meta.url)),
       "utf8",
     )
     const block = src.match(/export interface ManifestCacheEntry \{([^}]*)\}/)

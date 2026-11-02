@@ -219,6 +219,7 @@
 <li><code>functions/.env.&lt;name&gt;.local</code> applies to one function and overrides the shared file.</li>
 </ul>
 <p>Read them from <code>ctx.env</code>. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.</p>
+<p>Every value set with <code>supatype functions env set</code>, in <code>.env.local</code> or in <code>.env.&lt;name&gt;.local</code> arrives in <code>ctx.env</code> on each call, never in <code>Deno.env</code>: <code>Deno.env</code> is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. <code>Deno.env.get("RESEND_API_KEY")</code> finds nothing.</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list
@@ -240,7 +241,7 @@ $ npx supatype functions env unset RESEND_API_KEY</pre></div>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></div>
-<p><code>serve</code> listens on port <code>54321</code> by default; change it with <code>--port</code>. It loads <code>functions/.env.local</code> unless you pass <code>--env-file</code>. <code>invoke</code> sends a POST, prints the status and the response, and gives up after 30 seconds. <code>--auth</code> adds a test token to the request.</p>
+<p><code>serve</code> listens on port <code>18472</code> by default; change it with <code>--port</code>. It loads <code>functions/.env.local</code> unless you pass <code>--env-file</code>. <code>invoke</code> sends a POST, prints the status and the response, and gives up after 30 seconds. <code>--auth</code> adds a test token to the request. With <code>--local</code>, or when no Cloud project is linked, <code>invoke</code> calls a running <code>serve</code> on <code>--port</code> (18472 by default) when one answers, and the project's dev API otherwise.</p>
 
 <h2 id="self-host">Self-host</h2>
 <p>The self-host Compose file always includes a <code>functions-worker</code> service, built from the <code>supatype/functions-worker</code> image. It mounts the project read-only and serves <code>functions/</code> from it. There is no bundle or upload step: the files on disk are what runs.</p>
@@ -363,7 +364,7 @@ $ npx supatype hooks list</pre></div>
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

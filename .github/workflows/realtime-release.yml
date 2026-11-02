@@ -67,12 +67,15 @@ jobs:
             runner: ubuntu-24.04
             pkg_target: node22-linux-x64
             output: supatype-realtime-linux-amd64
+          # Each platform on a runner of its own OS and architecture, as storage's archives are
+          # built, rather than packaged across architectures on another (macos-15-intel is the
+          # x86_64 macOS label; macos-13 was retired on 2025-12-04).
           - platform: linux-arm64
-            runner: ubuntu-24.04
+            runner: ubuntu-24.04-arm
             pkg_target: node22-linux-arm64
             output: supatype-realtime-linux-arm64
           - platform: darwin-amd64
-            runner: macos-14
+            runner: macos-15-intel
             pkg_target: node22-macos-x64
             output: supatype-realtime-darwin-amd64
           - platform: darwin-arm64
@@ -172,9 +175,11 @@ jobs:
 
           # An immutable prefix is never rewritten: a client may already hold a binary and a
           # manifest from it, and replacing either is how the postgres checksum skew happened.
+          # A rerun of the release keeps what is published and carries on, so the jobs after
+          # this one (npm, the GitHub release) can still finish the version.
           if aws s3 ls "${BASE}/checksums.sha256.minisig" --endpoint-url "${EP}" >/dev/null 2>&1; then
-            echo "::error::realtime/v${VERSION}/ is already published. Release a new version instead."
-            exit 1
+            echo "::warning::realtime/v${VERSION}/ is already published. Keeping it and uploading nothing."
+            exit 0
           fi
 
           # Binaries first, then the manifest that names them, then its signature.

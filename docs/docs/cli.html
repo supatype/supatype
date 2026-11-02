@@ -205,8 +205,8 @@
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
         <tr><td><code>functions new &lt;name&gt;</code></td><td>Scaffold a new edge function</td><td></td></tr>
-        <tr><td><code>functions serve</code></td><td>Start a local Deno server that serves all functions with hot reload</td><td><code>--port &lt;port&gt;</code> (default 54321), <code>--env-file &lt;path&gt;</code> (default <code>.env.local</code>)</td></tr>
-        <tr><td><code>functions invoke &lt;name&gt;</code></td><td>Invoke a local or deployed function</td><td><code>--data &lt;json&gt;</code>, <code>--auth</code>, <code>--local</code></td></tr>
+        <tr><td><code>functions serve</code></td><td>Start a local Deno server that serves all functions with hot reload</td><td><code>--port &lt;port&gt;</code> (default 18472), <code>--env-file &lt;path&gt;</code> (default <code>.env.local</code>)</td></tr>
+        <tr><td><code>functions invoke &lt;name&gt;</code></td><td>Invoke a local or deployed function</td><td><code>--data &lt;json&gt;</code>, <code>--auth</code>, <code>--local</code> (a running <code>functions serve</code> if one answers, else the dev API), <code>--port &lt;port&gt;</code> (of that serve, default 18472)</td></tr>
         <tr><td><code>functions deploy</code></td><td>Deploy all functions (or <code>--only &lt;name&gt;</code> for one) to the linked project</td><td><code>--only &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--dry-run</code></td></tr>
         <tr><td><code>functions list</code> <strong>Cloud</strong></td><td>List all deployed functions for the linked project</td><td></td></tr>
         <tr><td><code>functions delete &lt;name&gt;</code> <strong>Cloud</strong></td><td>Remove a deployed function</td><td></td></tr>
@@ -298,7 +298,7 @@
 <footer class="site-footer">
   <div class="wrap footer-base footer-slim">
     <span>© Supatype Ltd, a UK company · Zero drift.</span>
-    <span>SDKs MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
   </div>
 </footer>
 

@@ -13,6 +13,8 @@ import { registerFunctions } from "../src/commands/functions.js"
  */
 let project: { dir: string; remove: () => void }
 let called: string[] = []
+// The base URL of a `functions serve` that answers, as the worker answers a bare request.
+let serving: string | undefined
 
 beforeEach(() => {
   project = tempProject("functions-invoke")
@@ -21,8 +23,14 @@ beforeEach(() => {
     `export default { project: { name: "acme" }, database: { provider: "docker" }, server: { mode: "dev" }, app: { mode: "none" } }\n`,
   )
   called = []
+  serving = undefined
   vi.stubGlobal("fetch", (url: string) => {
-    called.push(String(url))
+    const target = String(url)
+    if (target.startsWith("http://127.0.0.1:") && target.endsWith("/functions/v1/")) {
+      if (serving === undefined || !target.startsWith(serving)) return Promise.reject(new TypeError("fetch failed"))
+      return Promise.resolve(new Response(JSON.stringify({ error: "not_found", available: ["hello"] }), { status: 404 }))
+    }
+    called.push(target)
     return Promise.resolve(new Response("{}", { status: 200 }))
   })
   for (const key of ["SUPATYPE_URL", "SUPATYPE_API_URL", "PUBLIC_SUPATYPE_URL", "SITE_URL", "SUPATYPE_KONG_PORT"]) {
@@ -47,5 +55,24 @@ describe("functions invoke", () => {
     writeFileSync(join(project.dir, ".env"), "PUBLIC_SUPATYPE_URL=http://localhost:18800\n")
     await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
     expect(called).toEqual(["http://localhost:18800/functions/v1/hello"])
+  })
+
+  it("--local calls a running functions serve, on its default port", async () => {
+    writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
+    serving = "http://127.0.0.1:18472"
+    await runCommand(registerFunctions, ["functions", "invoke", "hello", "--local"], project.dir)
+    expect(called).toEqual(["http://127.0.0.1:18472/functions/v1/hello"])
+  })
+
+  it("--local calls a functions serve on the port --port names", async () => {
+    serving = "http://127.0.0.1:19123"
+    await runCommand(registerFunctions, ["functions", "invoke", "hello", "--local", "--port", "19123"], project.dir)
+    expect(called).toEqual(["http://127.0.0.1:19123/functions/v1/hello"])
+  })
+
+  it("--local falls back to the dev API when no functions serve answers", async () => {
+    writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
+    await runCommand(registerFunctions, ["functions", "invoke", "hello", "--local", "--port", "19124"], project.dir)
+    expect(called).toEqual(["http://localhost:18700/functions/v1/hello"])
   })
 })

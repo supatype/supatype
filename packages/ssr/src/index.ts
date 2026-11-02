@@ -1,2 +1,2 @@
 export { createServerClient } from "./server-client.js"
-export type { ServerClientOptions, CookieAdapter, CookieOptions } from "./types.js"
+export type { ServerClientOptions, CookieAdapter, CookieOptions, CookieToSet } from "./types.js"

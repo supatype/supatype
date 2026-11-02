@@ -1,6 +1,7 @@
 import React from "react"
 import type { FieldConfig, ModelConfig } from "../config.js"
 import { describeConstraint } from "../lib/evaluate-constraint.js"
+import { countOf } from "../lib/inflect.js"
 import { Badge, Card, Table, Td, Th } from "../components/ui.js"
 
 /**
@@ -158,11 +159,12 @@ function describeBounds(field: FieldConfig): string {
   const rules = field.validation ?? {}
   const parts: string[] = []
 
-  const unit = field.widget === "richtext" ? "characters of text" : "characters"
-  if (rules.maxLength !== undefined) parts.push(`at most ${rules.maxLength} ${unit}`)
-  if (rules.minLength !== undefined) parts.push(`at least ${rules.minLength} ${unit}`)
-  if (rules.maxItems !== undefined) parts.push(`at most ${rules.maxItems} items`)
-  if (rules.minItems !== undefined) parts.push(`at least ${rules.minItems} items`)
+  const characters = (n: number): string =>
+    field.widget === "richtext" ? countOf(n, "character of text", "characters of text") : countOf(n, "character")
+  if (rules.maxLength !== undefined) parts.push(`at most ${characters(rules.maxLength)}`)
+  if (rules.minLength !== undefined) parts.push(`at least ${characters(rules.minLength)}`)
+  if (rules.maxItems !== undefined) parts.push(`at most ${countOf(rules.maxItems, "item")}`)
+  if (rules.minItems !== undefined) parts.push(`at least ${countOf(rules.minItems, "item")}`)
   if (rules.min !== undefined) parts.push(`${rules.min} or more`)
   if (rules.max !== undefined) parts.push(`${rules.max} or less`)
 

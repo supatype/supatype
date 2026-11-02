@@ -13,11 +13,11 @@
 
 import type { Command } from "commander"
 import { existsSync, readdirSync } from "node:fs"
-import { join, relative, resolve, sep } from "node:path"
+import { join, relative, resolve } from "node:path"
 import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import { engineRequest, ensureEngine, type ComposeEngine } from "../engine-client.js"
-import { DEFAULT_DB_PORT, isLocalDatabaseUrl } from "../db-port.js"
+import { databaseUrlHostPort, isLocalDatabaseUrl } from "../db-port.js"
 import { composeRenderMode } from "../compose-render-mode.js"
 import {
   isArrayOf,
@@ -28,12 +28,15 @@ import {
   isString,
   nullable,
   optional,
+  toPosixPath,
   type Guard,
 } from "@supatype/shared"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { composeDbHostPort, redact, resolveHostDatabaseUrl } from "../host-database.js"
-import { collectSeed, SeedCollectionFailed } from "../seed-runner.js"
+import { collectSeed } from "../seed-runner.js"
+import { errorMessage } from "../error-message.js"
+import { connectAuthUsersByKey } from "../seed-auth-connect.js"
 import { seedBuilderPathWithDefaults } from "../type-generation.js"
 import type { SeedConfig, SeedIr } from "../seed.js"
 import { error, info, success, warn } from "../ui/messages.js"
@@ -118,7 +121,7 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
     }).dsn
   } catch (e) {
     // DsnNotFound and NoStackRunning say what to do in their message; the class name adds nothing.
-    error(e instanceof Error ? e.message : String(e))
+    error(errorMessage(e))
     return 2
   }
 
@@ -138,7 +141,7 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
 
   const prepared: Prepared[] = []
   for (const path of paths) {
-    const label = toPosix(relative(cwd, path))
+    const label = toPosixPath(relative(cwd, path))
     let collected
     try {
       collected = collectSeed(path, {
@@ -147,7 +150,7 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
         environment: opts.environment,
       })
     } catch (e) {
-      error(e instanceof SeedCollectionFailed ? e.message : String(e))
+      error(errorMessage(e))
       return 1
     }
 
@@ -204,8 +207,7 @@ export async function seedEngine(
  */
 function isStackDatabaseUrl(cwd: string, config: SupatypeConfig, dsn: string): boolean {
   if (!isLocalDatabaseUrl(dsn)) return false
-  const port = new URL(dsn).port || String(DEFAULT_DB_PORT)
-  return port === String(composeDbHostPort(cwd, composeRenderMode(cwd, config.project.name)))
+  return databaseUrlHostPort(dsn)?.port === composeDbHostPort(cwd, composeRenderMode(cwd, config.project.name))
 }
 
 // --- Discovery ---
@@ -228,7 +230,7 @@ function locateBuilder(cwd: string, config: SupatypeConfig): string | undefined 
   const path = resolve(cwd, relativePath)
   if (!existsSync(path)) {
     error(
-      `The generated seed builder is missing: ${toPosix(relativePath)}\n` +
+      `The generated seed builder is missing: ${toPosixPath(relativePath)}\n` +
         "  Run `supatype generate`. It needs no database and no running stack.",
     )
     return undefined
@@ -250,10 +252,33 @@ interface ApplyOptions {
 async function apply(prepared: Prepared[], options: ApplyOptions): Promise<number> {
   const { cwd, config, dsn, opts, engine } = options
   const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  let documents: string[]
+  try {
+    documents = prepared.map((one) => JSON.stringify({ ...connectAuthUsersByKey(one.document, ast), file: one.file }))
+  } catch (e) {
+    error(errorMessage(e))
+    return 1
+  }
 
-  // The engine takes one `--run-once` for the run, so a file asking for it decides for all
-  // of them. Said out loud rather than generalised silently, because the difference is
-  // whether work someone expected to happen happens.
+  const result = await engineRequest("/seed", {
+    ast,
+    ir_documents: documents,
+    database_url: dsn,
+    schema: pgSchema(config),
+    atomic: opts.atomic,
+    run_once: runOnceForAll(prepared),
+    ...(opts.environment !== undefined ? { environment: opts.environment } : {}),
+  }, isSeedResult, engine)
+
+  return report(result, prepared.length, dsn)
+}
+
+/**
+ * The engine takes one `--run-once` for the run, so a file asking for it decides for all of them.
+ * Said out loud rather than generalised silently, because the difference is whether work someone
+ * expected to happen happens.
+ */
+function runOnceForAll(prepared: Prepared[]): boolean {
   const askedRunOnce = prepared.filter((one) => one.config.runOnce === true)
   if (askedRunOnce.length > 0 && askedRunOnce.length !== prepared.length) {
     warn(
@@ -263,18 +288,7 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
           .join(", ")} asked for it.`,
     )
   }
-
-  const result = await engineRequest("/seed", {
-    ast,
-    ir_documents: prepared.map((one) => JSON.stringify({ ...one.document, file: one.file })),
-    database_url: dsn,
-    schema: pgSchema(config),
-    atomic: opts.atomic,
-    run_once: askedRunOnce.length > 0,
-    ...(opts.environment !== undefined ? { environment: opts.environment } : {}),
-  }, isSeedResult, engine)
-
-  return report(result, prepared.length, dsn)
+  return askedRunOnce.length > 0
 }
 
 interface SeedResult {
@@ -286,14 +300,25 @@ interface SeedResult {
     written?: Record<string, number>
     skippedGroups?: string[]
   }>
-  error?: {
-    kind: string
-    message?: string
-    remedy?: string | null
-    file?: string
-    path?: string
-  }
+  error?: SeedFailure
 }
+
+/** Why the engine could not seed, or could not read what was seeded. */
+interface SeedFailure {
+  kind: string
+  message?: string
+  remedy?: string | null
+  file?: string
+  path?: string
+}
+
+const isSeedFailure: Guard<SeedFailure> = isShape({
+  kind: isString,
+  message: optional(isString),
+  remedy: optional(nullable(isString)),
+  file: optional(isString),
+  path: optional(isString),
+})
 
 /**
  * Print what happened to every file, then the outcome.
@@ -316,19 +341,20 @@ const isSeedResult: Guard<SeedResult> = isShape({
       }),
     ),
   ),
-  error: optional(
-    isShape({
-      kind: isString,
-      message: optional(isString),
-      remedy: optional(nullable(isString)),
-      file: optional(isString),
-      path: optional(isString),
-    }),
-  ),
+  error: optional(isSeedFailure),
 })
 
-/** `seed --status`: the latest run of each file, and whether it has changed since. */
-const isSeedStatus = isShape({
+/**
+ * `seed --status`: the latest run of each file, and whether it has changed since. `error` when the
+ * engine could not read them, a database it could not reach included.
+ */
+interface SeedStatus {
+  files?: Array<{ file: string; appliedAt: string; status: string; durationMs: number; drifted: boolean }>
+  error?: SeedFailure
+}
+
+const isSeedStatus: Guard<SeedStatus> = isShape({
+  error: optional(isSeedFailure),
   files: optional(
     isArrayOf(
       isShape({ file: isString, appliedAt: isString, status: isString, durationMs: isNumber, drifted: isBoolean }),
@@ -358,19 +384,43 @@ function report(result: SeedResult, count: number, dsn: string): number {
     return 1
   }
 
-  const where = [failure.file, failure.path].filter((part) => part !== undefined && part !== "")
-  error(
-    (failure.message ?? failure.kind) +
-      (where.length > 0 ? `\n  at ${where.join(" ")}` : "") +
-      (failure.remedy !== undefined && failure.remedy !== null ? `\n  ${failure.remedy}` : ""),
-  )
+  return reportSeedFailure(failure)
+}
+
+/** Print the engine's failure; its exit code. */
+function reportSeedFailure(failure: SeedFailure): number {
+  error(seedFailureText(failure))
   // Nothing ran because nothing could: the environment, not the seed.
   return failure.kind === "connection" || failure.kind === "document" ? 2 : 1
 }
 
-async function reportStatus(dsn: string, engine: ComposeEngine | undefined): Promise<number> {
-  const result = await engineRequest("/seed", { database_url: dsn, status: true }, isSeedStatus, engine)
+/**
+ * The engine's error as one message: what failed, where, and the remedy. The engine already writes
+ * the remedy into the message of some failures (a column the database does not have), so it is
+ * added only when the message does not carry it, or it printed twice.
+ */
+export function seedFailureText(failure: SeedFailure): string {
+  const message = failure.message ?? failure.kind
+  const where = [failure.file, failure.path].filter((part) => part !== undefined && part !== "")
+  const remedy = failure.remedy ?? undefined
+  return (
+    message +
+    (where.length > 0 ? `\n  at ${where.join(" ")}` : "") +
+    (remedy !== undefined && !message.includes(remedy) ? `\n  ${remedy}` : "")
+  )
+}
 
+async function reportStatus(dsn: string, engine: ComposeEngine | undefined): Promise<number> {
+  return reportSeedStatus(await engineRequest("/seed", { database_url: dsn, status: true }, isSeedStatus, engine), dsn)
+}
+
+/**
+ * Print what `seed --status` found; its exit code. An engine that could not reach the database
+ * answers with an error beside an empty list, which this used to read as "No seeds have been
+ * applied", exit 0, for a database it never connected to.
+ */
+export function reportSeedStatus(result: SeedStatus, dsn: string): number {
+  if (result.error !== undefined) return reportSeedFailure(result.error)
   const files = result.files ?? []
   if (files.length === 0) {
     info(`No seeds have been applied to ${redact(dsn)}.`)
@@ -386,7 +436,3 @@ async function reportStatus(dsn: string, engine: ComposeEngine | undefined): Pro
   return 0
 }
 
-/** Reported with forward slashes, so the message reads the same on every platform. */
-function toPosix(path: string): string {
-  return path.split(sep).join("/")
-}

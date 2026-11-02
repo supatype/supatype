@@ -18,8 +18,8 @@ type Reader = NonNullable<NonNullable<Parameters<typeof ensureKongPort>[1]>["por
 
 /** Docker as it answers with one stopped stack, `supatype-other`, configured with Kong on 18473. */
 const reader: Reader = {
-  listContainers: () => "k1 supatype-other\n",
-  portBindings: (ids) =>
+  listContainers: async () => "k1 supatype-other\n",
+  portBindings: async (ids) =>
     ids.map((id) => (id === "k1" ? '{"8000/tcp":[{"HostIp":"","HostPort":"18473"}]}' : "{}")).join("\n"),
 }
 

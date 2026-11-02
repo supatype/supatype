@@ -114,12 +114,12 @@ export async function runEnginePush(
   databaseUrl: string,
   ast: unknown,
   opts?: {
-    force?: boolean
-    schema?: string
-    schemaSourcesGzBase64?: string
+    force?: boolean | undefined
+    schema?: string | undefined
+    schemaSourcesGzBase64?: string | undefined
     schemaSourcesManifest?: unknown
     /** Put back access changed outside Supatype (plan 3.5). */
-    overwriteDrift?: boolean
+    overwriteDrift?: boolean | undefined
     /** Recorded on the migration row by an engine that records it (`push_audit`). */
     audit?: PushAudit
   },
@@ -193,16 +193,16 @@ export async function runEngineDoctor(
   databaseUrl: string,
   ast: unknown,
   opts?: {
-    noCache?: boolean
-    schema?: string
-    rebaseline?: boolean
-    acceptAccessDrift?: boolean
+    noCache?: boolean | undefined
+    schema?: string | undefined
+    rebaseline?: boolean | undefined
+    acceptAccessDrift?: boolean | undefined
     /**
      * With `rebaseline`: the drifted objects its preview showed. The engine records only if the
      * drift is still exactly these, and otherwise refuses with `drift_changed`. Never empty: no
      * `--key` at all is "record whatever drift there is" to the binary.
      */
-    keys?: string[]
+    keys?: string[] | undefined
   },
 ): Promise<unknown> {
   const astPath = await writeTempJson(ast)
@@ -236,13 +236,13 @@ export async function runEngineAdoptWithAst(
   databaseUrl: string,
   ast: unknown,
   opts?: {
-    schema?: string
-    yes?: boolean
-    noCache?: boolean
+    schema?: string | undefined
+    yes?: boolean | undefined
+    noCache?: boolean | undefined
     /** Only these conflicts; an empty list adopts none (`--adopt-none`), absent adopts every one. */
-    keys?: string[]
-    release?: string[]
-    reclaim?: string[]
+    keys?: string[] | undefined
+    release?: string[] | undefined
+    reclaim?: string[] | undefined
   },
 ): Promise<unknown> {
   const astPath = await writeTempJson(ast)

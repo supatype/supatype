@@ -127,12 +127,13 @@ export function DevDashboard({ bus }: DevDashboardProps): React.ReactElement {
   const logWidth = cols - TASK_COL_WIDTH - 1
 
   useInput((input, key) => {
-    if (promptOpen) return
-
+    // Before the prompt check: a Ctrl+C on a prompt (one dev's start asks, say) is still dev's own
+    // Ctrl+C, and stops it as one anywhere else does (local test round 7, N32).
     if ((key.ctrl && input === "c") || input === "\x03") {
       requestDevShutdown()
       return
     }
+    if (promptOpen) return
 
     if (key.downArrow || input === "j") {
       bus.focusNext()

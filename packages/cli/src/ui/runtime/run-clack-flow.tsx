@@ -3,7 +3,7 @@ import { render, type Instance } from "ink"
 import { isInteractive } from "../interactive.js"
 import { createClackApi, type ClackApi } from "../clack-api.js"
 import { FlowApp } from "../flows/FlowApp.js"
-import { restoreStdinAfterInk } from "./stdin-after-ink.js"
+import { prepareStdinForInk, restoreStdinAfterInk } from "./stdin-after-ink.js"
 
 interface RunClackFlowRootProps<T> {
   run: (api: ClackApi) => Promise<T>
@@ -33,6 +33,7 @@ export async function runClackFlow<T>(run: (api: ClackApi) => Promise<T>): Promi
     throw new Error("Interactive Ink flow requires a TTY.")
   }
 
+  prepareStdinForInk()
   return new Promise<T>((resolve, reject) => {
     const instance = render(
       <RunClackFlowRoot
@@ -46,7 +47,8 @@ export async function runClackFlow<T>(run: (api: ClackApi) => Promise<T>): Promi
           reject(err)
         }}
       />,
-      { patchConsole: false },
+      // A Ctrl+C is the command's own, not Ink's to end the process on (prompt-interrupt.ts).
+      { patchConsole: false, exitOnCtrlC: false },
     )
   })
 }

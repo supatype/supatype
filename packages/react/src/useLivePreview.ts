@@ -8,7 +8,10 @@ import { studioUrlsKey, trustedStudioOrigins, warnRefusedOrigin, type StudioOrig
 export interface UseLivePreviewOptions<TData> {
   /** The initial/server data to display when not in preview mode. */
   initialData: TData
-  /** Optional model name filter, only accept preview data for this model. */
+  /**
+   * Optional model name filter, only accept preview data for this model. The name as the schema
+   * declares it (`"Post"`), which is what Studio sends, not the table name.
+   */
   model?: string
   /**
    * Where Studio is served, as a URL or origin, or a list of them. Only messages from these origins
@@ -39,7 +42,7 @@ export interface UseLivePreviewResult<TData> {
  * @example
  * ```tsx
  * function BlogPost({ post }: { post: Post }) {
- *   const { data, isPreview } = useLivePreview({ initialData: post, model: "post" })
+ *   const { data, isPreview } = useLivePreview({ initialData: post, model: "Post" })
  *   return (
  *     <article>
  *       {isPreview && <div className="preview-badge">Preview</div>}
