@@ -10,13 +10,14 @@
     "pg:psql": "tsx tests/integration/run-dev.ts pg psql",
     "test": "turbo run test",
     "lint": "eslint --quiet .",
-    "typecheck": "turbo run typecheck && tsc --project tsconfig.json",
+    "typecheck": "turbo run typecheck && tsc --project tsconfig.json && tsc --project packages/functions-worker/tsconfig.json",
     "build:engine": "cargo build --workspace",
     "build:engine:release": "cargo build --workspace --release",
     "test:engine": "cargo test --workspace",
     "clean": "turbo run clean && cargo clean",
     "skills:install": "bash scripts/skills-install.sh",
     "coverage:examples": "node scripts/check-example-coverage.mjs --write",
+    "check:image-sql": "node scripts/check-image-sql.mjs",
     "generate:examples": "bash scripts/regenerate-examples.sh"
   },
   "devDependencies": {

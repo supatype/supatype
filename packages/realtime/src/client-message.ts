@@ -14,6 +14,7 @@ const isSubscribe = isShape({
   table: optional(isString),
   schema: optional(isString),
   filter: optional(isRecordOf(isString)),
+  ref: optional(isString),
 })
 
 const isUnsubscribe = isShape({ type: isOneOf(["unsubscribe"] as const), channel: isString })

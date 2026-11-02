@@ -45,8 +45,12 @@ export interface FunctionContext {
   readonly dbUrl?: string
   readonly region: string
   /**
-   * Values from the functions directory's .env.local (or SUPATYPE_SHARED_ENV_FILE), then from
-   * .env.<function>.local, which wins. The project's own .env is not read for these.
+   * Values from the functions directory's .env.local (or SUPATYPE_SHARED_ENV_FILE), then those
+   * "supatype functions env set" gave a self-hosted project, then .env.<function>.local, which
+   * wins. The project's own .env is not read for these. They are read again on every call.
+   *
+   * They are here, never in Deno.env: that is the worker's one process environment, shared by every
+   * call running at once, so a value put there for one function would reach every other.
    */
   readonly env: Readonly<Record<string, string>>
 }

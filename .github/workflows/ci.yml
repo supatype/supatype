@@ -102,7 +102,8 @@ jobs:
         run: pnpm turbo run build
 
       # Every package's typecheck, then the root tsconfig.json (the config files beside each
-      # package's build config, which no package's typecheck covers).
+      # package's build config, which no package's typecheck covers), then the functions worker,
+      # which has no package.json: one beside its deno.json switches Deno to node_modules resolution.
       - name: Typecheck
         run: pnpm typecheck
 
@@ -218,6 +219,11 @@ jobs:
       - name: Test the functions worker
         working-directory: packages/functions-worker
         run: deno task test
+
+      # Native dev and functions serve run the copy of the worker the CLI carries; the CLI's build
+      # regenerates it, and this refuses a commit that changed the worker without it.
+      - name: The CLI's copy of the worker is current
+        run: node scripts/functions-worker-source.mjs generate --check
 
   docker:
     runs-on: ubuntu-latest

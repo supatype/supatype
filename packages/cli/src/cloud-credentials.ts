@@ -176,3 +176,16 @@ export async function cloudRefreshSession(
   const { accessToken, refreshToken: next, expiresIn } = answer
   return { accessToken, ...(next !== undefined && { refreshToken: next }), ...(expiresIn !== undefined && { expiresIn }) }
 }
+
+/**
+ * A Cloud access token set in the environment, for CI: SUPATYPE_ACCESS_TOKEN, else SUPATYPE_TOKEN,
+ * its older name; undefined when neither holds anything. Every command reads it here, so a linked
+ * project's commands take the same token `supatype link` and the cloud commands do.
+ */
+export function envAccessToken(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  for (const name of ["SUPATYPE_ACCESS_TOKEN", "SUPATYPE_TOKEN"]) {
+    const token = env[name]?.trim()
+    if (token) return token
+  }
+  return undefined
+}

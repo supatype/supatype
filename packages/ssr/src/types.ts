@@ -19,7 +19,9 @@ export interface CookieAdapter {
   /**
    * Writes the session cookie whenever the session changes on the server: a refreshed token, a
    * sign-in, or a sign-out (an empty value with `maxAge: 0`). Leave it out where cookies cannot be
-   * written, such as a Server Component.
+   * written, such as a Server Component: without it the client never refreshes, since the browser
+   * would never receive the refresh token a refresh returns, and an expired access token is sent as
+   * it is and refused.
    */
   setAll?(cookies: CookieToSet[]): void
 }

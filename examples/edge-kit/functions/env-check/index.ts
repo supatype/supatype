@@ -1,7 +1,10 @@
 import type { FunctionContext } from "../_shared/context.ts"
 import { handleOptions, json } from "../_shared/cors.ts"
 
-/** Confirms Deno.env injection from the functions worker / `supatype functions serve`. */
+/**
+ * Confirms what the functions worker or `supatype functions serve` hands a call: the Supatype keys
+ * on ctx, and WEBHOOK_SECRET from functions/.env.local in ctx.env, which is where env values arrive.
+ */
 export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   const preflight = handleOptions(req)
   if (preflight) return preflight

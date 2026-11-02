@@ -19,16 +19,17 @@ import { isArrayOf, isShape, isString, type FromShape } from "./json.js"
 import { RealtimeUnsupportedError } from "./capability.js"
 import { RlsFilter } from "./rls.js"
 import { filterIsMaskSafe } from "./field-mask.js"
-import { matchesFilter } from "./filter-match.js"
+import { matchesFilter, unreadableCondition } from "./filter-match.js"
+import { TOKEN_EXPIRED_CLOSE, TokenExpiry } from "./token-expiry.js"
 import { AdminServer } from "./admin/server.js"
 import { Tap, type ChangeRecord } from "./admin/tap.js"
 import type { BroadcastInput } from "./admin/broadcast.js"
 import type {
   ClientMessage,
   ServerMessage,
+  SubscribeMessage,
   Subscription,
   WalChange,
-  ChangeEvent,
   PresenceEntry,
   PresenceTrackMessage,
   BroadcastMessage,
@@ -46,6 +47,14 @@ interface SubscriberEntry {
   clientId: string
   client: ConnectedClient
   subscription: Subscription
+}
+
+/**
+ * The `ref` a reply echoes: the one its request carried, or none. A request without one is
+ * answered exactly as it was before refs existed, so an older client sees no new field.
+ */
+function withRef(ref: string | undefined): { ref?: string } {
+  return ref === undefined ? {} : { ref }
 }
 
 /** Schemas whose changes a shared instance never forwards: platform and service internals. */
@@ -96,6 +105,8 @@ export class RealtimeServer {
   /** Cached project routes for multi-tenant JWT verification + tier limits. */
   private projectRoutes = new Map<string, ProjectRoute>()
   private routingCacheTimer: ReturnType<typeof setInterval> | null = null
+  /** Closes each authenticated socket when its token expires. */
+  private readonly tokenExpiry = new TokenExpiry()
 
   constructor(env: RealtimeEnv, deps: RealtimeServerDeps = {}) {
     this.env = env
@@ -173,7 +184,7 @@ export class RealtimeServer {
     // `main()`: no process either. Now the port opens, `/health/ready` answers 503 with the reason,
     // and replication keeps retrying behind it.
     await new Promise<void>((resolve) => {
-      this.httpServer!.listen(this.env.port, () => {
+      this.httpServer!.listen(this.env.port, this.env.host, () => {
         console.log(`[realtime] WebSocket server listening on port ${this.env.port}${this.env.multiTenant ? " (multi-tenant)" : ""}`)
         resolve()
       })
@@ -207,7 +218,7 @@ export class RealtimeServer {
       multiTenant: this.env.multiTenant,
       broadcast: (input, projectRef) => this.studioBroadcast(input, projectRef),
     })
-    await this.admin.start(adminPort)
+    await this.admin.start(adminPort, this.env.host)
   }
 
   /** Resolves when the initial replication connection has settled, tests await this. */
@@ -221,6 +232,7 @@ export class RealtimeServer {
       clearInterval(this.routingCacheTimer)
       this.routingCacheTimer = null
     }
+    this.tokenExpiry.clear()
     await this.admin?.stop()
     await this.replication.stop()
     await this.rlsFilter.shutdown()
@@ -282,7 +294,13 @@ export class RealtimeServer {
       userAgent: boundedUserAgent(req.headers["user-agent"]),
     })
 
+    // Closed rather than dropped back to anonymous when its token runs out, so the client knows to
+    // reconnect, which resolves its token again: one holding a refreshed token comes back with it,
+    // and one holding only the expired token connects unauthenticated and is not closed again.
+    this.tokenExpiry.add(clientId, () => ws.close(TOKEN_EXPIRED_CLOSE, "token expired"))
+
     if (claims) {
+      this.tokenExpiry.watch(clientId, claims)
       this.send(ws, { type: "system", status: "ok", message: "authenticated" })
     } else {
       this.send(ws, { type: "system", status: "ok", message: "connected, send auth message to authenticate" })
@@ -376,7 +394,7 @@ export class RealtimeServer {
   ): void {
     const admitted = admitChannelAction(client, msg.channel, msg.type)
     if (typeof admitted === "string") {
-      this.send(client.ws, { type: "system", status: "error", message: admitted })
+      this.refuse(client, msg.channel, admitted)
       return
     }
     switch (msg.type) {
@@ -392,6 +410,15 @@ export class RealtimeServer {
     }
   }
 
+  /**
+   * Refuses something asked of one channel, naming it. The client reads an error that names no
+   * channel as about the whole socket, so a refusal without one put every healthy channel the
+   * client had into CHANNEL_ERROR.
+   */
+  private refuse(client: ConnectedClient, channel: string, message: string, ref?: string | undefined): void {
+    this.send(client.ws, { type: "system", status: "error", message, channel, ...withRef(ref) })
+  }
+
   private handleUnsubscribe(clientId: string, client: ConnectedClient, channel: string): void {
     const entry = this.channels.unsubscribe(clientId, channel)
     if (entry) this.announcePresence(client, channel, { joins: [], leaves: [entry] })
@@ -403,25 +430,17 @@ export class RealtimeServer {
     const claims = secret === null ? null : verifyToken(token, secret)
     if (claims) {
       this.channels.setClientClaims(clientId, claims)
+      this.tokenExpiry.watch(clientId, claims)
       this.send(client.ws, { type: "system", status: "ok", message: "authenticated" })
     } else {
       this.send(client.ws, { type: "system", status: "error", message: "invalid token" })
     }
   }
 
-  private handleSubscribe(
-    clientId: string,
-    client: ConnectedClient,
-    msg: {
-      channel: string
-      event?: ChangeEvent | "*" | undefined
-      table?: string | undefined
-      schema?: string | undefined
-      filter?: Record<string, string> | undefined
-    },
-  ): void {
-    if (this.env.secureChannels && !client.claims) {
-      this.send(client.ws, { type: "system", status: "error", message: "authenticate before subscribing" })
+  private handleSubscribe(clientId: string, client: ConnectedClient, msg: SubscribeMessage): void {
+    const refusal = this.subscribeRefusal(client, msg.filter)
+    if (refusal !== null) {
+      this.refuse(client, msg.channel, refusal, msg.ref)
       return
     }
 
@@ -442,8 +461,18 @@ export class RealtimeServer {
     }
 
     this.channels.subscribe(clientId, subscription)
-    this.send(client.ws, { type: "system", status: "ok", message: `subscribed to ${msg.channel}` })
+    this.send(client.ws, { type: "system", status: "ok", message: `subscribed to ${msg.channel}`, ...withRef(msg.ref) })
     this.sendPresenceState(client, msg.channel)
+  }
+
+  /** Why a join is refused, or null when it is accepted. */
+  private subscribeRefusal(client: ConnectedClient, filter: Record<string, string> | undefined): string | null {
+    if (this.env.secureChannels && !client.claims) return "authenticate before subscribing"
+    // Refused rather than stored. A condition the matcher cannot read used to be skipped, which
+    // widened the subscription to every row the other conditions let through.
+    const unreadable = unreadableCondition(filter ?? {})
+    if (unreadable === null) return null
+    return `invalid filter ${unreadable}: expected column=op.value with op one of eq, neq, gt, gte, lt, lte`
   }
 
   /**
@@ -462,6 +491,7 @@ export class RealtimeServer {
   }
 
   private handleDisconnect(clientId: string): void {
+    this.tokenExpiry.remove(clientId)
     const client = this.channels.removeClient(clientId)
     if (!client) return
 

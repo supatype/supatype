@@ -81,10 +81,11 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | Command | Purpose |
 |---------|---------|
 | `supatype functions new <name>` | Scaffold `functions/<name>/index.ts` plus Deno IDE types (`functions/deno.d.ts`, `functions/tsconfig.json`) |
-| `supatype functions serve` | Local Deno server for all functions |
+| `supatype functions serve` | Local Deno server for all functions, on port 18472 unless `--port` moves it |
 | `supatype functions deploy` | Deploy edge functions via control plane when linked. On a self-host compose stack nothing is uploaded (the worker reads `functions/` from disk): run `supatype self-host compose restart functions-worker` to load changes (`supatype dev` does that on save) |
 | `supatype functions list` | List deployed functions |
-| `supatype plugins` | Plugin scaffolding |
+| `supatype functions env set KEY=value` / `list` / `unset KEY` | A function's env values: on the linked project, else `functions/.env.local`. With `functions/.env.<name>.local` (one function, wins), every value arrives in `ctx.env`, read again on each call, never in `Deno.env`: that is the worker's one process environment, shared by every call running at once, so `Deno.env.get` finds none of them |
+| `supatype plugins` | Plugin scaffolding. A plugin cannot run SQL: the SDK has no `installSQL` or `uninstallSQL`, and `defineComposite` refuses either |
 | `supatype types` | Type utilities |
 
 A handler is `(req, ctx)`, with `ctx` typed by `functions/_shared/context.ts` (rewritten by `init`, `functions new`, `push` and `dev`). `ctx.url` is for calling the API from inside the function (under Docker, `http://kong:8000`, which no browser can open); `ctx.publicUrl` is the project's public address, for links you give to people. The scaffolded function returns `publicUrl`.

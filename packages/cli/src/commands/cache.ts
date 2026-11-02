@@ -19,6 +19,7 @@ import {
   listRestCacheEntries,
 } from "../rest-cache-admin.js"
 import { error, info, plain, warn } from "../ui/messages.js"
+import { errorMessage } from "../error-message.js"
 
 function isComponent(value: string): value is Component {
   return (BINARY_COMPONENTS as readonly string[]).includes(value)
@@ -164,7 +165,7 @@ export function registerCache(program: Command): void {
           plain(`\n(more available: cursor ${result.cursor})`)
         }
       } catch (e) {
-        error(e instanceof Error ? e.message : String(e))
+        error(errorMessage(e))
         process.exitCode = 1
       }
     })
@@ -188,7 +189,7 @@ export function registerCache(program: Command): void {
         plain(`status:  ${detail.status_code}`)
         if (detail.body_preview) plain(`body:\n${detail.body_preview}`)
       } catch (e) {
-        error(e instanceof Error ? e.message : String(e))
+        error(errorMessage(e))
         process.exitCode = 1
       }
     })
@@ -202,7 +203,7 @@ export function registerCache(program: Command): void {
         await deleteRestCacheEntry(cwd, key)
         info(`Deleted ${key}`)
       } catch (e) {
-        error(e instanceof Error ? e.message : String(e))
+        error(errorMessage(e))
         process.exitCode = 1
       }
     })
@@ -223,7 +224,7 @@ export function registerCache(program: Command): void {
         await flushRestCache(cwd, opts.table)
         info(opts.table ? `Flushed cache for table ${opts.table}` : "Flushed all REST cache entries")
       } catch (e) {
-        error(e instanceof Error ? e.message : String(e))
+        error(errorMessage(e))
         process.exitCode = 1
       }
     })

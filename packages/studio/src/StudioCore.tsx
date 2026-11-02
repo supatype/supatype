@@ -54,7 +54,6 @@ import { ModelSchema } from "./views/ModelSchema.js"
 import { ModelRules } from "./views/ModelRules.js"
 import { ModelApiDocs } from "./views/ModelApiDocs.js"
 import { ModelGraphQLDocs } from "./views/ModelGraphQLDocs.js"
-import { LogsViewer } from "./views/LogsViewer.js"
 import { Settings } from "./views/Settings.js"
 import { ComingSoon } from "./views/ComingSoon.js"
 import { RealtimeInspector } from "./views/RealtimeInspector.js"
@@ -487,7 +486,9 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="observability">
                 <Route index element={<Navigate to="logs" replace />} />
                 <Route path="logs" element={<Navigate to="api" replace />} />
-                <Route path="logs/api"       element={gated(LOGS, <LogsViewer />)} />
+                {/* Nothing records API requests yet. This mounted a log table over a list that never
+                    filled, which read as a project nobody had called. */}
+                <Route path="logs/api"       element={gated(LOGS, <ComingSoon title="API Logs" description="Request logging is coming soon." />)} />
                 <Route path="logs/auth"      element={<ComingSoon title="Auth Logs" description="Auth event logging is coming soon." />} />
                 <Route path="logs/storage"   element={<ComingSoon title="Storage Logs" description="Storage access logging is coming soon." />} />
                 {/* Shipped: the tail lives on the function itself, beside invoke and env, because a

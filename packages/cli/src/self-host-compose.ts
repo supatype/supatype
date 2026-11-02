@@ -1,10 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { spawnSync } from "node:child_process"
-import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
+import { createInterface } from "node:readline"
+import { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, SERVICE_ROLE_ROUTES_FILE } from "@supatype/shared"
+import { composeHostPath } from "./compose-host-path.js"
+export { composeHostPath } from "./compose-host-path.js"
+import { ENGINE_SERVICE } from "./compose-engine-service.js"
+import { requireDockerDaemon, type DockerBrandOptions, type DockerReportOptions } from "./docker-runtime.js"
+import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer } from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
-import { readJsonObjectFile } from "./json-file.js"
 import {
+  COMPOSE_DEV_KONG_PORT,
   postgrestSchemaEnv,
   externalDatabaseUrl,
   hooksPathFromProject,
@@ -16,6 +21,7 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { hasStudioOverride, pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
+import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { postgresImageFor, runningPostgresImage } from "./postgres-image.js"
@@ -37,10 +43,11 @@ import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-mask
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
-import { RELEASE_IMAGES } from "./release-images.js"
+import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage } from "./release-images.js"
 import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
+import { patchRouteManifest } from "./route-manifest.js"
 
 /**
  * The control plane secret as the server and the control plane receive it, and nobody else.
@@ -58,16 +65,8 @@ export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
   "SUPATYPE_POSTGRES_IMAGE",
 ] as const
 
-/** Compose image env vars that may be overridden manually in `.env`. */
-export const COMPOSE_IMAGE_ENV_KEYS = [
-  ...COMPOSE_PINNED_IMAGE_ENV_KEYS,
-  "SUPATYPE_CONTROL_PLANE_IMAGE",
-  "SUPATYPE_AUTH_IMAGE",
-  "SUPATYPE_STUDIO_IMAGE",
-  "SUPATYPE_STORAGE_IMAGE",
-  "SUPATYPE_FUNCTIONS_WORKER_IMAGE",
-  "SUPATYPE_SEAWEEDFS_IMAGE",
-] as const
+/** Kong's host port as compose interpolates it: `SUPATYPE_KONG_PORT`, else the default `dev` tries first. */
+const KONG_HOST_PORT = `\${SUPATYPE_KONG_PORT:-${COMPOSE_DEV_KONG_PORT}}`
 
 /** Pinned by digest, because the registry this replaced proved a tag can be taken away. */
 const SEAWEEDFS_IMAGE =
@@ -132,7 +131,10 @@ export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<str
   return env
 }
 
-/** True when a Docker image tag is a semver/latest ref we expect `docker pull` to resolve. */
+/**
+ * True when a Docker image tag is a semver/latest ref we expect `docker pull` to resolve. Any other
+ * tag may name an image built on this machine, which `update` keeps when no registry has it.
+ */
 export function isRegistryPullableImageRef(ref: string): boolean {
   const trimmed = ref.trim()
   if (!trimmed) return true
@@ -143,32 +145,13 @@ export function isRegistryPullableImageRef(ref: string): boolean {
   return false
 }
 
-export function hasLocalVersionPins(config: SupatypeProjectConfig): boolean {
-  const versions = config.versions
-  if (!versions) return false
-  return (
-    versions.engine === VERSION_PIN_LOCAL ||
-    versions.server === VERSION_PIN_LOCAL ||
-    versions.postgres === VERSION_PIN_LOCAL ||
-    versions.deno === VERSION_PIN_LOCAL
-  )
-}
-
-function readComposeImageEnvValues(cwd: string): string[] {
-  const env = readEnvFile(cwd)
-  return COMPOSE_IMAGE_ENV_KEYS.flatMap((key) => (env[key] ? [env[key]] : []))
-}
-
 /**
- * Use `docker compose pull --ignore-pull-failures` only when the project may
- * reference local-only images (config `versions: local` or custom `.env` tags).
+ * Say, before a stack starts, which in-repo images run from `:latest` because this CLI is not a
+ * release ({@link unpinnedImagesNote}). Read as compose reads them: the shell over `.env`.
  */
-export function composePullNeedsIgnoreFailures(
-  config: SupatypeProjectConfig,
-  cwd: string = process.cwd(),
-): boolean {
-  if (hasLocalVersionPins(config)) return true
-  return readComposeImageEnvValues(cwd).some((ref) => !isRegistryPullableImageRef(ref))
+export function noteUnpinnedImages(cwd: string): void {
+  const note = unpinnedImagesNote({ ...readEnvFile(cwd), ...process.env })
+  if (note !== undefined) console.log(`[supatype] ${note}`)
 }
 
 /**
@@ -211,11 +194,17 @@ export async function schemaEngineImageForPush(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | undefined> {
   const named = env["SUPATYPE_ENGINE_IMAGE"]?.trim() || readEnvFile(cwd)["SUPATYPE_ENGINE_IMAGE"]?.trim()
-  if (named) return named
+  if (named) return supportedEngineImage(named, "SUPATYPE_ENGINE_IMAGE")
   const pinned = pinnedVersion("engine", config)
   if (pinned === VERSION_PIN_LOCAL) return undefined
-  if (pinned) return dockerImageRef("engine", pinned)
-  return RELEASE_IMAGES.engine
+  if (pinned) return supportedEngineImage(dockerImageRef("engine", pinned), "versions.engine in supatype.config.ts")
+  return supportedEngineImage(RELEASE_IMAGES.engine, "the engine image this CLI build pins")
+}
+
+/** `image`, once its tag is known not to name an engine older than this CLI needs (engine-floor.ts). */
+function supportedEngineImage(image: string, from: string): string {
+  assertEngineVersionSupported(engineImageVersion(image), from, "image")
+  return image
 }
 
 /**
@@ -273,23 +262,6 @@ export function staticDirForCompose(config: SupatypeProjectConfig): string | und
   return dir && dir.length > 0 ? dir : "./public"
 }
 
-/**
- * A host path as the generated compose file names it: absolute, with forward slashes.
- *
- * Absolute because compose resolves a relative bind source against `--project-directory`, and
- * without that flag against the compose file's own folder, `.supatype/self-host`. The CLI always
- * passes the flag. Someone running `docker compose -f .supatype/self-host/docker-compose.yml` by
- * hand does not, and the server came up with that folder as its project: no admin config, manifest,
- * API config, functions or hooks, and an empty `.supatype/self-host/.supatype` left on the host
- * (SA3). Every compose command renders the file again on this machine, so a project that moved is
- * named at its new place the next time one runs. Forward slashes because Docker Desktop on Windows
- * reads `C:/...` as a host path and YAML needs no escaping for them.
- */
-export function composeHostPath(path: string): string {
-  const absolute = resolve(path)
-  return sep === "\\" ? absolute.replace(/\\/g, "/") : absolute
-}
-
 /** One bind mount in compose's long syntax, where no colon in a host path can be misread. */
 function bindMount(source: string, target: string, readOnly: boolean): string {
   return [
@@ -307,6 +279,7 @@ function projectMounts(cwd: string) {
   return {
     projectReadOnly: bindMount(root, "/project", true),
     projectWritable: bindMount(root, "/project", false),
+    engineProject: bindMount(root, ENGINE_SERVICE.projectDir, false),
     projectState: bindMount(join(root, ".supatype"), "/project/.supatype", false),
     kong: bindMount(paths.kongPath, "/etc/kong/kong.yml", true),
     seaweed: bindMount(paths.s3ConfigPath, "/etc/seaweedfs/s3.json", true),
@@ -439,9 +412,17 @@ function roleDatabaseUrl(config: SupatypeProjectConfig, role: string, passwordVa
  */
 export const COMPOSE_STUDIO_HOST_URL = `http://host.docker.internal:${STUDIO_DEV_PORT}`
 
+/**
+ * Compose's reference to an in-repo image: the variable that names it (IN_REPO_IMAGE_ENV, which the
+ * `:latest` note reads too) when set, else this CLI's own.
+ */
+function inRepoImage(name: InRepoImage): string {
+  return `\${${IN_REPO_IMAGE_ENV[name]}:-${RELEASE_IMAGES[name]}}`
+}
+
 /** Studio container: this release's Studio image unless SUPATYPE_STUDIO_IMAGE is set in .env. */
 function studioServiceBlock(): string {
-  return `    image: \${SUPATYPE_STUDIO_IMAGE:-${RELEASE_IMAGES.studio}}`
+  return `    image: ${inRepoImage("studio")}`
 }
 
 /** Host dev app (Astro/Vite on the machine) as seen from inside compose services. */
@@ -495,7 +476,7 @@ function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean
 }
 
 export interface SelfHostComposeOptions {
-  /** `supatype dev` with provider docker: internal-only db/server; Kong on host :18473. */
+  /** `supatype dev` with provider docker: internal-only db/server; Kong on host SUPATYPE_KONG_PORT. */
   devLocal?: boolean
   /**
    * Whether functions were given a direct database URL that names the stack's `db`
@@ -582,7 +563,8 @@ export function renderSelfHostCompose(
   const tlsEnabled = selfHostTlsEnabled(config, devLocal)
   const domain = config.server.domain?.trim() ?? ""
   // When TLS is on, default external URLs to https://<domain> so auth links/redirects use HTTPS.
-  const externalUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:18473"
+  // Otherwise Kong's published port, which a fixed 18473 was not once SUPATYPE_KONG_PORT moved it.
+  const externalUrlFallback = tlsEnabled ? `https://${domain}` : `http://localhost:${KONG_HOST_PORT}`
   const siteUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:3000"
   // The project's public address, as a compose reference: API_EXTERNAL_URL, which `supatype dev`
   // writes as the gateway's localhost address and a self-host operator sets to their domain. One
@@ -684,7 +666,7 @@ ${seaweedPorts}`
   const kongPorts = tlsEnabled
     ? `      - "80:8000"
       - "443:8443"`
-    : `      - "\${SUPATYPE_KONG_PORT:-18473}:8000"`
+    : `      - "${KONG_HOST_PORT}:8000"`
   // The RESP server the response cache and Kong's ACME certificates use.
   // Either a Valkey sidecar, or pg_keyspace inside the Postgres container --
   // one stateful service instead of two.
@@ -753,7 +735,7 @@ ${dbDependencyClause}      seaweedfs:
   const realtime = realtimeEnabled(config)
   const realtimeBlock = realtime
     ? `  realtime:
-    image: \${SUPATYPE_REALTIME_IMAGE:-${RELEASE_IMAGES.realtime}}
+    image: ${inRepoImage("realtime")}
     expose:
       - "4000"
       - "4001"
@@ -933,7 +915,7 @@ ${dbServiceBlock}  postgrest:
       PGRST_DB_POOL: 3
 ${dbDependency}
   storage:
-    image: \${SUPATYPE_STORAGE_IMAGE:-${RELEASE_IMAGES.storage}}
+    image: ${inRepoImage("storage")}
     expose:
       - "5000"
     environment:
@@ -953,18 +935,33 @@ ${dbDependency}
       MAX_UPLOAD_SIZE: \${MAX_UPLOAD_SIZE:--1}
 ${storageDependency}
   functions-worker:
-    image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-${RELEASE_IMAGES["functions-worker"]}}
+    image: ${inRepoImage("functions-worker")}
+    # An init as PID 1 passes the stop signal on: without one the worker ignored SIGTERM, and every
+    # restart a deploy made waited out the whole stop timeout.
+    init: true
+    # Time to drain the requests in flight before Docker kills it, above the worker's own drain: one
+    # Docker killed it 3 s after SIGTERM. The control plane's restart passes the same.
+    stop_grace_period: ${FUNCTIONS_WORKER_STOP_GRACE_SECONDS}s
     expose:
       - "8001"
 ${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:
 ${mounts.projectReadOnly}
     environment:
+      # Deno colours an error's text whether or not it writes to a terminal, and a function's error
+      # reaches its caller as JSON (DENO_ENV in native-dev-env.ts).
+      NO_COLOR: "1"
       SUPATYPE_FUNCTIONS_ROOT: ${functionsDir}
       SUPATYPE_DENO_FUNCTIONS_DIR: ${functionsDir}
       # Model hooks, served by this same worker under a hooks/ route the gateway refuses from
       # outside. One worker rather than two: a second container would cost a pod per project on
       # cloud, for isolation the route boundary already provides.
       SUPATYPE_HOOKS_ROOT: ${hooksDir}
+      # What \`functions env set\` gives the project: the control plane writes it under the project it
+      # mounts at /project, and the worker reads it on every call.
+      SUPATYPE_FUNCTION_ENV_FILE: /project/.supatype/function-env.json
+      # How long requests in flight get to finish when the worker is stopped: under its stop grace
+      # above, so it exits by itself before Docker kills it. Its own default is dev's 4 s.
+      SUPATYPE_FUNCTIONS_DRAIN_MS: "${FUNCTIONS_WORKER_DRAIN_MS}"
       # Every log line the worker writes carries this, and on cloud it is the label Loki indexes
       # each project's logs under. Without it a line is collected and filed under no project, which
       # is the same as losing it.
@@ -983,6 +980,12 @@ ${mounts.projectReadOnly}
       # each one able to read past every access rule in the schema.
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SERVICE_ROLE_ROUTES: "${serviceRoleRoutes(config).join(",")}"
+      # The list every deploy writes (functions.serviceRole), read on every call, so a route taken off
+      # it loses the key on its next call; the list above applies until the first deploy writes it.
+      SUPATYPE_SERVICE_ROLE_ROUTES_FILE: /project/.supatype/${SERVICE_ROLE_ROUTES_FILE}
+      # The manifest the server reads: a hook route with no code is a 503 only when it names that
+      # hook, so a hook the server would call is never taken for one it would not.
+      SUPATYPE_MANIFEST_PATH: /project/.supatype/manifest.json
       # A direct database connection for functions, off unless asked for.
       #
       # The worker reads SUPATYPE_DB_URL and exposes it as \`ctx.dbUrl\`, and nothing here ever set
@@ -1001,7 +1004,7 @@ ${mounts.projectReadOnly}
 ${dbDependency}
 ${realtimeBlock}
   control-plane:
-    image: \${SUPATYPE_CONTROL_PLANE_IMAGE:-${RELEASE_IMAGES["control-plane"]}}
+    image: ${inRepoImage("control-plane")}
     expose:
       - "8080"
     volumes:
@@ -1013,6 +1016,8 @@ ${mounts.projectWritable}
       SUPATYPE_PROJECT_ROOT: /project
       DATABASE_URL: "${ownerUrl}"
       SUPATYPE_FUNCTIONS_ROOT: ${functionsDir}
+      # Where \`push\` deploys hooks to (POST /projects/:ref/hooks/deploy): the worker's hooks root.
+      SUPATYPE_HOOKS_ROOT: ${hooksDir}
       SUPATYPE_STATIC_ROOT: /project/${staticDir.replace(/^\.\//, "")}
       SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
       COMPOSE_PROJECT_NAME: ${composeProject}
@@ -1128,12 +1133,12 @@ ${realtimeDependency}      control-plane:
 
 ${objectStoreBlock}
   schema-engine:
-    image: \${SUPATYPE_ENGINE_IMAGE:-${RELEASE_IMAGES.engine}}
+    image: \${${ENGINE_SERVICE.imageVariable}:-${ENGINE_SERVICE.defaultImage}}
     profiles: ["tools"]
-    entrypoint: ["supatype-engine"]
+    entrypoint: ["${ENGINE_SERVICE.entrypoint}"]
     volumes:
-${mounts.projectWritable}
-    working_dir: /project
+${mounts.engineProject}
+    working_dir: ${ENGINE_SERVICE.projectDir}
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
 ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
@@ -1163,6 +1168,12 @@ ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux 
       # for host.docker.internal after a few seconds and Studio's dev server became unreachable
       # (CE1). A recreated upstream is handled where the CLI recreates it: Kong is reloaded then
       # (runDockerCompose, EXT-N1).
+      #
+      # SRV is not looked up. Kong 3.6 asks for SRV records first, Docker's DNS never answers them,
+      # and each nginx worker's first upstream lookup waited about 4 s for the timeout: the first
+      # realtime subscribe often took that long. A records still come from the hosts file first, so
+      # host.docker.internal above resolves as before.
+      KONG_DNS_ORDER: "LAST,A,CNAME"
 ${kongTlsEnv}    volumes:
 ${mounts.kong}
     ports:
@@ -1182,47 +1193,43 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
   mkdirSync(dirname(manifestPath), { recursive: true })
 
   // The manifest is generated, not operator-authored, but `push` writes real values into it (the
-  // schema, for one), so an existing file is repaired rather than replaced.
+  // schema, for one), so an existing file keeps every key but the routes below. Malformed, it is
+  // left for the server to complain about rather than overwritten here.
   if (existsSync(manifestPath)) {
-    repairComposeFunctionsFlag(manifestPath)
+    patchRouteManifest(manifestPath, composeServiceRoutes(config), { keepMalformed: true })
     return
   }
 
-  const manifest = {
+  patchRouteManifest(manifestPath, {
     schema: "public",
     postgrest_url: "http://postgrest:3000",
+    ...composeServiceRoutes(config),
+  })
+}
+
+/**
+ * Where the server finds each service of this stack, set on every render rather than only into a
+ * new file. Native dev shares the manifest and records its own host ports for realtime, functions
+ * and storage, so a project moved from native to Docker kept native's URLs and the server proxied
+ * every subscription and every /storage/v1 call to a port nothing in the stack listened on (502).
+ * An older CLI's `functions_enabled: false` is put right by the same write.
+ */
+function composeServiceRoutes(config: SupatypeProjectConfig): Record<string, unknown> {
+  return {
+    // This file always generates a `storage` service, and native dev records its own storage
+    // service on a host port.
     storage_url: "http://storage:5000",
     // Matches the compose file: a manifest advertising a service that was not generated is how
-    // the server ends up proxying subscriptions to a host that does not resolve.
+    // the server ends up proxying subscriptions to a host that does not resolve. Undefined drops
+    // the key.
     realtime_enabled: realtimeEnabled(config),
-    ...(realtimeEnabled(config) && { realtime_url: "http://realtime:4000" }),
+    realtime_url: realtimeEnabled(config) ? "http://realtime:4000" : undefined,
     // True because this file *always* generates a `functions-worker` service and hands the server
     // `SUPATYPE_FUNCTIONS_WORKER_URL`. It said false, so the server answered 404 for every function
     // in a stack that was running a worker for them, provisioned, then switched off.
     functions_enabled: true,
     functions_worker_url: COMPOSE_FUNCTIONS_WORKER_URL,
   }
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
-}
-
-/**
- * Turn functions on in a manifest written by an older CLI, leaving every other key alone.
- *
- * Without this, only new projects get working functions: a stack generated before the flag was
- * corrected keeps `functions_enabled: false` on disk, and regenerating the compose file, the
- * obvious thing to try, does not fix it.
- */
-function repairComposeFunctionsFlag(manifestPath: string): void {
-  // Malformed: leave it for the server to complain about rather than overwrite it here.
-  const parsed = readJsonObjectFile(manifestPath)
-  if (parsed === undefined) return
-  if (parsed["functions_enabled"] === true && parsed["functions_worker_url"] !== undefined) return
-
-  parsed["functions_enabled"] = true
-  if (parsed["functions_worker_url"] === undefined) {
-    parsed["functions_worker_url"] = COMPOSE_FUNCTIONS_WORKER_URL
-  }
-  writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
 }
 
 /**
@@ -1481,6 +1488,25 @@ export function exitComposeFailed(
   )
 }
 
+/** The `docker` arguments for `docker compose <args>` on one project's file. */
+function composeInvocation(composePath: string, args: readonly string[], projectRoot: string, composeProject: string | undefined, quiet: boolean): string[] {
+  const envFile = resolve(projectRoot, ".env")
+  const composeArgs = ["compose", ...(quiet ? ["--progress", "quiet"] : [])]
+  // Per-project name isolates containers/volumes/network so multiple Supatype
+  // projects on one machine never share a database (default would be the
+  // ".supatype/self-host" dir name, identical for every project).
+  if (composeProject) composeArgs.push("-p", composeProject)
+  // Resolve ${VAR} in compose.yml from the project root .env (not .supatype/self-host/).
+  composeArgs.push("--project-directory", projectRoot, "-f", composePath)
+  if (existsSync(envFile)) composeArgs.push("--env-file", envFile)
+  return [...composeArgs, ...args]
+}
+
+/**
+ * `docker compose <args>`, synchronously. Its many callers are synchronous, and so are the exit
+ * paths that stop a stack. No limit: `up`, `pull` and `build` wait on registries and builds a
+ * person watches and can stop, and a quiet run here is one of those too (docker-exec.ts).
+ */
 export function runDockerCompose(
   composePath: string,
   args: string[],
@@ -1489,30 +1515,13 @@ export function runDockerCompose(
   options?: RunDockerComposeOptions,
 ): number {
   requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
-  const envFile = resolve(projectRoot, ".env")
-  const composeArgs = ["compose"]
-  if (options?.quiet) {
-    composeArgs.push("--progress", "quiet")
-  }
-  // Per-project name isolates containers/volumes/network so multiple Supatype
-  // projects on one machine never share a database (default would be the
-  // ".supatype/self-host" dir name, identical for every project).
-  if (composeProject) composeArgs.push("-p", composeProject)
-  // Resolve ${VAR} in compose.yml from the project root .env (not .supatype/self-host/).
-  composeArgs.push("--project-directory", projectRoot)
-  composeArgs.push("-f", composePath)
-  if (existsSync(envFile)) {
-    composeArgs.push("--env-file", envFile)
-  }
-  composeArgs.push(...args)
-  const env = composeProcessEnv(projectRoot, options?.quiet === true)
-  const stdio = options?.quiet ? "pipe" : "inherit"
+  const quiet = options?.quiet === true
   const runCompose = () =>
-    spawnSync("docker", composeArgs, {
-      stdio,
+    askDockerSync(composeInvocation(composePath, args, projectRoot, composeProject, quiet), {
+      stdio: quiet ? "pipe" : "inherit",
       cwd: projectRoot,
-      env,
-      ...(options?.quiet ? { encoding: "utf8" as const } : {}),
+      env: composeProcessEnv(projectRoot, quiet),
+      timeoutMs: NO_DOCKER_LIMIT,
     })
   // Whatever `up` created or recreated keeps its name but not its address, and a Kong that was
   // already running would go on sending to the old one (EXT-N1), so that Kong is reloaded.
@@ -1520,10 +1529,66 @@ export function runDockerCompose(
     args[0] === "up" && composeProject !== undefined
       ? upKeepingKongCurrent(projectRoot, { project: composeProject, composePath }, runCompose)
       : runCompose()
-  if (result.status !== 0) {
-    reportComposeFailure(args, options?.quiet === true ? capturedComposeOutput(result) : null)
-  }
+  if (result.status !== 0) reportComposeFailure(args, quiet ? capturedComposeOutput(result) : null)
   return result.status ?? 1
+}
+
+/** `docker compose <args>` quietly and asynchronously, within `timeoutMs`: for calls run side by side. */
+export function askDockerCompose(
+  composePath: string,
+  args: readonly string[],
+  projectRoot: string,
+  composeProject: string,
+  timeoutMs: number,
+): Promise<DockerAnswer> {
+  const call = { cwd: projectRoot, env: composeProcessEnv(projectRoot, true), timeoutMs }
+  return askDocker(composeInvocation(composePath, args, projectRoot, composeProject, true), call)
+}
+
+/** compose's closing line for an image it could not pull. */
+const DAEMON_PULL_ERROR = /^Error response from daemon: /
+
+/**
+ * compose's own line for one image's pull that failed, or that it stopped when another failed:
+ * ` Image <ref> Error <why>` and ` Image <ref> Interrupted` (Compose v5), or the same with a status
+ * mark and the service name before it (older Compose v2).
+ */
+const IMAGE_PULL_FAILED = /^\s*(?:\S\s+)?(?:Image\s+)?\S+\s+(?:Error|Interrupted)(?:\s|$)/
+
+/**
+ * Whether a line compose's pull writes is shown: its progress, but not its closing daemon errors,
+ * its per-image errors or the pulls it interrupted. Each image whose pull did not finish is pulled
+ * again on its own (compose-image-pull.ts), which says why when it fails, and one kept from this
+ * machine is no failure; compose printed its errors for an image `update` then said it kept (local
+ * test rounds 4 and 7).
+ */
+export function shownPullLine(line: string): boolean {
+  return !DAEMON_PULL_ERROR.test(line) && !IMAGE_PULL_FAILED.test(line)
+}
+
+/** `docker compose pull` for the project, its progress shown as it runs ({@link shownPullLine}); its exit status. */
+export function pullComposeImages(
+  composePath: string,
+  projectRoot: string,
+  composeProject: string,
+  report?: DockerReportOptions,
+): Promise<number> {
+  requireDockerDaemon(report)
+  const child = spawnDocker(composeInvocation(composePath, ["pull"], projectRoot, composeProject, false), {
+    cwd: projectRoot,
+    env: composeProcessEnv(projectRoot, false),
+    stdio: ["ignore", "inherit", "pipe"],
+    windowsHide: true,
+  })
+  if (child.stderr !== null) {
+    createInterface({ input: child.stderr }).on("line", (line) => {
+      if (shownPullLine(line)) process.stderr.write(`${line}\n`)
+    })
+  }
+  return new Promise((resolve) => {
+    child.on("error", () => resolve(1))
+    child.on("close", (code) => resolve(code ?? 1))
+  })
 }
 
 /** The environment compose runs with: the CLI's, less the shell's keys `.env` overrides. */
