@@ -1,8 +1,8 @@
 {
   "engine": {
     "image": "supatype/schema-engine",
-    "tag": "v0.7.0",
-    "commit": "a2753ec4bf2b539fcde72a9170917bbab8604020"
+    "tag": "v0.8.0",
+    "commit": "878b4980e53dfd959ad65eecf9df4224f4d611d6"
   },
   "server": {
     "image": "supatype/server",
