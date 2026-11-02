@@ -82,6 +82,8 @@ export function defineFieldType<TValue = unknown>(
 export function defineComposite(
   definition: CompositeDefinition,
 ): CompositeDefinition & { __supatype: "composite" } {
+  const problem = unsupportedCompositeFields(definition, `Composite "${definition.name}"`)
+  if (problem !== undefined) throw new Error(problem)
   return {
     ...definition,
     meta: {
@@ -93,6 +95,26 @@ export function defineComposite(
     },
     __supatype: "composite" as const,
   }
+}
+
+/**
+ * Fields a composite definition may not carry. `installSQL` and `uninstallSQL` were removed before
+ * plugins were public (29 Oct 2026): running them would let a package execute SQL with the
+ * project owner's rights on every push. A composite is fields and their constraints, nothing else.
+ */
+export const UNSUPPORTED_COMPOSITE_FIELDS: readonly string[] = ["installSQL", "uninstallSQL"]
+
+/**
+ * Why `definition` cannot be a composite, or undefined when it can. `where` names it for the
+ * message (a plugin package, say), since a JavaScript author or a stale build can still pass one.
+ */
+export function unsupportedCompositeFields(definition: object, where: string): string | undefined {
+  const present = UNSUPPORTED_COMPOSITE_FIELDS.filter((field) => field in definition)
+  if (present.length === 0) return undefined
+  return (
+    `${where} sets ${present.join(" and ")}, which ${present.length === 1 ? "is" : "are"} not supported: ` +
+    "Supatype does not run SQL a plugin ships. Express what it does as fields and constraints."
+  )
 }
 
 // ─── defineProvider ──────────────────────────────────────────────────────────

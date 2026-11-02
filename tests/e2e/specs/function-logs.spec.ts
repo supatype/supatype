@@ -6,15 +6,15 @@ import { signInToStudio } from "../lib/studio-session.js"
  *
  * This is the one part of the function-log chain nothing else covers. The worker's output, the
  * server's relay and the stream parser each have their own tests, and all of them pass against a
- * tab that renders its chrome over an empty table — which is exactly what shipped before, with
+ * tab that renders its chrome over an empty table. That is exactly what shipped before, with
  * "coming soon" in it.
  *
  * # The two deployment shapes, and why the test knows about both
  *
  * Logs reach Studio by one of two routes, decided by where the functions actually run:
  *
- *   - **an external worker** (Compose, cloud): the worker streams, the server relays it on
- *     `/functions/v1/admin/logs/tail`, and the tab tails live.
+ *   - **an external worker** (Compose, cloud): the worker streams, the server relays it on its
+ *     functions admin API at `/admin/v1/functions/logs/tail`, and the tab tails live.
  *   - **in-process Deno** (`supatype dev`): there is no worker to tail, the relay answers 501, and
  *     the tab falls back to the per-function query the server answers from its own log buffer.
  *
@@ -42,7 +42,9 @@ const signIn = (page: Page): Promise<void> =>
  * open for as long as it is on screen, so the network is never idle and that wait cannot return.
  */
 async function openLogsTab(page: Page, fn: string): Promise<boolean> {
-  const tail = page.waitForResponse((r) => r.url().includes("/functions/v1/admin/logs/tail"), {
+  // Where Studio calls the functions admin API (functionsAdminFetch): /admin/v1/functions, since it
+  // left /functions/v1/admin, where it hid a project function named "admin".
+  const tail = page.waitForResponse((r) => r.url().includes("/admin/v1/functions/logs/tail"), {
     timeout: 20_000,
   })
   await page.goto(`/studio/edge-functions/${fn}/logs`, { waitUntil: "domcontentloaded" })
@@ -89,7 +91,7 @@ test.describe("function logs", () => {
   })
 
   test("the tab does not present raw JSON as a log message", async ({ page, request }) => {
-    // The router emits structured JSON so cloud's pipeline can label each line. Both paths have to
+    // The worker emits structured JSON so cloud's pipeline can label each line. Both paths have to
     // unpack it: the relay passes it through as an object, and the in-process reader parses it. A
     // regression in either shows a whole JSON document where the message belongs, and every other
     // test still passes because the row is present and the timestamp is real.

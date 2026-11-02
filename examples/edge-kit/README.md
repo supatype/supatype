@@ -7,7 +7,7 @@ Maintainer / contributor example for **edge functions**: Deno IDE types, env inj
 | Function | Exercises |
 |---|---|
 | `ping` | Basic invoke |
-| `env-check` | `Deno.env` + worker-injected Supatype keys |
+| `env-check` | Supatype keys on `ctx`, and `WEBHOOK_SECRET` in `ctx.env` |
 | `echo` | JSON body round-trip |
 | `auth-required` | Reject missing / anon Bearer; accept user JWT |
 | `write-note` | Service-role `fetch` → `/rest/v1/note` (via in-compose Kong) |
@@ -48,7 +48,7 @@ There is no separate push step: `dev` pushes the schema when it starts and again
 
 ## Manual checklist (Deno types DX)
 
-1. Open `functions/env-check/index.ts`: `Deno.env.get(...)` must **not** show `Cannot find name 'Deno'`.
+1. Open `functions/env-check/index.ts` and type `Deno.`: it must complete, and must **not** show `Cannot find name 'Deno'`. Env values are read from `ctx.env` (the docs' Environment and secrets section says why).
 2. Open `src/App.tsx`: must **not** see a global `Deno` namespace on app code (functions are excluded from the root tsconfig).
 3. `pnpm typecheck`: both app and `functions/` projects pass.
 4. With the stack up: **ping**, **env-check**, **echo**, **auth 401 / anon reject / user OK**, **write-note**, **webhook** all behave as labeled on the buttons.

@@ -227,3 +227,126 @@ describe("databaseStateToSchemaScaffold()", () => {
     expect(scaffold("blog_posts")).not.toContain("tableName")
   })
 })
+
+/**
+ * Decision D5 (local test round 3): a pulled table's draft gave `Public` for every access rule,
+ * whatever its RLS policies were, so a draft pushed unchanged opened the table to everyone. The
+ * draft is closed instead, with a TODO naming each policy found on the table.
+ */
+describe("databaseStateToSchemaScaffold() access rules", () => {
+  const posts = { name: "posts", columns: [{ name: "id", dataType: "uuid", udtName: "uuid", nullable: false }] }
+  const policies = [
+    { table: "posts", name: "posts_read_all", command: "SELECT" },
+    { table: "posts", name: "posts_owner_write", command: "ALL" },
+    { table: "other", name: "other_read", command: "SELECT" },
+  ]
+
+  it("drafts every rule closed, never Public", () => {
+    const draft = databaseStateToSchemaScaffold({ tables: [posts], rlsPolicies: policies })
+    expect(draft).not.toMatch(/: Public/)
+    for (const op of ["read", "create", "update", "delete"]) expect(draft).toContain(`    ${op}: Private`)
+  })
+
+  it("names each RLS policy on the table in a TODO, and no other table's", () => {
+    const draft = databaseStateToSchemaScaffold({ tables: [posts], rlsPolicies: policies })
+    expect(draft).toContain('// TODO: closed until you write its rules. RLS policies on "posts": "posts_read_all" (SELECT), "posts_owner_write" (ALL).')
+    expect(draft).not.toContain("other_read")
+  })
+
+  // A policy is named by whoever wrote it, and a name can hold a newline or `*/`. Written raw into
+  // the one-line comment, the rest of the name became code and the scaffold did not parse.
+  it("keeps the TODO one line whatever a policy's name or command holds", () => {
+    const NL = String.fromCharCode(10)
+    const odd = [{ table: "posts", name: `line one${NL}read: Public */ x`, command: `q${NL}z` }]
+    const draft = databaseStateToSchemaScaffold({ tables: [posts], rlsPolicies: odd })
+    const todo = draft.split(NL).find((line) => line.includes("TODO: closed"))
+    const escaped = (text: string): string => JSON.stringify(text)
+    expect(todo).toBe(
+      `  // TODO: closed until you write its rules. RLS policies on "posts": ${escaped(odd[0]!.name)} (${escaped(odd[0]!.command)}).`,
+    )
+    expect(draft).not.toMatch(/^read: Public/m)
+  })
+
+  // JSON.stringify leaves U+2028 and U+2029 as they are, and TypeScript ends a `//` comment at
+  // either, so a name holding one still put the rest of it into the scaffold as code.
+  it("keeps the TODO one line when a policy's name holds a line or paragraph separator", () => {
+    const separators = [String.fromCharCode(0x2028), String.fromCharCode(0x2029)]
+    const odd = separators.map((sep, i) => ({ table: "posts", name: `p${i}${sep}read: Public`, command: "r" }))
+    const draft = databaseStateToSchemaScaffold({ tables: [posts], rlsPolicies: odd })
+    for (const sep of separators) expect(draft).not.toContain(sep)
+    const todo = draft.split(String.fromCharCode(10)).find((line) => line.includes("TODO: closed"))
+    expect(todo).toContain(`"p0${String.fromCharCode(92)}u2028read: Public" (SELECT)`)
+    expect(todo).toContain(`"p1${String.fromCharCode(92)}u2029read: Public" (SELECT)`)
+  })
+
+  // An index's columns went into the scaffold as `"${name}"`, so a column named with a quote
+  // closed the string early. Each is a JSON string now, which TypeScript reads as the same name.
+  it("writes an index's column names as valid string literals", () => {
+    const quoted = 'say "hi"'
+    const table = { name: "posts", columns: [{ name: quoted, dataType: "text", udtName: "text", nullable: false }] }
+    const indexes = [{ table: "posts", name: "i", columns: [quoted, "id"], unique: false, method: "btree", isPrimary: false }]
+    const draft = databaseStateToSchemaScaffold({ tables: [table], indexes })
+    expect(draft).toContain(`{ fields: [${JSON.stringify(quoted)}, "id"] },`)
+  })
+
+  it("says when the table has no RLS policy", () => {
+    const draft = databaseStateToSchemaScaffold({ tables: [posts] })
+    expect(draft).toContain('// TODO: closed until you write its rules. No RLS policy was found on "posts".')
+  })
+})
+
+/**
+ * #19: a uuid column with a foreign key to `auth.users(id)` is a user's id, and the draft says so
+ * with SupatypeAuthUserId and the key's delete rule. The engine reports the referenced schema from
+ * 0.7.0 on; an older engine names only the table, and `users` in `auth` cannot be told from any
+ * other `users`, so the draft stays a plain UUID rather than guess.
+ */
+describe("databaseStateToSchemaScaffold() and auth.users foreign keys", () => {
+  const userId = { name: "user_id", dataType: "uuid", udtName: "uuid", nullable: false }
+  const editorId = { name: "editor_id", dataType: "uuid", udtName: "uuid", nullable: true }
+  const authKey = (column: string, onDelete: string, extra: Record<string, unknown> = {}) => ({
+    table: "posts",
+    name: `posts_${column}_fkey`,
+    constraintType: "foreignKey",
+    columns: [column],
+    foreignSchema: "auth",
+    foreignTable: "users",
+    foreignColumns: ["id"],
+    onDelete,
+    ...extra,
+  })
+  const draft = (constraints: Array<Record<string, unknown>>): string =>
+    databaseStateToSchemaScaffold({
+      tables: [{ name: "posts", columns: [userId, editorId] }],
+      constraints: constraints.map((c) => ({ table: "posts", name: "c", constraintType: "foreignKey", columns: [], ...c })),
+    })
+
+  it("drafts a user id with the key's delete rule", () => {
+    const out = draft([authKey("user_id", "CASCADE"), authKey("editor_id", "SET NULL")])
+    expect(out).toContain('  user_id: SupatypeAuthUserId<{ onDelete: "cascade" }>')
+    expect(out).toContain('  editor_id: Optional<SupatypeAuthUserId<{ onDelete: "setNull" }>>')
+    expect(draft([authKey("user_id", "RESTRICT")])).toContain('  user_id: SupatypeAuthUserId<{ onDelete: "restrict" }>')
+  })
+
+  it("says a key with no delete rule the type can declare would be dropped", () => {
+    const out = draft([authKey("user_id", "NO ACTION")])
+    expect(out).toMatch(/^ {2}user_id: SupatypeAuthUserId \/\/ TODO: .*ON DELETE NO ACTION.*no foreign key/m)
+  })
+
+  it("keeps a plain UUID for an engine that does not report the schema", () => {
+    const { foreignSchema: _omitted, ...old } = authKey("user_id", "CASCADE")
+    const out = draft([old])
+    expect(out).not.toContain("SupatypeAuthUserId<")
+    expect(out).toMatch(/^ {2}user_id: UUID$/m)
+  })
+
+  it("keeps a plain UUID for a key to another schema, another column, or more than one column", () => {
+    for (const other of [
+      authKey("user_id", "CASCADE", { foreignSchema: "public" }),
+      authKey("user_id", "CASCADE", { foreignColumns: ["email"] }),
+      authKey("user_id", "CASCADE", { columns: ["user_id", "editor_id"], foreignColumns: ["id", "id"] }),
+    ]) {
+      expect(draft([other])).not.toContain("SupatypeAuthUserId<")
+    }
+  })
+})

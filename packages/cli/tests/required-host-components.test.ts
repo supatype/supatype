@@ -34,7 +34,17 @@ describe("requiredHostComponents", () => {
       "server",
       "postgres",
       "realtime",
+      "storage",
     ])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it("leaves out the storage service for a native project whose objects are on S3", () => {
+    const dir = join(tmpdir(), `supatype-req-host-s3-${Date.now()}`)
+    mkdirSync(dir, { recursive: true })
+    const config = baseConfig("native")
+    config.storage = { provider: "s3" }
+    expect(requiredHostComponents(config, dir)).not.toContain("storage")
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -46,6 +56,7 @@ describe("requiredHostComponents", () => {
       "server",
       "postgres",
       "realtime",
+      "storage",
       "deno",
     ])
     rmSync(dir, { recursive: true, force: true })

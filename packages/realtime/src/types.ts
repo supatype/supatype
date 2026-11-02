@@ -45,6 +45,13 @@ export interface SubscribeMessage {
   table?: string | undefined
   schema?: string | undefined
   filter?: Record<string, string> | undefined
+  /**
+   * The client's name for this request, echoed on the reply to it.
+   *
+   * Two joins on one channel name close together are otherwise answered by replies a client can
+   * only tell apart by order. Optional, so a client that sends none is answered as it always was.
+   */
+  ref?: string | undefined
 }
 
 export interface UnsubscribeMessage {
@@ -129,6 +136,7 @@ export interface SystemMessage {
   type: "system"
   status: "ok" | "error"
   message: string
+  /** The `ref` of the request this replies to, when that request carried one. */
   ref?: string | undefined
   /**
    * The channel a refusal is about. The client fails only that channel; an error without one is

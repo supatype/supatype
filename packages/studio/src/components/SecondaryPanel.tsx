@@ -8,7 +8,7 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject, isShape, isString, type Guard } from "../lib/json.js"
-import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
+import { functionsAdminError, functionsAdminFetch } from "../lib/functions-admin.js"
 import { Button, ListButton, NAV_RAIL } from "./ui.js"
 import { IconList } from "./icons.js"
 import { useInspectorAvailability, type InspectorAvailability } from "../hooks/useInspectorAvailability.js"
@@ -335,23 +335,15 @@ export function SecondaryPanel({
   const capability = useStudioCapability()
 
   const adminFetch = React.useCallback(
-    (adminPath: string, init?: RequestInit) =>
-      fetch(`${client.url}/functions/v1/admin${adminPath}`, {
-        ...init,
-        headers: {
-          "Content-Type": "application/json",
-          ...studioAuthHeaders(client),
-          ...init?.headers,
-        },
-      }),
+    (adminPath: string, init?: RequestInit) => functionsAdminFetch(client, adminPath, init),
     [client],
   )
 
-  const { data: functionsData } = useApiQuery<FunctionMeta[]>(
+  const { data: functionsData, error: functionsError } = useApiQuery<FunctionMeta[]>(
     async () => {
       if (sectionId !== "functions") return []
       const res = await adminFetch("/list")
-      if (!res.ok) return []
+      if (!res.ok) throw await functionsAdminError(res, "Could not list functions")
       const json = await res.json()
       const data = isJsonObject(json) ? json["data"] : undefined
       return Array.isArray(data) ? data.filter(isFunctionMeta) : []
@@ -405,7 +397,8 @@ export function SecondaryPanel({
       title: "Edge Functions",
       groups: items.length > 0
         ? [{ items }]
-        : [{ items: [{ label: "No functions yet", href: "/edge-functions" }] }],
+        // A refused list is not an empty one. The view under this link shows the refusal itself.
+        : [{ items: [{ label: functionsError ? "Could not load functions" : "No functions yet", href: "/edge-functions" }] }],
     }
     if (!selectedFnSlug && items.length > 0) {
       // Keep panel highlight stable until view syncs URL.

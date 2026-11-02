@@ -10,6 +10,7 @@
  */
 import { watch as fsWatch, existsSync } from "node:fs"
 import { join } from "node:path"
+import { debounce } from "./debounce.js"
 import { runDockerCompose } from "./self-host-compose.js"
 
 export type WatchFn = (
@@ -24,9 +25,6 @@ const WORKER_SOURCE_DIRS = ["functions", "hooks"] as const
 /** Source the worker imports. `.env*` files are read on every call, so they need no restart. */
 const SOURCE_FILE = /\.(ts|tsx|js|mjs|json)$/
 
-/** Windows fires several events per save; one restart covers them all. */
-const DEBOUNCE_MS = 300
-
 /**
  * Watch the project's functions/ and hooks/ and call `restart` once per burst of saves.
  *
@@ -39,16 +37,9 @@ export function watchFunctionSources(
   restart: () => void,
   watch: WatchFn = fsWatch,
 ): { close: () => void } {
-  let timer: ReturnType<typeof setTimeout> | null = null
-  const scheduleRestart = () => {
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
-      timer = null
-      restart()
-    }, DEBOUNCE_MS)
-  }
+  const scheduled = debounce(restart)
   const onChange = (_event: string, filename: string | null) => {
-    if (filename !== null && SOURCE_FILE.test(filename)) scheduleRestart()
+    if (filename !== null && SOURCE_FILE.test(filename)) scheduled.trigger()
   }
   const watchers = new Map<string, { close: () => void }>()
   const watchSourceDir = (dir: string): boolean => {
@@ -59,12 +50,11 @@ export function watchFunctionSources(
   }
   for (const dir of WORKER_SOURCE_DIRS) watchSourceDir(dir)
   const root = watch(cwd, { recursive: false }, (_event, filename) => {
-    if (isWorkerSourceDir(filename) && watchSourceDir(filename)) scheduleRestart()
+    if (isWorkerSourceDir(filename) && watchSourceDir(filename)) scheduled.trigger()
   })
   return {
     close: () => {
-      if (timer) clearTimeout(timer)
-      timer = null
+      scheduled.cancel()
       root.close()
       for (const watcher of watchers.values()) watcher.close()
     },

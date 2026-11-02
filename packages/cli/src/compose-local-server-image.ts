@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs"
 import { dirname, isAbsolute, join, resolve } from "node:path"
-import { spawnSync } from "node:child_process"
+import { askDockerSync, NO_DOCKER_LIMIT } from "./docker-exec.js"
 import { VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { appendStackOutput, getActiveDevSession } from "./dev-session.js"
 import { requireDockerDaemon } from "./docker-runtime.js"
@@ -66,11 +66,10 @@ export async function ensureLocalServerDockerImage(
   requireDockerDaemon(brand?.intro ? { brand: { intro: brand.intro } } : undefined)
   const dockerfile = join(root, "Dockerfile")
   console.log(`[supatype] Building local server Docker image from ${root}…`)
-  const result = spawnSync(
-    "docker",
-    ["build", "--progress=plain", "-t", LOCAL_SERVER_DOCKER_IMAGE, "-f", dockerfile, root],
-    { encoding: "utf8", stdio: "pipe" },
-  )
+  // No limit: a build the person started and watches, as long as the Dockerfile makes it.
+  const result = askDockerSync(["build", "--progress=plain", "-t", LOCAL_SERVER_DOCKER_IMAGE, "-f", dockerfile, root], {
+    timeoutMs: NO_DOCKER_LIMIT,
+  })
   const tui = getActiveDevSession()?.isTui() ?? false
   if (!tui) {
     appendStackOutput(result.stdout, "log")

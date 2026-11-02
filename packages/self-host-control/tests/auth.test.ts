@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { test, describe, before, after } from "node:test"
-import { dataOf, request, startServer, TEST_SECRET, type ControlPlaneServer } from "./helpers.js"
+import { dataOf, fakeDocker, request, startServer, TEST_SECRET, type ControlPlaneServer } from "./helpers.js"
 
 /**
  * The control plane answers only the gateway.
@@ -55,6 +55,7 @@ describe("control plane authentication", () => {
     process.env["SUPATYPE_PROJECT_ROOT"] = tmp
     process.env["SUPATYPE_PROJECT_REF"] = PROJECT
     process.env["COMPOSE_PROJECT_NAME"] = "supatype-self-host-control-test-none"
+    fakeDocker()
     ;({ server, baseUrl } = await startServer())
   })
 

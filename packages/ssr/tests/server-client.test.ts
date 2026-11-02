@@ -81,13 +81,86 @@ describe("createServerClient", () => {
     expect(written.flat().map((c) => c.name)).toEqual(["myapp-auth-token"])
   })
 
-  it("refreshes without an adapter `setAll`", async () => {
+})
+
+/**
+ * A server client lives for one request. A refresh it starts on its own rotates the browser's refresh
+ * token, and a timer it leaves behind outlives the request it was made for.
+ */
+describe("createServerClient lifetime", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** The Authorization header of the last request the stubbed fetch answered. */
+  function lastAuthorization(): string | null {
+    const last = vi.mocked(fetch).mock.calls.at(-1)
+    if (last === undefined) return null
+    const [input, init] = last
+    const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+    return headers.get("Authorization")
+  }
+
+  /** The refresh grants the stubbed fetch has answered. */
+  function refreshCalls(): number {
+    const calls = vi.mocked(fetch).mock.calls
+    return calls.filter(([input]) => String(input instanceof Request ? input.url : input).includes("grant_type=refresh_token")).length
+  }
+
+  it("schedules no refresh timer", () => {
+    vi.useFakeTimers()
+    stubFetch({ status: 500, body: {} })
+    const { cookies } = adapter([sessionCookie(jwt(3600), "r1")])
+    createServerClient("http://api.test", "anon", { cookies })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("does not refresh an expired session until a request needs it", async () => {
     const fresh = jwt(3600)
     stubFetch({ status: 200, body: { access_token: fresh, refresh_token: "r2", user: { id: "user-1" } } })
+    const { cookies, written } = adapter([sessionCookie(jwt(-60), "r1")])
+    const client = createServerClient("http://api.test", "anon", { cookies })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(refreshCalls()).toBe(0)
+    expect(written).toEqual([])
+
+    await client.from("posts").select("*")
+    expect(refreshCalls()).toBe(1)
+    expect(parseSessionFromCookies(written.flat())).toMatchObject({ accessToken: fresh, refreshToken: "r2" })
+  })
+
+  it("refreshes and writes the cookies back with an adapter `setAll`", async () => {
+    const fresh = jwt(3600)
+    stubFetch({ status: 200, body: { access_token: fresh, refresh_token: "r2", user: { id: "user-1" } } })
+    const { cookies, written } = adapter([sessionCookie(jwt(-60), "r1")])
+    const client = createServerClient("http://api.test", "anon", { cookies })
+    await client.from("posts").select("*")
+    expect(refreshCalls()).toBe(1)
+    expect(lastAuthorization()).toBe(`Bearer ${fresh}`)
+    expect(parseSessionFromCookies(written.flat())).toMatchObject({ accessToken: fresh, refreshToken: "r2" })
+  })
+
+  // Without `setAll` (a Server Component) the browser never receives what a refresh returns, and the
+  // refresh has already spent the refresh token the browser holds, so its next refresh is refused.
+  it("never refreshes without an adapter `setAll`: the expired token goes out as it is", async () => {
+    stubFetch({ status: 200, body: { access_token: jwt(3600), refresh_token: "r2", user: { id: "user-1" } } })
+    const expired = jwt(-60)
     const client = createServerClient("http://api.test", "anon", {
-      cookies: { getAll: () => [sessionCookie(jwt(-60), "r1")] },
+      cookies: { getAll: () => [sessionCookie(expired, "r1")] },
     })
-    await client.auth.ensureValidSession()
-    expect(client.auth.currentAccessToken).toBe(fresh)
+    await client.from("posts").select("*")
+    const { data } = await client.auth.getSession()
+    expect(refreshCalls()).toBe(0)
+    expect(lastAuthorization()).toBe(`Bearer ${expired}`)
+    expect(data.session?.accessToken).toBe(expired)
+  })
+
+  it("keeps the session out of any storage the runtime provides", async () => {
+    const setItem = vi.fn<(key: string, value: string) => void>()
+    vi.stubGlobal("window", { localStorage: { getItem: () => null, setItem, removeItem: () => undefined } })
+    stubFetch({ status: 200, body: { access_token: jwt(3600), refresh_token: "r2", user: { id: "user-1" } } })
+    const { cookies } = adapter([sessionCookie(jwt(-60), "r1")])
+    await createServerClient("http://api.test", "anon", { cookies }).auth.ensureValidSession()
+    expect(setItem).not.toHaveBeenCalled()
   })
 })

@@ -11,16 +11,17 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, relative, sep } from "node:path"
+import { join, relative } from "node:path"
 import { spawnComposeEngine, type ComposeEngineTarget } from "./compose-engine-run.js"
-import { errorMessage } from "./error-message.js"
+import { ENGINE_SERVICE } from "./compose-engine-service.js"
+import { errorMessage, spawnFailureText } from "./error-message.js"
 import type { Capabilities } from "./engine-ownership-gate.js"
 import { hasProjectConfig, loadConfig } from "./config.js"
 import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
 import { findJsonLine } from "./engine-json-line.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
-import { ENGINE_BUSY, ENGINE_BUSY_WORDING, engineBusySentence, isUnknown, type Guard } from "@supatype/shared"
+import { ENGINE_BUSY, ENGINE_BUSY_WORDING, engineBusySentence, isUnknown, toPosixPath, type Guard } from "@supatype/shared"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -232,7 +233,7 @@ export async function engineVersionCheck(): Promise<EngineVersionCheck> {
   }
   const result = spawnSync(bin, ["--version"], { encoding: "utf8" })
   if (result.status === 0) return { ok: true, bin, version: result.stdout.trim() }
-  const reason = result.error?.message ?? (result.stderr.trim() || `exit ${String(result.status)}`)
+  const reason = spawnFailureText({ status: result.status, stderr: result.stderr, error: result.error?.message })
   return { ok: false, bin, reason }
 }
 
@@ -263,12 +264,12 @@ export async function engineRequest(
 ): Promise<unknown> {
   if (compose !== undefined) return composeEngineRequest(endpoint, body, guard, compose)
   const bin = await getEngineBin()
-  // A schema with identity or generated columns goes only to an engine that reads them: one that
-  // does not would push plain columns and say nothing. Imported here, as the gate imports this.
+  // A schema goes only to an engine that can read it: one older than this CLI needs is refused by
+  // asking it (decision D3; once per binary), and one without identity or generated columns would
+  // push plain columns and say nothing. Imported here, as the gate imports this.
   if (body["ast"] !== undefined) {
     const { assertSupported, binaryCapabilities, identityColumnsNeed } = await import("./engine-ownership-gate.js")
-    const needs = identityColumnsNeed(body["ast"])
-    if (needs.length > 0) assertSupported(binaryCapabilities(bin), needs)
+    assertSupported(binaryCapabilities(bin), identityColumnsNeed(body["ast"]))
   }
   return readEngineResult(endpoint, spawnEngineHere(bin, endpoint, body), guard)
 }
@@ -339,13 +340,12 @@ function composeEngineRequest<T>(
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
   const hostDir = mkdtempSync(join(supatypeDir, "engine-"))
-  let result: SpawnSyncReturns<string>
+  let result: EngineRunResult
   try {
     const files = inContainer(writeRequestFiles(hostDir, body), cwd)
     result = spawnComposeEngine(compose.target, endpointToArgs(endpoint, body, files), {
       runFlags: DATABASE_FREE_ENDPOINTS.has(endpoint) ? ["-T", "--no-deps"] : ["-T"],
       secrets: { DATABASE_URL: compose.databaseUrl },
-      maxBuffer: 50 * 1024 * 1024,
     })
   } finally {
     rmSync(hostDir, { recursive: true, force: true })
@@ -355,7 +355,7 @@ function composeEngineRequest<T>(
 
 /** The request's files as the engine container sees them, under the project mount. */
 function inContainer(files: RequestFiles, cwd: string): RequestFiles {
-  const map = (path: string): string => `/project/${relative(cwd, path).split(sep).join("/")}`
+  const map = (path: string): string => `${ENGINE_SERVICE.projectDir}/${toPosixPath(relative(cwd, path))}`
   return {
     reqFile: map(files.reqFile),
     ...(files.gzPath !== undefined && { gzPath: map(files.gzPath) }),
@@ -376,7 +376,10 @@ function engineEnv(body: Record<string, unknown>): NodeJS.ProcessEnv {
 }
 
 /** Turn the engine's exit status and stdout into the request's answer, or throw its error. */
-function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>, guard: Guard<T>): T {
+/** What an engine run answered, from the binary here or from a compose container. */
+type EngineRunResult = Pick<SpawnSyncReturns<string>, "status" | "stdout" | "stderr">
+
+function readEngineResult<T>(endpoint: string, result: EngineRunResult, guard: Guard<T>): T {
   throwEngineFailure(endpoint, result)
   const answer = engineAnswer(result.stdout ?? "")
   if (!guard(answer)) {
@@ -386,7 +389,7 @@ function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>,
 }
 
 /** Throw the engine's error when it failed, unless the failure is itself the answer. */
-function throwEngineFailure(endpoint: string, result: SpawnSyncReturns<string>): void {
+function throwEngineFailure(endpoint: string, result: EngineRunResult): void {
   // A failed seed is an answer, not a crash.
   //
   // `engine seed` exits 1 when the seed itself failed and prints the result document on

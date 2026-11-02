@@ -108,6 +108,17 @@ describe("probeDockerDaemon", () => {
     })
     expect(spawnSyncMock).toHaveBeenCalledTimes(1)
   })
+
+  // Every compose command asks this first. With no limit a hung daemon held each one, and a daemon
+  // that never answered was reported as Docker not being installed.
+  it("gives up on a daemon that does not answer, and says so", () => {
+    spawnSyncMock.mockReturnValueOnce(
+      spawnResult({ status: null, error: Object.assign(new Error("spawnSync docker ETIMEDOUT"), { code: "ETIMEDOUT" }) }),
+    )
+
+    expect(probeDockerDaemon()).toEqual({ ok: false, reason: "daemon_unavailable", detail: "Docker did not answer within 15s" })
+    expect(spawnSyncMock.mock.calls[0]?.[2]).toMatchObject({ timeout: 15_000 })
+  })
 })
 
 describe("reportDockerUnavailable", () => {

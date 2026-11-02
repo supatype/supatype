@@ -19,7 +19,7 @@ export default defineConfig({
 })
 ```
 
-With `provider: "native"`, init also writes `server.port: 54321`, the port the native server
+With `provider: "native"`, init also writes `server.port: 18471`, the port the native server
 listens on. A Docker project's API is on the gateway port, `SUPATYPE_KONG_PORT` in `.env`.
 
 **Docker images:** omit `versions` so compose runs the exact images the installed CLI release was tested with (never `:latest`). Pin `versions.*` only when you need a different release.
@@ -138,7 +138,10 @@ environments: {
 
 `default` wins: with it set, `branchDefaults` is never read.
 
-For Docker dev, `supatype dev` may rewrite `DATABASE_URL` to the host-published compose Postgres port when using a local engine override.
+### Who owns `DATABASE_URL` in `.env`
+
+- **The CLI's**: the URL sits under `# supatype:managed, built from supatype.config.ts and the POSTGRES_ values below` (what `init` writes; an older `# supatype:managed` marker counts too), or is exactly the URL the CLI writes (`supatype_admin`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, a host on this machine, any port). Docker dev, native dev, a saved shell port and `self-host compose up` rewrite it to the provider and port the project runs, and host commands (`push`, `seed`, `admin`) use the project's own database in its place.
+- **Yours**: anything else. No command changes it, host commands use it as written, and dev warns when nothing answers where it points. Remove it to go back to the project's own database.
 
 ## Self-host HTTPS (custom domain)
 
@@ -212,9 +215,9 @@ GOOGLE_SECRET=...
   `supatype self-host compose render`/`up` warn when an enabled provider's secret is set nowhere.
 - **Configured only through `.env`:** nothing is rendered for a provider the config does not list,
   so it gets no default redirect. Set `SUPATYPE_EXTERNAL_<PROVIDER>_REDIRECT_URI` yourself, to
-  `<public API URL>/auth/v1/callback` (for example
-  `SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18473/auth/v1/callback`); without it the
-  server refuses the provider. Listing the provider under `auth.providers` is the recommended route,
+  `<public API URL>/auth/v1/callback`, the `API_EXTERNAL_URL` in `.env` (the gateway's
+  `SUPATYPE_KONG_PORT` under Docker, `server.port` natively); without it the server refuses the
+  provider. Listing the provider under `auth.providers` is the recommended route,
   since it supplies that default.
 - `supatype.local.config.ts` merges per provider, so it can swap in a development OAuth app's
   `clientId` without restating the rest.
@@ -277,7 +280,18 @@ export default defineConfig({
 })
 ```
 
-Requires no Docker. Uses host Postgres on :5432 and supatype-server on `server.port` (default 54321).
+Requires no Docker. Uses host Postgres on :5432 and supatype-server on `server.port` (default 18471).
+
+The native Postgres is not the Docker image, and some of what the image has is missing:
+
+- **GraphQL:** pg_graphql and `/graphql/v1` are Docker-only; native dev answers `/graphql/v1` with
+  501 `graphql_unavailable`. Use REST, or the Docker provider.
+- **pg_net:** not on Windows. On Linux and macOS it is preloaded, with pg_cron, as in the image.
+- **PostGIS:** not on macOS for now. Geometry fields need Linux, Windows or the Docker provider.
+
+pg_stat_statements, pg_cron, pg_net, plan_filter and safeupdate are preloaded when the downloaded
+archive carries them, so an older archive starts as it did. safeupdate refuses an `UPDATE` or
+`DELETE` with no `WHERE` in every session, as in the image: write `WHERE true` to mean every row.
 
 The native Postgres checks passwords (`scram-sha-256` for local and host connections): the
 superuser `postgres` uses `.env`'s `POSTGRES_PASSWORD` and PostgREST's `authenticator` uses

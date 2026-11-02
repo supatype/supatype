@@ -34,7 +34,36 @@ function byteLimit(key: string): number | undefined {
   return bytes
 }
 
+const STORAGE_BACKENDS = ["s3", "file"] as const
+
+/**
+ * Where object bytes live: `s3` (the default, any S3-compatible store) or `file` (a directory on
+ * local disk, for native `supatype dev` and single-box self-host). Refused at start when neither.
+ */
+function storageBackend(): (typeof STORAGE_BACKENDS)[number] {
+  const raw = env("STORAGE_BACKEND", "s3")
+  const backend = STORAGE_BACKENDS.find((known) => known === raw)
+  if (backend === undefined) throw new Error(`STORAGE_BACKEND must be one of ${STORAGE_BACKENDS.join(", ")}, got "${raw}"`)
+  return backend
+}
+
+/** The directory the file backend keeps objects in; required, and only read, with that backend. */
+function storageFilePath(backend: (typeof STORAGE_BACKENDS)[number]): string {
+  if (backend !== "file") return ""
+  const path = env("STORAGE_FILE_PATH", "").trim()
+  if (path === "") throw new Error("STORAGE_FILE_PATH is required when STORAGE_BACKEND is file")
+  return path
+}
+
+const backend = storageBackend()
+
 export const config = {
+  /** Where object bytes live; bucket and object metadata is in Postgres either way. */
+  storageBackend: backend,
+
+  /** The file backend's root directory, "" for S3. */
+  storageFilePath: storageFilePath(backend),
+
   /** Postgres connection string for the storage metadata tables. */
   databaseUrl: env(
     "DATABASE_URL",

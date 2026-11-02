@@ -11,25 +11,13 @@ describe("targetFetch cloud auth refresh", () => {
   it("refreshes once on TOKEN_EXPIRED then retries", async () => {
     const fetchMock = vi
       .fn<(url: string, init?: RequestInit) => Promise<unknown>>()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        json: async () => ({ message: "Token expired", code: "TOKEN_EXPIRED" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Token expired", code: "TOKEN_EXPIRED" }), { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
           access_token: "new-access",
           refresh_token: "new-refresh",
           expires_in: 3600,
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ data: { ok: true } }),
-      })
+        }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { ok: true } }), { status: 200 }))
 
     vi.stubGlobal("fetch", fetchMock)
 
@@ -62,11 +50,7 @@ describe("targetFetch cloud auth refresh", () => {
   it("points to supatype login when expired without refresh token", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 401,
-        json: async () => ({ message: "Token expired", code: "TOKEN_EXPIRED" }),
-      }),
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "Token expired", code: "TOKEN_EXPIRED" }), { status: 401 })),
     )
 
     await expect(
@@ -81,11 +65,7 @@ describe("targetFetch cloud auth refresh", () => {
   it("throws TargetApiError with status", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        json: async () => ({ message: "boom" }),
-      }),
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "boom" }), { status: 500 })),
     )
 
     await expect(

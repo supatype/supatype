@@ -8,7 +8,6 @@ import { useFunctionLogTail } from "../hooks/useFunctionLogTail.js"
 import { useInterval } from "../hooks/useTabActivity.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import {
-  bodyErrorText,
   type Guard,
   isArrayOf,
   isNumber,
@@ -18,9 +17,8 @@ import {
   nullable,
   optional,
   readJson,
-  readJsonObject,
 } from "../lib/json.js"
-import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
+import { functionsAdminError, functionsAdminFetch } from "../lib/functions-admin.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
 
@@ -52,11 +50,6 @@ const isLogEntry: Guard<LogEntry> = isShape({ timestamp: isString, level: isStri
 /** The functions admin API's list bodies: `{ data: [...] }`, where an empty list may be null. */
 function isDataList<T>(item: Guard<T>): Guard<{ data?: T[] | null }> {
   return isShape({ data: optional(nullable(isArrayOf(item))) })
-}
-
-/** The admin API's refusal, in its own words when it gave any. */
-async function adminError(res: Response, fallback: string): Promise<Error> {
-  return new Error(bodyErrorText(await readJsonObject(res)) ?? fallback)
 }
 
 const isHttpMethod = isOneOf(["GET", "POST"] as const)
@@ -261,7 +254,7 @@ function LogsTab({
     async () => {
       if (tailing) return []
       const res = await adminFetch(`/${encodeURIComponent(functionName)}/logs?since=${since}`)
-      if (!res.ok) return []
+      if (!res.ok) throw await functionsAdminError(res, "Could not read logs")
       const json = await readJson(res, isDataList(isLogEntry))
       return json.data ?? []
     },
@@ -272,6 +265,8 @@ function LogsTab({
   useInterval(refetch, autoRefresh && !tailing ? 10_000 : null)
 
   const logs: LogEntry[] = tailing ? tail.lines : data ?? []
+  // A refused query is not an empty history, so it shows the refusal and not "No logs".
+  const queryFailed = !tailing && error !== null
 
   return (
     <div>
@@ -299,7 +294,7 @@ function LogsTab({
         </div>
       </div>
 
-      {error && !tailing && <ErrorBanner message={error} />}
+      {queryFailed && <ErrorBanner message={error} />}
       {tailing && tail.state.kind === "error" && <ErrorBanner message={tail.state.message} />}
 
       {live && tail.state.kind === "unsupported" && (
@@ -313,7 +308,7 @@ function LogsTab({
         <div className="text-center py-8 text-xs text-muted-foreground">Loading logs…</div>
       )}
 
-      {logs.length === 0 && !(loading && !tailing) && (
+      {logs.length === 0 && !queryFailed && !(loading && !tailing) && (
         <EmptyState
           title={tailing ? "Waiting for output" : "No logs"}
           description={
@@ -384,10 +379,10 @@ function EnvVarsTab({
     : `/${encodeURIComponent(functionName)}/env`
   const showDefaults = scope === "defaults"
 
-  const { data, loading, refetch } = useApiQuery<string[]>(
+  const { data, loading, error: listError, refetch } = useApiQuery<string[]>(
     async () => {
       const res = await adminFetch(envBasePath)
-      if (!res.ok) return []
+      if (!res.ok) throw await functionsAdminError(res, "Could not list variables")
       const json = await readJson(res, isDataList(isString))
       return json.data ?? []
     },
@@ -395,6 +390,7 @@ function EnvVarsTab({
   )
 
   const keys = data ?? []
+  const shownError = error ?? listError
 
   const handleAdd = async () => {
     if (!newKey.trim()) return
@@ -406,7 +402,7 @@ function EnvVarsTab({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: newKey.trim(), value: newValue }),
       })
-      if (!res.ok) throw await adminError(res, "Failed to set variable")
+      if (!res.ok) throw await functionsAdminError(res, "Could not set the variable")
       setNewKey("")
       setNewValue("")
       refetch()
@@ -420,7 +416,7 @@ function EnvVarsTab({
   const handleDelete = async (key: string) => {
     try {
       const res = await adminFetch(`${envBasePath}/${encodeURIComponent(key)}`, { method: "DELETE" })
-      if (!res.ok) throw await adminError(res, "Failed to delete variable")
+      if (!res.ok) throw await functionsAdminError(res, "Could not delete the variable")
       refetch()
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")
@@ -429,7 +425,7 @@ function EnvVarsTab({
 
   return (
     <div>
-      {error && <ErrorBanner message={error} />}
+      {shownError && <ErrorBanner message={shownError} />}
 
       <div className="mb-5">
         <div className="mb-2">
@@ -492,7 +488,7 @@ function EnvVarsTab({
             <div className="text-center py-6 text-xs text-muted-foreground">Loading…</div>
           )}
 
-          {!loading && keys.length === 0 && (
+          {!loading && !listError && keys.length === 0 && (
             <EmptyState
               title={`No ${scope === "shared" ? "shared" : "function"} environment variables`}
               description="Add variables above to inject them into your edge functions at runtime."
@@ -550,22 +546,14 @@ export function EdgeFunctions(): React.ReactElement {
         : "invoke"
 
   const adminFetch = useCallback(
-    (path: string, init?: RequestInit) =>
-      fetch(`${client.url}/functions/v1/admin${path}`, {
-        ...init,
-        headers: {
-          "Content-Type": "application/json",
-          ...studioAuthHeaders(client),
-          ...init?.headers,
-        },
-      }),
+    (path: string, init?: RequestInit) => functionsAdminFetch(client, path, init),
     [client],
   )
 
   const { data, loading, error, refetch } = useApiQuery<FunctionMeta[]>(
     async () => {
       const res = await adminFetch("/list")
-      if (!res.ok) return []
+      if (!res.ok) throw await functionsAdminError(res, "Could not list functions")
       const json = await readJson(res, isDataList(isFunctionMeta))
       return json.data ?? []
     },
