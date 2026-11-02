@@ -1,41 +1,63 @@
 import type { RequestContext } from "../server.js"
-import { sendJson, readJson } from "../server.js"
+import { sendJson, readShapedJson } from "../server.js"
 import * as db from "../db.js"
-import { isArrayOf, isBoolean, isNumber, isOneOf, isShape, isString, nullable, optional } from "../json.js"
+import { isArrayOf, isBoolean, isNumber, isOneOf, isString, nullable, optional, type FromShape } from "../json.js"
 import {
   ensureBucket as ensureS3Bucket,
   deleteBucket as deleteS3Bucket,
   deleteObjects as deleteS3Objects,
   applyBucketPolicyFromConfig,
   objectKey,
-} from "../s3.js"
+} from "../object-store.js"
 
 import type { BucketAccessMode } from "../db.js"
 import { accessModeOf, nextAccessMode } from "../bucket-access.js"
+import { bucketIdProblem, bucketSettingsProblem, renameProblem, bucketFieldsProblem } from "../bucket-rules.js"
 
 const isAccessMode = isOneOf(["public", "private", "custom"] as const satisfies readonly BucketAccessMode[])
 
-/** `name` is checked by the handler, which answers a missing one by name. */
-const isCreateBucketBody = isShape({
+/**
+ * What a create and an update read; null for the size limit or the types is "no limit" in both (a
+ * create refused it, naming nothing, while an update took it: local test round 4). On a create,
+ * `name` is checked by the handler, which answers a missing one by name. On an update, `id` and
+ * `name` may only name the bucket itself: a Supabase client's update sends them along.
+ */
+const BUCKET_BODY = {
   id: optional(isString),
   name: optional(isString),
-  public: optional(isBoolean),
-  file_size_limit: optional(isNumber),
-  allowed_mime_types: optional(isArrayOf(isString)),
-  access_mode: optional(isAccessMode),
-  s3_bucket_policy: optional(nullable(isString)),
-})
-
-const isUpdateBucketBody = isShape({
   public: optional(isBoolean),
   file_size_limit: optional(nullable(isNumber)),
   allowed_mime_types: optional(nullable(isArrayOf(isString))),
   access_mode: optional(isAccessMode),
   s3_bucket_policy: optional(nullable(isString)),
-})
+} as const
+type BucketBody = FromShape<typeof BUCKET_BODY>
+
+/** Answers 400 with `problem` and says so, or does nothing when there is none. */
+function refused(ctx: RequestContext, problem: string | null): boolean {
+  if (problem === null) return false
+  sendJson(ctx.res, 400, { error: problem })
+  return true
+}
+
+/**
+ * The bucket's row, then its S3 policy. Only once the row exists: a name already taken answers 409
+ * before the policy of the bucket holding it is touched. Public on S3 exactly when the mode says
+ * so, since a custom bucket's rules decide who reads it, and a new private bucket has no policy.
+ */
+async function createBucketAndPolicy(id: string, body: BucketBody & { name: string }): Promise<db.BucketRow> {
+  const accessMode: BucketAccessMode = body.access_mode ?? (body.public ? "public" : "private")
+  await ensureS3Bucket(id)
+  const bucket = await db.createBucket(id, body.name, accessMode, body.file_size_limit, body.allowed_mime_types, body.s3_bucket_policy)
+  if (accessMode === "public" || bucket.s3_bucket_policy) {
+    await applyBucketPolicyFromConfig(id, { public: accessMode === "public", s3BucketPolicy: bucket.s3_bucket_policy })
+  }
+  return bucket
+}
 
 export async function create(ctx: RequestContext): Promise<void> {
-  const body = await readJson(ctx.req, isCreateBucketBody)
+  const body = await readShapedJson(ctx.req, BUCKET_BODY)
+  if (refused(ctx, bucketFieldsProblem(body))) return
 
   if (!body.name) {
     sendJson(ctx.res, 400, { error: "name is required" })
@@ -43,26 +65,9 @@ export async function create(ctx: RequestContext): Promise<void> {
   }
 
   const id = body.id ?? body.name
-  const accessMode: BucketAccessMode = body.access_mode ?? (body.public ? "public" : "private")
+  if (refused(ctx, bucketIdProblem(id) ?? bucketSettingsProblem(body))) return
   try {
-    await ensureS3Bucket(id)
-    const bucket = await db.createBucket(
-      id,
-      body.name,
-      accessMode,
-      body.file_size_limit,
-      body.allowed_mime_types,
-      body.s3_bucket_policy,
-    )
-    // Only once the row exists: a name already taken answers 409 before the policy of the bucket
-    // holding it is touched. Public on S3 exactly when the mode says so, since a custom bucket's
-    // rules decide who reads it, and a new private bucket has no policy to remove.
-    if (accessMode === "public" || bucket.s3_bucket_policy) {
-      await applyBucketPolicyFromConfig(id, {
-        public: accessMode === "public",
-        s3BucketPolicy: bucket.s3_bucket_policy,
-      })
-    }
+    const bucket = await createBucketAndPolicy(id, { ...body, name: body.name })
     sendJson(ctx.res, 200, { name: bucket.name })
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to create bucket"
@@ -89,15 +94,24 @@ export async function get(ctx: RequestContext): Promise<void> {
 }
 
 export async function update(ctx: RequestContext): Promise<void> {
-  const body = await readJson(ctx.req, isUpdateBucketBody)
+  const body = await readShapedJson(ctx.req, BUCKET_BODY)
+  if (refused(ctx, bucketFieldsProblem(body) ?? bucketSettingsProblem(body))) return
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)
-  if (!existing) {
+  if (existing && refused(ctx, renameProblem(existing, body))) return
+  if (!existing || !(await applyUpdate(id, existing, body))) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
-  // A public flag moves the mode, which decides every read; setting the flag alone left it where
-  // it was. A row whose stored pair is not yet the mode's is written as well, NULL mode included.
+  sendJson(ctx.res, 200, { message: "Successfully updated" })
+}
+
+/**
+ * Writes `body` over the bucket's row, then its S3 policy; false when the row is gone by then.
+ * A public flag moves the mode, which decides every read; setting the flag alone left it where it
+ * was. A row whose stored pair is not yet the mode's is written as well, NULL mode included.
+ */
+async function applyUpdate(id: string, existing: db.BucketRow, body: BucketBody): Promise<boolean> {
   const accessMode = nextAccessMode(accessModeOf(existing), body)
   const isPublic = accessMode === "public"
   const accessChanged = accessMode !== existing.access_mode || isPublic !== existing.public
@@ -109,17 +123,14 @@ export async function update(ctx: RequestContext): Promise<void> {
     ...(body.s3_bucket_policy !== undefined && { s3_bucket_policy: body.s3_bucket_policy }),
     ...(accessChanged && { access_mode: accessMode }),
   })
-  if (!bucket) {
-    sendJson(ctx.res, 404, { error: "Bucket not found" })
-    return
-  }
+  if (!bucket) return false
   // S3 follows the row once it is written, so a bucket deleted in between is not opened on S3.
   // A write that names access applies it even when the row already holds it: that is a retry of a
   // write whose S3 step failed, and the row alone would never send it again.
   if (accessChanged || namesAccess) {
     await applyBucketPolicyFromConfig(id, { public: isPublic, s3BucketPolicy: bucket.s3_bucket_policy })
   }
-  sendJson(ctx.res, 200, { message: "Successfully updated" })
+  return true
 }
 
 export async function remove(ctx: RequestContext): Promise<void> {

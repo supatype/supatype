@@ -59,4 +59,29 @@ describe("resolveInitDependencyVersions", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 500 })))
     expect(await resolveInitDependencyVersions()).toEqual(initDependencyVersionsFallback())
   })
+
+  // npm and pnpm hand their configured registry to scripts as npm_config_registry, and a project
+  // behind a mirror installs from it. Asking registry.npmjs.org regardless reached the internet from
+  // a machine that may not, and named versions the mirror may not have.
+  it("asks the registry npm is configured with", async () => {
+    vi.stubEnv("npm_config_registry", "http://mirror.test/npm/")
+    const asked: string[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        asked.push(url)
+        return new Response(null, { status: 404 })
+      }),
+    )
+    try {
+      await resolveInitDependencyVersions()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+    expect(asked.sort()).toEqual([
+      "http://mirror.test/npm/%40supatype%2Fcli",
+      "http://mirror.test/npm/%40supatype%2Fclient",
+      "http://mirror.test/npm/%40supatype%2Ftypes",
+    ])
+  })
 })

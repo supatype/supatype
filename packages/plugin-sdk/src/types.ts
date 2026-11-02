@@ -84,10 +84,6 @@ export interface CompositeDefinition {
     /** Default collapsed state? Default: false */
     defaultCollapsed?: boolean | undefined
   } | undefined
-  /** SQL to execute when the composite is first applied (e.g., trigger creation) */
-  installSQL?: string | undefined
-  /** SQL to execute when the composite is removed */
-  uninstallSQL?: string | undefined
   /** Plugin metadata */
   meta?: PluginMeta | undefined
 }

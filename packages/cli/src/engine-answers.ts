@@ -10,7 +10,6 @@
 import {
   isArrayOf,
   isBoolean,
-  isJsonObject,
   isNumber,
   isOneOf,
   isShape,
@@ -213,8 +212,10 @@ export const isDatabaseStateJson: Guard<DatabaseStateJson> = isShape({
         name: isString,
         constraintType: isString,
         columns: isStringArray,
+        foreignSchema: optional(nullable(isString)),
         foreignTable: optional(nullable(isString)),
         foreignColumns: optional(nullable(isStringArray)),
+        onDelete: optional(nullable(isString)),
         comment: optional(nullable(isString)),
       }),
     ),
@@ -232,6 +233,7 @@ export const isDatabaseStateJson: Guard<DatabaseStateJson> = isShape({
       }),
     ),
   ),
+  rlsPolicies: optional(isArrayOf(isShape({ table: isString, name: isString, command: isString }))),
 })
 
 // --- Generated output ---
@@ -239,6 +241,3 @@ export const isDatabaseStateJson: Guard<DatabaseStateJson> = isShape({
 /** `/generate` and `/migrate`: the text it made, or a message in its place. */
 export const isGenerateAnswer = isShape({ code: optional(isString), message: optional(isString) })
 export const isMigrateAnswer = isShape({ sql: optional(isString), message: optional(isString) })
-
-/** True for an object: an answer read key by key afterwards, such as the admin config. */
-export const isObjectAnswer: Guard<Record<string, unknown>> = isJsonObject

@@ -29,6 +29,17 @@ export interface BucketRow {
 }
 
 /**
+ * A bucket row as node-postgres reads it: `file_size_limit` is a bigint, which it reads as text.
+ * {@link bucketRow} makes it the number BucketRow says, which every limit the service accepts
+ * (bucket-rules.ts) can be exactly. Handed on as text, rows gave `"1000"` (local test round 4).
+ */
+type RawBucketRow = Omit<BucketRow, "file_size_limit"> & { file_size_limit: string | number | null }
+
+function bucketRow(raw: RawBucketRow): BucketRow {
+  return { ...raw, file_size_limit: raw.file_size_limit === null ? null : Number(raw.file_size_limit) }
+}
+
+/**
  * A `storage.objects` row as node-postgres reads it: timestamps arrive as `Date`.
  *
  * No `path_tokens`. The service's own bootstrap adds that column but the engine's does not, so a row
@@ -117,11 +128,11 @@ export async function createBucket(
   id: string,
   name: string,
   accessMode: BucketAccessMode,
-  fileSizeLimit?: number,
-  allowedMimeTypes?: string[],
+  fileSizeLimit?: number | null,
+  allowedMimeTypes?: string[] | null,
   s3BucketPolicy?: string | null,
 ): Promise<BucketRow> {
-  const res = await pool.query<BucketRow>(
+  const res = await pool.query<RawBucketRow>(
     `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, access_mode, s3_bucket_policy)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
@@ -135,22 +146,23 @@ export async function createBucket(
       s3BucketPolicy ?? null,
     ],
   )
-  return res.rows[0]!
+  return bucketRow(res.rows[0]!)
 }
 
 export async function getBucket(id: string): Promise<BucketRow | null> {
-  const res = await pool.query<BucketRow>(
+  const res = await pool.query<RawBucketRow>(
     `SELECT * FROM storage.buckets WHERE id = $1`,
     [id],
   )
-  return res.rows[0] ?? null
+  const row = res.rows[0]
+  return row === undefined ? null : bucketRow(row)
 }
 
 export async function listBuckets(): Promise<BucketRow[]> {
-  const res = await pool.query<BucketRow>(
+  const res = await pool.query<RawBucketRow>(
     `SELECT * FROM storage.buckets ORDER BY name`,
   )
-  return res.rows
+  return res.rows.map(bucketRow)
 }
 
 /** Changes what `updates` names. A new `access_mode` writes `public` with it, as createBucket does. */
@@ -192,11 +204,12 @@ export async function updateBucket(
   sets.push(`updated_at = now()`)
   values.push(id)
 
-  const res = await pool.query<BucketRow>(
+  const res = await pool.query<RawBucketRow>(
     `UPDATE storage.buckets SET ${sets.join(", ")} WHERE id = $${idx} RETURNING *`,
     values,
   )
-  return res.rows[0] ?? null
+  const row = res.rows[0]
+  return row === undefined ? null : bucketRow(row)
 }
 
 export async function deleteBucketRow(id: string): Promise<boolean> {

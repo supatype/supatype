@@ -13,3 +13,7 @@ export const FUNCTION_NAME_RULE = 'use lowercase letters, digits, "-" and "_", s
 export function isFunctionName(name: unknown): name is string {
   return typeof name === "string" && FUNCTION_NAME.test(name)
 }
+
+// The hook rule lives with the route rule, which the functions worker gets a copy of, so the worker
+// judges a hook name as the control plane does.
+export { HOOK_NAME, HOOK_NAME_RULE, isHookName } from "./function-routes.js"
