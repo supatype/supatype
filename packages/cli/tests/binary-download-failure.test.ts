@@ -6,6 +6,11 @@ import { download } from "../src/binary-cache.js"
 import type { ClackApi } from "../src/ui/clack-api.js"
 import { setActiveFlowApi } from "../src/ui/runtime/flow-session.js"
 
+// The CLI holds no release key, whatever is built in. The npm publish job builds the real key into
+// the CLI before it runs the tests, and the CLI falls back to that key when the environment names
+// none, so clearing SUPATYPE_RELEASE_PUBLIC_KEY alone left a key there and the download went on.
+vi.mock("../src/release-public-key.js", () => ({ releasePublicKey: () => "" }))
+
 /**
  * Local test, `update` with no release key: the failed download left an empty
  * `~/.supatype/cache/realtime/0.7.0/` behind, and the missing key, which no retry can supply, was
@@ -20,7 +25,6 @@ beforeEach(() => {
   // homedir() reads these, so the cache lands in the temp directory.
   vi.stubEnv("HOME", home)
   vi.stubEnv("USERPROFILE", home)
-  vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", "")
   vi.stubEnv("SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS", "")
   vi.stubGlobal("fetch", async () => {
     fetches += 1

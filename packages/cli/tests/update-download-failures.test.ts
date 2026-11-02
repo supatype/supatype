@@ -46,6 +46,13 @@ vi.mock("../src/ui/messages.js", async (importOriginal) => ({
   plain: () => undefined,
 }))
 
+// What a release build has built in, held out. The npm publish job sets the CLI's version and
+// builds the real release key in before it runs the tests: a release version has realtime and
+// storage run that release, so download it, when unpinned, and a built-in key verified what these
+// tests serve unsigned. PR CI builds neither in, so they passed there and failed the publish.
+vi.mock("../src/release-public-key.js", () => ({ releasePublicKey: () => "" }))
+vi.mock("../src/cli-version-embedded.js", () => ({ EMBEDDED_CLI_VERSION: "" }))
+
 vi.mock("../src/ui/fatal.js", () => ({
   fatalError: (message: string, hints: string[] = []): never => {
     throw new Error([message, ...hints].join("\n"))
@@ -100,7 +107,7 @@ describe("supatype update when downloads fail", () => {
 
 /** Every native component pinned to 1.0.0 with the CDN naming the same, then `changes` applied. */
 function pinAll(changes: { versions: Record<string, string>; latest: Record<string, string | undefined> }): void {
-  const base = { engine: "1.0.0", server: "1.0.0", postgres: "1.0.0", deno: "1.0.0", realtime: "1.0.0" }
+  const base = { engine: "1.0.0", server: "1.0.0", postgres: "1.0.0", deno: "1.0.0", realtime: "1.0.0", storage: "1.0.0" }
   project.versions = { ...base, ...changes.versions }
   project.latest = Object.fromEntries(
     Object.entries({ ...base, ...changes.latest }).filter((entry): entry is [string, string] => entry[1] !== undefined),
@@ -199,7 +206,6 @@ describe("the advice for each failure", () => {
     const home = mkdtempSync(join(tmpdir(), "supatype-update-home-"))
     vi.stubEnv("HOME", home)
     vi.stubEnv("USERPROFILE", home)
-    vi.stubEnv("SUPATYPE_RELEASE_PUBLIC_KEY", "")
     vi.stubEnv("SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS", "")
     vi.stubGlobal("fetch", async () => new Response("0000  supatype-realtime-linux-amd64\n"))
     vi.spyOn(console, "log").mockImplementation(() => undefined)
