@@ -32,8 +32,12 @@ export interface DbConstraintState {
   name: string
   constraintType: string
   columns: string[]
+  /** The referenced table's schema. Absent from engines older than 0.7.0, which did not report it. */
+  foreignSchema?: string | null
   foreignTable?: string | null
   foreignColumns?: string[] | null
+  /** A foreign key's delete rule, as Postgres names it: `NO ACTION`, `RESTRICT`, `CASCADE`, ... */
+  onDelete?: string | null
   comment?: string | null
 }
 
@@ -47,11 +51,20 @@ export interface DbIndexState {
   comment?: string | null
 }
 
+/** A row level security policy on a table, as the engine's introspection reports it. */
+export interface DbRlsPolicyState {
+  table: string
+  name: string
+  /** Postgres's letter for the command (`r`, `a`, `w`, `d` or `*`), from `pg_policy.polcmd`. */
+  command: string
+}
+
 export interface DatabaseStateJson {
   schema?: string
   tables: DbTableState[]
   constraints?: DbConstraintState[]
   indexes?: DbIndexState[]
+  rlsPolicies?: DbRlsPolicyState[]
 }
 
 export interface ColumnInfo {
@@ -61,7 +74,8 @@ export interface ColumnInfo {
   isPrimary: boolean
   isUnique: boolean
   hasDefault: boolean
-  references?: { table: string; column: string }
+  /** The column's single-column foreign key, when the engine reported the referenced schema. */
+  references?: { schema: string; table: string; column: string; onDelete: string | null }
   /** `ALWAYS` or `BY DEFAULT` when the column is an identity column. */
   identity?: string
   /** The expression when the column is a stored generated one. */
@@ -124,18 +138,23 @@ function compositeIndexes(
 
 /** Map a Postgres column to a Model<> field type string (draft). */
 export function pgTypeToModelField(col: ColumnInfo): string {
-  const name = col.name
   const type = col.pgType.toLowerCase()
-  // How the database fills it, declared as such (identity-contract): an identity column numbered by
-  // the database, a generated one computed from the row.
-  if (col.identity !== undefined && /int[248]|smallint|integer|bigint/.test(type)) {
-    const byDefault = col.identity === "BY DEFAULT"
-    if (type.includes("int2") || type.includes("smallint")) {
-      return `${name}: SmallInt<{ identity: "${byDefault ? "by-default" : "always"}" }>`
-    }
-    const width = type.includes("int8") || type.includes("bigint") ? "bigint" : "number"
-    return `${name}: Identity<${width}${byDefault ? ', "by-default"' : ""}>`
-  }
+  return databaseFilledField(col, type) ?? namedField(col, type) ?? typedField(col, type) ?? scalarField(col, type)
+}
+
+/** `Optional<` and `>` round a nullable column's type, nothing round another. */
+function optionalWrap(col: ColumnInfo): { optional: string; optionalClose: string } {
+  return { optional: col.nullable ? "Optional<" : "", optionalClose: col.nullable ? ">" : "" }
+}
+
+/**
+ * How the database fills it, declared as such (identity-contract): an identity column numbered by
+ * the database, a serial, a generated one computed from the row; or one the engine cannot declare.
+ */
+function databaseFilledField(col: ColumnInfo, type: string): string | undefined {
+  const name = col.name
+  const identity = identityField(col, type)
+  if (identity !== undefined) return identity
   if (col.serial === true && /int[48]|integer|bigint/.test(type)) {
     return `${name}: AutoIncrement<${type.includes("int8") || type.includes("bigint") ? "bigint" : "number"}>`
   }
@@ -151,11 +170,31 @@ export function pgTypeToModelField(col: ColumnInfo): string {
     const field = `Generated<${inner}, ${JSON.stringify(generated)}>`
     return `${name}: ${col.nullable ? `Optional<${field}>` : field}`
   }
-  const optional = col.nullable ? "Optional<" : ""
-  const optionalClose = col.nullable ? ">" : ""
+  return undefined
+}
 
-  // A uuid id is drafted as UUID. It is SupatypeAuthUserId only when it references auth.users, and
-  // that cannot be told yet: the engine reports a foreign key's table but not its schema.
+/** An identity column, at its width. */
+function identityField(col: ColumnInfo, type: string): string | undefined {
+  const name = col.name
+  if (col.identity !== undefined && /int[248]|smallint|integer|bigint/.test(type)) {
+    const byDefault = col.identity === "BY DEFAULT"
+    if (type.includes("int2") || type.includes("smallint")) {
+      return `${name}: SmallInt<{ identity: "${byDefault ? "by-default" : "always"}" }>`
+    }
+    const width = type.includes("int8") || type.includes("bigint") ? "bigint" : "number"
+    return `${name}: Identity<${width}${byDefault ? ', "by-default"' : ""}>`
+  }
+  return undefined
+}
+
+/** A column its name decides: a user's id, the key, a relation, the timestamps. */
+function namedField(col: ColumnInfo, type: string): string | undefined {
+  const name = col.name
+  // A uuid is a user's id when its foreign key names auth.users(id) (#19). Only then: drafting every
+  // uuid `id` as one declared each table's key to be a user's id.
+  if (type.includes("uuid") && referencesAuthUser(col)) {
+    return authUserIdField(col)
+  }
   if (name === "id" && type.includes("uuid")) {
     return `id: UUID`
   }
@@ -171,6 +210,13 @@ export function pgTypeToModelField(col: ColumnInfo): string {
   if (name === "deleted_at") {
     return `${name}: Optional<Timestamp>`
   }
+  return undefined
+}
+
+/** A timestamp, uuid, email or slug, with its nullability and uniqueness. */
+function typedField(col: ColumnInfo, type: string): string | undefined {
+  const name = col.name
+  const { optional, optionalClose } = optionalWrap(col)
   if (type.includes("timestamptz") || type.includes("timestamp with time zone")) {
     return `${name}: ${optional}Timestamp${optionalClose}`
   }
@@ -185,6 +231,13 @@ export function pgTypeToModelField(col: ColumnInfo): string {
   if (name === "slug" || name.endsWith("_slug")) {
     return `${name}: Slug<"title">`
   }
+  return undefined
+}
+
+/** A JSON, boolean, integer or text column; any other type is drafted as a string with a TODO. */
+function scalarField(col: ColumnInfo, type: string): string {
+  const name = col.name
+  const { optional, optionalClose } = optionalWrap(col)
   if (type.includes("jsonb")) {
     return `${name}: ${optional}JSON${optionalClose}`
   }
@@ -205,6 +258,53 @@ export function pgTypeToModelField(col: ColumnInfo): string {
   return `${name}: string /* TODO: ${col.pgType} */`
 }
 
+function referencesAuthUser(col: ColumnInfo): boolean {
+  const ref = col.references
+  return ref !== undefined && ref.schema === "auth" && ref.table === "users" && ref.column === "id"
+}
+
+/** The `AuthUserOnDelete` of each Postgres delete rule SupatypeAuthUserId can declare. */
+const AUTH_USER_ON_DELETE: Readonly<Record<string, string>> = {
+  CASCADE: "cascade",
+  RESTRICT: "restrict",
+  "SET NULL": "setNull",
+}
+
+/**
+ * The SupatypeAuthUserId field for a column keyed to auth.users(id). Its `onDelete` is what declares
+ * the foreign key: left out, the field has none. A rule the type cannot declare (`NO ACTION`,
+ * `SET DEFAULT`) is drafted without it and says so, because a push would then drop the key.
+ */
+function authUserIdField(col: ColumnInfo): string {
+  const rule = col.references?.onDelete ?? "NO ACTION"
+  const onDelete = AUTH_USER_ON_DELETE[rule]
+  const type = onDelete === undefined ? "SupatypeAuthUserId" : `SupatypeAuthUserId<{ onDelete: "${onDelete}" }>`
+  const field = `${col.name}: ${col.nullable ? `Optional<${type}>` : type}`
+  if (onDelete !== undefined) return field
+  return (
+    `${field} // TODO: the database key is ON DELETE ${rule}, which SupatypeAuthUserId cannot declare. ` +
+    'Without onDelete it declares no foreign key, so a push drops it: choose "restrict", "cascade" or "setNull".'
+  )
+}
+
+/**
+ * Each column of `table` with a single-column foreign key, keyed by column. Only keys whose schema
+ * the engine reported: an engine older than 0.7.0 names the table alone, and a `users` table in
+ * `auth` cannot be told from any other.
+ */
+function singleColumnForeignKeys(
+  table: string,
+  constraints: DbConstraintState[] | undefined,
+): Map<string, NonNullable<ColumnInfo["references"]>> {
+  const out = new Map<string, NonNullable<ColumnInfo["references"]>>()
+  for (const c of constraints ?? []) {
+    if (c.table !== table || c.constraintType !== "foreignKey" || c.columns.length !== 1) continue
+    if (typeof c.foreignSchema !== "string" || typeof c.foreignTable !== "string" || c.foreignColumns?.length !== 1) continue
+    out.set(c.columns[0]!, { schema: c.foreignSchema, table: c.foreignTable, column: c.foreignColumns[0]!, onDelete: c.onDelete ?? null })
+  }
+  return out
+}
+
 /** Convert snake_case table name to PascalCase model export name. */
 export function toModelName(s: string): string {
   return s
@@ -223,7 +323,7 @@ export function databaseStateToSchemaScaffold(
 
   const lines: string[] = [
     "// DRAFT: generated by `supatype pull`. Review access rules, relations, and indexes before push.",
-    'import type { Model, Public, UUID, Timestamp, Optional, Unique, Email, Slug, SupatypeAuthUserId, JSON, Int, BigInt, SmallInt, Identity, Generated, AutoIncrement } from "@supatype/types"',
+    'import type { Model, Private, UUID, Timestamp, Optional, Unique, Email, Slug, SupatypeAuthUserId, JSON, Int, BigInt, SmallInt, Identity, Generated, AutoIncrement } from "@supatype/types"',
     "",
   ]
 
@@ -232,6 +332,7 @@ export function databaseStateToSchemaScaffold(
 
     const modelName = toModelName(table.name)
     const uniques = singleColumnUniques(table.name, constraints)
+    const foreignKeys = singleColumnForeignKeys(table.name, constraints)
     const modelIndexes = compositeIndexes(table.name, indexes)
 
     const fieldLines: string[] = []
@@ -240,6 +341,8 @@ export function databaseStateToSchemaScaffold(
       const info = introspectColumnToColumnInfo(col, opts)
       info.isPrimary = col.name === "id"
       info.isUnique = uniques.get(col.name) ?? false
+      const references = foreignKeys.get(col.name)
+      if (references !== undefined) info.references = references
       fieldLines.push(`  ${pgTypeToModelField(info)}`)
     }
 
@@ -251,10 +354,10 @@ export function databaseStateToSchemaScaffold(
 
     const indexBlock =
       modelIndexes.length > 0
-        ? `\n  indexes: [\n${modelIndexes
+        ? `  indexes: [\n${modelIndexes
             .map(
               (idx) =>
-                `    { fields: [${idx.fields.map((f) => `"${f}"`).join(", ")}]${idx.unique ? ", unique: true" : ""} },`,
+                `    { fields: [${idx.fields.map((f) => JSON.stringify(f)).join(", ")}]${idx.unique ? ", unique: true" : ""} },`,
             )
             .join("\n")}\n  ],`
         : ""
@@ -265,17 +368,62 @@ export function databaseStateToSchemaScaffold(
     // The table a model maps to is its name in snake_case unless it says otherwise, so a table that
     // name does not come back to (`HTTPLog`, `Orders`) is named, or a push would create a new one.
     if (toSnakeCase(modelName) !== table.name) lines.push(`  tableName: ${JSON.stringify(table.name)},`)
-    lines.push(`  access: {`)
-    lines.push(`    read: Public`)
-    lines.push(`    create: Public`)
-    lines.push(`    update: Public`)
-    lines.push(`    delete: Public`)
-    lines.push(`  },${indexBlock}`)
+    lines.push(...closedAccessLines(table.name, state.rlsPolicies ?? []))
+    if (indexBlock !== "") lines.push(indexBlock)
     lines.push(`}>`)
     lines.push("")
   }
 
   return lines.join("\n")
+}
+
+/** Postgres's letters for a policy's command (`pg_policy.polcmd`), as SQL names them. */
+const POLICY_COMMANDS: Readonly<Record<string, string>> = { r: "SELECT", a: "INSERT", w: "UPDATE", d: "DELETE", "*": "ALL" }
+
+/**
+ * A policy's command as SQL names it. The engine reports Postgres's letter, and a command already
+ * spelled out is kept; anything else is quoted as a string, so it cannot end the comment it is in.
+ */
+function policyCommand(command: string): string {
+  const named = POLICY_COMMANDS[command] ?? command
+  return Object.values(POLICY_COMMANDS).includes(named) ? named : commentSafe(command)
+}
+
+/** U+2028 and U+2029, each with what a JSON string writes for it ({@link commentSafe}). */
+const COMMENT_ENDING_SEPARATORS: readonly (readonly [string, string])[] = [0x2028, 0x2029].map(
+  (code) => [String.fromCharCode(code), `${String.fromCharCode(92)}u${code.toString(16)}`] as const,
+)
+
+/**
+ * `text` quoted as a JSON string that cannot end the `//` comment it is written into. JSON escapes a
+ * newline but leaves U+2028 and U+2029 as they are, and TypeScript ends a line comment at either.
+ */
+function commentSafe(text: string): string {
+  let quoted = JSON.stringify(text)
+  for (const [separator, escaped] of COMMENT_ENDING_SEPARATORS) quoted = quoted.replaceAll(separator, escaped)
+  return quoted
+}
+
+/**
+ * A pulled table's draft access block, closing brace included: closed, with a TODO naming each RLS
+ * policy found on the table. Every rule used to be drafted `Public` whatever the policies said, so a
+ * draft pushed unchanged opened the table to everyone (decision D5, local test round 3). Each name
+ * is quoted ({@link commentSafe}): whoever wrote a policy named it, and a line break in a name ended
+ * the one-line comment and left the rest of the name in the scaffold as code.
+ */
+function closedAccessLines(table: string, policies: readonly DbRlsPolicyState[]): string[] {
+  const found = policies.filter((policy) => policy.table === table)
+  const named = found.map((policy) => `${commentSafe(policy.name)} (${policyCommand(policy.command)})`).join(", ")
+  const todo =
+    found.length === 0
+      ? `No RLS policy was found on ${commentSafe(table)}.`
+      : `RLS policies on ${commentSafe(table)}: ${named}.`
+  return [
+    `  // TODO: closed until you write its rules. ${todo}`,
+    `  access: {`,
+    ...["read", "create", "update", "delete"].map((op) => `    ${op}: Private`),
+    `  },`,
+  ]
 }
 
 /** Human-readable introspection summary for `supatype introspect`. */

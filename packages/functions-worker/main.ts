@@ -1,14 +1,19 @@
 /**
  * Standalone edge-functions worker (per-project or per-function).
- * Routing contract matches CLI-generated `.supatype/functions-router.ts`.
+ * The image runs it, and so do native `supatype dev` and `supatype functions serve`, from the copy
+ * the CLI carries (scripts/functions-worker-source.mjs), so a function behaves the same in each.
  */
 
+import { parseEnvText } from "./dotenv.ts"
+import { FUNCTION_ENTRY_FILE, functionRouteName, isHookName } from "./routes.ts"
+import { exitOnStop } from "./stop.ts"
 import {
   currentHookDepth,
   runInvocation,
   type FunctionContext,
 } from "./invocation.ts"
 import {
+  closeTails,
   installStructuredLogging,
   log,
   tailResponse,
@@ -71,22 +76,101 @@ function hooksRoot(): string {
 /** Route prefix for hook handlers. The gateway refuses this prefix on the public path. */
 const HOOKS_ROUTE_PREFIX = "hooks/"
 
-/**
- * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, from
- * `SUPATYPE_SERVICE_ROLE_ROUTES`.
- *
- * Hooks do not appear here: they get the key by default (see serviceRoleGranted). This list is for
- * the public surface, where the default is nothing.
- */
-function serviceRoleRoutes(): Set<string> {
-  const raw = (Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? "").trim()
-  if (!raw) return new Set()
+/** A comma-separated route list as a set, empty entries dropped. */
+function parseRoutes(text: string): Set<string> {
   return new Set(
-    raw
+    text
       .split(",")
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0),
   )
+}
+
+/** The routes file as last read: kept while its modification time and size are unchanged. */
+let routesFileRead: { mtime: number; size: number; routes: Set<string> } | null = null
+
+/**
+ * The routes in `file`, read again only when its modification time or size changed: one stat a
+ * call. Undefined when it has not been written (the environment's list applies); none when it is
+ * there but cannot be read.
+ */
+async function routesFromFile(file: string): Promise<Set<string> | undefined> {
+  let info: Deno.FileInfo
+  try {
+    info = await Deno.stat(file)
+  } catch (err) {
+    return err instanceof Deno.errors.NotFound ? undefined : new Set()
+  }
+  const mtime = info.mtime?.getTime() ?? -1
+  if (routesFileRead !== null && routesFileRead.mtime === mtime && routesFileRead.size === info.size) return routesFileRead.routes
+  try {
+    routesFileRead = { mtime, size: info.size, routes: parseRoutes(await Deno.readTextFile(file)) }
+  } catch {
+    routesFileRead = null
+    return new Set()
+  }
+  return routesFileRead.routes
+}
+
+/**
+ * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, looked up on every call: from
+ * the file `SUPATYPE_SERVICE_ROLE_ROUTES_FILE` names once it is written, else
+ * `SUPATYPE_SERVICE_ROLE_ROUTES`. Native dev writes the file when `functions.serviceRole` changes,
+ * and a self-hosted control plane on every deploy, so a route taken off the list loses the key on its
+ * next call, with no restart; the environment is fixed when the worker starts. A routes file that is
+ * there but cannot be read grants nothing.
+ *
+ * Hooks do not appear here: they get the key by default (see serviceRoleGranted). This list is for
+ * the public surface, where the default is nothing.
+ */
+async function serviceRoleRoutes(): Promise<Set<string>> {
+  const file = Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES_FILE")
+  const fromFile = file ? await routesFromFile(file) : undefined
+  return fromFile ?? parseRoutes(Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? "")
+}
+
+/** The function every entry of a hook or validator map names (table, then event or column, then the entry). */
+function functionsNamed(map: unknown): string[] {
+  if (typeof map !== "object" || map === null) return []
+  return Object.values(map).flatMap((entries: unknown) =>
+    typeof entries !== "object" || entries === null
+      ? []
+      : Object.values(entries).flatMap((entry: unknown) =>
+          typeof entry === "object" && entry !== null && "function" in entry && typeof entry.function === "string" ? [entry.function] : [],
+        ),
+  )
+}
+
+/**
+ * The hooks the stack's manifest maps (its `hooks` and `validators`), from the file
+ * `SUPATYPE_MANIFEST_PATH` names, the one the server reads; read on each call, which only a hook
+ * route with no code makes. Null when no manifest is named (Cloud's worker), or the one named cannot
+ * be read or parsed (caught mid-rewrite, say): the caller then fails closed.
+ */
+async function mappedHookNames(): Promise<Set<string> | null> {
+  const path = (Deno.env.get("SUPATYPE_MANIFEST_PATH") ?? "").trim()
+  if (!path) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await Deno.readTextFile(path))
+  } catch {
+    return null
+  }
+  if (typeof parsed !== "object" || parsed === null) return null
+  const maps = ["hooks" in parsed ? parsed.hooks : undefined, "validators" in parsed ? parsed.validators : undefined]
+  return new Set(maps.flatMap(functionsNamed))
+}
+
+/**
+ * Whether a hook route the worker has no code for answers 503 (the hook cannot be reached, and the
+ * server refuses the write for it) rather than 404 (no such hook). With the manifest's map, only a
+ * name it maps. Without one, every name that passes the hook-name rule: it fails closed, since a 404
+ * is read by the server as the hook rejecting the write.
+ */
+async function unreachableHook(name: string): Promise<boolean> {
+  const mapped = await mappedHookNames()
+  if (mapped !== null) return mapped.has(name)
+  return isHookName(name)
 }
 
 /**
@@ -101,9 +185,9 @@ function serviceRoleRoutes(): Set<string> {
  * ambient admin credential there is read and write access past every access rule in the schema,
  * handed to code the internet can call.
  */
-function serviceRoleGranted(route: string): boolean {
+async function serviceRoleGranted(route: string): Promise<boolean> {
   if (route.startsWith(HOOKS_ROUTE_PREFIX)) return true
-  return serviceRoleAllowed.has(route)
+  return (await serviceRoleRoutes()).has(route)
 }
 
 /**
@@ -118,10 +202,30 @@ function serviceRoleGranted(route: string): boolean {
  * past every access rule in the schema. Opting in is a line in `supatype.config.ts`, which is
  * reviewable; ambient privilege is not.
  */
-function withholdServiceRoleKey(): string {
+async function withholdServiceRoleKey(): Promise<string> {
   const key = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? ""
   if (key) Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")
-  return key
+  const keyFile = (Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY_FILE") ?? "").trim()
+  return keyFile ? await readServiceRoleKeyFile(keyFile) : key
+}
+
+/**
+ * The service-role key from `path`, or "" (no function is given it) when the file cannot be read.
+ *
+ * For a worker run under `deno run --watch`, as native `supatype dev` and `supatype functions serve`
+ * run it. A reload evaluates this module again in the same process, whose environment the first
+ * evaluation already took the key out of, so a key from the environment is there once only. The
+ * file is still there however the earlier evaluation ended. Its path stays in the environment: a
+ * function able to read the disk can read the file whether or not it is told where it is, and the
+ * key a function is handed is still decided by serviceRoleGranted alone.
+ */
+async function readServiceRoleKeyFile(path: string): Promise<string> {
+  try {
+    return (await Deno.readTextFile(path)).trim()
+  } catch (err) {
+    log("error", `No function is given the service-role key: could not read ${path} (${errorText(err)})`)
+    return ""
+  }
 }
 
 async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
@@ -133,26 +237,17 @@ async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
   // does not exist is ordinary, a project with functions but no hooks has no hooks directory, and
   // letting it throw would fail startup and take that project's working functions down with it.
   try {
+    // routes.ts is the rule a self-hosted control plane lists functions by too.
     for await (const entry of Deno.readDir(root)) {
-      if (entry.name.startsWith("_") || entry.name.startsWith(".")) continue
-
       const fullPath = `${root}/${entry.name}`
-
-      if (entry.isDirectory) {
-        const indexTs = `${fullPath}/index.ts`
-        try {
-          await Deno.stat(indexTs)
-          if (!single || entry.name === single) {
-            out.push({ name: entry.name, entrypoint: indexTs })
-          }
-        } catch {
-          // no index.ts
-        }
-      } else if (entry.isFile && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
-        const name = entry.name.replace(/\.ts$/, "")
-        if (!single || name === single) {
-          out.push({ name, entrypoint: fullPath })
-        }
+      const name = entry.isDirectory || entry.isFile ? functionRouteName(entry.name, entry.isDirectory ? "directory" : "file") : undefined
+      if (name === undefined || (single && name !== single)) continue
+      const entrypoint = entry.isDirectory ? `${fullPath}/${FUNCTION_ENTRY_FILE}` : fullPath
+      try {
+        await Deno.stat(entrypoint)
+        out.push({ name, entrypoint })
+      } catch {
+        // A directory with no entry module is not a route.
       }
     }
   } catch (err) {
@@ -200,22 +295,57 @@ async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, H
       })
       continue
     }
-    // A module loaded by URL is typed `any`; read its exports as unknown until checked.
-    const mod: unknown = await import(entrypointImportUrl(route.entrypoint))
-    const handler = exportedHandler(mod)
-    if (!isHandler(handler)) {
-      throw new Error(`Function "${route.name}" has no default export handler`)
-    }
-    handlers[route.name] = handler
+    handlers[route.name] = await loadHandler(route)
   }
 
   return handlers
 }
 
+/**
+ * The route's handler, or, when its module fails to import or exports no handler, one that answers
+ * the route with a 500 saying why. The first such module used to stop the worker starting, so one
+ * broken function took every function in the project down with it. The message goes out as JSON,
+ * so the escape codes come out of it: a client has no terminal to colour.
+ */
+async function loadHandler(route: DiscoveredRoute): Promise<Handler> {
+  try {
+    // A module loaded by URL is typed `any`; read its exports as unknown until checked.
+    const mod: unknown = await import(entrypointImportUrl(route.entrypoint))
+    const handler = exportedHandler(mod)
+    if (!isHandler(handler)) throw new Error('it has neither a default export nor a named "handler" export')
+    return handler
+  } catch (err) {
+    const message = `Function "${route.name}" failed to load: ${errorText(err)}`
+    log("error", message, { function: route.name })
+    return () => jsonError("function_load_failed", message, 500)
+  }
+}
+
+/**
+ * Terminal escape codes. Deno colours a missing module's location in its message, piped or not,
+ * and a handler's own error can carry them too.
+ */
+const TERMINAL_ESCAPES = /\u001b\[[0-9;?]*[A-Za-z]/g
+
+/**
+ * What a thrown value says: an Error's message, anything else as a string, without escape codes,
+ * since it goes out as JSON and a client has no terminal to colour.
+ */
+function errorText(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).replace(TERMINAL_ESCAPES, "")
+}
+
+/** A JSON error answer, `{ error: code, message, ...extra }`, as every route of the worker gives one. */
+function jsonError(code: string, message: string, status: number, extra: Record<string, unknown> = {}): Response {
+  return new Response(JSON.stringify({ error: code, message, ...extra }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  })
+}
+
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
 // Order matters: withhold, then import. See withholdServiceRoleKey.
-const serviceRoleKey = withholdServiceRoleKey()
-const serviceRoleAllowed = serviceRoleRoutes()
+const serviceRoleKey = await withholdServiceRoleKey()
 const root = functionsRoot()
 const routes = root ? await discoverRoutes(root) : []
 const handlers = await loadHandlers(routes)
@@ -261,29 +391,46 @@ const sharedEnvPath =
 
 
 
+/** The variables in the env file at `path`, read as the CLI and compose read one; none if it is absent. */
 async function readEnvFile(path: string): Promise<Record<string, string>> {
   if (!path) return {}
   try {
-    const text = await Deno.readTextFile(path)
-    const out: Record<string, string> = {}
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith("#")) continue
-      const eq = trimmed.indexOf("=")
-      if (eq <= 0) continue
-      out[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
-    }
-    return out
+    return parseEnvText(await Deno.readTextFile(path))
   } catch {
     return {}
   }
 }
 
+/**
+ * The values `functions env set` gave a self-hosted project: the control plane's JSON map, which
+ * compose names here. Without it a value set through the control plane never reached a function.
+ * Read on every call, like the env files, so a set or unset is seen without a restart.
+ */
+const managedEnvPath = (Deno.env.get("SUPATYPE_FUNCTION_ENV_FILE") ?? "").trim()
+
+async function readManagedEnv(): Promise<Record<string, string>> {
+  if (!managedEnvPath) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await Deno.readTextFile(managedEnvPath))
+  } catch {
+    return {}
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
+  return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+}
+
+/**
+ * The shared env file, then the managed values, then the function's own file, which wins. The three
+ * are read together: every call waits for them.
+ */
 async function scopedEnvForFunction(fnName: string): Promise<Record<string, string>> {
-  const shared = await readEnvFile(sharedEnvPath)
-  const fnPath = `${normalizedFunctionsDir}/.env.${fnName}.local`
-  const fnVars = await readEnvFile(fnPath)
-  return { ...shared, ...fnVars }
+  const [shared, managed, fnVars] = await Promise.all([
+    readEnvFile(sharedEnvPath),
+    readManagedEnv(),
+    readEnvFile(`${normalizedFunctionsDir}/.env.${fnName}.local`),
+  ])
+  return { ...shared, ...managed, ...fnVars }
 }
 
 const HOOK_DEPTH_HEADER = "x-supatype-hook-depth"
@@ -359,7 +506,10 @@ const publicUrl = resolvePublicUrl()
 // `onListen` is supplied so Deno does not print its own "Listening on …" line. That line goes to
 // stderr, which this worker's patched console reports as `level: "error"`, and on cloud `level` is
 // a Loki label, so every startup would appear in the dashboards as an error.
-Deno.serve({
+// Every address in its container; `functions serve` and native dev name 127.0.0.1.
+const hostname = Deno.env.get("SUPATYPE_FUNCTIONS_HOST") ?? "0.0.0.0"
+const server = Deno.serve({
+  hostname,
   port,
   onListen: ({ hostname, port: bound }) => {
     log("info", `functions-worker listening on http://${hostname}:${bound}`)
@@ -367,7 +517,9 @@ Deno.serve({
 }, async (req: Request): Promise<Response> => {
   const url = new URL(req.url)
   const pathParts = url.pathname.replace(/^\/functions\/v1\/?/, "").split("/").filter(Boolean)
-  // A hook is addressed as `hooks/<name>`, so the first segment alone is not the handler key.
+  // A hook is addressed as `hooks/<name>`, so the first segment alone is not the handler key. With no
+  // second segment no hook name is built: the path is looked up as the plain route "hooks", a 404
+  // unless a function has that name, so `hooks/<name>` always carries a name the request sent.
   const fnName =
     pathParts[0] === "hooks" && pathParts[1]
       ? HOOKS_ROUTE_PREFIX + pathParts[1]
@@ -379,15 +531,17 @@ Deno.serve({
     if (fnName === "_logs") return tailResponse()
   }
 
+  // A hook the map names with no code here (a new hook whose deploy failed) cannot be reached: 503,
+  // which the server's hook dispatch treats as unavailable and refuses the write for. A 404 read as
+  // the hook rejecting the write, with a "not found" message. Any other name stays a 404
+  // (unreachableHook).
+  if (fnName.startsWith(HOOKS_ROUTE_PREFIX) && !handlers[fnName]) {
+    const hook = fnName.slice(HOOKS_ROUTE_PREFIX.length)
+    if (await unreachableHook(hook)) return jsonError("hook_unavailable", `Hook "${hook}" is not deployed`, 503)
+  }
   if (!fnName || !handlers[fnName]) {
-    return new Response(
-      JSON.stringify({
-        error: "not_found",
-        message: fnName ? `Function "${fnName}" not found` : "No function specified",
-        available: Object.keys(handlers),
-      }),
-      { status: 404, headers: { "Content-Type": "application/json" } },
-    )
+    const message = fnName ? `Function "${fnName}" not found` : "No function specified"
+    return jsonError("not_found", message, 404, { available: Object.keys(handlers) })
   }
 
   // Nothing goes into the process environment, so nothing has to be taken back out and nothing has
@@ -403,7 +557,7 @@ Deno.serve({
     anonKey: Deno.env.get("SUPATYPE_ANON_KEY") ?? "",
     // From the closure, not the environment: the key was withheld before any handler was imported,
     // and only a route the project granted it receives it here.
-    ...(serviceRoleKey && serviceRoleGranted(fnName) && { serviceRoleKey }),
+    ...(serviceRoleKey && (await serviceRoleGranted(fnName)) && { serviceRoleKey }),
     ...(dbUrl !== undefined && { dbUrl }),
     region: Deno.env.get("SUPATYPE_REGION") ?? "local",
     env: await scopedEnvForFunction(fnName),
@@ -423,18 +577,19 @@ Deno.serve({
     })
     return response
   } catch (err) {
-    log("error", err instanceof Error ? err.message : "Unknown error", {
+    const message = errorText(err)
+    log("error", message, {
       request_id: context.executionId,
       function: fnName,
       status: 500,
       duration_ms: Number((performance.now() - start).toFixed(1)),
     })
-    return new Response(
-      JSON.stringify({
-        error: "function_error",
-        message: err instanceof Error ? err.message : "Unknown error",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    )
+    return jsonError("function_error", message, 500)
   }
+})
+// A restart of its container waited out the stop timeout without this, and must not cut off the
+// requests in flight (stop.ts). A log tail never ends on its own, so it is closed first.
+exitOnStop(() => {
+  closeTails()
+  return server.shutdown()
 })

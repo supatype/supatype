@@ -1,16 +1,18 @@
 import { randomUUID } from "node:crypto"
 import type { RequestContext } from "../server.js"
-import { sendJson, readBody, readJson } from "../server.js"
+import { sendJson, readBodyUpTo, readShapedJson } from "../server.js"
 import * as db from "../db.js"
-import * as s3 from "../s3.js"
+import * as store from "../object-store.js"
 import { parseTransformParams, transformImage, UnrenderableImageError } from "../transform.js"
 import { config } from "../env.js"
-import { uploadRefusal } from "../middleware/storage-limits.js"
+import { getEffectiveMaxUploadSize, oversizeRefusal, uploadRefusal, validateFileSize } from "../middleware/storage-limits.js"
 import { checkReadAccess } from "../middleware/access-control.js"
 import type { JwtPayload } from "../auth.js"
 import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
+import { folderOf, objectName, refusedName } from "../object-names.js"
 import { applyCorsHeaders } from "../middleware/cors.js"
-import { isNumber, isShape, isString, isUnknown, optional } from "../json.js"
+import { servesAnonymously } from "../bucket-access.js"
+import { isNumber, isString, isUnknown, optional } from "../json.js"
 
 // ─── MIME type inference ─────────────────────────────────────────────────────────
 
@@ -37,9 +39,6 @@ function inferMime(path: string, headerValue: string): string {
 
 export async function upload(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  // Already decoded by the router. Decoding it again threw on a name holding "%".
-  const objectPath = ctx.params["wildcard"]!
-
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
@@ -47,10 +46,13 @@ export async function upload(ctx: RequestContext): Promise<void> {
   }
 
   applyCorsHeaders(ctx.res, bucket)
+  const objectPath = routeName(ctx)
+  if (objectPath === null) return
   const jwt = callerOf(ctx)
 
   const contentType = inferMime(objectPath, ctx.req.headers["content-type"] ?? "")
-  const body = await readBody(ctx.req)
+  const body = await readUploadBody(ctx, bucket)
+  if (body === null) return
   // Type, size and quota, read once the body is in, since a folder's empty placeholder is exempt from the type rule.
   const refusal = await uploadRefusal(bucket, { objectPath, contentType, bodyLength: body.length })
   if (refusal) {
@@ -60,6 +62,25 @@ export async function upload(ctx: RequestContext): Promise<void> {
 
   const write: db.ObjectWrite = { bucketId, name: objectPath, metadata: { mimetype: contentType, size: body.length } }
   await writeObject(ctx, jwt, write, { body, contentType })
+}
+
+/**
+ * The upload's bytes, or null once it has answered 413: from Content-Length before any of the body
+ * is read, else as soon as the body passes the limit. An oversized upload was read whole first.
+ */
+async function readUploadBody(ctx: RequestContext, bucket: db.BucketRow): Promise<Buffer | null> {
+  const declared = Number(ctx.req.headers["content-length"] ?? Number.NaN)
+  const early = Number.isFinite(declared) ? validateFileSize(bucket, declared) : null
+  if (early !== null) return refuseUnread(ctx, early)
+  const body = await readBodyUpTo(ctx.req, getEffectiveMaxUploadSize(bucket))
+  return body ?? refuseUnread(ctx, oversizeRefusal(bucket))
+}
+
+/** Answers `refusal` to an upload whose body is left unread, so the connection cannot carry another request. */
+function refuseUnread(ctx: RequestContext, refusal: { status: number; body: { error: string } }): null {
+  ctx.res.setHeader("Connection", "close")
+  sendJson(ctx.res, refusal.status, refusal.body)
+  return null
 }
 
 /**
@@ -102,10 +123,10 @@ async function storeAndCommit(
   file: { body: Buffer; contentType: string },
 ): Promise<db.CommittedWrite | undefined> {
   const version = randomUUID()
-  const key = s3.objectKey(write.name, version)
+  const key = store.objectKey(write.name, version)
   let committed: db.CommittedWrite | undefined
   try {
-    await s3.putObject(write.bucketId, key, file.body, file.contentType)
+    await store.putObject(write.bucketId, key, file.body, file.contentType)
     committed = await refusingWhenUngranted(ctx, () => db.commitUploadAs(jwt, write, upsert, version))
   } catch (err) {
     await discard(write.bucketId, [{ name: write.name, version }])
@@ -126,8 +147,8 @@ async function storeAndCommit(
  * request has already happened and nothing reads bytes no row names.
  */
 async function discard(bucketId: string, objects: db.StoredObject[]): Promise<void> {
-  const keys = objects.map((o) => s3.objectKey(o.name, o.version))
-  await s3.deleteObjects(bucketId, keys).catch((err: unknown) => {
+  const keys = objects.map((o) => store.objectKey(o.name, o.version))
+  await store.deleteObjects(bucketId, keys).catch((err: unknown) => {
     console.error(`[storage] could not delete ${keys.length} stored object(s) in ${bucketId}:`, err)
   })
 }
@@ -201,11 +222,34 @@ async function refusingWhenUngranted<T>(ctx: RequestContext, run: () => Promise<
   }
 }
 
+// ─── Object names ───────────────────────────────────────────────────────────────
+
+/**
+ * Each of `sent` as an object name (object-names.ts), or null once the request has answered 400
+ * naming the first one refused, as the client sent it.
+ */
+function namesOrRefuse(ctx: RequestContext, sent: readonly string[]): string[] | null {
+  const names: string[] = []
+  for (const one of sent) {
+    const name = objectName(one)
+    if (name === null) {
+      sendJson(ctx.res, 400, { error: refusedName(one) })
+      return null
+    }
+    names.push(name)
+  }
+  return names
+}
+
+/** The object a route names, already decoded by the router, or null once it has answered 400. */
+function routeName(ctx: RequestContext): string | null {
+  return namesOrRefuse(ctx, [ctx.params["wildcard"]!])?.[0] ?? null
+}
+
 // ─── Download (public bucket) ───────────────────────────────────────────────────
 
 export async function downloadPublic(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
 
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
@@ -216,20 +260,20 @@ export async function downloadPublic(ctx: RequestContext): Promise<void> {
   // Apply bucket-specific CORS headers (task 46)
   applyCorsHeaders(ctx.res, bucket)
 
-  if (!bucket.public && bucket.access_mode !== "public") {
+  // Before the name, so a request with no access learns nothing about which names would be taken.
+  if (!servesAnonymously(bucket)) {
     sendJson(ctx.res, 403, { error: "Bucket is not public" })
     return
   }
 
-  await serveObject(ctx, bucketId, objectPath)
+  const objectPath = routeName(ctx)
+  if (objectPath !== null) await serveObject(ctx, bucketId, objectPath)
 }
 
 // ─── Download (authenticated) ───────────────────────────────────────────────────
 
 export async function downloadAuthenticated(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
-
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
@@ -238,6 +282,8 @@ export async function downloadAuthenticated(ctx: RequestContext): Promise<void> 
 
   // Apply bucket-specific CORS headers (task 46)
   applyCorsHeaders(ctx.res, bucket)
+  const objectPath = routeName(ctx)
+  if (objectPath === null) return
 
   // ── Access control (task 44) ────────────────────────────────────────────────
   const access = await checkReadAccess(bucket, objectPath, ctx.jwt)
@@ -252,57 +298,59 @@ export async function downloadAuthenticated(ctx: RequestContext): Promise<void> 
 // ─── Download (signed URL) ──────────────────────────────────────────────────────
 
 export async function downloadSigned(ctx: RequestContext): Promise<void> {
-  const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
-
   const token = ctx.url.searchParams.get("token")
   if (!token) {
     sendJson(ctx.res, 400, { error: "Missing token parameter" })
     return
   }
-
-  const bucket = await db.getBucket(bucketId)
-  if (!bucket) {
-    sendJson(ctx.res, 404, { error: "Bucket not found" })
-    return
-  }
-
-  // ── Pre-signed URL verification (task 45) ──────────────────────────────────
-  // Only this service's own HMAC token. Anything else used to be passed through "for S3 to
-  // validate", but the object was then fetched with the service's own credentials, so nothing
-  // validated it and `?token=x` read any private object with no session at all.
-  if (!verifySignedToken(token, bucketId, objectPath)) {
-    sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
-    return
-  }
+  // A token signed for a name the service refuses still names no object of its own.
+  const objectPath = routeName(ctx)
+  if (objectPath === null) return
+  const bucket = await signedBucket(ctx, token, objectPath)
+  if (!bucket) return
 
   // No CORS for private bucket signed URLs (task 46)
   applyCorsHeaders(ctx.res, bucket)
 
-  await serveObject(ctx, bucketId, objectPath)
+  await serveObject(ctx, bucket.id, objectPath)
+}
+
+/**
+ * The bucket a signed download names, once `token` is checked against the bucket and `objectPath`,
+ * the name it serves, or null once it has answered: 404 for no bucket, 403 for a bad token. The name
+ * served is the one createSignedUrl signs, so the two can never differ: a token checked against the
+ * name as sent ("/x") served another ("x"). Only this service's own HMAC token (task 45). Anything
+ * else used to be passed through "for S3 to validate", but the object was then fetched with the
+ * service's own credentials, so nothing validated it and `?token=x` read any private object with no
+ * session at all.
+ */
+async function signedBucket(ctx: RequestContext, token: string, objectPath: string): Promise<db.BucketRow | null> {
+  const bucket = await db.getBucket(ctx.params["bucket"]!)
+  if (!bucket) {
+    sendJson(ctx.res, 404, { error: "Bucket not found" })
+    return null
+  }
+  if (!verifySignedToken(token, bucket.id, objectPath)) {
+    sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
+    return null
+  }
+  return bucket
 }
 
 // ─── Create signed URL ──────────────────────────────────────────────────────────
 
 export async function createSignedUrl(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
-
-  const body = await readJson(ctx.req, isShape({ expiresIn: optional(isNumber) }))
-  const expiresIn = body.expiresIn ?? config.defaultSignedUrlExpiry
-
-  if (expiresIn < 1 || expiresIn > config.maxSignedUrlExpiry) {
-    sendJson(ctx.res, 400, {
-      error: `expiresIn must be between 1 and ${config.maxSignedUrlExpiry} seconds`,
-    })
-    return
-  }
+  const expiresIn = await signingExpiry(ctx)
+  if (expiresIn === null) return
 
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
+  const objectPath = routeName(ctx)
+  if (objectPath === null) return
 
   // ── Access control: check read permission before signing (task 44) ──────────
   const access = await checkReadAccess(bucket, objectPath, ctx.jwt)
@@ -318,19 +366,38 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
     return
   }
 
-  // This service's HMAC token for every bucket (task 45), served through this service, which
-  // resolves the object's live version when the URL is used. A public bucket used to get an S3
-  // presigned URL to one version's key, which stopped working the moment the object was
-  // overwritten and its old version deleted.
+  sendJson(ctx.res, 200, { signedURL: signedUrlFor(bucketId, objectPath, expiresIn) })
+}
+
+/** The life a signing request asks for, or null once it has answered 400 for one out of range. */
+async function signingExpiry(ctx: RequestContext): Promise<number | null> {
+  const body = await readShapedJson(ctx.req, { expiresIn: optional(isNumber) })
+  const expiresIn = body.expiresIn ?? config.defaultSignedUrlExpiry
+  if (expiresIn < 1 || expiresIn > config.maxSignedUrlExpiry) {
+    sendJson(ctx.res, 400, { error: `expiresIn must be between 1 and ${config.maxSignedUrlExpiry} seconds` })
+    return null
+  }
+  return expiresIn
+}
+
+/**
+ * This service's HMAC-signed URL for an object (task 45), served through this service, which
+ * resolves the object's live version when the URL is used. A public bucket used to get an S3
+ * presigned URL to one version's key, which stopped working once the object was overwritten and
+ * its old version deleted. The name is encoded again per segment: put back as decoded, a name
+ * holding `?` or `#` cut the URL short and the token with it.
+ */
+function signedUrlFor(bucketId: string, objectPath: string, expiresIn: number): string {
   const token = createSignedToken(bucketId, objectPath, expiresIn)
-  sendJson(ctx.res, 200, { signedURL: `/object/sign/${bucketId}/${objectPath}?token=${token}` })
+  const urlPath = [bucketId, ...objectPath.split("/")].map(encodeURIComponent).join("/")
+  return `/object/sign/${urlPath}?token=${token}`
 }
 
 // ─── Remove objects ─────────────────────────────────────────────────────────────
 
 export async function removeObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const { prefixes } = await readJson(ctx.req, isShape({ prefixes: optional(isUnknown) }))
+  const { prefixes } = await readShapedJson(ctx.req, { prefixes: optional(isUnknown) })
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
@@ -343,11 +410,14 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
     sendJson(ctx.res, 400, { error: "prefixes array is required" })
     return
   }
+  // Every name before anything is deleted: one refused name refuses the whole remove.
+  const names = namesOrRefuse(ctx, prefixes)
+  if (names === null) return
 
   // The rows first, as the caller, so the bucket's `delete` rule decides; then the bytes, for only
   // the objects Postgres deleted. The response lists those and no others, so an object the caller
   // may not delete is left in place and simply absent from the answer.
-  const deleted = await refusingWhenUngranted(ctx, () => db.deleteObjectsAs(jwt, bucketId, prefixes))
+  const deleted = await refusingWhenUngranted(ctx, () => db.deleteObjectsAs(jwt, bucketId, names))
   if (deleted === undefined) return
   await discard(bucketId, deleted)
 
@@ -356,18 +426,12 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
 
 // ─── List objects ───────────────────────────────────────────────────────────────
 
-const isListRequest = isShape({
+const LIST_REQUEST = {
   prefix: optional(isString),
   limit: optional(isNumber),
   offset: optional(isNumber),
   search: optional(isString),
-})
-
-/** The folder a list prefix names: "" for the bucket root, else its path ending in "/". */
-export function folderOf(prefix: string): string {
-  const path = prefix.replace(/^\/+|\/+$/g, "")
-  return path === "" ? "" : `${path}/`
-}
+} as const
 
 /**
  * A folder's direct children: its subfolders, then its objects, named relative to it, optionally
@@ -376,13 +440,18 @@ export function folderOf(prefix: string): string {
  */
 export async function listObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const body = await readJson(ctx.req, isListRequest)
+  const body = await readShapedJson(ctx.req, LIST_REQUEST)
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
-  const query = { folder: folderOf(body.prefix ?? ""), search: body.search ?? "", limit: body.limit ?? 100, offset: body.offset ?? 0 }
+  const folder = folderOf(body.prefix ?? "")
+  if (folder === null) {
+    sendJson(ctx.res, 400, { error: refusedName(body.prefix ?? "") })
+    return
+  }
+  const query = { folder, search: body.search ?? "", limit: body.limit ?? 100, offset: body.offset ?? 0 }
 
   // As the caller, so the list holds only what their read rule allows. It used to run on the
   // service's connection after a check that asked about the prefix as if it were an object, found
@@ -432,12 +501,12 @@ async function serveObject(ctx: RequestContext, bucketId: string, objectPath: st
     sendJson(ctx.res, 404, { error: "Object not found" })
     return
   }
-  const key = s3.objectKey(stored.name, stored.version)
+  const key = store.objectKey(stored.name, stored.version)
 
   const transformOpts = parseTransformParams(ctx.url.searchParams)
 
   try {
-    const obj = await s3.getObject(bucketId, key)
+    const obj = await store.getObject(bucketId, key)
 
     if (transformOpts && obj.contentType.startsWith("image/")) {
       const transformed = await transformImage(obj.body, transformOpts)

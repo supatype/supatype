@@ -36,7 +36,7 @@ describe("studio.auth.providers", () => {
   it("is passed to Studio when the project names providers", () => {
     const json = studioRuntimeJson(renderSelfHostCompose(config({ auth: { providers: ["keycloak", "github"] } })))
     expect(json["authProviders"]).toEqual(["keycloak", "github"])
-    expect(json["url"]).toBe("${API_EXTERNAL_URL:-http://localhost:18473}")
+    expect(json["url"]).toBe("${API_EXTERNAL_URL:-http://localhost:${SUPATYPE_KONG_PORT:-18473}}")
     expect(json["anonKey"]).toBe("${ANON_KEY:-}")
   })
 

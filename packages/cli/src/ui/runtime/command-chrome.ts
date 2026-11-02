@@ -100,6 +100,8 @@ const STREAMING_COMMAND_PATHS = new Set([
   "logs",
   "pg psql",
   "functions serve",
+  // A self-host link tails it until Ctrl+C, which the chrome's raw-mode stdin read as a key press.
+  "functions logs",
   "self-host compose logs",
 ])
 

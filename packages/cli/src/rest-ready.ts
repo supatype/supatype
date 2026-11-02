@@ -9,6 +9,8 @@
  * fault that was only a wait (PU1). So the push waits, bounded, for REST to stop answering 503.
  */
 
+import { setTimeout as sleep } from "node:timers/promises"
+
 /** About 32 s of PostgREST backoff, plus room for the request that follows it. */
 export const REST_READY_WITHIN_MS = 40_000
 
@@ -27,7 +29,7 @@ export interface RestReadyDeps {
 const liveDeps: RestReadyDeps = {
   fetchStatus: async (url, headers) =>
     (await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })).status,
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  sleep: (ms) => sleep(ms),
   now: () => Date.now(),
   log: (line) => console.log(line),
 }

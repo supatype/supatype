@@ -44,8 +44,15 @@ function hookedModels(ast: unknown): HookedModel[] {
  * that have no hooks, a generated file nobody imports is a file somebody eventually edits.
  */
 export function generateHooksModule(ast: unknown): string | null {
+  return hookedModels(ast).length === 0 ? null : hooksModuleSource(ast)
+}
+
+/**
+ * The module source for `ast`, with no table when no model declares a hook: what a handler just
+ * scaffolded imports, so it loads before the push that wires it writes the tables.
+ */
+export function hooksModuleSource(ast: unknown): string {
   const models = hookedModels(ast)
-  if (models.length === 0) return null
 
   const tableEntries = models
     .map(

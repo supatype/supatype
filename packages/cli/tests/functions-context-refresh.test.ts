@@ -47,7 +47,7 @@ describe("a project that already has functions", () => {
     const functions = projectWithFunctions()
     expect(existsSync(join(functions, "_shared", "context.ts"))).toBe(false)
 
-    expect(refreshFunctionsContext(dir, config)).toBe(true)
+    expect(refreshFunctionsContext(dir, config)).toBe("functions/_shared/context.ts")
     expect(existsSync(join(functions, "_shared", "context.ts"))).toBe(true)
   })
 
@@ -73,11 +73,24 @@ describe("a project that already has functions", () => {
   })
 })
 
+// Local test round 3: push said `functions/_shared/context.ts` on a project whose functions.path is
+// `edge`, and wrote `edge/_shared/context.ts`. The path said is the one written.
+describe("a project whose functions live elsewhere", () => {
+  it("names the path it wrote under functions.path", () => {
+    const edge = join(dir, "edge")
+    mkdirSync(edge, { recursive: true })
+    writeFileSync(join(edge, "ping.ts"), "export default () => new Response('ok')\n", "utf8")
+    const moved = projectConfig({ project: { name: "ctx" }, database: { provider: "docker" }, functions: { path: "edge" } })
+    expect(refreshFunctionsContext(dir, moved)).toBe("edge/_shared/context.ts")
+    expect(existsSync(join(edge, "_shared", "context.ts"))).toBe(true)
+  })
+})
+
 describe("a project with no functions", () => {
   it("is left alone", () => {
     // Writing `_shared/` into a project with no functions would create the thing it describes out
     // of nothing, and leave a directory nobody asked for in the diff.
-    expect(refreshFunctionsContext(dir, config)).toBe(false)
+    expect(refreshFunctionsContext(dir, config)).toBeUndefined()
     expect(existsSync(join(dir, "functions"))).toBe(false)
   })
 })

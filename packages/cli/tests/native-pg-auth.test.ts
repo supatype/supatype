@@ -16,7 +16,7 @@ import { projectConfig } from "./support/project-config.js"
 
 describe("initdb", () => {
   it("asks for scram-sha-256 on local and host connections, with the superuser's password", () => {
-    const args = ctl.initdbArgs("/data", "/tmp/pw")
+    const args = ctl.initdbArgs("/data", "/tmp/pw", { major: 17, icu: true })
     expect(args).toContain("--auth-local=scram-sha-256")
     expect(args).toContain("--auth-host=scram-sha-256")
     expect(args).toContain("--pwfile=/tmp/pw")

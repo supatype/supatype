@@ -165,7 +165,7 @@ describe("targetSchemaPush() against a server", () => {
   }
 
   function reply(status: number, json: unknown) {
-    return { ok: status >= 200 && status < 300, status, json: async () => json }
+    return { ok: status >= 200 && status < 300, status, statusText: "", json: async () => json, text: async () => JSON.stringify(json) }
   }
 
   it("refuses --overwrite-drift on a server without the capabilities route, and never sends the push", async () => {

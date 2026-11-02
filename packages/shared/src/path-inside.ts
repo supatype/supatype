@@ -18,3 +18,8 @@ export function resolveInside(root: string, path: string): string | undefined {
   const target = resolve(root, path)
   return pathInside(root, target) ? target : undefined
 }
+
+/** `path` with this platform's separator written as `/`, so it reads the same on every platform. */
+export function toPosixPath(path: string): string {
+  return path.split(sep).join("/")
+}

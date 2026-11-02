@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http"
-import { isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
@@ -95,10 +95,21 @@ export function registerSchemaRoutes(
     sendJson(ctx.res, 200, { data })
   })
 
-  // What the engine behind this control plane supports, so a CLI refuses a flag it would drop.
+  // What the engine behind this control plane supports, so a CLI refuses a flag it would drop, and
+  // what the control plane itself takes: a hook of several files (HOOK_FILES_FEATURE), and a hooks
+  // deploy hook by hook, with `keep` (HOOK_KEEP_FEATURE).
   route(routes, "GET", "/projects/:ref/schema/capabilities", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    sendJson(ctx.res, 200, { data: await runEngineCapabilities() })
+    // The control plane's own features do not depend on the engine: an engine that cannot be run lists
+    // none of its own, and the list still loads on any working stack.
+    const features = await runEngineCapabilities().then(
+      (answer) => answer.features,
+      (err: unknown) => {
+        console.error(`[control-plane] the engine's capabilities could not be read: ${err instanceof Error ? err.message : String(err)}`)
+        return []
+      },
+    )
+    sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE] } })
   })
 
   route(routes, "POST", "/projects/:ref/schema/push", async (ctx) => {
