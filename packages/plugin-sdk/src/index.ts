@@ -28,6 +28,8 @@ export {
   defineWidget,
   isPluginDefinition,
   checkPluginApiVersion,
+  unsupportedCompositeFields,
+  UNSUPPORTED_COMPOSITE_FIELDS,
   type AnyPluginDefinition,
 } from "./define.js"
 
