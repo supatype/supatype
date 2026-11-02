@@ -264,7 +264,8 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
       const res = await fetch(`${base}/functions/v1/${name}`)
       expect(res.status).toBe(500)
       const body: unknown = await res.json()
-      expect(body).toMatchObject({ error: "function_load_failed", message: expect.stringMatching(message) })
+      expect(body).toMatchObject({ error: "function_load_failed" })
+      expect(body).toHaveProperty("message", expect.stringMatching(message))
     }
   }, 60_000)
 
@@ -299,8 +300,9 @@ describe.skipIf(!denoAvailable)("the generated router under Deno", () => {
       expect(fromRouter).toMatchObject({
         status: 500,
         contentType: "application/json",
-        body: { error: "function_load_failed", message: expect.stringMatching(`^Function "${name}" failed to load: `) },
+        body: { error: "function_load_failed" },
       })
+      expect(fromRouter).toHaveProperty("body.message", expect.stringMatching(`^Function "${name}" failed to load: `))
     }
   }, 60_000)
 
