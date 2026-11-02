@@ -17,6 +17,8 @@ vi.mock("../src/model-versioning.js", () => ({ withPublishing: (ast: unknown) =>
 vi.mock("../src/model-hooks.js", () => ({
   validateModelHooks: () => [],
   validateModelValidators: () => [],
+  // A cache declaration, so the push has something to deploy to the target after the schema.
+  manifestMaps: () => ({ hooks: {}, validators: {}, cache: { post: { enabled: true } } }),
   syncManifestHooks: () => false,
   writeHooksModule: () => null,
 }))
@@ -49,7 +51,18 @@ vi.mock("../src/schema-sources.js", () => ({
 }))
 // Waiting for the linked server's REST API is rest-ready.test.ts's subject, not this one's.
 vi.mock("../src/rest-ready.js", () => ({ waitForRestReady: async () => true }))
-vi.mock("../src/resolve-target.js", () => ({
+// A self-host push sends its hook, validator and cache maps after the schema; the stack takes them.
+const hooksDeploy = vi.hoisted(() => ({ fails: false }))
+vi.mock("../src/target-client.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/target-client.js")>()),
+  targetFetch: async () => {
+    if (hooksDeploy.fails) throw new Error("Route not found")
+    return {}
+  },
+}))
+vi.mock("../src/resolve-target.js", async (importOriginal) => ({
+  // projectRequest and the rest stay real: the hook upload builds its request with them.
+  ...(await importOriginal<typeof import("../src/resolve-target.js")>()),
   resolveTarget: () => ({
     mode: "self-host",
     environment: "prod",
@@ -94,6 +107,7 @@ beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void printed.push(a.join(" ")))
   vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void printed.push(a.join(" ")))
   process.exitCode = undefined
+  hooksDeploy.fails = false
 })
 afterEach(() => {
   vi.restoreAllMocks()
@@ -139,5 +153,20 @@ describe.each([
     expect(askMock).not.toHaveBeenCalled()
     expect(printed.join("\n")).toContain("`supatype push --overwrite-drift`")
     expect(printed.join("\n")).toContain("post.post_select")
+  })
+})
+
+// Review: a push whose step after the schema failed still ended "Pushed to self-host (...)" and the
+// API URL, which read as success.
+describe("a push whose hook deploy fails after the schema is applied", () => {
+  it("ends with a failure summary, not the success line", async () => {
+    hooksDeploy.fails = true
+    targetSchemaPush.mockImplementation(async () => ({ status: "applied", message: "Applied 1 operation(s)." }))
+    await push()
+    const text = printed.join("\n")
+    expect(text).toContain("Route not found")
+    expect(text).not.toContain("Pushed to self-host")
+    expect(text).toContain("The push to the self-hosted server (prod) did not finish")
+    expect(process.exitCode).toBe(1)
   })
 })

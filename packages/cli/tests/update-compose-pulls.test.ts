@@ -42,6 +42,8 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
     const pulled = named.length > 0 ? named : stack.images.map((one) => one.service)
     return pulled.some((service) => stack.failing.has(service)) ? 1 : 0
   }),
+  // The pull update runs for every service: it exits non-zero when any fails, as compose does.
+  pullComposeImages: vi.fn(async () => (stack.images.some((one) => stack.failing.has(one.service)) ? 1 : 0)),
   askDockerCompose: vi.fn(async (_path: string, args: string[]) => {
     const service = args[1] ?? ""
     stack.events.push(`start ${service}`)

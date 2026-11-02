@@ -7,6 +7,7 @@
  * it, or PostgREST would be pointed at the wrong schemas for the tier the push will use.
  */
 
+import { devApiKeys, type DevApiKeys } from "./dev-api-keys.js"
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
 import { nativeMailerAutoconfirmEnv } from "./mailer-autoconfirm.js"
@@ -15,6 +16,7 @@ import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
 import { DENO_PORT_ENV, postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
+import { devServiceRoleKeyPath, writeServiceRoleKeyFileUntilExit } from "./service-role-key-file.js"
 
 /** Inputs to the outer layer of supatype-server's environment on the native path. */
 export interface NativeServerCoreInput {
@@ -131,4 +133,17 @@ export function nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }: Nativ
     // included, would otherwise replace it.
     [DENO_PORT_ENV]: String(denoPort),
   }
+}
+
+/**
+ * The anon and service-role keys native dev starts the server with, the service-role key also
+ * written to the file the functions worker reads it from, until dev exits.
+ *
+ * The keys in `.env` while they verify, as Docker dev uses. A pair signed afresh each run left
+ * `.env`'s SERVICE_ROLE_KEY refused by the admin API, which compares the key as a string.
+ */
+export function nativeDevApiKeys(cwd: string): DevApiKeys {
+  const keys = devApiKeys(cwd)
+  writeServiceRoleKeyFileUntilExit(devServiceRoleKeyPath(cwd), keys.serviceRoleKey)
+  return keys
 }

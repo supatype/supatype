@@ -4,6 +4,7 @@
  */
 
 import { getActiveDevSession } from "../dev-session.js"
+import { haltIfStopping } from "../dev-shutdown.js"
 import { isBoolean, isString, type Guard } from "@supatype/shared"
 import { createClackApi, isOptionOf, type ClackApi } from "./clack-api.js"
 import { isInteractive } from "./interactive.js"
@@ -27,8 +28,21 @@ async function devOrFlow<T>(
   accepts: Guard<T>,
   flowFn: (api: ClackApi) => Promise<T | typeof CLACK_CANCEL>,
 ): Promise<T | typeof CLACK_CANCEL> {
+  const answer = await askDevOrFlow(spec, accepts, flowFn)
+  // A prompt dev's shutdown cancelled (ending the session cancels every prompt waiting) is no
+  // answer of the person's: its caller would cancel, exit 0 and cut the shutdown off, Postgres's
+  // stop with it (review of round 7). It waits instead, and the shutdown ends the process.
+  if (isCancel(answer)) await haltIfStopping()
+  return answer
+}
+
+function askDevOrFlow<T>(
+  spec: Parameters<typeof enqueueDevPrompt>[0],
+  accepts: Guard<T>,
+  flowFn: (api: ClackApi) => Promise<T | typeof CLACK_CANCEL>,
+): Promise<T | typeof CLACK_CANCEL> {
   if (inDevTui()) {
-    return promptAnswer(await enqueueDevPrompt(spec), accepts)
+    return enqueueDevPrompt(spec).then((value) => promptAnswer(value, accepts))
   }
   const api = getActiveFlowApi()
   if (api) {

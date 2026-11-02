@@ -1,7 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
-import { askDocker, askDockerSync, NO_DOCKER_LIMIT, type DockerAnswer } from "./docker-exec.js"
+import { createInterface } from "node:readline"
+import { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, SERVICE_ROLE_ROUTES_FILE } from "@supatype/shared"
+import { composeHostPath } from "./compose-host-path.js"
+export { composeHostPath } from "./compose-host-path.js"
+import { ENGINE_SERVICE } from "./compose-engine-service.js"
+import { requireDockerDaemon, type DockerBrandOptions, type DockerReportOptions } from "./docker-runtime.js"
+import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer } from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
 import {
   COMPOSE_DEV_KONG_PORT,
@@ -257,23 +262,6 @@ export function staticDirForCompose(config: SupatypeProjectConfig): string | und
   return dir && dir.length > 0 ? dir : "./public"
 }
 
-/**
- * A host path as the generated compose file names it: absolute, with forward slashes.
- *
- * Absolute because compose resolves a relative bind source against `--project-directory`, and
- * without that flag against the compose file's own folder, `.supatype/self-host`. The CLI always
- * passes the flag. Someone running `docker compose -f .supatype/self-host/docker-compose.yml` by
- * hand does not, and the server came up with that folder as its project: no admin config, manifest,
- * API config, functions or hooks, and an empty `.supatype/self-host/.supatype` left on the host
- * (SA3). Every compose command renders the file again on this machine, so a project that moved is
- * named at its new place the next time one runs. Forward slashes because Docker Desktop on Windows
- * reads `C:/...` as a host path and YAML needs no escaping for them.
- */
-export function composeHostPath(path: string): string {
-  const absolute = resolve(path)
-  return sep === "\\" ? absolute.replace(/\\/g, "/") : absolute
-}
-
 /** One bind mount in compose's long syntax, where no colon in a host path can be misread. */
 function bindMount(source: string, target: string, readOnly: boolean): string {
   return [
@@ -291,6 +279,7 @@ function projectMounts(cwd: string) {
   return {
     projectReadOnly: bindMount(root, "/project", true),
     projectWritable: bindMount(root, "/project", false),
+    engineProject: bindMount(root, ENGINE_SERVICE.projectDir, false),
     projectState: bindMount(join(root, ".supatype"), "/project/.supatype", false),
     kong: bindMount(paths.kongPath, "/etc/kong/kong.yml", true),
     seaweed: bindMount(paths.s3ConfigPath, "/etc/seaweedfs/s3.json", true),
@@ -947,6 +936,12 @@ ${dbDependency}
 ${storageDependency}
   functions-worker:
     image: ${inRepoImage("functions-worker")}
+    # An init as PID 1 passes the stop signal on: without one the worker ignored SIGTERM, and every
+    # restart a deploy made waited out the whole stop timeout.
+    init: true
+    # Time to drain the requests in flight before Docker kills it, above the worker's own drain: one
+    # Docker killed it 3 s after SIGTERM. The control plane's restart passes the same.
+    stop_grace_period: ${FUNCTIONS_WORKER_STOP_GRACE_SECONDS}s
     expose:
       - "8001"
 ${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:
@@ -961,6 +956,12 @@ ${mounts.projectReadOnly}
       # outside. One worker rather than two: a second container would cost a pod per project on
       # cloud, for isolation the route boundary already provides.
       SUPATYPE_HOOKS_ROOT: ${hooksDir}
+      # What \`functions env set\` gives the project: the control plane writes it under the project it
+      # mounts at /project, and the worker reads it on every call.
+      SUPATYPE_FUNCTION_ENV_FILE: /project/.supatype/function-env.json
+      # How long requests in flight get to finish when the worker is stopped: under its stop grace
+      # above, so it exits by itself before Docker kills it. Its own default is dev's 4 s.
+      SUPATYPE_FUNCTIONS_DRAIN_MS: "${FUNCTIONS_WORKER_DRAIN_MS}"
       # Every log line the worker writes carries this, and on cloud it is the label Loki indexes
       # each project's logs under. Without it a line is collected and filed under no project, which
       # is the same as losing it.
@@ -979,6 +980,12 @@ ${mounts.projectReadOnly}
       # each one able to read past every access rule in the schema.
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SERVICE_ROLE_ROUTES: "${serviceRoleRoutes(config).join(",")}"
+      # The list every deploy writes (functions.serviceRole), read on every call, so a route taken off
+      # it loses the key on its next call; the list above applies until the first deploy writes it.
+      SUPATYPE_SERVICE_ROLE_ROUTES_FILE: /project/.supatype/${SERVICE_ROLE_ROUTES_FILE}
+      # The manifest the server reads: a hook route with no code is a 503 only when it names that
+      # hook, so a hook the server would call is never taken for one it would not.
+      SUPATYPE_MANIFEST_PATH: /project/.supatype/manifest.json
       # A direct database connection for functions, off unless asked for.
       #
       # The worker reads SUPATYPE_DB_URL and exposes it as \`ctx.dbUrl\`, and nothing here ever set
@@ -1009,6 +1016,8 @@ ${mounts.projectWritable}
       SUPATYPE_PROJECT_ROOT: /project
       DATABASE_URL: "${ownerUrl}"
       SUPATYPE_FUNCTIONS_ROOT: ${functionsDir}
+      # Where \`push\` deploys hooks to (POST /projects/:ref/hooks/deploy): the worker's hooks root.
+      SUPATYPE_HOOKS_ROOT: ${hooksDir}
       SUPATYPE_STATIC_ROOT: /project/${staticDir.replace(/^\.\//, "")}
       SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
       COMPOSE_PROJECT_NAME: ${composeProject}
@@ -1124,12 +1133,12 @@ ${realtimeDependency}      control-plane:
 
 ${objectStoreBlock}
   schema-engine:
-    image: \${SUPATYPE_ENGINE_IMAGE:-${RELEASE_IMAGES.engine}}
+    image: \${${ENGINE_SERVICE.imageVariable}:-${ENGINE_SERVICE.defaultImage}}
     profiles: ["tools"]
-    entrypoint: ["supatype-engine"]
+    entrypoint: ["${ENGINE_SERVICE.entrypoint}"]
     volumes:
-${mounts.projectWritable}
-    working_dir: /project
+${mounts.engineProject}
+    working_dir: ${ENGINE_SERVICE.projectDir}
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
 ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
@@ -1159,6 +1168,12 @@ ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux 
       # for host.docker.internal after a few seconds and Studio's dev server became unreachable
       # (CE1). A recreated upstream is handled where the CLI recreates it: Kong is reloaded then
       # (runDockerCompose, EXT-N1).
+      #
+      # SRV is not looked up. Kong 3.6 asks for SRV records first, Docker's DNS never answers them,
+      # and each nginx worker's first upstream lookup waited about 4 s for the timeout: the first
+      # realtime subscribe often took that long. A records still come from the hosts file first, so
+      # host.docker.internal above resolves as before.
+      KONG_DNS_ORDER: "LAST,A,CNAME"
 ${kongTlsEnv}    volumes:
 ${mounts.kong}
     ports:
@@ -1188,20 +1203,22 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
   patchRouteManifest(manifestPath, {
     schema: "public",
     postgrest_url: "http://postgrest:3000",
-    storage_url: "http://storage:5000",
     ...composeServiceRoutes(config),
   })
 }
 
 /**
- * Where the server finds realtime and functions in this stack, set on every render rather than
- * only into a new file. Native dev shares the manifest and records its own host ports for both, so
- * a project moved from native to Docker kept native's realtime URL and the server proxied every
- * subscription to a port nothing in the stack listened on (502). An older CLI's
- * `functions_enabled: false` is put right by the same write.
+ * Where the server finds each service of this stack, set on every render rather than only into a
+ * new file. Native dev shares the manifest and records its own host ports for realtime, functions
+ * and storage, so a project moved from native to Docker kept native's URLs and the server proxied
+ * every subscription and every /storage/v1 call to a port nothing in the stack listened on (502).
+ * An older CLI's `functions_enabled: false` is put right by the same write.
  */
 function composeServiceRoutes(config: SupatypeProjectConfig): Record<string, unknown> {
   return {
+    // This file always generates a `storage` service, and native dev records its own storage
+    // service on a host port.
+    storage_url: "http://storage:5000",
     // Matches the compose file: a manifest advertising a service that was not generated is how
     // the server ends up proxying subscriptions to a host that does not resolve. Undefined drops
     // the key.
@@ -1526,6 +1543,52 @@ export function askDockerCompose(
 ): Promise<DockerAnswer> {
   const call = { cwd: projectRoot, env: composeProcessEnv(projectRoot, true), timeoutMs }
   return askDocker(composeInvocation(composePath, args, projectRoot, composeProject, true), call)
+}
+
+/** compose's closing line for an image it could not pull. */
+const DAEMON_PULL_ERROR = /^Error response from daemon: /
+
+/**
+ * compose's own line for one image's pull that failed, or that it stopped when another failed:
+ * ` Image <ref> Error <why>` and ` Image <ref> Interrupted` (Compose v5), or the same with a status
+ * mark and the service name before it (older Compose v2).
+ */
+const IMAGE_PULL_FAILED = /^\s*(?:\S\s+)?(?:Image\s+)?\S+\s+(?:Error|Interrupted)(?:\s|$)/
+
+/**
+ * Whether a line compose's pull writes is shown: its progress, but not its closing daemon errors,
+ * its per-image errors or the pulls it interrupted. Each image whose pull did not finish is pulled
+ * again on its own (compose-image-pull.ts), which says why when it fails, and one kept from this
+ * machine is no failure; compose printed its errors for an image `update` then said it kept (local
+ * test rounds 4 and 7).
+ */
+export function shownPullLine(line: string): boolean {
+  return !DAEMON_PULL_ERROR.test(line) && !IMAGE_PULL_FAILED.test(line)
+}
+
+/** `docker compose pull` for the project, its progress shown as it runs ({@link shownPullLine}); its exit status. */
+export function pullComposeImages(
+  composePath: string,
+  projectRoot: string,
+  composeProject: string,
+  report?: DockerReportOptions,
+): Promise<number> {
+  requireDockerDaemon(report)
+  const child = spawnDocker(composeInvocation(composePath, ["pull"], projectRoot, composeProject, false), {
+    cwd: projectRoot,
+    env: composeProcessEnv(projectRoot, false),
+    stdio: ["ignore", "inherit", "pipe"],
+    windowsHide: true,
+  })
+  if (child.stderr !== null) {
+    createInterface({ input: child.stderr }).on("line", (line) => {
+      if (shownPullLine(line)) process.stderr.write(`${line}\n`)
+    })
+  }
+  return new Promise((resolve) => {
+    child.on("error", () => resolve(1))
+    child.on("close", (code) => resolve(code ?? 1))
+  })
 }
 
 /** The environment compose runs with: the CLI's, less the shell's keys `.env` overrides. */

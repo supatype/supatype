@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
-import { declaredHooks, hooksReport } from "../model-hooks.js"
+import { declaredHooks, ensureHooksModule, hookTableOf, hooksReport } from "../model-hooks.js"
 import { error, info, plain } from "../ui/messages.js"
 
 export function registerHooks(program: Command): void {
@@ -64,9 +64,18 @@ function scaffoldHook(cwd: string, name: string): void {
   const declared = declaredHooks(ast).filter((hook) => hook.function === name)
 
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "index.ts"), handlerTemplate(name, declared), "utf8")
+  const table = declared[0] === undefined ? undefined : hookTableOf(ast, declared[0].model)
+  writeFileSync(join(dir, "index.ts"), handlerTemplate(name, declared, table), "utf8")
 
   info(`Created hook: ${relative(cwd, join(dir, "index.ts"))}`)
+  // The handler imports the generated adapter; written now when missing, so it loads before a push.
+  const adapter = ensureHooksModule(cwd, hooksDir, ast)
+  if (adapter !== null) info(`Hook handler types written to ${adapter}`)
+  sayWiring(name, declared)
+}
+
+/** Which model events the new hook is wired to, or how to wire it when none names it yet. */
+function sayWiring(name: string, declared: { model: string; event: string }[]): void {
   if (declared.length === 0) {
     // Scaffolding a handler nothing calls is easy to do and impossible to notice, since a hook that
     // is never referenced simply never runs.
@@ -83,15 +92,20 @@ function scaffoldHook(cwd: string, name: string): void {
 }
 
 /**
- * The scaffold deliberately imports from `../_supatype/hooks.ts`, which `push` generates.
+ * The scaffold deliberately imports from `../_supatype/hooks.ts`, which `push` generates and
+ * `hooks new` writes when it is missing.
  *
- * Before the first push that file does not exist, so the handler will not compile, which is the
- * honest state: the types come from the schema, and a handler typed against a model that has not been
- * pushed is a handler typed against a guess.
+ * Until a push wires the hook, that module has no table for it, so the handler does not type-check,
+ * which is the honest state: the types come from the schema, and a handler typed against a model
+ * that has not been pushed is a handler typed against a guess. It still loads, so the push that
+ * wires it is served at once.
  */
-function handlerTemplate(name: string, declared: { model: string; event: string }[]): string {
+function handlerTemplate(name: string, declared: { model: string; event: string }[], table: string | undefined): string {
   const event = declared[0]?.event ?? "beforeChange"
   const model = declared[0]?.model ?? "YourModel"
+  // The table of the model that names the hook, as the generated types key it; a placeholder only
+  // when no model names it yet.
+  const tableType = JSON.stringify(table ?? "your_table")
 
   if (event.startsWith("after")) {
     return `// ${name}: model hook (${event})
@@ -101,7 +115,7 @@ function handlerTemplate(name: string, declared: { model: string; event: string 
 
 import { hook, type AfterChange } from "../_supatype/hooks.ts"
 
-const handler: AfterChange<"your_table"> = async (ctx) => {
+const handler: AfterChange<${tableType}> = async (ctx) => {
   console.log(\`\${ctx.table} \${ctx.operation} by \${ctx.user?.sub ?? "anon"}\`)
 }
 
@@ -119,7 +133,7 @@ export default hook(handler)
 
 import { hook, type BeforeChange } from "../_supatype/hooks.ts"
 
-const handler: BeforeChange<"your_table"> = async (ctx) => {
+const handler: BeforeChange<${tableType}> = async (ctx) => {
   if (ctx.operation === "insert") {
     // \`ctx.rows\` is the submitted rows, typed from the model.
     return { rows: ctx.rows }

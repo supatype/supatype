@@ -1,82 +1,68 @@
-import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
-import { spawnSync } from "node:child_process"
-import { FUNCTION_NAME_RULE, isFunctionName, isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { basename, dirname, join } from "node:path"
+import {
+  FUNCTION_ENTRY_FILE,
+  FUNCTION_NAME_RULE,
+  functionRouteName,
+  isFunctionDeployBody,
+  isFunctionName,
+  isRecordOf,
+  isShape,
+  isString,
+  optional,
+  SERVICE_ROLE_ROUTES_FILE,
+} from "@supatype/shared"
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
-import { assertProject, projectRoot } from "../project.js"
+import { assertProject } from "../project.js"
+import { clearAll, functionFiles, removeAll, writeChanged, writeFileIn, writeRoot, type FunctionWrite, type WriteRoot } from "../deploy-files.js"
+import { answerWithWorkerCurrent, childDir, functionEnvPath, functionsRoot } from "../worker.js"
 
-interface DeployedFunction {
-  name: string
-  source: string
+/**
+ * The functions under `root` the worker serves, sorted: found by the rule it discovers its routes by
+ * (`functionRouteName`, @supatype/shared), so `_shared`, dot directories, a directory with no
+ * index.ts and a declaration file are not listed, and a function kept as `<name>.ts` is.
+ */
+function servedFunctions(root: string): string[] {
+  if (!existsSync(root)) return []
+  return readdirSync(root, { withFileTypes: true })
+    .map((entry) => {
+      const kind = entry.isDirectory() ? "directory" : entry.isFile() ? "file" : undefined
+      const name = kind === undefined ? undefined : functionRouteName(entry.name, kind)
+      if (name === undefined) return undefined
+      return kind === "file" || existsSync(join(root, entry.name, FUNCTION_ENTRY_FILE)) ? name : undefined
+    })
+    .filter((name): name is string => name !== undefined)
+    .sort()
 }
 
-function functionsRoot(): string {
-  return process.env["SUPATYPE_FUNCTIONS_ROOT"] ?? join(projectRoot(), "functions")
-}
-
-function composeProject(): string {
-  return process.env["COMPOSE_PROJECT_NAME"] ?? "supatype-project"
-}
-
-function restartFunctionsWorker(): void {
-  spawnSync(
-    "docker",
-    ["compose", "-p", composeProject(), "restart", "functions-worker"],
-    { stdio: "inherit" },
-  )
+/** The directory of the function `name`, refused unless it may be one (worker.ts `childDir`). */
+function functionDir(name: unknown): string {
+  return childDir(functionsRoot(), name, "function")
 }
 
 /**
- * `name` when it passes the function-name rule the CLI also checks (`@supatype/shared`); a 400
- * otherwise. Nothing the rule allows can name a parent, a separator or a hidden entry.
+ * What a deploy body's functions write and remove, every function and path checked before anything
+ * is written (deploy-files.ts). Its count of functions comes with them.
  */
-function checkedName(name: unknown): string {
-  if (!isFunctionName(name)) {
-    throw badRequest(`Invalid function name ${JSON.stringify(name)}: ${FUNCTION_NAME_RULE}`)
-  }
-  return name
+function deployedFiles(body: unknown): { root: WriteRoot; count: number; writes: FunctionWrite[]; serviceRole: string[] | undefined } {
+  const { functions, serviceRole } = bodyOf(body, isFunctionDeployBody)
+  const refused = (serviceRole ?? []).filter((name) => !isFunctionName(name))
+  if (refused.length > 0) throw badRequest(`serviceRole names ${refused.map((name) => JSON.stringify(name)).join(", ")}, which are not function names: ${FUNCTION_NAME_RULE}`)
+  const root = writeRoot(functionsRoot(), "Functions", { mayBeLink: true })
+  // functionFiles refuses a name outside the function-name rule before it builds any path from it.
+  const writes = functions.map((fn) => functionFiles(root, { name: fn.name, source: fn.source, files: fn.files }))
+  return { root, count: functions.length, writes, serviceRole }
 }
 
-/**
- * The directory of the function `name`, refused unless the name passes the rule and the path is a
- * direct child of the functions directory. The second check is a backstop for the first: whatever
- * the rule lets through, nothing outside `functions/` is ever written or removed.
- */
-function functionDir(name: string): string {
-  const root = resolve(functionsRoot())
-  const dir = resolve(root, name)
-  if (dirname(dir) !== root) {
-    throw badRequest(`Function name ${JSON.stringify(name)} resolves outside the functions directory`)
-  }
-  return dir
-}
-
-/** The functions a deploy body names, every one checked before anything is written. */
-function deployedFunctions(body: unknown): Array<DeployedFunction & { dir: string }> {
-  const list = bodyOf(body, isShape({ functions: optional(isUnknown) })).functions
-  if (list === undefined) return []
-  if (!Array.isArray(list)) throw badRequest("functions must be an array")
-  return list.map((entry) => {
-    const fn = isJsonObject(entry) ? entry : {}
-    const name = checkedName(fn["name"])
-    const source = fn["source"]
-    if (typeof source !== "string") throw badRequest(`Function ${name} has no source`)
-    return { name, source, dir: functionDir(name) }
-  })
-}
-
-function envPath(): string {
-  return join(projectRoot(), ".supatype", "function-env.json")
-}
 
 const isFunctionEnv = isRecordOf(isString)
 
 /** The env file `POST /functions/env` writes: refused, rather than overwritten, when it is not one. */
 function readFunctionEnv(): Record<string, string> {
-  if (!existsSync(envPath())) return {}
-  const env = JSON.parse(readFileSync(envPath(), "utf8"))
-  if (!isFunctionEnv(env)) throw new Error(`${envPath()} is not a map of names to string values`)
+  if (!existsSync(functionEnvPath())) return {}
+  const env = JSON.parse(readFileSync(functionEnvPath(), "utf8"))
+  if (!isFunctionEnv(env)) throw new Error(`${functionEnvPath()} is not a map of names to string values`)
   return env
 }
 
@@ -87,40 +73,35 @@ export function registerFunctionRoutes(
 ): void {
   route(routes, "GET", "/projects/:ref/functions", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const root = functionsRoot()
-    if (!existsSync(root)) {
-      sendJson(ctx.res, 200, { data: [] })
-      return
-    }
-    const names = readdirSync(root, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => ({ name: d.name }))
-    sendJson(ctx.res, 200, { data: names })
+    sendJson(ctx.res, 200, { data: servedFunctions(functionsRoot()).map((name) => ({ name })) })
   })
 
   route(routes, "POST", "/projects/:ref/functions/deploy", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const functions = deployedFunctions(ctx.body)
-    for (const fn of functions) {
-      mkdirSync(fn.dir, { recursive: true })
-      writeFileSync(join(fn.dir, "index.ts"), fn.source, "utf8")
-    }
-
-    restartFunctionsWorker()
-    sendJson(ctx.res, 200, { data: { message: "Functions deployed", count: functions.length } })
+    const { root, count, writes, serviceRole } = deployedFiles(ctx.body)
+    // Written before anything is removed or cleared, so the function is never missing in between.
+    await writeChanged(writes.flatMap((write) => write.files))
+    await removeAll(writes.flatMap((write) => write.remove))
+    await clearAll(root, writes)
+    // The list replaces the last wholesale, as on Cloud; the worker reads it on every call, so a
+    // route taken off it loses the key on its next call. A deploy that sends none leaves it alone.
+    if (serviceRole !== undefined) await writeFileIn(dirname(functionEnvPath()), SERVICE_ROLE_ROUTES_FILE, serviceRole.join(","))
+    await answerWithWorkerCurrent(ctx.res, { message: "Functions deployed", count })
   })
 
   route(routes, "DELETE", "/projects/:ref/functions/:name", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const name = ctx.params["name"]!
-    rmSync(functionDir(checkedName(name)), { recursive: true, force: true })
-    restartFunctionsWorker()
-    sendJson(ctx.res, 200, { data: { deleted: name } })
+    // Whichever form the project keeps it in, both when both are there.
+    const dir = functionDir(name)
+    await removeAll([dir, `${dir}.ts`])
+    await answerWithWorkerCurrent(ctx.res, { deleted: name })
   })
 
+  // The names only, sorted, as Cloud lists them: a value is a secret, and never leaves the stack.
   route(routes, "GET", "/projects/:ref/functions/env", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    sendJson(ctx.res, 200, { data: readFunctionEnv() })
+    sendJson(ctx.res, 200, { data: Object.keys(readFunctionEnv()).sort() })
   })
 
   route(routes, "POST", "/projects/:ref/functions/env", async (ctx) => {
@@ -132,9 +113,36 @@ export function registerFunctionRoutes(
     }
     const current = readFunctionEnv()
     current[body.key] = body.value ?? ""
-    mkdirSync(dirname(envPath()), { recursive: true })
-    writeFileSync(envPath(), `${JSON.stringify(current, null, 2)}\n`, "utf8")
-    restartFunctionsWorker()
-    sendJson(ctx.res, 200, { data: { key: body.key } })
+    await writeFunctionEnv(current)
+    await answerWithWorkerCurrent(ctx.res, { key: body.key }, { codeUnchanged: true })
   })
+
+  // `supatype functions env unset` on a self-host link. An env change restarts nothing, since the
+  // worker reads the file on each call (worker.ts); the worker is still started if it stopped, or
+  // restarted for a restart a failed deploy owes.
+  route(routes, "DELETE", "/projects/:ref/functions/env/:key", async (ctx) => {
+    assertProject(ctx.params["ref"]!)
+    const key = decodedParam(ctx.params["key"]!)
+    const current = readFunctionEnv()
+    const removed = Object.hasOwn(current, key)
+    if (removed) {
+      delete current[key]
+      await writeFunctionEnv(current)
+    }
+    await answerWithWorkerCurrent(ctx.res, { key, removed }, { codeUnchanged: true })
+  })
+}
+
+/** Writes the function env file, a link there refused rather than followed (deploy-files.ts). */
+async function writeFunctionEnv(env: Record<string, string>): Promise<void> {
+  await writeFileIn(dirname(functionEnvPath()), basename(functionEnvPath()), `${JSON.stringify(env, null, 2)}\n`)
+}
+
+/** A path parameter as the caller encoded it (encodeURIComponent); a 400 when it cannot be decoded. */
+function decodedParam(raw: string): string {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    throw badRequest(`${JSON.stringify(raw)} is not a valid URL-encoded name`)
+  }
 }

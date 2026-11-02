@@ -119,16 +119,15 @@ describe("link model", () => {
       },
     }))
 
-    const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<unknown>>().mockResolvedValue({
-      ok: true,
-      json: async () => ({
+    const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<unknown>>().mockImplementation(async () =>
+      new Response(JSON.stringify({
         data: {
           status: "rolled_back",
           name: "push_test",
           message: "Rolled back migration push_test.",
         },
-      }),
-    })
+      }), { status: 200 }),
+    )
     vi.stubGlobal("fetch", fetchMock)
 
     const target = resolveTarget(tmp)

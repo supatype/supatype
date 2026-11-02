@@ -4,7 +4,6 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { denoServeEnv, serveDisplayUrl } from "../src/commands/functions.js"
 import { assertEngineVersionSupported } from "../src/engine-floor.js"
-import { generateFunctionsRouterSource } from "../src/functions-router-gen.js"
 import { localLinkLabel } from "../src/local-gateway.js"
 import { databaseStateToSchemaScaffold } from "../src/pull-utils.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
@@ -39,15 +38,9 @@ describe("pull's RLS TODO", () => {
 })
 
 describe("functions serve's address", () => {
-  it("listens on 127.0.0.1 unless told otherwise", () => {
-    const router = generateFunctionsRouterSource("/project/.supatype/functions-router.ts", [])
-    expect(router).toContain('const hostname = Deno.env.get("SUPATYPE_FUNCTIONS_HOST") ?? "127.0.0.1"')
-    expect(router).toMatch(/Deno\.serve\(\{\s*hostname,\s*port,/)
-  })
-
   it("takes --host, defaulting to 127.0.0.1, and hands it to Deno", () => {
     expect(serveCommand()?.options.find((o) => o.long === "--host")?.defaultValue).toBe("127.0.0.1")
-    const env = denoServeEnv(dir, join(dir, "functions"), projectConfig(), { port: "18472", host: "0.0.0.0" })
+    const env = denoServeEnv({ cwd: dir, config: projectConfig(), functionsDir: join(dir, "functions"), keyPath: undefined }, { port: "18472", host: "0.0.0.0" })
     expect(env["SUPATYPE_FUNCTIONS_HOST"]).toBe("0.0.0.0")
   })
 })
@@ -100,7 +93,7 @@ describe("an IPv6 --host given in brackets", () => {
   it("is announced with one pair of brackets, and handed to Deno without them", () => {
     expect(serveDisplayUrl("[::1]", "18472")).toBe("http://[::1]:18472/functions/v1/")
     expect(serveDisplayUrl("[::]", "18472")).toBe("http://localhost:18472/functions/v1/")
-    const env = denoServeEnv(dir, join(dir, "functions"), projectConfig(), { port: "18472", host: "[::1]" })
+    const env = denoServeEnv({ cwd: dir, config: projectConfig(), functionsDir: join(dir, "functions"), keyPath: undefined }, { port: "18472", host: "[::1]" })
     expect(env["SUPATYPE_FUNCTIONS_HOST"]).toBe("::1")
   })
 })

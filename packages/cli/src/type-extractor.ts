@@ -1425,8 +1425,8 @@ function parseBucketTypeLiteral(
       continue
     }
     if (key === "accept") {
-      const types = parseMimeAcceptList(member.type, sourceFile)
-      if (types !== undefined) out.allowedMimeTypes = types
+      const types = acceptList(member.type, sourceFile, bucketId)
+      if (types.length > 0) out.allowedMimeTypes = acceptedMimeTypes(bucketId, types)
       continue
     }
     if (key === "access") {
@@ -1460,30 +1460,54 @@ function parseJsonStringLiteral(typeNode: ts.TypeNode, sourceFile: ts.SourceFile
   return parseSizeStringLiteral(typeNode, sourceFile)
 }
 
-function parseMimeAcceptList(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): string[] | undefined {
+/**
+ * A MIME type a bucket can accept: `type/subtype` in RFC 6838's restricted names, or `type/*`. The
+ * storage service's own rule (`packages/storage/src/bucket-rules.ts`), so a type it would refuse at
+ * provisioning stops the schema here instead.
+ */
+export const BUCKET_MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$/i
+
+/** `types`, when each is a MIME type a bucket can accept; throws naming the first that is not. */
+function acceptedMimeTypes(bucketId: string, types: string[]): string[] {
+  const bad = types.find((type) => !BUCKET_MIME_TYPE.test(type))
+  if (bad === undefined) return types
+  throw new Error(
+    `Bucket "${bucketId}": accept holds "${bad}", which is not a MIME type. ` +
+      `Use "type/subtype" or "type/*", such as "image/png" or "image/*".`,
+  )
+}
+
+/**
+ * The MIME types a bucket's `accept` lists, an empty list meaning no limit. Any form but string
+ * literals written in place is refused: it was read as no list at all, so the bucket took every type.
+ */
+function acceptList(typeNode: ts.TypeNode, sourceFile: ts.SourceFile, bucketId: string): string[] {
+  const types = parseMimeAcceptList(typeNode)
+  if (types !== null) return types
+  throw new Error(
+    `Bucket "${bucketId}": could not read its \`accept\` list from \`${typeNode.getText(sourceFile)}\`.\n` +
+      `  accept lists MIME types as string literals in place, e.g. accept: ["image/png", "image/*"]`,
+  )
+}
+
+/** The string literals a tuple or a union lists, or null when it is written any other way. */
+function parseMimeAcceptList(typeNode: ts.TypeNode): string[] | null {
   if (ts.isTypeOperatorNode(typeNode) && typeNode.operator === ts.SyntaxKind.ReadonlyKeyword) {
-    return parseMimeAcceptList(typeNode.type, sourceFile)
+    return parseMimeAcceptList(typeNode.type)
   }
-  if (ts.isTupleTypeNode(typeNode)) {
-    const values: string[] = []
-    for (const el of typeNode.elements) {
-      const node: ts.TypeNode = ts.isNamedTupleMember(el) ? el.type : el
-      const s = literalStringType(node)
-      if (!s) return undefined
-      values.push(s)
-    }
-    return values.length > 0 ? values : undefined
+  const members = ts.isTupleTypeNode(typeNode)
+    ? typeNode.elements.map((el) => (ts.isNamedTupleMember(el) ? el.type : el))
+    : ts.isUnionTypeNode(typeNode)
+      ? [...typeNode.types]
+      : null
+  if (members === null) return null
+  const values: string[] = []
+  for (const node of members) {
+    const value = literalStringType(node)
+    if (!value) return null
+    values.push(value)
   }
-  if (ts.isUnionTypeNode(typeNode)) {
-    const values: string[] = []
-    for (const u of typeNode.types) {
-      const s = literalStringType(u)
-      if (!s) return undefined
-      values.push(s)
-    }
-    return values.length > 0 ? values : undefined
-  }
-  return undefined
+  return values
 }
 
 /** The operations a bucket's `access` may name, the same four a model's may. */

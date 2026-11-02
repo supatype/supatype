@@ -216,6 +216,8 @@ export interface SupatypeProjectConfig {
     deno?: string
     /** Path to a local supatype-realtime binary (or node entry script). */
     realtime?: string
+    /** Path to a local supatype-storage executable (or node entry script, e.g. packages/storage/dist/index.js). */
+    storage?: string
     /** Path to the @supatype/studio package directory (starts Vite dev server). */
     studio?: string
     /** Path to a local PostgREST binary. */
@@ -932,8 +934,12 @@ export const COMPOSE_DEV_KONG_PORT = 18473
  * cluster checks it, so the `postgres` default only reaches a cluster still set up that way.
  */
 export function localDSN(cfg: SupatypeProjectConfig, password = "postgres", cwd: string = process.cwd()): string {
-  const port = nativeDbPort(cfg, cwd)
-  return `postgres://postgres:${encodeURIComponent(password)}@127.0.0.1:${port}/${cfg.project.name}?sslmode=disable`
+  return nativeDatabaseUrl(cfg.project.name, password, nativeDbPort(cfg, cwd))
+}
+
+/** The URL of native Postgres's database `name` on `port`, as its superuser. */
+export function nativeDatabaseUrl(name: string, password: string, port: number): string {
+  return `postgres://postgres:${encodeURIComponent(password)}@127.0.0.1:${port}/${name}?sslmode=disable`
 }
 
 /** Where native Postgres listens when nothing moves it. */
@@ -1000,6 +1006,20 @@ export const DENO_PORT_ENV = "SUPATYPE_DENO_PORT"
  */
 export function nativeDenoPort(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): number {
   return shellEnvInt(DENO_PORT_ENV, env) ?? shellEnvInt(DENO_PORT_ENV, readDotEnvFiles(cwd)) ?? NATIVE_DENO_PORT
+}
+
+/** Where native dev's storage service listens when nothing moves it: beside Deno's 8001. */
+export const NATIVE_STORAGE_PORT = 8002
+
+/** The environment key native dev reads the storage service's port from. */
+export const STORAGE_PORT_ENV = "SUPATYPE_STORAGE_PORT"
+
+/**
+ * The port native dev's storage service listens on: `SUPATYPE_STORAGE_PORT` exported, then from
+ * `.env` and `.env.local`, then 8002, as for Deno's.
+ */
+export function nativeStoragePort(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): number {
+  return shellEnvInt(STORAGE_PORT_ENV, env) ?? shellEnvInt(STORAGE_PORT_ENV, readDotEnvFiles(cwd)) ?? NATIVE_STORAGE_PORT
 }
 
 /**

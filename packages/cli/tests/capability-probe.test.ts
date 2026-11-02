@@ -58,7 +58,13 @@ describe("targetCapabilities() against a server", () => {
     token: "t",
     link: null,
   })
-  const reply = (status: number, json: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => json })
+  const reply = (status: number, json: unknown) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: "",
+    json: async () => json,
+    text: async () => JSON.stringify(json),
+  })
 
   it("a missing route is a server too old for the check: it supports none of the features", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => reply(404, { error: "not_found", message: "Route not found" })))

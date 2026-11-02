@@ -5,6 +5,7 @@ import {
   withPublicFromMode,
   provisionBuckets,
   provisionBucketsFromAst,
+  unprovisionedBuckets,
   type SchemaStorageBucketAst,
 } from "../src/storage-provision.js"
 
@@ -73,16 +74,18 @@ describe("provisionBuckets", () => {
 
     await expect(
       provisionBuckets("http://localhost:54321/storage/v1", "key", [{ id: "photos", public: false }]),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual([])
   })
 
   it("warns and continues when the storage API is unreachable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")))
 
-    await provisionBuckets("http://localhost:54321/storage/v1", "key", [{ id: "photos", public: false }])
+    const failed = await provisionBuckets("http://localhost:54321/storage/v1", "key", [{ id: "photos", public: false }])
 
     expect(warn).toHaveBeenCalledWith('[storage] Storage API unreachable, skipped bucket "photos"')
+    // Named, so a caller that needs every bucket (native dev's import) can tell it did not happen.
+    expect(failed).toEqual(["photos"])
   })
 
   // Local test round 3, N3: a 502 with an empty body printed `Failed to provision bucket "big": `.
@@ -118,6 +121,19 @@ describe("provisionBucketsFromAst", () => {
     await provisionBucketsFromAst({}, "http://localhost:54321/storage/v1", "key")
 
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  // Docker dev dropped the failures, so a bucket the service refused was said nowhere but a warning.
+  it("says which buckets the service did not take, and how many were asked for", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) =>
+      String(init?.body).includes('"pics"') ? Response.json({ error: "no" }, { status: 400 }) : Response.json({}),
+    )
+    const result = await provisionBucketsFromAst({ storageBuckets: [{ id: "pics" }, { id: "docs" }] }, "http://localhost:54321/storage/v1", "key")
+    expect(result).toEqual({ total: 2, failed: ["pics"] })
+    expect(unprovisionedBuckets(result)).toBe("1 of 2 bucket(s) were not provisioned: pics")
+    expect(unprovisionedBuckets({ total: 2, failed: [] })).toBeNull()
   })
 })
 

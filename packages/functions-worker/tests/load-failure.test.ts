@@ -51,3 +51,18 @@ Deno.test("a function that failed to load answers 500 with why, and the others s
     await worker.stop()
   }
 })
+
+// A handler that throws while serving answers 500 with its message as JSON, which a client has no
+// terminal to colour, so escape codes come out of it as they do from a load failure's. Native dev
+// ran a generated router that did this; it now runs this worker, which must do the same.
+Deno.test("a handler that throws answers with its message, without escape codes", async () => {
+  const fails = 'export default () => { throw new Error("\u001b[31mboom\u001b[0m at work") }\n'
+  const worker = await startWorker({ fails }, Deno.env.toObject())
+  try {
+    const { status, body } = await call(worker.origin, "fails")
+    expectEqual(status, 500, "status")
+    expectEqual(JSON.stringify(body), JSON.stringify({ error: "function_error", message: "boom at work" }), "body")
+  } finally {
+    await worker.stop()
+  }
+})

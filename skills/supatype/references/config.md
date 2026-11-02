@@ -215,9 +215,9 @@ GOOGLE_SECRET=...
   `supatype self-host compose render`/`up` warn when an enabled provider's secret is set nowhere.
 - **Configured only through `.env`:** nothing is rendered for a provider the config does not list,
   so it gets no default redirect. Set `SUPATYPE_EXTERNAL_<PROVIDER>_REDIRECT_URI` yourself, to
-  `<public API URL>/auth/v1/callback` (for example
-  `SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18473/auth/v1/callback`); without it the
-  server refuses the provider. Listing the provider under `auth.providers` is the recommended route,
+  `<public API URL>/auth/v1/callback`, the `API_EXTERNAL_URL` in `.env` (the gateway's
+  `SUPATYPE_KONG_PORT` under Docker, `server.port` natively); without it the server refuses the
+  provider. Listing the provider under `auth.providers` is the recommended route,
   since it supplies that default.
 - `supatype.local.config.ts` merges per provider, so it can swap in a development OAuth app's
   `clientId` without restating the rest.

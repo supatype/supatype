@@ -17,14 +17,15 @@
  * Needs Docker. Without it the suite is skipped with a message rather than silently passing.
  */
 import { spawnSync } from "node:child_process"
-import { createHmac, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { connect } from "node:net"
-import type { Server } from "node:http"
+import { request, type Server } from "node:http"
 import { join } from "node:path"
-import pg from "pg"
+import type pg from "pg"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { isArrayOf, isJsonObject, isShape, isString, type Guard } from "../src/json.js"
+import { connectWhenReady, dockerAvailable, FIXTURES, provision, sign as signWith, startPostgres, startService } from "./support/stack.js"
 
 /** A response's JSON body, failing the test when the guard refuses it. */
 async function bodyOf<T>(res: Response, guard: Guard<T>): Promise<T> {
@@ -34,7 +35,6 @@ async function bodyOf<T>(res: Response, guard: Guard<T>): Promise<T> {
 }
 
 const SECRET = "caller-rules-test-secret-at-least-32-chars"
-const FIXTURES = join(import.meta.dirname, "fixtures")
 
 /** Objects the mocked S3 holds, keyed `bucket/key`. */
 const stored = new Map<string, Buffer>()
@@ -82,7 +82,6 @@ vi.mock("../src/s3.js", async (importOriginal) => {
 
 // ─── Postgres ─────────────────────────────────────────────────────────────────
 
-const dockerAvailable = spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0
 if (!dockerAvailable) console.warn("[caller-rules] Docker is not available: skipping the storage rules suite")
 
 let container = ""
@@ -90,62 +89,15 @@ let admin: pg.Client
 let server: Server
 let base = ""
 
-function docker(args: string[]): string {
-  const res = spawnSync("docker", args, { encoding: "utf8" })
-  if (res.status !== 0) throw new Error(`docker ${args.join(" ")} failed: ${res.stderr}`)
-  return res.stdout.trim()
-}
-
-async function connectWhenReady(url: string): Promise<pg.Client> {
-  for (let attempt = 0; attempt < 60; attempt++) {
-    const client = new pg.Client({ connectionString: url })
-    try {
-      await client.connect()
-      return client
-    } catch {
-      await client.end().catch(() => undefined)
-      await new Promise((r) => setTimeout(r, 500))
-    }
-  }
-  throw new Error("Postgres did not accept connections")
-}
-
-/** The roles the gateway issues, then the engine's SQL, in the order a push applies it. */
-async function provision(client: pg.Client): Promise<void> {
-  await client.query(`
-    CREATE ROLE anon NOLOGIN;
-    CREATE ROLE authenticated NOLOGIN;
-    CREATE ROLE service_role NOLOGIN BYPASSRLS;
-  `)
-  await client.query(readFileSync(join(FIXTURES, "auth.gen.sql"), "utf8"))
-  await client.query(readFileSync(join(FIXTURES, "storage.gen.sql"), "utf8"))
-}
-
-async function startService(databaseUrl: string): Promise<void> {
-  process.env["DATABASE_URL"] = databaseUrl
-  process.env["JWT_SECRET"] = SECRET
-  const { createServer } = await import("../src/server.js")
-  server = createServer()
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  const address = server.address()
-  if (address === null || typeof address === "string") throw new Error("storage service has no TCP address")
-  base = `http://127.0.0.1:${address.port}`
-  for (let attempt = 0; attempt < 60; attempt++) {
-    const health = await bodyOf(await fetch(`${base}/health`), isShape({ status: isString }))
-    if (health.status === "ok") return
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error("storage service never became ready")
-}
-
 beforeAll(async () => {
   if (!dockerAvailable) return
-  container = docker(["run", "-d", "--rm", "-e", "POSTGRES_PASSWORD=postgres", "-p", "127.0.0.1::5432", "postgres:17-alpine"])
-  const port = docker(["port", container, "5432"]).split(":").pop()
-  const url = `postgresql://postgres:postgres@127.0.0.1:${port}/postgres`
-  admin = await connectWhenReady(url)
+  const pgStack = startPostgres()
+  container = pgStack.container
+  admin = await connectWhenReady(pgStack.url)
   await provision(admin)
-  await startService(url)
+  const started = await startService(pgStack.url, SECRET)
+  server = started.server
+  base = started.base
 }, 120_000)
 
 afterAll(async () => {
@@ -158,9 +110,7 @@ afterAll(async () => {
 // ─── Callers ──────────────────────────────────────────────────────────────────
 
 function sign(claims: Record<string, unknown>): string {
-  const part = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url")
-  const head = `${part({ alg: "HS256", typ: "JWT" })}.${part(claims)}`
-  return `${head}.${createHmac("sha256", SECRET).update(head).digest("base64url")}`
+  return signWith(SECRET, claims)
 }
 
 const ANON = sign({ role: "anon" })
@@ -833,5 +783,162 @@ describe.skipIf(!dockerAvailable)("a new folder in a bucket that limits file typ
     expect((await uploadUntyped(SERVICE, "pictures", `${folder}/empty.bin`, "")).status).toBe(415)
     expect((await upload(SERVICE, "pictures", `${folder}/notes.txt`, "x")).status).toBe(415)
     expect(await row("pictures", `${folder}/.emptyFolderPlaceholder`)).toBeUndefined()
+  })
+})
+
+// ─── Object names (round 7, N31) ───────────────────────────────────────────────
+
+/** A request whose path goes exactly as given, its "." and ".." and empty parts included. */
+interface RawRequest {
+  method: string
+  path: string
+  token?: string
+  body?: string
+  upsert?: boolean
+}
+
+/** Sends `raw`: fetch would resolve the dot parts away before the service saw them, as curl --path-as-is does not. */
+async function rawRequest(raw: RawRequest): Promise<{ status: number; text: string }> {
+  const target = new URL(base)
+  const headers = {
+    "content-type": "text/plain",
+    ...(raw.token !== undefined && { authorization: `Bearer ${raw.token}` }),
+    ...(raw.upsert === true && { "x-upsert": "true" }),
+  }
+  return new Promise((resolve, reject) => {
+    const req = request({ host: target.hostname, port: target.port, method: raw.method, path: raw.path, headers }, (res) => {
+      let text = ""
+      res.setEncoding("utf8")
+      res.on("data", (chunk: string) => (text += chunk))
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, text }))
+    })
+    req.on("error", reject)
+    req.end(raw.body)
+  })
+}
+
+/** The refusal of an object name, quoting it as the client sent it. */
+const refusalOf = (sent: string): string => JSON.stringify({ error: `${JSON.stringify(sent)}: invalid object path` })
+
+/** A folder of its own in avatars, holding `a` and `x/a`, for one test's names. */
+async function namesFolder(): Promise<string> {
+  const dir = `names-${randomUUID()}`
+  await upload(SERVICE, "avatars", `${dir}/a`, "real")
+  await upload(SERVICE, "avatars", `${dir}/x/a`, "nested")
+  return dir
+}
+
+/** Names that are not names of their own: each steps through folders, or has an empty part. */
+const steppingNames = (dir: string): string[] => [
+  `${dir}/x/../a`, `${dir}/./a`, `${dir}/x/./a`, `${dir}/x//a`, `${dir}/x/a/..`, `${dir}/x/a/.`, `${dir}/%2E/a`, `//${dir}/a`,
+]
+
+describe.skipIf(!dockerAvailable)("object names that step through folders (N31)", () => {
+  it("refuses an upload or upsert under them, leaving the objects they reach as they were", async () => {
+    const dir = await namesFolder()
+    for (const name of steppingNames(dir)) {
+      const res = await rawRequest({ method: "POST", path: `/object/avatars/${name}`, token: SERVICE, body: "evil", upsert: true })
+      expect(res.status, name).toBe(400)
+    }
+    expect(await bytesOf("avatars", `${dir}/a`)).toBe("real")
+    expect(await bytesOf("avatars", `${dir}/x/a`)).toBe("nested")
+  })
+
+  it("refuses a download, public or authenticated, under them", async () => {
+    const dir = await namesFolder()
+    for (const name of steppingNames(dir)) {
+      const pub = await rawRequest({ method: "GET", path: `/object/public/avatars/${name}` })
+      const auth = await rawRequest({ method: "GET", path: `/object/authenticated/avatars/${name}`, token: SERVICE })
+      expect([pub.status, auth.status], name).toEqual([400, 400])
+    }
+  })
+
+  it("refuses to sign one, naming it as sent", async () => {
+    const dir = await namesFolder()
+    const sent = `${dir}/x/../a`
+    const res = await rawRequest({ method: "POST", path: `/object/sign/avatars/${sent}`, token: SERVICE, body: '{"expiresIn":60}' })
+    expect(res).toEqual({ status: 400, text: refusalOf(sent) })
+  })
+
+  it("refuses a signed URL whose token names one, rather than serving what it resolves to", async () => {
+    const dir = await namesFolder()
+    const sent = `${dir}/x/../a`
+    const { createSignedToken } = await import("../src/middleware/signed-urls.js")
+    const res = await rawRequest({ method: "GET", path: `/object/sign/avatars/${sent}?token=${createSignedToken("avatars", sent, 60)}` })
+    expect(res).toEqual({ status: 400, text: refusalOf(sent) })
+  })
+
+  // Review: the token was checked against the name as sent ("/x") and the name served was "x", so a
+  // token signed for "/x" served "x". It is checked against the name served, which is what is signed.
+  it("checks a signed URL's token against the name it serves, not the name as sent", async () => {
+    const dir = await namesFolder()
+    const { createSignedToken } = await import("../src/middleware/signed-urls.js")
+    const forSent = createSignedToken("avatars", `/${dir}/a`, 60)
+    const res = await rawRequest({ method: "GET", path: `/object/sign/avatars//${dir}/a?token=${forSent}` })
+    expect(res.status).toBe(403)
+  })
+
+  it("signs the name it serves, so a URL signed for one sent with a leading slash works", async () => {
+    const dir = await namesFolder()
+    const signed = await rawRequest({ method: "POST", path: `/object/sign/avatars//${dir}/a`, token: SERVICE, body: '{"expiresIn":60}' })
+    expect(signed.status).toBe(200)
+    const url: unknown = JSON.parse(signed.text)
+    const signedURL = typeof url === "object" && url !== null && "signedURL" in url && typeof url.signedURL === "string" ? url.signedURL : ""
+    expect(signedURL).toContain(`/object/sign/avatars/${dir}/a?token=`)
+    const res = await rawRequest({ method: "GET", path: signedURL })
+    expect(res).toEqual({ status: 200, text: "real" })
+  })
+
+  it("refuses a remove naming one, naming it as sent, and removes nothing", async () => {
+    const dir = await namesFolder()
+    const sent = `/${dir}/x/../a`
+    const res = await remove(SERVICE, "avatars", [`${dir}/x/a`, sent, `${dir}/a`])
+    expect({ status: res.status, text: await res.text() }).toEqual({ status: 400, text: refusalOf(sent) })
+    expect(await bytesOf("avatars", `${dir}/a`)).toBe("real")
+    expect(await bytesOf("avatars", `${dir}/x/a`)).toBe("nested")
+  })
+
+  it("strips one leading slash from a name, and only one", async () => {
+    const dir = await namesFolder()
+    expect((await rawRequest({ method: "GET", path: `/object/public/avatars//${dir}/a` })).text).toBe("real")
+    expect((await rawRequest({ method: "GET", path: `/object/public/avatars///${dir}/a` })).status).toBe(400)
+  })
+
+  it("refuses an anonymous download from a private bucket before looking at the name", async () => {
+    for (const name of ["a", "x/../a", "x//a"]) {
+      expect((await rawRequest({ method: "GET", path: `/object/public/dropbox/${name}` })).status, name).toBe(403)
+    }
+  })
+})
+
+/** A list's status for `prefix`, and the names when it answered 200. */
+async function listStatus(bucket: string, prefix: string): Promise<{ status: number; names: string[] }> {
+  const res = await fetch(`${base}/object/list/${bucket}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${SERVICE}`, "content-type": "application/json" },
+    body: JSON.stringify({ prefix, limit: 1000 }),
+  })
+  if (res.status !== 200) return { status: res.status, names: [] }
+  return { status: 200, names: (await bodyOf(res, isArrayOf(isJsonObject))).map((e) => String(e["name"])) }
+}
+
+describe.skipIf(!dockerAvailable)("list prefixes (N31)", () => {
+  it("strip one slash at each end, and refuse an empty part", async () => {
+    const dir = `list-${randomUUID()}`
+    await upload(SERVICE, "avatars", `${dir}/a/x`, "inside")
+    for (const prefix of [`${dir}/a`, `${dir}/a/`, `/${dir}/a`, `/${dir}/a/`]) {
+      expect(await listStatus("avatars", prefix), prefix).toEqual({ status: 200, names: ["x"] })
+    }
+    for (const prefix of [`///${dir}/a`, `//${dir}/a`, "//", `${dir}/a//`, `${dir}/a//x`]) {
+      expect((await listStatus("avatars", prefix)).status, prefix).toBe(400)
+    }
+  })
+
+  it("clean a dot part, as the server's store does: a/.. is the folder holding a", async () => {
+    const dir = `list-${randomUUID()}`
+    await upload(SERVICE, "avatars", `${dir}/a/x`, "inside")
+    expect(await listStatus("avatars", `${dir}/a/..`)).toEqual({ status: 200, names: ["a"] })
+    expect(await listStatus("avatars", `${dir}/./a`)).toEqual({ status: 200, names: ["x"] })
+    expect((await listStatus("avatars", "../x")).status).toBe(400)
   })
 })

@@ -46,6 +46,17 @@ function context(body: unknown): Parameters<typeof buckets.update>[0] {
   return { req, res, jwt: null, params: { id: "b" }, url: new URL("http://s/bucket/b") }
 }
 
+/** `ctx` for a request with `body`, and what was answered to it. */
+function answer(body: unknown): { ctx: Parameters<typeof buckets.update>[0]; sent: () => { status: number; body: string } } {
+  const ctx = context(body)
+  let said = ""
+  ctx.res.end = ((chunk?: unknown) => {
+    said = typeof chunk === "string" ? chunk : ""
+    return ctx.res
+  }) as typeof ctx.res.end
+  return { ctx, sent: () => ({ status: ctx.res.statusCode, body: said }) }
+}
+
 beforeEach(() => {
   vi.mocked(s3.applyBucketPolicyFromConfig).mockClear()
   vi.mocked(db.updateBucket).mockClear()
@@ -117,5 +128,101 @@ describe("POST /bucket", () => {
     vi.mocked(db.createBucket).mockRejectedValue(new Error("duplicate key value violates unique constraint"))
     await buckets.create(context({ name: "b", public: true }))
     expect(s3.applyBucketPolicyFromConfig).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Local test round 3c: a field the service does not read, `policy` for `s3_bucket_policy` say, was
+ * ignored without a word, so the bucket was made without what the caller meant it to have.
+ */
+describe("a bucket write naming a field the service does not read", () => {
+  it("is refused on create, with 400 naming the field", async () => {
+    const { ctx, sent } = answer({ name: "b", public: true, policy: "{}", size: 1 })
+    await buckets.create(ctx)
+    expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: "unknown field(s): policy, size" }) })
+    expect(db.createBucket).not.toHaveBeenCalled()
+  })
+
+  it("is refused on update, with 400 naming the field", async () => {
+    vi.mocked(db.getBucket).mockResolvedValue(row("private", false))
+    const { ctx, sent } = answer({ public: true, policy: "{}" })
+    await buckets.update(ctx)
+    expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: "unknown field(s): policy" }) })
+    expect(db.updateBucket).not.toHaveBeenCalled()
+  })
+
+  // A Supabase client's update sends the bucket's own id and name along with the settings.
+  it("takes an update naming the bucket's own id and name, and refuses a rename", async () => {
+    vi.mocked(db.getBucket).mockResolvedValue(row("private", false))
+    vi.mocked(db.updateBucket).mockResolvedValue(row("private", false))
+    await buckets.update(context({ id: "b", name: "b", public: false }))
+    expect(db.updateBucket).toHaveBeenCalled()
+    vi.mocked(db.updateBucket).mockClear()
+    const { ctx, sent } = answer({ id: "b", name: "c" })
+    await buckets.update(ctx)
+    expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'a bucket cannot be renamed: name "c" is not "b"' }) })
+    expect(db.updateBucket).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Review of round 3c: what Supabase's storage client sends. Its create sends `type` ("STANDARD" for
+ * an ordinary bucket) and `versioning_status`, and its update sends `name` equal to the bucket's id.
+ * Each was refused, so the client could create or update no bucket here.
+ */
+describe("a bucket write from Supabase's storage client", () => {
+  it("creates a standard bucket from the body its createBucket sends", async () => {
+    vi.mocked(db.createBucket).mockReset().mockResolvedValue(row("private", false))
+    const { ctx, sent } = answer({ id: "b", name: "b", type: "STANDARD", public: false, file_size_limit: 10, allowed_mime_types: ["image/png"] })
+    await buckets.create(ctx)
+    expect(sent().status).toBe(200)
+    expect(db.createBucket).toHaveBeenCalled()
+  })
+
+  it("refuses a bucket type or versioning it has no such feature for, naming it", async () => {
+    const analytics = answer({ id: "b", name: "b", type: "ANALYTICS" })
+    await buckets.create(analytics.ctx)
+    expect(analytics.sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'type "ANALYTICS" is not supported: this service stores STANDARD buckets' }) })
+    const versioned = answer({ id: "b", name: "b", versioning_status: "Enabled" })
+    await buckets.create(versioned.ctx)
+    expect(versioned.sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'versioning_status "Enabled" is not supported: this service keeps no object versions' }) })
+  })
+
+  it("updates a bucket whose name is not its id from the body its updateBucket sends", async () => {
+    const named = { ...row("private", false), name: "Pictures" }
+    vi.mocked(db.getBucket).mockResolvedValue(named)
+    vi.mocked(db.updateBucket).mockResolvedValue(named)
+    const { ctx, sent } = answer({ id: "b", name: "b", public: false })
+    await buckets.update(ctx)
+    expect(sent().status).toBe(200)
+    expect(db.updateBucket).toHaveBeenCalled()
+  })
+
+  it("still refuses an update naming another id", async () => {
+    vi.mocked(db.getBucket).mockResolvedValue(row("private", false))
+    const { ctx, sent } = answer({ id: "c" })
+    await buckets.update(ctx)
+    expect(sent()).toEqual({ status: 400, body: JSON.stringify({ error: 'a bucket cannot be renamed: id "c" is not "b"' }) })
+  })
+})
+
+/**
+ * Local test round 4: a create with `"file_size_limit": null` or `"allowed_mime_types": null`
+ * answered 400 with `The request body does not have the fields this route reads, with their types`,
+ * naming no field, while an update took the same nulls as "no limit".
+ */
+describe("a bucket create naming no limit", () => {
+  it("takes null for the size limit and the types, as an update does", async () => {
+    vi.mocked(db.createBucket).mockReset().mockResolvedValue(row("private", false))
+    const { ctx, sent } = answer({ name: "b", file_size_limit: null, allowed_mime_types: null })
+    await buckets.create(ctx)
+    expect(sent().status).toBe(200)
+    expect(vi.mocked(db.createBucket).mock.lastCall?.slice(3, 5)).toEqual([null, null])
+  })
+
+  it("names the field whose type it cannot read", async () => {
+    // The server answers an InvalidBody with 400 and its message (server.ts).
+    const { ctx } = answer({ name: "b", file_size_limit: "1000" })
+    await expect(buckets.create(ctx)).rejects.toThrow("The request body's file_size_limit does not have the type this route reads")
   })
 })

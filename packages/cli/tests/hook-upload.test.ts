@@ -3,7 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import { ADAPTER_KEY, readHookUpload } from "../src/hook-upload.js"
+import { FLATTENED_ADAPTER_IMPORT } from "@supatype/shared"
+import { readHookUpload } from "../src/hook-upload.js"
 
 function project(): { cwd: string; hooks: string } {
   const cwd = mkdtempSync(join(tmpdir(), "supatype-hook-upload-"))
@@ -50,7 +51,7 @@ export default hook(moderate)
 describe("readHookUpload", () => {
   it("is null when the schema names no hooks", () => {
     const { cwd, hooks } = project()
-    expect(readHookUpload(cwd, hooks, astWith({}))).toBeNull()
+    expect(readHookUpload(cwd, hooks, astWith({}), "entry")).toBeNull()
   })
 
   it("rewrites the generated adapter import to the flattened name", () => {
@@ -58,9 +59,9 @@ describe("readHookUpload", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", HANDLER)
 
-    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
     expect(upload?.handlers).toHaveLength(1)
-    expect(upload?.handlers[0]?.source).toContain(`./${ADAPTER_KEY}`)
+    expect(upload?.handlers[0]?.source).toContain(FLATTENED_ADAPTER_IMPORT)
     expect(upload?.handlers[0]?.source).not.toContain("../_supatype/hooks.ts")
   })
 
@@ -71,7 +72,7 @@ describe("readHookUpload", () => {
     writeHook(hooks, "moderate-post", HANDLER)
     writeHook(hooks, "abandoned", HANDLER)
 
-    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
     expect(upload?.handlers.map((h) => h.name)).toEqual(["moderate-post"])
   })
 
@@ -81,7 +82,7 @@ describe("readHookUpload", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", HANDLER)
 
-    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
     expect(upload?.map["posts"]?.["beforeChange"]?.function).toBe("moderate-post")
   })
 
@@ -91,16 +92,20 @@ describe("readHookUpload", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", HANDLER, { "helpers.ts": "export const x = 1\n" })
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" })))
-      .toThrow(/more than one file \(helpers\.ts\)/)
+    // Per-hook deploys: the hook is not sent, and why is said; the others still go.
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
+    expect(upload?.handlers).toEqual([])
+    expect(upload?.failed.map((f) => f.name)).toEqual(["moderate-post"])
+    expect(upload?.failed[0]?.reason).toMatch(/more than one file \(helpers\.ts\)/)
   })
 
   it("refuses a relative import it cannot resolve after flattening", () => {
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", `import { x } from "./helpers.ts"\nexport default () => x\n`)
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" })))
-      .toThrow(/imports \.\/helpers\.ts/)
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
+    expect(upload?.failed.map((f) => f.name)).toEqual(["moderate-post"])
+    expect(upload?.failed[0]?.reason).toMatch(/imports \.\/helpers\.ts/)
   })
 
   it("leaves bare specifiers and URLs alone", () => {
@@ -112,14 +117,69 @@ describe("readHookUpload", () => {
       `import { z } from "npm:zod"\nimport { j } from "https://esm.sh/joi"\n` + HANDLER,
     )
 
-    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }))
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
     expect(upload?.handlers).toHaveLength(1)
   })
 
   it("names the missing handler when a declared hook has no source", () => {
     const { cwd, hooks } = project()
 
-    expect(() => readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" })))
-      .toThrow(/moderate-post/)
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "entry")
+    expect(upload?.failed.map((f) => f.name)).toEqual(["moderate-post"])
+    expect(upload?.failed[0]?.reason).toMatch(/moderate-post\/index\.ts/)
+  })
+
+  // Per-hook deploys (Nic, 2026-11-01): each hook passes or fails on its own.
+  it("checks each hook on its own: a bad one fails, the good one is still sent", () => {
+    const { cwd, hooks } = project()
+    writeHook(hooks, "good-hook", HANDLER)
+    writeHook(hooks, "bad-hook", HANDLER, { "helpers.ts": "export const x = 1\n" })
+    const ast = { models: [
+      { name: "Post", fields: {}, annotations: { db: { tableName: "posts" }, platform: { hooks: { beforeChange: { function: "good-hook" } } } } },
+      { name: "Memo", fields: {}, annotations: { db: { tableName: "memos" }, platform: { hooks: { beforeChange: { function: "bad-hook" } } } } },
+    ] }
+    const upload = readHookUpload(cwd, hooks, ast, "entry")
+    expect(upload?.handlers.map((h) => h.name)).toEqual(["good-hook"])
+    expect(upload?.failed.map((f) => f.name)).toEqual(["bad-hook"])
+    expect(Object.keys(upload?.map ?? {}).sort()).toEqual(["memos", "posts"])
+  })
+})
+
+/**
+ * A linked push wrote the manifest's hook map on the stack, but not its validator map, so a
+ * validator never ran on a remote self-host stack; it also never uploaded the validator's function.
+ * Validators name functions in the same directory as hooks, so they travel with the hooks.
+ */
+describe("readHookUpload with validators", () => {
+  function astWithValidator(): unknown {
+    return {
+      models: [
+        {
+          name: "Post",
+          fields: [],
+          annotations: { db: { tableName: "posts" }, platform: { validate: { title: { function: "check-title" } } } },
+        },
+      ],
+    }
+  }
+
+  it("uploads the function a validator names, with no hook declared", () => {
+    const { cwd, hooks } = project()
+    writeHook(hooks, "check-title", HANDLER)
+    const upload = readHookUpload(cwd, hooks, astWithValidator(), "entry")
+    expect(upload?.handlers.map((handler) => handler.name)).toEqual(["check-title"])
+    expect(upload?.map).toEqual({})
+  })
+})
+
+// Review of round 7, item C6: a server writes the hook's directory back as the project keeps it.
+describe("readHookUpload for a target that takes a hook's directory", () => {
+  it("sends every file, the adapter import as the project writes it", () => {
+    const { cwd, hooks } = project()
+    writeHook(hooks, "moderate-post", `import { x } from "./helpers.ts"\n` + HANDLER, { "helpers.ts": "export const x = 1\n" })
+
+    const upload = readHookUpload(cwd, hooks, astWith({ beforeChange: "moderate-post" }), "directory")
+    expect(Object.keys(upload?.handlers[0]?.files ?? {}).sort()).toEqual(["helpers.ts", "index.ts"])
+    expect(upload?.handlers[0]?.files?.["index.ts"]).toContain("../_supatype/hooks.ts")
   })
 })

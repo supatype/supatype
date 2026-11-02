@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { startNativeRealtime, type NativeRealtimeOptions } from "../src/native-realtime.js"
 import { decodingProblem } from "../src/db-preflight.js"
-import type { RealtimeLaunchSpec } from "../src/realtime-launch.js"
+import type { ComponentLaunchSpec } from "../src/component-launch.js"
 import type { ProcessManager } from "../src/process-manager.js"
 import { isJsonObject } from "@supatype/shared"
 import { parseJsonAs } from "./support/json.js"
@@ -57,14 +57,14 @@ function freePort(): Promise<number> {
 }
 
 /** A stand-in realtime: `body` is the script node runs, with PORT in its environment. */
-function fakeRealtime(body: string): () => Promise<RealtimeLaunchSpec> {
+function fakeRealtime(body: string): () => Promise<ComponentLaunchSpec> {
   const script = join(dir, "fake-realtime.cjs")
   writeFileSync(script, body, "utf8")
   return async () => ({ bin: process.execPath, args: [script] })
 }
 
 /** A realtime answering /health/ready with `status` and `json`, exiting after `lifeMs` when given. */
-function answering(status: number, json: object, lifeMs?: number): () => Promise<RealtimeLaunchSpec> {
+function answering(status: number, json: object, lifeMs?: number): () => Promise<ComponentLaunchSpec> {
   return fakeRealtime(`
 const http = require("node:http")
 const server = http.createServer((req, res) => {
@@ -76,7 +76,7 @@ ${lifeMs === undefined ? "" : `setTimeout(() => process.exit(0), ${lifeMs})`}
 `)
 }
 
-async function start(launch: () => Promise<RealtimeLaunchSpec>): Promise<ProcessManager | null> {
+async function start(launch: () => Promise<ComponentLaunchSpec>): Promise<ProcessManager | null> {
   const proc = await startNativeRealtime(options(), launch)
   if (proc !== null) started.push(proc)
   return proc
@@ -115,6 +115,17 @@ describe("startNativeRealtime", () => {
     expect(logs.join("\n")).toContain(`Realtime service: ${options().url}`)
   })
 
+  // Local test round 3c (N18): native realtime listened on every address, 0.0.0.0 and [::].
+  it("tells realtime to listen on 127.0.0.1 only", async () => {
+    const seen = JSON.stringify(join(dir, "realtime-host"))
+    const proc = await start(fakeRealtime(`
+require("node:fs").writeFileSync(${seen}, process.env.REALTIME_HOST ?? "unset")
+require("node:http").createServer((req, res) => res.end("{}")).listen(Number(process.env.PORT), "127.0.0.1")
+`))
+    expect(proc).not.toBeNull()
+    expect(readFileSync(join(dir, "realtime-host"), "utf8")).toBe("127.0.0.1")
+  })
+
   it("disables realtime and says so when the process exits without answering", async () => {
     expect(await start(fakeRealtime("process.exit(0)\n"))).toBeNull()
     expect(manifest()).toEqual({ realtime_enabled: false })
@@ -142,6 +153,24 @@ describe("startNativeRealtime", () => {
     expect(Date.now() - begun).toBeLessThan(options().readyTimeoutMs ?? 0)
     expect(logs.join("\n")).toContain(`Realtime service: ${options().url} (still connecting to the database)`)
     await vi.waitFor(() => expect(manifest()).toEqual({ realtime_enabled: false }), { timeout: 5_000 })
+  }, 10_000)
+
+  // Local test round 7 (3b-22): on a Postgres without wal2json, realtime answers "connecting" first
+  // and "unsupported" once it has asked the database. Dev printed only the connecting line, and the
+  // "database changes are off" line round 6 showed never came.
+  it("says database changes are off when a realtime announced as connecting finds it cannot stream them", async () => {
+    const launch = fakeRealtime(`
+const http = require("node:http")
+const begun = Date.now()
+http.createServer((req, res) => {
+  const settled = Date.now() - begun > 1000
+  res.writeHead(503, { "Content-Type": "application/json" })
+  res.end(JSON.stringify(settled ? { status: "unsupported", reason: "wal2json is not installed" } : { status: "connecting" }))
+}).listen(Number(process.env.PORT), "127.0.0.1")
+`)
+    expect(await start(launch)).not.toBeNull()
+    expect(logs.join("\n")).toContain("(still connecting to the database)")
+    await vi.waitFor(() => expect(warnings.join("\n")).toMatch(/Realtime is up at .* but database changes are off: wal2json is not installed/), { timeout: 6_000 })
   }, 10_000)
 
   it("disables realtime when it exits after starting", async () => {

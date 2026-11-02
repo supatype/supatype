@@ -146,6 +146,8 @@ Variables for functions live in env files inside the functions directory:
 
 Read them from `ctx.env`. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.
 
+Every value set with `supatype functions env set`, in `.env.local` or in `.env.<name>.local` arrives in `ctx.env` on each call, never in `Deno.env`: `Deno.env` is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. `Deno.env.get("RESEND_API_KEY")` finds nothing.
+
 ```sh
 $ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list
@@ -180,7 +182,7 @@ $ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'
 ```
 
-`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. `--auth` adds a test token to the request.
+`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
 
 <h2 id="self-host">Self-host</h2>
 

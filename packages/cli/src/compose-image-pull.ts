@@ -16,7 +16,7 @@ import { isRegistryPullableImageRef } from "./self-host-compose.js"
 /** What {@link pullServiceImages} asks of Docker. */
 export interface ImagePullSteps {
   /** `docker compose pull` for every service, shown as it runs; its exit status. */
-  pullAll: () => number
+  pullAll: () => Promise<number>
   /** Each service and the image it runs, as compose resolves the file. */
   images: () => Promise<ServiceImage[]>
   /** `docker compose pull` for one service, quietly: whether it worked, and what it said when not. */
@@ -41,7 +41,7 @@ export interface ImagePulls {
 /** Pull every image; those that could not be pulled. */
 export async function pullServiceImages(steps: ImagePullSteps): Promise<ImagePulls> {
   const pulls: ImagePulls = { failed: [], keptLocal: [] }
-  if (steps.pullAll() === 0) return pulls
+  if ((await steps.pullAll()) === 0) return pulls
   // Compose gives one exit status for the lot, so each is asked again on its own. What did pull
   // the first time is current now, and pulling it again costs a manifest check.
   const images = await steps.images()

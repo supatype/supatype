@@ -19,14 +19,13 @@ import {
   pgSchema,
   projectRootFromConfig,
   resolveRuntimeProvider,
-  hooksPathFromProject,
   schemaPathFromProject,
   selfHostTlsEnabled,
   usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
-import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
-import { rowCacheChangeNote, syncRowCacheEnv } from "./model-cache.js"
+import { rowCacheChangeNote } from "./model-cache.js"
+import { writeAppliedAstArtifacts } from "./applied-ast-artifacts.js"
 import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { devApiKeys } from "./dev-api-keys.js"
 import { warnUrlUnsafeComposePasswords } from "./url-safe-passwords.js"
@@ -38,7 +37,6 @@ import { devSessionLockFor, recoverStaleDevSession, writeDevSessionLock } from "
 import { endDevSession, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
-import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
 import { offerToSaveShellDbPort } from "./db-port-offer.js"
@@ -105,7 +103,7 @@ import {
 } from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
-import { provisionBucketsFromAst } from "./storage-provision.js"
+import { provisionBucketsFromAst, unprovisionedBuckets } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { demoDataHint, publishDevReady } from "./dev-ready-panel.js"
@@ -144,10 +142,24 @@ import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
 import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 import { mailerProviderEnv } from "./mailer-env.js"
+import { fetchWithin } from "./fetch-within.js"
+import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
+
+/**
+ * The image pins config asks for, once the engine's is known not to be older than this CLI needs.
+ * Checked before `.env` is written: a push refused the engine after writing its pin there as a
+ * managed line, and `.env` stayed pinned to the refused engine (local test round 6).
+ */
+function checkedImagePins(config: SupatypeProjectConfig): Record<string, string> {
+  const pins = composeDockerImageEnv(config)
+  const engine = pins["SUPATYPE_ENGINE_IMAGE"]
+  if (engine !== undefined) assertEngineVersionSupported(engineImageVersion(engine), "versions.engine in supatype.config.ts", "image")
+  return pins
+}
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
-  const imagePins = composeDockerImageEnv(config)
+  const imagePins = checkedImagePins(config)
   // Clean up only what a previous run wrote from config. A hand-written image tag in `.env` is the
   // documented way to run a local build, and this used to delete it on every compose run.
   const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
@@ -327,7 +339,7 @@ export function upsertDevComposeEnv(
   devDbPort?: number,
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
-  const imagePins = composeDockerImageEnv(config)
+  const imagePins = checkedImagePins(config)
   // `POSTGRES_PASSWORD` and `JWT_SECRET` are deliberately absent.
   //
   // They used to be pinned here to published constants on every `dev` run, against the same
@@ -547,18 +559,6 @@ function loopbackBase(port: number): string {
 }
 
 /**
- * `fetch` with a deadline, because the built-in has none.
- *
- * A poll loop bounded by `maxSec` iterations is only bounded if each attempt can end. Against a
- * socket that accepts and never responds, an un-timed `fetch` never settles, the loop never reaches
- * its second iteration, and a wait advertised as 120 seconds runs until someone kills it. That is
- * how `supatype push` came to hang indefinitely after reporting the schema applied.
- */
-async function fetchWithin(url: string, ms: number, init?: RequestInit): Promise<Response> {
-  return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
-}
-
-/**
  * Print what the stack is doing when the gateway never comes up.
  *
  * A 503 through the gateway means Kong is running and something behind it is
@@ -651,12 +651,18 @@ async function waitStorageApiReady(
   )
 }
 
+/**
+ * The schema's buckets on the dev stack. One the service did not take is said in one line, with what
+ * it means: dev carries on, and only uploads to that bucket fail. They were dropped without a word
+ * past each bucket's own warning.
+ */
 async function provisionDockerStorageBuckets(
   ast: ExtractedSchemaAstV2,
   kongPort: number,
   serviceRoleKey: string,
 ): Promise<void> {
-  await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey)
+  const left = unprovisionedBuckets(await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey))
+  if (left !== null) console.warn(`[supatype] ⚠  ${left}; uploads to them fail until a later push takes them.`)
 }
 
 let _lastPushedAst: string | null = null
@@ -702,19 +708,10 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // Every project running on Compose therefore had a manifest with no `hooks` and no `validators`
   // key, and the server, having nothing to call, ran neither. A hook silently not firing is bad; a
   // validator silently not firing means a write the schema says is checked is accepted with a 201.
-  const hooksModule = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
-  if (hooksModule !== null) console.log(`[supatype] Hook handler types written to ${hooksModule}`)
-  // And the context module, on the same terms. `init` and `functions new` wrote it and nothing
-  // else did, so a project that already had functions when the two-argument contract landed never
-  // received one: its handlers had no `FunctionContext` to import.
-  const contextModule = refreshFunctionsContext(cwd, config)
-  if (contextModule !== undefined) console.log(`[supatype] Function context type written to ${contextModule}`)
-  if (syncManifestHooks(cwd, ast)) {
-    console.log("[supatype] Hook and validator maps written to .supatype/manifest.json")
-  }
-  // Written before the stack comes up, so a first run with a row cache declared starts with it on
-  // rather than needing a second `supatype dev`.
-  const rowCache = syncRowCacheEnv(cwd, ast)
+  // The row cache is written before the stack comes up, so a first run with a row cache declared
+  // starts with it on rather than needing a second `supatype dev`.
+  const { lines, rowCache } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: true })
+  for (const line of lines) console.log(`[supatype] ${line}`)
   if (rowCache !== null) {
     console.log(`[supatype] ${rowCacheChangeNote(rowCache)}`)
   }

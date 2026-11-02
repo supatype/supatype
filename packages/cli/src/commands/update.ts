@@ -9,7 +9,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
-import { askDockerCompose, runDockerCompose, writeSelfHostCompose, composeProjectName } from "../self-host-compose.js"
+import { askDockerCompose, pullComposeImages, writeSelfHostCompose, composeProjectName } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { syncComposeImagePins } from "../dev-compose.js"
 import { composeServiceImages } from "../compose-services.js"
@@ -25,6 +25,7 @@ import {
   type PlatformId,
 } from "../binary-cache.js"
 import { defaultComponentVersion } from "../release-images.js"
+import { BINARY_COMPONENTS, RELEASE_VERSIONED_COMPONENTS } from "../components.js"
 import { error, info, plain } from "../ui/messages.js"
 import { fatalError } from "../ui/fatal.js"
 
@@ -93,7 +94,7 @@ async function updateComposeImages(cwd: string, config: SupatypeProjectConfig): 
   const project = composeProjectName(config.project.name)
   info("Pulling self-host compose images...")
   const pulls = await pullServiceImages({
-    pullAll: () => runDockerCompose(composePath, ["pull"], cwd, project, { brand: UPDATE_BRAND }),
+    pullAll: () => pullComposeImages(composePath, cwd, project, { brand: UPDATE_BRAND }),
     images: () => composeServiceImages({ composePath, projectRoot: cwd, projectName: project }),
     pullOne: async (service) => {
       const answer = await askDockerCompose(composePath, ["pull", service], cwd, project, DOCKER_PULL_TIMEOUT_MS)
@@ -116,7 +117,7 @@ function imagePullFailure(one: FailedPull): UpdateFailure {
 }
 
 /** The components a native project runs, in the order `update` fetches them. */
-const NATIVE_COMPONENTS: readonly Component[] = ["engine", "server", "postgres", "deno", "realtime"]
+const NATIVE_COMPONENTS: readonly Component[] = BINARY_COMPONENTS
 
 /** A pinned component the CDN has a newer version of. */
 interface ComponentUpdate {
@@ -236,12 +237,12 @@ function planComponent(component: Component, config: SupatypeProjectConfig, { la
   return { kind: "update", update: { component, from: current, to: latest } }
 }
 
-/** A pinned component the CDN names no latest version for: skipped for realtime, a failure otherwise. */
+/** A pinned component the CDN names no latest version for: skipped for realtime and storage, a failure otherwise. */
 function missingLatest(component: Component): ComponentPlan {
-  if (component === "realtime") {
-    // Realtime binaries publish with every stable supatype v* release, but releases from
-    // before that have none, and a prerelease never moves realtime/latest.json.
-    info(`Skipping ${component}: no realtime/latest.json on the CDN (realtime binaries ship with each stable supatype v* release)`)
+  if (RELEASE_VERSIONED_COMPONENTS.has(component)) {
+    // Realtime binaries and storage archives publish with every stable supatype v* release, but
+    // releases from before that have none, and a prerelease never moves <component>/latest.json.
+    info(`Skipping ${component}: no ${component}/latest.json on the CDN (it ships with each stable supatype v* release)`)
     return null
   }
   error(`No latest version for ${component} on CDN`)

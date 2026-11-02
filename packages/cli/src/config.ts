@@ -116,6 +116,9 @@ const LOCAL_CONFIG_CANDIDATES = [
   "supatype.local.config.mjs",
 ]
 
+/** The file names a project's config can have, the local override included. */
+export const PROJECT_CONFIG_FILES: readonly string[] = [...MAIN_CONFIG_CANDIDATES, ...LOCAL_CONFIG_CANDIDATES]
+
 /** True when `cwd` holds a project config, whether or not it then loads (a retired one included). */
 export function hasProjectConfig(cwd: string): boolean {
   return [...MAIN_CONFIG_CANDIDATES, LEGACY_TOML].some((candidate) => existsSync(resolve(cwd, candidate)))
