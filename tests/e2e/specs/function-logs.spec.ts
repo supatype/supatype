@@ -13,8 +13,8 @@ import { signInToStudio } from "../lib/studio-session.js"
  *
  * Logs reach Studio by one of two routes, decided by where the functions actually run:
  *
- *   - **an external worker** (Compose, cloud): the worker streams, the server relays it on
- *     `/functions/v1/admin/logs/tail`, and the tab tails live.
+ *   - **an external worker** (Compose, cloud): the worker streams, the server relays it on its
+ *     functions admin API at `/admin/v1/functions/logs/tail`, and the tab tails live.
  *   - **in-process Deno** (`supatype dev`): there is no worker to tail, the relay answers 501, and
  *     the tab falls back to the per-function query the server answers from its own log buffer.
  *
@@ -42,7 +42,9 @@ const signIn = (page: Page): Promise<void> =>
  * open for as long as it is on screen, so the network is never idle and that wait cannot return.
  */
 async function openLogsTab(page: Page, fn: string): Promise<boolean> {
-  const tail = page.waitForResponse((r) => r.url().includes("/functions/v1/admin/logs/tail"), {
+  // Where Studio calls the functions admin API (functionsAdminFetch): /admin/v1/functions, since it
+  // left /functions/v1/admin, where it hid a project function named "admin".
+  const tail = page.waitForResponse((r) => r.url().includes("/admin/v1/functions/logs/tail"), {
     timeout: 20_000,
   })
   await page.goto(`/studio/edge-functions/${fn}/logs`, { waitUntil: "domcontentloaded" })
