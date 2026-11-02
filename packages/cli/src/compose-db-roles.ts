@@ -3,7 +3,8 @@
  */
 
 import { dirname } from "node:path"
-import { spawnSync, type SpawnSyncReturns } from "node:child_process"
+import { askDockerSync, DOCKER_EXEC_TIMEOUT_MS, type DockerAnswer } from "./docker-exec.js"
+import { spawnFailureText } from "./error-message.js"
 import {
   SQL_EDITOR_PASSWORD_ENV,
   devAuthenticatorPassword,
@@ -53,33 +54,22 @@ function runOwnerPsql(
   composeProject: string,
   sql: string,
   env: Record<string, string> = {},
-): SpawnSyncReturns<string> {
+): DockerAnswer {
   const { user, password, database } = devDatabaseIdentity(cwd)
   const secrets = dockerEnv({ PGPASSWORD: password, ...env })
-  return spawnSync(
-    "docker",
+  return askDockerSync(
     [
       "compose", "-p", composeProject, "-f", paths.composePath,
       "exec", "-T", ...secrets.args,
       "db", "psql", "-v", "ON_ERROR_STOP=1", "-U", user, "-d", database,
     ],
-    {
-      cwd: dirname(paths.composePath),
-      encoding: "utf8",
-      timeout: 10_000,
-      input: sql,
-      env: secrets.env,
-    },
+    { cwd: dirname(paths.composePath), timeoutMs: DOCKER_EXEC_TIMEOUT_MS, input: sql, env: secrets.env },
   )
 }
 
 /** Why a `docker` call failed, from whatever it said. */
-function failureDetail(result: SpawnSyncReturns<string>): string {
-  const detail = [result.stderr, result.error?.message]
-    .map((s) => (s ?? "").trim())
-    .filter((s) => s.length > 0)
-    .join("\n")
-  return detail === "" ? "docker gave no output." : detail
+function failureDetail(result: DockerAnswer): string {
+  return spawnFailureText({ ...result, stdout: "" })
 }
 
 /**

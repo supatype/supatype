@@ -20,6 +20,8 @@ export interface SocketSwapHarness {
   realtime: RealtimeClient
   /** Every socket opened so far, oldest first. */
   sockets: MockWebSocketInstance[]
+  /** The newest socket. Fails the test when none has been opened. */
+  socket(): MockWebSocketInstance
   /** Let queued connects and opens run. */
   settle(): Promise<void>
   /** The server acknowledges every join sent on the newest socket. */
@@ -50,6 +52,7 @@ export function createSocketSwapHarness(): SocketSwapHarness {
   return {
     realtime,
     sockets: mock.instances,
+    socket: () => newestOf(mock.instances),
     settle,
     ackJoins: () => {
       for (const channel of subscribedChannels(newestOf(mock.instances))) reply("ok", `subscribed to ${channel}`)

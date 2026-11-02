@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
-import { readComposeEnvInt } from "./env-file.js"
+import { readComposeEnvInt, readDotEnvFiles, shellEnvInt } from "./env-file.js"
 import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
@@ -97,7 +97,7 @@ export interface SupatypeProjectConfig {
      * "managed"    = cloud-managed, HMAC tenant verification
      */
     mode: "dev" | "standalone" | "managed"
-    /** Port supatype-server listens on (default: 54321). */
+    /** Port supatype-server listens on (default: NATIVE_SERVER_PORT, 18471). */
     port?: number
     /** Port PostgREST listens on in local dev (default: 3001). */
     postgrestPort?: number
@@ -216,6 +216,8 @@ export interface SupatypeProjectConfig {
     deno?: string
     /** Path to a local supatype-realtime binary (or node entry script). */
     realtime?: string
+    /** Path to a local supatype-storage executable (or node entry script, e.g. packages/storage/dist/index.js). */
+    storage?: string
     /** Path to the @supatype/studio package directory (starts Vite dev server). */
     studio?: string
     /** Path to a local PostgREST binary. */
@@ -226,8 +228,8 @@ export interface SupatypeProjectConfig {
      * Email delivery provider.
      * "console" = log to stdout (default for dev)
      * "smtp"    = SMTP (set `smtp` below and/or SUPATYPE_SMTP_* in `.env`)
-     * "resend"  = Resend API (requires RESEND_API_KEY, RESEND_FROM)
-     * "ses"     = AWS SES v2 (ambient credentials, requires SES_FROM)
+     * "resend"  = Resend API (requires SUPATYPE_RESEND_API_KEY, SUPATYPE_RESEND_FROM)
+     * "ses"     = AWS SES v2 (ambient credentials, requires SUPATYPE_SES_FROM)
      */
     provider: "console" | "smtp" | "resend" | "ses"
     /**
@@ -242,11 +244,11 @@ export interface SupatypeProjectConfig {
       admin_email?: string
       sender_name?: string
     }
-    /** Resend API key (provider=resend, or set RESEND_API_KEY env var). */
+    /** Resend API key (provider=resend, or set SUPATYPE_RESEND_API_KEY in `.env`). */
     resend_api_key?: string
-    /** From address for Resend (provider=resend, or set RESEND_FROM env var). */
+    /** From address for Resend (provider=resend, or set SUPATYPE_RESEND_FROM in `.env`). */
     resend_from?: string
-    /** From address for SES (provider=ses, or set SES_FROM env var). */
+    /** From address for SES (provider=ses, or set SUPATYPE_SES_FROM in `.env`). */
     ses_from?: string
     /**
      * When true, `supatype dev` enables the send-email HTTP hook pointing at this
@@ -862,7 +864,7 @@ export function preferredFunctionsPathFromProject(cfg: SupatypeProjectConfig, cw
  * running two (A3-N4, A4-N2); with no port recorded there is no address to give.
  */
 export function serverBaseUrl(cfg: SupatypeProjectConfig, cwd: string = process.cwd()): string | undefined {
-  const port = cfg.server.port ?? 54321
+  const port = nativeServerPort(cfg)
   switch (cfg.server.mode) {
     case "dev":
     case "standalone":
@@ -932,12 +934,31 @@ export const COMPOSE_DEV_KONG_PORT = 18473
  * cluster checks it, so the `postgres` default only reaches a cluster still set up that way.
  */
 export function localDSN(cfg: SupatypeProjectConfig, password = "postgres", cwd: string = process.cwd()): string {
-  const port = nativeDbPort(cfg, cwd)
-  return `postgres://postgres:${encodeURIComponent(password)}@127.0.0.1:${port}/${cfg.project.name}?sslmode=disable`
+  return nativeDatabaseUrl(cfg.project.name, password, nativeDbPort(cfg, cwd))
+}
+
+/** The URL of native Postgres's database `name` on `port`, as its superuser. */
+export function nativeDatabaseUrl(name: string, password: string, port: number): string {
+  return `postgres://postgres:${encodeURIComponent(password)}@127.0.0.1:${port}/${name}?sslmode=disable`
 }
 
 /** Where native Postgres listens when nothing moves it. */
 export const NATIVE_DB_PORT = 5432
+
+/**
+ * Where supatype-server listens when `server.port` does not move it. In Supatype's own range, below
+ * the gateway's {@link COMPOSE_DEV_KONG_PORT}, from which `dev` walks upward for each further
+ * project. It was 54321, Supabase's port, which a Supabase user already holds (decision D4).
+ */
+export const NATIVE_SERVER_PORT = 18471
+
+/** Where `supatype functions serve` listens without `--port`, beside the native server (D4). */
+export const FUNCTIONS_SERVE_PORT = 18472
+
+/** The port supatype-server listens on: `server.port`, else {@link NATIVE_SERVER_PORT}. */
+export function nativeServerPort(cfg: SupatypeProjectConfig): number {
+  return cfg.server.port ?? NATIVE_SERVER_PORT
+}
 
 /** Where native realtime listens when nothing moves it. */
 export const NATIVE_REALTIME_PORT = 4000
@@ -970,6 +991,35 @@ export function nativeDataDir(cfg: SupatypeProjectConfig): string {
 /** The port native realtime listens on: `SUPATYPE_REALTIME_PORT`, then `server.realtimePort`, then 4000. */
 export function nativeRealtimePort(cfg: SupatypeProjectConfig, cwd: string = process.cwd()): number {
   return readComposeEnvInt(cwd, REALTIME_PORT_ENV) ?? cfg.server?.realtimePort ?? NATIVE_REALTIME_PORT
+}
+
+/** Where the native server starts Deno for functions when nothing moves it: the server's default. */
+export const NATIVE_DENO_PORT = 8001
+
+/** The environment key the server reads the Deno port from. */
+export const DENO_PORT_ENV = "SUPATYPE_DENO_PORT"
+
+/**
+ * The port native dev's Deno listens on: `SUPATYPE_DENO_PORT` exported, then from `.env` and
+ * `.env.local` (the files native dev builds the server's environment from), then 8001. A value
+ * that is not a port, blank included, is passed over.
+ */
+export function nativeDenoPort(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): number {
+  return shellEnvInt(DENO_PORT_ENV, env) ?? shellEnvInt(DENO_PORT_ENV, readDotEnvFiles(cwd)) ?? NATIVE_DENO_PORT
+}
+
+/** Where native dev's storage service listens when nothing moves it: beside Deno's 8001. */
+export const NATIVE_STORAGE_PORT = 8002
+
+/** The environment key native dev reads the storage service's port from. */
+export const STORAGE_PORT_ENV = "SUPATYPE_STORAGE_PORT"
+
+/**
+ * The port native dev's storage service listens on: `SUPATYPE_STORAGE_PORT` exported, then from
+ * `.env` and `.env.local`, then 8002, as for Deno's.
+ */
+export function nativeStoragePort(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): number {
+  return shellEnvInt(STORAGE_PORT_ENV, env) ?? shellEnvInt(STORAGE_PORT_ENV, readDotEnvFiles(cwd)) ?? NATIVE_STORAGE_PORT
 }
 
 /**

@@ -17,13 +17,13 @@
  * of this.
  */
 import { EMBEDDED_CLI_VERSION } from "./cli-version-embedded.js"
-import type { Component } from "./components.js"
+import { RELEASE_VERSIONED_COMPONENTS, type Component } from "./components.js"
 import { PINNED_IMAGES } from "./generated/release-images.js"
 
 export type PinnedComponent = keyof typeof PINNED_IMAGES
 
 /** The images built in this repository, published under the CLI's version. */
-type InRepoImage = "studio" | "storage" | "realtime" | "functions-worker" | "control-plane"
+export type InRepoImage = "studio" | "storage" | "realtime" | "functions-worker" | "control-plane"
 
 type ReleaseImageName = PinnedComponent | InRepoImage
 
@@ -59,6 +59,36 @@ export function releaseImages(version: string = EMBEDDED_CLI_VERSION): Record<Re
 /** The images this CLI runs when nothing names one. */
 export const RELEASE_IMAGES = releaseImages()
 
+/** The variable that names each in-repo image in place of the CLI's own. */
+export const IN_REPO_IMAGE_ENV: Readonly<Record<InRepoImage, string>> = {
+  studio: "SUPATYPE_STUDIO_IMAGE",
+  storage: "SUPATYPE_STORAGE_IMAGE",
+  realtime: "SUPATYPE_REALTIME_IMAGE",
+  "functions-worker": "SUPATYPE_FUNCTIONS_WORKER_IMAGE",
+  "control-plane": "SUPATYPE_CONTROL_PLANE_IMAGE",
+}
+
+/**
+ * What to say when a CLI that is not a release runs in-repo images from `:latest`, naming those
+ * nothing in `env` (`.env` under the shell, as compose reads them) overrides; undefined otherwise.
+ * A released CLI runs the images of its own version and has nothing to say. A source build has no
+ * version of its own published, so `:latest` is intended there, and it used to run without a word.
+ */
+export function unpinnedImagesNote(
+  env: Readonly<Record<string, string | undefined>>,
+  version: string = EMBEDDED_CLI_VERSION,
+): string | undefined {
+  if (isReleaseVersion(version)) return undefined
+  const names = Object.entries(IN_REPO_IMAGE_ENV)
+    .filter(([, key]) => (env[key]?.trim() ?? "") === "")
+    .map(([name]) => name)
+  if (names.length === 0) return undefined
+  return (
+    `This CLI is not a release build, so ${names.join(", ")} run from :latest; a released CLI runs ` +
+    "the images of its own version. Name one with its SUPATYPE_*_IMAGE in .env to choose it."
+  )
+}
+
 /** A pinned component's version as the CDN and `versions` spell it: the tag without its `v`. */
 export function pinnedComponentVersion(component: PinnedComponent): string {
   return PINNED_IMAGES[component].tag.replace(/^v/, "")
@@ -66,11 +96,11 @@ export function pinnedComponentVersion(component: PinnedComponent): string {
 
 /**
  * The binary version `supatype dev` downloads for a component the project does not pin, or
- * undefined to ask the CDN for its latest (Deno, which has its own pin, and realtime in a build
- * that is not a release, whose own version was never published).
+ * undefined to ask the CDN for its latest (Deno, which has its own pin, and realtime or storage in
+ * a build that is not a release, whose own version was never published).
  */
 export function defaultComponentVersion(component: Component, version: string = EMBEDDED_CLI_VERSION): string | undefined {
   if (isPinnedComponent(component)) return pinnedComponentVersion(component)
-  if (component === "realtime" && isReleaseVersion(version)) return version
+  if (RELEASE_VERSIONED_COMPONENTS.has(component) && isReleaseVersion(version)) return version
   return undefined
 }

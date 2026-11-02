@@ -200,17 +200,29 @@ function satisfies(actual: unknown, condition: Condition, columnType: string | u
 }
 
 /**
+ * The first condition of `filter` the grammar cannot read, as `column=condition`, or null when
+ * every one is readable. A subscribe is refused on it, so a typo is reported rather than matched.
+ */
+export function unreadableCondition(filter: Record<string, string>): string | null {
+  for (const [column, raw] of Object.entries(filter)) {
+    if (!parseCondition(raw)) return `${column}=${raw}`
+  }
+  return null
+}
+
+/**
  * Whether a change passes every condition of a subscriber's filter.
  *
- * A condition in a form the grammar does not know is ignored, as before: it can only widen what
- * the subscriber asked for, and every delivery is still judged for visibility.
+ * A condition in a form the grammar does not know matches nothing. It used to be skipped, which
+ * widened the subscription to rows the subscriber never asked for. Subscribe refuses such a
+ * filter, so this is the second line of defence, not the first.
  */
 export function matchesFilter(change: WalChange, filter: Record<string, string>): boolean {
   const record = change.newRecord ?? change.oldRecord
   if (!record) return true
   for (const [column, raw] of Object.entries(filter)) {
     const condition = parseCondition(raw)
-    if (!condition) continue
+    if (!condition) return false
     if (!satisfies(record[column], condition, change.columnTypes[column])) return false
   }
   return true

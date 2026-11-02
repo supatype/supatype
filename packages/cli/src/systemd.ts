@@ -9,7 +9,8 @@
 import { writeFileSync, mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
-import type { SupatypeProjectConfig } from "./project-config.js"
+import { nativeServerPort, type SupatypeProjectConfig } from "./project-config.js"
+import { pgServerSettings } from "./postgres-ctl.js"
 
 export interface SystemdOptions {
   /** Directory where unit files are written. Defaults to .supatype/systemd/. */
@@ -63,26 +64,53 @@ function postgresUnit(
   const dataDir = config.database.data_dir ?? join(stateDir, "data")
   const logDir = join(stateDir, "logs")
   const pgBinDir = `%h/.supatype/cache/postgres/${config.versions?.postgres ?? "latest"}/bin`
+  // The settings `supatype dev` starts Postgres with, libraries asked of the install the unit runs
+  // (`%h` read as this user's home, the unit's User by default).
+  const settings = pgServerSettings({ pgBinDir: pgBinDir.replace("%h", homedir()), database: config.project.name })
 
+  const unit: PostgresUnitParts = { name: config.project.name, user, envFile, stateDir, dataDir, logDir, pgBinDir, settings }
+  return `${postgresUnitHead(unit)}${postgresUnitService(unit)}`
+}
+
+/** What the Postgres unit names: the project, who runs it, and where its files and binaries are. */
+interface PostgresUnitParts {
+  name: string
+  user: string
+  envFile: string
+  stateDir: string
+  dataDir: string
+  logDir: string
+  pgBinDir: string
+  settings: string
+}
+
+/** The Postgres unit's [Unit] section, and its [Service] section up to the commands. */
+function postgresUnitHead(u: PostgresUnitParts): string {
   return `[Unit]
-Description=Supatype Postgres (${config.project.name})
+Description=Supatype Postgres (${u.name})
 After=network.target
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
 Type=forking
-User=${user}
-EnvironmentFile=-${envFile}
-ExecStartPre=/bin/mkdir -p ${logDir}
-ExecStart=${pgBinDir}/pg_ctl start \\
-  -D ${dataDir} \\
-  -l ${logDir}/postgres.log \\
+User=${u.user}
+EnvironmentFile=-${u.envFile}
+`
+}
+
+/** The Postgres unit's commands, restart policy and [Install] section. */
+function postgresUnitService(u: PostgresUnitParts): string {
+  return `ExecStartPre=/bin/mkdir -p ${u.logDir}
+ExecStart=${u.pgBinDir}/pg_ctl start \\
+  -D ${u.dataDir} \\
+  -l ${u.logDir}/postgres.log \\
+  -o "${u.settings}" \\
   -w \\
   -t 60
-ExecStop=${pgBinDir}/pg_ctl stop -D ${dataDir} -m fast
-ExecReload=${pgBinDir}/pg_ctl reload -D ${dataDir}
-PIDFile=${stateDir}/pid/postgres.pid
+ExecStop=${u.pgBinDir}/pg_ctl stop -D ${u.dataDir} -m fast
+ExecReload=${u.pgBinDir}/pg_ctl reload -D ${u.dataDir}
+PIDFile=${u.stateDir}/pid/postgres.pid
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=90
@@ -99,7 +127,7 @@ function serverUnit(
   user: string,
   envFile: string,
 ): string {
-  const port = config.server.port ?? 54321
+  const port = nativeServerPort(config)
   const serverBin = `%h/.supatype/cache/server/${config.versions?.server ?? "latest"}/supatype-server`
   const logDir = join(stateDir, "logs")
 

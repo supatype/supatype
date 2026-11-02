@@ -15,6 +15,14 @@ import {
 } from "./json.js"
 
 /**
+ * An object path as it goes into a URL: each segment encoded, the `/` between them kept, since the
+ * server matches the path on it. Interpolated as given, a name holding `?` or `#` cut the URL short.
+ */
+function encodeObjectPath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/")
+}
+
+/**
  * An object as `list()` answers it, field for field (packages/storage/src/routes/objects.ts,
  * `listedObject`), named relative to the folder listed. A null is sent as null, never left out.
  */
@@ -290,7 +298,7 @@ export class BucketClient {
     if (options?.upsert === true) {
       headers["x-upsert"] = "true"
     }
-    const res = await this.send(`${this.url}/object/${this.bucket}/${path}`, {
+    const res = await this.send(`${this.url}/object/${this.bucket}/${encodeObjectPath(path)}`, {
       method: "POST",
       headers,
       body: file,
@@ -342,7 +350,7 @@ export class BucketClient {
     path: string,
     expiresIn: number,
   ): Promise<{ data: { signedUrl: string } | null; error: SupatypeError | null }> {
-    const res = await this.send(`${this.url}/object/sign/${this.bucket}/${path}`, {
+    const res = await this.send(`${this.url}/object/sign/${this.bucket}/${encodeObjectPath(path)}`, {
       method: "POST",
       // Signing creates nothing on the server, so a second request is harmless.
       idempotent: true,
@@ -419,7 +427,7 @@ export class BucketClient {
     path: string,
     transform?: TransformOptions | undefined,
   ): string {
-    let url = `${this.url}/object/${access}/${this.bucket}/${path}`
+    let url = `${this.url}/object/${access}/${this.bucket}/${encodeObjectPath(path)}`
     if (transform) {
       const params = new URLSearchParams()
       if (transform.width !== undefined) params.set("width", String(transform.width))

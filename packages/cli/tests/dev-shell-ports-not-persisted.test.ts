@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { upsertDevComposeEnv } from "../src/dev-compose.js"
 import { ensureDevDbPort } from "../src/dev-ports.js"
-import { readEnvValue } from "../src/env-file.js"
+import { MANAGED_MARKER, readEnvValue } from "../src/env-file.js"
 import { isPortInUse } from "../src/postgres-ctl.js"
 import { validateProjectConfig } from "../src/project-config.js"
 
@@ -51,6 +51,8 @@ const PERSISTED = [
   "SITE_URL=http://localhost:18474",
   "VITE_SUPATYPE_URL=http://localhost:18474",
   "SUPATYPE_DEV_DB_PORT=54329",
+  // The CLI's own URL, marked: a hand-written one is never moved (database-url-owner-docker.test.ts).
+  MANAGED_MARKER,
   "DATABASE_URL=postgresql://demo:pw@localhost:54329/demo",
 ]
 
@@ -111,5 +113,19 @@ describe("a dev port given only in the shell", () => {
     upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18500)
     expect(env(cwd, "SUPATYPE_KONG_PORT")).toBe("18500")
     expect(env(cwd, "API_EXTERNAL_URL")).toBe("http://localhost:18500")
+  })
+
+  // Local test C: the shell repeating `.env`'s own port is no throwaway. Treated as one, a project
+  // whose `.env` said 54339 kept a DATABASE_URL on another port for as long as the export stayed.
+  it("writes what it builds from a port the shell repeats from .env", () => {
+    const cwd = project()
+    vi.stubEnv("SUPATYPE_DEV_DB_PORT", "54329")
+    writeFileSync(
+      join(cwd, ".env"),
+      `JWT_SECRET=x\nPOSTGRES_PASSWORD=pw\nSUPATYPE_DEV_DB_PORT=54329\n${MANAGED_MARKER}\nDATABASE_URL=postgresql://demo:pw@localhost:5432/demo\n`,
+      "utf8",
+    )
+    upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18474, 54329)
+    expect(env(cwd, "DATABASE_URL")).toContain(":54329/")
   })
 })

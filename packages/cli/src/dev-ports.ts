@@ -4,11 +4,12 @@
  * availability so multiple projects and port collisions are surfaced clearly.
  */
 
-import { spawnSync } from "node:child_process"
 import { CLACK_CANCEL, isCancel, p } from "./ui/clack.js"
+import { askDocker, askDockerSync, DOCKER_QUERY_TIMEOUT_MS, type DockerRunner } from "./docker-exec.js"
 import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 import { isPortInUse } from "./postgres-ctl.js"
-import { readComposeEnvInt, readEnvInt, upsertEnvFile } from "./env-file.js"
+import { readComposeEnvInt, shellEnvInt, upsertEnvFile } from "./env-file.js"
+import { writeCliDatabaseUrl } from "./database-url-owner.js"
 import { isInteractive } from "./ui/interactive.js"
 import { fatalError } from "./ui/fatal.js"
 import { COMPOSE_DEV_DB_PORT, hostComposeDbUrl } from "./host-database.js"
@@ -42,12 +43,11 @@ export function composeProjectOwnsPort(dockerPsOutput: string, project: string):
  * into the wrong database. Refusing is the safe answer for a stranger; only our own stack is fine.
  */
 export function portHeldByComposeProject(port: number, project: string): boolean {
-  const result = spawnSync(
-    "docker",
-    ["ps", "--filter", `publish=${port}`, "--format", '{{.Label "com.docker.compose.project"}}'],
-    { encoding: "utf8" },
-  )
-  if (result.status !== 0 || typeof result.stdout !== "string") return false
+  // Synchronous: `projectStackUrl` (local-stack.ts) asks it from synchronous push and seed paths.
+  const result = askDockerSync(["ps", "--filter", `publish=${port}`, "--format", '{{.Label "com.docker.compose.project"}}'], {
+    timeoutMs: DOCKER_QUERY_TIMEOUT_MS,
+  })
+  if (result.status !== 0) return false
   return composeProjectOwnsPort(result.stdout, project)
 }
 
@@ -57,25 +57,28 @@ export function portHeldByComposeProject(port: number, project: string): boolean
  */
 export interface ComposePortReader {
   /** One `<container id> <compose project>` line per container, or null when Docker cannot be asked. */
-  listContainers: () => string | null
+  listContainers: () => Promise<string | null>
   /** One `HostConfig.PortBindings` JSON object per line for `ids`, or null when Docker cannot be asked. */
-  portBindings: (ids: readonly string[]) => string | null
+  portBindings: (ids: readonly string[]) => Promise<string | null>
 }
 
-function dockerOutput(args: readonly string[]): string | null {
-  const result = spawnSync("docker", [...args], { encoding: "utf8" })
-  return result.status === 0 && typeof result.stdout === "string" ? result.stdout : null
+/**
+ * Docker's answers about compose containers, each given up on after `timeoutMs` (docker-exec.ts):
+ * `init` waited on these without limit, 8 seconds for one `docker inspect` on a busy machine.
+ */
+export function dockerPortReader(runner?: DockerRunner, timeoutMs?: number): ComposePortReader {
+  const output = async (args: readonly string[]): Promise<string | null> => {
+    const answer = await askDocker(args, { ...(runner && { runner }), ...(timeoutMs !== undefined && { timeoutMs }) })
+    return answer.status === 0 ? answer.stdout : null
+  }
+  return {
+    listContainers: () =>
+      output(["ps", "-a", "--filter", "label=com.docker.compose.project", "--format", '{{.ID}} {{.Label "com.docker.compose.project"}}']),
+    portBindings: (ids) => output(["inspect", "-f", "{{json .HostConfig.PortBindings}}", ...ids]),
+  }
 }
 
-export const dockerComposePortReader: ComposePortReader = {
-  listContainers: () =>
-    dockerOutput([
-      "ps", "-a",
-      "--filter", "label=com.docker.compose.project",
-      "--format", '{{.ID}} {{.Label "com.docker.compose.project"}}',
-    ]),
-  portBindings: (ids) => dockerOutput(["inspect", "-f", "{{json .HostConfig.PortBindings}}", ...ids]),
-}
+export const dockerComposePortReader: ComposePortReader = dockerPortReader()
 
 /** Host ports in one container's `HostConfig.PortBindings` JSON; none for anything unreadable. */
 function hostPortsFromBindings(line: string): number[] {
@@ -116,18 +119,28 @@ function supatypeContainerIds(listing: string, ownProject: string | undefined): 
  * makes the two clash the first time both run. Empty when Docker is absent or does not answer:
  * this only narrows a choice, and nothing should fail for want of it.
  */
-export function reservedComposePorts(
+export async function reservedComposePorts(
   reader: ComposePortReader = dockerComposePortReader,
   ownProject?: string,
-): Set<number> {
-  const ids = supatypeContainerIds(reader.listContainers() ?? "", ownProject)
+): Promise<Set<number>> {
+  const ids = supatypeContainerIds((await reader.listContainers()) ?? "", ownProject)
   if (ids.length === 0) return new Set()
-  return new Set((reader.portBindings(ids) ?? "").split("\n").flatMap(hostPortsFromBindings))
+  return new Set(((await reader.portBindings(ids)) ?? "").split("\n").flatMap(hostPortsFromBindings))
 }
 
-/** The Kong port a new project gets: the first from the default that is free and no stack claims. */
-export async function chooseInitKongPort(reader: ComposePortReader = dockerComposePortReader): Promise<number> {
-  return findNextFreePort(COMPOSE_DEV_KONG_PORT, reservedComposePorts(reader))
+/**
+ * The Kong port a new project gets: `SUPATYPE_KONG_PORT` from the shell when it is set, otherwise
+ * the first from the default that is free and no stack claims.
+ *
+ * Compose binds the shell's port ahead of `.env`, and every other command reads it first
+ * ({@link readPersistedKongPort}). Choosing past it had `init` write and announce a port the stack
+ * would never listen on.
+ */
+export async function chooseInitKongPort(
+  reader: ComposePortReader = dockerComposePortReader,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
+  return kongPortFromEnvironment(env) ?? findNextFreePort(COMPOSE_DEV_KONG_PORT, await reservedComposePorts(reader))
 }
 
 export function isValidHostPort(port: number): boolean {
@@ -163,13 +176,15 @@ export async function findNextFreePort(start: number, reserved: ReadonlySet<numb
  * another.
  */
 export function readPersistedKongPort(cwd: string, env: NodeJS.ProcessEnv = process.env): number | null {
-  return kongPortFromEnvironment(env) ?? readEnvInt(cwd, "SUPATYPE_KONG_PORT")
+  return readComposeEnvInt(cwd, KONG_PORT_ENV, env)
 }
+
+/** The variable compose reads Kong's host port from. */
+const KONG_PORT_ENV = "SUPATYPE_KONG_PORT"
 
 /** `SUPATYPE_KONG_PORT` from the shell environment, when it is set to a usable port. */
 function kongPortFromEnvironment(env: NodeJS.ProcessEnv): number | null {
-  const port = Number(env["SUPATYPE_KONG_PORT"]?.trim())
-  return isValidHostPort(port) ? port : null
+  return shellEnvInt(KONG_PORT_ENV, env)
 }
 
 function persistKongPort(cwd: string, port: number): void {
@@ -259,7 +274,7 @@ export async function ensureKongPort(
     return promptPortConflict(cwd, persisted, "in_use")
   }
 
-  const reserved = reservedComposePorts(opts.portReader, opts.composeProject)
+  const reserved = await reservedComposePorts(opts.portReader, opts.composeProject)
   return firstRunKongPort(cwd, interactive && context === "init", reserved)
 }
 
@@ -276,12 +291,29 @@ async function firstRunKongPort(cwd: string, prompt: boolean, reserved: Readonly
 
 /**
  * Wizard / init: pick a Kong port without writing `.env` (scaffold writes it). Neither the default
- * offered nor a port typed in may be one another Supatype stack is configured with (M2).
+ * offered nor a port typed in may be one another Supatype stack is configured with (M2). A port
+ * exported in the shell is taken without asking, as {@link chooseInitKongPort} does: compose binds it
+ * whatever is typed here.
  */
-export async function promptKongPortChoice(reader: ComposePortReader = dockerComposePortReader): Promise<number> {
-  const reserved = reservedComposePorts(reader)
-  const freeDefault = await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved)
+export async function promptKongPortChoice(
+  reader: ComposePortReader = dockerComposePortReader,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
+  const fromShell = kongPortFromEnvironment(env)
+  if (fromShell !== null) {
+    p.log.info(`Local API gateway port (Kong): ${fromShell}, from SUPATYPE_KONG_PORT in your shell.`)
+    return fromShell
+  }
+  const reserved = await reservedComposePorts(reader)
+  const port = await askKongPort(await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved))
+  if (await portTaken(port, reserved)) {
+    return promptPortConflictWithoutPersist(port, "init", reserved)
+  }
+  return port
+}
 
+/** Ask for the Kong port, offering `freeDefault`; a cancel ends init. */
+async function askKongPort(freeDefault: number): Promise<number> {
   const value = await p.text({
     message: "Local API gateway port (Kong)",
     defaultValue: String(freeDefault),
@@ -298,11 +330,7 @@ export async function promptKongPortChoice(reader: ComposePortReader = dockerCom
     process.exit(0)
   }
 
-  const port = parseHostPortInput(value)!
-  if (await portTaken(port, reserved)) {
-    return promptPortConflictWithoutPersist(port, "init", reserved)
-  }
-  return port
+  return parseHostPortInput(value)!
 }
 
 async function promptPortConflictWithoutPersist(
@@ -412,9 +440,7 @@ export async function ensureDevDbPort(cwd: string, opts: EnsureDevDbPortOptions 
 }
 
 function persistDevDbPort(cwd: string, port: number): number {
-  upsertEnvFile(cwd, {
-    SUPATYPE_DEV_DB_PORT: String(port),
-    DATABASE_URL: hostComposeDbUrl(cwd, port),
-  })
+  // The URL only over one the CLI owns: one that is yours always wins (database-url-owner.ts).
+  writeCliDatabaseUrl(cwd, hostComposeDbUrl(cwd, port), { SUPATYPE_DEV_DB_PORT: String(port) })
   return port
 }

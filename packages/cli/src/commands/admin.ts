@@ -4,7 +4,6 @@
 // auth.users table. First admin is ensured on `supatype dev` or `supatype push`.
 
 import type { Command } from "commander"
-import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import bcrypt from "bcryptjs"
@@ -27,6 +26,8 @@ import { adminPromptDeclined, recordAdminPromptDeclined } from "../admin-prompt-
 import { error, info, plain } from "../ui/messages.js"
 import { promptPassword, promptText } from "../ui/prompts.js"
 import { isInteractive } from "../ui/interactive.js"
+import { errorMessage, spawnFailureText } from "../error-message.js"
+import { askDockerSync, DOCKER_EXEC_TIMEOUT_MS } from "../docker-exec.js"
 import {
   getActiveDevSession,
 } from "../dev-session.js"
@@ -186,8 +187,7 @@ export function registerAdmin(program: Command): void {
           }
           info(studioLoginHint(projectStudioUrl(cwd, config, opts.connection)))
         } catch (err) {
-          const message = err instanceof Error ? err.message : "Unknown error"
-          error(`Failed to create admin user: ${message}`)
+          error(`Failed to create admin user: ${errorMessage(err)}`)
           process.exit(1)
         }
       },
@@ -223,9 +223,7 @@ export function registerAdmin(program: Command): void {
           plain(`  Email: ${opts.email.toLowerCase()}`)
           plain(`  Role:  ${opts.role}`)
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Unknown error"
-          error(`Failed to update role: ${message}`)
+          error(`Failed to update role: ${errorMessage(err)}`)
           process.exit(1)
         } finally {
           await pool.end()
@@ -273,9 +271,7 @@ export function registerAdmin(program: Command): void {
         for (const row of rows) plain(memberLine(row))
         plain()
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Unknown error"
-        error(`Failed to list admin users: ${message}`)
+        error(`Failed to list admin users: ${errorMessage(err)}`)
         process.exit(1)
       } finally {
         await pool.end()
@@ -339,8 +335,7 @@ export async function ensureFirstAdminUserForProject(
         merged,
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      error(`Could not ensure first admin user: ${message}`)
+      error(`Could not ensure first admin user: ${errorMessage(err)}`)
     }
     return
   }
@@ -394,8 +389,7 @@ export async function ensureFirstAdminWithQuery(
       cwd,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    error(`Failed to create admin user: ${message}`)
+    error(`Failed to create admin user: ${errorMessage(err)}`)
     return
   }
   clearAdminSeedPassword(cwd)
@@ -778,16 +772,14 @@ async function composeExecQuery(
  */
 function runComposePsql(cwd: string, compose: ComposeStack, psqlArgs: string[], input?: string): string {
   const { args, env } = composeDbPsql(cwd, compose, psqlArgs)
-  const result = spawnSync("docker", args, {
+  const result = askDockerSync(args, {
     cwd: dirname(compose.composePath),
-    encoding: "utf8",
     env,
+    timeoutMs: DOCKER_EXEC_TIMEOUT_MS,
     ...(input !== undefined && { input }),
   })
-  if (result.status !== 0) {
-    throw new Error((result.stderr ?? result.stdout ?? "compose psql failed").trim())
-  }
-  return (result.stdout ?? "").trim()
+  if (result.status !== 0) throw new Error(`compose psql failed: ${spawnFailureText(result)}`)
+  return result.stdout.trim()
 }
 
 function parsePsqlScalarRows(sql: string, text: string): UnknownRow[] {
