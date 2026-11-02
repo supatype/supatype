@@ -83,12 +83,42 @@ vi.mock("../src/config.js", async (importOriginal) => ({
   loadSchemaAst: () => schema.ast,
 }))
 
+/** `snapshotOptional` as each push passed it: dev's may go without the snapshot, push's may not. */
+const snapshotOptional = vi.hoisted((): boolean[] => [])
 vi.mock("../src/schema-sources.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/schema-sources.js")>()),
-  writeSchemaSourcePushArtifacts: () => null,
+  writeSchemaSourcePushArtifacts: (_cwd: string, optional: boolean) => {
+    snapshotOptional.push(optional)
+    return null
+  },
 }))
 
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: () => false }))
+
+// No stack runs for these projects, and none may be asked about. Each push asked the real Docker
+// for a running `supatype-demo` server (`docker ps`) about once a test: a second or more apiece on
+// a loaded machine, and an answer that depended on what that machine happened to be running.
+const NO_STACK = { devSessionLocked: () => false, runningServerMode: () => undefined }
+vi.mock("../src/compose-render-mode.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/compose-render-mode.js")>()
+  return {
+    ...actual,
+    runningStackMode: (cwd: string, name: string) => actual.runningStackMode(cwd, name, NO_STACK),
+    composeRenderMode: (cwd: string, name: string) => actual.composeRenderMode(cwd, name, NO_STACK),
+    composeRenderOptions: (cwd: string, name: string) => actual.composeRenderOptions(cwd, name, NO_STACK),
+  }
+})
+
+// Every test imports dev-compose afresh (see loadPush), and the first import transforms its whole
+// module graph: 6 to 7 seconds alone, past 22 in a loaded suite, all charged to whichever test ran
+// first, which then hit the 30 second timeout. Loaded once here, while the file is collected and no
+// test's clock runs, the transforms are cached and each test's import only evaluates the modules.
+await Promise.all([
+  import("../src/dev-compose.js"),
+  import("../src/destructive-consent.js"),
+  import("../src/drift-consent.js"),
+  import("../src/dev-initial-push.js"),
+])
 
 const ADMIN = ".supatype/admin-config.json"
 const TYPES = "types/database.ts"
@@ -216,6 +246,13 @@ describe.each([
     expect(generated("/admin")).toBe(0)
   })
 
+  it("takes the schema snapshot as push's, which refuses a name restore would refuse", async () => {
+    snapshotOptional.length = 0
+    const { pushYes } = await loadPush(over)
+    await pushYes()
+    expect(snapshotOptional).toEqual([false])
+  })
+
   it("writes them exactly once when push --yes applies after the engine's refusal", async () => {
     engine.refuseUnforced = true
     const { pushYes } = await loadPush(over)
@@ -336,5 +373,76 @@ describe.each([
     const { devPush } = await loadPush(over)
     await expect(devPush()).rejects.toThrow(/Nothing was applied/)
     expect(existsSync(join(cwd, "supatype/generated/seed.ts"))).toBe(false)
+  })
+})
+
+/**
+ * Decision (local test round 3, N7 follow-up): Docker dev's type refresh uses the host engine that
+ * `supatype generate` uses, its pin or `overrides.engine`, not the project's compose engine image.
+ * The image is the fallback only when the host program cannot be fetched.
+ */
+describe("the engine docker dev refreshes the generated files with", () => {
+  it("is the host engine for a project with no override, not the compose image", async () => {
+    const { pushYes } = await loadPush(COMPOSE_ENGINE)
+    await pushYes()
+    const writes = engineRequest.mock.calls.filter(([endpoint]) => endpoint === "/generate" || endpoint === "/admin")
+    expect(writes.length).toBeGreaterThan(0)
+    // engineRequest(endpoint, body, guard, engine): the fourth argument is the compose engine, if any.
+    for (const call of writes) expect((call as readonly unknown[])[3]).toBeUndefined()
+  })
+})
+
+/** Second review: what dev's refresh writes when the engine is refused or cannot be fetched. */
+describe("docker dev's refresh without its usual engine", () => {
+  /** Make the host engine fail with `error`, counting calls from here (the mock outlives a test). */
+  async function hostEngineFails(error: Error): Promise<ReturnType<typeof vi.fn>> {
+    const { ensureEngine } = await import("../src/engine-client.js")
+    const mocked = vi.mocked(ensureEngine)
+    mocked.mockReset()
+    mocked.mockRejectedValue(error)
+    return mocked
+  }
+
+  /** The host program could not be fetched, as `ensureBinary` says it. */
+  async function offline(): Promise<Error> {
+    const { BinaryUnavailable } = await import("../src/ensure-binary.js")
+    return new BinaryUnavailable("fetch failed: offline")
+  }
+
+  afterEach(async () => {
+    const { ensureEngine } = await import("../src/engine-client.js")
+    vi.mocked(ensureEngine).mockReset()
+    vi.mocked(ensureEngine).mockResolvedValue(undefined)
+  })
+
+  it("still writes the client and augmentation, which need no engine, when the engine is refused", async () => {
+    const { pushYes } = await loadPush(COMPOSE_ENGINE)
+    await hostEngineFails(new Error("This CLI needs Supatype engine 0.8.0 or newer"))
+    await pushYes()
+    expect(existsSync(join(cwd, CLIENT))).toBe(true)
+    expect(generated("/generate")).toBe(0)
+  })
+
+  it("writes with the image under SUPATYPE_STRICT, then fails the run with the true reason", async () => {
+    vi.stubEnv("SUPATYPE_STRICT", "1")
+    try {
+      const { pushYes } = await loadPush(COMPOSE_ENGINE)
+      await hostEngineFails(await offline())
+      await expect(pushYes()).rejects.toThrow(/could not be fetched.*fetch failed: offline/s)
+      expect(generated("/generate")).toBe(1)
+      expect(generated("/admin")).toBe(1)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("asks for the host engine once in an offline session, not on every save", async () => {
+    const { pushYes } = await loadPush(COMPOSE_ENGINE)
+    const ensureEngine = await hostEngineFails(await offline())
+    await pushYes()
+    schema.ast = { version: 3, models: [] }
+    await pushYes()
+    expect(generated("/generate")).toBe(2)
+    expect(ensureEngine).toHaveBeenCalledTimes(1)
   })
 })

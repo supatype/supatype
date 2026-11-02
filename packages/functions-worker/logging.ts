@@ -78,6 +78,13 @@ const TAIL_BUFFER_LINES = Math.max(
 
 const buffer: LogLine[] = []
 const subscribers = new Set<(line: LogLine) => void>()
+/** How to end each open tail, so a stopping worker is not held by a stream that never ends. */
+const openTails = new Set<() => void>()
+
+/** Ends every open tail; a tailing client reconnects to the worker that replaces this one. */
+export function closeTails(): void {
+  for (const close of [...openTails]) close()
+}
 
 function record(line: LogLine): void {
   if (TAIL_BUFFER_LINES > 0) {
@@ -175,9 +182,15 @@ export function tailResponse(): Response {
       controller.enqueue(encoder.encode("retry: 2000\n\n"))
       for (const line of buffer) send(line)
 
+      const close = (): void => {
+        unsubscribe()
+        controller.close()
+      }
       subscribers.add(send)
+      openTails.add(close)
       unsubscribe = () => {
         subscribers.delete(send)
+        openTails.delete(close)
       }
     },
     cancel() {

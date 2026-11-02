@@ -2,7 +2,7 @@ import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { loadCloudCredentials, persistCloudSession } from "../cloud-credentials.js"
+import { envAccessToken, loadCloudCredentials, persistCloudSession } from "../cloud-credentials.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "../link.js"
 import { targetFetch } from "../target-client.js"
 import { isArrayOf, isShape, isString, isUnknown, nullable, optional, type Guard } from "@supatype/shared"
@@ -325,10 +325,7 @@ function getCloudConfigOrExit(): CloudConfig {
   let config = loadCloudConfig(cwd)
   if (!config) {
     const creds = loadCloudCredentials()
-    const token =
-      process.env["SUPATYPE_ACCESS_TOKEN"] ??
-      process.env["SUPATYPE_TOKEN"] ??
-      creds?.accessToken
+    const token = envAccessToken() ?? creds?.accessToken
     const apiUrl =
       process.env["SUPATYPE_API_URL"] ?? creds?.apiUrl ?? "https://api.supatype.com"
     if (!token) {

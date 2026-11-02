@@ -2,13 +2,14 @@
  * `supatype dev` when `provider: docker`, full self-host Compose stack (Kong gateway).
  */
 
+import { setTimeout as sleep } from "node:timers/promises"
 import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { spawnSync } from "node:child_process"
+import { askDocker, askDockerSync, DOCKER_EXEC_TIMEOUT_MS, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
 import { loadSchemaAst, projectNameInFile } from "./config.js"
 import { withComposeSchemaPushLock } from "./schema-push-lock.js"
@@ -18,14 +19,13 @@ import {
   pgSchema,
   projectRootFromConfig,
   resolveRuntimeProvider,
-  hooksPathFromProject,
   schemaPathFromProject,
   selfHostTlsEnabled,
   usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
-import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
-import { rowCacheChangeNote, syncRowCacheEnv } from "./model-cache.js"
+import { rowCacheChangeNote } from "./model-cache.js"
+import { writeAppliedAstArtifacts } from "./applied-ast-artifacts.js"
 import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { devApiKeys } from "./dev-api-keys.js"
 import { warnUrlUnsafeComposePasswords } from "./url-safe-passwords.js"
@@ -37,11 +37,19 @@ import { devSessionLockFor, recoverStaleDevSession, writeDevSessionLock } from "
 import { endDevSession, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
-import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
-import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "./db-port.js"
+import { offerToSaveShellDbPort } from "./db-port-offer.js"
+import { databaseUrlSyncMessage } from "./db-port.js"
+import {
+  databaseUrlState,
+  setCliDatabaseUrlForRun,
+  syncDatabaseUrlPort,
+  warnIfHandWrittenUrlSilent,
+  writeCliDatabaseUrl,
+} from "./database-url-owner.js"
 import { degraded } from "./strict.js"
+import { ENGINE_FALLBACK, generatedFilesEngine, type EngineChoice } from "./generated-files-engine.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
 import { consentRefusal, reportDevPushFailure } from "./push-refusal.js"
@@ -50,6 +58,7 @@ import {
   composeDockerImageEnv,
   composeProjectName,
   exitComposeFailed,
+  noteUnpinnedImages,
   publishesDbToHost,
   runDockerCompose,
   schemaEngineImageForPush,
@@ -74,10 +83,9 @@ import {
   isDiffResult,
   isEnginePushResult,
   isGenerateAnswer,
-  isObjectAnswer,
 } from "./engine-answers.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
-import { readEnvValue, upsertEnvFile } from "./env-file.js"
+import { readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
 import { warnProjectAuthProviderSecrets } from "./auth-providers.js"
 import {
   devDatabaseIdentity,
@@ -95,7 +103,7 @@ import {
 } from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
-import { provisionBucketsFromAst } from "./storage-provision.js"
+import { provisionBucketsFromAst, unprovisionedBuckets } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { demoDataHint, publishDevReady } from "./dev-ready-panel.js"
@@ -108,7 +116,7 @@ import {
   engineCapabilities,
   identityColumnsNeed,
   OVERWRITE_DRIFT_NEED,
-  probeCapabilities,
+  checkedCapabilities,
   type Capabilities,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
@@ -133,10 +141,25 @@ import { spawnComposeEngine } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
 import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
+import { mailerProviderEnv } from "./mailer-env.js"
+import { fetchWithin } from "./fetch-within.js"
+import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
+
+/**
+ * The image pins config asks for, once the engine's is known not to be older than this CLI needs.
+ * Checked before `.env` is written: a push refused the engine after writing its pin there as a
+ * managed line, and `.env` stayed pinned to the refused engine (local test round 6).
+ */
+function checkedImagePins(config: SupatypeProjectConfig): Record<string, string> {
+  const pins = composeDockerImageEnv(config)
+  const engine = pins["SUPATYPE_ENGINE_IMAGE"]
+  if (engine !== undefined) assertEngineVersionSupported(engineImageVersion(engine), "versions.engine in supatype.config.ts", "image")
+  return pins
+}
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
-  const imagePins = composeDockerImageEnv(config)
+  const imagePins = checkedImagePins(config)
   // Clean up only what a previous run wrote from config. A hand-written image tag in `.env` is the
   // documented way to run a local build, and this used to delete it on every compose run.
   const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
@@ -266,36 +289,6 @@ export async function projectComposeEngine(
   }
 }
 
-/**
- * `email.provider` and `email.smtp` for the compose server service.
- *
- * The native dev path has mapped these since it existed; the compose path never
- * did, so a project that asked for smtp got the auth service's noop client and
- * no message at all. Console is the documented default, and it at least says
- * that a message would have been sent.
- */
-function composeMailerEnv(config: SupatypeProjectConfig): Record<string, string> {
-  const email = config.email
-  const out: Record<string, string> = {
-    // Mailer.MailerProvider, so the doubled word is the real name.
-    SUPATYPE_MAILER_MAILER_PROVIDER: email?.provider ?? "console",
-  }
-  const smtp = email?.smtp
-  if (email?.provider !== "smtp" || smtp === undefined) return out
-
-  if (smtp.host !== undefined && smtp.host !== "") out.SUPATYPE_SMTP_HOST = smtp.host
-  if (smtp.port !== undefined) out.SUPATYPE_SMTP_PORT = String(smtp.port)
-  if (smtp.user !== undefined && smtp.user !== "") out.SUPATYPE_SMTP_USER = smtp.user
-  if (smtp.pass !== undefined && smtp.pass !== "") out.SUPATYPE_SMTP_PASS = smtp.pass
-  if (smtp.admin_email !== undefined && smtp.admin_email !== "") {
-    out.SUPATYPE_SMTP_ADMIN_EMAIL = smtp.admin_email
-  }
-  if (smtp.sender_name !== undefined && smtp.sender_name !== "") {
-    out.SUPATYPE_SMTP_SENDER_NAME = smtp.sender_name
-  }
-  return out
-}
-
 async function resolveKongPort(cwd: string, composeProject?: string): Promise<number> {
   // The compose project is passed so an already-running stack of *this* project counts as
   // available rather than as a collision.
@@ -346,7 +339,7 @@ export function upsertDevComposeEnv(
   devDbPort?: number,
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
-  const imagePins = composeDockerImageEnv(config)
+  const imagePins = checkedImagePins(config)
   // `POSTGRES_PASSWORD` and `JWT_SECRET` are deliberately absent.
   //
   // They used to be pinned here to published constants on every `dev` run, against the same
@@ -378,7 +371,10 @@ export function upsertDevComposeEnv(
     SITE_URL: apiUrl,
     // From auth.email.enableConfirmations, unless the developer set their own in .env.
     ...devMailerAutoconfirmUpdate(cwd, config),
-    ...composeMailerEnv(config),
+    // email.provider and its settings, which the compose file passes to the server. The compose
+    // path used to carry none of them, so a project that asked for smtp, Resend or SES got the auth
+    // service's noop client and no message at all.
+    ...mailerProviderEnv(config.email),
     ...imagePins,
   }
   // Never for an external database: this URL describes the `db` container, which that project does
@@ -386,13 +382,7 @@ export function upsertDevComposeEnv(
   // every CLI command reads, with a DSN pointing at a database that does not exist. Found by
   // rehearsing a push against a real external Postgres, where the compose guard then refused to
   // proceed because .env and the config disagreed. They disagreed because of this line.
-  if (devDbPort !== undefined && !usesExternalDatabase(config)) {
-    updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
-    // User and database from the project, not hardcoded, same reason as
-    // `seedMissingDatabaseIdentity`: a project not named "supatype" had this URL pointing at a
-    // database that does not exist.
-    updates.DATABASE_URL = hostComposeDbUrl(cwd, devDbPort)
-  }
+  if (devDbPort !== undefined && !usesExternalDatabase(config)) updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
   // `SUPATYPE_SERVER_IMAGE` is written here, not passed in, and it is deliberately *not* marked
   // managed. The managed marker means "this value came from `versions` in the config and is mine to
   // clean up when the pin goes away". The locally built image comes from `overrides`, so removing
@@ -411,21 +401,45 @@ export function upsertDevComposeEnv(
   // write is removed: an operator's own GOTRUE_ variable is theirs, and the server's error names it
   // and its replacement precisely enough to fix by hand.
   const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
-  // A port the shell gave for this run is the run's, not the project's (DR9).
-  const { persist, runOnly } = splitShellPortUpdates(updates)
+  // A port the shell gave for this run is the run's, not the project's (DR9), unless `.env` holds it too.
+  const dotEnv = readEnvFile(cwd)
+  const { persist, runOnly } = splitShellPortUpdates(updates, process.env, dotEnv)
   applyForThisRun(runOnly)
   upsertEnvFile(cwd, persist, {
     removeManaged: removeImageKeys,
     managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
-    // A local image left in `.env` after the project stopped asking for one would keep pointing
-    // compose at a stale build, and it carries no marker for `removeManaged` to act on.
-    remove: [
-      ...retiredKeys,
-      ...(!wantsLocalServer && !("SUPATYPE_SERVER_IMAGE" in imagePins)
-        ? ["SUPATYPE_SERVER_IMAGE"]
-        : []),
-    ],
+    remove: [...retiredKeys, ...staleLocalServerImage(dotEnv["SUPATYPE_SERVER_IMAGE"], wantsLocalServer, imagePins)],
   })
+  if (devDbPort !== undefined && !usesExternalDatabase(config)) {
+    writeDevStackDatabaseUrl(cwd, devDbPort, runOnly.SUPATYPE_DEV_DB_PORT !== undefined)
+  }
+}
+
+/**
+ * `SUPATYPE_SERVER_IMAGE` to remove from `.env`: the local-dev image this CLI wrote, once the project
+ * stops asking for a local build and pins no server. It carries no marker for `removeManaged` to act
+ * on, and left behind it would keep pointing compose at a stale build. Any other value was set by
+ * hand, `supatype/server:it-r3` for instance, and is kept (local test round 3, N1).
+ */
+function staleLocalServerImage(
+  current: string | undefined,
+  wantsLocalServer: boolean,
+  imagePins: Record<string, string>,
+): string[] {
+  if (wantsLocalServer || "SUPATYPE_SERVER_IMAGE" in imagePins) return []
+  return current?.trim() === LOCAL_SERVER_DOCKER_IMAGE ? ["SUPATYPE_SERVER_IMAGE"] : []
+}
+
+/**
+ * Docker dev's DATABASE_URL: the stack's database at `devDbPort`, with the project's own user and
+ * database, not hardcoded ones, which on a project not named "supatype" named a database that does
+ * not exist. Written over a URL the CLI owns, for this run only when the port is the shell's; one
+ * that is yours always wins (database-url-owner.ts).
+ */
+function writeDevStackDatabaseUrl(cwd: string, devDbPort: number, runOnly: boolean): void {
+  const url = hostComposeDbUrl(cwd, devDbPort)
+  if (runOnly) setCliDatabaseUrlForRun(databaseUrlState(cwd), url)
+  else writeCliDatabaseUrl(cwd, url)
 }
 
 /** Keep compose + Studio on the same freshly signed dev JWTs; sync optional image pins from config. */
@@ -471,8 +485,7 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
 
   const deadline = Date.now() + maxMs
   while (Date.now() < deadline) {
-    const ready = spawnSync(
-      "docker",
+    const ready = await askDocker(
       // Over TCP, deliberately, not the Unix socket.
       //
       // On a first run the Postgres entrypoint starts a temporary server with `listen_addresses=''`
@@ -486,10 +499,10 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
         ...baseArgs, "exec", "-T", "db",
         "pg_isready", "-h", "127.0.0.1", "-U", devDatabaseIdentity(cwd).user,
       ],
-      { cwd: composeDir, encoding: "utf8" },
+      { cwd: composeDir, timeoutMs: DOCKER_EXEC_TIMEOUT_MS },
     )
     if (ready.status === 0) return
-    await new Promise((r) => setTimeout(r, 2000))
+    await sleep(2000)
   }
   throw new Error("Compose db service did not become healthy in time")
 }
@@ -514,12 +527,9 @@ function dumpComposeDbLogs(
   if (existsSync(envFile)) args.push("--env-file", envFile)
   args.push("logs", "--no-color", "--timestamps", "--tail", "800", "db")
 
-  const result = spawnSync("docker", args, {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-  })
-  const body = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+  // Synchronous: called from the failure paths that then exit.
+  const result = askDockerSync(args, { cwd, timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
+  const body = `${result.stdout}${result.stderr}`.trim()
   const content = body || `(empty, docker compose logs db exit ${result.status ?? "?"})\n`
   try {
     writeFileSync(logPath, content)
@@ -549,18 +559,6 @@ function loopbackBase(port: number): string {
 }
 
 /**
- * `fetch` with a deadline, because the built-in has none.
- *
- * A poll loop bounded by `maxSec` iterations is only bounded if each attempt can end. Against a
- * socket that accepts and never responds, an un-timed `fetch` never settles, the loop never reaches
- * its second iteration, and a wait advertised as 120 seconds runs until someone kills it. That is
- * how `supatype push` came to hang indefinitely after reporting the schema applied.
- */
-async function fetchWithin(url: string, ms: number, init?: RequestInit): Promise<Response> {
-  return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
-}
-
-/**
  * Print what the stack is doing when the gateway never comes up.
  *
  * A 503 through the gateway means Kong is running and something behind it is
@@ -568,23 +566,21 @@ async function fetchWithin(url: string, ms: number, init?: RequestInit): Promise
  * That sends people to look at Kong, which is almost never the problem, and in
  * CI the containers are gone by the time anything else can inspect them.
  */
-function reportUnhealthyStack(composePath: string, cwd: string, project: string): void {
-  const capture = (args: string[]): string => {
-    const result = spawnSync("docker", ["compose", "-p", project, "--project-directory", cwd, "-f", composePath, ...args], {
-      encoding: "utf8",
-      cwd,
-    })
-    return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+async function reportUnhealthyStack(composePath: string, cwd: string, project: string): Promise<void> {
+  const capture = async (args: string[]): Promise<string> => {
+    const call = { cwd, timeoutMs: DOCKER_QUERY_TIMEOUT_MS }
+    const result = await askDocker(["compose", "-p", project, "--project-directory", cwd, "-f", composePath, ...args], call)
+    return `${result.stdout}${result.stderr}`.trim()
   }
 
   console.error("")
   console.error("[supatype] The gateway is up but a service behind it is not. Container state:")
-  const state = capture(["ps", "-a"])
+  const state = await capture(["ps", "-a"])
   console.error(state === "" ? "  (no containers)" : state)
 
   // The two the gateway health check depends on, and db because both need it.
   for (const service of ["server", "realtime", "db"]) {
-    const logs = capture(["logs", "--no-color", "--tail", "40", service])
+    const logs = await capture(["logs", "--no-color", "--tail", "40", service])
     if (logs === "") continue
     console.error("")
     console.error(`[supatype] last 40 lines from ${service}:`)
@@ -614,12 +610,12 @@ async function waitKongReady(
       lastRealtime = `HTTP ${realtime.status}`
       if (auth.ok && realtime.ok) return
     } catch (err) {
-      lastAuth = lastRealtime = err instanceof Error ? err.message : String(err)
+      lastAuth = lastRealtime = errorMessage(err)
     }
-    await new Promise((r) => setTimeout(r, 1000))
+    await sleep(1000)
   }
   if (stack !== undefined) {
-    reportUnhealthyStack(stack.composePath, stack.cwd, stack.project)
+    await reportUnhealthyStack(stack.composePath, stack.cwd, stack.project)
   }
   throw new Error(
     `Gateway at ${base} did not become ready within ${maxSec}s ` +
@@ -648,19 +644,25 @@ async function waitStorageApiReady(
     } catch {
       /* retry */
     }
-    await new Promise((r) => setTimeout(r, 1000))
+    await sleep(1000)
   }
   console.warn(
     `[supatype] Storage API at ${url} did not become ready within ${maxSec}s, bucket provisioning may fail.`,
   )
 }
 
+/**
+ * The schema's buckets on the dev stack. One the service did not take is said in one line, with what
+ * it means: dev carries on, and only uploads to that bucket fail. They were dropped without a word
+ * past each bucket's own warning.
+ */
 async function provisionDockerStorageBuckets(
   ast: ExtractedSchemaAstV2,
   kongPort: number,
   serviceRoleKey: string,
 ): Promise<void> {
-  await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey)
+  const left = unprovisionedBuckets(await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey))
+  if (left !== null) console.warn(`[supatype] ⚠  ${left}; uploads to them fail until a later push takes them.`)
 }
 
 let _lastPushedAst: string | null = null
@@ -673,9 +675,8 @@ let _composePushQueued = false
 /**
  * Regenerate everything derived from the schema once a push has applied it: the AST-derived files,
  * then the types and admin config from the engine. Never called for a push that was refused or
- * failed. A docker project with no `overrides.engine` uses its own engine image, the one that
- * pushed (A5-N3); otherwise the host binary, falling back to the image when the binary cannot be
- * fetched.
+ * failed. The engine is the one `supatype generate` uses, the host program, with the project's
+ * image only when that cannot be fetched (generated-files-engine.ts).
  */
 async function refreshSchemaArtifacts(
   cwd: string,
@@ -683,16 +684,18 @@ async function refreshSchemaArtifacts(
   ast: unknown,
 ): Promise<void> {
   writeAstDerivedArtifacts(cwd, config, ast)
-  const adminConfigPath = join(cwd, ".supatype", "admin-config.json")
-  let engine: ComposeEngine | undefined
+  // The client and augmentation need no engine, so no engine problem keeps them from being written.
+  writeDevAstOutputs(cwd, ast, config, "")
+  let choice: EngineChoice
   try {
-    engine = await projectComposeEngine(cwd, config)
+    choice = await generatedFilesEngine(cwd, config)
   } catch (err) {
-    degraded("The project's engine image could not be resolved, admin config and types not refreshed", errorMessage(err))
+    degraded("No engine could write the admin config and types, so they were not refreshed", errorMessage(err))
     return
   }
-  if (engine === undefined && !(await hostEngineOrComposeFallback(cwd, config, ast, adminConfigPath))) return
-  await writeEngineArtifacts(cwd, config, ast, adminConfigPath, engine)
+  await writeEngineArtifacts(cwd, config, ast, join(cwd, ".supatype", "admin-config.json"), choice.engine)
+  // Said after writing, so SUPATYPE_STRICT fails the run with the files written and the true reason.
+  if (choice.fellBack !== undefined) degraded(ENGINE_FALLBACK, choice.fellBack)
 }
 
 /** The files read straight off the applied AST, written whatever happens with the generator afterwards. */
@@ -705,20 +708,10 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // Every project running on Compose therefore had a manifest with no `hooks` and no `validators`
   // key, and the server, having nothing to call, ran neither. A hook silently not firing is bad; a
   // validator silently not firing means a write the schema says is checked is accepted with a 201.
-  const hooksModule = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
-  if (hooksModule !== null) console.log(`[supatype] Hook handler types written to ${hooksModule}`)
-  // And the context module, on the same terms. `init` and `functions new` wrote it and nothing
-  // else did, so a project that already had functions when the two-argument contract landed never
-  // received one: its handlers had no `FunctionContext` to import.
-  if (refreshFunctionsContext(cwd, config)) {
-    console.log("[supatype] Function context type written to functions/_shared/context.ts")
-  }
-  if (syncManifestHooks(cwd, ast)) {
-    console.log("[supatype] Hook and validator maps written to .supatype/manifest.json")
-  }
-  // Written before the stack comes up, so a first run with a row cache declared starts with it on
-  // rather than needing a second `supatype dev`.
-  const rowCache = syncRowCacheEnv(cwd, ast)
+  // The row cache is written before the stack comes up, so a first run with a row cache declared
+  // starts with it on rather than needing a second `supatype dev`.
+  const { lines, rowCache } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: true })
+  for (const line of lines) console.log(`[supatype] ${line}`)
   if (rowCache !== null) {
     console.log(`[supatype] ${rowCacheChangeNote(rowCache)}`)
   }
@@ -741,57 +734,14 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
  * on `npm run seed` with ECONNREFUSED against a port nothing was listening on. The layout is the
  * stack's own (dev while a dev session holds it, otherwise self-host), so a self-host push in a
  * project that once ran dev keeps the self-host port, and the message names the variable it read.
+ * Only a URL the CLI owns moves: one that is yours is left as it is, for this run too.
  */
 function syncDatabaseUrlToStack(cwd: string, config: SupatypeProjectConfig): void {
-  const dbPort = syncDatabaseUrlPort(cwd, composeRenderMode(cwd, config.project.name) === "dev")
-  if (dbPort === null) return
-  console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
+  const sync = syncDatabaseUrlPort(cwd, composeRenderMode(cwd, config.project.name) === "dev")
+  if (sync !== null) console.log(`[supatype] ${databaseUrlSyncMessage(sync)}`)
 }
 
-/**
- * True when the host engine binary is ready. When it is not, the in-compose engine writes the
- * admin config and types instead and this answers false, having said which happened.
- */
-async function hostEngineOrComposeFallback(
-  cwd: string,
-  config: SupatypeProjectConfig,
-  ast: unknown,
-  adminConfigPath: string,
-): Promise<boolean> {
-  try {
-    await ensureEngine()
-    return true
-  } catch (err) {
-    // A project that named its engine gets that engine or an error, never a stand-in.
-    if (hasEngineOverride(config)) {
-      degraded("overrides.engine could not be used, admin config and types not refreshed", errorMessage(err))
-      return false
-    }
-    // The host engine is a CDN download and this machine could not complete it. The schema is
-    // already applied, so fall back to the engine in compose rather than giving up: without
-    // admin-config.json Studio reports "No schema has been pushed yet" on a stack whose schema is
-    // entirely live, which reads as a failed push rather than a missing binary.
-    const paths = selfHostComposePaths(cwd)
-    const composeProject = composeProjectName(config.project.name)
-    const wrote = await generateViaComposeEngine(paths, cwd, composeProject, config, ast, adminConfigPath)
-      .catch(() => false)
-    // Reported through `degraded` rather than warned, so a run that takes this path says so where
-    // CI looks, rather than in a line that scrolls past.
-    const message = errorMessage(err)
-    if (wrote) {
-      degraded("Host engine unavailable, used the in-compose engine instead", message)
-    } else {
-      degraded(
-        "Host engine unavailable, admin config and types not refreshed",
-        `${message}\n[supatype] Studio will report no schema until this succeeds, even though the ` +
-          "schema is applied. Retry with the stack up, or run `supatype push`.",
-      )
-    }
-    return false
-  }
-}
-
-/** The types, the AST outputs and the admin config, from `engine` (the host binary when undefined). */
+/** The types, the seed builder and the admin config, from `engine` (the host binary when undefined). */
 async function writeEngineArtifacts(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -813,7 +763,6 @@ async function writeEngineArtifacts(
     console.warn(`[supatype] Type generation failed: ${errorMessage(err)}`)
   }
 
-  writeDevAstOutputs(cwd, ast, config, "")
   await writeDevSeedBuilder(cwd, config, ast, engine)
 
   try {
@@ -889,6 +838,11 @@ export interface ComposePushOptions {
   force?: boolean
   /** The engine's audit flags (`composeAuditArgs`), empty for an engine that does not take them. */
   audit?: readonly string[]
+  /**
+   * Push without the schema snapshot when it cannot be taken, rather than refuse. dev's, which
+   * pushes on every save; `supatype push` refuses ({@link writeSchemaSourcePushArtifacts}).
+   */
+  snapshotOptional?: boolean
 }
 
 /**
@@ -978,7 +932,7 @@ async function applyViaHostEngine(
   opts: ComposePushOptions,
 ): Promise<void> {
   await ensureEngine()
-  const sources = writeSchemaSourcePushArtifacts(cwd)
+  const sources = writeSchemaSourcePushArtifacts(cwd, opts.snapshotOptional === true)
   const body = {
     ast,
     database_url: projectDatabaseUrl(cwd, config),
@@ -1001,7 +955,7 @@ async function applyViaComposeEngine(
   opts: ComposePushOptions,
 ): Promise<void> {
   const { paths, composeProject } = stack
-  const sources = writeSchemaSourcePushArtifacts(cwd)
+  const sources = writeSchemaSourcePushArtifacts(cwd, opts.snapshotOptional === true)
   const audit = opts.audit ?? (await composeAuditArgs(cwd, config))
   const pushOnce = () => runComposeEnginePush(paths, cwd, composeProject, config, sources, { ...opts, audit })
   const runPush = async () => {
@@ -1009,7 +963,7 @@ async function applyViaComposeEngine(
     // Windows Docker bind mounts can lag briefly after the host write. A consent refusal is the
     // engine's considered answer, not a lagging mount, and running it again only repeats it.
     if (first.status === 0 || consentRefusal(first.output) !== null) return first
-    await new Promise((r) => setTimeout(r, 250))
+    await sleep(250)
     return pushOnce()
   }
   // B: only hold the advisory lock when realtime is already decoding, first-boot
@@ -1094,7 +1048,13 @@ async function runDevSchemaPush(
   const once = (overwriteDrift: boolean) =>
     pushConsentingToDestructive(
       (force) =>
-        runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, audit, overwriteDrift, force }),
+        runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, {
+          ...opts,
+          audit,
+          overwriteDrift,
+          force,
+          snapshotOptional: true,
+        }),
       DEV_DESTRUCTIVE_POLICY,
       consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
     )
@@ -1173,12 +1133,12 @@ export async function dockerEngineCapabilities(cwd: string, config: SupatypeProj
   const probe = (): Capabilities => {
     const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
     const target = { cwd, project: composeProjectName(config.project.name), composePath: paths.composePath, engineImage }
-    return probeCapabilities((args) => {
+    return checkedCapabilities((args) => {
       const run = spawnComposeEngine(target, args, { runFlags: ["--no-deps"] })
-      return { status: run.status, stdout: run.stdout ?? "", stderr: run.error?.message ?? run.stderr ?? "" }
+      return { status: run.status, stdout: run.stdout, stderr: run.error ?? run.stderr }
     })
   }
-  const imageId = engineImage === undefined ? "compose-default" : localImageId(engineImage)
+  const imageId = engineImage === undefined ? "compose-default" : await localImageId(engineImage)
   // Not pulled yet: the probe pulls it, and the next call keys on the ID it then has.
   if (imageId === undefined) return probe()
   return rememberCapabilitiesSync(dockerCapabilities, `${cwd}\0${engineImage ?? ""}\0${imageId}`, probe)
@@ -1188,8 +1148,8 @@ export async function dockerEngineCapabilities(cwd: string, config: SupatypeProj
  * The local image's ID, or undefined when Docker does not have it. The answer is keyed on it, so
  * a tag that now names another image (a pull, a rebuild) is asked again, and nothing else is.
  */
-function localImageId(image: string): string | undefined {
-  const inspect = spawnSync("docker", ["image", "inspect", "--format", "{{.Id}}", image], { encoding: "utf8" })
+async function localImageId(image: string): Promise<string | undefined> {
+  const inspect = await askDocker(["image", "inspect", "--format", "{{.Id}}", image], { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
   const id = inspect.status === 0 ? inspect.stdout.trim() : ""
   return id === "" ? undefined : id
 }
@@ -1420,7 +1380,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   let result = await runComposeEngineDiff(paths, cwd, project, config)
   // Windows Docker bind mounts can lag briefly after the host write.
   if (result.status !== 0) {
-    await new Promise((r) => setTimeout(r, 250))
+    await sleep(250)
     result = await runComposeEngineDiff(paths, cwd, project, config)
   }
   if (result.status !== 0) {
@@ -1547,7 +1507,7 @@ async function applyInitialSchema(
     push: () => runDevSchemaPush(cwd, config, paths, schemaPath, project, opts),
     recoverDatabase: () => startComposeDatabase(config, paths, cwd, project, brand, undefined, endDevSession),
     dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    sleep: (ms) => sleep(ms),
   }
   const outcome = await adoptingOnRefusal(await pushInitialSchema(steps), steps, cwd, config)
   // Ending the session before an exit, so its message reaches the real terminal rather than a TUI
@@ -1574,6 +1534,18 @@ async function adoptingOnRefusal(
   return adopted === "adopted" ? pushInitialSchema(steps) : outcome
 }
 
+/**
+ * The dev stack's database port, moved off one something else holds, or undefined for an external
+ * database. A port only the shell gives is offered to `.env` before anything else reads the URL
+ * (db-port-offer.ts), so a yes is what the rest of the run sees.
+ */
+async function devStackDbPort(cwd: string, config: SupatypeProjectConfig, project: string): Promise<number | undefined> {
+  if (!publishesDbToHost(config)) return undefined
+  const port = await ensureDevDbPort(cwd, { composeProject: project, mayMove: true })
+  await offerToSaveShellDbPort(cwd)
+  return port
+}
+
 export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, opts: DevComposeOptions): Promise<void> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("runDevCompose requires provider: docker")
@@ -1593,9 +1565,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // `overrides.engine` while the compose file published unconditionally is what left a project
   // with a database on 54329 and a URL still saying 5432.
   // Only dev moves the port off something else that holds it.
-  const devDbPort = publishesDbToHost(config)
-    ? await ensureDevDbPort(cwd, { composeProject: project, mayMove: true })
-    : undefined
+  const devDbPort = await devStackDbPort(cwd, config, project)
 
   const { anonKey, serviceRoleKey } = devApiKeys(cwd)
 
@@ -1606,6 +1576,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   warnProjectAuthProviderSecrets(cwd, config)
 
   console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
+  noteUnpinnedImages(cwd)
   const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   if (ensureDevApiConfig(cwd)) {
     console.log("[supatype] API config written to .supatype/api-config.json")
@@ -1667,7 +1638,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   }
   await startComposeDatabase(config, paths, cwd, project, devBrand, 180_000, endDevSession)
   // Settle before DDL: pg_isready can pass slightly before the instance is stable.
-  await new Promise((r) => setTimeout(r, 3000))
+  await sleep(3000)
+  // With the stack's database up, so a hand-written URL naming it is not reported as silent.
+  await warnIfHandWrittenUrlSilent(cwd)
 
   if (!usesExternalDatabase(config)) {
     reconcileAuthenticatorPassword(paths, cwd, project)
@@ -1852,91 +1825,4 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   // Until Ctrl+C or a signal: the shutdown hook takes the stack down and exits.
   await waitForDevShutdown()
-}
-
-/**
- * Run one read-only generator in the in-compose schema-engine and return its stdout.
- *
- * The same image and the same bind mount the push just used, so if the schema could be applied
- * this can run. It exists because the host engine is a separate binary fetched from a CDN, and a
- * machine that cannot fetch it is not a machine that cannot generate: the schema is already
- * applied, the AST is already on disk, and the container that did it is one `docker compose run`
- * away.
- */
-async function runComposeEngineGenerator(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  config: SupatypeProjectConfig,
-  args: readonly string[],
-): Promise<string | null> {
-  const engineImage = await schemaEngineImageForPush(config, cwd)
-  const target = { cwd, project: composeProject, composePath: paths.composePath, engineImage }
-  const result = spawnComposeEngine(target, [...args, "-i", COMPOSE_SCHEMA_AST], {
-    runFlags: ["-T"],
-    maxBuffer: 20 * 1024 * 1024,
-  })
-  if ((result.status ?? 1) !== 0) return null
-  return String(result.stdout ?? "")
-}
-
-/**
- * The in-compose engine as {@link engineRequest} takes it, for generating only. No database URL:
- * `/generate` reads the AST alone and runs without starting the database.
- */
-async function composeGeneratorEngine(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  config: SupatypeProjectConfig,
-): Promise<ComposeEngine> {
-  const engineImage = await schemaEngineImageForPush(config, cwd)
-  return {
-    target: { cwd, project: composeProject, composePath: paths.composePath, engineImage },
-    databaseUrl: "",
-    capabilities: () => dockerEngineCapabilities(cwd, config),
-  }
-}
-
-/**
- * Write `admin-config.json` and the generated types using the in-compose engine.
- *
- * The fallback for a host engine that could not be fetched. Without it, a `supatype dev` that
- * applied the schema perfectly well still left no `admin-config.json`, and Studio reads that file
- * to decide whether a schema exists: the stack came up, every table was live, the API served them,
- * and Studio said **"No schema has been pushed yet."** The warning that preceded it named the
- * download, not the consequence, so nothing connected the two.
- *
- * Returns true when the admin config was written, which is the file Studio actually needs.
- */
-export async function generateViaComposeEngine(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  config: SupatypeProjectConfig,
-  ast: unknown,
-  adminConfigPath: string,
-): Promise<boolean> {
-  const { typesPath } = projectOutputPaths(config.output)
-  const out = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["generate"])
-  if (writeEngineTypes(cwd, typesPath, out ?? undefined)) {
-    console.log(`[supatype] Types written to ${typesPath} (in-compose engine).`)
-  }
-
-  // The same AST-derived files as the host path. This is the fallback used when the host engine
-  // could not be fetched, and these need no engine at all, so there is no reason for a project on
-  // this path to end up with fewer generated files than one on the other.
-  writeDevAstOutputs(cwd, ast, config, " (in-compose engine).")
-  await writeDevSeedBuilder(cwd, config, ast, await composeGeneratorEngine(paths, cwd, composeProject, config))
-
-  const adminOut = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["admin"])
-  if (!adminOut) return false
-  const parsed = parseEngineJsonOutput(adminOut, isObjectAnswer)
-  if (parsed === null) return false
-
-  const admin = withAdminRoles(parsed, config)
-  restoreSystemRelationTargets(admin, ast)
-  writeFileSync(adminConfigPath, `${JSON.stringify(admin, null, 2)}\n`)
-  console.log("[supatype] Admin config written to .supatype/admin-config.json (in-compose engine).")
-  return true
 }

@@ -5,7 +5,7 @@ import { withDatabaseRetry } from "./db-retry.js"
 import * as bucketRoutes from "./routes/buckets.js"
 import * as objectRoutes from "./routes/objects.js"
 import { getDefaultCorsHeaders } from "./middleware/cors.js"
-import type { Guard } from "./json.js"
+import { isShape, shapeMismatches, type FromShape, type Shape } from "./json.js"
 
 export interface RequestContext {
   req: IncomingMessage
@@ -72,6 +72,16 @@ function matchRoute(
     }
   }
   return null
+}
+
+/**
+ * The request's path as the client sent it. URL.pathname resolves "." and ".." parts (and %2E with
+ * them) away, so "x/../a" was routed as "a" and wrote over it: an object name is judged as written
+ * (object-names.ts). A request line naming a whole URL falls back to its pathname.
+ */
+function pathAsSent(requestUrl: string | undefined, url: URL): string {
+  const path = (requestUrl ?? "/").split("?")[0] ?? "/"
+  return path.startsWith("/") ? path : url.pathname
 }
 
 /** The matching route, or "malformed" when the path's percent-encoding cannot be decoded. */
@@ -150,7 +160,7 @@ export function createServer() {
       return
     }
 
-    const matched = matchedOrMalformed(method, url.pathname)
+    const matched = matchedOrMalformed(method, pathAsSent(req.url, url))
     if (matched === "malformed") {
       sendJson(res, 400, { error: "Malformed percent-encoding in the path" })
       return
@@ -199,13 +209,33 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
   res.end(JSON.stringify(body))
 }
 
+/** The whole request body. */
 export async function readBody(req: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  for await (const chunk of req) {
-    const piece: unknown = chunk
-    chunks.push(Buffer.isBuffer(piece) ? piece : Buffer.from(String(piece)))
-  }
-  return Buffer.concat(chunks)
+  return (await readBodyUpTo(req, -1)) ?? Buffer.alloc(0)
+}
+
+/**
+ * The request body, or null as soon as more than `limit` bytes of it have arrived (-1 for no
+ * limit). The rest is left unread: the caller answers, and the connection closes after it.
+ */
+export function readBodyUpTo(req: IncomingMessage, limit: number): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    const stop = (result: Buffer | null): void => {
+      req.off("data", onData).off("end", onEnd).off("error", reject)
+      resolve(result)
+    }
+    const onData = (chunk: Buffer): void => {
+      size += chunk.length
+      if (limit !== -1 && size > limit) {
+        req.pause()
+        stop(null)
+      } else chunks.push(chunk)
+    }
+    const onEnd = (): void => stop(Buffer.concat(chunks))
+    req.on("data", onData).on("end", onEnd).on("error", reject)
+  })
 }
 
 /** A request body this service cannot read: answered with a 400 that says why. */
@@ -216,8 +246,11 @@ export class InvalidBody extends Error {
   }
 }
 
-/** The request's JSON body when the guard accepts it; an `InvalidBody` when it is not JSON or not that. */
-export async function readJson<T>(req: IncomingMessage, guard: Guard<T>): Promise<T> {
+/**
+ * The request's JSON body when it has `shape`; an `InvalidBody` when it is not JSON or not that,
+ * naming the fields whose type does not match.
+ */
+export async function readShapedJson<S extends Shape>(req: IncomingMessage, shape: S): Promise<FromShape<S>> {
   const text = (await readBody(req)).toString("utf8")
   let body: unknown
   try {
@@ -225,8 +258,13 @@ export async function readJson<T>(req: IncomingMessage, guard: Guard<T>): Promis
   } catch {
     throw new InvalidBody("The request body must be JSON")
   }
-  if (!guard(body)) throw new InvalidBody("The request body does not have the fields this route reads, with their types")
-  return body
+  if (isShape(shape)(body)) return body
+  const fields = shapeMismatches(shape, body)
+  throw new InvalidBody(
+    fields.length > 0
+      ? `The request body's ${fields.join(", ")} ${fields.length === 1 ? "does" : "do"} not have the type this route reads`
+      : "The request body does not have the fields this route reads, with their types",
+  )
 }
 
 // CORS headers are now managed by middleware/cors.ts

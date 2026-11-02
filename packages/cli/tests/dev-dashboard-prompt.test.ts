@@ -67,7 +67,7 @@ describe("dev dashboard prompt panel", () => {
       void enqueueDevPrompt({ kind: "confirm", message: LEFTOVER_STACK_QUESTION, initialValue: true })
       const rows = panelRows(await lastFrame(columns, 30))
       expect(rows).toContain("Stop the orphaned stack before starting?")
-      expect(rows).toContain("Yes / No: y/n, ←/→, enter")
+      expect(rows).toContain("Yes / No: Y/n, ←/→, enter for yes")
       expect(rows.join(" ")).toContain("is still running).")
     })
   }

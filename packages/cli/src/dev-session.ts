@@ -3,6 +3,7 @@
  */
 
 import { render, type Instance } from "ink"
+import { prepareStdinForInk } from "./ui/runtime/stdin-after-ink.js"
 import React from "react"
 import type { ProcessOptions } from "./process-manager.js"
 import { filterDevSubprocessLine, filterStackLogLine, formatConsoleArgs } from "./dev-log-filter.js"
@@ -142,6 +143,8 @@ export class DevSession {
 
   startInk(): void {
     if (!this.isTui() || this.ink) return
+    // A prompt before dev started stopped stdin's read when it ended; the dashboard needs it.
+    prepareStdinForInk()
     this.ink = render(React.createElement(DevDashboard, { bus: this.bus }))
   }
 

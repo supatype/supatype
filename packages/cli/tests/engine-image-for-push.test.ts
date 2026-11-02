@@ -10,7 +10,7 @@ import { projectConfig } from "./support/project-config.js"
  * win: the push used to overwrite it with the latest published tag, so a local engine build, and
  * CI's `SUPATYPE_ENGINE_IMAGE`, were silently never the engine that pushed.
  */
-const pinned = projectConfig({ project: { name: "p" }, versions: { engine: "0.6.0" } })
+const pinned = projectConfig({ project: { name: "p" }, versions: { engine: "0.9.0" } })
 
 const dirs: string[] = []
 function project(env?: string): string {
@@ -37,6 +37,6 @@ describe("schemaEngineImageForPush()", () => {
 
   it("runs the pinned version when nothing is named", async () => {
     const image = await schemaEngineImageForPush(pinned, project(), {})
-    expect(image).toContain("0.6.0")
+    expect(image).toContain("0.9.0")
   })
 })

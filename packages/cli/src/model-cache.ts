@@ -17,16 +17,11 @@
  * verify before relying on it; this is the verified path.
  */
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
-import { keptName } from "@supatype/shared"
+import { keptName, type CacheMap, type ManifestCacheEntry } from "@supatype/shared"
 import { astModels, objectAt } from "./ast-read.js"
 
-/** One table's cache declaration, as the manifest carries it. */
-export interface ManifestCacheEntry {
-  enabled?: boolean
-  maxTtl?: number
-  public?: boolean
-  rows?: boolean
-}
+/** One table's cache declaration, as the manifest carries it (@supatype/shared). */
+export type { ManifestCacheEntry } from "@supatype/shared"
 
 /**
  * Every model's cache declaration, keyed by table name.
@@ -36,8 +31,8 @@ export interface ManifestCacheEntry {
  * and an empty entry would read as "declared, permitting nothing": the same outcome by a route
  * that looks like a bug.
  */
-export function manifestCache(ast: unknown): Record<string, ManifestCacheEntry> {
-  const out: Record<string, ManifestCacheEntry> = {}
+export function manifestCache(ast: unknown): CacheMap {
+  const out: CacheMap = {}
   // Each step is checked, so a malformed model is skipped rather than throwing a TypeError out of
   // `supatype push`.
   for (const model of astModels(ast)) {

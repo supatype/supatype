@@ -7,6 +7,7 @@
 
 import { existsSync } from "node:fs"
 import type { Component } from "./components.js"
+import { keepsObjectsLocally } from "./local-storage.js"
 import {
   functionsPathCandidatesFromProject,
   resolveRuntimeProvider,
@@ -24,6 +25,8 @@ export function requiredHostComponents(
   }
 
   const components: Component[] = ["engine", "server", "postgres", "realtime"]
+  // Native dev runs the storage service for a project whose objects stay on this machine.
+  if (keepsObjectsLocally(config)) components.push("storage")
   const hasFunctions = functionsPathCandidatesFromProject(config, cwd).some((dir) =>
     existsSync(dir),
   )

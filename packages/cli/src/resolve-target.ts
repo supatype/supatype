@@ -18,7 +18,7 @@ import type { EnginePushResult } from "./engine-push-output.js"
 import type { DoctorReport } from "./commands/doctor.js"
 import type { DatabaseStateJson } from "./pull-utils.js"
 import { readJsonFileOrThrow } from "./json-file.js"
-import { isShape, isString, optional, type Guard } from "@supatype/shared"
+import { HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, isShape, isString, optional, type Guard } from "@supatype/shared"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import type { AppliedRenameRecord } from "./rename-journal.js"
 import { pushAuditFields } from "./push-audit.js"
@@ -43,6 +43,7 @@ import {
   type ProjectLink,
 } from "./link.js"
 import {
+  envAccessToken,
   persistCloudSession,
   resolveCloudAccessToken,
   resolveCloudRefreshToken,
@@ -54,7 +55,7 @@ import {
   assertSupported,
   engineCapabilities,
   identityColumnsNeed,
-  parseCapabilities,
+  serverAnswerCapabilities,
   REBASELINE_KEYS_NEED,
   type Capabilities,
   type FeatureNeed,
@@ -65,6 +66,8 @@ export interface ResolveTargetFlags {
   direct?: boolean
   local?: boolean
   connection?: string | undefined
+  /** Resolve a linked target with no session or token too, for a call that may go without one. */
+  tokenOptional?: boolean
 }
 
 export type TargetMode = "cloud" | "self-host" | "local" | "direct"
@@ -101,12 +104,16 @@ export function loadBranchContext(cwd: string): BranchContext | null {
   return readJsonFileOrThrow(path, isBranchContext, "a branch context")
 }
 
-function resolveBranchDefaults(cwd: string, configEnvDefault?: string): string | undefined {
-  if (configEnvDefault) return configEnvDefault
+/**
+ * The environment `config` names for this checkout: its default, else the one its branch defaults
+ * give the current git branch. From the config the caller already read: reading it runs it in a
+ * child process, and a second read made every linked command half a second slower.
+ */
+function resolveBranchDefaults(cwd: string, config: SupatypeProjectConfig): string | undefined {
+  if (config.environments?.default) return config.environments.default
+  const branchDefaults = config.environments?.branchDefaults
+  if (!branchDefaults) return undefined
   try {
-    const config = loadConfig(cwd)
-    const branchDefaults = config.environments?.branchDefaults
-    if (!branchDefaults) return undefined
     const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8" }).trim()
     return branchDefaults[branch]
   } catch {
@@ -183,7 +190,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
 
   const envName = resolveEnvironmentName(
     link,
-    flags.env ?? resolveBranchDefaults(cwd, config.environments?.default),
+    flags.env ?? resolveBranchDefaults(cwd, config),
   )
   const envTarget = getEnvironmentTarget(link, envName)
   if (!envTarget) {
@@ -192,10 +199,11 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     )
   }
 
+  // A token exported for CI first for a Cloud link, as `supatype link` and the cloud commands read it.
   const token =
-    (link.kind === "cloud" ? resolveCloudAccessToken(link) : undefined) ??
+    (link.kind === "cloud" ? envAccessToken() ?? resolveCloudAccessToken(link) : undefined) ??
     resolveEnvironmentToken(link, envTarget)
-  if (!token) {
+  if (!token && flags.tokenOptional !== true) {
     throw new Error(
       link.kind === "cloud"
         ? `No cloud session for environment "${envName}". Run: supatype login`
@@ -250,7 +258,11 @@ function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh
   }
 }
 
-function apiFetchOpts(
+/**
+ * A request to `path` on the target, carrying its token, org and environment, and renewing a Cloud
+ * session that expired.
+ */
+export function apiFetchOpts(
   target: DeployTarget,
   method: string,
   path: string,
@@ -260,7 +272,7 @@ function apiFetchOpts(
   return {
     method,
     path,
-    token: target.token!,
+    ...(target.token !== undefined ? { token: target.token } : {}),
     ...(body !== undefined ? { body } : {}),
     ...(target.orgId !== undefined ? { orgId: target.orgId } : {}),
     ...(target.mode === "cloud" ? { environment: target.environment } : {}),
@@ -270,6 +282,73 @@ function apiFetchOpts(
 
 function projectPath(target: DeployTarget, subpath: string): string {
   return `/projects/${target.projectRef}${subpath}`
+}
+
+/**
+ * A request to the target's project API, at `/projects/<ref><subpath>`, carrying its token, org and
+ * environment, and renewing a Cloud session that expired.
+ */
+export function projectRequest(target: DeployTarget, method: string, subpath: string, body?: unknown): TargetFetchOptions {
+  return apiFetchOpts(target, method, projectPath(target, subpath), body)
+}
+
+/** How a target serves the project's functions. */
+export interface TargetFunctions {
+  /** Where a function is invoked: `<invokeBase>/<name>`. */
+  invokeBase: string
+  /** The token an authenticated invoke carries, when the target has one to give. */
+  invokeToken: string | undefined
+  /** Cloud answers a window of past log lines; a server relays the worker's live stream from `tail`. */
+  logs: { kind: "window" } | { kind: "tail"; tail: TargetStreamPath }
+}
+
+/**
+ * What a hook upload may carry: the entry module alone, or every file of the hook's directory, which
+ * a server writes back as the project keeps it.
+ */
+export type HookFiles = "entry" | "directory"
+
+/**
+ * What a hooks deploy to `target` may do, from one (cached) capabilities answer.
+ *
+ * `files`: every file of a hook only when the target says it takes them ({@link HOOK_FILES_FEATURE}).
+ * Anything else, Cloud, an older self-hosted control plane or one with no capabilities route (404),
+ * takes the entry alone: an older stack dropped `files` without a word and the push reported success.
+ *
+ * `keep`: whether it deploys hook by hook and takes `keep` ({@link HOOK_KEEP_FEATURE}). A target that
+ * does not list it takes all of a push's hooks or none.
+ *
+ * Any other failure to ask rejects: the caller does not deploy hooks it cannot describe to the target,
+ * and says why.
+ */
+export async function targetHookSupport(target: DeployTarget): Promise<{ files: HookFiles; keep: boolean }> {
+  const { features } = await targetCapabilities(target)
+  return { files: features.has(HOOK_FILES_FEATURE) ? "directory" : "entry", keep: features.has(HOOK_KEEP_FEATURE) }
+}
+
+/** Where a stream is served on the target: `<baseUrl><apiPrefix><path>`. */
+export interface TargetStreamPath {
+  baseUrl: string
+  apiPrefix: "/admin/v1"
+  path: string
+}
+
+/**
+ * The target's functions: Supatype Cloud serves them on the project's own host and keeps past log
+ * lines; a self-hosted or local server serves them under its API and relays a live tail from its
+ * admin API. An authenticated invoke carries the Cloud session, or a local link's key; a
+ * self-hosted link's service-role key is never handed to it.
+ */
+export function targetFunctions(target: DeployTarget): TargetFunctions {
+  if (target.mode === "cloud") {
+    const invokeBase = `https://${target.projectRef}.supatype.dev/functions/v1`
+    return { invokeBase, invokeToken: target.token, logs: { kind: "window" } }
+  }
+  // A local link is this machine's own server, and its key goes with an authenticated invoke there.
+  // A self-hosted link's service-role key is not handed to a function.
+  const invokeToken = target.mode === "local" ? target.token : undefined
+  const tail: TargetStreamPath = { baseUrl: target.apiBaseUrl, apiPrefix: "/admin/v1", path: "/functions/logs/tail" }
+  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs: { kind: "tail", tail } }
 }
 
 /**
@@ -329,7 +408,7 @@ async function serverCapabilities(target: DeployTarget): Promise<Capabilities> {
     if (isUnknownProject(err)) throw new Error(unknownProjectMessage(target, err))
     if (err.status !== 404) throw err
   }
-  return { features: parseCapabilities(answer) ?? new Set(), source: "server" }
+  return serverAnswerCapabilities(answer)
 }
 
 /**
