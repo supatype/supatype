@@ -11,6 +11,7 @@
 
 import { existsSync, readdirSync } from "node:fs"
 import { currentPlatform, type PlatformId } from "./binary-cache.js"
+import { cliExecutableName as executableName } from "./cli-program-path.js"
 
 /**
  * Which C library the running system provides. Only meaningful on Linux: Bun links
@@ -47,7 +48,7 @@ export function cliArchiveName(
 
 /** The executable inside the archive. */
 export function cliExecutableName(platform: PlatformId = currentPlatform()): string {
-  return platform.os === "windows" ? "supatype.exe" : "supatype"
+  return executableName(platform)
 }
 
 /** CDN path of a version's archive, relative to the CDN root. */

@@ -8,6 +8,7 @@ export interface MergePackageJsonOptions {
 
 type PackageJson = {
   name?: string
+  version?: string
   private?: boolean
   type?: string
   scripts?: Record<string, string>
@@ -15,50 +16,129 @@ type PackageJson = {
   devDependencies?: Record<string, string>
 }
 
-const CORE_SCRIPTS = {
+/**
+ * `supatype generate` when the CLI is installed, and nothing when it is not.
+ *
+ * The generated files are gitignored, so a fresh clone has to produce them before anything can
+ * import them; `generate` is fully offline, which is what makes gitignoring generated code
+ * reasonable rather than a trap. A production install leaves out development dependencies, the CLI
+ * among them, but npm still runs `prepare`: a bare `supatype generate` failed it with
+ * `supatype: not found`. Nothing there needs generating, since the build that imports the files
+ * ran with everything installed. Prisma's client skips its generate the same way when the Prisma
+ * CLI is not installed.
+ *
+ * Node, not the shell, so it reads the same under sh and cmd.exe, for npm, pnpm and yarn. Only a
+ * CLI that is not installed is skipped: any other failure to find it, or of the generate itself,
+ * still fails the install.
+ */
+export const PREPARE_COMMAND =
+  "node -e \"" +
+  [
+    "let p",
+    "try{p=require.resolve('@supatype/cli/package.json')}catch(e){if(e.code==='MODULE_NOT_FOUND')process.exit(0);throw e}",
+    "const r=require('child_process').spawnSync(process.execPath,[require('path').join(p,'..','bin','supatype.js'),'generate'],{stdio:'inherit'})",
+    "process.exit(r.status??1)",
+  ].join(";") +
+  "\""
+
+/**
+ * The scripts every Supatype project gets, written by `init` into a new package.json and merged
+ * into an existing one, so the two cannot drift: the merge once ran `tsx seed.ts`, which loads the
+ * seed module without calling it, while new projects ran `supatype seed`.
+ */
+export const CORE_SCRIPTS = {
   dev: "supatype dev",
   push: "supatype push",
-  seed: "tsx seed.ts",
+  seed: "supatype seed",
+  prepare: PREPARE_COMMAND,
 } as const
 
-/** Merge Supatype deps/scripts into an existing package.json object. */
+/**
+ * Vite serves the app in development, and `build` writes the `./dist` that `app.static_dir` serves
+ * in production. Without `build` nothing ever produced `./dist`.
+ */
+const VITE_SCRIPTS = { vite: "vite", build: "vite build" } as const
+
+const FUNCTIONS_SCRIPTS = { functions: "supatype functions serve" } as const
+
+/** The Vite major that current `@vitejs/plugin-react` requires as a peer. */
+export const VITE_RANGE = "^8"
+
+/**
+ * Development-time only, so devDependencies. schema/index.ts imports @supatype/types with
+ * `import type`, which is erased at build; supatype.config.ts imports defineConfig, which only the
+ * CLI evaluates; seed.ts is run by `supatype seed`. Nothing `supatype push` or `supatype generate`
+ * writes refers to either package. The generated client imports @supatype/client at runtime, so
+ * that one is a real dependency.
+ *
+ * In dependencies they were installed by `npm install --omit=dev`, so every production install of
+ * a Supatype app pulled the CLI to support three files that never run in production.
+ *
+ * No tsx: the CLI's program runs the project's TypeScript itself. TypeScript stays for the editor
+ * and for `tsc`, and `defineConfig`'s module imports it.
+ */
+function toolDependencies(deps: InitDependencyVersions, opts: MergePackageJsonOptions): Record<string, string> {
+  return {
+    "@supatype/cli": `^${deps.cli}`,
+    "@supatype/types": `^${deps.types}`,
+    typescript: "^5",
+    ...(opts.app.viteDevUrl ? { vite: VITE_RANGE } : {}),
+  }
+}
+
+function projectScripts(opts: MergePackageJsonOptions): Record<string, string> {
+  return {
+    ...CORE_SCRIPTS,
+    ...(opts.app.viteDevUrl ? VITE_SCRIPTS : {}),
+    ...(opts.helloFunction ? FUNCTIONS_SCRIPTS : {}),
+  }
+}
+
+/** The package.json `init` writes for a new project. */
+export function scaffoldPackageJson(opts: MergePackageJsonOptions, deps: InitDependencyVersions): string {
+  const pkg: PackageJson = {
+    name: opts.projectName,
+    version: "0.1.0",
+    private: true,
+    type: "module",
+    scripts: projectScripts(opts),
+    dependencies: { "@supatype/client": `^${deps.client}` },
+    devDependencies: toolDependencies(deps, opts),
+  }
+  return `${JSON.stringify(pkg, null, 2)}\n`
+}
+
+type Section = Record<string, string> | undefined
+
+/** Each of `wanted` that none of `present` already names. */
+function absentFrom(wanted: Record<string, string>, ...present: Section[]): Record<string, string> {
+  return Object.fromEntries(Object.entries(wanted).filter(([key]) => present.every((p) => p?.[key] === undefined)))
+}
+
+/** Merge Supatype deps/scripts into an existing package.json object, keeping what it already has. */
 export function mergeSupatypePackageJson(
   pkg: PackageJson,
   opts: MergePackageJsonOptions,
   deps: InitDependencyVersions,
 ): PackageJson {
-  const next: PackageJson = { ...pkg }
-
-  if (!next.name) next.name = opts.projectName
-  if (next.private === undefined) next.private = true
-  if (!next.type) next.type = "module"
-
-  const scripts = { ...(next.scripts ?? {}) }
-  for (const [key, value] of Object.entries(CORE_SCRIPTS)) {
-    if (scripts[key] === undefined) scripts[key] = value
-  }
+  const scripts = { ...pkg.scripts, ...absentFrom(projectScripts(opts), pkg.scripts) }
   if (scripts.dev !== CORE_SCRIPTS.dev && scripts["supatype:dev"] === undefined) {
     scripts["supatype:dev"] = CORE_SCRIPTS.dev
   }
-  if (opts.app.viteDevUrl && scripts.vite === undefined) {
-    scripts.vite = "vite"
+  return {
+    ...pkg,
+    name: pkg.name || opts.projectName,
+    private: pkg.private ?? true,
+    type: pkg.type || "module",
+    scripts,
+    dependencies: {
+      ...pkg.dependencies,
+      ...absentFrom({ "@supatype/client": `^${deps.client}` }, pkg.dependencies, pkg.devDependencies),
+    },
+    // A tool the project already lists in either section stays where it is.
+    devDependencies: {
+      ...pkg.devDependencies,
+      ...absentFrom(toolDependencies(deps, opts), pkg.dependencies, pkg.devDependencies),
+    },
   }
-  if (opts.helloFunction && scripts.functions === undefined) {
-    scripts.functions = "supatype functions serve"
-  }
-  next.scripts = scripts
-
-  const dependencies = { ...(next.dependencies ?? {}) }
-  if (dependencies["@supatype/cli"] === undefined) dependencies["@supatype/cli"] = `^${deps.cli}`
-  if (dependencies["@supatype/types"] === undefined) dependencies["@supatype/types"] = `^${deps.types}`
-  if (dependencies["@supatype/client"] === undefined) dependencies["@supatype/client"] = `^${deps.client}`
-  next.dependencies = dependencies
-
-  const devDependencies = { ...(next.devDependencies ?? {}) }
-  if (devDependencies.tsx === undefined) devDependencies.tsx = "^4.19.2"
-  if (devDependencies.typescript === undefined) devDependencies.typescript = "^5"
-  if (opts.app.viteDevUrl && devDependencies.vite === undefined) devDependencies.vite = "^6"
-  next.devDependencies = devDependencies
-
-  return next
 }

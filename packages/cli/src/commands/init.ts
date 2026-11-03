@@ -35,7 +35,7 @@ import {
   sharedFunctionsReadmeSource,
 } from "../functions-deno-types.js"
 import { functionTemplateSource } from "../functions-template.js"
-import { mergeSupatypePackageJson } from "../init-package-json.js"
+import { mergeSupatypePackageJson, scaffoldPackageJson } from "../init-package-json.js"
 import { downloadRelease, initFromExample } from "../init-example.js"
 import { errorMessage } from "../error-message.js"
 import { parseJsonObject } from "@supatype/shared"
@@ -741,7 +741,7 @@ export function scaffold(
 
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) {
-    write("package.json", packageJsonTemplate(opts, deps))
+    write("package.json", scaffoldPackageJson(opts, deps))
   } else {
     try {
       const existing = parseJsonObject(readFileSync(pkgPath, "utf8"))
@@ -879,60 +879,6 @@ async function resolveDependencyVersions(): Promise<InitDependencyVersions> {
     )
   }
   return deps
-}
-
-function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions): string {
-  const scripts: string[] = [
-    `    "dev": "supatype dev"`,
-    `    "push": "supatype push"`,
-    `    "seed": "supatype seed"`,
-    // The generated seed builder is gitignored, so a fresh clone has to produce it before
-    // anything can import it. `generate` is fully offline, which is the condition that makes
-    // gitignoring generated code reasonable rather than a trap; without this hook it would be
-    // one, and the failure would be a missing module rather than anything naming the remedy.
-    `    "prepare": "supatype generate"`,
-  ]
-  if (opts.app.viteDevUrl) {
-    scripts.push(`    "vite": "vite"`)
-  }
-  if (opts.helloFunction) {
-    scripts.push(`    "functions": "supatype functions serve"`)
-  }
-  // Both are development-time only, so they belong in devDependencies. Validated end to end
-  // against a real database: schema/index.ts imports @supatype/types with `import type`, which is
-  // erased at build; supatype.config.ts imports defineConfig, which only the CLI evaluates; and
-  // seed.ts is run by `tsx seed.ts`. Nothing `supatype push` or `supatype generate` writes refers
-  // to either package: the generated types import nothing. The generated client
-  // (supatype/generated/client.ts) imports @supatype/client at runtime, so that one is a real
-  // dependency.
-  //
-  // In dependencies they were installed by `npm install --omit=dev`, so every production install
-  // of a Supatype app pulled the whole CLI toolchain (ink, react, typescript, ts-morph, pg, tsx)
-  // to support three files that never run in production.
-  const devDeps = [
-    `    "@supatype/cli": "^${deps.cli}"`,
-    `    "@supatype/types": "^${deps.types}"`,
-    `    "tsx": "^4.19.2"`,
-    `    "typescript": "^5"`,
-  ]
-  if (opts.app.viteDevUrl) {
-    devDeps.push(`    "vite": "^6"`)
-  }
-  return `{
-  "name": "${opts.projectName}",
-  "private": true,
-  "type": "module",
-  "scripts": {
-${scripts.join(",\n")}
-  },
-  "dependencies": {
-    "@supatype/client": "^${deps.client}"
-  },
-  "devDependencies": {
-${devDeps.join(",\n")}
-  }
-}
-`
 }
 
 function tsConfigTemplate(opts: ScaffoldOptions): string {
@@ -1100,6 +1046,15 @@ function initLocalApiUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort">): 
   return opts.provider === "docker"
     ? `http://localhost:${opts.kongPort ?? COMPOSE_DEV_KONG_PORT}`
     : `http://localhost:${NATIVE_SERVER_PORT}`
+}
+
+/**
+ * Where auth emails send people back to. A static or proxied app is served on the same address as
+ * the API, so that is the app's address too; it was `http://localhost:3000` for every project,
+ * where nothing listened. With no app, the address is the developer's own, and 3000 is a guess.
+ */
+function initSiteUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort" | "app">): string {
+  return opts.app.mode === "none" ? "http://localhost:3000" : initLocalApiUrl(opts)
 }
 
 function holdingPageTemplate(projectName: string, apiUrl: string): string {
@@ -1343,7 +1298,7 @@ SERVICE_ROLE_KEY=`)
 ${CONTROL_PLANE_SECRET_ENV}=${generateControlPlaneSecret()}`)
 
   sections.push(`# Site URL (used for email redirects)
-SITE_URL=http://localhost:3000`)
+SITE_URL=${initSiteUrl(opts)}`)
 
   if (opts.provider === "docker" && opts.kongPort !== undefined) {
     const apiUrl = `http://localhost:${opts.kongPort}`
