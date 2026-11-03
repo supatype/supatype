@@ -20,23 +20,34 @@ type PackageJson = {
  * `supatype generate` when the CLI is installed, and nothing when it is not.
  *
  * The generated files are gitignored, so a fresh clone has to produce them before anything can
- * import them; `generate` is fully offline, which is what makes gitignoring generated code
- * reasonable rather than a trap. A production install leaves out development dependencies, the CLI
- * among them, but npm still runs `prepare`: a bare `supatype generate` failed it with
- * `supatype: not found`. Nothing there needs generating, since the build that imports the files
- * ran with everything installed. Prisma's client skips its generate the same way when the Prisma
- * CLI is not installed.
+ * import them. A production install leaves out development dependencies, the CLI among them, but
+ * npm still runs `prepare`, and a bare `supatype generate` failed it with `supatype: not found`.
+ * Nothing needs generating there: the build that imports the files ran with everything installed.
+ * Prisma's client skips its generate the same way when the Prisma CLI is not installed.
  *
- * Node, not the shell, so it reads the same under sh and cmd.exe, for npm, pnpm and yarn. Only a
- * CLI that is not installed is skipped: any other failure to find it, or of the generate itself,
- * still fails the install.
+ * The CLI is looked for in the folders Node looks in for a package (`module.paths`): node_modules
+ * beside the project and in each folder above it, where a workspace hoists it, nearest first. Not on
+ * NODE_PATH or in the global folders, which belong to no project. It is found by its folder, not
+ * through its `exports`, which name no package.json in any release. A folder that cannot be read is
+ * passed over, as Node passes it over. A CLI that is not installed is skipped. A CLI folder that is
+ * there but broken, such as a link into a pruned pnpm store, fails the install, as a generate that
+ * fails does.
+ *
+ * The script is Node rather than shell, so sh and cmd.exe read it alike, and it holds no character
+ * either shell would read inside its double quotes (tests/init-package-json.test.ts holds it to
+ * that). Yarn 2 and later do not run a project's own `prepare` on install, so there
+ * `supatype generate` is run by hand, as it always was.
  */
 export const PREPARE_COMMAND =
   "node -e \"" +
   [
-    "let p",
-    "try{p=require.resolve('@supatype/cli/package.json')}catch(e){if(e.code==='MODULE_NOT_FOUND')process.exit(0);throw e}",
-    "const r=require('child_process').spawnSync(process.execPath,[require('path').join(p,'..','bin','supatype.js'),'generate'],{stdio:'inherit'})",
+    "const {join}=require('path'),{lstatSync}=require('fs')",
+    "function has(c){try{return lstatSync(c)}catch{}}",
+    "const d=module.paths.map(function(p){return join(p,'@supatype','cli')}).find(has)",
+    "if(d===undefined)process.exit(0)",
+    "const bin=join(d,'bin','supatype.js')",
+    "const r=require('child_process').spawnSync(process.execPath,[bin,'generate'],{stdio:'inherit'})",
+    "if(r.error)console.error(r.error.message)",
     "process.exit(r.status??1)",
   ].join(";") +
   "\""

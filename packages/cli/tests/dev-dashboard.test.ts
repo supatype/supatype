@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+// Before Ink loads: with CI=true it draws nothing until it unmounts, and these tests read the frames
+// it draws as the dashboard changes.
+vi.hoisted(() => {
+  vi.stubEnv("CI", "false")
+})
+
 vi.mock("../src/dev-shutdown.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/dev-shutdown.js")>()),
   requestDevShutdown: vi.fn(),

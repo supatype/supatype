@@ -105,22 +105,54 @@ describe("the prepare script", () => {
     return dir
   }
 
-  /** A stand-in CLI whose `generate` records that it ran, and exits with `status`. */
-  function installCli(dir: string, status: number): void {
-    const cli = join(dir, "node_modules", "@supatype", "cli")
+  /**
+   * A stand-in CLI whose `generate` records that it ran, and exits with `status`. Its `exports`
+   * do not name its package.json, as no release's do: it is found all the same.
+   */
+  function installCli(dir: string, status: number, folder = "node_modules"): void {
+    const cli = join(dir, folder, "@supatype", "cli")
     mkdirSync(join(cli, "bin"), { recursive: true })
-    writeFileSync(join(cli, "package.json"), '{ "name": "@supatype/cli" }\n')
+    writeFileSync(join(cli, "package.json"), '{ "name": "@supatype/cli", "exports": { ".": "./index.js" } }\n')
     const script = `require("node:fs").writeFileSync("generated", process.argv[2]); process.exit(${status})`
     writeFileSync(join(cli, "bin", "supatype.js"), `${script}\n`)
   }
 
-  const prepare = (cwd: string) => spawnSync(PREPARE_COMMAND, { cwd, shell: true, encoding: "utf8" })
+  const prepare = (cwd: string, env: NodeJS.ProcessEnv = {}) =>
+    spawnSync(PREPARE_COMMAND, { cwd, shell: true, encoding: "utf8", env: { ...process.env, ...env } })
 
   it("succeeds, and generates nothing, where the CLI is not installed", () => {
     const dir = project()
     const result = prepare(dir)
     expect(result.status, result.stderr).toBe(0)
     expect(existsSync(join(dir, "generated"))).toBe(false)
+  })
+
+  // pnpm's bin shims point NODE_PATH at pnpm's store, and Node's global folders include
+  // ~/.node_modules: neither is this project's, and a production install that left the CLI out
+  // must not run some other copy.
+  it.each([
+    ["on NODE_PATH", "node_modules", (dir: string) => ({ NODE_PATH: join(dir, "node_modules") })],
+    ["in the home folder's .node_modules", ".node_modules", (dir: string) => ({ HOME: dir, USERPROFILE: dir })],
+  ] as const)("ignores a CLI %s", (_, folder, env) => {
+    const elsewhere = project()
+    installCli(elsewhere, 0, folder)
+    const dir = project()
+    const result = prepare(dir, env(elsewhere))
+    expect(result.status, result.stderr).toBe(0)
+    expect(existsSync(join(dir, "generated"))).toBe(false)
+  })
+
+  // A workspace member can pin a CLI of its own beside the one the root hoists.
+  it("runs the nearest CLI", () => {
+    const root = project()
+    installCli(root, 4)
+    const pkg = join(root, "packages", "app")
+    mkdirSync(pkg, { recursive: true })
+    writeFileSync(join(pkg, "package.json"), '{ "type": "module" }\n')
+    installCli(pkg, 0)
+    const result = prepare(pkg)
+    expect(result.status, result.stderr).toBe(0)
+    expect(existsSync(join(pkg, "generated"))).toBe(true)
   })
 
   it("runs supatype generate where the CLI is installed", () => {
@@ -131,9 +163,50 @@ describe("the prepare script", () => {
     expect(existsSync(join(dir, "generated"))).toBe(true)
   })
 
+  // A workspace hoists the CLI to the root's node_modules, above the package that runs prepare.
+  it("finds a CLI hoisted into a parent directory", () => {
+    const root = project()
+    installCli(root, 0)
+    const pkg = join(root, "packages", "app")
+    mkdirSync(pkg, { recursive: true })
+    writeFileSync(join(pkg, "package.json"), '{ "type": "module" }\n')
+    const result = prepare(pkg)
+    expect(result.status, result.stderr).toBe(0)
+    expect(existsSync(join(pkg, "generated"))).toBe(true)
+  })
+
+  // A node_modules above the project that is a file, or one the user may not read, holds no CLI.
+  // Node's own lookup passes over it: failing on it failed an install that had nothing to run.
+  it("passes over a node_modules it cannot look inside", () => {
+    const root = project()
+    writeFileSync(join(root, "node_modules"), "")
+    const pkg = join(root, "app")
+    mkdirSync(pkg)
+    const result = prepare(pkg)
+    expect(result.status, result.stderr).toBe(0)
+  })
+
+  // A folder with nothing behind it, as a link into a pruned pnpm store leaves: skipping it would
+  // pass the install and fail the build later, on generated files that were never written.
+  it("fails the install when the CLI folder is there but broken", () => {
+    const dir = project()
+    mkdirSync(join(dir, "node_modules", "@supatype", "cli"), { recursive: true })
+    expect(prepare(dir).status).not.toBe(0)
+  })
+
   it("fails the install when generate fails", () => {
     const dir = project()
     installCli(dir, 3)
     expect(prepare(dir).status).toBe(3)
+  })
+
+  // The script is one double-quoted argument to node under sh and cmd.exe alike. A quote or a
+  // backslash in it would end or change that argument, a redirect would split it if a quote were
+  // ever lost, and cmd.exe with delayed expansion strips a lone `!`, which turned `if(!d)` into
+  // `if(d)`.
+  it("holds no character a shell would rewrite inside double quotes", () => {
+    const body = /^node -e "(.*)"$/.exec(PREPARE_COMMAND)?.[1]
+    expect(body).toBeDefined()
+    expect(body).not.toMatch(/[!$`%"\\<>|&]/)
   })
 })
