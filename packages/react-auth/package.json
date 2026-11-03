@@ -16,7 +16,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --project tests/tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --maxWorkers=50% --passWithNoTests",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {

@@ -41,7 +41,7 @@
     "typecheck": "tsc --project tests/tsconfig.json --noEmit && tsc --project bin/tsconfig.json",
     "typecheck:tests": "tsc --project tests/tsconfig.json --noEmit",
     "postinstall": "node --input-type=module --eval \"import{existsSync}from'node:fs';import{resolve}from'node:path';import{pathToFileURL}from'node:url';const f=resolve(process.cwd(),'dist/scripts/postinstall.js');if(existsSync(f))await import(pathToFileURL(f).href)\"",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=50%",
     "test:packed": "vitest run --config vitest.packed.config.ts",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
