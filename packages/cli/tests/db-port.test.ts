@@ -75,9 +75,10 @@ describe("publishedDbPort", () => {
 })
 
 describe("syncDatabaseUrlPort", () => {
+  // In .env for a dev stack; a self-host stack's move is for the run only (database-url-owner-selfhost).
   it("rewrites the port when the two disagree", () => {
-    writeEnv("DATABASE_URL=postgresql://u:p@localhost:5432/acme\nSUPATYPE_DB_PORT=5433\n")
-    expect(syncDatabaseUrlPort(dir, false)).toEqual({ from: "5432", to: "5433", envKey: "SUPATYPE_DB_PORT" })
+    writeEnv("DATABASE_URL=postgresql://u:p@localhost:5432/acme\nSUPATYPE_DEV_DB_PORT=5433\n")
+    expect(syncDatabaseUrlPort(dir, true)).toEqual({ from: "5432", to: "5433", envKey: "SUPATYPE_DEV_DB_PORT" })
     expect(envText()).toContain("localhost:5433/acme")
   })
 
@@ -85,9 +86,9 @@ describe("syncDatabaseUrlPort", () => {
     // The whole point is one field. A rewrite that dropped the password would take the stack down
     // in a way that looks nothing like a port problem.
     writeEnv(
-      "DATABASE_URL=postgresql://supatype_admin:s3cr3t@127.0.0.1:5432/acme?sslmode=disable\nSUPATYPE_DB_PORT=5440\n",
+      "DATABASE_URL=postgresql://supatype_admin:s3cr3t@127.0.0.1:5432/acme?sslmode=disable\nSUPATYPE_DEV_DB_PORT=5440\n",
     )
-    syncDatabaseUrlPort(dir, false)
+    syncDatabaseUrlPort(dir, true)
     const url = new URL(readFileSync(join(dir, ".env"), "utf8").match(/^DATABASE_URL=(.+)$/m)![1]!)
     expect(url.port).toBe("5440")
     expect(url.username).toBe("supatype_admin")
@@ -146,9 +147,9 @@ describe("syncDatabaseUrlPort follows the stack's own layout", () => {
     expect(envText()).toContain("127.0.0.1:54390/acme")
   })
 
-  it("moves a dev-port URL to the self-host port and names SUPATYPE_DB_PORT", () => {
+  it("moves a dev-port URL to the self-host port for the run and names SUPATYPE_DB_PORT", () => {
     writeEnv(both.replace(":54390/", ":54329/"))
-    expect(syncDatabaseUrlPort(dir, false)).toEqual({ from: "54329", to: "54390", envKey: "SUPATYPE_DB_PORT" })
+    expect(syncDatabaseUrlPort(dir, false, {})).toEqual({ from: "54329", to: "54390", envKey: "SUPATYPE_DB_PORT", runOnly: true })
   })
 
   it("names SUPATYPE_DEV_DB_PORT when a dev stack moves it", () => {

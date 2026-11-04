@@ -113,7 +113,7 @@ Install the client first with `npm install @supatype/client`: the generated file
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -255,7 +255,7 @@ $ supatype self-host compose up -d
 ```
 
 :::note
-`supatype self-host compose up` points `DATABASE_URL` in `.env` at the Compose Postgres on `SUPATYPE_DB_PORT` (5432 unless you set it), so `push` and Studio use the same database as the stack. Leave it as it wrote it.
+`DATABASE_URL` in `.env` belongs to `supatype dev`. Self-host commands such as `push`, `seed` and `admin` connect to the Compose Postgres on `SUPATYPE_DB_PORT` (5432 unless you set it) for their own run, without rewriting it, so they use the same database as the stack.
 :::
 
 <h2 id="upgrading">Upgrading Supatype</h2>

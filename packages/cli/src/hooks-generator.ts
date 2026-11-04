@@ -134,10 +134,11 @@ interface HookBase {
 /**
  * The rows this request is about to overwrite, fetched only if you ask.
  *
- * Resolved by the server from the in-flight request's own filter, as the caller's own role, so it
- * cannot show you rows the caller could not read, and you cannot widen the filter. Capped:
- * \`truncated\` is true when there were more, in which case acting on what you got means acting on a
- * prefix you did not choose.
+ * The rows the write will change: the server selects them by the request's own filter plus the
+ * caller's own update or delete rule, so you cannot widen the filter. They are returned as stored,
+ * with no field masking, so do not echo them into a rejection message, which reaches the caller.
+ * Capped: \`truncated\` is true when there were more, in which case acting on what you got means
+ * acting on a prefix you did not choose.
  */
 export type PreviousRows<T extends HookedTable> = () => Promise<{
   rows: HookTables[T]["Row"][]

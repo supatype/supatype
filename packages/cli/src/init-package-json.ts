@@ -1,4 +1,5 @@
 import semver from "semver"
+import { isJsonObject } from "@supatype/shared"
 import type { InitDependencyVersions } from "./init-dependency-versions.js"
 
 export interface MergePackageJsonOptions {
@@ -84,7 +85,7 @@ function projectScripts(opts: MergePackageJsonOptions): Record<string, string> {
 export function scaffoldPackageJson(opts: MergePackageJsonOptions, deps: InitDependencyVersions): string {
   const pkg: PackageJson = {
     name: opts.projectName,
-    version: "0.1.0",
+    version: NEW_PROJECT_VERSION,
     private: true,
     type: "module",
     scripts: projectScripts(opts),
@@ -103,14 +104,35 @@ function absentFrom(wanted: Record<string, string>, ...present: Section[]): Reco
 
 const CLIENT = "@supatype/client"
 
-/**
- * The `prepare` earlier releases of `init` wrote, which fails every production install, replaced by
- * the one it writes now. A `prepare` of the project's own is kept.
- */
+/** The `prepare` earlier releases of `init` wrote, which fails every production install. */
 const EARLIER_PREPARE = "supatype generate"
 
+/** The version `init` writes for a new project, or adds to an existing one that has none. */
+const NEW_PROJECT_VERSION = "0.1.0"
+
+/**
+ * `prepare` as a Supatype project needs it: {@link PREPARE_COMMAND} in place of the one earlier
+ * releases of `init` wrote, after a `prepare` of the project's own (husky, say) that does not run
+ * either already, and on its own when there is none. A project's own `prepare` used to be kept as
+ * it was, so a fresh clone never generated the gitignored seed builder.
+ */
+export function supatypePrepare(existing: string | undefined): string {
+  if (existing === undefined || existing.trim() === "" || existing.trim() === EARLIER_PREPARE) return PREPARE_COMMAND
+  if (existing.includes(PREPARE_COMMAND) || existing.includes(EARLIER_PREPARE)) return existing
+  return `${existing} && ${PREPARE_COMMAND}`
+}
+
 function withPrepare(scripts: Record<string, string> | undefined): Record<string, string> {
-  return scripts?.["prepare"] === EARLIER_PREPARE ? { ...scripts, prepare: PREPARE_COMMAND } : { ...scripts }
+  return { ...scripts, prepare: supatypePrepare(scripts?.["prepare"]) }
+}
+
+/**
+ * The script among `scripts` that runs `supatype dev`: `supatype:dev` when the merge put it beside
+ * a dev script of the project's own, else `dev`.
+ */
+export function supatypeDevScript(scripts: unknown): string {
+  const named = (key: string) => isJsonObject(scripts) && scripts[key] === CORE_SCRIPTS.dev
+  return !named("dev") && named("supatype:dev") ? "supatype:dev" : "dev"
 }
 
 /**
@@ -158,6 +180,7 @@ export function mergeSupatypePackageJson(
   return {
     ...pkg,
     name: pkg.name || opts.projectName,
+    version: pkg.version || NEW_PROJECT_VERSION,
     private: pkg.private ?? true,
     type: pkg.type || "module",
     scripts,

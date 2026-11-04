@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import semver from "semver"
-import { mergeSupatypePackageJson, PREPARE_COMMAND, scaffoldPackageJson } from "../src/init-package-json.js"
+import { mergeSupatypePackageJson, PREPARE_COMMAND, scaffoldPackageJson, supatypeDevScript } from "../src/init-package-json.js"
 
 const DEPS = { cli: "0.1.1", types: "0.1.1", client: "0.1.1" }
 const NO_APP = { projectName: "existing", app: { mode: "none" }, helloFunction: false }
@@ -133,18 +133,44 @@ describe("mergeSupatypePackageJson", () => {
   })
 
   // The `prepare` earlier releases wrote failed every production install with `supatype: not found`.
-  it("replaces the prepare earlier releases wrote, and keeps a project's own", () => {
+  it("replaces the prepare earlier releases wrote", () => {
     const earlier = mergeSupatypePackageJson({ scripts: { prepare: "supatype generate" } }, NO_APP, DEPS)
-    const own = mergeSupatypePackageJson({ scripts: { prepare: "husky" } }, NO_APP, DEPS)
 
     expect(earlier.scripts?.prepare).toBe(PREPARE_COMMAND)
-    expect(own.scripts?.prepare).toBe("husky")
+  })
+
+  // A project's own prepare (husky, say) was kept as it was, so a fresh clone never generated the
+  // gitignored seed builder. The command runs after it, once.
+  it("chains supatype-prepare after a prepare of the project's own", () => {
+    const own = mergeSupatypePackageJson({ scripts: { prepare: "husky" } }, NO_APP, DEPS)
+
+    expect(own.scripts?.prepare).toBe(`husky && ${PREPARE_COMMAND}`)
+  })
+
+  it("leaves prepare as it is on a re-run, or when it already generates", () => {
+    const once = mergeSupatypePackageJson({ scripts: { prepare: "husky" } }, NO_APP, DEPS)
+    const twice = mergeSupatypePackageJson(once, NO_APP, DEPS)
+    const generates = mergeSupatypePackageJson({ scripts: { prepare: "husky && supatype generate" } }, NO_APP, DEPS)
+
+    expect(twice.scripts?.prepare).toBe(once.scripts?.prepare)
+    expect(generates.scripts?.prepare).toBe("husky && supatype generate")
+  })
+
+  it("sets a version only when the project has none", () => {
+    expect(mergeSupatypePackageJson({ name: "existing" }, NO_APP, DEPS).version).toBe("0.1.0")
+    expect(mergeSupatypePackageJson({ name: "existing", version: "3.2.1" }, NO_APP, DEPS).version).toBe("3.2.1")
+  })
+
+  it("names the script that runs supatype dev, for the next steps", () => {
+    expect(supatypeDevScript(mergeSupatypePackageJson({}, NO_APP, DEPS).scripts)).toBe("dev")
+    expect(supatypeDevScript(mergeSupatypePackageJson({ scripts: { dev: "next dev" } }, NO_APP, DEPS).scripts)).toBe("supatype:dev")
+    expect(supatypeDevScript(undefined)).toBe("dev")
   })
 
   it("keeps the project's own scripts, in their order, ahead of the ones it adds", () => {
     const merged = mergeSupatypePackageJson({ scripts: { prepare: "husky", build: "tsc" } }, VITE_APP, DEPS)
 
-    expect(merged.scripts?.prepare).toBe("husky")
+    expect(merged.scripts?.prepare).toBe(`husky && ${PREPARE_COMMAND}`)
     expect(merged.scripts?.build).toBe("tsc")
     expect(Object.keys(merged.scripts ?? {}).slice(0, 2)).toEqual(["prepare", "build"])
   })

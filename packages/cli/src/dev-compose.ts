@@ -5,6 +5,8 @@
 import { setTimeout as sleep } from "node:timers/promises"
 import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
+import { warn } from "./ui/messages.js"
+import { FRONTEND_URL_KEYS, frontendEnv, writeFrontendEnv } from "./frontend-env.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
@@ -70,6 +72,7 @@ import {
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
 import { composeServiceIsRunning } from "./compose-kong.js"
+import type { ComposeStack } from "./compose-db-psql.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 import { hasEngineOverride } from "./binary-cache.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
@@ -358,13 +361,9 @@ export function upsertDevComposeEnv(
     ...seedMissingLocalSecrets(cwd, config),
     // Project configuration, seeded not overwritten, see seedMissingDatabaseIdentity.
     ...seedMissingDatabaseIdentity(cwd, config),
-    // Shared with `supatype keys --write`, so a front end's prefix cannot be written by one and
-    // forgotten by the other. See `anonKeyEnvUpdates`.
-    //
-    // This list used to live here as well, and the two had already drifted: `dev` wrote
-    // PUBLIC_ and EXPO_PUBLIC_ URLs and no VITE_SUPATYPE_URL, so a Vite app whose `.env` had only
-    // ever been touched by `supatype dev` built against an empty string.
-    ...anonKeyEnvUpdates(anonKey, serviceRoleKey, apiUrl),
+    // Shared with `supatype keys --write`, so a name cannot be written by one and forgotten by the
+    // other. See `anonKeyEnvUpdates`. The front end's copies are written below, not here.
+    ...anonKeyEnvUpdates(anonKey, serviceRoleKey),
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
@@ -402,16 +401,27 @@ export function upsertDevComposeEnv(
   const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
   // A port the shell gave for this run is the run's, not the project's (DR9), unless `.env` holds it too.
   const dotEnv = readEnvFile(cwd)
-  const { persist, runOnly } = splitShellPortUpdates(updates, process.env, dotEnv)
+  const { persist, runOnly } = splitShellPortUpdates({ ...updates, ...frontendEnv({ apiUrl }) }, process.env, dotEnv)
   applyForThisRun(runOnly)
-  upsertEnvFile(cwd, persist, {
+  const { urlsKept, rest } = takeFrontendUrls(persist)
+  upsertEnvFile(cwd, rest, {
     removeManaged: removeImageKeys,
     managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
     remove: [...retiredKeys, ...staleLocalServerImage(dotEnv["SUPATYPE_SERVER_IMAGE"], wantsLocalServer, imagePins)],
   })
+  // The front end's copies go where a development build reads them, not .env, which a production
+  // build reads (frontend-env.ts). The URL only when it is the project's port, not the shell's.
+  writeFrontendEnv(cwd, { anonKey, ...(urlsKept && { apiUrl }) }, { local: true })
   if (devDbPort !== undefined && !usesExternalDatabase(config)) {
     writeDevStackDatabaseUrl(cwd, devDbPort, runOnly.SUPATYPE_DEV_DB_PORT !== undefined)
   }
+}
+
+/** `persist` less the front-end URL names, and whether they were among what is kept. */
+function takeFrontendUrls(persist: Record<string, string>): { urlsKept: boolean; rest: Record<string, string> } {
+  const names: ReadonlySet<string> = new Set(FRONTEND_URL_KEYS)
+  const rest = Object.fromEntries(Object.entries(persist).filter(([key]) => !names.has(key)))
+  return { urlsKept: FRONTEND_URL_KEYS.every((key) => key in persist), rest }
 }
 
 /**
@@ -1336,26 +1346,25 @@ export async function adoptSchemaDocker(
  * `supatype diff` when `provider: docker`. Uses in-compose schema-engine unless
  * `overrides.engine` is set: then Postgres is published to the host and diff runs
  * through the local engine binary.
+ *
+ * A dry run leaves the machine as it found it: a database the diff had to start is stopped again
+ * afterwards. It used to be left running.
  */
 export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("diffSchemaDocker requires provider: docker")
   }
   const project = composeProjectName(config.project.name)
+  const brand = { intro: "Schema diff" }
   if (hasEngineOverride(config)) {
-    const brand = { intro: "Schema diff" }
-    await ensureDockerDbPublishedForHostEngine(cwd, config, brand)
-    const schemaPath = schemaPathFromProject(config, cwd)
-    const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
-    await ensureEngine()
-    return engineRequest(
-      "/diff",
-      { ast, database_url: projectDatabaseUrl(cwd, config), schema: pgSchema(config) },
-      isDiffResult,
+    return withComposeDatabaseStarted(cwd, config, project, () => ensureDockerDbPublishedForHostEngine(cwd, config, brand), () =>
+      diffWithHostEngine(cwd, config),
     )
   }
 
-  // A diff of a standalone stack must not write dev values over the operator's .env (SH1).
+  // A diff of a standalone stack must not write dev values over the operator's .env (SH1). A dev
+  // stack's is brought up to date as push does: compose interpolates the whole file, so a project
+  // that has not yet run `dev` can lack values `up -d db` needs.
   const mode = composeRenderMode(cwd, config.project.name)
   if (mode === "dev") {
     const { anonKey, serviceRoleKey } = devApiKeys(cwd)
@@ -1363,18 +1372,67 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   }
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
-  const diffBrand = { intro: "Schema diff" }
+  return withComposeDatabaseStarted(cwd, config, project, () => startComposeDatabase(config, paths, cwd, project, brand), () =>
+    diffWithComposeEngine(cwd, config, paths, project),
+  )
+}
 
-  await startComposeDatabase(config, paths, cwd, project, diffBrand)
+/**
+ * `run` with the stack's database up, `start` bringing it up, then stopped again when it was not
+ * running before. One that a `supatype dev` session or a running stack is using is left as it was.
+ */
+async function withComposeDatabaseStarted<T>(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  project: string,
+  start: () => Promise<void>,
+  run: () => Promise<T>,
+): Promise<T> {
+  const stack = { project, composePath: selfHostComposePaths(cwd).composePath }
+  // An external database is not the stack's to start or stop.
+  const wasStopped = !usesExternalDatabase(config) && !composeServiceIsRunning(cwd, stack, "db")
+  let started = false
+  try {
+    await start()
+    started = true
+    return await run()
+  } finally {
+    // A start that failed after `up -d db` (its health wait, the host publish) has still brought
+    // the container up; one refused before it (no stack running) has started nothing to stop.
+    if (wasStopped && (started || composeServiceIsRunning(cwd, stack, "db"))) stopComposeDatabase(cwd, stack)
+  }
+}
 
-  const schemaPath = schemaPathFromProject(config, cwd)
-  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+/** Stop the stack's database, saying so rather than failing the command whose result is already in hand. */
+function stopComposeDatabase(cwd: string, stack: ComposeStack): void {
+  try {
+    const status = runDockerCompose(stack.composePath, ["stop", "db"], cwd, stack.project, { quiet: true })
+    if (status !== 0) warn("Could not stop the Postgres container this command started. Stop it with `supatype self-host compose stop db`.")
+  } catch (err) {
+    warn(`Could not stop the Postgres container this command started: ${errorMessage(err)}`)
+  }
+}
+
+/** The diff from the host engine binary, against the database published to the host. */
+async function diffWithHostEngine(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult> {
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
+  await ensureEngine()
+  return engineRequest("/diff", { ast, database_url: projectDatabaseUrl(cwd, config), schema: pgSchema(config) }, isDiffResult)
+}
+
+/** The diff from the compose schema-engine, which reads the AST written beside the compose file. */
+async function diffWithComposeEngine(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  paths: SelfHostComposePaths,
+  project: string,
+): Promise<DiffResult> {
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
   await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
-  const astPath = join(supatypeDir, "schema.ast.json")
-  writeFileSync(astPath, JSON.stringify(ast))
+  writeFileSync(join(supatypeDir, "schema.ast.json"), JSON.stringify(ast))
 
   let result = await runComposeEngineDiff(paths, cwd, project, config)
   // Windows Docker bind mounts can lag briefly after the host write.
@@ -1386,19 +1444,22 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     const detail = filterComposeNoise(result.output) || result.output
     throw new Error(detail || `Engine schema diff failed (exit ${result.status})`)
   }
-  if (!result.diff) {
-    // The engine exited 0 and produced nothing this could parse, which is a different failure from
-    // the engine exiting non-zero and is the harder one to act on. "Engine diff returned no result"
-    // named only the symptom, and running the same compose command by hand gave a clear error in
-    // one go, so the message was the only thing standing between the reader and the answer.
-    const output = (filterComposeNoise(result.output) || result.output || "").trim()
-    throw new Error(
-      output === ""
-        ? "The schema engine exited 0 and printed nothing. Run `supatype self-host compose run --rm schema-engine diff` to see what it does."
-        : `The schema engine exited 0 but its output could not be parsed as a diff:\n${output}`,
-    )
-  }
-  return result.diff
+  return result.diff ?? unparsedDiffError(result.output)
+}
+
+/**
+ * The engine exited 0 and produced nothing this could parse, which is a different failure from the
+ * engine exiting non-zero and is the harder one to act on. "Engine diff returned no result" named
+ * only the symptom, and running the same compose command by hand gave a clear error in one go, so
+ * the message was the only thing standing between the reader and the answer.
+ */
+function unparsedDiffError(rawOutput: string): never {
+  const output = (filterComposeNoise(rawOutput) || rawOutput || "").trim()
+  throw new Error(
+    output === ""
+      ? "The schema engine exited 0 and printed nothing. Run `supatype self-host compose run --rm schema-engine diff` to see what it does."
+      : `The schema engine exited 0 but its output could not be parsed as a diff:\n${output}`,
+  )
 }
 
 /**

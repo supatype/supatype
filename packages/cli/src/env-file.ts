@@ -78,6 +78,8 @@ export interface UpsertOptions {
   label?: string
   /** Keys to delete outright, whoever wrote them. For secrets being rotated out. */
   remove?: readonly string[]
+  /** The file in `cwd` to merge into: `.env` unless given, `.env.development.local` for instance. */
+  file?: string
 }
 
 /** The older form of `upsertEnvFile`'s options: a list of keys, where options are an object. */
@@ -104,7 +106,7 @@ export function upsertEnvFile(
   const managed = new Set(opts.managed ?? [])
   const label = opts.label ?? MANAGED_MARKER
 
-  const envPath = join(cwd, ".env")
+  const envPath = join(cwd, opts.file ?? ".env")
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
   const lines = parseLines(existing)
 
@@ -170,9 +172,9 @@ function relabel(kept: EnvLine[], label: string | undefined): void {
   if (label !== undefined) kept.push({ text: label, managed: false })
 }
 
-/** Parse a project `.env` into key/value pairs. See {@link parseEnvText}. */
-export function readEnvFile(cwd: string): Record<string, string> {
-  const text = envText(cwd)
+/** Parse a project `.env`, or the env `file` named, into key/value pairs. See {@link parseEnvText}. */
+export function readEnvFile(cwd: string, file = ".env"): Record<string, string> {
+  const text = envText(cwd, file)
   return text === null ? {} : parseEnvText(text)
 }
 
@@ -193,8 +195,8 @@ export function readDotEnvFiles(cwd: string): Record<string, string> {
  * `.env`'s text, or null when there is none, without the byte order mark Windows tools write.
  * Left in, it hid the first key from the single-key readers below.
  */
-function envText(cwd: string): string | null {
-  const envPath = join(cwd, ".env")
+function envText(cwd: string, file = ".env"): string | null {
+  const envPath = join(cwd, file)
   return existsSync(envPath) ? readFileSync(envPath, "utf8").replace(/^\uFEFF/, "") : null
 }
 

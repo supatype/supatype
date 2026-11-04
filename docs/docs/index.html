@@ -184,7 +184,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
 <pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
 <span class="k">export</span> <span class="k">const</span> supatype = createClient({
-  url: <span class="k">import</span>.meta.env.VITE_SUPATYPE_URL,
+  url: <span class="k">import</span>.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: <span class="k">import</span>.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
     <div class="cb"><div class="cb-bar"><span>src/posts.ts</span><button type="button" class="cb-copy">Copy</button></div>
@@ -294,7 +294,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
 <span class="pr">$</span> supatype self-host compose up -d</pre></div>
     <div class="callout">
       <span class="callout-label">NOTE</span>
-      <p><code>supatype self-host compose up</code> points <code>DATABASE_URL</code> in <code>.env</code> at the Compose Postgres on <code>SUPATYPE_DB_PORT</code> (5432 unless you set it), so <code>push</code> and Studio use the same database as the stack. Leave it as it wrote it.</p>
+      <p><code>DATABASE_URL</code> in <code>.env</code> belongs to <code>supatype dev</code>. Self-host commands such as <code>push</code>, <code>seed</code> and <code>admin</code> connect to the Compose Postgres on <code>SUPATYPE_DB_PORT</code> (5432 unless you set it) for their own run, without rewriting it, so they use the same database as the stack.</p>
     </div>
 
     <h2 id="upgrading">Upgrading Supatype</h2>

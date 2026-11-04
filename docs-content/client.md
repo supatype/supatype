@@ -23,12 +23,12 @@ Import `createClient` from the client file the CLI generates, not from `@supatyp
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
 
-Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_`, `EXPO_PUBLIC_` and `NEXT_PUBLIC_` copies for other frameworks. Read them rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY`, with `PUBLIC_`, `NEXT_PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. A local stack's values go to `.env.development.local`, which Vite, Next.js and Expo read in development only, so a production build has none of them and the client uses the address the page was served from, which is the API's when Supatype serves your app. A deployment's values (`supatype keys` on a server whose `API_EXTERNAL_URL` is its real address) go to `.env`, which a production build reads. Read these rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 

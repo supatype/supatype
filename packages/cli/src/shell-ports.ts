@@ -12,16 +12,11 @@
  * environment ahead of `.env`, see the run's port.
  */
 
+import { FRONTEND_URL_KEYS } from "./frontend-env.js"
+
 /** The `.env` keys `dev` builds from each port, by the variable that sets the port. */
 const DERIVED_FROM_PORT: Readonly<Record<string, readonly string[]>> = {
-  SUPATYPE_KONG_PORT: [
-    "SUPATYPE_KONG_PORT",
-    "API_EXTERNAL_URL",
-    "SITE_URL",
-    "VITE_SUPATYPE_URL",
-    "PUBLIC_SUPATYPE_URL",
-    "EXPO_PUBLIC_SUPATYPE_URL",
-  ],
+  SUPATYPE_KONG_PORT: ["SUPATYPE_KONG_PORT", "API_EXTERNAL_URL", "SITE_URL", ...FRONTEND_URL_KEYS],
   SUPATYPE_DEV_DB_PORT: ["SUPATYPE_DEV_DB_PORT", "DATABASE_URL"],
 }
 

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { upsertDevComposeEnv } from "../src/dev-compose.js"
 import { ensureDevDbPort } from "../src/dev-ports.js"
-import { MANAGED_MARKER, readEnvValue } from "../src/env-file.js"
+import { MANAGED_MARKER, readEnvFile, readEnvValue } from "../src/env-file.js"
 import { isPortInUse } from "../src/postgres-ctl.js"
 import { validateProjectConfig } from "../src/project-config.js"
 
@@ -32,6 +32,7 @@ const RUN_KEYS = [
   "VITE_SUPATYPE_URL",
   "PUBLIC_SUPATYPE_URL",
   "EXPO_PUBLIC_SUPATYPE_URL",
+  "NEXT_PUBLIC_SUPATYPE_URL",
   "SUPATYPE_DEV_DB_PORT",
   "DATABASE_URL",
 ]
@@ -127,5 +128,43 @@ describe("a dev port given only in the shell", () => {
     )
     upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18474, 54329)
     expect(env(cwd, "DATABASE_URL")).toContain(":54329/")
+  })
+})
+
+/**
+ * Issue 23: Docker dev wrote the front end's API address to `.env`, which a production Vite build
+ * reads, so `http://localhost:<port>` shipped in the bundle. It goes to `.env.development.local`,
+ * and the copy dev left in `.env` is taken out. A shell-only port writes neither.
+ */
+describe("the front end's API address from docker dev", () => {
+  const devFile = (cwd: string) => readEnvFile(cwd, ".env.development.local")
+
+  it("is written to .env.development.local, and dev's old copy leaves .env", () => {
+    const cwd = project()
+    upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18474)
+    expect(devFile(cwd)["VITE_SUPATYPE_URL"]).toBe("http://localhost:18474")
+    expect(devFile(cwd)["NEXT_PUBLIC_SUPATYPE_URL"]).toBe("http://localhost:18474")
+    expect(env(cwd, "VITE_SUPATYPE_URL")).toBe("<unset>")
+    expect(env(cwd, "PUBLIC_SUPATYPE_URL")).toBe("<unset>")
+    // Expo reads .env.development.local in development too (docs.expo.dev environment variables).
+    expect(devFile(cwd)["EXPO_PUBLIC_SUPATYPE_URL"]).toBe("http://localhost:18474")
+    expect(env(cwd, "EXPO_PUBLIC_SUPATYPE_URL")).toBe("<unset>")
+  })
+
+  it("writes the local stack's anon key for the front end beside it, and ANON_KEY to .env", () => {
+    const cwd = project()
+    upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18474)
+    expect(devFile(cwd)["VITE_SUPATYPE_ANON_KEY"]).toBe("anon-key")
+    expect(devFile(cwd)["EXPO_PUBLIC_SUPATYPE_ANON_KEY"]).toBe("anon-key")
+    expect(env(cwd, "VITE_SUPATYPE_ANON_KEY")).toBe("<unset>")
+    expect(env(cwd, "ANON_KEY")).toBe("anon-key")
+  })
+
+  it("writes no URL for a port only the shell gave", () => {
+    const cwd = project()
+    vi.stubEnv("SUPATYPE_KONG_PORT", "18990")
+    upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18990)
+    expect(devFile(cwd)["VITE_SUPATYPE_URL"]).toBeUndefined()
+    expect(process.env["VITE_SUPATYPE_URL"]).toBe("http://localhost:18990")
   })
 })

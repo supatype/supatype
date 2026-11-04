@@ -380,3 +380,85 @@ describe("objects not checked for changes made by hand (F16, F29)", () => {
     expect(lines[1]).toBe("    Not checked for changes made by hand (the comparison timed out), so it is treated as changed.")
   })
 })
+
+/**
+ * Issue 11: a CHECK from a string-literal union (`question_kind_check`) is created inside its
+ * table's CREATE TABLE or ADD COLUMN, so the engine marks it `inline`, and inline actions were left
+ * out entirely: the diff never said the check would be made. They are shown under the change whose
+ * statement makes them, and still not counted or confirmed on their own.
+ */
+describe("inline actions in the plan", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const diff: DiffResult = {
+    operations: [
+      { type: "create_table", table: "question", risk: "safe" },
+      { type: "add_column", table: "answer", column: "kind", risk: "safe" },
+    ],
+    reconcile: [
+      { action: "create", key: key("check", "question", "question_kind_check"), inline: true },
+      { action: "create", key: key("primary_key", "question", "question_pkey"), inline: true },
+      { action: "create", key: key("check", "answer", "answer_kind_check"), inline: true },
+      { action: "create", key: key("foreign_key", "answer", "answer_question_id_fkey"), inline: true },
+    ],
+  }
+
+  it("hangs each check and foreign key under the change that makes it", () => {
+    const changes = plannedChanges(diff)
+    expect(changes.map((c) => [c.label, c.details])).toEqual([
+      ["create_table question", ["check question_kind_check"]],
+      ["add_column answer.kind", ["check answer_kind_check", "foreign key answer_question_id_fkey"]],
+    ])
+  })
+
+  it("prints them indented beneath it, without counting them", () => {
+    const out = printed(() => printDiffOperations(diff))
+    expect(out).toContain("2 change(s)")
+    expect(out).toMatch(/\[\+\] create_table question {2}\(safe\)\n {6}with check question_kind_check/)
+    expect(out).toContain("      with check answer_kind_check")
+    expect(out).not.toContain("question_pkey")
+  })
+})
+
+/**
+ * Issue 12: the engine's grant object for PUBLIC is `REVOKE ALL PRIVILEGES ON <table> FROM PUBLIC`,
+ * and nothing is ever granted to PUBLIC, but the diff said `create table grant <table>.PUBLIC`. A
+ * grant is labelled by what its statement does.
+ */
+describe("table grant labels", () => {
+  const grant = (action: string, role: string): ReconcileAction => ({ action, key: key("table_grant", "posts", role) })
+  const labels = (actions: ReconcileAction[]) => plannedChanges({ operations: [], reconcile: actions }).map((c) => c.label)
+
+  it("says PUBLIC's is a revoke of every privilege", () => {
+    expect(labels([grant("create", "PUBLIC")])).toEqual(["revoke every privilege on posts from PUBLIC"])
+  })
+
+  it("says a role's sets what that role may do", () => {
+    expect(labels([grant("create", "anon"), grant("replace", "authenticated")])).toEqual([
+      "set anon's privileges on posts",
+      "set authenticated's privileges on posts",
+    ])
+  })
+
+  it("says a dropped one is a revoke, and one removed by hand is put back", () => {
+    expect(labels([grant("drop", "anon"), grant("recreate", "PUBLIC")])).toEqual([
+      "revoke every privilege on posts from anon",
+      "revoke every privilege on posts from PUBLIC (put back: removed outside Supatype)",
+    ])
+  })
+})
+
+describe("table grant drift labels", () => {
+  const drift = (role: string): ReconcileAction => ({
+    action: "drift",
+    key: key("table_grant", "posts", role),
+    security_relevant: true,
+  })
+
+  it("says what the push does about privileges changed by hand", () => {
+    expect(plannedChanges({ operations: [], reconcile: [drift("PUBLIC"), drift("anon")] }).map((c) => [c.label, c.risk])).toEqual([
+      ["PUBLIC was given privileges on posts outside Supatype; the push revokes them", "danger"],
+      ["anon's privileges on posts were changed outside Supatype; the push puts them back", "danger"],
+    ])
+  })
+})

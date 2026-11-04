@@ -30,7 +30,7 @@ Every example below imports the client from `src/supatype.ts`, created once as s
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -322,4 +322,4 @@ What the cookie handling does and does not do:
 - Set `cookiePrefix` on both sides if you change the client's `auth.cookiePrefix`. The default is `st`.
 - The server client is built from `@supatype/client`, not your generated client file, so `update(..., { publish: true })` is not accepted on it.
 
-The browser half of a Next.js app needs the URL and anon key in `NEXT_PUBLIC_` variables. `supatype keys` does not write those names, so copy the values across. Server code can read `PUBLIC_SUPATYPE_URL` and `PUBLIC_SUPATYPE_ANON_KEY` directly.
+The browser half of a Next.js app needs the URL and anon key in `NEXT_PUBLIC_` variables. `supatype keys` writes `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY`: a local stack's to `.env.development.local`, which Next.js reads in development only, and a deployment's to `.env`. Server code can read `PUBLIC_SUPATYPE_URL` and `PUBLIC_SUPATYPE_ANON_KEY` the same way.

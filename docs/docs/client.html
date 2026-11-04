@@ -122,10 +122,10 @@
 <pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
 <span class="k">export</span> <span class="k">const</span> supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
-    <p>Every page in these docs imports the client from this one file. <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code>, <code>EXPO_PUBLIC_</code> and <code>NEXT_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
+    <p>Every page in these docs imports the client from this one file. <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code>, <code>NEXT_PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. A local stack's values go to <code>.env.development.local</code>, which Vite, Next.js and Expo read in development only, so a production build has none of them and the client uses the address the page was served from, which is the API's when Supatype serves your app. A deployment's values (<code>supatype keys</code> on a server whose <code>API_EXTERNAL_URL</code> is its real address) go to <code>.env</code>, which a production build reads. Read these rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
     <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
     <p><code>createClient</code> takes these options as well as <code>url</code> and <code>anonKey</code>:</p>
     <div class="tbl"><table>

@@ -106,11 +106,36 @@ describe("writeKeysToEnv", () => {
     expect(envValue(dir, "CUSTOM_THING")).toBe("mine")
   })
 
-  it("carries the API URL through when the project records one", () => {
-    writeFileSync(join(dir, ".env"), "JWT_SECRET=s\nPUBLIC_SUPATYPE_URL=http://localhost:18475\n")
+  // Issue 23: the URL went into `.env`, which a production Vite build reads, so the local address
+  // shipped in the bundle. It goes to `.env.development.local`, read in development only.
+  it("carries the API URL through to .env.development.local when the project records one", () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=s\nAPI_EXTERNAL_URL=http://localhost:18475\n")
     writeKeysToEnv(dir, PAIR, true)
 
-    expect(envValue(dir, "VITE_SUPATYPE_URL")).toBe("http://localhost:18475")
+    expect(readEnvFile(dir, ".env.development.local")["VITE_SUPATYPE_URL"]).toBe("http://localhost:18475")
+    expect(envValue(dir, "VITE_SUPATYPE_URL")).toBeUndefined()
+    // The local stack's anon key goes with it: in .env, a production build shipped it too.
+    expect(readEnvFile(dir, ".env.development.local")["VITE_SUPATYPE_ANON_KEY"]).toBe(PAIR.anonKey)
+    expect(envValue(dir, "VITE_SUPATYPE_ANON_KEY")).toBeUndefined()
+    expect(envValue(dir, "ANON_KEY")).toBe(PAIR.anonKey)
+  })
+
+  // On a server, API_EXTERNAL_URL is the deployment's own address, which its production build needs.
+  it("writes a deployment's URL and anon key to .env, which a production build reads", () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=s\nAPI_EXTERNAL_URL=https://example.com\n")
+    writeKeysToEnv(dir, PAIR, true)
+
+    expect(envValue(dir, "VITE_SUPATYPE_URL")).toBe("https://example.com")
+    expect(envValue(dir, "EXPO_PUBLIC_SUPATYPE_ANON_KEY")).toBe(PAIR.anonKey)
+  })
+
+  it("keeps a URL already in .env.development.local without --force", () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=s\nAPI_EXTERNAL_URL=http://localhost:18475\n")
+    writeFileSync(join(dir, ".env.development.local"), "VITE_SUPATYPE_URL=http://127.0.0.1:9000\n")
+    const result = writeKeysToEnv(dir, PAIR, false)
+
+    expect(readEnvFile(dir, ".env.development.local")["VITE_SUPATYPE_URL"]).toBe("http://127.0.0.1:9000")
+    expect(result.kept).toContain("VITE_SUPATYPE_URL (.env.development.local)")
   })
 
   it("writes no URL names when the project records no URL", () => {
@@ -131,25 +156,10 @@ describe("writeKeysToEnv", () => {
 })
 
 describe("anonKeyEnvUpdates", () => {
-  it("is the one list both `keys` and `dev` write from", () => {
-    // They held separate lists, so a front end's prefix could be written by one and forgotten by
-    // the other, and which names a project's .env ended up with depended on which command ran last.
-    const names = Object.keys(anonKeyEnvUpdates("a", "s"))
-    expect(names).toEqual([
-      "ANON_KEY",
-      "SERVICE_ROLE_KEY",
-      "VITE_SUPATYPE_ANON_KEY",
-      "PUBLIC_SUPATYPE_ANON_KEY",
-      "EXPO_PUBLIC_SUPATYPE_ANON_KEY",
-      "NEXT_PUBLIC_SUPATYPE_ANON_KEY",
-    ])
-  })
-
-  it("adds the URL names only when given a URL", () => {
-    expect(Object.keys(anonKeyEnvUpdates("a", "s", "http://x"))).toContain("VITE_SUPATYPE_URL")
-    expect(Object.keys(anonKeyEnvUpdates("a", "s"))).not.toContain("VITE_SUPATYPE_URL")
-    expect(Object.keys(anonKeyEnvUpdates("a", "s", "http://x"))).toContain("NEXT_PUBLIC_SUPATYPE_URL")
-    expect(Object.keys(anonKeyEnvUpdates("a", "s"))).not.toContain("NEXT_PUBLIC_SUPATYPE_URL")
+  // Issue 23: the front end's copies are written where a build of their kind reads them
+  // (frontend-env.test.ts), not with these.
+  it("is the pair both `keys` and `dev` write to .env", () => {
+    expect(Object.keys(anonKeyEnvUpdates("a", "s"))).toEqual(["ANON_KEY", "SERVICE_ROLE_KEY"])
   })
 })
 
@@ -198,8 +208,10 @@ describe("generateAndWriteKeys (init)", () => {
     const result = generateAndWriteKeys(dir)
     if (!result.ok) throw new Error(result.reason)
 
-    expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_ANON_KEY")).toBe(result.anonKey)
-    expect(envValue(dir, "NEXT_PUBLIC_SUPATYPE_URL")).toBe("http://localhost:18999")
+    expect(readEnvFile(dir, ".env.development.local")["NEXT_PUBLIC_SUPATYPE_ANON_KEY"]).toBe(result.anonKey)
+    expect(readEnvFile(dir, ".env.development.local")["NEXT_PUBLIC_SUPATYPE_URL"]).toBe("http://localhost:18999")
+    // The CLI's own copy in .env, read by a production build, is taken out.
+    expect(envValue(dir, "PUBLIC_SUPATYPE_URL")).toBeUndefined()
     expect(verifyJwt(envValue(dir, "ANON_KEY") ?? "", SECRET)).not.toBeNull()
   })
 })

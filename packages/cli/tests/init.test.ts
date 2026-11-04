@@ -123,6 +123,48 @@ describe("scaffold()", () => {
     expect(content).toContain("SITE_URL=")
   })
 
+  // Issue 23: .env is read by a production Vite build, so the local gateway address shipped in the
+  // bundle. The front-end URL names go to .env.development.local, read in development only.
+  it("writes the front end's local API URL to .env.development.local, not .env", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), kongPort: 18478 })
+    const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(env).not.toMatch(/^(VITE_|PUBLIC_|NEXT_PUBLIC_|EXPO_PUBLIC_)SUPATYPE_(URL|ANON_KEY)=/m)
+    const dev = readFileSync(join(tmpRoot, ".env.development.local"), "utf8")
+    expect(dev).toMatch(/^VITE_SUPATYPE_URL=http:\/\/localhost:18478$/m)
+    expect(dev).toMatch(/^NEXT_PUBLIC_SUPATYPE_URL=http:\/\/localhost:18478$/m)
+    expect(readFileSync(join(tmpRoot, ".gitignore"), "utf8")).toMatch(/^\.env\.\*\.local$/m)
+  })
+
+  it("adds .env.*.local to a .gitignore the project already has", () => {
+    writeFileSync(join(tmpRoot, ".gitignore"), "node_modules/\n")
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), kongPort: 18478 })
+    expect(readFileSync(join(tmpRoot, ".gitignore"), "utf8")).toMatch(/^\.env\.\*\.local$/m)
+  })
+
+  // Fresh-user test: the static directory typed at init was ignored for a Vite project with a
+  // production target, which always served ./dist.
+  it("serves the static directory typed at init, and has Vite build into it", () => {
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app", "self-host"),
+      app: { mode: "static", staticDir: "./build", viteDevUrl: "http://127.0.0.1:5173" },
+    })
+    const config = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(config).toContain('static_dir: "./build"')
+    expect(config).not.toContain("./dist")
+    expect(existsSync(join(tmpRoot, "build/index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "dist/index.html"))).toBe(false)
+    expect(readFileSync(join(tmpRoot, "vite.config.ts"), "utf8")).toContain('outDir: "build"')
+  })
+
+  it("leaves Vite's own build directory alone when the static directory is dist", () => {
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app", "self-host"),
+      app: { mode: "static", staticDir: "./dist", viteDevUrl: "http://127.0.0.1:5173" },
+    })
+    expect(readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")).toContain('static_dir: "./dist"')
+    expect(readFileSync(join(tmpRoot, "vite.config.ts"), "utf8")).not.toContain("outDir")
+  })
+
   it("schema/index.ts exports a Profile model using RFC v2 Model<>", () => {
     scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
     const content = readFileSync(join(tmpRoot, "schema/index.ts"), "utf8")
@@ -230,7 +272,7 @@ describe("scaffold()", () => {
       domain: "api.example.com",
       app: {
         mode: "static",
-        staticDir: "./public",
+        staticDir: "./dist",
         viteDevUrl: "http://127.0.0.1:5173",
       },
     })
@@ -245,6 +287,26 @@ describe("scaffold()", () => {
     expect(local).toContain('vite_dev_url: "http://127.0.0.1:5173"')
     expect(existsSync(join(tmpRoot, "dist/index.html"))).toBe(true)
     expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
+  })
+
+  // Fresh-user follow-up: a "Decide later" project that chose Vite got `static` + `vite_dev_url`,
+  // and nothing started Vite: `supatype dev` starts an app only in proxy mode, and the next steps
+  // never said to run it. It gets the same split as a project with a production target.
+  it("static app mode with Vite and no production target splits the same way, so dev starts Vite", () => {
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app", "later"),
+      app: { mode: "static", staticDir: "./dist", viteDevUrl: "http://127.0.0.1:5173" },
+    })
+    const committed = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(committed).toContain('mode: "static"')
+    expect(committed).toContain('static_dir: "./dist"')
+    expect(committed).not.toContain("vite_dev_url")
+    expect(committed).toContain('mode: "dev"')
+
+    const local = readFileSync(join(tmpRoot, "supatype.local.config.ts"), "utf8")
+    expect(local).toContain('mode: "proxy"')
+    expect(local).toContain('start: "vite"')
+    expect(local).toContain('vite_dev_url: "http://127.0.0.1:5173"')
   })
 
   it("static app mode with Vite scaffolds root index.html and vite.config.ts", () => {

@@ -130,7 +130,7 @@
 <pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
 <span class="k">export</span> <span class="k">const</span> supatype = createClient({
-  url: <span class="k">import</span>.meta.env.VITE_SUPATYPE_URL,
+  url: <span class="k">import</span>.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: <span class="k">import</span>.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
 <p>Sign-in screens are covered on <a href="/docs/auth.html#ui">Auth: Pre-built UI</a>, and the subscription hooks on <a href="/docs/realtime.html#hooks">Realtime: Framework hooks</a>. This page does not repeat them.</p>
@@ -371,7 +371,7 @@ createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span 
 <li>Set <code>cookiePrefix</code> on both sides if you change the client's <code>auth.cookiePrefix</code>. The default is <code>st</code>.</li>
 <li>The server client is built from <code>@supatype/client</code>, not your generated client file, so <code>update(..., { publish: true })</code> is not accepted on it.</li>
 </ul>
-<p>The browser half of a Next.js app needs the URL and anon key in <code>NEXT_PUBLIC_</code> variables. <code>supatype keys</code> does not write those names, so copy the values across. Server code can read <code>PUBLIC_SUPATYPE_URL</code> and <code>PUBLIC_SUPATYPE_ANON_KEY</code> directly.</p>
+<p>The browser half of a Next.js app needs the URL and anon key in <code>NEXT_PUBLIC_</code> variables. <code>supatype keys</code> writes <code>NEXT_PUBLIC_SUPATYPE_URL</code> and <code>NEXT_PUBLIC_SUPATYPE_ANON_KEY</code>: a local stack's to <code>.env.development.local</code>, which Next.js reads in development only, and a deployment's to <code>.env</code>. Server code can read <code>PUBLIC_SUPATYPE_URL</code> and <code>PUBLIC_SUPATYPE_ANON_KEY</code> the same way.</p>
 
     <nav class="pn" aria-label="More pages">
       <a href="/docs/client.html"><small>PREVIOUS</small><span>Client</span></a>
