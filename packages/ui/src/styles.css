@@ -1,0 +1,167 @@
+/*
+ * @supatype/ui stylesheet: import once, before your own CSS.
+ *
+ *   import "@supatype/ui/styles.css"
+ *
+ * The RichTextEditor (from "@supatype/ui/rich-text") renders plain su-richtext / su-rt-* classes,
+ * styled here. Theme it by setting the --su-rt-* custom properties on :root or any ancestor.
+ * The variable defaults sit in :where(:root), which has zero specificity, so setting a variable
+ * anywhere wins. Overriding the rules themselves still needs this file imported first.
+ */
+
+:where(:root) {
+  --su-rt-muted: #6b7280;
+  --su-rt-accent: #2563eb;
+  --su-rt-border: #e5e7eb;
+  --su-rt-border-width: 1px;
+  --su-rt-radius: 6px;
+  --su-rt-bg: #ffffff;
+  --su-rt-toolbar-bg: #f9fafb;
+  --su-rt-min-height: 8rem;
+  --su-rt-pad-y: 0.75rem;
+  --su-rt-pad-x: 1rem;
+}
+
+.su-richtext {
+  font-size: 1rem;
+}
+
+.su-richtext-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem 0.5rem;
+  border: var(--su-rt-border-width) solid var(--su-rt-border);
+  border-bottom: none;
+  border-radius: var(--su-rt-radius) var(--su-rt-radius) 0 0;
+  background: var(--su-rt-toolbar-bg);
+}
+
+.su-richtext-toolbar button {
+  min-width: 1.85rem;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  border: 1px solid var(--su-rt-border);
+  border-radius: calc(var(--su-rt-radius) * 2 / 3);
+  background: var(--su-rt-button-bg, var(--su-rt-bg));
+  color: var(--su-rt-fg, inherit);
+  cursor: pointer;
+}
+
+.su-richtext-toolbar button:hover {
+  border-color: var(--su-rt-accent);
+  color: var(--su-rt-accent);
+}
+
+.su-richtext-toolbar-divider {
+  width: 1px;
+  height: 1.1rem;
+  margin: 0 0.2rem;
+  background: var(--su-rt-border);
+}
+
+.su-richtext-surface {
+  position: relative;
+  border: var(--su-rt-border-width) solid var(--su-rt-border);
+  border-radius: 0 0 var(--su-rt-radius) var(--su-rt-radius);
+  background: var(--su-rt-bg);
+}
+
+.su-richtext-readonly .su-richtext-surface {
+  border-radius: var(--su-rt-radius);
+}
+
+.su-richtext-editable {
+  min-height: var(--su-rt-min-height);
+  padding: var(--su-rt-pad-y) var(--su-rt-pad-x);
+  outline: none;
+  line-height: 1.6;
+}
+
+.su-richtext-placeholder {
+  position: absolute;
+  top: var(--su-rt-pad-y);
+  left: var(--su-rt-pad-x);
+  color: var(--su-rt-muted);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Content nodes, named by the editor theme in RichTextEditor.tsx */
+
+.su-rt-h1,
+.su-rt-h2,
+.su-rt-h3 {
+  font-weight: 800;
+  line-height: 1.25;
+  margin: 0 0 0.4rem;
+}
+
+.su-rt-h1 {
+  font-size: 1.6em;
+}
+
+.su-rt-h2 {
+  font-size: 1.3em;
+}
+
+.su-rt-h3 {
+  font-size: 1.1em;
+}
+
+.su-rt-p {
+  margin: 0 0 0.5rem;
+}
+
+.su-rt-ul,
+.su-rt-ol {
+  margin: 0 0 0.5rem 1.4rem;
+  padding: 0;
+}
+
+.su-rt-ul {
+  list-style: disc;
+}
+
+.su-rt-ol {
+  list-style: decimal;
+}
+
+.su-rt-li {
+  margin: 0.15rem 0;
+}
+
+.su-rt-bold {
+  font-weight: 700;
+}
+
+.su-rt-italic {
+  font-style: italic;
+}
+
+.su-rt-underline {
+  text-decoration: underline;
+}
+
+.su-rt-strikethrough {
+  text-decoration: line-through;
+}
+
+/* Lexical uses this instead of the two classes above when text has both formats. */
+.su-rt-underline-strikethrough {
+  text-decoration: underline line-through;
+}
+
+.su-rt-quote {
+  margin: 0 0 0.5rem;
+  padding-left: var(--su-rt-pad-x);
+  border-left: calc(var(--su-rt-border-width) * 3) solid var(--su-rt-border);
+  color: var(--su-rt-muted);
+}
+
+.su-rt-link {
+  color: var(--su-rt-accent);
+  text-decoration: underline;
+}

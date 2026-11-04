@@ -28,8 +28,17 @@ export function startPostgres(): { container: string; url: string } {
   return { container, url: `postgresql://postgres:postgres@127.0.0.1:${port}/postgres` }
 }
 
+/**
+ * How long a fresh container may take to accept connections. It initialises a cluster and restarts
+ * before it does: a few seconds alone, but past the 30s this allowed while `turbo run test` ran
+ * every package's suite at once and Docker started other containers beside it. Inside the 120s the
+ * suites' setup hooks allow, which also cover starting the container.
+ */
+const POSTGRES_READY_WITHIN_MS = 90_000
+
 export async function connectWhenReady(url: string): Promise<pg.Client> {
-  for (let attempt = 0; attempt < 60; attempt++) {
+  const deadline = Date.now() + POSTGRES_READY_WITHIN_MS
+  while (Date.now() < deadline) {
     const client = new pg.Client({ connectionString: url })
     try {
       await client.connect()

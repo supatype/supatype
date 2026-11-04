@@ -48,6 +48,12 @@ function startDevTail(wait: "waitForDevShutdown" | "bare promise") {
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * Each test starts a Node process that loads the CLI's TypeScript through tsx, which takes seconds
+ * on a machine running every package's tests at once: 30s ran out under `turbo run test`.
+ */
+const CHILD_PROCESS_TEST_MS = 90_000
+
 describe("supatype dev after it reports ready", () => {
   it("keeps running with nothing else holding it open, until a signal shuts it down", async () => {
     const dev = startDevTail("waitForDevShutdown")
@@ -63,7 +69,7 @@ describe("supatype dev after it reports ready", () => {
     dev.child.kill("SIGTERM")
     expect(await dev.exited).toBe(0)
     expect(dev.output()).toContain("shutdown work ran")
-  }, 30_000)
+  }, CHILD_PROCESS_TEST_MS)
 
   // What it replaced, so the test above is known to catch the failure: the process ends on its
   // own, exit 0, without the shutdown work, and the exit hook is all that runs (in dev, a silent
@@ -73,5 +79,5 @@ describe("supatype dev after it reports ready", () => {
     await dev.ready
     expect(await dev.exited).toBe(0)
     expect(dev.output()).not.toContain("shutdown work ran")
-  }, 30_000)
+  }, CHILD_PROCESS_TEST_MS)
 })

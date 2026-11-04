@@ -4,12 +4,8 @@ import React, { useCallback, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { useMutation } from "@supatype/react"
 import type { TableInsert } from "@supatype/client"
-import {
-  RichTextEditor,
-  emptyRichTextDocument,
-  richTextIsEmpty,
-  type SerializedEditorState,
-} from "@supatype/ui"
+import { emptyRichTextDocument, richTextIsEmpty, type SerializedEditorState } from "@supatype/ui"
+import { RichTextEditor } from "@supatype/ui/rich-text"
 
 type NewPostFormProps = {
   userId: string

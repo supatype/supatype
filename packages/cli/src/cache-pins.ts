@@ -6,6 +6,7 @@ import { existsSync, readdirSync, rmSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { BINARY_COMPONENTS, type Component } from "./components.js"
 import { cachePath, cacheRoot, pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
+import { dirSize } from "./byte-size.js"
 import { loadConfig } from "./config.js"
 import { errorMessage } from "./error-message.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
@@ -161,23 +162,6 @@ function pinReason(
   if (matches.length === 0) return undefined
   const names = [...new Set(matches.map((m) => m.projectName))]
   return `pinned by ${names.join(", ")}`
-}
-
-function dirSize(dir: string): number {
-  let total = 0
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        total += dirSize(full)
-      } else {
-        total += statSync(full).size
-      }
-    }
-  } catch {
-    // skip unreadable
-  }
-  return total
 }
 
 export interface CleanCachedBinariesOptions {

@@ -4,6 +4,8 @@
     "outDir": "dist",
     "rootDir": "src",
     "composite": true,
+    "sourceMap": false,
+    "declarationMap": false,
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"]
   },
