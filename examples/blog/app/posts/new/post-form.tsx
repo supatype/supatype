@@ -4,12 +4,8 @@ import React, { useCallback, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { useMutation } from "@supatype/react"
 import type { TableInsert } from "@supatype/client"
-import {
-  RichTextEditor,
-  emptyRichTextDocument,
-  richTextIsEmpty,
-  type SerializedEditorState,
-} from "@supatype/ui"
+import { emptyRichTextDocument, richTextIsEmpty, type SerializedEditorState } from "@supatype/ui"
+import { RichTextEditor } from "@supatype/ui/rich-text"
 
 type NewPostFormProps = {
   userId: string
@@ -35,7 +31,7 @@ export function NewPostForm({ userId }: NewPostFormProps): React.ReactElement {
       return
     }
     // No `status`. A new post is unpublished because `published_at` is null, and the read rule is
-    // what hides it — nothing has to remember to say so.
+    // what hides it, so nothing has to remember to say so.
     const payload = {
       title,
       // `body` is a localized column: it holds every language at once, so a bare value is the

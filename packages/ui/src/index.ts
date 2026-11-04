@@ -16,7 +16,7 @@ export { Skeleton } from "./Skeleton.js"
 
 export { ThemeProvider, useTheme } from "./ThemeProvider.js"
 
-export { RichTextEditor } from "./RichTextEditor.js"
-export type { RichTextEditorProps } from "./RichTextEditor.js"
+// RichTextEditor lives at "@supatype/ui/rich-text" so this entry never imports lexical.
+// The helpers below only touch the serialized JSON shape, so they stay here.
 export { emptyRichTextDocument, normalizeRichTextDefault, richTextIsEmpty, stringToRichTextDocument } from "./richtext-utils.js"
 export type { SerializedEditorState, SerializedLexicalNode } from "@supatype/types/lexical"
