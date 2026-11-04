@@ -98,6 +98,23 @@ describe("scaffold()", () => {
     expect(editor).not.toBe(value("AUTHENTICATOR_PASSWORD"))
   })
 
+  // SITE_URL is where auth emails send people back to. It was localhost:3000 for every project,
+  // while a static or proxied app is served on the API's address, so the links went nowhere.
+  it.each([
+    ["a static app on Docker", { mode: "static", staticDir: "./dist" }, "docker", 18478, "http://localhost:18478"],
+    ["a proxied app on Docker", { mode: "proxy", upstream: "http://localhost:4000", start: "dev" }, "docker", 18478, "http://localhost:18478"],
+    ["a static app on the native provider", { mode: "static", staticDir: "./dist" }, "native", undefined, "http://localhost:18471"],
+    ["no app", { mode: "none" }, "docker", 18478, "http://localhost:3000"],
+  ] as const)(".env points SITE_URL at where %s is served", (_, app, provider, kongPort, siteUrl) => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), app, provider, ...(kongPort !== undefined ? { kongPort } : {}) })
+    expect(readFileSync(join(tmpRoot, ".env"), "utf8")).toMatch(new RegExp(`^SITE_URL=${siteUrl}$`, "m"))
+  })
+
+  it("package.json carries a version", () => {
+    scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
+    expect(JSON.parse(readFileSync(join(tmpRoot, "package.json"), "utf8"))).toMatchObject({ version: "0.1.0" })
+  })
+
   it(".env contains ANON_KEY, SERVICE_ROLE_KEY, and SITE_URL placeholders", () => {
     scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
     const content = readFileSync(join(tmpRoot, ".env"), "utf8")
@@ -106,9 +123,6 @@ describe("scaffold()", () => {
     expect(content).toContain("SITE_URL=")
   })
 
-  // Fresh-user test: SITE_URL was http://localhost:3000 for every project, while a docker project's
-  // app is served through Kong at its own port. The first `supatype dev` rewrote it to that port, so
-  // until then email links pointed at a port nothing listened on.
   // Issue 23: .env is read by a production Vite build, so the local gateway address shipped in the
   // bundle. The front-end URL names go to .env.development.local, read in development only.
   it("writes the front end's local API URL to .env.development.local, not .env", () => {
@@ -125,19 +139,6 @@ describe("scaffold()", () => {
     writeFileSync(join(tmpRoot, ".gitignore"), "node_modules/\n")
     scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), kongPort: 18478 })
     expect(readFileSync(join(tmpRoot, ".gitignore"), "utf8")).toMatch(/^\.env\.\*\.local$/m)
-  })
-
-  it(".env's SITE_URL is the gateway's address for a docker project", () => {
-    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), kongPort: 18478 })
-    const content = readFileSync(join(tmpRoot, ".env"), "utf8")
-    expect(content).toMatch(/^SITE_URL=http:\/\/localhost:18478$/m)
-    expect(content).not.toContain("localhost:3000")
-  })
-
-  it(".env's SITE_URL stays on port 3000 for a native project", () => {
-    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), provider: "native" })
-    const content = readFileSync(join(tmpRoot, ".env"), "utf8")
-    expect(content).toMatch(/^SITE_URL=http:\/\/localhost:3000$/m)
   })
 
   // Fresh-user test: the static directory typed at init was ignored for a Vite project with a
@@ -322,7 +323,10 @@ describe("scaffold()", () => {
     expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
     const pkg = readFileSync(join(tmpRoot, "package.json"), "utf8")
     expect(pkg).toContain('"vite": "vite"')
+    // Current @vitejs/plugin-react peers vite ^8, so ^6 failed the install with ERESOLVE.
     expect(pkg).toContain('"vite": "^8"')
+    // app.static_dir serves Vite's build output, which nothing produced without this.
+    expect(pkg).toContain('"build": "vite build"')
     const viteConfig = readFileSync(join(tmpRoot, "vite.config.ts"), "utf8")
     expect(viteConfig).toContain("port: 5173")
   })

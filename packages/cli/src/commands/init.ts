@@ -35,10 +35,15 @@ import {
   sharedFunctionsReadmeSource,
 } from "../functions-deno-types.js"
 import { functionTemplateSource } from "../functions-template.js"
-import { mergeSupatypePackageJson, newSupatypePackageJson, supatypeDevScript } from "../init-package-json.js"
+import {
+  mergeSupatypePackageJson,
+  PREPARE_COMMAND,
+  scaffoldPackageJson,
+  supatypeDevScript,
+} from "../init-package-json.js"
 import { downloadRelease, initFromExample } from "../init-example.js"
 import { errorMessage } from "../error-message.js"
-import { parseJsonObject } from "@supatype/shared"
+import { isJsonObject, parseJsonObject } from "@supatype/shared"
 import { cliPackageVersion } from "../cli-package-version.js"
 import {
   initDependencyVersionsFallback,
@@ -721,18 +726,9 @@ export function scaffold(
 
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) {
-    write("package.json", packageJsonTemplate(opts, deps))
+    write("package.json", scaffoldPackageJson(opts, deps))
   } else {
-    try {
-      const existing = parseJsonObject(readFileSync(pkgPath, "utf8"))
-      if (!existing.ok) throw new Error("package.json is not a JSON object")
-      const merged = mergeSupatypePackageJson(existing.value, opts, deps)
-      writeFileSync(pkgPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8")
-      file("updated", "package.json (added Supatype dependencies)")
-    } catch {
-      warn("Could not merge into package.json, add @supatype/cli and @supatype/types manually.")
-      file("skipped", "package.json (invalid JSON)")
-    }
+    mergeIntoPackageJson(pkgPath, opts, deps)
   }
 
   write("supatype.config.ts", tsConfigTemplate(opts))
@@ -748,6 +744,39 @@ export function scaffold(
 
   if (opts.helloFunction) scaffoldHelloFunction(dir, write)
   scaffoldGitignore(dir, write)
+}
+
+/**
+ * Supatype's scripts and packages merged into the project's own package.json, saying so when its
+ * `prepare` changed: a project's own (husky, say) gets `supatype-prepare` after it, and the one
+ * earlier releases of init wrote is replaced.
+ */
+function mergeIntoPackageJson(pkgPath: string, opts: ScaffoldOptions, deps: InitDependencyVersions): void {
+  try {
+    const existing = parseJsonObject(readFileSync(pkgPath, "utf8"))
+    if (!existing.ok) throw new Error("package.json is not a JSON object")
+    const merged = mergeSupatypePackageJson(existing.value, opts, deps)
+    writeFileSync(pkgPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8")
+    file("updated", "package.json (added Supatype dependencies)")
+    const before = scriptOf(existing.value, "prepare")
+    const after = merged.scripts?.["prepare"]
+    if (before !== undefined && after !== undefined && before !== after) {
+      info(`package.json's prepare script was "${before}" and is now "${after}", so a fresh clone generates the seed builder.`)
+    }
+  } catch {
+    warn(
+      "Could not merge into package.json. Add @supatype/client to dependencies, @supatype/cli and " +
+        `@supatype/types to devDependencies, and a "prepare" script of "${PREPARE_COMMAND}".`,
+    )
+    file("skipped", "package.json (invalid JSON)")
+  }
+}
+
+/** The package.json script `name`, when it is a string. */
+function scriptOf(pkg: Record<string, unknown>, name: string): string | undefined {
+  const scripts = pkg["scripts"]
+  const script = isJsonObject(scripts) ? scripts[name] : undefined
+  return typeof script === "string" ? script : undefined
 }
 
 /**
@@ -883,15 +912,11 @@ async function resolveDependencyVersions(): Promise<InitDependencyVersions> {
   const runningCli = cliPackageVersion()
   if (deps.cli !== runningCli || deps.types !== runningCli || deps.client !== runningCli) {
     info(
-      `Using published npm versions: @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}, ` +
+      `Pinning @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}, ` +
         `@supatype/client ^${deps.client}`,
     )
   }
   return deps
-}
-
-function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions): string {
-  return `${JSON.stringify(newSupatypePackageJson(opts, deps), null, 2)}\n`
 }
 
 /**
@@ -1060,6 +1085,15 @@ function initLocalApiUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort">): 
   return opts.provider === "docker"
     ? `http://localhost:${opts.kongPort ?? COMPOSE_DEV_KONG_PORT}`
     : `http://localhost:${NATIVE_SERVER_PORT}`
+}
+
+/**
+ * Where auth emails send people back to. A static or proxied app is served on the same address as
+ * the API, so that is the app's address too; it was `http://localhost:3000` for every project,
+ * where nothing listened. With no app, the address is the developer's own, and 3000 is a guess.
+ */
+function initSiteUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort" | "app">): string {
+  return opts.app.mode === "none" ? "http://localhost:3000" : initLocalApiUrl(opts)
 }
 
 function holdingPageTemplate(projectName: string, apiUrl: string): string {
@@ -1303,12 +1337,8 @@ SERVICE_ROLE_KEY=`)
 # request without it, so code running in the functions worker cannot call it directly.
 ${CONTROL_PLANE_SECRET_ENV}=${generateControlPlaneSecret()}`)
 
-  // A docker project's app is served through its gateway, which is where `supatype dev` points this
-  // on its first run. Written here too, so email links work before that run as well.
-  const apiUrl = initLocalApiUrl(opts)
-  const siteUrl = opts.provider === "docker" ? apiUrl : "http://localhost:3000"
   sections.push(`# Site URL (used for email redirects)
-SITE_URL=${siteUrl}`)
+SITE_URL=${initSiteUrl(opts)}`)
 
   if (opts.provider === "docker" && opts.kongPort !== undefined) {
     // The front end's copies of this address and the anon key are in .env.development.local
@@ -1316,7 +1346,7 @@ SITE_URL=${siteUrl}`)
     sections.push(
       `# Local API gateway (Kong), unique per project so multiple stacks can run concurrently
 SUPATYPE_KONG_PORT=${opts.kongPort}
-API_EXTERNAL_URL=${apiUrl}`,
+API_EXTERNAL_URL=${initLocalApiUrl(opts)}`,
     )
   }
 

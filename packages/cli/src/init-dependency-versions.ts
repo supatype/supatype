@@ -1,4 +1,5 @@
 import { cliPackageVersion } from "./cli-package-version.js"
+import semver from "semver"
 import { isRecordOf, isShape, isString, isUnknown, optional, type Guard } from "@supatype/shared"
 
 export interface InitDependencyVersions {
@@ -6,15 +7,7 @@ export interface InitDependencyVersions {
   types: string
   /** The runtime client the generated `supatype/generated/client.ts` imports. */
   client: string
-  /** Vite, for a project that develops its app with it: npm's latest, else {@link VITE_OFFLINE_VERSION}. */
-  vite: string
 }
-
-/**
- * Vite when the registry cannot be asked, written as `^8`. It used to be `^6` whatever npm had,
- * two majors behind by the time a new project was made with it.
- */
-export const VITE_OFFLINE_VERSION = "8"
 
 type NpmRegistryPackage = {
   versions?: Record<string, unknown>
@@ -30,7 +23,7 @@ const isNpmRegistryPackage: Guard<NpmRegistryPackage> = isShape({
 /** Fallback when the registry is unreachable (offline / tests). */
 export function initDependencyVersionsFallback(): InitDependencyVersions {
   const version = cliPackageVersion()
-  return { cli: version, types: version, client: version, vite: VITE_OFFLINE_VERSION }
+  return { cli: version, types: version, client: version }
 }
 
 /**
@@ -49,33 +42,16 @@ function npmRegistry(): string {
  */
 const REGISTRY_TIMEOUT_MS = 3_000
 
-/** The registry's JSON at `path` when it answers in time and `guard` accepts it, else null. */
-async function fetchRegistryJson<T>(path: string, guard: Guard<T>): Promise<T | null> {
+async function fetchNpmPackage(name: string): Promise<NpmRegistryPackage | null> {
+  const url = `${npmRegistry()}/${encodeURIComponent(name)}`
   try {
-    const resp = await fetch(`${npmRegistry()}/${path}`, { signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS) })
+    const resp = await fetch(url, { signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS) })
     if (!resp.ok) return null
-    const body: unknown = await resp.json()
-    return guard(body) ? body : null
+    const meta = await resp.json()
+    return isNpmRegistryPackage(meta) ? meta : null
   } catch {
     return null
   }
-}
-
-async function fetchNpmPackage(name: string): Promise<NpmRegistryPackage | null> {
-  return fetchRegistryJson(encodeURIComponent(name), isNpmRegistryPackage)
-}
-
-const isNpmVersionDocument: Guard<{ version: string }> = isShape({ version: isString })
-
-/**
- * `name`'s `latest` dist-tag, from the registry's document for that one version. The package's
- * whole document lists every version ever published: Vite's runs to megabytes, which a slow
- * connection could not fetch inside {@link REGISTRY_TIMEOUT_MS}.
- */
-async function fetchLatestVersion(name: string): Promise<string | null> {
-  const latest = await fetchRegistryJson(`${encodeURIComponent(name)}/latest`, isNpmVersionDocument)
-  const version = latest?.version.trim() ?? ""
-  return version === "" ? null : version
 }
 
 function versionPublishedOnNpm(meta: NpmRegistryPackage | null, version: string): boolean {
@@ -98,28 +74,35 @@ function resolvePackageVersion(
 }
 
 /**
- * Pick @supatype/cli, @supatype/types and @supatype/client versions that exist on npm, and Vite's
- * latest.
+ * Pick @supatype/cli, @supatype/types and @supatype/client versions that exist on npm.
  * The running CLI may be a local dev build ahead of the registry (e.g. 0.1.3
  * while types is only published at 0.1.1).
  */
 export async function resolveInitDependencyVersions(): Promise<InitDependencyVersions> {
   const runningCli = cliPackageVersion()
-  const [cliMeta, typesMeta, clientMeta, viteLatest] = await Promise.all([
+  const [cliMeta, typesMeta, clientMeta] = await Promise.all([
     fetchNpmPackage("@supatype/cli"),
     fetchNpmPackage("@supatype/types"),
     fetchNpmPackage("@supatype/client"),
-    fetchLatestVersion("vite"),
   ])
 
-  if (!cliMeta && !typesMeta && !clientMeta && !viteLatest) {
+  if (!cliMeta && !typesMeta && !clientMeta) {
     return initDependencyVersionsFallback()
   }
 
   return {
     cli: resolvePackageVersion(cliMeta, runningCli),
     types: resolvePackageVersion(typesMeta, runningCli),
-    client: resolvePackageVersion(clientMeta, runningCli),
-    vite: viteLatest ?? VITE_OFFLINE_VERSION,
+    client: notOlderThan(resolvePackageVersion(clientMeta, runningCli), runningCli),
   }
+}
+
+/**
+ * The client carries `supatype-prepare`, the scaffold's `prepare`, and is released with the CLI,
+ * so one older than the running CLI may predate it. npm's latest is such a client while this CLI's
+ * own release is still publishing, or failed to: then this CLI's version, which npm will not have
+ * yet, fails the install on that version, where npm's latest failed it on a missing command.
+ */
+function notOlderThan(version: string, floor: string): string {
+  return semver.valid(version) !== null && semver.valid(floor) !== null && semver.lt(version, floor) ? floor : version
 }

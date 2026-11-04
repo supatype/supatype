@@ -4,6 +4,7 @@ import type { DevLogBus } from "../../dev-log-bus.js"
 import { stripAnsi } from "../../dev-log-filter.js"
 import { logoRowCount } from "../../dev-logo.js"
 import { logInkColor, taskInkColor } from "../../dev-task-colors.js"
+import { FlowSpinner } from "../components/FlowSpinner.js"
 import { LogoWordmark } from "../components/LogoWordmark.js"
 import { PromptPanel } from "../components/PromptPanel.js"
 import { DevReadyPanelView } from "./DevReadyPanelView.js"
@@ -25,6 +26,7 @@ const TAGLINE = "local development"
 const CHROME_ABOVE_LOG = 2 // separator + keybindings
 const CHROME_BELOW_LOG = 2 // footer separator + focused line
 const MIN_LOG_ROWS = 3
+const STEP_ROWS = 2 // FlowSpinner's line and its bottom margin
 
 function truncate(text: string, width: number): string {
   if (width <= 0) return ""
@@ -116,13 +118,17 @@ export function DevDashboard({ bus }: DevDashboardProps): React.ReactElement {
   const focusedId = bus.getFocusedTaskId()
   const taskIds = bus.getTaskOrder()
   const readyPanel = bus.getReadyPanel()
+  // A question on screen is what dev is waiting on, and once the stack is up there is nothing to
+  // wait for, so in both the step's spinner gives way.
+  const step = promptOpen || readyPanel !== null ? null : bus.getStep()
   const logoRows = logoRowCount() + 1 // figlet + tagline
+  const stepRows = step !== null ? STEP_ROWS : 0
   const fullReadyRows = readyPanel ? bus.readyPanelRowCount(false) : 0
   const availableForPanel =
-    rows - logoRows - CHROME_ABOVE_LOG - CHROME_BELOW_LOG - MIN_LOG_ROWS - promptRows
+    rows - logoRows - stepRows - CHROME_ABOVE_LOG - CHROME_BELOW_LOG - MIN_LOG_ROWS - promptRows
   const useCompactPanel = readyPanel !== null && fullReadyRows > availableForPanel
   const readyRows = readyPanel ? bus.readyPanelRowCount(useCompactPanel) : 0
-  const chromeRows = logoRows + readyRows + CHROME_ABOVE_LOG + CHROME_BELOW_LOG + promptRows
+  const chromeRows = logoRows + stepRows + readyRows + CHROME_ABOVE_LOG + CHROME_BELOW_LOG + promptRows
   const logHeight = Math.max(0, rows - chromeRows)
   const logWidth = cols - TASK_COL_WIDTH - 1
 
@@ -172,6 +178,7 @@ export function DevDashboard({ bus }: DevDashboardProps): React.ReactElement {
   return (
     <Box flexDirection="column" width={cols} height={rows}>
       <LogoWordmark maxWidth={cols} tagline={TAGLINE} />
+      {step !== null ? <FlowSpinner message={step} /> : null}
       {readyPanel ? (
         <DevReadyPanelView panel={readyPanel} width={cols} compact={useCompactPanel} />
       ) : null}

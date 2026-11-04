@@ -62,6 +62,11 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
     docker.compose += 1
     return 0
   },
+  // Starting the database runs compose without blocking, through this one.
+  runDockerComposeQuietly: async () => {
+    docker.compose += 1
+    return 0
+  },
 }))
 
 vi.mock("../src/config.js", async (importOriginal) => ({

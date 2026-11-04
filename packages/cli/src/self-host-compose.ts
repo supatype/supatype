@@ -5,8 +5,8 @@ import { FUNCTIONS_WORKER_DRAIN_MS, FUNCTIONS_WORKER_STOP_GRACE_SECONDS, SERVICE
 import { composeHostPath } from "./compose-host-path.js"
 export { composeHostPath } from "./compose-host-path.js"
 import { ENGINE_SERVICE } from "./compose-engine-service.js"
-import { requireDockerDaemon, type DockerBrandOptions, type DockerReportOptions } from "./docker-runtime.js"
-import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer } from "./docker-exec.js"
+import { requireDockerDaemon, requireDockerDaemonAsync, type DockerBrandOptions, type DockerReportOptions } from "./docker-runtime.js"
+import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer, type DockerLimit } from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
 import {
   COMPOSE_DEV_KONG_PORT,
@@ -29,7 +29,7 @@ import { postgresImageFor, runningPostgresImage } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.js"
-import { upKeepingKongCurrent } from "./compose-kong.js"
+import { upKeepingKongCurrent, upKeepingKongCurrentAsync } from "./compose-kong.js"
 import { addressPoolExhaustionHint } from "./docker-address-pool.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
 import {
@@ -1538,13 +1538,64 @@ export function runDockerCompose(
   return result.status ?? 1
 }
 
+/**
+ * {@link runDockerCompose} quietly and without blocking: while `up` pulls images and starts the
+ * stack, which can take minutes, `supatype dev`'s dashboard keeps drawing and its spinner keeps
+ * turning. The synchronous run froze the screen for all of it.
+ */
+export async function runDockerComposeQuietly(
+  composePath: string,
+  args: string[],
+  projectRoot: string,
+  composeProject: string,
+  brand?: DockerBrandOptions,
+): Promise<number> {
+  const run = quietComposeRun(composePath, args, projectRoot, composeProject, brand)
+  composeInFlight.add(run)
+  try {
+    return await run
+  } finally {
+    composeInFlight.delete(run)
+  }
+}
+
+/**
+ * Quiet compose runs still going. A Ctrl+C can reach dev while one runs, now that it does not block,
+ * and a `down` that finished before an `up` still starting would leave the stack running after
+ * dev said it had stopped it. A shutdown waits for these first ({@link settleComposeRuns}).
+ */
+const composeInFlight = new Set<Promise<number>>()
+
+/** Resolves once every quiet compose run under way has ended, however it ended. */
+export async function settleComposeRuns(): Promise<void> {
+  await Promise.allSettled([...composeInFlight])
+}
+
+async function quietComposeRun(
+  composePath: string,
+  args: string[],
+  projectRoot: string,
+  composeProject: string,
+  brand?: DockerBrandOptions,
+): Promise<number> {
+  await requireDockerDaemonAsync(brand !== undefined ? { brand } : undefined)
+  const runCompose = () => askDockerCompose(composePath, args, projectRoot, composeProject, NO_DOCKER_LIMIT)
+  // As in runDockerCompose: a Kong already running is reloaded when `up` moved what it routes to.
+  const result =
+    args[0] === "up"
+      ? await upKeepingKongCurrentAsync(projectRoot, { project: composeProject, composePath }, runCompose)
+      : await runCompose()
+  if (result.status !== 0) reportComposeFailure(args, capturedComposeOutput(result))
+  return result.status ?? 1
+}
+
 /** `docker compose <args>` quietly and asynchronously, within `timeoutMs`: for calls run side by side. */
 export function askDockerCompose(
   composePath: string,
   args: readonly string[],
   projectRoot: string,
   composeProject: string,
-  timeoutMs: number,
+  timeoutMs: DockerLimit,
 ): Promise<DockerAnswer> {
   const call = { cwd: projectRoot, env: composeProcessEnv(projectRoot, true), timeoutMs }
   return askDocker(composeInvocation(composePath, args, projectRoot, composeProject, true), call)

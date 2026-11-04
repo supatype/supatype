@@ -55,12 +55,17 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
     nginxPath: "",
     s3ConfigPath: "",
   }),
-  runDockerCompose: (_path: string, args: string[]) => {
-    docker.compose.push(args)
-    if (args[0] === "up" && args.includes("db")) docker.dbRunning = true
-    return 0
-  },
+  runDockerCompose: (_path: string, args: string[]) => compose(args),
+  // The database's `up` runs without blocking since #316, so the dashboard keeps drawing.
+  runDockerComposeQuietly: async (_path: string, args: string[]) => compose(args),
 }))
+
+/** One compose command, recorded; an `up` of `db` leaves it running. */
+function compose(args: string[]): number {
+  docker.compose.push(args)
+  if (args[0] === "up" && args.includes("db")) docker.dbRunning = true
+  return 0
+}
 vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-engine-run.js")>()),
   spawnComposeEngine: () => ({ status: 0, stdout: JSON.stringify(DIFF), stderr: "", pid: 0, output: [], signal: null }),

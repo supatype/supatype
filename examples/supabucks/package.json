@@ -10,7 +10,7 @@
     "push": "supatype push",
     "seed": "supatype seed",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=50%"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",

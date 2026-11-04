@@ -1,22 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("../src/cli-package-version.js", () => ({ cliPackageVersion: () => "0.9.0" }))
+
 import {
   initDependencyVersionsFallback,
   resolveInitDependencyVersions,
 } from "../src/init-dependency-versions.js"
 
-/**
- * A registry holding `packages`. Vite answers only at `/vite/latest`, the one small document init
- * needs from it: its whole document lists every version ever published, many megabytes.
- */
 function mockRegistry(packages: Record<string, { latest: string; versions: string[] }>) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
-      const path = decodeURIComponent(url.replace("https://registry.npmjs.org/", ""))
-      if (path === "vite") return new Response(null, { status: 500 })
-      const latestOf = path.endsWith("/latest") ? packages[path.slice(0, -"/latest".length)] : undefined
-      if (latestOf) return Response.json({ version: latestOf.latest })
-      const pkg = packages[path]
+      const name = decodeURIComponent(url.replace("https://registry.npmjs.org/", ""))
+      const pkg = packages[name]
       if (!pkg) return new Response(null, { status: 404 })
       const versions = Object.fromEntries(pkg.versions.map((v) => [v, {}]))
       return Response.json({ versions, "dist-tags": { latest: pkg.latest } })
@@ -31,13 +27,13 @@ describe("resolveInitDependencyVersions", () => {
 
   it("uses the running CLI version when both packages publish it", async () => {
     mockRegistry({
-      "@supatype/cli": { latest: "0.1.3", versions: ["0.1.1", "0.1.3"] },
-      "@supatype/types": { latest: "0.1.3", versions: ["0.1.1", "0.1.3"] },
+      "@supatype/cli": { latest: "0.10.0", versions: ["0.1.1", "0.9.0", "0.10.0"] },
+      "@supatype/types": { latest: "0.10.0", versions: ["0.1.1", "0.9.0", "0.10.0"] },
     })
 
     const deps = await resolveInitDependencyVersions()
-    expect(deps.cli).toBe("0.1.3")
-    expect(deps.types).toBe("0.1.3")
+    expect(deps.cli).toBe("0.9.0")
+    expect(deps.types).toBe("0.9.0")
   })
 
   it("falls back to npm latest when the running CLI version is unpublished", async () => {
@@ -60,6 +56,31 @@ describe("resolveInitDependencyVersions", () => {
     const deps = await resolveInitDependencyVersions()
     expect(deps.cli).toBe("0.1.3")
     expect(deps.types).toBe("0.1.1")
+  })
+
+  // The client carries the scaffold's `prepare` command, released with the CLI. npm's latest, while
+  // this CLI's own release is still publishing, is a client that may not have it.
+  it("never picks a client older than the running CLI", async () => {
+    mockRegistry({
+      "@supatype/cli": { latest: "0.8.0", versions: ["0.8.0"] },
+      "@supatype/client": { latest: "0.8.0", versions: ["0.8.0"] },
+    })
+
+    const deps = await resolveInitDependencyVersions()
+    expect(deps.cli).toBe("0.8.0")
+    expect(deps.client).toBe("0.9.0")
+  })
+
+  it("never picks a pre-release of the running CLI's own version", async () => {
+    mockRegistry({ "@supatype/client": { latest: "0.9.0-rc.3", versions: ["0.9.0-rc.3"] } })
+
+    expect((await resolveInitDependencyVersions()).client).toBe("0.9.0")
+  })
+
+  it("keeps a client newer than the running CLI", async () => {
+    mockRegistry({ "@supatype/client": { latest: "0.10.0", versions: ["0.10.0"] } })
+
+    expect((await resolveInitDependencyVersions()).client).toBe("0.10.0")
   })
 
   it("falls back to the running CLI version when the registry is unreachable", async () => {
@@ -89,31 +110,6 @@ describe("resolveInitDependencyVersions", () => {
       "http://mirror.test/npm/%40supatype%2Fcli",
       "http://mirror.test/npm/%40supatype%2Fclient",
       "http://mirror.test/npm/%40supatype%2Ftypes",
-      "http://mirror.test/npm/vite/latest",
     ])
-  })
-})
-
-/**
- * Fresh-user test: a project made with Vite was pinned to `^6` whatever npm had, two majors behind.
- * Vite's own latest is asked for alongside the Supatype packages, and `^8` is the offline answer.
- */
-describe("the Vite version init pins", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it("is npm's latest", async () => {
-    mockRegistry({
-      "@supatype/cli": { latest: "0.1.3", versions: ["0.1.3"] },
-      vite: { latest: "8.1.2", versions: ["6.0.0", "8.1.2"] },
-    })
-    expect((await resolveInitDependencyVersions()).vite).toBe("8.1.2")
-  })
-
-  it("is 8 when the registry is unreachable", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 500 })))
-    expect((await resolveInitDependencyVersions()).vite).toBe("8")
-    expect(initDependencyVersionsFallback().vite).toBe("8")
   })
 })

@@ -160,8 +160,29 @@ export function upKeepingKongCurrent<T extends { status: number | null }>(
 ): T {
   const before = runningContainers(cwd, stack)
   const result = up()
-  // A Kong the `up` started resolves afresh: nothing to look at after it.
-  if (result.status !== 0 || (before !== undefined && !before.has("kong"))) return result
-  if (kongNeedsReload(before, runningContainers(cwd, stack), kongUpstreams(cwd, stack))) reloadKong(cwd, stack)
+  reloadKongIfMoved(cwd, stack, before, result.status)
   return result
+}
+
+/** {@link upKeepingKongCurrent} for an `up` run asynchronously, so a screen keeps drawing meanwhile. */
+export async function upKeepingKongCurrentAsync<T extends { status: number | null }>(
+  cwd: string,
+  stack: ComposeStack,
+  up: () => Promise<T>,
+): Promise<T> {
+  const before = runningContainers(cwd, stack)
+  const result = await up()
+  reloadKongIfMoved(cwd, stack, before, result.status)
+  return result
+}
+
+function reloadKongIfMoved(
+  cwd: string,
+  stack: ComposeStack,
+  before: ReturnType<typeof runningContainers>,
+  status: number | null,
+): void {
+  // A Kong the `up` started resolves afresh: nothing to look at after it.
+  if (status !== 0 || (before !== undefined && !before.has("kong"))) return
+  if (kongNeedsReload(before, runningContainers(cwd, stack), kongUpstreams(cwd, stack))) reloadKong(cwd, stack)
 }

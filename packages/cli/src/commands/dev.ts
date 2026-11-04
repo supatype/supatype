@@ -92,7 +92,7 @@ import {
 } from "../postgrest-release.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } from "../dev-session.js"
+import { beginDevSession, endDevSession, resolveDevUiMode, showDevStep, startDevSession } from "../dev-session.js"
 import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
@@ -306,6 +306,9 @@ export function registerDev(program: Command): void {
       if (provider === "docker") requireUrlSafeComposePasswords(cwd, config)
 
       beginDevSession(resolveDevUiMode(opts.stream === true))
+      // From the first frame, so the dashboard never shows the logo over an empty log with nothing
+      // to say what it is doing. The provider's own steps follow.
+      await showDevStep("Getting ready")
       if (hasMeaningfulOverrides(config)) {
         console.warn("[supatype] Local binary overrides active:")
         for (const line of describeActiveOverrides(config)) {
@@ -338,6 +341,7 @@ export function registerDev(program: Command): void {
 
       // ── 2. Resolve engine + server binaries ──────────────────────────────
       console.log(`[supatype] Resolving component binaries for "${projectName}"...`)
+      await showDevStep("Getting components ready (the first start downloads them)")
       const [engineBin, serverBin] = await Promise.all([
         ensureBinary("engine", config),
         ensureBinary("server", config),
@@ -396,6 +400,8 @@ export function registerDev(program: Command): void {
         // initdb, and createdb on a first start, need the archive's version and ICU support; asked once.
         let build: PgBuild | undefined
         const buildOnce = (): PgBuild => (build ??= pgBuild(pgBinDir))
+        // Before initdb, which a first start runs here and which takes the longest.
+        await showDevStep("Starting Postgres")
         ensureCluster(pgOpts, pgPassword, buildOnce)
         console.log("[supatype] Starting Postgres...")
         pgStart(pgOpts)
@@ -457,6 +463,7 @@ export function registerDev(program: Command): void {
 
       // ── 8. auth migrations (auth.users before engine studio SQL) ─────────
       console.log("[supatype] Running auth migrations...")
+      await showDevStep("Running auth migrations")
       const migrateEnv = authMigrateEnv(serverPort, dbURL, LOCAL_JWT_SECRET)
       runAuthMigrations(serverBin, migrateEnv)
       await haltIfStopping()
@@ -476,15 +483,18 @@ export function registerDev(program: Command): void {
       const schemaPush: NativeSchemaPush = {
         cwd, engineBin, schemaPath, dbURL, adminConfigPath, storagePath: localStoragePath, skipFieldKinds, config, overwriteDrift,
       }
+      await showDevStep("Applying the schema")
       await runSchemaPush(schemaPush).catch(reportUnlessStopping(reportDevPushFailure))
       await haltIfStopping()
 
       const { ensureFirstAdminUser } = await import("./admin.js")
+      await showDevStep("Checking for an admin user")
       await ensureFirstAdminUser(dbURL, { cwd })
 
       // ── 10. Spawn supatype-server ─────────────────────────────────────────
 
       // The functions worker the image runs, from the CLI's copy, on every start (native-worker.ts).
+      await showDevStep("Starting services")
       const worker = await prepareNativeWorker(cwd, config)
 
       // The server passes its environment, the key included, on to Deno, but the functions worker

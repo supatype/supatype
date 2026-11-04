@@ -25,6 +25,8 @@ $ supatype push --help
 
 The npm package needs Node.js 22 or later. It is the install to use on Windows.
 
+The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
+
 On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:
 
 ```sh
@@ -179,7 +181,9 @@ All of these need Supatype Cloud, which is coming soon.
 | `update` | Download the latest component binaries and update versions in supatype.config.ts | `--check` |
 | `engine status` | Run the host engine binary's `--version` and show which binary answered |  |
 | `cache list` | List cached component binaries and their sizes | `--project <path>` |
-| `cache clean [component] [version]` | Remove cached binaries not pinned by local project configs | `--dry-run`, `--force`, `--project <path>` |
+| `cache clean [component] [version]` | Remove cached binaries not pinned by local project configs, and CLI programs of other versions (`cache clean cli` for those alone) | `--dry-run`, `--force`, `--project <path>` |
 | `migrate-from-v1` | Codemod runtime model() schema DSL into RFC v2 Model&lt;&gt; type aliases | `--schema <path>`, `--write` |
 
 Binaries are cached in `~/.supatype/cache/`. `cache clean --force` removes every cached binary, pinned or not.
+
+Upgrading an npm install leaves the previous version's program in `~/.supatype/cache/cli/`, since another project may still use it. Once the programs of other versions take more than 250 MB, the CLI says so when it starts, at most once a day. `cache clean` removes them, and never the running version; a project still on a removed version downloads it again on its next command.

@@ -16,6 +16,7 @@
   "include": [
     "ts-reset.d.ts",
     "packages/*/vitest.config.ts",
+    "packages/*/vitest.*.config.ts",
     "packages/*/vite.config.ts",
     "packages/*/tailwind.*.ts",
     "packages/cli/deno.d.ts"
