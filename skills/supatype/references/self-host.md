@@ -20,10 +20,12 @@ For local dev, `supatype dev` writes `.supatype/environment.json` with the Kong 
 ## Local dev (Docker)
 
 ```bash
-supatype keys --write  # only if init skipped the keys
-supatype dev           # Compose stack + control-plane; Kong on :18473; applies the schema on every save
+npm run dev            # supatype dev: Compose stack + control-plane; applies the schema on every save
 supatype status        # local services or linked target summary
 ```
+
+Kong listens on `SUPATYPE_KONG_PORT` from `.env` (init takes 18473 or the next free port); open the
+URL init and `dev` print.
 
 `supatype dev` renders compose, starts services, and may write `SUPATYPE_KONG_PORT`, `SUPATYPE_DEV_DB_PORT`, and `.supatype/environment.json` to the project. It refuses a `JWT_SECRET` shorter than 32 characters before starting anything. It stops its stack when the process that started it exits; to keep a stack up with nothing attached, use `supatype self-host compose up -d`.
 
@@ -106,7 +108,7 @@ pins.
 **`compose up` checks `JWT_SECRET`.** Shorter than 32 characters stops it with
 `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` (PostgREST 14 would
 otherwise restart in a loop). Fix: `openssl rand -base64 48` into `.env` as `JWT_SECRET`, then
-`supatype keys --write --force` (plain `--write` only fills blank keys).
+`supatype keys --force` (plain `supatype keys` only fills blank keys).
 
 **A stack keeps its mode.** Every command that renders the compose file (`push`, `diff`, `adopt`,
 `update`, every `self-host compose` command) uses one rule: dev while `supatype dev` runs for the
@@ -115,6 +117,22 @@ production stack leaves it standalone and leaves `.env` alone, and `self-host co
 `supatype dev` stack keeps it dev. "`supatype dev` runs" means `.supatype/dev-session.json` names a
 live process: a file left by a killed `dev` (or written by a CLI older than this rule, which kept no
 process ID) is removed and does not count.
+
+### Local overrides stay local
+
+`supatype.local.config.ts` is for development. Every `self-host` command (`compose up`, `down`,
+`restart`, `status`, `logs`, `render`, and the native `serve`, `reload`, `backup` and the rest),
+`supatype deploy`, and a `supatype push` to a production stack (a linked self-host server, or the
+project's own stack while it runs standalone) load `supatype.config.ts` alone. When an override
+exists they print `Using supatype.config.ts without supatype.local.config.ts: that override is for
+local development.` So a `server: { mode: "dev" }` override no longer reaches production even when
+the file is present on the server.
+
+**`DATABASE_URL` in `.env` stays dev's.** `self-host compose up` no longer rewrites it to the
+self-host stack's port; that had dev and self-host rewriting the same line in turn. Host commands
+(`push`, `seed`, `admin`) reach the running self-host stack's Postgres on `SUPATYPE_DB_PORT` (5432
+unless set) for their own run, past a URL the CLI wrote. A `DATABASE_URL` of your own is still used
+as written.
 
 **REST answers 503 until the first push.** A fresh stack returns `503` with `PGRST002` on every
 `/rest/v1/` request: PostgREST will not serve until the schemas it exposes exist, and `supatype
@@ -231,7 +249,7 @@ supatype self-host compose up -d
 
 When `mode = "standalone"` + `domain` + `tls.email` are all set, the generated stack:
 
-- publishes **Kong on `:80` and `:443`** (instead of the local `:18473`),
+- publishes **Kong on `:80` and `:443`** (instead of the local gateway port, `SUPATYPE_KONG_PORT`),
 - adds the RESP cert store the `acme` plugin needs, served by the **`db` container itself** by default, or a **Valkey** service (persisted in the `valkey-data` volume) when `cache.provider` is `valkey` (see below),
 - enables Kong's global **`acme`** plugin, which provisions a Let's Encrypt certificate on the first HTTPS request and auto-renews it.
 
@@ -239,7 +257,7 @@ Prerequisites: point the domain's DNS **A record** at the server's public IP and
 
 Set `server.tls.provider = "none"` to keep a domain configured but stay on plain HTTP.
 
-> A `supatype.local.config.ts` override with `server: { mode: "dev" }` keeps local `supatype dev` on HTTP. That file is gitignored, so HTTPS still activates on the production server where it does not exist.
+> A `supatype.local.config.ts` override with `server: { mode: "dev" }` keeps local `supatype dev` on HTTP. The self-host commands never read it (see [Local overrides stay local](#local-overrides-stay-local)), so HTTPS activates on the production server whether or not the file is there.
 
 ## Cache provider: pg_keyspace or Valkey
 

@@ -31,8 +31,11 @@ const { data, error } = await supatype
   .select()
 ```
 
-Insert, update and upsert always return the written rows in `data` (an array). Chaining `.select()`
-is optional and only narrows which columns come back.
+A write returns no rows unless you ask: without `.select()`, `data` is `null`. Chain `.select()` for
+every column, or `.select(columns)` for some, to get the written rows back as an array. Returning a
+row needs the right to read it as well as to write it, so on a table whose rules let a caller create
+but not read (an anonymous order form, say), a plain insert succeeds and one with `.select()` is
+refused with `42501`.
 
 ## Update
 
@@ -49,7 +52,7 @@ const { data, error } = await supatype
 Update multiple rows at once:
 
 ```typescript
-const { data, error } = await supatype
+const { error } = await supatype
   .from("posts")
   .update({ status: "archived" })
   .in("id", [postId1, postId2])
@@ -100,12 +103,13 @@ const { data, error } = await supatype
     id: userId,
     display_name: "Alice",
   })
+  .select()
 ```
 
 Upsert multiple rows:
 
 ```typescript
-const { data, error } = await supatype
+const { error } = await supatype
   .from("profiles")
   .upsert([
     { id: user1Id, display_name: "Alice" },
@@ -137,22 +141,29 @@ const { error } = await supatype
   .eq("post_id", postId)
 ```
 
-A plain delete does not return the deleted rows: `data` is an empty array on success. Chain
+A plain delete does not return the deleted rows: `data` is `null` on success. Chain
 `.select()` (or `.select(columns)`) to get them back. Like updates, include at least one filter when
 deleting: on the `supatype/postgres` image the database refuses a `DELETE` with no `WHERE` clause,
 and on the native runtime it deletes every row.
 
 ## Returning data
 
-Insert, update and upsert return the affected rows; a delete returns them when you chain
-`.select()`. Chain `.select(columns)` to choose which columns come back, and `.single()` or
-`.maybeSingle()` to get one row instead of an array:
+No write returns rows until you chain `.select()`: `data` is `null`, and so is `count`. Chain
+`.select()` for every column or `.select(columns)` to choose them. `.single()` and `.maybeSingle()`
+return one row instead of an array, and on a write they come after `.select()`: called without it
+they are a type error, and from untyped code they answer an error and send nothing.
 
 ```typescript
+// Nothing back: data is null
+const { error } = await supatype
+  .from("posts")
+  .insert({ title: "Test", body: "Hello", author_id: userId })
+
 // The inserted row with all columns, as an array
 const { data: rows } = await supatype
   .from("posts")
   .insert({ title: "Test", body: "Hello", author_id: userId })
+  .select()
 
 // Only specific columns, as a single object
 const { data: post } = await supatype
@@ -160,6 +171,15 @@ const { data: post } = await supatype
   .insert({ title: "Test", body: "Hello", author_id: userId })
   .select("id, title, created_at")
   .single()
+```
+
+The framework bindings follow the same rule. `useMutation` (React, Vue) and `createMutation`
+(Solid, Svelte) return `data: null` unless the call passes `select`: `true` for every column, or the
+columns as `.select()` takes them.
+
+```typescript
+const { mutate: createPost } = useMutation("posts", "insert")
+const { data } = await createPost({ title: "Hello", author_id: userId }, { select: "id, title" })
 ```
 
 ## Error handling
@@ -170,6 +190,7 @@ All mutations return `{ data, error }`. Always check for errors:
 const { data, error } = await supatype
   .from("posts")
   .insert({ title: "Test", body: "Hello", author_id: userId })
+  .select("id")
   .single()
 
 if (error) {

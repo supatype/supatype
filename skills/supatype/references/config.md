@@ -1,6 +1,6 @@
 # supatype.config.ts reference
 
-Canonical config uses `defineConfig` from `@supatype/cli`. Optional `supatype.local.config.ts` merges on top (gitignored).
+Canonical config uses `defineConfig` from `@supatype/cli`. Optional `supatype.local.config.ts` merges on top (gitignored) for local development only: `supatype dev` reads it, while the self-host commands, `deploy` and a push to a production stack (a linked self-host server, or the project's own stack running standalone) use `supatype.config.ts` alone, printing one line when they leave an override out.
 
 ## Minimal scaffold (from `supatype init`)
 
@@ -16,10 +16,12 @@ export default defineConfig({
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },
+  output: { types: "types/database.ts", client: "supatype/generated/index.d.ts" },
 })
 ```
 
-With `provider: "native"`, init also writes `server.port: 18471`, the port the native server
+The types land in `types/database.ts` and the client in `supatype/generated/client.ts`, beside
+`index.d.ts`. With `provider: "native"`, init also writes `server.port: 18471`, the port the native server
 listens on. A Docker project's API is on the gateway port, `SUPATYPE_KONG_PORT` in `.env`.
 
 **Docker images:** omit `versions` so compose runs the exact images the installed CLI release was tested with (never `:latest`). Pin `versions.*` only when you need a different release.
@@ -37,24 +39,37 @@ export default defineConfig({
   server: {
     mode: "standalone",
     domain: "demo.supatype.com",
-    tls: { email: "you@example.com", provider: "kong" },
+    tls: { email: "you@example.com" },
   },
   app: {
     mode: "static",
-    static_dir: "./dist",
-    vite_dev_url: "http://127.0.0.1:5173",
+    static_dir: "./dist",  // production build output
   },
   environments: { default: "production" },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },
+  output: { types: "types/database.ts", client: "supatype/generated/index.d.ts" },
 })
 ```
 
-Keep local HTTP in `supatype.local.config.ts`:
+Init also writes `supatype.local.config.ts`, which keeps `supatype dev` on local HTTP and, with
+Vite, runs the app as a proxy that `dev` starts:
 
 ```typescript
-export default { server: { mode: "dev" } }
+import type { SupatypeConfig } from "@supatype/cli"
+
+const localConfig: Partial<SupatypeConfig> = {
+  server: { mode: "dev" },
+  app: {
+    mode: "proxy",
+    upstream: "http://127.0.0.1:5173",
+    start: "vite",
+    vite_dev_url: "http://127.0.0.1:5173",
+  },
+}
+
+export default localConfig
 ```
 
 ## Key fields
@@ -92,18 +107,24 @@ AUTHENTICATOR_PASSWORD= # generated: PostgREST's own login, deliberately not the
 SUPATYPE_SQL_EDITOR_PASSWORD= # generated: Studio SQL editor's login, not a superuser
 JWT_SECRET=             # generated: signs ANON_KEY / SERVICE_ROLE_KEY; at least 32 characters
 SUPATYPE_CONTROL_PLANE_SECRET= # generated: only the server and the control plane get it
-ANON_KEY=           # from: supatype keys --write
-SERVICE_ROLE_KEY=   # from: supatype keys --write; also the token for the self-host /platform/v1 API
-SITE_URL=http://localhost:18473
+ANON_KEY=           # written by init, or: supatype keys
+SERVICE_ROLE_KEY=   # written by init, or: supatype keys; also the token for the self-host /platform/v1 API
+SITE_URL=http://localhost:18473      # docker: the local gateway URL init chose
+SUPATYPE_KONG_PORT=18473             # docker: init takes 18473 or the next free port
+API_EXTERNAL_URL=http://localhost:18473
 # Optional, off by default: a raw database URL handed to every function as ctx.dbUrl. It bypasses
 # row rules and field masking, so use a least-privilege role, never the admin URL (self-host.md).
 # SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:<password>@db:5432/my-project
-VITE_SUPATYPE_ANON_KEY=   # copy from ANON_KEY for Vite builds / dev
 
 # Written by supatype dev (docker):
-# SUPATYPE_KONG_PORT=18473
 # SUPATYPE_DEV_DB_PORT=54329
 ```
+
+The front end's copies (`VITE_SUPATYPE_URL`, `VITE_SUPATYPE_ANON_KEY` and their `PUBLIC_`,
+`NEXT_PUBLIC_`, `EXPO_PUBLIC_` twins) are not in `.env` for a local stack: they go to
+`.env.development.local`, read in development only, so a production build never ships localhost or
+the dev anon key. A deployment's real values go to `.env`. See
+[frontend.md](frontend.md#frontend-env-files).
 
 `supatype dev` **does not** rewrite `POSTGRES_PASSWORD` or `JWT_SECRET`. It reads them, so a
 generated secret reaches production intact. It does rewrite the keys derived from them
@@ -140,7 +161,7 @@ environments: {
 
 ### Who owns `DATABASE_URL` in `.env`
 
-- **The CLI's**: the URL sits under `# supatype:managed, built from supatype.config.ts and the POSTGRES_ values below` (what `init` writes; an older `# supatype:managed` marker counts too), or is exactly the URL the CLI writes (`supatype_admin`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, a host on this machine, any port). Docker dev, native dev, a saved shell port and `self-host compose up` rewrite it to the provider and port the project runs, and host commands (`push`, `seed`, `admin`) use the project's own database in its place.
+- **The CLI's**: the URL sits under `# supatype:managed, built from supatype.config.ts and the POSTGRES_ values below` (what `init` writes; an older `# supatype:managed` marker counts too), or is exactly the URL the CLI writes (`supatype_admin`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, a host on this machine, any port). Docker dev, native dev and a saved shell port rewrite it to the provider and port the project runs, and host commands (`push`, `seed`, `admin`) use the project's own database in its place. The line belongs to dev: self-host commands never rewrite it, and reach the self-host stack's Postgres (on `SUPATYPE_DB_PORT`, 5432 unless set) for their own run only.
 - **Yours**: anything else. No command changes it, host commands use it as written, and dev warns when nothing answers where it points. Remove it to go back to the project's own database.
 
 ## Self-host HTTPS (custom domain)
@@ -155,7 +176,7 @@ server: {
 },
 ```
 
-Apply with `supatype self-host compose up -d`. Keep a `supatype.local.config.ts` with `server: { mode: "dev" }` and **app proxy** for Vite local dev:
+Apply with `supatype self-host compose up -d`, which reads `supatype.config.ts` without the local override. Keep a `supatype.local.config.ts` with `server: { mode: "dev" }` and **app proxy** for Vite local dev; the self-host commands never read it:
 
 ```typescript
 export default {

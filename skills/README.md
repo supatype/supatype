@@ -48,7 +48,7 @@ Manifests live at `.cursor-plugin/` and `.claude-plugin/` (repo root). See [plug
 
 ## Monorepo contributors
 
-Edit **`skills/supatype/`** only — do not commit copies under `.cursor/skills/` or `.claude/skills/supatype/`.
+Edit **`skills/supatype/`** only. Do not commit copies under `.cursor/skills/` or `.claude/skills/supatype/`.
 
 Install the user skill locally for Claude Code in this repo:
 
@@ -56,7 +56,10 @@ Install the user skill locally for Claude Code in this repo:
 pnpm skills:install
 ```
 
-This symlinks `skills/supatype` → `.claude/skills/supatype`. Contributor-only **`supatype-dev`** stays at `.claude/skills/supatype-dev/` (not published).
+This links `.claude/skills/supatype` to `skills/supatype`, replacing whatever was there, so an edit
+to the skill is live at once. On Linux and macOS the link is a symlink. On Windows (Git Bash) it is
+a directory junction, which needs no admin rights: `ln -s` there makes a plain copy that drifts
+from the source. Contributor-only **`supatype-dev`** stays at `.claude/skills/supatype-dev/` (not published).
 
 ## Personal (all projects)
 

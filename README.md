@@ -77,7 +77,8 @@ Every package consumes the same generated types; nothing in your app introspects
 | [`@supatype/ssr`](packages/ssr) | Cookie-based auth for server components, route handlers and middleware |
 | [`@supatype/plugin-sdk`](packages/plugin-sdk) | Build custom field types, composites, providers and Studio widgets |
 | [`@supatype/plugin-seo`](packages/plugin-seo), [`plugin-color-picker`](packages/plugin-color-picker), [`plugin-phone-field`](packages/plugin-phone-field) | First-party plugins |
-| [`@supatype/ui`](packages/ui), [`@supatype/common`](packages/common) | Shared UI components and web-app utilities |
+| [`@supatype/ui`](packages/ui) | React components styled with Tailwind, which your Tailwind build must scan (v4 `@source`, v3 `content`; see its README), a stylesheet at `@supatype/ui/styles.css`, and a Lexical rich text editor at `@supatype/ui/rich-text` |
+| [`@supatype/common`](packages/common) | Shared web-app utilities |
 
 Services (shipped as images, not npm libraries): [`studio`](packages/studio) (admin panel and CMS), [`storage`](packages/storage), [`realtime`](packages/realtime), [`functions-worker`](packages/functions-worker) (Deno edge functions).
 

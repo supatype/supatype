@@ -71,7 +71,8 @@ looks in the default one unless you say otherwise.
 
 The client's `update` does the saving for you on a model that keeps drafts (see
 [Creating a record](#creating-a-record) for how it knows). Each record the filters match gets a new
-draft, all or none in one call, and `{ publish: true }` publishes them in the same call:
+draft, all or none in one call, and `{ publish: true }` publishes them in the same call. Chain
+`.select()` to get the saved drafts back; without it `data` is `null`:
 
 ```typescript
 // Saves a draft of the record. The live row does not move.
@@ -115,8 +116,9 @@ has made the row visible to you. `create_record` inserts without reading back, t
 and from then on the record is visible to whoever created it.
 
 The client knows which models keep drafts from the generated `client.ts` (by default
-`supatype/generated/client.ts`), so import `createClient` from there. Its `insert` creates one record through `create_record` and returns the
-row read back from the draft view, in the shape an insert returns. `upsert` is left a plain write,
+`supatype/generated/client.ts`), so import `createClient` from there. Its `insert` creates one record through `create_record` and, when you chain
+`.select()`, returns the row read back from the draft view, in the shape an insert returns. Without
+`.select()` it reads nothing back and `data` is `null`. `upsert` is left a plain write,
 since `create_record` cannot say what a conflict should do. A raw REST caller refused this way gets a
 `hint` naming `supatype.create_record` and `supatype.create_records`.
 
@@ -124,8 +126,8 @@ since `create_record` cannot say what a conflict should do. A raw REST caller re
 
 An `insert` of several rows goes through `create_records`, which creates every record in one call,
 **all or none**: if the database refuses any of them (your create rule, a constraint, a missing
-required field), none is created. The rows come back in the order you sent them, with your select
-applied:
+required field), none is created. With `.select()`, the rows come back in the order you sent
+them, with your select applied:
 
 ```typescript
 const { data } = await supatype
