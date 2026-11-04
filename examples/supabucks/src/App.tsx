@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { RichTextEditor } from "@supatype/ui"
+import { RichTextEditor } from "@supatype/ui/rich-text"
 import { useAuth } from "./useAuth"
 import { earnStars, redeemReward, updateProfile, type RichTextDoc } from "./api"
 import { MENU, REWARDS, tierFor, nextReward, GOLD_THRESHOLD, type MenuItem, type Reward } from "./catalog"

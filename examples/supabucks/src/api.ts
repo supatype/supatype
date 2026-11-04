@@ -28,6 +28,7 @@ export async function ensureCustomer(uid: string, name: string): Promise<Custome
   const { data, error } = await supatype
     .from("customer")
     .insert({ id: uid, name, stars: 0, lifetimeStars: 0 })
+    .select()
   if (error) throw new Error(error.message)
   return writtenRow(data)
 }
@@ -44,7 +45,7 @@ export async function fetchActivity(uid: string): Promise<Activity[]> {
 
 /** Simulate paying for a drink: log the activity and credit the stars. */
 export async function earnStars(customer: Customer, item: MenuItem): Promise<Customer> {
-  await supatype.from("activity").insert({
+  const logged = await supatype.from("activity").insert({
     auth_user_id: customer.id,
     customer_id: customer.id,
     kind: "earn",
@@ -53,6 +54,7 @@ export async function earnStars(customer: Customer, item: MenuItem): Promise<Cus
     stars: item.stars,
     amount: item.amount,
   })
+  if (logged.error) throw new Error(logged.error.message)
   const { data, error } = await supatype
     .from("customer")
     .update({
@@ -60,6 +62,7 @@ export async function earnStars(customer: Customer, item: MenuItem): Promise<Cus
       lifetimeStars: customer.lifetimeStars + item.stars,
     })
     .eq("id", customer.id)
+    .select()
   if (error) throw new Error(error.message)
   return writtenRow(data)
 }
@@ -70,14 +73,14 @@ export async function updateProfile(
   uid: string,
   fields: { name?: string; bio?: RichTextDoc | null },
 ): Promise<Customer> {
-  const { data, error } = await supatype.from("customer").update(fields).eq("id", uid)
+  const { data, error } = await supatype.from("customer").update(fields).eq("id", uid).select()
   if (error) throw new Error(error.message)
   return writtenRow(data)
 }
 
 /** Redeem a reward: log it and debit the stars. */
 export async function redeemReward(customer: Customer, reward: Reward): Promise<Customer> {
-  await supatype.from("activity").insert({
+  const logged = await supatype.from("activity").insert({
     auth_user_id: customer.id,
     customer_id: customer.id,
     kind: "redeem",
@@ -86,10 +89,12 @@ export async function redeemReward(customer: Customer, reward: Reward): Promise<
     stars: -reward.cost,
     amount: null,
   })
+  if (logged.error) throw new Error(logged.error.message)
   const { data, error } = await supatype
     .from("customer")
     .update({ stars: customer.stars - reward.cost })
     .eq("id", customer.id)
+    .select()
   if (error) throw new Error(error.message)
   return writtenRow(data)
 }

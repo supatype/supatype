@@ -4,6 +4,8 @@ import React from "react"
 import { SupatypeProvider, useAuth } from "@supatype/react"
 import Link from "next/link"
 import { supatype } from "@/lib/supatype"
+// The package stylesheet goes first so globals.css can override it.
+import "@supatype/ui/styles.css"
 import "./globals.css"
 
 function SiteNav(): React.ReactElement {

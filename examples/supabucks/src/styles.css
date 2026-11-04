@@ -172,26 +172,20 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.02em; }
 .field input:focus, .field textarea:focus { border-color: var(--green); }
 .profile-editor-actions { display: flex; justify-content: flex-end; }
 
-/* Supatype RichTextEditor (@supatype/ui) */
-.su-richtext { font-size: 1rem; }
-.su-richtext-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px; border: 1.5px solid var(--line); border-bottom: none; border-radius: 12px 12px 0 0; background: var(--cream); }
-.su-richtext-toolbar button { min-width: 30px; padding: 4px 8px; font: inherit; font-size: .85rem; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); cursor: pointer; }
-.su-richtext-toolbar button:hover { border-color: var(--green); color: var(--green); }
-.su-richtext-toolbar-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
-.su-richtext-surface { position: relative; border: 1.5px solid var(--line); border-radius: 0 0 12px 12px; background: var(--paper); }
-.su-richtext-editable { min-height: 8rem; padding: 12px 14px; outline: none; line-height: 1.6; }
-.su-richtext-placeholder { position: absolute; top: 12px; left: 14px; color: var(--muted); pointer-events: none; user-select: none; }
-.su-richtext-readonly .su-richtext-toolbar { display: none; }
-.su-richtext-readonly .su-richtext-surface { border-radius: 12px; }
-.su-rt-h { font-weight: 800; margin: 0 0 .4rem; }
-.su-rt-p { margin: 0 0 .5rem; }
-.su-rt-ul, .su-rt-ol { margin: 0 0 .5rem 1.4rem; }
-.su-rt-li { margin: .15rem 0; }
-.su-rt-bold { font-weight: 700; }
-.su-rt-italic { font-style: italic; }
-.su-rt-underline { text-decoration: underline; }
-.su-rt-strikethrough { text-decoration: line-through; }
-.su-rt-link { color: var(--green); text-decoration: underline; }
+/* Supatype RichTextEditor (@supatype/ui): its rules come from @supatype/ui/styles.css, imported in
+   main.tsx. This maps the editor's theme properties onto the Supabucks palette. */
+:root {
+  --su-rt-border: var(--line);
+  --su-rt-border-width: 1.5px;
+  --su-rt-radius: 12px;
+  --su-rt-toolbar-bg: var(--cream);
+  --su-rt-bg: var(--paper);
+  --su-rt-fg: var(--ink);
+  --su-rt-muted: var(--muted);
+  --su-rt-accent: var(--green);
+  --su-rt-pad-y: 12px;
+  --su-rt-pad-x: 14px;
+}
 
 /* Footer */
 .footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; color: var(--muted); font-size: .86rem; }

@@ -93,7 +93,7 @@ For anything `filter` cannot say, such as ranges or embeds with conditions, use 
 
 ### useMutation and useFunction
 
-`useMutation(table, operation)` takes `"insert"`, `"update"`, `"delete"` or `"upsert"` and returns `mutate`, `loading` and `error`. `mutate(data, { filter, publish })` takes the rows to write; `filter` picks the rows for an update or delete, and `publish: true` publishes the drafts an update saves. It does not ask for the written rows back, so call `refetch` on your query afterwards.
+`useMutation(table, operation)` takes `"insert"`, `"update"`, `"delete"` or `"upsert"` and returns `mutate`, `loading` and `error`. `mutate(data, { filter, publish, select })` takes the rows to write; `filter` picks the rows for an update or delete, and `publish: true` publishes the drafts an update saves. Without `select`, the written rows are not returned and `data` is `null`, so call `refetch` on your query afterwards. To get them back, pass `select: true` for every column or a column string such as `select: "id,title"`, written as `.select()` takes it. Returning rows needs permission to read them as well as write them.
 
 `mutate` resolves with `{ data, error, count }`. There are no `onMutate`, `onSuccess` or `onError` callbacks, so an optimistic update and its rollback are yours to write.
 
@@ -238,7 +238,7 @@ The query runs on mount. `createMutation` and `createFunction` work like the Vue
 ### How Vue, Svelte and Solid differ from React
 
 - The query option is `columns`, not `select`. `refetchInterval`, `cache` and `draft` are React only.
-- `mutate` takes `filter` but not `publish`.
+- `mutate(data, { filter, select })` takes `filter` and `select` as React's does, but not `publish`. Without `select`, `data` is `null`.
 - `invoke` takes a body only, so the call is always a `POST`.
 - `signIn` and `signUp` take `(email, password)` rather than an object, `signInWithOAuth(provider)` sends the browser to the provider, and there is a `resetPassword(email)`.
 - There is no live preview hook or rich text component.

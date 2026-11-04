@@ -403,72 +403,18 @@ button:disabled {
 }
 
 /* ─── @supatype/ui RichTextEditor (Lexical) ─────────────────────────── */
+/* The editor's rules come from @supatype/ui/styles.css (imported in layout.tsx); this maps its */
+/* theme properties onto the blog's palette, so they follow the dark scheme too. */
+
+:root {
+  --su-rt-border: var(--color-border);
+  --su-rt-toolbar-bg: var(--color-surface);
+  --su-rt-bg: var(--color-bg);
+  --su-rt-muted: var(--color-muted);
+  --su-rt-accent: var(--color-accent);
+  --su-rt-min-height: 14rem;
+}
 
 .post-body-editor {
   margin-top: 0.35rem;
-}
-
-.su-richtext-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--color-border);
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  background: var(--color-surface);
-}
-
-.su-richtext-toolbar button {
-  min-width: 1.75rem;
-  padding: 0.2rem 0.45rem;
-  font: inherit;
-  font-size: 0.85rem;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-bg);
-  color: inherit;
-  cursor: pointer;
-}
-
-.su-richtext-toolbar button:hover {
-  border-color: var(--color-muted);
-}
-
-.su-richtext-toolbar-divider {
-  width: 1px;
-  height: 1.1rem;
-  margin: 0 0.15rem;
-  background: var(--color-border);
-}
-
-.su-richtext-surface {
-  position: relative;
-  border: 1px solid var(--color-border);
-  border-radius: 0 0 6px 6px;
-  background: var(--color-bg);
-}
-
-.su-richtext-readonly .su-richtext-toolbar {
-  display: none;
-}
-
-.su-richtext-readonly .su-richtext-surface {
-  border-radius: 6px;
-}
-
-.su-richtext-editable {
-  min-height: 14rem;
-  padding: 0.75rem 1rem;
-  outline: none;
-}
-
-.su-richtext-placeholder {
-  position: absolute;
-  top: 0.75rem;
-  left: 1rem;
-  color: var(--color-muted);
-  pointer-events: none;
-  user-select: none;
 }

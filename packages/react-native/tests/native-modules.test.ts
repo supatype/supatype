@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest"
 import { AuthClient, createCodeChallengeS256 } from "@supatype/client"
 import { createAuthUrlListener, createNativeClient, openOAuth, secureStoreAdapter, type LinkingLike } from "../src/index.js"
 
@@ -75,7 +75,14 @@ function exchangeBody(fetchSpy: ReturnType<typeof vi.fn>): Record<string, string
   return body
 }
 
-beforeEach(() => vi.restoreAllMocks())
+// Nothing here reaches a real server. `signInWithOAuth` asks `/settings` whether the provider is on,
+// and a dev stack listening on localhost:9999 answered `github: false`, failing the PKCE tests on
+// any machine running one. Settings that cannot be read leave the provider to `/authorize`.
+beforeEach(() => {
+  vi.restoreAllMocks()
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })))
+})
+afterEach(() => vi.unstubAllGlobals())
 
 describe("Secure Store", () => {
   it("keeps the PKCE verifier across a relaunch, so a sign-in finished after the OS killed the app still exchanges", async () => {

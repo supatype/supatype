@@ -67,12 +67,25 @@ afterEach(() => {
 })
 
 describe("useMutation requests", () => {
-  it("inserts the rows it is given and returns what the server answered", async () => {
+  it("inserts the rows it is given and asks for none back", async () => {
     const sent = stubFetch()
     const result = await mutateOnce("insert", [{ title: "a" }, { title: "b" }])
     expect(sent).toEqual([{ method: "POST", path: "/rest/v1/posts", body: [{ title: "a" }, { title: "b" }], profile: null, range: null }])
+    expect(result).toEqual({ data: null, error: null, count: null })
+  })
+
+  it("returns the rows the server answered when select names columns", async () => {
+    const sent = stubFetch()
+    const result = await mutateOnce("insert", { title: "a" }, { select: "id,title" })
+    expect(sent.map((r) => r.path)).toEqual(["/rest/v1/posts?select=id,title"])
+    expect(result).toEqual({ data: [{ id: 1 }], error: null, count: 1 })
+  })
+
+  it("returns every column with select: true", async () => {
+    const sent = stubFetch()
+    const result = await mutateOnce("update", { title: "b" }, { filter: { id: 7 }, select: true })
+    expect(sent.map((r) => r.path)).toEqual(["/rest/v1/posts?id=eq.7&select=*"])
     expect(result.data).toEqual([{ id: 1 }])
-    expect(result.error).toBeNull()
   })
 
   it("upserts with the merge preference", async () => {
@@ -89,10 +102,18 @@ describe("useMutation requests", () => {
     ])
   })
 
-  it("deletes only the rows the filter names, with no body", async () => {
+  it("deletes only the rows the filter names, with no body, and returns none", async () => {
     const sent = stubFetch()
-    await mutateOnce("delete", undefined, { filter: { id: 7 } })
+    const result = await mutateOnce("delete", undefined, { filter: { id: 7 } })
     expect(sent).toEqual([{ method: "DELETE", path: "/rest/v1/posts?id=eq.7", body: null, profile: null, range: null }])
+    expect(result.data).toBeNull()
+  })
+
+  it("returns the deleted rows with select", async () => {
+    const sent = stubFetch()
+    const result = await mutateOnce("delete", undefined, { filter: { id: 7 }, select: "id" })
+    expect(sent.map((r) => r.path)).toEqual(["/rest/v1/posts?id=eq.7&select=id"])
+    expect(result.data).toEqual([{ id: 1 }])
   })
 
   // Each used to go out as a request the server could only refuse: a POST or PATCH with no body,
@@ -169,11 +190,11 @@ describe("useMutation update on a model that keeps drafts", () => {
 
   it("saves a draft of each matched record and returns the drafts, leaving the live row alone", async () => {
     const sent = stubDraftsServer()
-    const result = await mutateOnce("update", { title: "b" }, { filter: { id: ID } })
+    const result = await mutateOnce("update", { title: "b" }, { filter: { id: ID }, select: true })
     expect(sent.map((r) => `${r.method} ${r.path}`)).toEqual([
       `GET /rest/v1/posts?id=eq.${ID}&select=id`,
       "POST /rest/v1/rpc/save_drafts",
-      `GET /rest/v1/posts?id=in.(${ID})`,
+      `GET /rest/v1/posts?select=*&id=in.(${ID})`,
     ])
     expect(sent[1]!.body).toEqual({ model_table: "posts", record_ids: [ID], data: { title: "b" }, publish: false })
     expect(sent[2]!.profile).toBe("draft")

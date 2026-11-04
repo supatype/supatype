@@ -3,19 +3,16 @@
 import { useState, useCallback } from "react"
 import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { runMutation, type MutationOperation, type MutationOutcome } from "@supatype/client/bindings"
+import { runMutation, type MutationOperation, type MutationOutcome, type MutationRequest } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 
-export interface MutationOptions {
-  /** Simple equality filters for update/delete operations */
-  filter?: Record<string, unknown> | undefined
-  /**
-   * For an update on a model that keeps drafts: publish the drafts it saves in the same call. Without
-   * it the update saves a new draft of each record and the live rows stay as they are.
-   */
-  publish?: boolean | undefined
-}
+/**
+ * `filter`: equality filters for an update or delete. `publish`: for an update on a model that keeps
+ * drafts, publish the drafts it saves in the same call. `select`: return the written rows, `true` for
+ * every column or the columns as `.select()` takes them; without it `data` is null.
+ */
+export type MutationOptions = MutationRequest
 
 export interface UseMutationResult<TRow> {
   mutate(
@@ -32,7 +29,7 @@ export interface UseMutationResult<TRow> {
  * @example
  * ```tsx
  * const { mutate: createPost, loading } = useMutation('posts', 'insert')
- * await createPost({ title: 'Hello', status: 'draft' })
+ * const { data } = await createPost({ title: 'Hello', status: 'draft' }, { select: 'id' })
  *
  * const { mutate: editPost } = useMutation('posts', 'update')
  * await editPost({ title: 'Hello again' }, { filter: { id: postId }, publish: true })
@@ -61,10 +58,7 @@ export function useMutation<
       setLoading(true)
       setError(null)
       try {
-        const publish = options?.publish
-        const result = await runMutation<TRow>(client as AnyClient, table, operation, data, options?.filter, {
-          ...(publish !== undefined && { publish }),
-        })
+        const result = await runMutation<TRow>(client as AnyClient, table, operation, data, options)
         if (result.error !== null) setError(result.error)
         return result
       } finally {

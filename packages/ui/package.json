@@ -2,19 +2,34 @@
   "name": "@supatype/ui",
   "version": "0.7.0",
   "license": "MIT",
-  "description": "Shared React component library, Tailwind + Radix UI primitives",
+  "description": "Shared React components for Supatype apps, styled with Tailwind, plus a Lexical rich text editor",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./rich-text": {
+      "types": "./dist/rich-text.d.ts",
+      "import": "./dist/rich-text.js"
+    },
+    "./styles.css": "./dist/styles.css"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsc --project tsconfig.json && node scripts/copy-css.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "node --test tests/package.test.mjs tests/input.test.mjs tests/rich-text-editor.test.mjs",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "peerDependencies": {
@@ -27,14 +42,28 @@
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0"
   },
+  "peerDependenciesMeta": {
+    "@lexical/link": {
+      "optional": true
+    },
+    "@lexical/list": {
+      "optional": true
+    },
+    "@lexical/react": {
+      "optional": true
+    },
+    "@lexical/rich-text": {
+      "optional": true
+    },
+    "@lexical/selection": {
+      "optional": true
+    },
+    "lexical": {
+      "optional": true
+    }
+  },
   "dependencies": {
     "@supatype/types": "workspace:*",
-    "@radix-ui/react-dialog": "^1.1.0",
-    "@radix-ui/react-dropdown-menu": "^2.1.0",
-    "@radix-ui/react-select": "^2.1.0",
-    "@radix-ui/react-tabs": "^1.1.0",
-    "@radix-ui/react-toast": "^1.2.0",
-    "@radix-ui/react-tooltip": "^1.1.0",
     "clsx": "^2.1.0"
   },
   "devDependencies": {
@@ -45,6 +74,7 @@
     "@lexical/selection": "^0.43.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "jsdom": "^30.1.1",
     "lexical": "^0.43.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

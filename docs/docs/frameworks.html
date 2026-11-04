@@ -185,7 +185,7 @@
 <p>For anything <code>filter</code> cannot say, such as ranges or embeds with conditions, use the client directly through <code>useSupatype()</code>.</p>
 
 <h3>useMutation and useFunction</h3>
-<p><code>useMutation(table, operation)</code> takes <code>"insert"</code>, <code>"update"</code>, <code>"delete"</code> or <code>"upsert"</code> and returns <code>mutate</code>, <code>loading</code> and <code>error</code>. <code>mutate(data, { filter, publish })</code> takes the rows to write; <code>filter</code> picks the rows for an update or delete, and <code>publish: true</code> publishes the drafts an update saves. It does not ask for the written rows back, so call <code>refetch</code> on your query afterwards.</p>
+<p><code>useMutation(table, operation)</code> takes <code>"insert"</code>, <code>"update"</code>, <code>"delete"</code> or <code>"upsert"</code> and returns <code>mutate</code>, <code>loading</code> and <code>error</code>. <code>mutate(data, { filter, publish, select })</code> takes the rows to write; <code>filter</code> picks the rows for an update or delete, and <code>publish: true</code> publishes the drafts an update saves. Without <code>select</code>, the written rows are not returned and <code>data</code> is <code>null</code>, so call <code>refetch</code> on your query afterwards. To get them back, pass <code>select: true</code> for every column or a column string such as <code>select: "id,title"</code>, written as <code>.select()</code> takes it. Returning rows needs permission to read them as well as write them.</p>
 <p><code>mutate</code> resolves with <code>{ data, error, count }</code>. There are no <code>onMutate</code>, <code>onSuccess</code> or <code>onError</code> callbacks, so an optimistic update and its rollback are yours to write.</p>
 <p><code>useFunction(name)</code> returns <code>invoke</code>, <code>data</code>, <code>error</code> and <code>loading</code>. <code>invoke(body, { method, headers })</code> calls <code>supatype.functions.invoke</code>. See <a href="/docs/functions.html#call">Functions: Call a function</a>.</p>
 <p><code>useAuth()</code> returns <code>user</code>, <code>session</code>, <code>loading</code>, <code>error</code>, <code>signUp</code>, <code>signIn</code> (email and password), <code>signInWithOAuth</code>, <code>signInWithOtp</code> and <code>signOut</code>, and re-renders when the session changes. For anything else, such as MFA or a password reset, call <code>useSupatype().auth</code>. See <a href="/docs/auth.html">Auth</a>.</p>
@@ -301,7 +301,7 @@ createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span 
 <h3>How Vue, Svelte and Solid differ from React</h3>
 <ul>
 <li>The query option is <code>columns</code>, not <code>select</code>. <code>refetchInterval</code>, <code>cache</code> and <code>draft</code> are React only.</li>
-<li><code>mutate</code> takes <code>filter</code> but not <code>publish</code>.</li>
+<li><code>mutate(data, { filter, select })</code> takes <code>filter</code> and <code>select</code> as React's does, but not <code>publish</code>. Without <code>select</code>, <code>data</code> is <code>null</code>.</li>
 <li><code>invoke</code> takes a body only, so the call is always a <code>POST</code>.</li>
 <li><code>signIn</code> and <code>signUp</code> take <code>(email, password)</code> rather than an object, <code>signInWithOAuth(provider)</code> sends the browser to the provider, and there is a <code>resetPassword(email)</code>.</li>
 <li>There is no live preview hook or rich text component.</li>

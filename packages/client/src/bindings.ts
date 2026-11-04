@@ -17,6 +17,6 @@ export type {
 export { startOAuthRedirect } from "./auth-redirect.js"
 export { isClientFor, isRowsOf, isCallerValue } from "./caller-types.js"
 export { runMutation } from "./mutation-request.js"
-export type { MutationOperation, MutationOutcome } from "./mutation-request.js"
+export type { MutationOperation, MutationOutcome, MutationRequest, MutationSelect } from "./mutation-request.js"
 export { livePreviewMessage, previewMessageOf, originOf } from "./live-preview.js"
 export type { LivePreviewMessage } from "./live-preview.js"

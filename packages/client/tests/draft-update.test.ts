@@ -96,7 +96,7 @@ describe("update on a model that keeps drafts", () => {
 
   it("saves nothing when the filters match no record, as a PATCH that matches nothing", async () => {
     const fetch = serve(draftsServer([]))
-    const { data, error, count } = await client().from("posts").update({ title: "Edited" }).eq("id", ID)
+    const { data, error, count } = await client().from("posts").update({ title: "Edited" }).eq("id", ID).select()
     expect(fetchCalls(fetch)).toHaveLength(1)
     expect({ data, error, count }).toEqual({ data: [], error: null, count: 0 })
   })
@@ -116,7 +116,7 @@ describe("update on a model that keeps drafts", () => {
 
   it("reaches the framework bindings, which update through runMutation", async () => {
     const fetch = serve(draftsServer())
-    const outcome = await runMutation(client(), "posts", "update", { title: "Edited" }, { id: ID }, { publish: true })
+    const outcome = await runMutation(client(), "posts", "update", { title: "Edited" }, { filter: { id: ID }, publish: true, select: true })
     expect(fetchCalls(fetch)[1]?.url).toBe(`${BASE}/rest/v1/rpc/save_drafts`)
     expect(jsonBody(fetchCalls(fetch)[1]?.init ?? {})["publish"]).toBe(true)
     expect(outcome.data).toEqual([DRAFT])
@@ -129,14 +129,14 @@ describe("update on a model that keeps no drafts", () => {
     vi.unstubAllGlobals()
   })
 
-  it("is a plain PATCH asking for the rows back", async () => {
+  it("is a plain PATCH, asking for the rows back once select() does", async () => {
     registerDraftModels({ version: 1, tables: { posts: { primaryKey: "id" } } })
     const fetch = serve(mockFetch(() => Promise.resolve(jsonResponse([{ id: 1, label: "news" }]))))
-    const { data } = await client().from("tags").update({ label: "news" }).eq("id", 1)
+    const { data } = await client().from("tags").update({ label: "news" }).eq("id", 1).select()
     const [only] = fetchCalls(fetch)
     expect(fetchCalls(fetch)).toHaveLength(1)
     expect(only?.init.method).toBe("PATCH")
-    expect(only?.url).toBe(`${BASE}/rest/v1/tags?id=eq.1`)
+    expect(only?.url).toBe(`${BASE}/rest/v1/tags?id=eq.1&select=*`)
     expect(header(only?.init ?? {}, "Prefer")).toContain("return=representation")
     expect(data).toEqual([{ id: 1, label: "news" }])
   })
