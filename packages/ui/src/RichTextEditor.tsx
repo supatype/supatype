@@ -12,10 +12,13 @@ import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin"
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary"
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
 import {
+  $createParagraphNode,
+  $getRoot,
   $getSelection,
   $isRangeSelection,
   FORMAT_TEXT_COMMAND,
   type EditorState,
+  type ElementNode,
   type LexicalEditor,
   type TextFormatType,
 } from "lexical"
@@ -23,88 +26,89 @@ import { $createHeadingNode, HeadingNode, QuoteNode } from "@lexical/rich-text"
 import { ListNode, ListItemNode, INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from "@lexical/list"
 import { AutoLinkNode, LinkNode } from "@lexical/link"
 import { $setBlocksType } from "@lexical/selection"
-import { $createParagraphNode, $getRoot } from "lexical"
 import clsx from "clsx"
 
 const EDITOR_NODES = [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode]
 
-const EDITOR_THEME = {
+/** Class names Lexical puts on content nodes. Exported for the package test, not from an entry. */
+export const EDITOR_THEME = {
   heading: { h1: "su-rt-h1", h2: "su-rt-h2", h3: "su-rt-h3" },
-  text: { bold: "su-rt-bold", italic: "su-rt-italic", underline: "su-rt-underline", strikethrough: "su-rt-strikethrough" },
+  text: {
+    bold: "su-rt-bold",
+    italic: "su-rt-italic",
+    underline: "su-rt-underline",
+    strikethrough: "su-rt-strikethrough",
+    underlineStrikethrough: "su-rt-underline-strikethrough",
+  },
   list: { ul: "su-rt-ul", ol: "su-rt-ol", listitem: "su-rt-li" },
   link: "su-rt-link",
   paragraph: "su-rt-p",
+  quote: "su-rt-quote",
+}
+
+/**
+ * A toolbar button that acts on mouse down, with the default prevented so the editor keeps its
+ * selection: a click would move focus to the button first and leave nothing selected to format.
+ */
+function ToolbarButton({
+  title,
+  onPress,
+  children,
+}: {
+  title: string
+  onPress: () => void
+  children: React.ReactNode
+}): React.ReactElement {
+  return (
+    <button type="button" title={title} onMouseDown={(e) => { e.preventDefault(); onPress() }}>
+      {children}
+    </button>
+  )
+}
+
+/** Turn the selected blocks into the block `create` makes. */
+function setBlocks(editor: LexicalEditor, create: () => ElementNode): void {
+  editor.update(() => {
+    const selection = $getSelection()
+    if ($isRangeSelection(selection)) $setBlocksType(selection, create)
+  })
 }
 
 function ToolbarPlugin(): React.ReactElement {
   const [editor] = useLexicalComposerContext()
-
-  const format = useCallback((fmt: TextFormatType) => {
-    editor.dispatchCommand(FORMAT_TEXT_COMMAND, fmt)
-  }, [editor])
-
-  const setHeading = useCallback((tag: "h1" | "h2" | "h3") => {
-    editor.update(() => {
-      const selection = $getSelection()
-      if ($isRangeSelection(selection)) {
-        $setBlocksType(selection, () => $createHeadingNode(tag))
-      }
-    })
-  }, [editor])
-
-  const setParagraph = useCallback(() => {
-    editor.update(() => {
-      const selection = $getSelection()
-      if ($isRangeSelection(selection)) {
-        $setBlocksType(selection, () => $createParagraphNode())
-      }
-    })
-  }, [editor])
+  const format = useCallback((fmt: TextFormatType) => editor.dispatchCommand(FORMAT_TEXT_COMMAND, fmt), [editor])
+  const heading = useCallback((tag: "h1" | "h2") => setBlocks(editor, () => $createHeadingNode(tag)), [editor])
 
   return (
     <div className="su-richtext-toolbar" role="toolbar" aria-label="Formatting">
-      <button type="button" title="Bold" onMouseDown={(e) => { e.preventDefault(); format("bold") }}>
-        B
-      </button>
-      <button type="button" title="Italic" onMouseDown={(e) => { e.preventDefault(); format("italic") }}>
-        I
-      </button>
-      <button type="button" title="Underline" onMouseDown={(e) => { e.preventDefault(); format("underline") }}>
-        U
-      </button>
+      <ToolbarButton title="Bold" onPress={() => format("bold")}>B</ToolbarButton>
+      <ToolbarButton title="Italic" onPress={() => format("italic")}>I</ToolbarButton>
+      <ToolbarButton title="Underline" onPress={() => format("underline")}>U</ToolbarButton>
       <span className="su-richtext-toolbar-divider" aria-hidden />
-      <button type="button" title="Heading 1" onMouseDown={(e) => { e.preventDefault(); setHeading("h1") }}>
-        H1
-      </button>
-      <button type="button" title="Heading 2" onMouseDown={(e) => { e.preventDefault(); setHeading("h2") }}>
-        H2
-      </button>
-      <button type="button" title="Paragraph" onMouseDown={(e) => { e.preventDefault(); setParagraph() }}>
-        ¶
-      </button>
+      <ToolbarButton title="Heading 1" onPress={() => heading("h1")}>H1</ToolbarButton>
+      <ToolbarButton title="Heading 2" onPress={() => heading("h2")}>H2</ToolbarButton>
+      <ToolbarButton title="Paragraph" onPress={() => setBlocks(editor, () => $createParagraphNode())}>¶</ToolbarButton>
       <span className="su-richtext-toolbar-divider" aria-hidden />
-      <button
-        type="button"
-        title="Bullet list"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)
-        }}
-      >
+      <ToolbarButton title="Bullet list" onPress={() => editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)}>
         •
-      </button>
-      <button
-        type="button"
-        title="Numbered list"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)
-        }}
-      >
+      </ToolbarButton>
+      <ToolbarButton title="Numbered list" onPress={() => editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)}>
         1.
-      </button>
+      </ToolbarButton>
     </div>
   )
+}
+
+/**
+ * Keeps the editor's editable state on the `editable` prop. Lexical reads `initialConfig` on mount
+ * only, so a change to the prop after it swapped the toolbar but left the content as it was.
+ */
+function EditablePlugin({ editable }: { editable: boolean }): null {
+  const [editor] = useLexicalComposerContext()
+  useEffect(() => {
+    editor.setEditable(editable)
+  }, [editor, editable])
+  return null
 }
 
 function InitialStatePlugin({ value }: { value: SerializedEditorState | null | undefined }): null {
@@ -182,6 +186,7 @@ export function RichTextEditor({
     <div className={clsx("su-richtext", className, !editable && "su-richtext-readonly")}>
       <LexicalComposer key={documentKey} initialConfig={initialConfig}>
         {editable ? <ToolbarPlugin /> : null}
+        <EditablePlugin editable={editable} />
         <InitialStatePlugin value={value} />
         <div className="su-richtext-surface">
           <RichTextPlugin
