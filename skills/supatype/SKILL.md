@@ -38,15 +38,20 @@ brew install supatype/tap/supatype
 ## New project
 
 ```bash
-npx @supatype/cli init <project-name>     # asks where it runs in production; --defaults skips the prompts
+npx @supatype/cli init <project-name>     # asks its questions; --defaults (-y) takes the defaults
 cd <project-name>
-npm install                                # only if init skipped the install
-supatype keys --write                      # only if init skipped the keys: ANON_KEY + SERVICE_ROLE_KEY in .env
-supatype dev                               # terminal 1: Docker Compose (Kong :18473); applies the schema and watches it
-npm run vite                               # terminal 2: if app.vite_dev_url is set
+npm run dev                                # supatype dev: applies the schema, generates types, watches both
 ```
 
-Plain `supatype keys` fills the blank keys in `.env` when there is one (`--write` is the same), signed with that `.env`'s `JWT_SECRET`; `--print` only prints.
+Then open the URL init printed (`Open http://localhost:<port>`). For a Docker project init picks
+the gateway (Kong) port: the first free one from 18473 up, or the one you typed, kept in `.env` as
+`SUPATYPE_KONG_PORT` and `API_EXTERNAL_URL`. Do not assume 18473. Init installs the packages and
+writes the keys itself; when it could not, it prints a "Finish setup:" list naming what is left
+(`npm install`, `supatype update`, `supatype keys`), so follow that list rather than guessing.
+
+`npm run dev` starts the app's dev server too, whatever the production target: for a static Vite
+app init writes `supatype.local.config.ts` with `app.mode: "proxy"` and `start: "vite"`, and a
+"local dev server" app is proxy mode already. An init-made project never needs a second terminal.
 
 `supatype dev` keeps running. It pushes the schema when it starts and on every save, and
 regenerates the typed client each time; there is no separate `push` step locally. `push` is for
@@ -92,8 +97,8 @@ for older scripts. For wiring a front end, see [references/frontend.md](referenc
 - **Native alternative:** `provider: "native"`: host Postgres :5432, supatype-server :18471. Not everything the Docker stack has: pg_graphql and `/graphql/v1` are Docker-only, pg_net is not on Windows, and PostGIS is not on macOS for now (see [config.md](references/config.md#switching-to-native-dev))
 - **Schema API:** `@supatype/types` `Model<>` types, not `@supatype/schema`
 - **Config:** `supatype.config.ts` + `defineConfig`; TOML unsupported
-- **Docker API URL:** `http://localhost:18473` (or `SUPATYPE_KONG_PORT` in `.env`)
-- **Types output:** `output: { types: "path/to/file.ts" }` in config
+- **Docker API URL:** `http://localhost:<SUPATYPE_KONG_PORT>`, the port in `.env` (init takes 18473 or the next free one), also kept there as `API_EXTERNAL_URL`
+- **Types output:** `types/database.ts` by default, beside the generated client at `supatype/generated/client.ts`; set `output: { types: "path/to/file.ts" }` in config to move it
 - **Local overrides:** `supatype.local.config.ts` (gitignored)
 
 ## Client usage
@@ -103,12 +108,21 @@ for older scripts. For wiring a front end, see [references/frontend.md](referenc
 import { createClient } from "./supatype/generated/client"
 
 const supatype = createClient({
-  url: process.env.PUBLIC_SUPATYPE_URL ?? "http://localhost:18473",
-  anonKey: process.env.ANON_KEY!,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 
 const { data } = await supatype.from("post").select("*")
+const { data: created } = await supatype.from("post").insert({ title: "Hello" }).select("id").single()
 ```
+
+The CLI writes the local stack's URL and anon key to `.env.development.local`, read in development
+only, and a deployment's real values to `.env`. A production build without them falls back to the
+page's own origin, which is the API's when Supatype serves the app. See
+[references/frontend.md](references/frontend.md#frontend-env-files).
+
+Writes (`insert`, `update`, `upsert`, `delete`) return `data: null` unless you chain `.select()`;
+`.single()` and `.maybeSingle()` on a write need `.select()` before them.
 
 Call `createClient` with no type argument: the generated client already carries the schema's types.
 `createClient<Database>` loses the drafts typing (`update(..., { publish: true })` stops compiling)
@@ -127,13 +141,14 @@ Add `@supatype/client` when wiring a frontend. `supatype dev` applies schema cha
 | Wrong project / holding page | Another stack may own your Kong port; use the URL from `supatype dev` output |
 | Docker still running after dev | Run `supatype self-host compose down`; check Docker Desktop for orphaned `supatype-*` stacks |
 | Renamed project, old containers | Next `supatype dev` offers to stop the old stack; or `docker compose -p supatype-<old-name> down` |
-| Missing JWT keys | `supatype keys --write` |
-| `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` | Put a longer secret in `.env` (`openssl rand -base64 48`), then `supatype keys --write --force` |
+| Missing JWT keys | `supatype keys` (fills the blank keys in `.env`) |
+| `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` | Put a longer secret in `.env` (`openssl rand -base64 48`), then `supatype keys --force` |
 | REST answers `503` / `PGRST002` on a fresh self-host stack | Expected until the first `supatype push`; push waits up to 40 s for REST to load the schema |
 | ``The process that started `supatype dev` has exited, so dev is stopping its stack.`` | The starter (script, CI step, agent command) exited. Keep `dev` in the foreground, or use `supatype self-host compose up -d` |
 | `.env` change not picked up by a running stack | `supatype self-host compose restart <service>` (not `docker compose restart`) |
 | No supatype.config.ts | `supatype init` |
-| Types out of sync | `supatype push` or `supatype generate` |
+| Types out of sync | Keep `supatype dev` running (it regenerates on every save), or run `supatype generate` |
+| Insert or update `data` is `null` | Writes return no rows until you chain `.select()` (or pass `select` to `useMutation`) |
 | Destructive migration blocked | Review `supatype diff`; use `supatype push --yes` if intended |
 | `SupatypeClient<Database>` not assignable to `SupatypeClient<any>` | Version skew between app's `@supatype/client` and the one `@supatype/react`(-auth) pulls; add npm `overrides: { "@supatype/client": "$@supatype/client" }` |
 
