@@ -2,13 +2,15 @@ import { createSignal } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { runMutation, type MutationOperation } from "@supatype/client/bindings"
+import { runMutation, type MutationOperation, type MutationRequest } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 
-export interface MutationOptions {
-  filter?: Record<string, unknown> | undefined
-}
+/**
+ * `filter`: equality filters for an update or delete. `select`: return the written rows, `true` for
+ * every column or the columns as `.select()` takes them; without it `data` is null.
+ */
+export type MutationOptions = Pick<MutationRequest, "filter" | "select">
 
 export interface MutationResult<TRow> {
   mutate: (
@@ -39,7 +41,7 @@ export function createMutation<
     setError(null)
 
     try {
-      const outcome = await runMutation<TRow>(client as AnyClient, table, operation, data, options?.filter)
+      const outcome = await runMutation<TRow>(client as AnyClient, table, operation, data, options)
       const result = { data: outcome.data, error: outcome.error }
 
       if (result.error) setError(result.error)

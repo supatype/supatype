@@ -55,7 +55,7 @@ describe("single() without exactly one row", () => {
 
   it("a write words it as PostgREST does", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(emptyArray()))
-    const { error } = await new MutationBuilder("http://x", "/rest/v1/t", {}, "PATCH", {}).single()
+    const { error } = await new MutationBuilder("http://x", "/rest/v1/t", {}, "PATCH", {}).select().single()
     vi.unstubAllGlobals()
     expect(error).toEqual({ message: SINGLE_ROW_MESSAGE, code: "PGRST116" })
   })

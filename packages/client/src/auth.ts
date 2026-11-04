@@ -319,15 +319,36 @@ export class AuthClient {
       this._setSession(null)
       return
     }
-    if (this.refreshInFlight) {
-      await this.refreshInFlight
-      return
+    await this.refreshOnce()
+  }
+
+  /**
+   * Refresh after the server refused `refusedToken` as expired or invalid, whatever the local clock
+   * says of it. True when the session now holds a different token, so a request refused with that
+   * one is worth sending again; false when signed out, when the refresh failed or handed back the
+   * same token, or when this client leaves expired sessions for the server to refuse.
+   */
+  async refreshRefusedSession(refusedToken: string): Promise<boolean> {
+    await this.ready
+    const session = this.currentSession
+    if (session === null) return false
+    // Another request's refresh has already replaced it.
+    if (session.accessToken !== refusedToken) return true
+    if (!this.refreshExpiredToken) return false
+    await this.refreshOnce()
+    const token = this.currentAccessToken
+    return token !== null && token !== refusedToken
+  }
+
+  /** One refresh at a time: a second caller waits for the one already in flight. */
+  private async refreshOnce(): Promise<void> {
+    if (this.refreshInFlight === null) {
+      this.refreshInFlight = this.refreshSession()
+        .then(() => undefined)
+        .finally(() => {
+          this.refreshInFlight = null
+        })
     }
-    this.refreshInFlight = this.refreshSession()
-      .then(() => undefined)
-      .finally(() => {
-        this.refreshInFlight = null
-      })
     await this.refreshInFlight
   }
 

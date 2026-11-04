@@ -173,22 +173,49 @@ export function bearerToken(headers: Record<string, string>): string {
 // with plain `fetch` as it always has.
 export type { RequestTransport }
 
-/** Send once; on a 401, let the session refresh and send again with freshly resolved headers. */
+/**
+ * What a client does once the server has called `refusedToken` expired or invalid: refresh the
+ * session it belongs to, whatever the local clock says of it, and answer whether the session now
+ * holds a different token. False when there is no session, as for an anon caller.
+ */
+export type UnauthorizedHandler = (refusedToken: string) => Promise<boolean>
+
+/** A token PostgREST could not verify, or whose claims it rejected (an expired token among them). */
+const STALE_TOKEN_CODES: ReadonlySet<string> = new Set([PostgrestErrorCodes.JWT_INVALID, PostgrestErrorCodes.JWT_EXPIRED])
+
+/**
+ * Whether a 401 refuses the token itself rather than what the caller asked to do.
+ *
+ * Read from a clone, so the caller still reads the body it is handed. A row rule refusing an anon
+ * write also answers 401 (42501), and sending that again only repeats the refusal.
+ */
+async function refusesToken(res: Response): Promise<boolean> {
+  const body = await readJsonObject(res.clone())
+  if (typeof body["code"] === "string" && STALE_TOKEN_CODES.has(body["code"])) return true
+  return /jwt expired/i.test(refusalText(body) ?? "")
+}
+
+/**
+ * Send once. On a 401 that refuses the token, refresh the session and send again, but only when the
+ * refresh produced a token other than the one refused: anything else would repeat the same request
+ * to the same answer, and a write twice.
+ */
 export async function fetchWithOptional401Retry(
   send: RequestTransport,
   url: string,
   init: RequestInit & FetchOptions,
   resolveHeaders: () => Promise<Record<string, string>>,
-  onUnauthorized?: (() => Promise<void>) | undefined,
+  onUnauthorized?: UnauthorizedHandler | undefined,
 ): Promise<Response> {
-  let headers = await resolveHeaders()
-  let res = await send(url, { ...init, headers })
-  if (res.status === 401 && onUnauthorized !== undefined) {
-    await onUnauthorized()
-    headers = await resolveHeaders()
-    res = await send(url, { ...init, headers })
-  }
-  return res
+  const headers = await resolveHeaders()
+  const res = await send(url, { ...init, headers })
+  if (res.status !== 401 || onUnauthorized === undefined) return res
+  const refused = bearerToken(headers)
+  if (!(await refusesToken(res)) || !(await onUnauthorized(refused))) return res
+  const refreshed = await resolveHeaders()
+  // A preview link or a caller-supplied header can outrank the session, and then nothing changed.
+  if (bearerToken(refreshed) === refused) return res
+  return send(url, { ...init, headers: refreshed })
 }
 
 /**
@@ -208,7 +235,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
   private readonly baseUrl: string
   private readonly path: string
   private readonly getHeaders: HeadersProvider
-  private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly onUnauthorized: UnauthorizedHandler | undefined
   private readonly send: RequestTransport
   private readonly extraHeaders: Record<string, string>
   private readonly queryCache: QueryCache
@@ -222,7 +249,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     headers: Record<string, string> | HeadersProvider,
     columns?: string | undefined,
     queryCache: QueryCache = defaultQueryCache,
-    onUnauthorized?: (() => Promise<void>) | undefined,
+    onUnauthorized?: UnauthorizedHandler | undefined,
     selectOptions?: SelectQueryOptions | undefined,
     transport: RequestTransport = plainFetch,
   ) {
@@ -483,13 +510,38 @@ export interface MutationOptions {
 type ReturnedRow<TRow, TTables, TName extends string, TColumns extends string> =
   [TTables] extends [Record<string, TableDef>] ? SelectRow<TTables, TName, TColumns> : TRow
 
-export class MutationBuilder<TRow, TTables = unknown, TName extends string = string>
+/**
+ * The boundary between what a write resolved to and what its builder is typed to resolve to.
+ *
+ * `select()` both asks for the rows and types the builder as returning them, so a builder typed
+ * `null` resolves to `null` and one typed with rows resolves to the rows. That each row has the
+ * caller's row type is the same unchecked claim `isCallerRow` describes.
+ */
+function isWriteResult<TResult>(value: unknown): value is TResult {
+  return value === null || Array.isArray(value)
+}
+
+/** `single()` or `maybeSingle()` on a write that asked for no rows, refused before anything is sent. */
+function rowNotSelected(): { data: null; error: SupatypeError; count: null } {
+  const message = "A write returns no rows until select() asks for them: call select() before single() or maybeSingle()"
+  return { data: null, error: { message }, count: null }
+}
+
+/**
+ * An insert, update, upsert or delete.
+ *
+ * Asks for no rows back, as postgrest-js does, and resolves to `data: null`: returning a row needs
+ * the right to read it, so a table whose rules let a caller create but not read refused every write
+ * that asked. `select()` asks for the rows and types `TResult` as them; `single()` and
+ * `maybeSingle()` exist only after it.
+ */
+export class MutationBuilder<TRow, TTables = unknown, TName extends string = string, TResult = null>
   extends FilterBuilder
-  implements PromiseLike<QueryResult<TRow[]>> {
+  implements PromiseLike<QueryResult<TResult>> {
   private readonly baseUrl: string
   private readonly path: string
   private readonly getHeaders: HeadersProvider
-  private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly onUnauthorized: UnauthorizedHandler | undefined
   private readonly send: RequestTransport
   private readonly extraHeaders: Record<string, string>
   private readonly method: HttpMethod
@@ -497,6 +549,8 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   private readonly createThrough: DraftCreate | undefined
   private readonly editThrough: DraftEdit | undefined
   private readonly refusal: SupatypeError | undefined
+  /** Set by `select()`: the write asks for the rows it wrote and resolves to them. */
+  private returning = false
 
   constructor(
     baseUrl: string,
@@ -505,7 +559,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     method: HttpMethod,
     body?: unknown,
     opts?: MutationOptions | undefined,
-    onUnauthorized?: (() => Promise<void>) | undefined,
+    onUnauthorized?: UnauthorizedHandler | undefined,
     transport: RequestTransport = plainFetch,
   ) {
     super()
@@ -522,8 +576,6 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     this.refusal = opts?.refusal
 
     if (opts?.upsert === true) this.prefer("resolution=merge-duplicates")
-    // Return inserted/updated rows
-    if (method !== "DELETE") this.prefer("return=representation")
   }
 
   private prefer(preference: string): void {
@@ -535,24 +587,26 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   /**
    * Return the written rows, limited to `columns`.
    *
-   * Asks for the representation too, which a delete does not by default: without it PostgREST
-   * answers 204 and `delete().select()` returned no rows although it had deleted some.
+   * Asks for the representation, which no write does without it: the caller needs the right to
+   * read the rows as well as to write them.
    */
   select<TColumns extends string = "*">(
     columns?: TColumns | undefined,
-  ): MutationBuilder<ReturnedRow<TRow, TTables, TName, TColumns>, TTables, TName>
-  /** Return the written rows typed as `TResult`, for a shape the select string cannot describe. */
-  select<TResult>(columns?: string | undefined): MutationBuilder<TResult, TTables, TName>
-  // The same request, now described as returning the selected shape rather than the whole row. The
+  ): MutationBuilder<ReturnedRow<TRow, TTables, TName, TColumns>, TTables, TName, ReturnedRow<TRow, TTables, TName, TColumns>[]>
+  /** Return the written rows typed as `TSelected`, for a shape the select string cannot describe. */
+  select<TSelected>(columns?: string | undefined): MutationBuilder<TSelected, TTables, TName, TSelected[]>
+  // The same request, now described as returning the selected shape rather than nothing. The
   // overloads above say which shape; the row type is the caller's claim, checked by nothing at
   // runtime, so the builder itself is returned rather than a copy that would split the request.
-  select(columns?: string | undefined): MutationBuilder<unknown, TTables, TName> {
+  select(columns?: string | undefined): MutationBuilder<unknown, TTables, TName, unknown> {
     this.params.set("select", columns ?? "*")
     this.prefer("return=representation")
+    this.returning = true
     return this
   }
 
-  async single(): Promise<QueryResult<TRow>> {
+  async single(this: MutationBuilder<TRow, TTables, TName, TRow[]>): Promise<QueryResult<TRow>> {
+    if (!this.returning) return rowNotSelected()
     const { data, error, count, meta } = await this._execute({
       Accept: "application/vnd.pgrst.object+json",
     })
@@ -569,18 +623,26 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     return { data: row, error: null, count: 1, ...(meta && { meta }) }
   }
 
-  async maybeSingle(): Promise<QueryResult<TRow | null>> {
+  async maybeSingle(this: MutationBuilder<TRow, TTables, TName, TRow[]>): Promise<QueryResult<TRow | null>> {
+    if (!this.returning) return rowNotSelected()
     const { data, error, count, meta } = await this._execute({})
     if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
     const row = data !== null && data.length > 0 ? (data[0] ?? null) : null
     return { data: row, error: null, count, ...(meta && { meta }) }
   }
 
-  then<R1 = QueryResult<TRow[]>, R2 = never>(
-    onfulfilled?: ((value: QueryResult<TRow[]>) => R1 | PromiseLike<R1>) | null | undefined,
+  then<R1 = QueryResult<TResult>, R2 = never>(
+    onfulfilled?: ((value: QueryResult<TResult>) => R1 | PromiseLike<R1>) | null | undefined,
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null | undefined,
   ): PromiseLike<R1 | R2> {
-    return this._execute().then(onfulfilled, onrejected)
+    return this._execute()
+      .then(({ data, ...rest }): QueryResult<TResult> => ({ ...rest, data: isWriteResult<TResult>(data) ? data : null }))
+      .then(onfulfilled, onrejected)
+  }
+
+  /** A write that succeeded with no rows to give: `[]` when `select()` asked for them, else null. */
+  private nothingReturned(): QueryResult<TRow[]> {
+    return this.returning ? { data: [], error: null, count: 0 } : { data: null, error: null, count: null }
   }
 
   /** POST, PATCH and DELETE: the transport applies the timeout and never retries them. */
@@ -620,9 +682,8 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
       return { data: null, error, count: null }
     }
 
-    if (res.status === 204) {
-      return { data: [], error: null, count: 0 }
-    }
+    // Nothing asked for and so nothing to read: PostgREST answers 201 or 204 with no body.
+    if (!this.returning || res.status === 204) return this.nothingReturned()
 
     // The returned representation of what was just written, so it needs the same care as a read.
     const result = readRows<TRow>(await res.text(), this.path, res.status, null)
@@ -630,7 +691,8 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   }
 
   /**
-   * Create the records as their first drafts, then read them back as an insert returns them.
+   * Create the records as their first drafts, then, when `select()` asked, read them back as an
+   * insert returns them.
    *
    * Read from the draft view, which has the table's row type: the live row of a new record holds no
    * locale yet, so reading the table would hand back empty translations for what was just written.
@@ -645,8 +707,9 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   }
 
   /**
-   * Save a draft of each record the filters match, publishing it too when asked, then read the
-   * drafts back as an update returns its rows. The live rows are left to publishing.
+   * Save a draft of each record the filters match, publishing it too when asked, then, when
+   * `select()` asked, read the drafts back as an update returns its rows. The live rows are left to
+   * publishing.
    *
    * The records are the ones the caller reads in the table under the update's filters, as a `PATCH`
    * would match them, and `save_drafts` saves all of them or none.
@@ -655,7 +718,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     const matched = await this.matchedKeys(target.primaryKey)
     if (!Array.isArray(matched)) return { data: null, error: matched, count: null }
     // A `PATCH` that matches nothing answers no rows, and so does this, having saved nothing.
-    if (matched.length === 0) return { data: [], error: null, count: 0 }
+    if (matched.length === 0) return this.nothingReturned()
     const body = { model_table: target.table, record_ids: matched, data: this.body, publish: target.publish }
     const keys = await this.callPublishing("save_drafts", body)
     if (!Array.isArray(keys)) return { data: null, error: keys, count: null }
@@ -681,6 +744,8 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
 
   /** `keys`' newest drafts, from the draft view, with this write's select and in the order given. */
   private async readDrafts(target: DraftCreate, keys: string[]): Promise<QueryResult<TRow[]>> {
+    // Only when asked: reading the drafts needs the right to read them, as returning a row does.
+    if (!this.returning) return this.nothingReturned()
     const select = readBackColumns(this.params.get("select"), target.primaryKey, keys.length)
     const result = await new QueryBuilder<Record<string, unknown>>(
       this.baseUrl,

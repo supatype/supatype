@@ -127,7 +127,7 @@ await supatype.from("comment").update({ body: "Edited" }).eq("id", commentId)
 await supatype.from("comment").delete().eq("id", commentId)
 ```
 
-A write returns no rows unless you add `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
+A write returns no rows unless you add `.select()`: without it, `data` is `null`. Returning a row needs permission to read it, so leave `.select()` off when the access rules let the caller create a row but not read it. On a write, `single()` and `maybeSingle()` work only after `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
 
 A `RichText` field takes a plain string on write.
 
@@ -281,6 +281,8 @@ Queries, `rpc`, `functions.invoke`, auth and most storage calls return `{ data, 
 `error` is a plain object with `message` and, when known, `code`, `status`, `details` and `hint`. Do not test it with `instanceof`. When a field validator refused the write, `field` names the column, so you can mark that input.
 
 An insert an access rule refuses returns code `42501`. An update or delete that the rules hide matches no rows and returns no error. `single()` with no row returns `PGRST116`.
+
+When the server refuses a request with 401, the client sends it again only if the token expired or was invalid (`PGRST301`, `PGRST303` or "JWT expired"), the caller is signed in, and refreshing the session gave a new token. Any other 401 is returned as `error` after one try, including an anon write that an access rule refuses.
 
 :::caution[Network failures]
 A network failure on a query, `rpc`, `graphql` or a function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Most auth and storage calls throw instead, so wrap them in `try` when the network may fail. Three return the failure as `error` like a query: `storage.listBuckets`, `storage.createBucket` and `auth.refreshSession`. `auth.signOut` ignores a network failure and clears the session on this device anyway.

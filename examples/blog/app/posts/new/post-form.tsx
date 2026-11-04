@@ -45,7 +45,8 @@ export function NewPostForm({ userId }: NewPostFormProps): React.ReactElement {
       // was `Record<string, unknown>` and satisfied anything.
       auth_user_id: userId,
     } satisfies TableInsert<"post">
-    const result = await mutate(payload)
+    // Only the slug, to open the new post: a write returns no rows unless asked.
+    const result = await mutate(payload, { select: "slug" })
     if (result.error === null && result.data !== null && result.data.length > 0) {
       const created = result.data[0]
       if (created !== undefined) {

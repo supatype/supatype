@@ -7,6 +7,7 @@ import {
   fetchWithOptional401Retry,
   type DraftCreate,
   type HeadersProvider,
+  type UnauthorizedHandler,
 } from "./query.js"
 import { registeredDraftModel } from "./draft-models-registry.js"
 import { GENERATED_CLIENT_IMPORT } from "./generated-client.js"
@@ -91,7 +92,7 @@ export type AnyClient = SupatypeClient<AnyDatabase>
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
 export { onIdentityChange, type IdentitySource } from "./identity.js"
-export { QueryBuilder, MutationBuilder, type HeadersProvider, type RequestTransport } from "./query.js"
+export { QueryBuilder, MutationBuilder, type HeadersProvider, type RequestTransport, type UnauthorizedHandler } from "./query.js"
 export { QueryCache, defaultQueryCache } from "./query-cache.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, StorageFolder, StorageListEntry, ListOptions, RemovedObject, StorageReference, TransformOptions } from "./storage.js"
@@ -157,7 +158,7 @@ class TableClient<
   private readonly table: string
   private readonly path: string
   private readonly getHeaders: HeadersProvider
-  private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly onUnauthorized: UnauthorizedHandler | undefined
   /** The client's retry-aware fetch, so `timeout` and `retry` reach table requests too. */
   private readonly send: RequestTransport
   private readonly queryCache: QueryCache
@@ -177,7 +178,7 @@ class TableClient<
     getHeaders: HeadersProvider,
     realtime: RealtimeClient,
     queryCache: QueryCache = defaultQueryCache,
-    onUnauthorized: (() => Promise<void>) | undefined,
+    onUnauthorized: UnauthorizedHandler | undefined,
     send: RequestTransport,
   ) {
     this.baseUrl = baseUrl
@@ -251,15 +252,17 @@ class TableClient<
   }
 
   /**
-   * Insert one row or several.
+   * Insert one row or several. Resolves to `data: null` unless `.select()` asks for the rows, which
+   * needs the right to read them as well as to write them.
    *
    * **On a model that keeps drafts**, one record is created through `supatype.create_record`, as
    * Studio creates it, and several through `supatype.create_records`, all or none in one call: each
-   * record starts as its first draft, and the rows come back read from the draft view in the shape
-   * and order a plain insert returns. A plain insert asking for the row back is refused there by a
-   * read rule that hides unpublished records, because Postgres checks the returned row against it
-   * before anything has made the new row visible to its author. The generated `supatype/generated/client.ts`
-   * says which models keep drafts; a client without it inserts as before.
+   * record starts as its first draft, and with `.select()` the rows come back read from the draft
+   * view in the shape and order a plain insert returns. A plain insert asking for the row back is
+   * refused there by a read rule that hides unpublished records, because Postgres checks the
+   * returned row against it before anything has made the new row visible to its author. The
+   * generated `supatype/generated/client.ts` says which models keep drafts; a client without it
+   * inserts as before.
    */
   insert(
     data: TDef["Insert"] | TDef["Insert"][],
@@ -308,12 +311,13 @@ class TableClient<
   }
 
   /**
-   * Change the rows the filters match.
+   * Change the rows the filters match. Resolves to `data: null` unless `.select()` asks for the rows.
    *
    * **On a model that keeps drafts** the live rows do not change: each matched record gets a new
    * draft through `supatype.save_drafts`, merged onto its newest version as Studio saves one, all or
-   * none in one call, and the drafts come back read from the draft view. Pass `{ publish: true }` to
-   * publish them in the same call, so the history records the version that went live. The generated
+   * none in one call, and with `.select()` the drafts come back read from the draft view. Pass
+   * `{ publish: true }` to publish them in the same call, so the history records the version that
+   * went live. The generated
    * `supatype/generated/client.ts` says which models keep drafts; elsewhere this is a plain `PATCH`, and
    * `{ publish: true }` is refused, since there is nothing to publish.
    */
@@ -489,14 +493,14 @@ export interface FunctionInvokeOptions {
 class FunctionsClient {
   private readonly baseUrl: string
   private readonly getHeaders: HeadersProvider
-  private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly onUnauthorized: UnauthorizedHandler | undefined
   private readonly doFetch: RequestTransport
 
   constructor(
     baseUrl: string,
     getHeaders: HeadersProvider,
     doFetch: RequestTransport,
-    onUnauthorized?: (() => Promise<void>) | undefined,
+    onUnauthorized?: UnauthorizedHandler | undefined,
   ) {
     this.baseUrl = baseUrl
     this.getHeaders = getHeaders
@@ -714,7 +718,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
 
   const onUnauthorized = config.serviceRoleKey
     ? undefined
-    : (): Promise<void> => auth.ensureValidSession()
+    : (refusedToken: string): Promise<boolean> => auth.refreshRefusedSession(refusedToken)
 
   const functions = new FunctionsClient(config.url, getAuthHeaders, doFetch, onUnauthorized)
   const runGraphql = createGraphqlRunner({ endpoint: `${config.url}/graphql/v1`, send: doFetch, headers: getAuthHeaders, onUnauthorized })
@@ -767,7 +771,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         },
         async update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }> {
           const tc = tableClient<TDef>(tableName)
-          const result = await tc.upsert(data)
+          const result = await tc.upsert(data).select<TRow>()
           const row = result.data?.[0] ?? null
           return { data: row, error: result.error }
         },
