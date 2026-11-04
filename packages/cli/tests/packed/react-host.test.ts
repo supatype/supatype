@@ -30,7 +30,7 @@ import {
  * a conflicting version there. With React 19 at the root, `ink` and its `react-reconciler` were
  * hoisted beside it and loaded React 19, while the CLI's own React 18 sat unused one level down.
  * Every command then failed at startup, including `--version` and the scaffold's
- * `prepare: supatype generate`, so `npm install` itself failed and the project could not install.
+ * `prepare`, which runs `supatype generate`, so `npm install` itself failed and the project could not install.
  *
  * Needs network access for npm and Bun to compile the program, so it runs from `test:packed`, not
  * the default suite. Fetching the schema engine needs the release key, as every source build does:
@@ -46,6 +46,7 @@ interface Release {
   cli: string
   types: string
   shared: string
+  client: string
 }
 
 /**
@@ -78,11 +79,12 @@ async function buildRelease(): Promise<Release> {
   mkdirSync(tarballs)
   const shared = packWorkspacePackage("shared", tarballs)
   const types = packWorkspacePackage("types", tarballs)
+  const client = packWorkspacePackage("client", tarballs)
   const stage = stageCliPackage(VERSION, shared)
   const cli = packStagedCli(stage, tarballs)
   const program = compileProgram(stage, join(root, "program"))
   const mirror = await serveRelease(join(root, "cdn"), VERSION, program)
-  return { root, mirror, cli, types, shared }
+  return { root, mirror, cli, types, shared, client }
 }
 
 function cliEnv(release: Release, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -110,22 +112,36 @@ function scaffold(parent: string): string {
 
 const isScaffoldPackage = isShape({ dependencies: isJsonObject, devDependencies: isJsonObject })
 
-/** The scaffold's package.json with the local tarballs and `host`'s React in place of the registry's. */
+/**
+ * The scaffold's package.json with the local tarballs and `host`'s React in place of the registry's.
+ * The client is this checkout's too: its `supatype-prepare` bin is the scaffold's `prepare`.
+ */
 function hostPackageJson(scaffoldDir: string, host: Host, release: Release): string {
   const scaffolded = parseJsonAs(readFileSync(join(scaffoldDir, "package.json"), "utf8"), isScaffoldPackage)
   return JSON.stringify({
     ...scaffolded,
-    dependencies: { ...scaffolded.dependencies, ...host.deps },
+    dependencies: { ...scaffolded.dependencies, ...host.deps, "@supatype/client": fileSpec(release.client) },
     devDependencies: { ...scaffolded.devDependencies, "@supatype/cli": fileSpec(release.cli), "@supatype/types": fileSpec(release.types) },
-    overrides: { "@supatype/shared": fileSpec(release.shared), "@supatype/types": fileSpec(release.types) },
+    overrides: {
+      "@supatype/shared": fileSpec(release.shared),
+      "@supatype/types": fileSpec(release.types),
+      "@supatype/client": fileSpec(release.client),
+    },
   }, null, 2)
 }
 
-/** Installs a copy of the scaffold for `host`. The scaffold's `prepare` runs `supatype generate`. */
-function installHost(release: Release, scaffoldDir: string, name: string, host: Host): { dir: string; install: SpawnSyncReturns<string> } {
+/** A copy of the scaffold for `host`, without the types its `prepare` generates. */
+function copyScaffold(release: Release, scaffoldDir: string, name: string, host: Host): string {
   const dir = join(release.root, name)
   cpSync(scaffoldDir, dir, { recursive: true })
+  rmSync(join(dir, "types"), { recursive: true, force: true })
   writeFileSync(join(dir, "package.json"), hostPackageJson(scaffoldDir, host, release))
+  return dir
+}
+
+/** Installs a copy of the scaffold for `host`. */
+function installHost(release: Release, scaffoldDir: string, name: string, host: Host): { dir: string; install: SpawnSyncReturns<string> } {
+  const dir = copyScaffold(release, scaffoldDir, name, host)
   const install = run("npm", ["install", "--no-audit", "--no-fund"], dir, cliEnv(release))
   for (const thrower of host.throwing) plantThrowingPackage(dir, thrower)
   return { dir, install }
@@ -188,8 +204,9 @@ describe.each(Object.entries(HOSTS))("the packed CLI in an app with %s at the ro
 
   const app = (): string => apps.get(name) ?? ""
 
-  it("installs, running the scaffold's prepare: supatype generate", () => {
+  it("installs, generating types through the scaffold's prepare", () => {
     expect(install.status, output(install)).toBe(0)
+    expect(existsSync(join(app(), "types", "database.ts")), output(install)).toBe(true)
     const react = host.deps["react"]
     if (react !== undefined) expect(rootVersion(app(), "react")).toBe(react)
   })
@@ -213,13 +230,12 @@ describe.each(Object.entries(HOSTS))("the packed CLI in an app with %s at the ro
 describe("a production install of the scaffold", () => {
   it("installs without the CLI", () => {
     const release = current()
-    const dir = join(release.root, "production")
-    cpSync(scaffoldDir, dir, { recursive: true })
-    writeFileSync(join(dir, "package.json"), hostPackageJson(scaffoldDir, { deps: {}, throwing: [] }, release))
+    const dir = copyScaffold(release, scaffoldDir, "production", { deps: {}, throwing: [] })
     const install = run("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], dir, cliEnv(release))
     expect(install.status, output(install)).toBe(0)
     expect(existsSync(join(dir, "node_modules", "@supatype", "cli"))).toBe(false)
     expect(existsSync(join(dir, "node_modules", "@supatype", "client"))).toBe(true)
+    expect(existsSync(join(dir, "types", "database.ts"))).toBe(false)
   })
 })
 

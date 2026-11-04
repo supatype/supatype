@@ -1,12 +1,17 @@
-import { afterEach, describe, expect, it } from "vitest"
-import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { describe, expect, it } from "vitest"
+import semver from "semver"
 import { mergeSupatypePackageJson, PREPARE_COMMAND, scaffoldPackageJson } from "../src/init-package-json.js"
 
 const DEPS = { cli: "0.1.1", types: "0.1.1", client: "0.1.1" }
 const NO_APP = { projectName: "existing", app: { mode: "none" }, helloFunction: false }
+/** `raised` allows no client below `floor`, and nothing `listed` did not, unless it is `^floor`. */
+function expectRaised(raised: string | undefined, listed: string, floor: string): void {
+  expect(raised).toBeDefined()
+  const lowest = semver.minVersion(raised ?? "")
+  expect(lowest !== null && semver.gte(lowest, floor), `${raised} starts below ${floor}`).toBe(true)
+  if (raised !== `^${floor}`) expect(semver.subset(raised ?? "", listed), `${raised} widens ${listed}`).toBe(true)
+}
+
 const VITE_APP = { projectName: "existing", app: { mode: "static", viteDevUrl: "http://127.0.0.1:5173" }, helloFunction: false }
 
 describe("mergeSupatypePackageJson", () => {
@@ -43,15 +48,97 @@ describe("mergeSupatypePackageJson", () => {
     expect(merged.scripts?.seed).toBe("supatype seed")
   })
 
+  // `prepare` runs on a production install too, so the client, whose bin it is, must be installed there.
   it("generates on install, as a new project does", () => {
-    expect(mergeSupatypePackageJson({ name: "existing" }, NO_APP, DEPS).scripts?.prepare).toBe(PREPARE_COMMAND)
+    const merged = mergeSupatypePackageJson({ name: "existing" }, NO_APP, DEPS)
+
+    expect(merged.scripts?.prepare).toBe(PREPARE_COMMAND)
+    expect(merged.dependencies?.["@supatype/client"]).toBe("^0.1.1")
   })
 
-  it("leaves @supatype/client where a project already lists it", () => {
+  // A production install leaves development dependencies out, and `supatype-prepare` with them.
+  it("moves @supatype/client into dependencies, keeping a range new enough", () => {
     const merged = mergeSupatypePackageJson({ devDependencies: { "@supatype/client": "^0.6.0" } }, NO_APP, DEPS)
 
-    expect(merged.dependencies?.["@supatype/client"]).toBeUndefined()
-    expect(merged.devDependencies?.["@supatype/client"]).toBe("^0.6.0")
+    expect(merged.dependencies?.["@supatype/client"]).toBe("^0.6.0")
+    expect(merged.devDependencies?.["@supatype/client"]).toBeUndefined()
+  })
+
+  // A client older than the one init picks may predate `supatype-prepare`, and fail every install.
+  it.each(["^0.0.9", "0.1.0", "~0.1.0", ">=0.0.1", "^0.1", "0.x", "*", "x", "v0.0.6", "<0.9.0", "^1.0.0 || ^0.1.0"])(
+    "raises a @supatype/client range of %s",
+    (range) => {
+      const merged = mergeSupatypePackageJson({ dependencies: { "@supatype/client": range } }, NO_APP, DEPS)
+
+      expectRaised(merged.dependencies?.["@supatype/client"], range, "0.1.1")
+    },
+  )
+
+  // An older CLI than the project's client raises the lower end only: the project keeps its 0.12.
+  it("raises a @supatype/client range without moving the project down to the floor", () => {
+    const older = { ...DEPS, client: "0.9.0" }
+    const merged = mergeSupatypePackageJson({ dependencies: { "@supatype/client": ">=0.5.0" } }, NO_APP, older)
+    const range = merged.dependencies?.["@supatype/client"] ?? ""
+
+    expect(semver.satisfies("0.12.0", range)).toBe(true)
+    expect(semver.satisfies("0.8.0", range)).toBe(false)
+  })
+
+  it.each(["^0.0.9", "0.1.0", "<0.1.0"])("sets a @supatype/client range of %s, with nothing at the floor, to ^floor", (range) => {
+    const merged = mergeSupatypePackageJson({ dependencies: { "@supatype/client": range } }, NO_APP, DEPS)
+
+    expect(merged.dependencies?.["@supatype/client"]).toBe("^0.1.1")
+  })
+
+  it.each([
+    "workspace:*",
+    "file:../client",
+    "../client",
+    "~/client",
+    "owner/supatype-client",
+    "git@github.com:me/client.git",
+    "latest",
+    "^0.2.0",
+    "^0.2",
+    "~1",
+    ">= 0.2.0",
+    ">=0.2.0 <1.0.0",
+    "0.2.0 - 0.3.0",
+    "^0.2.0 || ^0.3.0",
+    ">0.2.0",
+    "<2 >=0.2",
+    "0.2.0+build",
+  ])("keeps a @supatype/client range of %s", (range) => {
+    const merged = mergeSupatypePackageJson({ dependencies: { "@supatype/client": range } }, NO_APP, DEPS)
+
+    expect(merged.dependencies?.["@supatype/client"]).toBe(range)
+  })
+
+  // A pre-release lower bound allows that pre-release, which may predate what its release has.
+  it.each([
+    ["^0.8.0-rc.1", "0.8.0"],
+    [">=0.8.0-0", "0.8.0"],
+    ["^0.8.0-rc.0", "0.8.0-rc.2"],
+  ])("raises a @supatype/client range of %s below %s", (range, floor) => {
+    const merged = mergeSupatypePackageJson({ dependencies: { "@supatype/client": range } }, NO_APP, { ...DEPS, client: floor })
+
+    expectRaised(merged.dependencies?.["@supatype/client"], range, floor)
+  })
+
+  it.each(["^0.9.0", "^0.8.0-rc.2"])("keeps a @supatype/client range of %s above a pre-release init picked", (range) => {
+    const rc = { ...DEPS, client: "0.8.0-rc.1" }
+    const merged = mergeSupatypePackageJson({ dependencies: { "@supatype/client": range } }, NO_APP, rc)
+
+    expect(merged.dependencies?.["@supatype/client"]).toBe(range)
+  })
+
+  // The `prepare` earlier releases wrote failed every production install with `supatype: not found`.
+  it("replaces the prepare earlier releases wrote, and keeps a project's own", () => {
+    const earlier = mergeSupatypePackageJson({ scripts: { prepare: "supatype generate" } }, NO_APP, DEPS)
+    const own = mergeSupatypePackageJson({ scripts: { prepare: "husky" } }, NO_APP, DEPS)
+
+    expect(earlier.scripts?.prepare).toBe(PREPARE_COMMAND)
+    expect(own.scripts?.prepare).toBe("husky")
   })
 
   it("keeps the project's own scripts, in their order, ahead of the ones it adds", () => {
@@ -87,126 +174,3 @@ describe("scaffoldPackageJson", () => {
   })
 })
 
-/**
- * The project's `prepare`, run the way npm runs it: through the shell, in the project. A production
- * install leaves out development dependencies, the CLI with them, and still runs `prepare`, where
- * a bare `supatype generate` failed the install with `supatype: not found`.
- */
-describe("the prepare script", () => {
-  const dirs: string[] = []
-  afterEach(() => {
-    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-  })
-
-  function project(): string {
-    const dir = mkdtempSync(join(tmpdir(), "supatype-prepare-"))
-    dirs.push(dir)
-    writeFileSync(join(dir, "package.json"), '{ "type": "module" }\n')
-    return dir
-  }
-
-  /**
-   * A stand-in CLI whose `generate` records that it ran, and exits with `status`. Its `exports`
-   * do not name its package.json, as no release's do: it is found all the same.
-   */
-  function installCli(dir: string, status: number, folder = "node_modules"): void {
-    const cli = join(dir, folder, "@supatype", "cli")
-    mkdirSync(join(cli, "bin"), { recursive: true })
-    writeFileSync(join(cli, "package.json"), '{ "name": "@supatype/cli", "exports": { ".": "./index.js" } }\n')
-    const script = `require("node:fs").writeFileSync("generated", process.argv[2]); process.exit(${status})`
-    writeFileSync(join(cli, "bin", "supatype.js"), `${script}\n`)
-  }
-
-  const prepare = (cwd: string, env: NodeJS.ProcessEnv = {}) =>
-    spawnSync(PREPARE_COMMAND, { cwd, shell: true, encoding: "utf8", env: { ...process.env, ...env } })
-
-  it("succeeds, and generates nothing, where the CLI is not installed", () => {
-    const dir = project()
-    const result = prepare(dir)
-    expect(result.status, result.stderr).toBe(0)
-    expect(existsSync(join(dir, "generated"))).toBe(false)
-  })
-
-  // pnpm's bin shims point NODE_PATH at pnpm's store, and Node's global folders include
-  // ~/.node_modules: neither is this project's, and a production install that left the CLI out
-  // must not run some other copy.
-  it.each([
-    ["on NODE_PATH", "node_modules", (dir: string) => ({ NODE_PATH: join(dir, "node_modules") })],
-    ["in the home folder's .node_modules", ".node_modules", (dir: string) => ({ HOME: dir, USERPROFILE: dir })],
-  ] as const)("ignores a CLI %s", (_, folder, env) => {
-    const elsewhere = project()
-    installCli(elsewhere, 0, folder)
-    const dir = project()
-    const result = prepare(dir, env(elsewhere))
-    expect(result.status, result.stderr).toBe(0)
-    expect(existsSync(join(dir, "generated"))).toBe(false)
-  })
-
-  // A workspace member can pin a CLI of its own beside the one the root hoists.
-  it("runs the nearest CLI", () => {
-    const root = project()
-    installCli(root, 4)
-    const pkg = join(root, "packages", "app")
-    mkdirSync(pkg, { recursive: true })
-    writeFileSync(join(pkg, "package.json"), '{ "type": "module" }\n')
-    installCli(pkg, 0)
-    const result = prepare(pkg)
-    expect(result.status, result.stderr).toBe(0)
-    expect(existsSync(join(pkg, "generated"))).toBe(true)
-  })
-
-  it("runs supatype generate where the CLI is installed", () => {
-    const dir = project()
-    installCli(dir, 0)
-    const result = prepare(dir)
-    expect(result.status, result.stderr).toBe(0)
-    expect(existsSync(join(dir, "generated"))).toBe(true)
-  })
-
-  // A workspace hoists the CLI to the root's node_modules, above the package that runs prepare.
-  it("finds a CLI hoisted into a parent directory", () => {
-    const root = project()
-    installCli(root, 0)
-    const pkg = join(root, "packages", "app")
-    mkdirSync(pkg, { recursive: true })
-    writeFileSync(join(pkg, "package.json"), '{ "type": "module" }\n')
-    const result = prepare(pkg)
-    expect(result.status, result.stderr).toBe(0)
-    expect(existsSync(join(pkg, "generated"))).toBe(true)
-  })
-
-  // A node_modules above the project that is a file, or one the user may not read, holds no CLI.
-  // Node's own lookup passes over it: failing on it failed an install that had nothing to run.
-  it("passes over a node_modules it cannot look inside", () => {
-    const root = project()
-    writeFileSync(join(root, "node_modules"), "")
-    const pkg = join(root, "app")
-    mkdirSync(pkg)
-    const result = prepare(pkg)
-    expect(result.status, result.stderr).toBe(0)
-  })
-
-  // A folder with nothing behind it, as a link into a pruned pnpm store leaves: skipping it would
-  // pass the install and fail the build later, on generated files that were never written.
-  it("fails the install when the CLI folder is there but broken", () => {
-    const dir = project()
-    mkdirSync(join(dir, "node_modules", "@supatype", "cli"), { recursive: true })
-    expect(prepare(dir).status).not.toBe(0)
-  })
-
-  it("fails the install when generate fails", () => {
-    const dir = project()
-    installCli(dir, 3)
-    expect(prepare(dir).status).toBe(3)
-  })
-
-  // The script is one double-quoted argument to node under sh and cmd.exe alike. A quote or a
-  // backslash in it would end or change that argument, a redirect would split it if a quote were
-  // ever lost, and cmd.exe with delayed expansion strips a lone `!`, which turned `if(!d)` into
-  // `if(d)`.
-  it("holds no character a shell would rewrite inside double quotes", () => {
-    const body = /^node -e "(.*)"$/.exec(PREPARE_COMMAND)?.[1]
-    expect(body).toBeDefined()
-    expect(body).not.toMatch(/[!$`%"\\<>|&]/)
-  })
-})

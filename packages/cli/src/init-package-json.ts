@@ -1,3 +1,4 @@
+import semver from "semver"
 import type { InitDependencyVersions } from "./init-dependency-versions.js"
 
 export interface MergePackageJsonOptions {
@@ -17,40 +18,14 @@ type PackageJson = {
 }
 
 /**
- * `supatype generate` when the CLI is installed, and nothing when it is not.
+ * `supatype generate` when the CLI is installed, and nothing when it is not: a bin of
+ * `@supatype/client` (bin/supatype-prepare.js there says how it finds the CLI). The client is a
+ * production dependency, so the bin is there on a production install, where the CLI is not.
  *
- * The generated files are gitignored, so a fresh clone has to produce them before anything can
- * import them. A production install leaves out development dependencies, the CLI among them, but
- * npm still runs `prepare`, and a bare `supatype generate` failed it with `supatype: not found`.
- * Nothing needs generating there: the build that imports the files ran with everything installed.
- * Prisma's client skips its generate the same way when the Prisma CLI is not installed.
- *
- * The CLI is looked for in the folders Node looks in for a package (`module.paths`): node_modules
- * beside the project and in each folder above it, where a workspace hoists it, nearest first. Not on
- * NODE_PATH or in the global folders, which belong to no project. It is found by its folder, not
- * through its `exports`, which name no package.json in any release. A folder that cannot be read is
- * passed over, as Node passes it over. A CLI that is not installed is skipped. A CLI folder that is
- * there but broken, such as a link into a pruned pnpm store, fails the install, as a generate that
- * fails does.
- *
- * The script is Node rather than shell, so sh and cmd.exe read it alike, and it holds no character
- * either shell would read inside its double quotes (tests/init-package-json.test.ts holds it to
- * that). Yarn 2 and later do not run a project's own `prepare` on install, so there
- * `supatype generate` is run by hand, as it always was.
+ * It was once a script written into the project's package.json in full, which no upgrade could
+ * fix: each project kept the copy it was made with.
  */
-export const PREPARE_COMMAND =
-  "node -e \"" +
-  [
-    "const {join}=require('path'),{lstatSync}=require('fs')",
-    "function has(c){try{return lstatSync(c)}catch{}}",
-    "const d=module.paths.map(function(p){return join(p,'@supatype','cli')}).find(has)",
-    "if(d===undefined)process.exit(0)",
-    "const bin=join(d,'bin','supatype.js')",
-    "const r=require('child_process').spawnSync(process.execPath,[bin,'generate'],{stdio:'inherit'})",
-    "if(r.error)console.error(r.error.message)",
-    "process.exit(r.status??1)",
-  ].join(";") +
-  "\""
+export const PREPARE_COMMAND = "supatype-prepare"
 
 /**
  * The scripts every Supatype project gets, written by `init` into a new package.json and merged
@@ -113,7 +88,7 @@ export function scaffoldPackageJson(opts: MergePackageJsonOptions, deps: InitDep
     private: true,
     type: "module",
     scripts: projectScripts(opts),
-    dependencies: { "@supatype/client": `^${deps.client}` },
+    dependencies: { [CLIENT]: clientRange(undefined, deps.client) },
     devDependencies: toolDependencies(deps, opts),
   }
   return `${JSON.stringify(pkg, null, 2)}\n`
@@ -126,29 +101,70 @@ function absentFrom(wanted: Record<string, string>, ...present: Section[]): Reco
   return Object.fromEntries(Object.entries(wanted).filter(([key]) => present.every((p) => p?.[key] === undefined)))
 }
 
+const CLIENT = "@supatype/client"
+
+/**
+ * The `prepare` earlier releases of `init` wrote, which fails every production install, replaced by
+ * the one it writes now. A `prepare` of the project's own is kept.
+ */
+const EARLIER_PREPARE = "supatype generate"
+
+function withPrepare(scripts: Record<string, string> | undefined): Record<string, string> {
+  return scripts?.["prepare"] === EARLIER_PREPARE ? { ...scripts, prepare: PREPARE_COMMAND } : { ...scripts }
+}
+
+/**
+ * The project's @supatype/client range, as `prepare` needs it: at least `floor`, the client `init`
+ * would pick, since an older one may predate `supatype-prepare`. A range whose lowest version, as
+ * npm's own `semver` reads it, is at or above the floor is kept. So is a spec that is not a range,
+ * such as `workspace:*`, a path, a git URL or a tag. Any other range has its lower end raised and
+ * keeps its upper end, so a project on a newer client than the floor is not moved down to it:
+ * `>=0.5.0` becomes `>=0.5.0 >=0.9.0`. A range with nothing left at or above the floor becomes
+ * `^floor`.
+ */
+function clientRange(listed: string | undefined, floor: string): string {
+  if (listed === undefined) return `^${floor}`
+  if (semver.validRange(listed) === null || semver.valid(floor) === null) return listed
+  const lowest = semver.minVersion(listed)
+  if (lowest !== null && semver.gte(lowest, floor)) return listed
+  const raised = listed
+    .split("||")
+    .map((alternative) => `${alternative.trim()} >=${floor}`)
+    .filter((alternative) => semver.minVersion(alternative) !== null)
+  return raised.length > 0 ? raised.join(" || ") : `^${floor}`
+}
+
+/**
+ * The client in `dependencies` at a range `prepare` can run with, and out of `devDependencies`: a
+ * production install leaves those out, and `supatype-prepare` with them.
+ */
+function withClient(pkg: PackageJson, floor: string): Required<Pick<PackageJson, "dependencies" | "devDependencies">> {
+  const { [CLIENT]: listedDev, ...devDependencies } = pkg.devDependencies ?? {}
+  const range = clientRange(pkg.dependencies?.[CLIENT] ?? listedDev, floor)
+  return { dependencies: { ...pkg.dependencies, [CLIENT]: range }, devDependencies }
+}
+
 /** Merge Supatype deps/scripts into an existing package.json object, keeping what it already has. */
 export function mergeSupatypePackageJson(
   pkg: PackageJson,
   opts: MergePackageJsonOptions,
   deps: InitDependencyVersions,
 ): PackageJson {
-  const scripts = { ...pkg.scripts, ...absentFrom(projectScripts(opts), pkg.scripts) }
+  const scripts = { ...withPrepare(pkg.scripts), ...absentFrom(projectScripts(opts), pkg.scripts) }
   if (scripts.dev !== CORE_SCRIPTS.dev && scripts["supatype:dev"] === undefined) {
     scripts["supatype:dev"] = CORE_SCRIPTS.dev
   }
+  const { dependencies, devDependencies } = withClient(pkg, deps.client)
   return {
     ...pkg,
     name: pkg.name || opts.projectName,
     private: pkg.private ?? true,
     type: pkg.type || "module",
     scripts,
-    dependencies: {
-      ...pkg.dependencies,
-      ...absentFrom({ "@supatype/client": `^${deps.client}` }, pkg.dependencies, pkg.devDependencies),
-    },
+    dependencies,
     // A tool the project already lists in either section stays where it is.
     devDependencies: {
-      ...pkg.devDependencies,
+      ...devDependencies,
       ...absentFrom(toolDependencies(deps, opts), pkg.dependencies, pkg.devDependencies),
     },
   }

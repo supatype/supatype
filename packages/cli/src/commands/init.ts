@@ -35,7 +35,7 @@ import {
   sharedFunctionsReadmeSource,
 } from "../functions-deno-types.js"
 import { functionTemplateSource } from "../functions-template.js"
-import { mergeSupatypePackageJson, scaffoldPackageJson } from "../init-package-json.js"
+import { mergeSupatypePackageJson, PREPARE_COMMAND, scaffoldPackageJson } from "../init-package-json.js"
 import { downloadRelease, initFromExample } from "../init-example.js"
 import { errorMessage } from "../error-message.js"
 import { parseJsonObject } from "@supatype/shared"
@@ -750,7 +750,10 @@ export function scaffold(
       writeFileSync(pkgPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8")
       file("updated", "package.json (added Supatype dependencies)")
     } catch {
-      warn("Could not merge into package.json, add @supatype/cli and @supatype/types manually.")
+      warn(
+        "Could not merge into package.json. Add @supatype/client to dependencies, @supatype/cli and " +
+          `@supatype/types to devDependencies, and a "prepare" script of "${PREPARE_COMMAND}".`,
+      )
       file("skipped", "package.json (invalid JSON)")
     }
   }
@@ -874,7 +877,7 @@ async function resolveDependencyVersions(): Promise<InitDependencyVersions> {
   const runningCli = cliPackageVersion()
   if (deps.cli !== runningCli || deps.types !== runningCli || deps.client !== runningCli) {
     info(
-      `Using published npm versions: @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}, ` +
+      `Pinning @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}, ` +
         `@supatype/client ^${deps.client}`,
     )
   }

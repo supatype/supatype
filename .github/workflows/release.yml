@@ -631,8 +631,8 @@ jobs:
   # The published npm package, installed the way the report that found it did: a scaffolded
   # project with React 19 added. Installed as JavaScript, the CLI's Ink was hoisted beside the
   # app's React 19 and loaded it, so every command failed, and `npm install` with it through the
-  # scaffold's `prepare: supatype generate`. The package now starts the program cli-publish put on
-  # the CDN, which this also proves is there and verifies under the release key.
+  # scaffold's `prepare`, which runs `supatype generate`. The package now starts the program
+  # cli-publish put on the CDN, which this also proves is there and verifies under the release key.
   verify-npm-install:
     name: npm install in a React 19 app (${{ matrix.os }})
     needs: [prepare, npm]
@@ -654,14 +654,18 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          # A version is not always installable the moment `npm publish` returns.
-          for attempt in 1 2 3 4 5 6; do
-            npm view "@supatype/cli@${VERSION}" version >/dev/null 2>&1 && break
-            if [ "$attempt" = 6 ]; then
-              echo "::error::@supatype/cli@${VERSION} is not on npm"
-              exit 1
-            fi
-            sleep 20
+          # A version is not always installable the moment `npm publish` returns. The scaffold
+          # needs the client too: its `prepare` is the client's `supatype-prepare`, and init picks
+          # no client older than itself.
+          for pkg in cli client; do
+            for attempt in 1 2 3 4 5 6; do
+              npm view "@supatype/${pkg}@${VERSION}" version >/dev/null 2>&1 && break
+              if [ "$attempt" = 6 ]; then
+                echo "::error::@supatype/${pkg}@${VERSION} is not on npm"
+                exit 1
+              fi
+              sleep 20
+            done
           done
 
           npx --yes "@supatype/cli@${VERSION}" init app -y --no-install --no-keys --no-admin

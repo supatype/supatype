@@ -80,10 +80,15 @@
 * **init:** new projects no longer install `tsx`. The CLI runs the project's TypeScript itself.
 * **init:** a project installs for production. Its `prepare` ran `supatype generate`, which npm
   runs on `npm ci --omit=dev` too, where the CLI (a development dependency) is not installed, so
-  every production install failed with `supatype: not found`. `prepare` now runs `generate` only
-  where the CLI is installed, as Prisma's client does with the Prisma CLI, and a failing `generate`
-  still fails the install. Existing projects `init` is merged into get the same script. A project
-  made before this release keeps its old `prepare`: replace it with the one `init` writes.
+  every production install failed with `supatype: not found`. `prepare` is now
+  `supatype-prepare`, a command `@supatype/client` installs, which runs `generate` only where the
+  CLI is installed, as Prisma's client does with the Prisma CLI. A failing `generate` still fails
+  the install. Existing projects `init` is merged into get the same script, and their
+  `@supatype/client` is moved into `dependencies` and raised to a release that has the command.
+  `init` never picks a client older than itself, and replaces the `prepare` earlier releases
+  wrote. A project made before this release keeps that `prepare` until then: set it to
+  `supatype-prepare`, and upgrade `@supatype/client` to this release, the first with that command,
+  listed in `dependencies`.
 * **dev:** a Ctrl+C sent to the npm package's process alone, as an IDE's stop button sends it, stops
   dev on Linux and macOS, where the starter passes every stop signal on. dev counts the same signal
   twice within half a second as one press, since a Ctrl+C typed in the terminal reaches it both
