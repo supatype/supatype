@@ -98,6 +98,23 @@ describe("scaffold()", () => {
     expect(editor).not.toBe(value("AUTHENTICATOR_PASSWORD"))
   })
 
+  // SITE_URL is where auth emails send people back to. It was localhost:3000 for every project,
+  // while a static or proxied app is served on the API's address, so the links went nowhere.
+  it.each([
+    ["a static app on Docker", { mode: "static", staticDir: "./dist" }, "docker", 18478, "http://localhost:18478"],
+    ["a proxied app on Docker", { mode: "proxy", upstream: "http://localhost:4000", start: "dev" }, "docker", 18478, "http://localhost:18478"],
+    ["a static app on the native provider", { mode: "static", staticDir: "./dist" }, "native", undefined, "http://localhost:18471"],
+    ["no app", { mode: "none" }, "docker", 18478, "http://localhost:3000"],
+  ] as const)(".env points SITE_URL at where %s is served", (_, app, provider, kongPort, siteUrl) => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), app, provider, ...(kongPort !== undefined ? { kongPort } : {}) })
+    expect(readFileSync(join(tmpRoot, ".env"), "utf8")).toMatch(new RegExp(`^SITE_URL=${siteUrl}$`, "m"))
+  })
+
+  it("package.json carries a version", () => {
+    scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
+    expect(JSON.parse(readFileSync(join(tmpRoot, "package.json"), "utf8"))).toMatchObject({ version: "0.1.0" })
+  })
+
   it(".env contains ANON_KEY, SERVICE_ROLE_KEY, and SITE_URL placeholders", () => {
     scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
     const content = readFileSync(join(tmpRoot, ".env"), "utf8")
@@ -244,7 +261,10 @@ describe("scaffold()", () => {
     expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
     const pkg = readFileSync(join(tmpRoot, "package.json"), "utf8")
     expect(pkg).toContain('"vite": "vite"')
-    expect(pkg).toContain('"vite": "^6"')
+    // Current @vitejs/plugin-react peers vite ^8, so ^6 failed the install with ERESOLVE.
+    expect(pkg).toContain('"vite": "^8"')
+    // app.static_dir serves Vite's build output, which nothing produced without this.
+    expect(pkg).toContain('"build": "vite build"')
     const viteConfig = readFileSync(join(tmpRoot, "vite.config.ts"), "utf8")
     expect(viteConfig).toContain("port: 5173")
   })

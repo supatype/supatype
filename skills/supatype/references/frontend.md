@@ -263,7 +263,6 @@ Supatype ships first-party bindings. Prefer them over wiring the raw client by h
 | `@supatype/svelte` | Stores: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
 | `@supatype/ssr` | Cookie-based client for Server Components, Route Handlers, middleware |
 | `@supatype/ui` | Shared React component library (Tailwind + Radix primitives) |
-| `@supatype/navigation` | Shared `Header` / `Footer` components |
 
 > **Don't reimplement auth forms or auth state by hand.** Use `@supatype/react-auth` for the UI and `@supatype/react`'s `useAuth` for state. Drop to the raw client only for app-specific data access not covered by the hooks.
 

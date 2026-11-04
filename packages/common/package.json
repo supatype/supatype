@@ -31,7 +31,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tests/tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=50%",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {

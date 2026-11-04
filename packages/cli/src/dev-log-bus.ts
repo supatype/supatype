@@ -22,9 +22,24 @@ export class DevLogBus {
   private readonly listeners = new Set<() => void>()
   private focusedTaskId = "stack"
   private readyPanel: DevReadyPanel | null = null
+  private step: string | null = null
 
   constructor(private readonly maxLines = DEFAULT_MAX_LINES) {
     this.registerTask("stack", "supatype")
+  }
+
+  /**
+   * What dev is waiting on, shown with a spinner until the next step, or until the stack is up and
+   * the ready panel replaces it. Without it the dashboard showed the logo and an idle log while
+   * Docker pulled images, with nothing to say it was working.
+   */
+  setStep(step: string): void {
+    this.step = step
+    this.notify()
+  }
+
+  getStep(): string | null {
+    return this.step
   }
 
   registerTask(id: string, title: string): void {

@@ -7,12 +7,12 @@
  * JSON, which made the CLI stricter about a postgres archive than about overwriting itself.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { createHash } from "node:crypto"
-import { homedir, tmpdir } from "node:os"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
-import { currentPlatform, fetchChecksums, readLatestVersion, type PlatformId } from "./binary-cache.js"
+import { fetchChecksums, readLatestVersion, type PlatformId } from "./binary-cache.js"
 import {
   cliArchiveName,
   cliArchivePath,
@@ -21,6 +21,8 @@ import {
   currentLibc,
   type LibcId,
 } from "./cli-artifacts.js"
+import { cliCachePath, publishedTarget } from "./cli-program-path.js"
+import { uniqueFileToken } from "./unique-file-token.js"
 
 /**
  * Overridable for the same reason scripts/install.sh takes SUPATYPE_CDN: with the host fixed,
@@ -33,14 +35,6 @@ import {
  */
 const CDN_BASE = process.env["SUPATYPE_CDN_BASE"]?.replace(/\/$/, "")
   || "https://releases.supatype.com"
-
-/** Where a downloaded release is unpacked, so a repeated update does not refetch it. */
-export function cliCachePath(
-  version: string,
-  platform: PlatformId = currentPlatform(),
-): string {
-  return join(homedir(), ".supatype", "cache", "cli", version, cliExecutableName(platform))
-}
 
 export async function fetchStandaloneCliLatestVersion(): Promise<string> {
   const resp = await fetch(`${CDN_BASE}/cli/latest.json`)
@@ -94,45 +88,72 @@ function unpackExecutable(archivePath: string, destDir: string, platform: Platfo
 }
 
 /**
- * Download and verify the standalone CLI for this machine, returning the path to the
- * executable. Nothing is written to the cache until the checksum matches.
+ * Moves a verified executable into the cache in one step.
+ *
+ * The npm starter treats a file at the cache path as verified and runs it, so a half-written one
+ * would be run on every later start: written in place, an interrupted download left exactly that.
+ * Two first runs at once both download. On Windows the second rename fails while the first copy
+ * is running, and either copy is the same verified file, so that loss is not an error.
  */
-export async function downloadStandaloneCli(
-  version?: string,
-  platform: PlatformId = currentPlatform(),
-  libc: LibcId = currentLibc(platform),
-): Promise<string> {
-  const resolved = version ?? await fetchStandaloneCliLatestVersion()
-  const dest = cliCachePath(resolved, platform)
-  if (existsSync(dest)) return dest
+function publishAtomically(unpacked: string, dest: string, platform: PlatformId): void {
+  mkdirSync(join(dest, ".."), { recursive: true })
+  const partial = `${dest}.${uniqueFileToken()}.partial`
+  copyFileSync(unpacked, partial)
+  if (platform.os !== "windows") chmodSync(partial, 0o755)
+  try {
+    renameSync(partial, dest)
+  } catch (err) {
+    rmSync(partial, { force: true })
+    if (!existsSync(dest)) throw err
+  }
+}
 
+/** A version's archive for this machine, once it matches the signed checksums manifest. */
+async function fetchVerifiedArchive(version: string, platform: PlatformId, libc: LibcId): Promise<Buffer> {
   const name = cliArchiveName(platform, libc)
-  const archive = await fetchBytes(`${CDN_BASE}${cliArchivePath(resolved, platform, libc)}`, name)
+  const checksumsUrl = `${CDN_BASE}${cliChecksumsPath(version)}`
 
   // The manifest is verified before it is trusted, and only then is the archive compared
   // against it. A checksum alone would prove the download was intact, not that it came from
   // us, and the signature is what makes replacing our own executable no weaker than fetching
   // a postgres archive. fetchChecksums treats the .minisig as mandatory and fails closed
-  // without a public key, which is the same rule component downloads follow.
-  const checksumsUrl = `${CDN_BASE}${cliChecksumsPath(resolved)}`
-  const expected = await fetchChecksums(checksumsUrl, `${checksumsUrl}.minisig`, name)
+  // without a public key, which is the same rule component downloads follow. The two are
+  // fetched together, so a manifest that fails its signature is reported without waiting for
+  // the archive.
+  const [expected, archive] = await Promise.all([
+    fetchChecksums(checksumsUrl, `${checksumsUrl}.minisig`, name),
+    fetchBytes(`${CDN_BASE}${cliArchivePath(version, platform, libc)}`, name),
+  ])
   const actual = createHash("sha256").update(archive).digest("hex")
   if (actual !== expected.checksum) {
     throw new Error(
       `Checksum mismatch for ${name}.\n  expected: ${expected.checksum}\n  actual:   ${actual}`,
     )
   }
+  return archive
+}
 
+/**
+ * Download and verify the standalone CLI for this machine, returning the path to the
+ * executable. Nothing is written to the cache until the checksum matches. A machine no release
+ * is built for is refused here, before any request.
+ */
+export async function downloadStandaloneCli(
+  version?: string,
+  platform: PlatformId = publishedTarget(),
+  libc: LibcId = currentLibc(platform),
+): Promise<string> {
+  const resolved = version ?? await fetchStandaloneCliLatestVersion()
+  const dest = cliCachePath(resolved, platform)
+  if (existsSync(dest)) return dest
+
+  const archive = await fetchVerifiedArchive(resolved, platform, libc)
   const staging = join(tmpdir(), `supatype-cli-${resolved}-${process.pid}`)
   try {
     mkdirSync(staging, { recursive: true })
-    const archivePath = join(staging, name)
+    const archivePath = join(staging, cliArchiveName(platform, libc))
     writeFileSync(archivePath, archive)
-    const unpacked = unpackExecutable(archivePath, staging, platform)
-
-    mkdirSync(join(dest, ".."), { recursive: true })
-    writeFileSync(dest, readFileSync(unpacked))
-    if (platform.os !== "windows") chmodSync(dest, 0o755)
+    publishAtomically(unpackExecutable(archivePath, staging, platform), dest, platform)
     return dest
   } finally {
     rmSync(staging, { recursive: true, force: true })

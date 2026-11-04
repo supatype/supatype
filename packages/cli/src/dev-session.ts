@@ -2,7 +2,8 @@
  * `supatype dev` output session, Ink dashboard (default) or interleaved stream mode.
  */
 
-import { render, type Instance } from "ink"
+import { render, type Instance, type RenderOptions } from "ink"
+import { setTimeout as sleep } from "node:timers/promises"
 import { prepareStdinForInk } from "./ui/runtime/stdin-after-ink.js"
 import React from "react"
 import type { ProcessOptions } from "./process-manager.js"
@@ -31,6 +32,21 @@ export function beginDevSession(mode: DevUiMode): DevSession {
     activeSession.startInk()
   }
   return activeSession
+}
+
+/** How long Ink may hold a redraw back: it draws at most once in this window. */
+const INK_FRAME_MS = 40
+
+/**
+ * Names what dev is waiting on, shown on the dashboard with a spinner until the next step or the
+ * ready panel, then pauses for Ink to draw it. Much of a native start blocks the thread (initdb,
+ * starting Postgres, the schema push), and a step set just before one of those was never drawn: the
+ * dashboard went from the logo straight to the services. The log line each step already prints
+ * stays as it was; in stream mode that line is all there is.
+ */
+export async function showDevStep(step: string): Promise<void> {
+  activeSession?.bus.setStep(step)
+  if (activeSession?.isInkMounted() === true) await sleep(INK_FRAME_MS)
 }
 
 /** @deprecated Ink starts in beginDevSession, kept for callers that invoke late. */
@@ -108,6 +124,15 @@ export function appendDevTaskLog(
   write(`${prefix} ${line}`)
 }
 
+/**
+ * The dashboard, mounted. Ctrl+C is the dashboard's to handle: it starts dev's shutdown. Left to
+ * Ink, the first Ctrl+C unmounted the dashboard and nothing else, so dev kept running with no screen
+ * until a second one reached it as a signal.
+ */
+export function renderDevDashboard(bus: DevLogBus, streams: Pick<RenderOptions, "stdin" | "stdout" | "patchConsole"> = {}): Instance {
+  return render(React.createElement(DevDashboard, { bus }), { ...streams, exitOnCtrlC: false })
+}
+
 export class DevSession {
   readonly bus = new DevLogBus()
   readonly mode: DevUiMode
@@ -145,7 +170,7 @@ export class DevSession {
     if (!this.isTui() || this.ink) return
     // A prompt before dev started stopped stdin's read when it ended; the dashboard needs it.
     prepareStdinForInk()
-    this.ink = render(React.createElement(DevDashboard, { bus: this.bus }))
+    this.ink = renderDevDashboard(this.bus)
   }
 
   stop(): void {
