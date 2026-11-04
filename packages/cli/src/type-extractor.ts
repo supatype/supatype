@@ -5,6 +5,7 @@ import ts from "typescript"
 import { isJsonObject, isOneOf } from "@supatype/shared"
 import type { AuthUserOnDelete } from "@supatype/types"
 import { isIdentityDependent } from "./cache-identity-scope.js"
+import { HOOK_EVENTS, isAfterHookEvent } from "./hook-events.js"
 import {
   applyImportRename,
   createResolveContext,
@@ -2423,18 +2424,10 @@ interface ParsedModelHook {
   function: string
   timeout?: number
   onUnavailable?: "reject" | "log"
+  /** An after-hook's `columns: "all"`; absent means the default, `"safe"`. */
+  columns?: "all"
 }
 
-const HOOK_EVENTS = ["beforeChange", "afterChange", "beforeDelete", "afterDelete"] as const
-
-/**
- * Read `hooks` from a model's meta.
- *
- * Deliberately strict: an entry that is neither a string nor an object with a `function` name is
- * **dropped**, and `validateModelHooks` then reports the model whose hook did not survive. A hook
- * silently not firing is the failure this feature cannot have, so an unreadable declaration must
- * fail the push rather than extract to nothing.
- */
 /**
  * Read `validate` from a model's meta: field name to the function that checks it.
  *
@@ -2491,6 +2484,17 @@ function parseModelValidators(
   return out
 }
 
+/**
+ * Read `hooks` from a model's meta.
+ *
+ * Deliberately strict: an entry that is neither a string nor an object with a `function` name is
+ * **dropped**, and `validateModelHooks` then reports the model whose hook did not survive. A hook
+ * silently not firing is the failure this feature cannot have, so an unreadable declaration must
+ * fail the push rather than extract to nothing.
+ *
+ * `columns` is kept only on an after-hook: a before-hook sees the request rather than the stored
+ * row, so there is nothing for it to choose.
+ */
 function parseModelHooks(
   metaArg: ts.TypeNode | undefined,
   sourceFile: ts.SourceFile,
@@ -2509,15 +2513,17 @@ function parseModelHooks(
     const event = getPropertyName(member.name)
     if (!event || !(HOOK_EVENTS as readonly string[]).includes(event)) continue
 
-    const parsed = parseModelHookValue(member.type, sourceFile)
+    const parsed = parseModelHookValue(member.type, sourceFile, isAfterHookEvent(event))
     if (parsed !== null) hooks[event] = parsed
   }
   return hooks
 }
 
+/** A hook or validator entry; `columns` is read only when `afterHook`, the one place it means anything. */
 function parseModelHookValue(
   node: ts.TypeNode,
   sourceFile: ts.SourceFile,
+  afterHook = false,
 ): ParsedModelHook | null {
   const literal = literalStringType(node)
   if (literal !== null) {
@@ -2528,6 +2534,7 @@ function parseModelHookValue(
   let fn: string | undefined
   let timeout: number | undefined
   let onUnavailable: "reject" | "log" | undefined
+  let allColumns = false
 
   for (const member of node.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue
@@ -2540,6 +2547,8 @@ function parseModelHookValue(
     } else if (key === "onUnavailable") {
       const value = literalStringType(member.type)
       if (value === "reject" || value === "log") onUnavailable = value
+    } else if (key === "columns") {
+      allColumns = afterHook && literalStringType(member.type) === "all"
     }
   }
 
@@ -2548,6 +2557,7 @@ function parseModelHookValue(
     function: fn,
     ...(timeout !== undefined && { timeout }),
     ...(onUnavailable !== undefined && { onUnavailable }),
+    ...(allColumns && { columns: "all" as const }),
   }
 }
 

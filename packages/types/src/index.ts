@@ -1181,22 +1181,27 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
    * also generates a typed handler signature per hooked model, so `row` is the model's real
    * column set rather than `unknown`.
    *
-   * **A hook is not a security boundary.** It fires for every write through the API, including
-   * one made with the `service_role` key: that key changes what Postgres permits, not whether the
-   * hook runs. Direct SQL, seeds and migrations do not go through the API and bypass it.
-   * Invariants belong in {@link ModelMeta.access}, a `CHECK`, or a generated column, all of which
-   * apply to every writer. A hook is for the work that is genuinely application logic: enrichment,
-   * notification, indexing, a validation the database cannot express.
+   * **A before-hook is not a security boundary.** `beforeChange` and `beforeDelete` fire for every
+   * write through the API, including one made with the `service_role` key, but direct SQL, seeds
+   * and migrations do not go through the API and bypass them. Invariants belong in
+   * {@link ModelMeta.access}, a `CHECK`, or a generated column, all of which apply to every writer.
+   * A hook is for the work that is genuinely application logic: enrichment, notification,
+   * indexing, a validation the database cannot express.
    *
    * `beforeChange` and `beforeDelete` are called before the write reaches Postgres and can
    * reject it (any `4xx` from the function) or replace its body. `afterChange` and
-   * `afterDelete` run once the write has succeeded and cannot change it.
+   * `afterDelete` run once the write has committed and cannot change it. Where the database has
+   * logical replication they are fed from its change log, so they see every writer (API, Studio,
+   * SQL, functions) except seeds, and may be delivered more than once.
+   *
+   * An after-hook's rows leave out every column with a field `read` rule unless it declares
+   * `columns: "all"`, so a hook forwarding a row cannot leak a column its reader could not see.
    */
   hooks?: {
-    readonly beforeChange?: ModelHook
-    readonly afterChange?: ModelHook
-    readonly beforeDelete?: ModelHook
-    readonly afterDelete?: ModelHook
+    readonly beforeChange?: BeforeModelHook
+    readonly afterChange?: AfterModelHook
+    readonly beforeDelete?: BeforeModelHook
+    readonly afterDelete?: AfterModelHook
   }
 
   /**
@@ -1412,6 +1417,21 @@ export type ModelHookOptions = {
    * writes through) and `"log"` after one (the write already happened; there is nothing to fail).
    */
   readonly onUnavailable?: "reject" | "log"
+}
+
+/** A before-hook: it sees the request, not the stored row, so it has no `columns` to choose. */
+export type BeforeModelHook = string | (ModelHookOptions & { readonly columns?: never })
+
+/** An after-hook: a function name, or that name with per-hook options. */
+export type AfterModelHook = string | AfterModelHookOptions
+
+export type AfterModelHookOptions = ModelHookOptions & {
+  /**
+   * Which columns the hook's rows carry. `"safe"` (the default) leaves out every column with a
+   * field `read` rule; `"all"` keeps them. Opt in only for a hook that needs a restricted column
+   * and will not pass it on to someone who could not read it.
+   */
+  readonly columns?: "safe" | "all"
 }
 
 /** Shorthand for singleton globals, `Model<Fields, GlobalMeta<Fields>>`. */

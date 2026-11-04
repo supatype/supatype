@@ -45,6 +45,9 @@ export const OWNERSHIP_FEATURES = [
   // Not an ownership flag: a field's `identity` / `generated` (identity-contract). An engine without
   // it ignores both and makes a plain column, so a schema declaring either is refused instead.
   "identity_columns",
+  // Not an ownership flag either: a push whose data migrations fire after-hooks (`push --run-hooks`).
+  // An engine without it would reject the flag as an unknown argument.
+  "run_hooks",
 ] as const
 
 export type OwnershipFeature = (typeof OWNERSHIP_FEATURES)[number]
@@ -86,6 +89,9 @@ export function adoptNeeds(opts: {
 
 /** What putting back access changed outside Supatype needs (`--overwrite-drift`, or a yes to it). */
 export const OVERWRITE_DRIFT_NEED: FeatureNeed = { feature: "overwrite_drift", flag: "--overwrite-drift" }
+
+/** What firing after-hooks for a push's own data migrations needs (`push --run-hooks`). */
+export const RUN_HOOKS_NEED: FeatureNeed = { feature: "run_hooks", flag: "--run-hooks" }
 
 /**
  * What a rebaseline needs to record only the drift its preview showed. An engine or server without

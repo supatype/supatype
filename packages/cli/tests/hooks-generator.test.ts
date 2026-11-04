@@ -38,6 +38,41 @@ function astFor(schema: string): unknown {
   return extractSchemaAstFromTypes(schemaPath, dir)
 }
 
+/**
+ * What tsc prints for the generated `module` beside `handler`, in a project set up the way a hook's
+ * is: a `deno.d.ts` for `Deno.env` (which `supatype functions new` writes) and strict options.
+ */
+function compileWithHandler(
+  module: string | null,
+  handler: string,
+  options: { exactOptionalPropertyTypes?: boolean } = {},
+): string {
+  expect(module).not.toBeNull()
+  const dir = mkdtempSync(join(tmpdir(), "supatype-hookscompile-"))
+  dirs.push(dir)
+  writeFileSync(join(dir, "hooks.ts"), module ?? "", "utf8")
+  writeFileSync(join(dir, "deno.d.ts"), DENO_ENV, "utf8")
+  writeFileSync(join(dir, "handler.ts"), handler, "utf8")
+  const compilerOptions = {
+    strict: true,
+    exactOptionalPropertyTypes: options.exactOptionalPropertyTypes ?? true,
+    noEmit: true,
+    target: "ES2022",
+    module: "Preserve",
+    moduleResolution: "bundler",
+    allowImportingTsExtensions: true,
+    lib: ["ES2022", "DOM"],
+    types: [],
+  }
+  writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions, include: ["*.ts"] }), "utf8")
+  return tscOutput(dir)
+}
+
+const DENO_ENV = `declare namespace Deno {
+  const env: { get(key: string): string | undefined }
+}
+`
+
 const HOOKED_SCHEMA = `
 import type { Block, Blocks, Button, Model, Optional, RichText, Timestamp, UUID } from "@supatype/types"
 
@@ -95,28 +130,10 @@ describe("the generated module compiles", () => {
    * file is imported by their hook, so a broken emit breaks their function rather than our build.
    */
   it("typechecks under strict mode, together with a handler that uses it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "supatype-hookscompile-"))
-    dirs.push(dir)
-
-    const module = generateHooksModule(astFor(HOOKED_SCHEMA))
-    expect(module).not.toBeNull()
-    writeFileSync(join(dir, "hooks.ts"), module ?? "", "utf8")
-
-    // `supatype functions new` writes a `functions/deno.d.ts`, which is where a real project gets
-    // this. The generated module uses `Deno.env` to find the API, so the fixture needs it too.
-    writeFileSync(
-      join(dir, "deno.d.ts"),
-      `declare namespace Deno {
-  const env: { get(key: string): string | undefined }
-}
-`,
-      "utf8",
-    )
-
     // A handler written the way the docs will show it, including the narrowing that the
     // discriminated union is there to provide.
-    writeFileSync(
-      join(dir, "handler.ts"),
+    const output = compileWithHandler(
+      generateHooksModule(astFor(HOOKED_SCHEMA)),
       `import { hook, type AfterDelete, type BeforeChange } from "./hooks.ts"
 
 const moderate: BeforeChange<"posts"> = async (ctx) => {
@@ -131,83 +148,125 @@ const moderate: BeforeChange<"posts"> = async (ctx) => {
 }
 
 const purge: AfterDelete<"posts"> = async (ctx) => {
-  void ctx.filter
+  for (const row of ctx.old) void row.title
+  void ctx.deliveryId
 }
 
 export default hook(moderate)
 export const alsoPurge = hook(purge)
 `,
-      "utf8",
     )
-
-    writeFileSync(
-      join(dir, "tsconfig.json"),
-      JSON.stringify({
-        compilerOptions: {
-          strict: true,
-          exactOptionalPropertyTypes: true,
-          noEmit: true,
-          target: "ES2022",
-          module: "Preserve",
-          moduleResolution: "bundler",
-          allowImportingTsExtensions: true,
-          lib: ["ES2022", "DOM"],
-          types: [],
-        },
-        include: ["*.ts"],
-      }),
-      "utf8",
-    )
-
-    const output = tscOutput(dir)
     expect(output).toBe("")
   })
 
   it("rejects a handler for a table that declares no hook", () => {
     // The point of `HookedTable`: naming an unhooked table must not silently produce a handler that
     // never runs.
-    const dir = mkdtempSync(join(tmpdir(), "supatype-hooksneg-"))
-    dirs.push(dir)
-    writeFileSync(join(dir, "hooks.ts"), generateHooksModule(astFor(HOOKED_SCHEMA)) ?? "", "utf8")
-    // `supatype functions new` writes a `functions/deno.d.ts`, which is where a real project gets
-    // this. The generated module uses `Deno.env` to find the API, so the fixture needs it too.
-    writeFileSync(
-      join(dir, "deno.d.ts"),
-      `declare namespace Deno {
-  const env: { get(key: string): string | undefined }
-}
-`,
-      "utf8",
-    )
-
-    writeFileSync(
-      join(dir, "handler.ts"),
+    const output = compileWithHandler(
+      generateHooksModule(astFor(HOOKED_SCHEMA)),
       `import type { BeforeChange } from "./hooks.ts"
 const nope: BeforeChange<"comments"> = async () => ({})
 export default nope
 `,
-      "utf8",
+      { exactOptionalPropertyTypes: false },
     )
-    writeFileSync(
-      join(dir, "tsconfig.json"),
-      JSON.stringify({
-        compilerOptions: {
-          strict: true,
-          noEmit: true,
-          target: "ES2022",
-          module: "Preserve",
-          moduleResolution: "bundler",
-          allowImportingTsExtensions: true,
-          lib: ["ES2022", "DOM"],
-          types: [],
-        },
-        include: ["*.ts"],
-      }),
-      "utf8",
-    )
-
-    const output = tscOutput(dir)
     expect(output).toContain("comments")
+  })
+})
+
+describe("after-hook rows", () => {
+  const RESTRICTED_SCHEMA = `
+import type { LoggedIn, Model, Public, Role, UUID } from "@supatype/types"
+
+export type Post = Model<{ id: UUID; title: string; secretNote: string }, {
+  tableName: "posts"
+  access: { read: Public; create: LoggedIn; fields: { secretNote: { read: Role<"admin"> } } }
+  hooks: { afterChange: "notify"; afterDelete: { function: "audit"; columns: "all" } }
+}>
+`
+
+  it("gives afterChange its rows always, the old rows on update, and a delivery id", () => {
+    const output = compileWithHandler(
+      generateHooksModule(astFor(RESTRICTED_SCHEMA)),
+      `import { hook, type AfterChange } from "./hooks.ts"
+
+const notify: AfterChange<"posts"> = async (ctx) => {
+  const titles: string[] = ctx.rows.map((r) => r.title)
+  const key: string = ctx.deliveryId
+  if (ctx.operation === "update") {
+    const before: string[] = ctx.old.map((r) => r.title)
+    void before
+  }
+  void titles
+  void key
+}
+
+export default hook(notify)
+`,
+    )
+    expect(output).toBe("")
+  })
+
+  it("leaves a restricted column out of a hook that did not ask for every column", () => {
+    const output = compileWithHandler(
+      generateHooksModule(astFor(RESTRICTED_SCHEMA)),
+      `import type { AfterChange } from "./hooks.ts"
+
+const notify: AfterChange<"posts"> = async (ctx) => {
+  void ctx.rows[0]?.secretNote
+}
+
+export default notify
+`,
+    )
+    expect(output).toContain("secretNote")
+  })
+
+  it("has no old rows on an insert", () => {
+    const output = compileWithHandler(
+      generateHooksModule(astFor(RESTRICTED_SCHEMA)),
+      `import type { AfterChange } from "./hooks.ts"
+
+const notify: AfterChange<"posts"> = async (ctx) => {
+  if (ctx.operation === "insert") void ctx.old
+}
+
+export default notify
+`,
+    )
+    expect(output).toContain("old")
+  })
+
+  it("keeps a restricted column for a hook that declared columns: all", () => {
+    const output = compileWithHandler(
+      generateHooksModule(astFor(RESTRICTED_SCHEMA)),
+      `import type { AfterDelete } from "./hooks.ts"
+
+const audit: AfterDelete<"posts"> = async (ctx) => {
+  const notes: string[] = ctx.old.map((r) => r.secretNote)
+  void notes
+}
+
+export default audit
+`,
+    )
+    expect(output).toBe("")
+  })
+
+  it("passes the old rows and the delivery id from the payload to the handler", () => {
+    const module = generateHooksModule(astFor(RESTRICTED_SCHEMA)) ?? ""
+    expect(module).toContain('...(wire["old"] !== undefined && { old: wire["old"] })')
+    expect(module).toContain('...(deliveryId !== undefined && { deliveryId })')
+  })
+
+  // One call per transaction, table and operation: the comments are what a handler author reads to
+  // know that, and that `old[i]` is the row `rows[i]` was.
+  it("says what one call holds and how its delivery id is built", () => {
+    const module = generateHooksModule(astFor(RESTRICTED_SCHEMA)) ?? ""
+    expect(module).toContain("one transaction")
+    expect(module).toContain("`old[i]` is `rows[i]` as it was")
+    expect(module).toContain("`commitLSN:schema.table:operation`")
+    expect(module).toContain("in the JSON shape PostgREST returns")
   })
 })
 
@@ -235,21 +294,8 @@ export type Product = Model<{
   })
 
   it("typechecks with a validator written the way the docs will show it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "supatype-validatorcompile-"))
-    dirs.push(dir)
-
-    const module = generateHooksModule(astFor(VALIDATED_SCHEMA))
-    writeFileSync(join(dir, "hooks.ts"), module ?? "", "utf8")
-    writeFileSync(
-      join(dir, "deno.d.ts"),
-      `declare namespace Deno {
-  const env: { get(key: string): string | undefined }
-}
-`,
-      "utf8",
-    )
-    writeFileSync(
-      join(dir, "handler.ts"),
+    const output = compileWithHandler(
+      generateHooksModule(astFor(VALIDATED_SCHEMA)),
       `import { fieldValidator, type FieldValidator } from "./hooks.ts"
 
 // The value is the column's real type, so this narrows without a cast.
@@ -262,27 +308,7 @@ const checkItems: FieldValidator<"product", "setupItems"> = (ctx) => {
 
 export default fieldValidator(checkItems)
 `,
-      "utf8",
     )
-    writeFileSync(
-      join(dir, "tsconfig.json"),
-      JSON.stringify({
-        compilerOptions: {
-          strict: true,
-          exactOptionalPropertyTypes: true,
-          noEmit: true,
-          target: "ES2022",
-          module: "ESNext",
-          moduleResolution: "Bundler",
-          allowImportingTsExtensions: true,
-          lib: ["ES2022", "DOM"],
-        },
-        include: ["*.ts"],
-      }),
-      "utf8",
-    )
-
-    const output = tscOutput(dir)
     expect(output, "the generated validator surface must compile").toBe("")
   })
 })

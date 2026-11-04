@@ -13,6 +13,12 @@ import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cac
 import { adoptionKey } from "../adopt-walkthrough.js"
 import { REBASELINE_KEYS_NEED } from "../engine-ownership-gate.js"
 import { explainingRefusal } from "../push-refusal.js"
+import { loadProjectLink } from "../link.js"
+import { isAfterHookEvent } from "../hook-columns.js"
+import type { CheckResult } from "../db-preflight.js"
+import { afterHooksHealthLines, DB_CHECK_HINT, readAfterHooksHealth, type AfterHooksHealth } from "../after-hooks-health.js"
+import { errorMessage } from "../error-message.js"
+import type { SupatypeProjectConfig } from "../config.js"
 
 /**
  * The engine's reconcile, sorted for an operator. The optional categories arrived with the
@@ -215,9 +221,13 @@ async function doctor(opts: DoctorOptions): Promise<void> {
     ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const, REBASELINE_KEYS_NEED] : []),
     ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
   ])
+  const hooks = hooksReport(cwd, hooksPathFromProject(config, cwd), ast)
+  // Started before the engine's reconcile so the two round trips overlap; it never rejects.
+  const afterHooksSource = declaresAfterHook(hooks) ? probeAfterHooksSource(cwd, config, opts.connection) : undefined
   const preview = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
 
-  printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
+  printHooks(hooks)
+  if (afterHooksSource !== undefined) printAfterHooksSource(await afterHooksSource)
   printServiceRoleGrants(checkServiceRoleRoutes(config, cwd), serviceRoleRoutes(config))
 
   let report: DoctorReport | undefined = preview
@@ -341,6 +351,74 @@ export function printHooks(report: HooksReport): void {
     plain("\n  .supatype/manifest.json carries no hook map, so the server has nothing to call.")
     plain("  Run: supatype push")
   }
+}
+
+/**
+ * Where after-hooks read writes from: the running server's own answer, or failing that the database's
+ * as `db check` says it, or why neither could be asked.
+ */
+export type AfterHooksProbe =
+  | { readonly checked: true; readonly health: AfterHooksHealth }
+  | { readonly checked: true; readonly source: CheckResult }
+  | { readonly checked: false; readonly reason: string }
+
+/** Whether the schema declares an after-hook, the only kind whose source depends on the database. */
+export function declaresAfterHook(report: HooksReport): boolean {
+  return report.declared.some((hook) => isAfterHookEvent(hook.event))
+}
+
+/**
+ * Ask the project's running server, whose listener delivers the hooks, and only when no server
+ * answers ask the database doctor can reach from here, the same probe `db check` runs. A linked
+ * project's database is not this machine's to probe, so it is pointed at `db check` instead.
+ */
+export async function probeAfterHooksSource(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  connection: string | undefined,
+): Promise<AfterHooksProbe> {
+  try {
+    // Inside the try: a link file that cannot be read is a reason to give, not a rejection, since
+    // doctor awaits this only after its engine round trip.
+    if (connection === undefined && loadProjectLink(cwd) !== null) {
+      return { checked: false, reason: "this project is linked, and its database is not reachable from here" }
+    }
+    // Loaded here, not at the top: only a schema with an after-hook needs any of this.
+    const { resolveHostDatabaseUrl } = await import("../host-database.js")
+    const { projectStackUrl } = await import("../local-stack.js")
+    const { dsn } = resolveHostDatabaseUrl(cwd, config, { connection, allowDerived: true })
+    const stackUrl = projectStackUrl(cwd, config, dsn)
+    const health = stackUrl === undefined ? undefined : await readAfterHooksHealth(stackUrl)
+    if (health !== undefined) return { checked: true, health }
+    const { afterHooksSourceCheck, logicalDecodingChecks } = await import("../db-preflight.js")
+    return { checked: true, source: afterHooksSourceCheck(await logicalDecodingChecks(dsn)) }
+  } catch (err) {
+    return { checked: false, reason: errorMessage(err) }
+  }
+}
+
+/**
+ * Whether after-hooks run from the change log, which sees every writer, or fall back to the request
+ * path, which sees only writes through the API. Nothing fails either way, so the difference is
+ * invisible until a write made in SQL fires no hook: the kind of silence doctor is for. Without a
+ * server's answer, worded as `db check` words it, from the same check.
+ */
+export function printAfterHooksSource(outcome: AfterHooksProbe): void {
+  plain("\nAfter-hooks source:\n")
+  if (!outcome.checked) {
+    plain(`  Could not tell: ${outcome.reason}.`)
+    plain("  Run: supatype db check --connection <url>")
+    return
+  }
+  if ("health" in outcome) {
+    for (const line of afterHooksHealthLines(outcome.health)) plain(line)
+    return
+  }
+  const { severity, detail, impact } = outcome.source
+  plain(`  ${severity === "pass" ? "•" : "✗"} ${detail}`)
+  if (impact === undefined) return
+  plain(`  ${impact}`)
+  plain(DB_CHECK_HINT)
 }
 
 /**

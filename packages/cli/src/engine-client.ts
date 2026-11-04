@@ -570,6 +570,8 @@ export function endpointToArgs(
   // Plan 3.5: put back access changed outside Supatype. The CLI sets it only after a person said
   // yes to the difference, or when `--overwrite-drift` was passed.
   const overwriteDrift = body["overwrite_drift"] === true ? ["--overwrite-drift"] : []
+  // `push --run-hooks`: the push's data migrations fire after-hooks rather than being marked skipped.
+  const runHooks = body["run_hooks"] === true ? ["--run-hooks"] : []
 
   switch (endpoint) {
     case "/diff":
@@ -590,6 +592,7 @@ export function endpointToArgs(
         // nothing and abort. The CLI asks the person, and sends `force` only after a yes.
         "--non-interactive",
         ...overwriteDrift,
+        ...runHooks,
         ...sourceArgs,
         // Only in a body `enginePush` built for an engine that records them.
         ...auditFlags(body),

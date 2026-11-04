@@ -76,6 +76,7 @@ export interface HookTables {
       authorName?: string | null
       created_at?: string
     }
+    AfterHookHidden: { afterChange: never; afterDelete: never }
   }
   "talk": {
     Row: {
@@ -126,6 +127,7 @@ export interface HookTables {
       created_at?: string
       updated_at?: string
     }
+    AfterHookHidden: { afterChange: never; afterDelete: never }
   }
 }
 
@@ -134,7 +136,10 @@ export type HookedTable = keyof HookTables & string
 
 interface HookBase {
   readonly table: string
-  /** Claims from the JWT the server already verified. `null` for an anonymous caller. */
+  /**
+   * Claims from the JWT the server already verified. `null` for an anonymous caller, and for an
+   * after-hook on a write made outside the API (SQL, a migration), which has no caller.
+   */
   readonly user: { readonly sub: string; readonly role: string; readonly email?: string } | null
   /** Correlates this hook with the request in server logs. */
   readonly requestId: string
@@ -170,15 +175,54 @@ export type BeforeDeleteContext<T extends HookedTable> = HookBase & {
   readonly previous: PreviousRows<T>
 }
 
-export type AfterChangeContext<T extends HookedTable> = HookBase & {
-  readonly operation: "insert" | "update"
-  /** Written rows: present only when the caller sent `Prefer: return=representation`. */
-  readonly rows?: HookTables[T]["Row"][]
+/**
+ * A row as an after-hook receives it: every column with a field `read` rule is left out, unless
+ * the hook declared `columns: "all"`.
+ */
+export type AfterChangeRow<T extends HookedTable> = Omit<
+  HookTables[T]["Row"],
+  HookTables[T]["AfterHookHidden"]["afterChange"]
+>
+export type AfterDeleteRow<T extends HookedTable> = Omit<
+  HookTables[T]["Row"],
+  HookTables[T]["AfterHookHidden"]["afterDelete"]
+>
+
+/**
+ * An after-hook runs once the write has committed, for every writer: the API, Studio, SQL and
+ * functions alike. One call carries every row one transaction changed in one table with one
+ * operation, so a bulk insert arrives as a single call.
+ *
+ * Values are in the JSON shape PostgREST returns for the same row.
+ *
+ * Delivery is at least once, so the same call can arrive twice.
+ */
+interface AfterHookBase extends HookBase {
+  /**
+   * `commitLSN:schema.table:operation`: the same for every delivery of one call. Keep the ones you
+   * have handled and drop a repeat.
+   */
+  readonly deliveryId: string
 }
 
-export type AfterDeleteContext<T extends HookedTable> = HookBase & {
+export type AfterChangeContext<T extends HookedTable> =
+  | (AfterHookBase & {
+      readonly operation: "insert"
+      /** Every row the transaction inserted into this table. */
+      readonly rows: AfterChangeRow<T>[]
+    })
+  | (AfterHookBase & {
+      readonly operation: "update"
+      /** Every row the transaction updated in this table, as it is now. */
+      readonly rows: AfterChangeRow<T>[]
+      /** Aligned by index: `old[i]` is `rows[i]` as it was before the update. */
+      readonly old: AfterChangeRow<T>[]
+    })
+
+export type AfterDeleteContext<T extends HookedTable> = AfterHookBase & {
   readonly operation: "delete"
-  readonly filter: string
+  /** Every row the transaction deleted from this table, as it was. */
+  readonly old: AfterDeleteRow<T>[]
 }
 
 /** Reject with a message, or with a status of your choosing. */
@@ -316,16 +360,20 @@ type AnyHandler = (ctx: never) => unknown
  * A hook's context from the server's payload. `previousPath` is the server callback **path** for
  * pre-write rows, absent when there are none to fetch: a path rather than a URL because the server
  * does not know its own in-network address, while this worker is already told how to reach the stack.
+ * `old` and `deliveryId` come only to an after-hook.
  */
 function hookContext(wire: Record<string, unknown>, signature: string | null): Record<string, unknown> {
   const filter = text(wire, "filter")
   const previousPath = text(wire, "previousPath")
+  const deliveryId = text(wire, "deliveryId")
   return {
     table: text(wire, "table") ?? "",
     operation: text(wire, "operation") ?? "",
     user: wire["user"] ?? null,
     requestId: text(wire, "requestId") ?? "",
+    ...(deliveryId !== undefined && { deliveryId }),
     ...(wire["rows"] !== undefined && { rows: wire["rows"] }),
+    ...(wire["old"] !== undefined && { old: wire["old"] }),
     ...(wire["patch"] !== undefined && { patch: wire["patch"] }),
     ...(filter !== undefined && { filter }),
     ...(previousPath !== undefined && { previous: () => fetchPrevious(previousPath, signature) }),

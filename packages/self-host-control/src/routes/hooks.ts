@@ -6,8 +6,8 @@
  * `supatype push` to a linked self-host stack sends this after the schema is applied, with the body
  * it sends Cloud (`HookDeployBody`, @supatype/shared): `handlers`, each a name and its flattened
  * source, the generated adapter among them as `_supatype-hooks`; `map`, the hook map; and the
- * manifest's other two maps, `validators` (the functions a field's validator names travel with the
- * handlers) and `cache`.
+ * manifest's other maps, `validators` (the functions a field's validator names travel with the
+ * handlers), `cache` and `tables` (each hooked table's after-hook columns and key).
  *
  * The stack's worker serves hooks from the project's hooks directory (SUPATYPE_HOOKS_ROOT), and the
  * server reads which hook or validator runs around a write, and what may be cached, from the
@@ -30,10 +30,13 @@ import {
   isCacheMap,
   isHookDeployBody,
   isHookMap,
+  isTableMap,
   parseJsonObject,
   unflattenHookSource,
   type CacheMap,
+  type HookDeployBody,
   type HookMap,
+  type TableMap,
 } from "@supatype/shared"
 import { badRequest, bodyOf, HttpError, route } from "../http.js"
 import type { RouteHandler } from "../http.js"
@@ -62,16 +65,20 @@ function checkedHookMap(map: unknown, key: "map" | "validators"): HookMap {
   return map
 }
 
-/** The body's three maps, each checked; a map not sent is undefined and left as the manifest has it. */
-function checkedMaps(body: { map?: unknown; validators?: unknown; cache?: unknown }): {
+/** The body's maps, each checked; a map not sent is undefined and left as the manifest has it. */
+function checkedMaps(body: Pick<HookDeployBody, "map" | "validators" | "cache" | "tables">): {
   hooks: HookMap
   validators: HookMap | undefined
   cache: CacheMap | undefined
+  tables: TableMap | undefined
 } {
   const hooks = checkedHookMap(body.map ?? {}, "map")
   const validators = body.validators === undefined ? undefined : checkedHookMap(body.validators, "validators")
   if (body.cache !== undefined && !isCacheMap(body.cache)) throw badRequest("cache must be table to its settings: enabled, public, rows, maxTtl")
-  return { hooks, validators, cache: body.cache }
+  if (body.tables !== undefined && !isTableMap(body.tables)) {
+    throw badRequest('tables must be table to its after-hook columns ("safe" or "all"), restrictedColumns and primaryKey')
+  }
+  return { hooks, validators, cache: body.cache, tables: body.tables }
 }
 
 /** The functions the maps call that were not uploaded, so a map never names a missing handler. */

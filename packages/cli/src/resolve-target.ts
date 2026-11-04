@@ -56,7 +56,9 @@ import {
   engineCapabilities,
   identityColumnsNeed,
   serverAnswerCapabilities,
+  OVERWRITE_DRIFT_NEED,
   REBASELINE_KEYS_NEED,
+  RUN_HOOKS_NEED,
   type Capabilities,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
@@ -473,20 +475,26 @@ export async function targetSchemaPush(
     schemaSources?: SchemaSourcesPayload | null
     /** Put back access changed outside Supatype (plan 3.5); only after consent. */
     overwriteDrift?: boolean
+    /** `push --run-hooks`: the push's data migrations fire after-hooks rather than being skipped. */
+    runHooks?: boolean
   },
 ): Promise<EnginePushResult> {
   const overwriteDrift = opts.overwriteDrift === true
+  const runHooks = opts.runHooks === true
   await requireTargetFeatures(target, [
-    ...(overwriteDrift ? [{ feature: "overwrite_drift" as const, flag: "--overwrite-drift" }] : []),
+    ...(overwriteDrift ? [OVERWRITE_DRIFT_NEED] : []),
+    ...(runHooks ? [RUN_HOOKS_NEED] : []),
     ...identityColumnsNeed(ast),
   ])
+  // The engine's own names, which a control plane forwards as they are.
+  const flags = { ...(overwriteDrift && { overwrite_drift: true }), ...(runHooks && { run_hooks: true }) }
   if (runsEngineHere(target)) {
     const body: Record<string, unknown> = {
       ast,
       database_url: target.databaseUrl!,
       schema: opts.schema ?? "public",
       force: opts.force ?? true,
-      ...(overwriteDrift && { overwrite_drift: true }),
+      ...flags,
     }
     if (opts.schemaSources) {
       body["schema_sources_gz_base64"] = opts.schemaSources.dataBase64
@@ -500,8 +508,7 @@ export async function targetSchemaPush(
     ast,
     force: opts.force ?? true,
     schema: opts.schema ?? "public",
-    // The engine's own name, which a control plane forwards as it is.
-    ...(overwriteDrift && { overwrite_drift: true }),
+    ...flags,
     // Who is pushing. A control plane records the identity it authenticated instead.
     ...pushAuditFields(opts.cwd),
   }

@@ -397,6 +397,28 @@ describe("hooks deploy route", () => {
     assert.deepEqual(tree(tmp), before)
   })
 
+  // The after-hook listener reads each hooked table's columns and key from a map beside `hooks`.
+  const TABLES = { note: { columns: { afterChange: "all", afterDelete: "safe" }, restrictedColumns: ["secret"], primaryKey: ["id"] } }
+
+  test("writes the table map beside the hook map", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [TAG_NOTE, ADAPTER], map: MAP, tables: TABLES })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    const written = manifest(projectDir)
+    assert.deepEqual(written["tables"], TABLES)
+    assert.deepEqual(written["hooks"], MAP)
+  })
+
+  test("refuses a table map whose entries are not the manifest's", async () => {
+    const before = tree(tmp)
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, {
+      handlers: [],
+      map: {},
+      tables: { note: { columns: { afterChange: "every" }, restrictedColumns: [], primaryKey: [] } },
+    })
+    assert.equal(res.status, 400)
+    assert.deepEqual(tree(tmp), before)
+  })
+
   test("refuses a cache map whose settings are not the manifest's", async () => {
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/hooks/deploy`, { handlers: [], map: {}, cache: { note: { maxTtl: "60" } } })
     assert.equal(res.status, 400)

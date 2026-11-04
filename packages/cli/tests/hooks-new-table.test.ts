@@ -40,6 +40,18 @@ export type BlogPost = Model<{ id: UUID }, { tableName: "posts"; hooks: { afterC
     await runCommand(registerHooks, ["hooks", "new", "index-post"], project.dir)
     expect(handlerOf("index-post")).toContain(`AfterChange<"posts">`)
   })
+
+  it("types an afterDelete hook as one, since its context carries old rows and no new ones", async () => {
+    writeFileSync(join(project.dir, "schema", "index.ts"), `import type { Model, UUID } from "@supatype/types"
+export type BlogPost = Model<{ id: UUID }, { tableName: "posts"; hooks: { afterDelete: "purge-post" } }>
+`)
+    await runCommand(registerHooks, ["hooks", "new", "purge-post"], project.dir)
+    const handler = handlerOf("purge-post")
+    expect(handler).toContain(`AfterDelete<"posts">`)
+    expect(handler).not.toContain("AfterChange")
+    // Delivery is at least once, so the scaffold says how to drop a repeat.
+    expect(handler).toContain("ctx.deliveryId")
+  })
 })
 
 // Local test round 6c, N30: a hook made before any model named it imports `../_supatype/hooks.ts`,

@@ -15,6 +15,7 @@ import { discoverHandlersInDir } from "./functions-discovery.js"
 import { manifestCache } from "./model-cache.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
+import { hookTableColumns } from "./hook-columns.js"
 import { applyManifestMaps, isJsonObject, keptName, type ManifestHookEntry, type ManifestMaps } from "@supatype/shared"
 
 export interface DeclaredHook {
@@ -191,9 +192,18 @@ function writeModule(cwd: string, file: string, module: string): string {
   return relative(cwd, file) || file
 }
 
-/** The manifest's three maps for `ast`: what a local push writes and a linked push sends. */
+/**
+ * The manifest's maps for `ast`: what a local push writes and a linked push sends. `tables` holds
+ * each hooked table's after-hook columns and key, beside `hooks` rather than inside it, because a
+ * released server reads every key of a `hooks` table entry as an event.
+ */
 export function manifestMaps(ast: unknown): ManifestMaps {
-  return { hooks: manifestHooks(ast), validators: manifestValidators(ast), cache: manifestCache(ast) }
+  return {
+    hooks: manifestHooks(ast),
+    validators: manifestValidators(ast),
+    cache: manifestCache(ast),
+    tables: hookTableColumns(ast),
+  }
 }
 
 /**

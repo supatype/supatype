@@ -161,6 +161,12 @@ describe("CLI binary (requires built dist/)", () => {
     }
   })
 
+  it("push --help shows --run-hooks", () => {
+    const { stdout, exitCode } = runCli(["push", "--help"])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("--run-hooks")
+  })
+
   it("self-host compose --help shows compose subcommands", () => {
     const { stdout, exitCode } = runCli(["self-host", "compose", "--help"])
     expect(exitCode).toBe(0)

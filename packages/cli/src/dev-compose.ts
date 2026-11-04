@@ -839,6 +839,8 @@ async function writeDevSeedBuilder(
 export interface ComposePushOptions {
   /** `--overwrite-drift`: put back access changed outside Supatype (plan 3.5). */
   overwriteDrift?: boolean
+  /** `push --run-hooks`: the push's data migrations fire after-hooks, rather than being skipped. */
+  runHooks?: boolean
   /**
    * Apply a change that drops data. Only after a person agreed to it, through
    * `pushConsentingToDestructive`: without it the engine refuses, which is what keeps a rename it
@@ -948,6 +950,7 @@ async function applyViaHostEngine(
     schema: pgSchema(config),
     force: opts.force === true,
     ...(opts.overwriteDrift === true && { overwrite_drift: true }),
+    ...(opts.runHooks === true && { run_hooks: true }),
     ...(sources !== null && {
       schema_sources_gz_base64: sources.payload.dataBase64,
       schema_sources_manifest: sources.payload.manifest,
@@ -1191,6 +1194,7 @@ export function composeEnginePushArgs(
   if (opts.force === true) args.push("--force")
   // Only when asked: an engine older than the ledger rejects the flag.
   if (opts.overwriteDrift === true) args.push("--overwrite-drift")
+  if (opts.runHooks === true) args.push("--run-hooks")
   if (sources) {
     args.push(
       "--schema-sources-gz",

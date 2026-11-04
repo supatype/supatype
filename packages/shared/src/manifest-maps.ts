@@ -1,6 +1,6 @@
 /**
- * The route manifest's three maps (`hooks`, `validators`, `cache`), the hook deploy body that carries
- * them to a stack, and how a hook handler is flattened for that body and put back. The CLI writes the
+ * The route manifest's maps (`hooks`, `validators`, `cache`, `tables`), the hook deploy body that
+ * carries them to a stack, and how a hook handler is flattened for that body and put back. The CLI writes the
  * maps for a local stack and sends the body to a linked one; the self-host control plane reads the
  * body and writes the same maps. Each kept its own copy of these until both drew them from here.
  */
@@ -27,11 +27,31 @@ export type HookMap = Record<string, Record<string, ManifestHookEntry>>
 /** Table to its cache declaration. */
 export type CacheMap = Record<string, ManifestCacheEntry>
 
-/** The manifest's three maps, keyed as the manifest keys them. */
+/** Which columns an after-hook's rows carry: `"safe"` leaves out restricted columns, `"all"` keeps them. */
+export type AfterHookColumns = "safe" | "all"
+
+/**
+ * One hooked table, as the after-hook listener reads it: what each after-hook's rows carry (a
+ * missing event means `"safe"`), the columns with a field `read` rule, and the key columns in order.
+ *
+ * A map of its own beside `hooks` rather than keys inside a `hooks` table entry, because a released
+ * server reads every key of such an entry as a hook event and would refuse the whole manifest.
+ */
+export interface ManifestTableEntry {
+  columns: { afterChange?: AfterHookColumns; afterDelete?: AfterHookColumns }
+  restrictedColumns: string[]
+  primaryKey: string[]
+}
+
+/** Table to its after-hook column settings and key. */
+export type TableMap = Record<string, ManifestTableEntry>
+
+/** The manifest's maps, keyed as the manifest keys them. */
 export interface ManifestMaps {
   hooks: HookMap
   validators: HookMap
   cache: CacheMap
+  tables: TableMap
 }
 
 const isHookEntry = isShape({
@@ -48,11 +68,23 @@ export const isCacheMap = isRecordOf(
   isShape({ enabled: optional(isBoolean), public: optional(isBoolean), rows: optional(isBoolean), maxTtl: optional(isNumber) }),
 )
 
+const isAfterHookColumns = optional(isOneOf(["safe", "all"]))
+
+/** A table map: each entry's columns per after-hook, restricted columns and key, each of its type. */
+export const isTableMap = isRecordOf(
+  isShape({
+    columns: isShape({ afterChange: isAfterHookColumns, afterDelete: isAfterHookColumns }),
+    restrictedColumns: isArrayOf(isString),
+    primaryKey: isArrayOf(isString),
+  }),
+)
+
 const HOOK_DEPLOY_BODY = {
   handlers: optional(isArrayOf(isShape({ name: isUnknown, source: isString, files: optional(isRecordOf(isString)) }))),
   map: optional(isUnknown),
   validators: optional(isUnknown),
   cache: optional(isUnknown),
+  tables: optional(isUnknown),
   keep: optional(isArrayOf(isString)),
 } as const
 
@@ -60,9 +92,10 @@ const HOOK_DEPLOY_BODY = {
  * `POST /projects/:ref/hooks/deploy`: `handlers`, each a name and its flattened source, the adapter
  * among them as {@link ADAPTER_NAME}, and for a hook of more than one file sent to a target that
  * takes them, `files`: every file of its directory by `/` path, as written; `map`, the hook map;
- * `validators` and `cache`, the manifest's other two maps; and `keep`, the hooks the sender could
- * not deploy (they failed its checks), whose code on the target stays exactly as it is. The maps are
- * checked with {@link isHookMap} and {@link isCacheMap} by the reader, which says which is wrong.
+ * `validators`, `cache` and `tables`, the manifest's other maps; and `keep`, the hooks the sender
+ * could not deploy (they failed its checks), whose code on the target stays exactly as it is. The
+ * maps are checked with {@link isHookMap}, {@link isCacheMap} and {@link isTableMap} by the reader,
+ * which says which is wrong.
  *
  * Each hook passes or fails on its own: a hook that fails keeps its last good version where it has
  * one, and a new one leaves the tables that map it refusing writes until it deploys. A write never

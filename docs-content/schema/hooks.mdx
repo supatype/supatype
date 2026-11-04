@@ -32,13 +32,18 @@ because of a typo would otherwise leave the write it was meant to guard succeedi
 
 Say this before anything else, because the feature invites the opposite assumption.
 
-Hooks fire for writes **through the API**. Direct SQL, `psql`, seeds and migrations bypass them
-entirely. So a hook cannot enforce an invariant; it can only enforce it for callers who arrived over
-HTTP.
+The hooks that can stop a write, `beforeChange` and `beforeDelete`, fire for writes **through the
+API**. Direct SQL, `psql`, seeds and migrations bypass them entirely. So a before-hook cannot enforce
+an invariant; it can only enforce it for callers who arrived over HTTP.
 
 The service-role key is **not** an exception. It changes what Postgres permits, not whether the API
 runs your hooks, so a service-role write over HTTP fires them like any other, including one your own
 hook makes. See [when a hook writes](#when-a-hook-writes).
+
+After-hooks are the other way round. They are fed from the database's change log, so they see
+**every** committed write whatever made it: the API, Studio, plain SQL, a function's own connection.
+That makes `afterChange` the right place for "whenever a post changes, reindex it". It still cannot
+stop anything: by the time it runs, the write has committed. See [after-hooks](#after-hooks).
 
 Invariants belong where every writer meets them:
 
@@ -58,8 +63,8 @@ validation the database has no way to express.
 |---|---|---|---|
 | `beforeChange` | before an insert or update reaches Postgres | yes | yes |
 | `beforeDelete` | before a delete reaches Postgres | yes | no |
-| `afterChange` | after a successful insert or update | no | no |
-| `afterDelete` | after a successful delete | no | no |
+| `afterChange` | after an insert or update commits, from any writer | no | no |
+| `afterDelete` | after a delete commits, from any writer | no | no |
 
 There are no read hooks. A hook on every row of every response is a latency multiplier on the hottest
 path, and hiding data is what [field access](/docs/schema/field-access.html) already does inside Postgres.
@@ -112,7 +117,7 @@ const moderate: BeforeChange<"posts"> = async (ctx) => ({})
 const reindex: AfterChange<"posts"> = async (ctx) => {
   await fetch("https://search.example.com/index", {
     method: "POST",
-    body: JSON.stringify({ table: ctx.table, rows: ctx.rows ?? [] }),
+    body: JSON.stringify({ table: ctx.table, rows: ctx.rows }),
   })
 }
 
@@ -127,10 +132,100 @@ Point each event at that same name in the schema: `hooks: { beforeChange: "post-
 A REST write is not "a row". `POST` may carry an array. `PATCH /posts?status=eq.draft` is a partial
 patch plus a filter that may match a thousand rows. `DELETE` is a filter alone.
 
-So a hook is called **once per request**, with what the request actually contains, and an update
-therefore gets a patch and a filter rather than rows. The filter is not rewritable: a hook that could
-widen `?id=eq.1` into `?id=gt.0` would turn a one-row update into a table-wide one with nothing in
-the caller's code to suggest it.
+So a before-hook is called **once per request**, with what the request actually contains, and an
+update therefore gets a patch and a filter rather than rows. The filter is not rewritable: a hook that
+could widen `?id=eq.1` into `?id=gt.0` would turn a one-row update into a table-wide one with nothing
+in the caller's code to suggest it.
+
+After-hooks run once the change is committed, so they get the rows themselves instead: see below.
+
+## After-hooks
+
+`afterChange` and `afterDelete` read committed changes from the database's change log (logical
+replication), not from the API's reply. So they fire for every writer, and the rows are always there.
+
+One call carries **every row one transaction changed in one table with one operation**. A bulk insert
+of 500 rows is one call with 500 `rows`, and a transaction that inserts into `posts` and updates
+`authors` makes one call for each.
+
+| Field | `afterChange` insert | `afterChange` update | `afterDelete` |
+|---|---|---|---|
+| `rows` | the inserted rows | the rows as they are now | none |
+| `old` | none | the same rows as they were before, `old[i]` being `rows[i]` | the deleted rows |
+| `deliveryId` | always | always | always |
+
+Values are in the **JSON shape PostgREST returns** for the same row: a timestamp is an ISO string, a
+`bigint` or `numeric` is a number, a JSON column is its JSON. So the generated row types hold, and a
+row reads the same here as in the client.
+
+`ctx.user` is the caller when the write came through the API, and `null` for a write made outside it,
+such as SQL in `psql` or a migration.
+
+```typescript
+// docs:no-check: hooks/notify-post/index.ts
+import { hook, type AfterChange } from "../_supatype/hooks.ts"
+
+const notify: AfterChange<"posts"> = async (ctx) => {
+  if (ctx.operation === "update") {
+    if (ctx.rows.every((row, i) => ctx.old[i]?.title === row.title)) return
+  }
+  await fetch("https://chat.example.com/notify", {
+    method: "POST",
+    body: JSON.stringify({ deliveryId: ctx.deliveryId, rows: ctx.rows }),
+  })
+}
+
+export default hook(notify)
+```
+
+### Delivery is at least once
+
+A call is delivered until your hook answers, with retries and backoff, and the change log only moves
+on once it has. Nothing is lost if the server restarts, but the same call can arrive **twice**. Each
+carries a `deliveryId`, `commitLSN:schema.table:operation`, the same on every delivery of that call.
+Dedupe **per call**: a hook whose effect must not repeat (an email, a charge, a counter) records the
+ids it has handled and skips one it has seen, for example with a unique key on a table of handled ids.
+A repeat repeats the whole call, every row of it, so record the id once the call's work is done, not
+per row. A hook that only overwrites something, such as a search index entry, needs nothing extra.
+
+### Restricted columns stay out
+
+The change log is not filtered by row or field rules, so the server strips columns before your hook
+sees a row: every column with a field `read` rule ([field access](/docs/schema/field-access.html)) is
+**left out** of `rows` and `old`. The generated types match, so reading one is a compile error. That
+stops a hook forwarding a row to email or chat from leaking a column its readers could never see.
+
+A hook that genuinely needs those columns opts in:
+
+```typescript
+hooks: {
+  afterChange: { function: "audit-salary", columns: "all" }
+}
+```
+
+Hooks already hold the service-role key, so this is about accidental leaks rather than privilege:
+opt in only for a hook that will not pass the column on.
+
+### Seeds and push data migrations do not fire them
+
+`supatype seed` marks its transaction so after-hooks skip it. Loading fixtures should not send a
+hundred welcome emails.
+
+A push's own data migrations (a column converted to a new type, blocks moved, rows rewritten for a
+kind change) skip them the same way, since a conversion over a whole table is not something a hook
+should hear about row by row. `supatype push --run-hooks` keeps them firing for that push.
+
+### Databases without a change log
+
+Some external Postgres cannot do logical replication (`wal_level` is not `logical`, the wal2json
+plugin is not allowed, or the server's role lacks `REPLICATION`). There, after-hooks **fall back to the
+request path**: after an API write succeeds, the server reads the written rows back as the service role,
+strips restricted columns the same way, and calls your hook. That works for every write through the
+API and **misses writes made outside it**. `supatype db check` and `supatype doctor` say which path
+your database gives you, and why.
+
+A table with an after-hook logs whole old rows to the change log (`REPLICA IDENTITY FULL`), so that
+`old` can be complete. That costs extra WAL on those tables only.
 
 ## Reading what is about to change
 
@@ -165,7 +260,8 @@ choose.
 ## Identity
 
 `ctx.user` is **already verified**: the server checked the token's signature before invoking your
-hook. `null` means an anonymous caller. That is not "no token supplied", but no *verified* subject:
+hook. `null` means an anonymous caller, or, for an after-hook, a write made outside the API. That is
+not "no token supplied", but no *verified* subject:
 
 ```typescript
 // docs:no-check
@@ -212,9 +308,8 @@ hooks: {
 that silently stopped running must not pass writes through, so the caller gets a **503** and the write
 does not happen. After: the write already happened, so there is nothing left to fail.
 
-An `after*` hook's failure never reaches the caller, and it only runs at all for a successful write.
-It sees the written rows only when the caller sent `Prefer: return=representation`, because that is
-the only case where PostgREST returned any.
+An `after*` hook's failure never reaches the caller, and it only runs at all for a committed write. A
+delivery it does not answer is retried with backoff, then logged.
 
 ## When a hook writes
 
@@ -231,20 +326,26 @@ Two consequences worth knowing:
 
 - **Fanning out is fine.** A `beforeChange` on `posts` writing an `audit_log` row whose own hook ships
   it somewhere is two levels deep and entirely normal. Only a genuine loop reaches the limit.
-- **Writing to your own table needs care.** If a hook must, do it in `afterChange` and make the write
-  idempotent, or move the change into the row you are already returning from `beforeChange`, which
-  costs no extra request at all.
+- **Writing to your own table needs care.** Prefer moving the change into the row you are already
+  returning from `beforeChange`, which costs no extra request at all.
 
 The depth travels as a header the worker attaches for you, so this holds whichever client you write
 with, and it is never sent anywhere but your own stack.
 
+An after-hook reads the change log, where every write is a new change, so an `afterChange` that
+writes to its own table is called again for its own write. Make such a write stop itself: write only
+when the value would actually change, so the second call finds nothing to do.
+
 ## What a hook costs
 
-A hooked write is **two network hops instead of one**, plus one edge-function invocation. On Supatype
-Cloud that invocation counts against your plan's function limits like any other, and the concurrency
-limit becomes a limit on concurrent writes to hooked tables: 10 on the Free plan. The default 2s
-timeout sits well below the Free plan's 10s function time limit, so a hung hook fails fast instead of
-occupying a slot.
+A write with a before-hook is **two network hops instead of one**, plus one edge-function invocation.
+On Supatype Cloud that invocation counts against your plan's function limits like any other, and the
+concurrency limit becomes a limit on concurrent writes to hooked tables: 10 on the Free plan. The
+default 2s timeout sits well below the Free plan's 10s function time limit, so a hung hook fails fast
+instead of occupying a slot.
+
+An after-hook adds nothing to the write's own latency, since it runs after commit, but each delivery
+is still a function invocation, and its table writes more WAL (see above).
 
 Hooks are worth this on the tables that need them. `hooks` on every model is an easy and expensive
 mistake.
@@ -257,5 +358,11 @@ npx supatype doctor
 ```
 
 Both list every declared hook and mark one whose handler does not exist. `doctor` also reports the
-other ways a hook can fail to fire: functions switched off in the stack, or a manifest that predates
-your hooks. Each of those failures is otherwise silent: the write simply succeeds unvalidated.
+other ways a hook can fail to fire: functions switched off in the stack, a manifest that predates
+your hooks, or after-hooks on the request path, which miss writes made outside the API. Each of those
+failures is otherwise silent: the write simply succeeds unvalidated.
+
+`doctor` asks the running server, whose listener delivers after-hooks, and warns when its slot holds
+more than 1 GiB of WAL: delivery is behind, and Postgres drops a slot that falls too far behind, after
+which the changes it had not delivered never are. `supatype db check` reports the same for any
+database you point it at.

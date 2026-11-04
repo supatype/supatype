@@ -56,7 +56,7 @@ describe("the hook deploy body", () => {
       vi.spyOn(console, "log").mockImplementation(() => undefined)
       const target = { mode, environment: "production", projectRef: "demo", apiBaseUrl: "https://stack.example.test", apiPrefix: "/platform/v1", token: "key", link: null } as const
       await deployHooksToTarget(cwd, projectConfig(), target, ast)
-      expect(sent.bodies).toEqual([{ handlers: [], map: {}, validators: {}, cache: { note: { enabled: true } } }])
+      expect(sent.bodies).toEqual([{ handlers: [], map: {}, validators: {}, cache: { note: { enabled: true } }, tables: {} }])
     })
   }
 })
@@ -82,7 +82,7 @@ describe("an empty hook deploy", () => {
   it("is sent from a fresh clone that never deployed, clearing the target's hooks", async () => {
     const cwd = project()
     expect(await deployHooksToTarget(cwd, projectConfig(), target, { models: [] })).toBe(false)
-    expect(sent.bodies).toEqual([{ handlers: [], map: {}, validators: {}, cache: {} }])
+    expect(sent.bodies).toEqual([{ handlers: [], map: {}, validators: {}, cache: {}, tables: {} }])
     expect(said.join("\n")).not.toMatch(/\d+ hook\(s\)/)
   })
 

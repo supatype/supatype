@@ -8,7 +8,7 @@ never called still counts here: proving an example *runs* is what the live-stack
 
 | Package | Exports | Imported by an example | Note |
 |---|---:|---:|---|
-| `@supatype/types` | 131 | 58 | 73 not imported |
+| `@supatype/types` | 133 | 58 | 75 not imported |
 | `@supatype/client` | 25 | 5 | 20 not imported |
 | `@supatype/react` | 12 | 9 | 3 not imported |
 | `@supatype/ssr` | 1 | 0 | 1 not imported |
@@ -26,7 +26,7 @@ Ancillary types (`…Options`, `…Result`), client-owned classes and test-only 
 excluded, because you receive those rather than reaching for them. What is left is vocabulary: each
 either deserves an example or deserves saying why not.
 
-**`@supatype/types`**: `AccessRuleFor`, `After`, `Ago`, `All`, `Asset`, `AuthRole`, `AuthUid`, `AuthUserOnDelete`, `AutoIncrement`, `Before`, `BigInt`, `BucketAccessMode`, `BucketRule`, `BucketStorageAccess`, `ButtonTarget`, `ButtonValue`, `Bytea`, `Claim`, `Code`, `Computed`, `DateTime`, `Default`, `EditorReadOnly`, `ExactInterval`, `Exists`, `FieldValidation`, `Float`, `FromNow`, `Generated`, `Geo`, `GeoShape`, `Gt`, `HasOne`, `IPAddress`, `Identity`, `IdentityMode`, `In`, `IndexMethod`, `IsNull`, `Like`, `LocalizedModel`, `Lt`, `MacAddress`, `ManyToMany`, `ModelHook`, `ModelIndex`, `Money`, `Neq`, `Not`, `OffsetBase`, `OnDelete`, `OnUpdate`, `OwnerKey`, `OwnerOf`, `PrimaryKey`, `Private`, `Publishable`, `RelationTarget`, `Rows`, `ServerDefault`, `SmallInt`, `SoftDelete`, `StartOf`, `TSQuery`, `TSVector`, `TimeInterval`, `TimeUnit`, `Timestamps`, `TruncUnit`, `Values`, `VectorDistance`, `WithPublishable`, `WithSoftDelete`
+**`@supatype/types`**: `AccessRuleFor`, `After`, `AfterModelHook`, `Ago`, `All`, `Asset`, `AuthRole`, `AuthUid`, `AuthUserOnDelete`, `AutoIncrement`, `Before`, `BeforeModelHook`, `BigInt`, `BucketAccessMode`, `BucketRule`, `BucketStorageAccess`, `ButtonTarget`, `ButtonValue`, `Bytea`, `Claim`, `Code`, `Computed`, `DateTime`, `Default`, `EditorReadOnly`, `ExactInterval`, `Exists`, `FieldValidation`, `Float`, `FromNow`, `Generated`, `Geo`, `GeoShape`, `Gt`, `HasOne`, `IPAddress`, `Identity`, `IdentityMode`, `In`, `IndexMethod`, `IsNull`, `Like`, `LocalizedModel`, `Lt`, `MacAddress`, `ManyToMany`, `ModelHook`, `ModelIndex`, `Money`, `Neq`, `Not`, `OffsetBase`, `OnDelete`, `OnUpdate`, `OwnerKey`, `OwnerOf`, `PrimaryKey`, `Private`, `Publishable`, `RelationTarget`, `Rows`, `ServerDefault`, `SmallInt`, `SoftDelete`, `StartOf`, `TSQuery`, `TSVector`, `TimeInterval`, `TimeUnit`, `Timestamps`, `TruncUnit`, `Values`, `VectorDistance`, `WithPublishable`, `WithSoftDelete`
 
 **`@supatype/client`**: `RemovedObject`, `SelectRow`, `Session`, `StorageFolder`, `StorageObject`, `StorageReference`, `SupatypeBuckets`, `SupatypeFunctions`, `SupatypeModels`, `TableRelationship`, `TableSubscription`, `TableUpdate`, `createGraphqlRunner`, `fieldKindsAreRegistered`, `forgetRegisteredDraftModels`, `forgetRegisteredFieldKinds`, `onIdentityChange`, `readGraphqlSchema`, `registerDraftModels`, `registerFieldKinds`
 
