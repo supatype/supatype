@@ -5,10 +5,10 @@ import { runCommand, tempProject } from "./support/command-run.js"
 import { MANAGED_MARKER } from "../src/env-file.js"
 
 /**
- * B5 follow-up: a self-host push points DATABASE_URL at the self-host port, but a stack started
- * with `self-host compose up` and never pushed kept whatever URL `.env` had, which in a project
- * that had run dev was the dev database's. Seed and admin then reached the dev database. `up` now
- * syncs DATABASE_URL to the layout it renders, the same way push does.
+ * Issue 26: `up` moved `.env`'s DATABASE_URL to the self-host port, and the next `supatype dev`
+ * moved it back, so the two took turns rewriting the same line. `.env`'s DATABASE_URL is dev's and
+ * `up` leaves it. Seed and admin still reach the running stack's port past a URL the CLI wrote
+ * (host-database.ts), which was the reason for the move (B5 follow-up).
  */
 const compose = vi.hoisted(() => ({ calls: [] as string[][], devLocal: false }))
 
@@ -62,12 +62,12 @@ afterEach(() => {
 const databaseUrl = () => /^DATABASE_URL=(.*)$/m.exec(readFileSync(join(project.dir, ".env"), "utf8"))?.[1]
 
 describe("self-host compose up", () => {
-  it("points a dev-port DATABASE_URL at the self-host port and names SUPATYPE_DB_PORT", async () => {
+  it("leaves a dev-port DATABASE_URL in .env as dev wrote it", async () => {
     writeFileSync(join(project.dir, ".env"), env("postgresql://u:p@127.0.0.1:54329/acme"))
     const run = await runCommand(registerSelfHost, ["self-host", "compose", "up"], project.dir)
     expect(compose.calls).toEqual([["up", "-d"]])
-    expect(databaseUrl()).toBe("postgresql://u:p@127.0.0.1:54390/acme")
-    expect(run.output).toContain("to match SUPATYPE_DB_PORT")
+    expect(databaseUrl()).toBe("postgresql://u:p@127.0.0.1:54329/acme")
+    expect(run.output).not.toContain("DATABASE_URL port")
   })
 
   it("leaves a URL already on the self-host port alone", async () => {

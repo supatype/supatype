@@ -112,7 +112,7 @@ API_EXTERNAL_URL=https://example.com
 SITE_URL=https://example.com
 ```
 
-Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SERVICE_ROLE_KEY` from this `JWT_SECRET` and adds the `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` copies your frontend build reads. Keys from your laptop will not work here, because they were signed with a different secret.
+Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SERVICE_ROLE_KEY` from this `JWT_SECRET` and adds the `VITE_SUPATYPE_URL` (`https://example.com`, from `API_EXTERNAL_URL`) and `VITE_SUPATYPE_ANON_KEY` copies your frontend build reads to `.env`. Keys from your laptop will not work here, because they were signed with a different secret.
 
 ### 6. First boot
 

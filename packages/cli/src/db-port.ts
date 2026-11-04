@@ -86,7 +86,7 @@ export function composeDbPublish(devLocal: boolean): ComposeDbPublish {
 }
 
 /** Hosts whose port is ours to correct. Anything else is somebody else's database. */
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
+export const LOCAL_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
 
 /** The port Postgres is published on for this project in one layout, from `.env` or the shell. */
 export function publishedDbPort(env: Readonly<Record<string, string | undefined>>, devLocal: boolean): number {

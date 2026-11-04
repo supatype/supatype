@@ -95,11 +95,11 @@ describe("writing the URL", () => {
   })
 
   it("moves the port of the CLI's alone, yours staying on its own", () => {
-    writeEnv([`DATABASE_URL=${HAND_WRITTEN}`, "SUPATYPE_DB_PORT=5433"])
-    expect(syncDatabaseUrlPort(dir, false)).toBeNull()
+    writeEnv([`DATABASE_URL=${HAND_WRITTEN}`, "SUPATYPE_DEV_DB_PORT=5433"])
+    expect(syncDatabaseUrlPort(dir, true)).toBeNull()
     expect(envText()).toContain(`DATABASE_URL=${HAND_WRITTEN}`)
-    writeEnv([`DATABASE_URL=${INIT_URL}`, "SUPATYPE_DB_PORT=5433"])
-    expect(syncDatabaseUrlPort(dir, false)).toEqual({ from: "5432", to: "5433", envKey: "SUPATYPE_DB_PORT" })
+    writeEnv([`DATABASE_URL=${INIT_URL}`, "SUPATYPE_DEV_DB_PORT=5433"])
+    expect(syncDatabaseUrlPort(dir, true)).toEqual({ from: "5432", to: "5433", envKey: "SUPATYPE_DEV_DB_PORT" })
     expect(envText()).toContain(`${DATABASE_URL_MARKER}\nDATABASE_URL=${INIT_URL.replace("5432", "5433")}`)
   })
 

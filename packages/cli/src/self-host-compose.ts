@@ -10,6 +10,7 @@ import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnsw
 import { fatalError } from "./ui/fatal.js"
 import {
   COMPOSE_DEV_KONG_PORT,
+  defaultAppStaticDir,
   postgrestSchemaEnv,
   externalDatabaseUrl,
   hooksPathFromProject,
@@ -256,10 +257,14 @@ export function appUpstreamForCompose(config: SupatypeProjectConfig): string | u
   return upstream && upstream.length > 0 ? upstream : undefined
 }
 
-export function staticDirForCompose(config: SupatypeProjectConfig): string | undefined {
-  if (config.app.mode !== "static") return undefined
+/**
+ * The directory the app's static files are served from and deployed to: `app.static_dir`, else
+ * {@link defaultAppStaticDir}. The server and the control plane had a fallback each, ./public and
+ * ./dist, so a deploy could write where the server did not serve.
+ */
+export function appStaticDir(config: SupatypeProjectConfig): string {
   const dir = config.app.static_dir?.trim()
-  return dir && dir.length > 0 ? dir : "./public"
+  return dir ? dir : defaultAppStaticDir(Boolean(config.app.vite_dev_url?.trim()))
 }
 
 /** One bind mount in compose's long syntax, where no colon in a host path can be misread. */
@@ -462,7 +467,7 @@ function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean
   const mode = config.app.mode ?? "none"
   const lines = [`      SUPATYPE_APP_MODE: ${mode}`]
   if (mode === "static") {
-    const dir = staticDirForCompose(config) ?? "./public"
+    const dir = appStaticDir(config)
     lines.push(`      SUPATYPE_APP_STATIC_DIR: /project/${dir.replace(/^\.\//, "")}`)
   } else if (mode === "proxy" && config.app.upstream?.trim()) {
     lines.push(`      SUPATYPE_APP_UPSTREAM: ${proxyUpstreamForCompose(config.app.upstream, devLocal)}`)
@@ -574,7 +579,7 @@ export function renderSelfHostCompose(
   const authProviderEnv = composeAuthProviderEnv(config, publicApiUrl)
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
-  const staticDir = staticDirForCompose(config) ?? "./dist"
+  const staticDir = appStaticDir(config)
   // functions.path and the project root, as the containers see them. These were hardcoded to
   // /project/functions and /project/hooks, so a project keeping its functions anywhere else had every
   // one of them answer 404 in the stack while native dev served them.

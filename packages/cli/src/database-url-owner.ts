@@ -100,9 +100,11 @@ export function setCliDatabaseUrlForRun(state: DatabaseUrlState, url: string, sh
 }
 
 /**
- * Point a CLI-owned DATABASE_URL at the port the stack's layout publishes Postgres on, for a dev
- * stack (`devLocal`) or a self-host one: in `.env`, or for a port only the shell gives, in this
- * run's environment. What moved, for the caller to report, or null.
+ * Point a CLI-owned DATABASE_URL at the port the stack's layout publishes Postgres on. For a dev
+ * stack (`devLocal`) in `.env`, or for a port only the shell gives, in this run's environment. For
+ * a self-host stack always in this run's environment: `.env`'s URL is dev's, and moving it there
+ * had dev and self-host rewriting the same line in turn (issue 26). What moved, for the caller to
+ * report, or null.
  *
  * `devLocal` is the layout of the stack the caller works with, never a guess from which variables
  * `.env` holds: a project that once ran dev keeps SUPATYPE_DEV_DB_PORT there, and preferring it on a
@@ -116,7 +118,8 @@ export function syncDatabaseUrlPort(cwd: string, devLocal: boolean, shell: NodeJ
   const moved = databaseUrlWithPort(state.url, shellEnvInt(envKey, shell) ?? publishedDbPort(state.env, devLocal))
   if (moved === null) return null
   const sync: DbPortSync = { from: moved.from, to: moved.to, envKey }
-  if (!setForThisRunOnly(shell, state.env, envKey) || shellEnvInt(envKey, shell) === null) {
+  const runOnly = !devLocal || (setForThisRunOnly(shell, state.env, envKey) && shellEnvInt(envKey, shell) !== null)
+  if (!runOnly) {
     writeCliDatabaseUrl(cwd, moved.url, {}, state)
     return sync
   }

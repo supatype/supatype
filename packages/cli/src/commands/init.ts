@@ -35,7 +35,7 @@ import {
   sharedFunctionsReadmeSource,
 } from "../functions-deno-types.js"
 import { functionTemplateSource } from "../functions-template.js"
-import { mergeSupatypePackageJson } from "../init-package-json.js"
+import { mergeSupatypePackageJson, newSupatypePackageJson, supatypeDevScript } from "../init-package-json.js"
 import { downloadRelease, initFromExample } from "../init-example.js"
 import { errorMessage } from "../error-message.js"
 import { parseJsonObject } from "@supatype/shared"
@@ -47,8 +47,16 @@ import {
 } from "../init-dependency-versions.js"
 import { detectProjectSetup, type DetectedProjectSetup } from "../init-project-detect.js"
 import { SUPATYPE_GITIGNORE_PATHS } from "../gitignore.js"
+import { DEV_FRONTEND_ENV_FILE, writeFrontendEnv } from "../frontend-env.js"
 import { DEFAULT_CLIENT_PATH, DEFAULT_TYPES_PATH } from "../type-generation.js"
-import { COMPOSE_DEV_KONG_PORT, NATIVE_DB_PORT, NATIVE_SERVER_PORT, nativeDatabaseUrl } from "../project-config.js"
+import {
+  COMPOSE_DEV_KONG_PORT,
+  defaultAppStaticDir,
+  NATIVE_DB_PORT,
+  NATIVE_SERVER_PORT,
+  nativeDatabaseUrl,
+  VITE_BUILD_DIR,
+} from "../project-config.js"
 import { cliDatabaseUrlLines } from "../database-url-owner.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
@@ -224,40 +232,56 @@ export function registerInit(program: Command): void {
       }
       const asked = startInitQuestions(result.provider)
       if (asked.kongPort) result.kongPort = await asked.kongPort
-
-      if (opts.admin === false) {
-        delete result.adminEmail
-        delete result.adminPassword
-      } else if (opts.adminEmail && opts.adminPassword) {
-        result.adminEmail = opts.adminEmail
-        result.adminPassword = opts.adminPassword
-      }
-
-      // CLI flags override wizard / default action choices.
-      const doInstall = opts.install !== false && result.install
-      const doKeys = opts.keys !== false && result.generateKeys
-
-      if (name) mkdirSync(dir, { recursive: true })
-
-      const deps = await asked.deps
-
-      scaffold(dir, result, deps)
-
-      const wants: SetupWants = { install: doInstall, keys: doKeys }
-      const outcome = await withStepView((view) => runSetupSteps(dir, result.packageManager, wants, view))
-      exitOnFailedSetup(outcome, wants, result.packageManager)
-      const { installOk, keysGenerated, binariesReady } = outcome
-
-      await warnDockerUnavailableForProvider(result.provider, asked.daemon)
-
-      printNextSteps({
-        name,
-        result,
-        installed: doInstall && installOk,
-        keysGenerated,
-        binariesReady,
-      })
+      await createProject({ name, dir, result, opts, deps: asked.deps, ...(asked.daemon !== undefined && { daemon: asked.daemon }) })
     })
+}
+
+/** What both inits hand on once the answers are in: where, what, and the CLI's flags. */
+interface CreateProjectArgs {
+  name: string | undefined
+  dir: string
+  result: WizardResult
+  opts: InitCliOptions
+  deps: Promise<InitDependencyVersions>
+  /** Docker's answer, when init already asked. */
+  daemon?: Promise<DockerDaemonProbe>
+}
+
+/**
+ * Write the project, run its setup steps and print what is left, the same for the interactive init
+ * and `init -y`. They were two copies, and had come to disagree about whether keys nobody generated
+ * were a step left to do.
+ */
+async function createProject(args: CreateProjectArgs): Promise<void> {
+  const { name, dir, result, opts } = args
+  applyAdminFlags(result, opts)
+  // CLI flags override wizard / default action choices.
+  const wants: SetupWants = { install: opts.install !== false && result.install, keys: opts.keys !== false && result.generateKeys }
+  if (name) mkdirSync(dir, { recursive: true })
+  scaffold(dir, result, await args.deps)
+
+  const outcome = await withStepView((view) => runSetupSteps(dir, result.packageManager, wants, view))
+  exitOnFailedSetup(outcome, wants, result.packageManager)
+  await warnDockerUnavailableForProvider(result.provider, args.daemon)
+  printNextSteps({
+    name,
+    result,
+    installed: wants.install && outcome.installOk,
+    keysGenerated: outcome.keysGenerated,
+    binariesReady: outcome.binariesReady,
+    devScript: projectDevScript(dir),
+  })
+}
+
+/** `--no-admin`, or `--admin-email` with `--admin-password`, over the answers. */
+function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
+  if (opts.admin === false) {
+    delete result.adminEmail
+    delete result.adminPassword
+  } else if (opts.adminEmail && opts.adminPassword) {
+    result.adminEmail = opts.adminEmail
+    result.adminPassword = opts.adminPassword
+  }
 }
 
 interface InteractiveInitArgs {
@@ -282,48 +306,13 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
         ),
       )
     }
-    let result = await collectWizardAnswers({
+    const result = await collectWizardAnswers({
       defaultName,
       defaultTarget: modeTarget,
-      dir,
       detected,
       askName: name === undefined,
     })
-
-    if (opts.admin === false) {
-      delete result.adminEmail
-      delete result.adminPassword
-    } else if (opts.adminEmail && opts.adminPassword) {
-      result.adminEmail = opts.adminEmail
-      result.adminPassword = opts.adminPassword
-    }
-
-    const doInstall = opts.install !== false && result.install
-    const doKeys = opts.keys !== false && result.generateKeys
-
-    if (name) mkdirSync(dir, { recursive: true })
-
-    const deps = await resolveDependencyVersions()
-
-    scaffold(dir, result, deps)
-
-    const wants: SetupWants = { install: doInstall, keys: doKeys }
-    const outcome = await withStepView((view) => runSetupSteps(dir, result.packageManager, wants, view))
-    exitOnFailedSetup(outcome, wants, result.packageManager)
-    const { installOk, binariesReady } = outcome
-    // Keys nobody asked for are not a step left to do.
-    const keysGenerated = outcome.keysGenerated || !doKeys
-
-    await warnDockerUnavailableForProvider(result.provider)
-
-    p.outro(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
-    printNextSteps({
-      name,
-      result,
-      installed: doInstall && installOk,
-      keysGenerated,
-      binariesReady,
-    })
+    await createProject({ name, dir, result, opts, deps: resolveDependencyVersions() })
   })
 
   process.exit(0)
@@ -334,14 +323,13 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
 export interface WizardContext {
   defaultName: string
   defaultTarget: ProductionTarget
-  dir: string
   detected: DetectedProjectSetup
   /** False when `init <name>` already named the project. */
   askName: boolean
 }
 
 export async function collectWizardAnswers(context: WizardContext): Promise<WizardResult> {
-    const { defaultName, defaultTarget, dir, detected } = context
+    const { defaultName, defaultTarget, detected } = context
     const projectName = context.askName ? await promptProjectName(defaultName) : defaultName
 
     const admin = await promptAdminUser()
@@ -410,16 +398,7 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       kongPort = await promptKongPortChoice()
     }
 
-    const defaultSchemaPath = existsSync(join(dir, "schema/index.ts"))
-      ? "schema/index.ts"
-      : "schema/index.ts"
-    const schemaPath = ensureNotCancelled(
-      await p.text({
-        message: "Where should your schema live?",
-        defaultValue: defaultSchemaPath,
-        placeholder: "schema/index.ts",
-      }),
-    ).trim() || defaultSchemaPath
+    const schemaPath = await askWithDefault("Where should your schema live?", "schema/index.ts")
 
     const app = await promptApp(detected, productionTarget)
 
@@ -475,10 +454,12 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
 }
 
 async function promptProjectName(defaultName: string): Promise<string> {
-  const answer = ensureNotCancelled(
-    await p.text({ message: "Project name", defaultValue: defaultName, placeholder: defaultName }),
-  )
-  return answer.trim() || defaultName
+  return askWithDefault("Project name", defaultName)
+}
+
+/** A text answer, trimmed, or `defaultValue` when it was left empty. */
+async function askWithDefault(message: string, defaultValue: string): Promise<string> {
+  return ensureNotCancelled(await p.text({ message, defaultValue })).trim() || defaultValue
 }
 
 async function promptProductionStorage(): Promise<StorageProvider> {
@@ -510,16 +491,24 @@ async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?:
     }),
   ).trim()
 
-  let adminPassword = ""
-  while (true) {
-    adminPassword = ensureNotCancelled(
-      await p.password({ message: "Admin password (min 8 characters)" }),
-    ).trim()
-    if (adminPassword.length >= 8) break
-    p.log.warn("Password must be at least 8 characters.")
-  }
+  return { adminEmail, adminPassword: await promptAdminPassword() }
+}
 
-  return { adminEmail, adminPassword }
+/**
+ * The admin password, typed twice: asked once, a typo became the Studio password with nothing to
+ * show it. Both are asked again when they differ.
+ */
+async function promptAdminPassword(): Promise<string> {
+  while (true) {
+    const password = ensureNotCancelled(await p.password({ message: "Admin password (min 8 characters)" })).trim()
+    if (password.length < 8) {
+      p.log.warn("Password must be at least 8 characters.")
+      continue
+    }
+    const confirmed = ensureNotCancelled(await p.password({ message: "Confirm admin password" })).trim()
+    if (confirmed === password) return password
+    p.log.warn("Passwords do not match.")
+  }
 }
 
 async function promptApp(
@@ -546,37 +535,38 @@ async function promptApp(
   )
 
   if (mode === "static") {
-    const staticDir = ensureNotCancelled(
-      await p.text({
-        message: "Directory to serve",
-        defaultValue: detected.staticDir,
-        placeholder: detected.staticDir,
-      }),
-    ).trim() || detected.staticDir
     const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
-    return { mode, staticDir, ...(viteDevUrl ? { viteDevUrl } : {}) }
+    return { mode, staticDir: await promptStaticDir(detected, viteDevUrl !== undefined), ...(viteDevUrl ? { viteDevUrl } : {}) }
   }
 
   if (mode === "proxy") {
-    const upstream = ensureNotCancelled(
-      await p.text({
-        message: "URL of your running dev server",
-        defaultValue: detected.hasVite ? detected.viteDevUrl : "http://localhost:3000",
-        placeholder: detected.hasVite ? detected.viteDevUrl : "http://localhost:3000",
-      }),
-    ).trim() || (detected.hasVite ? detected.viteDevUrl : "http://localhost:3000")
-    const start = ensureNotCancelled(
-      await p.text({
-        message: "package.json script that starts your dev server",
-        defaultValue: detected.hasVite ? "vite" : "dev",
-        placeholder: detected.hasVite ? "vite" : "dev",
-      }),
-    ).trim() || (detected.hasVite ? "vite" : "dev")
+    const upstream = await askWithDefault(
+      "URL of your running dev server",
+      detected.hasVite ? detected.viteDevUrl : "http://localhost:3000",
+    )
+    const start = await askWithDefault("package.json script that starts your dev server", detected.hasVite ? "vite" : "dev")
     const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
     return { mode, upstream, start, ...(viteDevUrl ? { viteDevUrl } : {}) }
   }
 
   return { mode: "none" }
+}
+
+/**
+ * The directory a static site is served from, asked after Vite: it was asked before, so a new Vite
+ * project was offered ./public. A Vite project is offered its build output, ./dist; a site with no
+ * build is offered what detection found, ./public when it found nothing. ./public for Vite is
+ * warned about and kept: it is Vite's folder of assets copied into the build, not the build.
+ */
+async function promptStaticDir(detected: DetectedProjectSetup, vite: boolean): Promise<string> {
+  const staticDir = await askWithDefault("Directory to serve", vite ? VITE_BUILD_DIR : detected.staticDir)
+  if (vite && staticDirRelative(staticDir) === "public") {
+    p.log.warn(
+      "./public is Vite's folder for static assets it copies into the build, so serving it skips the build. " +
+        "Vite builds into ./dist unless vite.config.ts says otherwise.",
+    )
+  }
+  return staticDir
 }
 
 async function promptViteDevUrl(
@@ -594,17 +584,7 @@ async function promptViteDevUrl(
   )
   if (!useVite) return undefined
 
-  p.note(`Press Enter for ${detected.viteDevUrl}, or type a custom URL.`)
-
-  return (
-    ensureNotCancelled(
-      await p.text({
-        message: "Vite dev server URL",
-        defaultValue: detected.viteDevUrl,
-        placeholder: detected.viteDevUrl,
-      }),
-    ).trim() || detected.viteDevUrl
-  )
+  return askWithDefault("Vite dev server URL", detected.viteDevUrl)
 }
 
 // ─── Package manager ───────────────────────────────────────────────────────--
@@ -756,34 +736,58 @@ export function scaffold(
   }
 
   write("supatype.config.ts", tsConfigTemplate(opts))
-  if (opts.productionTarget !== "later") {
+  if (writesLocalOverride(opts)) {
     write("supatype.local.config.ts", localConfigTemplate(opts.app))
   }
   write(opts.schemaPath, schemaTemplate())
   write(".env", envTemplate(opts))
+  scaffoldDevFrontendEnv(dir, opts)
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
   scaffoldAppAssets(dir, opts, write)
 
   if (opts.helloFunction) scaffoldHelloFunction(dir, write)
-
-  const gitignorePath = join(dir, ".gitignore")
-  if (existsSync(gitignorePath)) {
-    const merged = mergeGitignoreTemplate(readFileSync(gitignorePath, "utf8"))
-    if (merged !== readFileSync(gitignorePath, "utf8")) {
-      writeFileSync(gitignorePath, merged, "utf8")
-      file("updated", ".gitignore (added .supatype/)")
-    } else {
-      file("skipped", ".gitignore (already exists)")
-    }
-  } else {
-    write(".gitignore", gitignoreTemplate())
-  }
+  scaffoldGitignore(dir, write)
 }
 
-function staticDirRelative(staticDir?: string): string {
-  const raw = (staticDir ?? "./public").trim()
-  return raw.replace(/^\.\//, "").replace(/\/+$/, "") || "public"
+/**
+ * The front end's local API address, in `.env.development.local` (frontend-env.ts) for a docker
+ * project, whose gateway port is known now. In `.env`, a production build read it and shipped it.
+ */
+function scaffoldDevFrontendEnv(dir: string, opts: ScaffoldOptions): void {
+  if (opts.provider !== "docker" || opts.kongPort === undefined) return
+  const existed = existsSync(join(dir, DEV_FRONTEND_ENV_FILE))
+  writeFrontendEnv(dir, { apiUrl: initLocalApiUrl(opts) })
+  file(existed ? "updated" : "created", DEV_FRONTEND_ENV_FILE)
+}
+
+function scaffoldGitignore(dir: string, write: (rel: string, content: string) => void): void {
+  const gitignorePath = join(dir, ".gitignore")
+  if (!existsSync(gitignorePath)) {
+    write(".gitignore", gitignoreTemplate())
+    return
+  }
+  const existing = readFileSync(gitignorePath, "utf8")
+  const merged = mergeGitignoreTemplate(existing)
+  if (merged === existing) {
+    file("skipped", ".gitignore (already exists)")
+    return
+  }
+  writeFileSync(gitignorePath, merged, "utf8")
+  file("updated", ".gitignore (added Supatype's local files)")
+}
+
+/**
+ * The directory a static app is served from: the one typed at init, else the stack's own default
+ * (defaultAppStaticDir). The config, the holding page and Vite's build all read it here, so none
+ * of them can name a different one.
+ */
+function staticDirOf(app: ScaffoldAppOptions): string {
+  return app.staticDir ?? defaultAppStaticDir(Boolean(app.viteDevUrl))
+}
+
+function staticDirRelative(staticDir: string): string {
+  return staticDir.trim().replace(/^\.\//, "").replace(/\/+$/, "") || "public"
 }
 
 function scaffoldAppAssets(
@@ -804,14 +808,8 @@ function scaffoldAppAssets(
   const hasVite = Boolean(opts.app.viteDevUrl)
 
   if (opts.app.mode === "static") {
-    const staticRel = staticDirRelative(opts.app.staticDir)
-    if (opts.app.viteDevUrl && opts.productionTarget !== "later") {
-      writeUnlessExists("dist/index.html", holding)
-      scaffoldVite(dir, opts, writeUnlessExists, holding)
-      return
-    }
-    writeUnlessExists(`${staticRel}/index.html`, holding)
-    if (opts.app.viteDevUrl) scaffoldVite(dir, opts, writeUnlessExists, holding)
+    writeUnlessExists(`${staticDirRelative(staticDirOf(opts.app))}/index.html`, holding)
+    if (hasVite) scaffoldVite(dir, opts, writeUnlessExists, holding)
     return
   }
 
@@ -844,7 +842,18 @@ function scaffoldVite(
     file("skipped", `${viteConfigRel} (already exists)`)
     return
   }
-  write("vite.config.ts", viteConfigTemplate(opts.app.viteDevUrl))
+  write("vite.config.ts", viteConfigTemplate(opts.app.viteDevUrl, viteBuildOutDir(opts)))
+}
+
+/**
+ * Where `vite build` writes, when it is not Vite's own `dist`: the static directory a static app is
+ * served from, so its build lands there. Undefined otherwise.
+ */
+function viteBuildOutDir(opts: ScaffoldOptions): string | undefined {
+  if (opts.app.mode !== "static") return undefined
+  const outDir = staticDirRelative(staticDirOf(opts.app))
+  // Not into "./public" either: that is Vite's own assets folder, served as it is (promptStaticDir).
+  return outDir === "dist" || outDir === "public" ? undefined : outDir
 }
 
 function scaffoldHelloFunction(
@@ -882,67 +891,31 @@ async function resolveDependencyVersions(): Promise<InitDependencyVersions> {
 }
 
 function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions): string {
-  const scripts: string[] = [
-    `    "dev": "supatype dev"`,
-    `    "push": "supatype push"`,
-    `    "seed": "supatype seed"`,
-    // The generated seed builder is gitignored, so a fresh clone has to produce it before
-    // anything can import it. `generate` is fully offline, which is the condition that makes
-    // gitignoring generated code reasonable rather than a trap; without this hook it would be
-    // one, and the failure would be a missing module rather than anything naming the remedy.
-    `    "prepare": "supatype generate"`,
-  ]
-  if (opts.app.viteDevUrl) {
-    scripts.push(`    "vite": "vite"`)
-  }
-  if (opts.helloFunction) {
-    scripts.push(`    "functions": "supatype functions serve"`)
-  }
-  // Both are development-time only, so they belong in devDependencies. Validated end to end
-  // against a real database: schema/index.ts imports @supatype/types with `import type`, which is
-  // erased at build; supatype.config.ts imports defineConfig, which only the CLI evaluates; and
-  // seed.ts is run by `tsx seed.ts`. Nothing `supatype push` or `supatype generate` writes refers
-  // to either package: the generated types import nothing. The generated client
-  // (supatype/generated/client.ts) imports @supatype/client at runtime, so that one is a real
-  // dependency.
-  //
-  // In dependencies they were installed by `npm install --omit=dev`, so every production install
-  // of a Supatype app pulled the whole CLI toolchain (ink, react, typescript, ts-morph, pg, tsx)
-  // to support three files that never run in production.
-  const devDeps = [
-    `    "@supatype/cli": "^${deps.cli}"`,
-    `    "@supatype/types": "^${deps.types}"`,
-    `    "tsx": "^4.19.2"`,
-    `    "typescript": "^5"`,
-  ]
-  if (opts.app.viteDevUrl) {
-    devDeps.push(`    "vite": "^6"`)
-  }
-  return `{
-  "name": "${opts.projectName}",
-  "private": true,
-  "type": "module",
-  "scripts": {
-${scripts.join(",\n")}
-  },
-  "dependencies": {
-    "@supatype/client": "^${deps.client}"
-  },
-  "devDependencies": {
-${devDeps.join(",\n")}
-  }
+  return `${JSON.stringify(newSupatypePackageJson(opts, deps), null, 2)}\n`
 }
-`
+
+/**
+ * Whether init writes a supatype.local.config.ts: for a production target, whose committed config
+ * is production's, and for a static app developed with Vite, whose dev server `supatype dev` starts
+ * only in proxy mode. A "Decide later" project with Vite used to get neither, and nothing started
+ * Vite.
+ */
+function writesLocalOverride(opts: Pick<ScaffoldOptions, "productionTarget" | "app">): boolean {
+  return opts.productionTarget !== "later" || viteDevelopsStaticApp(opts.app)
+}
+
+/** A static app with a Vite dev server: served from its build, developed through Vite. */
+function viteDevelopsStaticApp(app: ScaffoldAppOptions): boolean {
+  return app.mode === "static" && Boolean(app.viteDevUrl)
 }
 
 function tsConfigTemplate(opts: ScaffoldOptions): string {
   const serverMode = serverModeForTarget(opts.productionTarget)
-  const hasLocalOverride = opts.productionTarget !== "later"
   const lines: string[] = []
   lines.push(`import { defineConfig } from "@supatype/cli"`)
   lines.push("")
-  if (hasLocalOverride) {
-    lines.push(`// Committed config = ${opts.productionTarget} production target.`)
+  if (opts.productionTarget !== "later") lines.push(`// Committed config = ${opts.productionTarget} production target.`)
+  if (writesLocalOverride(opts)) {
     lines.push(`// Local development overrides live in supatype.local.config.ts (gitignored).`)
   }
   lines.push(`export default defineConfig({`)
@@ -1032,22 +1005,9 @@ function localDevAppConfigLines(app: ScaffoldAppOptions): string[] {
 
 function appConfigLines(app: ScaffoldAppOptions, productionTarget: ProductionTarget): string[] {
   if (app.mode === "static") {
-    if (productionTarget !== "later" && app.viteDevUrl) {
-      return [
-        `  app: {`,
-        `    mode: "static",`,
-        `    static_dir: "./dist",  // production build output`,
-        `  },`,
-      ]
-    }
-    const out = [
-      `  app: {`,
-      `    mode: "static",`,
-      `    static_dir: "${app.staticDir ?? "./public"}",`,
-    ]
-    if (app.viteDevUrl) out.push(`    vite_dev_url: "${app.viteDevUrl}",`)
-    out.push(`  },`)
-    return out
+    // Vite's dev server is the local override's (writesLocalOverride); this is the built site.
+    const built = viteDevelopsStaticApp(app) ? "  // production build output" : ""
+    return [`  app: {`, `    mode: "static",`, `    static_dir: "${staticDirOf(app)}",${built}`, `  },`]
   }
   if (app.mode === "proxy") {
     if (productionTarget !== "later") {
@@ -1236,12 +1196,13 @@ function vitePortFromDevUrl(viteDevUrl: string): number {
   }
 }
 
-function viteConfigTemplate(viteDevUrl: string): string {
+function viteConfigTemplate(viteDevUrl: string, outDir?: string): string {
   const port = vitePortFromDevUrl(viteDevUrl)
+  const build = outDir === undefined ? "" : `  // Built into the directory supatype.config.ts serves.\n  build: { outDir: "${outDir}" },\n`
   return `import { defineConfig } from "vite"
 
 export default defineConfig({
-  server: {
+${build}  server: {
     host: "127.0.0.1",
     port: ${port},
     strictPort: true,
@@ -1342,18 +1303,20 @@ SERVICE_ROLE_KEY=`)
 # request without it, so code running in the functions worker cannot call it directly.
 ${CONTROL_PLANE_SECRET_ENV}=${generateControlPlaneSecret()}`)
 
+  // A docker project's app is served through its gateway, which is where `supatype dev` points this
+  // on its first run. Written here too, so email links work before that run as well.
+  const apiUrl = initLocalApiUrl(opts)
+  const siteUrl = opts.provider === "docker" ? apiUrl : "http://localhost:3000"
   sections.push(`# Site URL (used for email redirects)
-SITE_URL=http://localhost:3000`)
+SITE_URL=${siteUrl}`)
 
   if (opts.provider === "docker" && opts.kongPort !== undefined) {
-    const apiUrl = `http://localhost:${opts.kongPort}`
+    // The front end's copies of this address and the anon key are in .env.development.local
+    // (scaffoldDevFrontendEnv, and the keys step), where a production build does not read them.
     sections.push(
       `# Local API gateway (Kong), unique per project so multiple stacks can run concurrently
 SUPATYPE_KONG_PORT=${opts.kongPort}
-PUBLIC_SUPATYPE_URL=${apiUrl}
-API_EXTERNAL_URL=${apiUrl}
-VITE_SUPATYPE_URL=${apiUrl}
-VITE_SUPATYPE_ANON_KEY=`,
+API_EXTERNAL_URL=${apiUrl}`,
     )
   }
 
@@ -1380,7 +1343,7 @@ SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
 const SELF_HOST_PORTS_ENV_SECTION = `# Self-host stack ports (supatype self-host compose). Kong, at SUPATYPE_KONG_PORT, is the way in.
 # Postgres, the API server and SeaweedFS bind 127.0.0.1 only. To reach them from other machines,
 # set SUPATYPE_PUBLISH_ADDRESS=0.0.0.0 (put a firewall in front of the server first).
-# A self-host push points DATABASE_URL at SUPATYPE_DB_PORT.
+# Self-host commands reach Postgres at SUPATYPE_DB_PORT for their own run; DATABASE_URL above stays dev's.
 # SUPATYPE_PUBLISH_ADDRESS=127.0.0.1
 # SUPATYPE_DB_PORT=5432
 # SUPATYPE_SERVER_PORT=9999
@@ -1533,14 +1496,19 @@ src/lib/supatype.ts
 `
 }
 
+/**
+ * An existing `.gitignore` with what init adds to a project: `.supatype/` (link.json holds secrets)
+ * and `.env.*.local`, where init writes the front end's development-only API address. Each is added
+ * only when the file does not already cover it.
+ */
 export function mergeGitignoreTemplate(existingContent: string): string {
-  if (existingContent.includes(".supatype/") || existingContent.includes(".supatype\n")) {
-    return existingContent
-  }
-  const block = `
-# Supatype: local runtime (contains secrets in link.json)
-.supatype/
-`
+  const lines = existingContent.split(/\r?\n/).map((line) => line.trim())
+  const missing = [
+    ...(existingContent.includes(".supatype/") || lines.includes(".supatype") ? [] : [".supatype/"]),
+    ...(lines.includes(".env.*.local") || lines.includes("*.local") ? [] : [".env.*.local"]),
+  ]
+  if (missing.length === 0) return existingContent
+  const block = `\n# Supatype: local runtime (secrets in .supatype/link.json) and development-only env files\n${missing.join("\n")}\n`
   return existingContent.endsWith("\n") ? `${existingContent}${block}` : `${existingContent}\n${block}`
 }
 
@@ -1587,6 +1555,25 @@ export interface InitStepsArgs {
   installed: boolean
   keysGenerated: boolean
   binariesReady: boolean
+  /** The package.json script that runs `supatype dev`: `dev`, or `supatype:dev` beside a dev of the project's own. */
+  devScript?: string
+}
+
+/** One titled block of what init prints when it is done, with a line after its steps when it has one. */
+export interface InitStepBlock {
+  title: string
+  steps: string[]
+  after?: string
+}
+
+/** The script in `dir`'s package.json that runs `supatype dev`, or `dev` when it cannot be read. */
+function projectDevScript(dir: string): string {
+  try {
+    const pkg = parseJsonObject(readFileSync(join(dir, "package.json"), "utf8"))
+    return pkg.ok ? supatypeDevScript(pkg.value["scripts"]) : "dev"
+  } catch {
+    return "dev"
+  }
 }
 
 /** True when nothing is left to set up, only to run. */
@@ -1594,23 +1581,37 @@ function initSetupComplete(args: InitStepsArgs): boolean {
   return args.installed && args.keysGenerated && args.binariesReady
 }
 
-function printNextSteps(args: InitStepsArgs & { result: WizardResult }): void {
-  const { name, result } = args
+function printNextSteps(args: InitStepsArgs): void {
+  const { name } = args
   info(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
-  nextSteps(initSetupComplete(args) ? "Next steps:" : "Finish setup:", initFirstSteps(args))
-  printProductionSteps(result)
-  if (result.productionTarget === "self-host") nextSteps("Develop locally:", initDevSteps(result))
+  for (const block of initStepBlocks(args)) {
+    nextSteps(block.title, block.steps)
+    if (block.after !== undefined) plain(`  ${block.after}`)
+  }
+  const target = args.result.productionTarget
+  if (target === "cloud" || target === "self-host") {
+    info(`supatype.local.config.ts keeps \`supatype dev\` local while the committed config targets ${target}.`)
+  }
+  plain()
 }
 
 /**
- * The commands to run next, in order, after `init`: setting up, then what the project is for. A
- * self-host project leads with taking it to its server, and its local development is printed after
- * ({@link printNextSteps}); every other project leads with `supatype dev`.
+ * Everything init prints when it is done, in order: running the project locally, then its secrets,
+ * then taking it to production. Production comes last whatever the target: it is the step for
+ * later, and a self-host project used to lead with a domain the person had just said they lacked.
  */
+export function initStepBlocks(args: InitStepsArgs): InitStepBlock[] {
+  const blocks: InitStepBlock[] = [
+    { title: initSetupComplete(args) ? "Next steps:" : "Finish setup:", steps: initFirstSteps(args) },
+    { title: "Secrets: generated for this project, kept in .env:", steps: initSecretLines(), after: SECRETS_CLOSING },
+  ]
+  const deploy = deployBlock(args.result)
+  return deploy === undefined ? blocks : [...blocks, deploy]
+}
+
+/** Setting up, then running the project locally, for every production target. */
 export function initFirstSteps(args: InitStepsArgs): string[] {
-  const { result } = args
-  const next = result.productionTarget === "self-host" ? selfHostProductionSteps(result) : initDevSteps(result)
-  return [...initSetupSteps(args), ...next]
+  return [...initSetupSteps(args), ...initDevSteps(args)]
 }
 
 function initSetupSteps(args: InitStepsArgs): string[] {
@@ -1619,79 +1620,98 @@ function initSetupSteps(args: InitStepsArgs): string[] {
   if (name) steps.push(`cd ${name}`)
   if (!initSetupComplete(args)) {
     if (!installed) steps.push(`${result.packageManager} install`)
-    if (!binariesReady) steps.push("supatype update        # download component binaries")
+    if (!binariesReady) steps.push("supatype update   # download component binaries")
     if (!keysGenerated) steps.push("supatype keys")
   }
   return steps
 }
 
+/** `script` run the way `pm` runs a package.json script. */
+function runScriptCommand(pm: PackageManager, script: string): string {
+  return pm === "npm" || pm === "bun" ? `${pm} run ${script}` : `${pm} ${script}`
+}
+
+/** `command` with `comments` after it, each comment after the first on its own line in the same column. */
+function commented(command: string, comments: string[]): string[] {
+  const column = command.length + 3
+  return comments.map((comment, index) => `${(index === 0 ? command : "").padEnd(column)}# ${comment}`)
+}
+
 /**
- * `supatype dev`, which applies the schema and generates the types, then watches both. `push` is for
- * another database (`push --env <name>`), and listing it here sent people to it anyway.
+ * The dev script, which applies the schema and generates the types, then watches both; then where
+ * to open the project. `push` is for another database (`push --env <name>`), and listing it here
+ * sent people to it anyway.
  */
-function initDevSteps(result: InitStepsArgs["result"]): string[] {
-  const steps: string[] = []
-  const stack = `${result.provider === "docker" ? "Docker Compose stack" : "native binaries"}, API on ${initLocalApiUrl(result)}`
-  steps.push("supatype dev          # applies the schema, generates types, and watches both")
-  steps.push(`                      # ${stack}`)
-  if (result.adminEmail) {
-    steps.push("                      # first admin user is created on dev")
-  }
+function initDevSteps(args: InitStepsArgs): string[] {
+  const { result } = args
+  const comments = [
+    "applies the schema, generates types, and watches both",
+    result.provider === "docker" ? "runs the Docker Compose stack" : "runs the native binaries",
+  ]
+  if (result.adminEmail) comments.push("first admin user is created on dev")
+  const steps = commented(runScriptCommand(result.packageManager, args.devScript ?? "dev"), comments)
+  steps.push(`Open ${initLocalApiUrl(result)}`)
   if (result.helloFunction) {
-    steps.push("supatype functions serve   # run edge functions locally")
+    steps.push(...commented(runScriptCommand(result.packageManager, "functions"), ["run edge functions locally"]))
   }
   return steps
 }
 
-/** The secrets, frontend and production blocks printed after the first steps. */
-export function printProductionSteps(result: WizardResult): void {
-  // Shown once, at creation. These are generated per project rather than shipped as
-  // constants, so this is the moment to say they exist and where they live, nothing prints
-  // them again, and the JWT secret is only echoed as a fingerprint from here on.
-  nextSteps("Secrets: generated for this project, kept in .env:", [
-    "POSTGRES_PASSWORD    direct SQL access as the superuser",
-    "AUTHENTICATOR_PASSWORD    PostgREST's own login; rotating the one above does not affect it",
-    "SUPATYPE_SQL_EDITOR_PASSWORD    Studio's SQL editor login, a role that is not a superuser",
-    "JWT_SECRET    signs ANON_KEY and SERVICE_ROLE_KEY; changing it invalidates every token",
-    "Keep .env out of version control, and use different values in production.",
-  ])
+/**
+ * The secrets init generated, shown once, at creation. They are generated per project rather than
+ * shipped as constants, so this is the moment to say they exist and where they live: nothing prints
+ * them again, and the JWT secret is only echoed as a fingerprint from here on.
+ */
+const INIT_SECRETS: ReadonlyArray<readonly [name: string, description: string]> = [
+  ["POSTGRES_PASSWORD", "direct SQL access as the superuser"],
+  ["AUTHENTICATOR_PASSWORD", "PostgREST's own login; rotating the one above does not affect it"],
+  ["SUPATYPE_SQL_EDITOR_PASSWORD", "Studio's SQL editor login, a role that is not a superuser"],
+  ["JWT_SECRET", "signs ANON_KEY and SERVICE_ROLE_KEY; changing it invalidates every token"],
+]
 
-  // No frontend block: someone who chose "No app" was told how to serve a static one. `supatype app
-  // add` is there when they want one.
+const SECRETS_CLOSING = "Keep .env out of version control, and use different values in production."
 
+/** One line per secret, each description two spaces past the longest name. */
+export function initSecretLines(): string[] {
+  const width = Math.max(...INIT_SECRETS.map(([name]) => name.length)) + 2
+  return INIT_SECRETS.map(([name, description]) => `${name.padEnd(width)}${description}`)
+}
+
+/** Taking the project to production, for a target that has one. No frontend block: `supatype app add` covers that. */
+function deployBlock(result: InitStepsArgs["result"]): InitStepBlock | undefined {
   if (result.productionTarget === "cloud") {
-    nextSteps("Deploy to Supatype Cloud:", [
-      "supatype login",
-      "supatype link --env production --project <ref>",
-      "supatype push --env production",
-    ])
-    info("supatype.local.config.ts keeps `supatype dev` local while the committed config targets cloud.")
-  } else if (result.productionTarget === "self-host") {
-    // The self-host steps lead the first block (initFirstSteps); local development follows this.
-    info("supatype.local.config.ts keeps `supatype dev` local while the committed config targets self-host.")
+    return {
+      title: "When you're ready to deploy (Supatype Cloud):",
+      steps: ["supatype login", "supatype link --env production --project <ref>", "supatype push --env production"],
+    }
   }
-  plain()
+  if (result.productionTarget === "self-host") {
+    return { title: "When you're ready to deploy (self-host):", steps: selfHostDeploySteps(result) }
+  }
+  return undefined
 }
 
-/** Taking a self-host project to its own server, with or without a domain for HTTPS. */
-function selfHostProductionSteps(result: Pick<WizardResult, "domain" | "tlsEmail">): string[] {
-  const steps: string[] = []
+/**
+ * Taking a self-host project to its own server. With a domain, DNS and the firewall come first;
+ * without one, HTTPS is the last step and an optional one, since the person just said they had none.
+ */
+export function selfHostDeploySteps(result: Partial<Pick<WizardResult, "domain" | "tlsEmail">>): string[] {
   const domain = result.domain?.trim()
-  if (domain) {
-    steps.push(`1. Point DNS: an A record for ${domain} -> your server's public IP`)
-    steps.push("2. Open ports 80 and 443 on the server firewall")
-    if (!result.tlsEmail) {
-      steps.push("3. Set server.tls.email in supatype.config.ts (required for HTTPS)")
-    }
-    steps.push("supatype self-host compose up -d   # Kong provisions HTTPS automatically")
-    steps.push(`Your Supatype platform goes live at https://${domain}`)
-    steps.push(
-      "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certificates outlive restarts)",
-    )
-  } else {
-    steps.push("Set server.domain + server.tls.email in supatype.config.ts to enable automatic HTTPS")
-    steps.push("supatype self-host compose up -d   # Docker stack")
+  const link = "supatype link --env production ...   # then: supatype push --env production"
+  if (!domain) {
+    return [
+      "supatype self-host compose up -d   # on your server: the Docker stack",
+      link,
+      "Later, optionally: set server.domain and server.tls.email in supatype.config.ts for automatic HTTPS",
+    ]
   }
-  steps.push("supatype link --env production ... # then: supatype push --env production")
-  return steps
+  return [
+    `1. Point DNS: an A record for ${domain} -> your server's public IP`,
+    "2. Open ports 80 and 443 on the server firewall",
+    ...(result.tlsEmail ? [] : ["3. Set server.tls.email in supatype.config.ts (required for HTTPS)"]),
+    "supatype self-host compose up -d   # Kong provisions HTTPS automatically",
+    link,
+    `Your Supatype platform goes live at https://${domain}`,
+    "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certificates outlive restarts)",
+  ]
 }

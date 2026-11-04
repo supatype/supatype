@@ -4,12 +4,19 @@ import {
   resolveInitDependencyVersions,
 } from "../src/init-dependency-versions.js"
 
+/**
+ * A registry holding `packages`. Vite answers only at `/vite/latest`, the one small document init
+ * needs from it: its whole document lists every version ever published, many megabytes.
+ */
 function mockRegistry(packages: Record<string, { latest: string; versions: string[] }>) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
-      const name = decodeURIComponent(url.replace("https://registry.npmjs.org/", ""))
-      const pkg = packages[name]
+      const path = decodeURIComponent(url.replace("https://registry.npmjs.org/", ""))
+      if (path === "vite") return new Response(null, { status: 500 })
+      const latestOf = path.endsWith("/latest") ? packages[path.slice(0, -"/latest".length)] : undefined
+      if (latestOf) return Response.json({ version: latestOf.latest })
+      const pkg = packages[path]
       if (!pkg) return new Response(null, { status: 404 })
       const versions = Object.fromEntries(pkg.versions.map((v) => [v, {}]))
       return Response.json({ versions, "dist-tags": { latest: pkg.latest } })
@@ -82,6 +89,31 @@ describe("resolveInitDependencyVersions", () => {
       "http://mirror.test/npm/%40supatype%2Fcli",
       "http://mirror.test/npm/%40supatype%2Fclient",
       "http://mirror.test/npm/%40supatype%2Ftypes",
+      "http://mirror.test/npm/vite/latest",
     ])
+  })
+})
+
+/**
+ * Fresh-user test: a project made with Vite was pinned to `^6` whatever npm had, two majors behind.
+ * Vite's own latest is asked for alongside the Supatype packages, and `^8` is the offline answer.
+ */
+describe("the Vite version init pins", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("is npm's latest", async () => {
+    mockRegistry({
+      "@supatype/cli": { latest: "0.1.3", versions: ["0.1.3"] },
+      vite: { latest: "8.1.2", versions: ["6.0.0", "8.1.2"] },
+    })
+    expect((await resolveInitDependencyVersions()).vite).toBe("8.1.2")
+  })
+
+  it("is 8 when the registry is unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 500 })))
+    expect((await resolveInitDependencyVersions()).vite).toBe("8")
+    expect(initDependencyVersionsFallback().vite).toBe("8")
   })
 })

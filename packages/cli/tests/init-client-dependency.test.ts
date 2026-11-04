@@ -18,7 +18,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-const DEPS = { cli: "0.7.0", types: "0.7.0", client: "0.7.0" }
+const DEPS = { cli: "0.7.0", types: "0.7.0", client: "0.7.0", vite: "8.0.0" }
 
 function section(pkg: unknown, key: string): Record<string, unknown> {
   const value = isJsonObject(pkg) ? pkg[key] : undefined

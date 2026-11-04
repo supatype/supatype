@@ -927,6 +927,14 @@ export function serviceRoleRoutes(cfg: SupatypeProjectConfig): string[] {
 /** Kong gateway port when `provider: docker` (self-host compose dev). */
 export const COMPOSE_DEV_KONG_PORT = 18473
 
+/** Vite's build output, the directory a Vite-built app is served from unless it names another. */
+export const VITE_BUILD_DIR = "./dist"
+
+/** A static app's directory when none is named: Vite's build output for a Vite app, else ./public. */
+export function defaultAppStaticDir(viteBuilt: boolean): string {
+  return viteBuilt ? VITE_BUILD_DIR : "./public"
+}
+
 /**
  * The local Postgres DSN derived from project name (dev default).
  *

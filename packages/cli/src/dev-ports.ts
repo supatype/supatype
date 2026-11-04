@@ -9,6 +9,7 @@ import { askDocker, askDockerSync, DOCKER_QUERY_TIMEOUT_MS, type DockerRunner } 
 import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 import { isPortInUse } from "./postgres-ctl.js"
 import { readComposeEnvInt, shellEnvInt, upsertEnvFile } from "./env-file.js"
+import { writeFrontendEnv } from "./frontend-env.js"
 import { writeCliDatabaseUrl } from "./database-url-owner.js"
 import { isInteractive } from "./ui/interactive.js"
 import { fatalError } from "./ui/fatal.js"
@@ -187,14 +188,18 @@ function kongPortFromEnvironment(env: NodeJS.ProcessEnv): number | null {
   return shellEnvInt(KONG_PORT_ENV, env)
 }
 
-function persistKongPort(cwd: string, port: number): void {
+/**
+ * Record a Kong port dev moved to: in `.env`, with the front end's copies of its address in
+ * `.env.development.local`, since a production build reads `.env`. Exported for its tests.
+ */
+export function persistKongPort(cwd: string, port: number): void {
   const apiUrl = `http://localhost:${port}`
   upsertEnvFile(cwd, {
     SUPATYPE_KONG_PORT: String(port),
-    PUBLIC_SUPATYPE_URL: apiUrl,
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
   })
+  writeFrontendEnv(cwd, { apiUrl })
 }
 
 async function promptPortConflict(
@@ -317,7 +322,6 @@ async function askKongPort(freeDefault: number): Promise<number> {
   const value = await p.text({
     message: "Local API gateway port (Kong)",
     defaultValue: String(freeDefault),
-    placeholder: String(COMPOSE_DEV_KONG_PORT),
     validate: (raw) => {
       const port = parseHostPortInput(raw ?? "")
       if (!port) return `Enter a port between ${MIN_PORT} and ${MAX_PORT}.`
