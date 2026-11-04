@@ -19,7 +19,7 @@
 import pg from "pg"
 import { isBoolean, isShape, isString, nullable, type Guard } from "@supatype/shared"
 import { queryRows, withDatabase, type UnknownRow } from "./db-rows.js"
-import { errorCode } from "./error-message.js"
+import { errorCode, errorMessage } from "./error-message.js"
 
 export type Severity = "pass" | "warn" | "degrade" | "fail"
 
@@ -61,6 +61,13 @@ async function queryAs<T>(q: QueryFn, guard: Guard<T>, sql: string, params: unkn
   return rows
 }
 
+/** The one row of a probe that always returns exactly one. */
+async function queryOne<T>(q: QueryFn, guard: Guard<T>, sql: string, params: unknown[] = []): Promise<T> {
+  const [row] = await queryAs(q, guard, sql, params)
+  if (row === undefined) throw new Error(`Preflight probe returned no rows: ${sql}`)
+  return row
+}
+
 /**
  * Tables in `schema` Supatype did not create: not in its ledger (`_supatype.managed_objects`), and
  * not stamped `supatype:managed` by an engine from before the ledger. Since the engine stopped
@@ -88,62 +95,260 @@ export async function foreignTables(q: QueryFn, schema: string): Promise<string[
   return rows.map((t) => t.relname)
 }
 
+/** The first decoding check that rules decoding out, or undefined when none does. */
+function decodingBlocker(decoding: readonly CheckResult[]): CheckResult | undefined {
+  return decoding.find((r) => r.severity === "degrade" || r.severity === "fail")
+}
+
 /**
- * Why the database cannot give realtime logical decoding, or undefined when it can: `wal_level`
- * first, then the wal2json slot probe, the checks `supatype db check` runs. For native dev to name
- * the cause when realtime exits without a word, instead of guessing at it (local test round 3).
+ * Why the database cannot give realtime logical decoding, or undefined when it can: the same checks
+ * `supatype db check` runs, so the two cannot disagree. For native dev to name the cause when
+ * realtime exits without a word, instead of guessing at it (local test round 3), and for doctor.
  */
 export async function decodingProblem(q: QueryFn): Promise<string | undefined> {
-  const [row] = await queryAs(q, isShape({ wal_level: isString }), "SHOW wal_level")
-  const level = row?.wal_level ?? "unknown"
-  if (level !== "logical") return `wal_level is "${level}", not logical`
-  const probe = await probeLogicalDecoding(q)
-  return probe.severity === "degrade" ? probe.detail : undefined
+  return decodingBlocker(await decodingChecks(q))?.detail
+}
+
+/** {@link decodingChecks} for the database at `databaseUrl`, on a connection of its own. */
+export async function logicalDecodingChecks(databaseUrl: string): Promise<CheckResult[]> {
+  return withDatabase(databaseUrl, (client) => decodingChecks((sql, params = []) => queryRows(client, sql, params)))
 }
 
 /** {@link decodingProblem} for the database at `databaseUrl`, on a connection of its own. */
 export async function logicalDecodingProblem(databaseUrl: string): Promise<string | undefined> {
-  return withDatabase(databaseUrl, (client) => decodingProblem((sql, params = []) => queryRows(client, sql, params)))
+  return decodingBlocker(await logicalDecodingChecks(databaseUrl))?.detail
+}
+
+/** What a database that cannot decode loses, said the same way by every check that finds it. */
+const NO_DECODING_IMPACT =
+  "Realtime subscriptions are unavailable, and after-hooks fall back to the request path; everything " +
+  "else is unaffected."
+
+/**
+ * What logical decoding needs, which realtime and the after-hook listener share: `wal_level`, a
+ * spare slot, and a wal2json slot the connected role may create.
+ */
+async function decodingChecks(q: QueryFn): Promise<CheckResult[]> {
+  const { wal_level } = await queryOne(q, isShape({ wal_level: isString }), "SHOW wal_level")
+  const slots = await queryOne(
+    q,
+    isShape({ used: isString, max: isString, existing: isString, role: isString }),
+    `SELECT (SELECT count(*) FROM pg_replication_slots)::text AS used,
+            current_setting('max_replication_slots') AS max,
+            coalesce((SELECT string_agg(slot_name, ',') FROM pg_replication_slots
+                       WHERE slot_name = ANY($1)), '') AS existing,
+            current_user::text AS role`,
+    [[...SUPATYPE_SLOTS]],
+  )
+  const existing = slots.existing === "" ? [] : slots.existing.split(",")
+  const results = [walLevelCheck(wal_level), slotsCheck(slots.used, slots.max, existing)]
+
+  // The definitive check: create the slot realtime would create, then drop it.
+  //
+  // There is no catalog to consult. `wal2json` is a shared library, not an extension, so it never
+  // appears in `pg_available_extensions`: the only way to know whether this database can decode is
+  // to ask it to. Cloud SQL does not ship the plugin at all; plenty of managed Postgres will not
+  // grant `REPLICATION`. Both produce a stack that looks healthy until the first subscription.
+  //
+  // Skipped when `wal_level` or the slot budget already rules it out, since the probe would fail for
+  // that reason and report it a second time under a less specific heading.
+  if (results.every((r) => r.severity === "pass")) results.push(await probeLogicalDecoding(q, slots.role))
+  return results
+}
+
+function walLevelCheck(walLevel: string): CheckResult {
+  const logical = walLevel === "logical"
+  return {
+    id: "wal-level",
+    title: "wal_level = logical (realtime, after-hooks)",
+    severity: logical ? "pass" : "degrade",
+    detail: logical ? `wal_level is "${walLevel}"` : `wal_level is "${walLevel}", not logical`,
+    ...(!logical && {
+      impact: NO_DECODING_IMPACT,
+      remedy:
+        "-- Requires a server restart, and on managed Postgres a parameter-group change\n" +
+        "-- rather than SQL. Shown for a self-managed server:\n" +
+        "ALTER SYSTEM SET wal_level = 'logical';",
+      remedyNeedsOperator: true,
+    }),
+  }
 }
 
 /**
- * Ask the database to do the one thing realtime needs, then undo it.
+ * Room for the slots Supatype has not created yet. Realtime and the after-hook listener each keep a
+ * slot of their own, so a database with one free slot has room for only one of them.
+ */
+function slotsCheck(used: string, max: string, existing: readonly string[]): CheckResult {
+  const free = Math.max(Number(max) - Number(used), 0)
+  const needed = SUPATYPE_SLOTS.filter((slot) => !existing.includes(slot))
+  const leftOut = needed.slice(free)
+  return {
+    id: "replication-slots",
+    title: "A replication slot each for realtime and after-hooks",
+    severity: leftOut.length === 0 ? "pass" : "degrade",
+    detail:
+      `${used} of ${max} in use` +
+      (leftOut.length === 0 ? "" : `, no room for ${leftOut.join(" or ")} (${needed.length} needed, ${free} free)`),
+    ...(leftOut.length > 0 && {
+      impact: "Realtime and the after-hook listener each need a slot of their own, and the ones named cannot create one.",
+      remedy: `ALTER SYSTEM SET max_replication_slots = ${Number(used) + needed.length + 5};`,
+      remedyNeedsOperator: true,
+    }),
+  }
+}
+
+/**
+ * Which path after-hooks take on this database, from {@link decodingChecks}. The change log sees
+ * every writer; the fallback is the server reading the written rows back after an API request,
+ * which cannot see a write that never went through the API.
+ */
+export function afterHooksSourceCheck(decoding: readonly CheckResult[]): CheckResult {
+  const base = { id: "after-hooks-source", title: "Where after-hooks read writes from" }
+  const blocker = decodingBlocker(decoding)
+  if (blocker === undefined) {
+    return { ...base, severity: "pass", detail: "the change log: afterChange and afterDelete see every writer" }
+  }
+  return {
+    ...base,
+    severity: "degrade",
+    detail: `the request path, because ${blocker.detail}`,
+    impact: `${REQUEST_PATH_IMPACT} Fix "${blocker.title}" above to move them to the change log.`,
+  }
+}
+
+/** What after-hooks on the request path miss, said the same way by `db check` and `doctor`. */
+export const REQUEST_PATH_IMPACT =
+  "afterChange and afterDelete fire only for writes made through the API. A write made outside the " +
+  "API (SQL, a migration, a function's own database connection) does not reach them."
+
+/** The replication slots Supatype's own services read: realtime's and the after-hook listener's. */
+const SUPATYPE_SLOTS = ["supatype_realtime", "supatype_hooks"] as const
+
+/**
+ * WAL a slot may hold before it is worth saying: a quarter of the `max_slot_wal_keep_size` the
+ * supatype/postgres image sets (4096 MB), past which Postgres gives up on the slot and its reader
+ * has to start again from now, losing what it had not read.
+ */
+export const RETAINED_WAL_WARN_BYTES = 1024 ** 3
+
+/** Bytes as a reader would say them, in GiB to one place. */
+export function gibibytes(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`
+}
+
+/** One of Supatype's slots and the WAL it holds, in bytes as Postgres prints them. */
+export interface SlotRetention {
+  slot_name: string
+  retained: string
+}
+
+/**
+ * Whether a Supatype slot holds a lot of WAL. A reader that stopped (a stopped server, a listener
+ * stuck on a hook that never answers) keeps WAL on disk until it reads again, and on a small
+ * volume that is how the database fills its disk with nothing saying why.
+ */
+export function retainedWalCheck(slots: readonly SlotRetention[]): CheckResult {
+  const base = { id: "slot-retained-wal", title: "WAL held by Supatype's replication slots" }
+  const heavy = slots.filter((slot) => Number(slot.retained) > RETAINED_WAL_WARN_BYTES)
+  if (heavy.length === 0) {
+    return { ...base, severity: "pass", detail: `none holds more than ${gibibytes(RETAINED_WAL_WARN_BYTES)}` }
+  }
+  return {
+    ...base,
+    severity: "warn",
+    detail: heavy.map((slot) => `${slot.slot_name} holds ${gibibytes(Number(slot.retained))}`).join(", "),
+    impact:
+      "Its reader is behind or stopped. Start the stack so it catches up; one that stays behind is " +
+      "dropped by Postgres at max_slot_wal_keep_size, and its reader starts again from now.",
+  }
+}
+
+/** {@link retainedWalCheck} for the database `q` reaches. */
+async function slotRetention(q: QueryFn): Promise<CheckResult> {
+  const slots = await queryAs(
+    q,
+    isShape({ slot_name: isString, retained: isString }),
+    `SELECT slot_name, coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), 0)::bigint::text AS retained
+       FROM pg_replication_slots WHERE slot_name = ANY($1)`,
+    [[...SUPATYPE_SLOTS]],
+  )
+  return retainedWalCheck(slots)
+}
+
+/**
+ * Who the answer is about. The probe runs as the role `db check` connected as, while the server's
+ * listener connects with SUPATYPE_SQL_DATABASE_URL, which a generated stack sets to its owner URL
+ * (POSTGRES_USER, or DATABASE_URL for an external database).
+ */
+const SERVER_ROLE_NOTE =
+  "The server's after-hook listener connects with SUPATYPE_SQL_DATABASE_URL; check that role if it is not this one."
+
+/** Postgres's words when `output_plugin_libraries` does not name the plugin a slot asked for. */
+const NOT_AN_ALLOWED_PLUGIN = "may not be used as an output plugin"
+
+/**
+ * Why the probe slot was refused, and what fixes it. Both refusals that share `42501` are told
+ * apart by Postgres's message: the allowlist one has no SQLSTATE of its own.
+ */
+/** How to let a slot decode with wal2json when output_plugin_libraries leaves it out. */
+const ALLOW_WAL2JSON_REMEDY = [
+  "-- This sets the whole list: name any plugin it already allows as well, as in",
+  "-- 'wal2json, other_plugin'. Then reload:",
+  "ALTER SYSTEM SET output_plugin_libraries = 'wal2json';",
+  "SELECT pg_reload_conf();",
+].join("\n")
+
+/** What to do when the server has no wal2json library. */
+const INSTALL_WAL2JSON_REMEDY = [
+  "-- wal2json is a server library, not an extension: it must be installed on the host",
+  "-- (or offered by your provider) and cannot be added over SQL. Supatype's own image",
+  "-- ships it. Set database.external.realtime: false to stop starting the service.",
+].join("\n")
+
+function decodingRefusal(error: unknown, role: string): { detail: string; remedy: string } {
+  const code = errorCode(error)
+  const message = errorMessage(error)
+  if (code === "42501" && message.includes(NOT_AN_ALLOWED_PLUGIN)) {
+    return {
+      detail: "output_plugin_libraries does not name wal2json, so no slot may decode with it",
+      remedy: ALLOW_WAL2JSON_REMEDY,
+    }
+  }
+  if (code === "42501") {
+    return {
+      detail: `role "${role}" may not use replication slots (no REPLICATION attribute)`,
+      remedy: [
+        `-- ${SERVER_ROLE_NOTE}`,
+        `ALTER ROLE ${ident(role)} WITH REPLICATION;`,
+      ].join("\n"),
+    }
+  }
+  return {
+    detail: code === "58P01" ? "the wal2json output plugin is not installed on this server" : message,
+    remedy: INSTALL_WAL2JSON_REMEDY,
+  }
+}
+
+/**
+ * Ask the database to do the one thing realtime and the after-hook listener need, then undo it.
  *
  * SQLSTATEs measured against `supatype/postgres` rather than recalled:
- * `55000` wal_level too low, `58P01` the plugin's library is absent, `42501` the role may not use
- * replication slots.
+ * `55000` wal_level too low, `58P01` the plugin's library is absent, `42501` either the role may
+ * not use replication slots or `output_plugin_libraries` does not name wal2json.
  */
-async function probeLogicalDecoding(q: QueryFn): Promise<CheckResult> {
-  const base = { id: "logical-decoding", title: "wal2json logical decoding (realtime)" }
+async function probeLogicalDecoding(q: QueryFn, role: string): Promise<CheckResult> {
+  const base = { id: "logical-decoding", title: "wal2json logical decoding (realtime, after-hooks)" }
   try {
     await q(`SELECT pg_create_logical_replication_slot($1, 'wal2json')`, [PROBE_SLOT])
   } catch (error) {
-    const code = errorCode(error)
-    const detail =
-      code === "58P01"
-        ? "the wal2json output plugin is not installed on this server"
-        : code === "42501"
-          ? "this role may not use replication slots (no REPLICATION attribute)"
-          : error instanceof Error
-            ? error.message
-            : String(error)
     return {
       ...base,
       severity: "degrade",
-      detail,
+      ...decodingRefusal(error, role),
       impact:
-        "Realtime subscriptions are unavailable; everything else is unaffected. The service still " +
-        "starts, reports this reason on /health/ready, and serves nothing else differently.",
-      ...(code === "42501"
-        ? { remedy: `ALTER ROLE CURRENT_USER WITH REPLICATION;`, remedyNeedsOperator: true }
-        : {
-            remedy: [
-              "-- wal2json is a server library, not an extension: it must be installed on the host",
-              "-- (or offered by your provider) and cannot be added over SQL. Supatype's own image",
-              "-- ships it. Set database.external.realtime: false to stop starting the service.",
-            ].join("\n"),
-            remedyNeedsOperator: true,
-          }),
+        `${NO_DECODING_IMPACT} The realtime service still starts, reports this reason on ` +
+        "/health/ready, and serves nothing else differently.",
+      remedyNeedsOperator: true,
     }
   }
 
@@ -163,7 +368,11 @@ async function probeLogicalDecoding(q: QueryFn): Promise<CheckResult> {
     }
   }
 
-  return { ...base, severity: "pass", detail: "a wal2json slot can be created and dropped" }
+  return {
+    ...base,
+    severity: "pass",
+    detail: `role "${role}" can create and drop a wal2json slot. ${SERVER_ROLE_NOTE}`,
+  }
 }
 
 const REQUIRED_ROLES = ["anon", "authenticated", "service_role", "authenticator"] as const
@@ -233,11 +442,7 @@ export async function runPreflight(
   const q: QueryFn = (sql, params = []) => queryRows(client, sql, params)
 
   /** For probes that always return exactly one row. */
-  const one = async <T>(guard: Guard<T>, sql: string, params: unknown[] = []): Promise<T> => {
-    const [row] = await queryAs(q, guard, sql, params)
-    if (row === undefined) throw new Error(`Preflight probe returned no rows: ${sql}`)
-    return row
-  }
+  const one = <T>(guard: Guard<T>, sql: string, params: unknown[] = []): Promise<T> => queryOne(q, guard, sql, params)
 
   // ── Server version ─────────────────────────────────────────────────────────
   const { server_version_num } = await one(isShape({ server_version_num: isString }), "SHOW server_version_num")
@@ -465,54 +670,9 @@ export async function runPreflight(
     }),
   })
 
-  // ── Realtime ───────────────────────────────────────────────────────────────
-  const { wal_level } = await one(isShape({ wal_level: isString }), "SHOW wal_level")
-  const walLogical = wal_level === "logical"
-  results.push({
-    id: "wal-level",
-    title: "wal_level = logical (realtime)",
-    severity: walLogical ? "pass" : "degrade",
-    detail: `wal_level is "${wal_level}"`,
-    ...(!walLogical && {
-      impact: "Realtime subscriptions are unavailable; everything else is unaffected.",
-      remedy:
-        "-- Requires a server restart, and on managed Postgres a parameter-group change\n" +
-        "-- rather than SQL. Shown for a self-managed server:\n" +
-        "ALTER SYSTEM SET wal_level = 'logical';",
-      remedyNeedsOperator: true,
-    }),
-  })
-
-  const slots = await one(
-    isShape({ used: isString, max: isString }),
-    `SELECT (SELECT count(*) FROM pg_replication_slots)::text AS used,
-            current_setting('max_replication_slots') AS max`,
-  )
-  const slotsFree = Number(slots.max) - Number(slots.used)
-  results.push({
-    id: "replication-slots",
-    title: "A spare replication slot (realtime)",
-    severity: slotsFree > 0 ? "pass" : "degrade",
-    detail: `${slots.used} of ${slots.max} in use`,
-    ...(slotsFree <= 0 && {
-      impact: "Realtime cannot create its slot.",
-      remedy: "ALTER SYSTEM SET max_replication_slots = 10;",
-      remedyNeedsOperator: true,
-    }),
-  })
-
-  // The definitive realtime check: create the slot realtime would create, then drop it.
-  //
-  // There is no catalog to consult. `wal2json` is a shared library, not an extension, so it never
-  // appears in `pg_available_extensions`: the only way to know whether this database can decode is
-  // to ask it to. Cloud SQL does not ship the plugin at all; plenty of managed Postgres will not
-  // grant `REPLICATION`. Both produce a stack that looks healthy until the first subscription.
-  //
-  // Skipped when `wal_level` or the slot budget already rules it out, since the probe would fail for
-  // that reason and report it a second time under a less specific heading.
-  if (walLogical && slotsFree > 0) {
-    results.push(await probeLogicalDecoding(q))
-  }
+  // ── Realtime and after-hooks ───────────────────────────────────────────────
+  const decoding = await decodingChecks(q)
+  results.push(...decoding, afterHooksSourceCheck(decoding), await slotRetention(q))
 
   // ── Existing tables in the target schema ───────────────────────────────────
   if (schemaExists) {

@@ -2334,11 +2334,13 @@ A model hook is a handler the API server calls around a write to one model: to c
 | Key | Runs | Can |
 | --- | --- | --- |
 | `beforeChange` | Before an insert or update reaches Postgres | Let it through, replace the rows or the patch, or refuse it |
-| `afterChange` | After an insert or update succeeded | React only. It cannot change or undo the write |
+| `afterChange` | After an insert or update commits, from any writer | React only. It cannot change or undo the write |
 | `beforeDelete` | Before a delete reaches Postgres | Let it through or refuse it |
-| `afterDelete` | After a delete succeeded | React only |
+| `afterDelete` | After a delete commits, from any writer | React only |
 
-Hooks fire on writes to `/rest/v1/<table>`: `POST` and `PUT` are inserts, `PATCH` is an update, `DELETE` is a delete. That covers the client's `insert`, `upsert`, `update` and `delete`, including calls made with the service-role key. RPC calls, direct SQL, seeds and migrations do not fire them.
+`before*` hooks fire on writes to `/rest/v1/<table>`: `POST` and `PUT` are inserts, `PATCH` is an update, `DELETE` is a delete. That covers the client's `insert`, `upsert`, `update` and `delete`, including calls made with the service-role key. RPC calls, direct SQL, seeds and migrations do not fire them.
+
+`after*` hooks read committed changes from the database's change log instead, so they fire for every writer: the API, Studio, SQL and functions. Seeds are the exception. On a database without logical replication they fall back to writes through the API only; `supatype db check` and `supatype doctor` say which you have.
 
 #### Declare a hook
 
@@ -2365,6 +2367,7 @@ export type Post = Model<{
 | `function` | The directory under `hooks/`. |
 | `timeout` | Milliseconds to wait for an answer. Default `2000`. |
 | `onUnavailable` | What to do when the hook does not answer: a timeout, a connection failure, a `5xx`, a thrown error or an unreadable body. `"reject"` refuses the write, `"log"` lets it through and logs. Defaults to `"reject"` for `before*` hooks and `"log"` for `after*` hooks. |
+| `columns` | `after*` hooks only. `"safe"`, the default, leaves every column with a field `read` rule out of the hook's rows; `"all"` keeps them. |
 
 `supatype push` refuses a schema whose hook names a directory with no `index.ts`, so a typo cannot leave a hook that never fires.
 
@@ -2403,9 +2406,11 @@ The type argument is the table name. `BeforeChange`, `AfterChange`, `BeforeDelet
 | Context field | What it holds |
 | --- | --- |
 | `table`, `operation` | The table and `insert`, `update` or `delete`. |
-| `user` | `sub`, `role` and `email` from the caller's verified token, or `null` for an anonymous caller. |
+| `user` | `sub`, `role` and `email` from the caller's verified token, or `null` for an anonymous caller and for an `after*` hook on a write made outside the API. |
 | `requestId` | Matches the request in the server logs. |
-| `rows` | An insert's rows, always an array. On `afterChange`, the written rows, only when the caller asked for them back with `.select()`. |
+| `rows` | An insert's rows, always an array. On `afterChange`, every row one transaction wrote to the table with that operation, always present and in the JSON shape PostgREST returns, so a bulk insert is one call. |
+| `old` | On an `afterChange` update and on `afterDelete`: the rows as they were before. On an update, `old[i]` is `rows[i]` as it was. |
+| `deliveryId` | On `after*` hooks: `commitLSN:schema.table:operation`, the same on every delivery of one call. Delivery is at least once, so keep the ids you have handled if a repeat would do harm. |
 | `patch` | An update's changes. |
 | `filter` | The request's filter on an update or delete, such as `id=eq.42`. A hook cannot change it. |
 | `previous()` | Before an update or delete: fetches the rows about to change, up to 100, with `truncated: true` when there were more. They come back as stored, without field masking, so do not copy them into a refusal message. |
@@ -2417,7 +2422,7 @@ To keep a model's whole lifecycle in one directory, point several events at the 
 #### How hooks run
 
 - The server reads the whole request body before any hook runs. A body over 1 MiB on a write to a hooked table is refused, rather than written without the hook.
-- An `after*` hook runs once the caller already has its response. Its failures are logged and never reach the caller.
+- An `after*` hook runs once the write has committed. A delivery it does not answer is retried with backoff, then logged, and never reaches the caller. Its rows leave out restricted columns unless it declares `columns: "all"`.
 - A hook may write through the API, and those writes fire hooks too. A chain more than four hooks deep is refused with status `508`, so a hook that writes to its own table cannot loop forever.
 - On a Docker stack the `functions-worker` container mounts `hooks/` next to `functions/`. When `supatype dev` runs on Docker, the worker restarts when a hook file changes. On a self-hosted stack, restart it after changing a hook, as for functions.
 
@@ -4068,7 +4073,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift` |
+| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift`, `--run-hooks` |
 | `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>`, `--direct` |
 | `generate` | Regenerate TypeScript types without running a migration |  |
 | `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |

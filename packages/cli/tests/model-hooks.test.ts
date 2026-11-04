@@ -192,6 +192,33 @@ export type Post = Model<{ id: UUID }, {
     expect(Object.keys(expectShape(manifest["hooks"], isJsonObject))).toEqual(["posts"])
   })
 
+  it("writes each hooked table's columns and key as a map of its own, beside the hook map", () => {
+    // Inside a `hooks` table entry these would read as hook events to a released server, which then
+    // refuses the whole manifest.
+    const { dir, ast } = project(`
+import type { LoggedIn, Model, Public, Role, UUID } from "@supatype/types"
+
+export type Post = Model<{ id: UUID; secretNote: string }, {
+  tableName: "posts"
+  access: { read: Public; create: LoggedIn; fields: { secretNote: { read: Role<"admin"> } } }
+  hooks: { afterChange: { function: "index-post"; columns: "all" } }
+}>
+`)
+    mkdirSync(join(dir, ".supatype"), { recursive: true })
+    writeFileSync(join(dir, ".supatype", "manifest.json"), JSON.stringify({ functions_enabled: true }), "utf8")
+
+    expect(syncManifestHooks(dir, ast)).toBe(true)
+    const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
+    expect(Object.keys(expectShape(manifest["hooks"], isRecordOf(isJsonObject))["posts"] ?? {})).toEqual(["afterChange"])
+    expect(manifest["tables"]).toEqual({
+      posts: {
+        restrictedColumns: ["secretNote"],
+        primaryKey: ["id"],
+        columns: { afterChange: "all", afterDelete: "safe" },
+      },
+    })
+  })
+
   it("never creates a manifest from scratch", () => {
     // `functions_enabled` is a plain bool on the server's side, so a manifest carrying only hooks
     // would read as functions *disabled*, the defect fixed one commit earlier, by another door.

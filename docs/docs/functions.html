@@ -262,11 +262,12 @@ $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></di
 <div class="tbl"><table><thead><tr><th scope="col">Key</th><th scope="col">Runs</th><th scope="col">Can</th></tr></thead>
 <tbody>
 <tr><td><code>beforeChange</code></td><td>Before an insert or update reaches Postgres</td><td>Let it through, replace the rows or the patch, or refuse it</td></tr>
-<tr><td><code>afterChange</code></td><td>After an insert or update succeeded</td><td>React only. It cannot change or undo the write</td></tr>
+<tr><td><code>afterChange</code></td><td>After an insert or update commits, from any writer</td><td>React only. It cannot change or undo the write</td></tr>
 <tr><td><code>beforeDelete</code></td><td>Before a delete reaches Postgres</td><td>Let it through or refuse it</td></tr>
-<tr><td><code>afterDelete</code></td><td>After a delete succeeded</td><td>React only</td></tr>
+<tr><td><code>afterDelete</code></td><td>After a delete commits, from any writer</td><td>React only</td></tr>
 </tbody></table></div>
-<p>Hooks fire on writes to <code>/rest/v1/&lt;table&gt;</code>: <code>POST</code> and <code>PUT</code> are inserts, <code>PATCH</code> is an update, <code>DELETE</code> is a delete. That covers the client's <code>insert</code>, <code>upsert</code>, <code>update</code> and <code>delete</code>, including calls made with the service-role key. RPC calls, direct SQL, seeds and migrations do not fire them.</p>
+<p><code>before*</code> hooks fire on writes to <code>/rest/v1/&lt;table&gt;</code>: <code>POST</code> and <code>PUT</code> are inserts, <code>PATCH</code> is an update, <code>DELETE</code> is a delete. That covers the client's <code>insert</code>, <code>upsert</code>, <code>update</code> and <code>delete</code>, including calls made with the service-role key. RPC calls, direct SQL, seeds and migrations do not fire them.</p>
+<p><code>after*</code> hooks read committed changes from the database's change log instead, so they fire for every writer: the API, Studio, SQL and functions. Seeds are the exception. On a database without logical replication they fall back to writes through the API only; <code>supatype db check</code> and <code>supatype doctor</code> say which you have.</p>
 <h3>Declare a hook</h3>
 <p>Name the handler in the model's second argument. A string is the handler's directory name; an object adds options.</p>
 <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
@@ -286,6 +287,7 @@ $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></di
 <tr><td><code>function</code></td><td>The directory under <code>hooks/</code>.</td></tr>
 <tr><td><code>timeout</code></td><td>Milliseconds to wait for an answer. Default <code>2000</code>.</td></tr>
 <tr><td><code>onUnavailable</code></td><td>What to do when the hook does not answer: a timeout, a connection failure, a <code>5xx</code>, a thrown error or an unreadable body. <code>"reject"</code> refuses the write, <code>"log"</code> lets it through and logs. Defaults to <code>"reject"</code> for <code>before*</code> hooks and <code>"log"</code> for <code>after*</code> hooks.</td></tr>
+<tr><td><code>columns</code></td><td><code>after*</code> hooks only. <code>"safe"</code>, the default, leaves every column with a field <code>read</code> rule out of the hook's rows; <code>"all"</code> keeps them.</td></tr>
 </tbody></table></div>
 <p><code>supatype push</code> refuses a schema whose hook names a directory with no <code>index.ts</code>, so a typo cannot leave a hook that never fires.</p>
 <h3>Write the handler</h3>
@@ -313,9 +315,11 @@ $ npx supatype hooks list</pre></div>
 <div class="tbl"><table><thead><tr><th scope="col">Context field</th><th scope="col">What it holds</th></tr></thead>
 <tbody>
 <tr><td><code>table</code>, <code>operation</code></td><td>The table and <code>insert</code>, <code>update</code> or <code>delete</code>.</td></tr>
-<tr><td><code>user</code></td><td><code>sub</code>, <code>role</code> and <code>email</code> from the caller's verified token, or <code>null</code> for an anonymous caller.</td></tr>
+<tr><td><code>user</code></td><td><code>sub</code>, <code>role</code> and <code>email</code> from the caller's verified token, or <code>null</code> for an anonymous caller and for an <code>after*</code> hook on a write made outside the API.</td></tr>
 <tr><td><code>requestId</code></td><td>Matches the request in the server logs.</td></tr>
-<tr><td><code>rows</code></td><td>An insert's rows, always an array. On <code>afterChange</code>, the written rows, only when the caller asked for them back with <code>.select()</code>.</td></tr>
+<tr><td><code>rows</code></td><td>An insert's rows, always an array. On <code>afterChange</code>, every row one transaction wrote to the table with that operation, always present and in the JSON shape PostgREST returns, so a bulk insert is one call.</td></tr>
+<tr><td><code>old</code></td><td>On an <code>afterChange</code> update and on <code>afterDelete</code>: the rows as they were before. On an update, <code>old[i]</code> is <code>rows[i]</code> as it was.</td></tr>
+<tr><td><code>deliveryId</code></td><td>On <code>after*</code> hooks: <code>commitLSN:schema.table:operation</code>, the same on every delivery of one call. Delivery is at least once, so keep the ids you have handled if a repeat would do harm.</td></tr>
 <tr><td><code>patch</code></td><td>An update's changes.</td></tr>
 <tr><td><code>filter</code></td><td>The request's filter on an update or delete, such as <code>id=eq.42</code>. A hook cannot change it.</td></tr>
 <tr><td><code>previous()</code></td><td>Before an update or delete: fetches the rows about to change, up to 100, with <code>truncated: true</code> when there were more. They come back as stored, without field masking, so do not copy them into a refusal message.</td></tr>
@@ -325,7 +329,7 @@ $ npx supatype hooks list</pre></div>
 <h3>How hooks run</h3>
 <ul>
 <li>The server reads the whole request body before any hook runs. A body over 1 MiB on a write to a hooked table is refused, rather than written without the hook.</li>
-<li>An <code>after*</code> hook runs once the caller already has its response. Its failures are logged and never reach the caller.</li>
+<li>An <code>after*</code> hook runs once the write has committed. A delivery it does not answer is retried with backoff, then logged, and never reaches the caller. Its rows leave out restricted columns unless it declares <code>columns: "all"</code>.</li>
 <li>A hook may write through the API, and those writes fire hooks too. A chain more than four hooks deep is refused with status <code>508</code>, so a hook that writes to its own table cannot loop forever.</li>
 <li>On a Docker stack the <code>functions-worker</code> container mounts <code>hooks/</code> next to <code>functions/</code>. When <code>supatype dev</code> runs on Docker, the worker restarts when a hook file changes. On a self-hosted stack, restart it after changing a hook, as for functions.</li>
 </ul>

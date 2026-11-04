@@ -43,6 +43,7 @@ import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-mask
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
+import { postgrestHookActorEnv } from "./hook-actor.js"
 import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage } from "./release-images.js"
 import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
@@ -302,6 +303,20 @@ function containerProjectPath(cwd: string, hostPath: string, setting: string): s
     )
   }
   return rel === "" ? "/project" : `/project/${rel.split(sep).join("/")}`
+}
+
+/**
+ * PostgREST's pre-request lines, which mark each API write's transaction with its caller so
+ * after-hooks fed from the change log can tell it from a write made in SQL. Empty for a server
+ * older than the one whose migrations create the function (hook-actor.ts).
+ */
+function hookActorLines(config: SupatypeProjectConfig): string {
+  const env = postgrestHookActorEnv(config)
+  if (!("PGRST_DB_PRE_REQUEST" in env)) return ""
+  return (
+    "      # Marks each API write's transaction with its caller, for after-hooks fed from the change log.\n" +
+    `      PGRST_DB_PRE_REQUEST: ${env.PGRST_DB_PRE_REQUEST}\n`
+  )
 }
 
 /**
@@ -913,7 +928,7 @@ ${dbServiceBlock}  postgrest:
       # views and never the base tables, and "public" otherwise. Decided by the same tier as above.
       PGRST_DB_EXTRA_SEARCH_PATH: ${postgrestSchemas.PGRST_DB_EXTRA_SEARCH_PATH}
       PGRST_DB_POOL: 3
-${dbDependency}
+${hookActorLines(config)}${dbDependency}
   storage:
     image: ${inRepoImage("storage")}
     expose:

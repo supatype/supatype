@@ -18,7 +18,7 @@ vi.mock("../src/model-hooks.js", () => ({
   validateModelHooks: () => [],
   validateModelValidators: () => [],
   // A cache declaration, so the push has something to deploy to the target after the schema.
-  manifestMaps: () => ({ hooks: {}, validators: {}, cache: { post: { enabled: true } } }),
+  manifestMaps: () => ({ hooks: {}, validators: {}, cache: { post: { enabled: true } }, tables: {} }),
   syncManifestHooks: () => false,
   writeHooksModule: () => null,
 }))

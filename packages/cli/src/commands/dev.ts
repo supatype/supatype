@@ -91,6 +91,7 @@ import {
   postgrestRuntimeRepairDue,
 } from "../postgrest-release.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
+import { postgrestHookActorEnv } from "../hook-actor.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } from "../dev-session.js"
 import { publishDevReady } from "../dev-ready-panel.js"
@@ -626,6 +627,8 @@ export function registerDev(program: Command): void {
           PGRST_SERVER_HOST: "127.0.0.1",
           PGRST_JWT_SECRET: serverEnv["SUPATYPE_JWT_SECRET"] ?? "",
           PGRST_LOG_LEVEL: "warn",
+          // The caller marker after-hooks read from the change log, as on a compose stack.
+          ...postgrestHookActorEnv(config),
           // On Windows, PostgREST (MinGW/GHC binary) needs libpq.dll and
           // OpenSSL DLLs. Prepend a Postgres bin dir which bundles these
           // runtime dependencies.

@@ -73,7 +73,7 @@ Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything 
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift` |
+| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift`, `--run-hooks` |
 | `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>`, `--direct` |
 | `generate` | Regenerate TypeScript types without running a migration |  |
 | `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |

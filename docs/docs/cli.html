@@ -163,7 +163,7 @@
     <div class="tbl"><table>
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
-        <tr><td><code>push</code></td><td>Push schema to the database: diff, prompt for destructive changes, apply migration, generate types</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--direct</code> (alias <code>--local</code>), <code>--overwrite-drift</code></td></tr>
+        <tr><td><code>push</code></td><td>Push schema to the database: diff, prompt for destructive changes, apply migration, generate types</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--direct</code> (alias <code>--local</code>), <code>--overwrite-drift</code>, <code>--run-hooks</code></td></tr>
         <tr><td><code>diff</code></td><td>Show planned schema changes without applying them (dry run)</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--direct</code></td></tr>
         <tr><td><code>generate</code></td><td>Regenerate TypeScript types without running a migration</td><td></td></tr>
         <tr><td><code>migrate</code></td><td>Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With <code>--record</code> the file also records the migration as a push does</td><td><code>-o, --output &lt;file&gt;</code>, <code>--record</code>, <code>--force</code></td></tr>

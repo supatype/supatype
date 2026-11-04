@@ -240,14 +240,22 @@ function resolveColumn(
   name: string,
   meta: Record<string, unknown>,
 ): { column: string; ts: string } | null {
-  if (meta["kind"] !== "relation") return { column: name, ts: toTsType(meta) }
-  if (meta["cardinality"] !== "belongsTo") return null
-
-  const column = foreignKeyColumn(name, meta)
+  const column = columnNameOf(name, meta)
+  if (column === null) return null
+  if (meta["kind"] !== "relation") return { column, ts: toTsType(meta) }
 
   // Nullable unless the relation asked for `NOT NULL`, which is the engine's rule. A fix that made
   // every foreign key non-nullable would be wrong in the other direction just as often.
   return { column, ts: meta["required"] === true ? "string" : "string | null" }
+}
+
+/**
+ * The name of the column field `name` occupies on its own table, or null when it occupies none: the
+ * name half of {@link resolveColumn}, for anything that must name the same columns the Row type does.
+ */
+export function columnNameOf(name: string, meta: Record<string, unknown>): string | null {
+  if (meta["kind"] !== "relation") return name
+  return meta["cardinality"] === "belongsTo" ? foreignKeyColumn(name, meta) : null
 }
 
 /** Declared fields as the columns they become, dropping the ones that are not columns here. */

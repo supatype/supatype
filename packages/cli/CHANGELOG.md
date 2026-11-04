@@ -15,8 +15,16 @@
 * **realtime:** the service's process entry is `dist/main.js`; `dist/index.js` only exports and no
   longer starts a server, so an `overrides.realtime` naming `packages/realtime/dist/index.js` exits
   at once. Point it at `packages/realtime/dist/main.js`.
+* **hooks:** `AfterDeleteContext` has no `filter`. After-hooks are fed from the database's change log,
+  which records the rows a write changed rather than the request that changed them, so there is no
+  filter to give. `ctx.old` replaces it: the deleted rows themselves, as they were. A handler reading
+  `ctx.filter` in an `afterDelete` no longer compiles; read `ctx.old` instead.
 
 ### Features
+
+* **push:** `--run-hooks` fires after-hooks for the rows a push's own data migrations rewrite (column
+  conversions, block moves, kind changes). Without it they are skipped, as seeds are. Against an
+  engine whose capabilities do not list `run_hooks`, the push stops before anything is sent.
 
 * **init:** `supatype init <dir> --example <name>` starts from `examples/<name>` of the release
   matching the CLI (`v<version>` on GitHub), with every `workspace:` dependency pinned to

@@ -62,6 +62,7 @@ export {
   isCacheMap,
   isHookDeployBody,
   isHookMap,
+  isTableMap,
   unflattenHookSource,
   type CacheMap,
   type HookDeployBody,
@@ -69,4 +70,7 @@ export {
   type ManifestCacheEntry,
   type ManifestHookEntry,
   type ManifestMaps,
+  type ManifestTableEntry,
+  type TableMap,
+  type AfterHookColumns,
 } from "./manifest-maps.js"

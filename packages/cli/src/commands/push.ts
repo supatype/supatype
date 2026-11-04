@@ -40,7 +40,7 @@ import {
 import { printPushWarnings } from "../engine-push-output.js"
 import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
 import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from "../destructive-consent.js"
-import { adoptKeysNeed, OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js"
+import { adoptKeysNeed, OVERWRITE_DRIFT_NEED, RUN_HOOKS_NEED } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
@@ -94,9 +94,14 @@ export function registerPush(program: Command): void {
       "--overwrite-drift",
       "Put back policies, grants, labels and RLS changed outside Supatype without asking",
     )
+    .option(
+      "--run-hooks",
+      "Fire after-hooks for the rows this push's data migrations rewrite (skipped by default)",
+    )
     .action(async (opts: {
       yes?: boolean
       overwriteDrift?: boolean
+      runHooks?: boolean
       connection?: string
       env?: string
       direct?: boolean
@@ -111,7 +116,11 @@ export function registerPush(program: Command): void {
       assertEngineSupportsSchema(ast, pinnedVersion("engine", config))
       assertPreviewAddressesResolve(config)
 
-      const run: PushRun = { yes: opts.yes ?? false, overwriteDrift: opts.overwriteDrift ?? false }
+      const run: PushRun = {
+        yes: opts.yes ?? false,
+        overwriteDrift: opts.overwriteDrift ?? false,
+        runHooks: opts.runHooks ?? false,
+      }
       // A refusal (access changed by hand, another push running, an image Docker could not pull)
       // ends with what to do about it, whichever way the push went.
       // Unmanaged tables and lost data are spoken to by the push's own walkthrough.
@@ -178,12 +187,14 @@ async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushR
   const audit = await composeAuditArgs(cwd, config)
   const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT_NEED])
   if (run.overwriteDrift) await gate()
+  if (run.runHooks === true) await requireDockerFeatures(cwd, config, [RUN_HOOKS_NEED])
   const engine: DockerPushEngine = hasEngineOverride(config) ? "host" : "compose"
+  const runHooks = run.runHooks === true
   const applying = (overwriteDrift: boolean) =>
     pushConsentingToDestructive(
       (force) =>
         withSpinner(dockerApplyMessage(force, engine), () =>
-          pushSchemaDocker(cwd, config, { overwriteDrift, force, audit }),
+          pushSchemaDocker(cwd, config, { overwriteDrift, force, audit, runHooks }),
         ),
       { yes: run.yes, apply: "supatype push --yes" },
       consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
@@ -201,6 +212,8 @@ export interface PushRun {
   yes: boolean
   /** `--overwrite-drift`: put back access changed outside Supatype without asking (plan 3.5). */
   overwriteDrift: boolean
+  /** `--run-hooks`: the push's data migrations fire after-hooks, which they skip by default. */
+  runHooks?: boolean
 }
 
 /**
@@ -238,6 +251,7 @@ async function pushViaTarget(
 ): Promise<void> {
   // Before anything is read or asked: a server or engine that cannot honour the flag says so now.
   if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT_NEED])
+  if (run.runHooks === true) await requireTargetFeatures(target, [RUN_HOOKS_NEED])
   if (!(await databaseIsReady(cwd, config, target, ast))) return
   const plan = (schema: unknown) =>
     withSpinner("Diffing against database", () => targetSchemaDiff(target, schema, { schema: pgSchema }))
@@ -401,6 +415,7 @@ function applyToTarget(
         schema: pgSchema,
         schemaSources: buildSchemaSourcesPayload(cwd),
         overwriteDrift,
+        runHooks: run.runHooks === true,
       }),
     )
   return pushOfferingAdoption(
@@ -497,16 +512,16 @@ export async function deployHooksToTarget(
   const upload = readHookUpload(cwd, hooksDir, ast, support.files)
   const failed = upload?.failed ?? []
   if (failed.length > 0 && !support.keep) return reportNoneSent(target, failed)
-  // One body for every target, the manifest's three maps in it: a self-host stack learns the
-  // validator and cache maps only here, as a local push writes them (applied-ast-artifacts.ts). It
+  // One body for every target, the manifest's maps in it: a self-host stack learns the validator,
+  // cache and table maps only here, as a local push writes them (applied-ast-artifacts.ts). It
   // is sent on every push, empty when the schema declares nothing, so it clears what the target was
   // given before from wherever that push came: a record kept on one machine missed a fresh clone's.
   const adapter = readGeneratedAdapter(hooksDir)
   const named = upload?.handlers ?? []
   const handlers = adapter === null || named.length === 0 ? named : [...named, adapter]
-  const { hooks, validators, cache } = manifestMaps(ast)
+  const { hooks, validators, cache, tables } = manifestMaps(ast)
   const keep = failed.length > 0 ? { keep: failed.map((hook) => hook.name) } : {}
-  return uploadHooks(target, { handlers, map: hooks, validators, cache, ...keep }, named.length, failed)
+  return uploadHooks(target, { handlers, map: hooks, validators, cache, tables, ...keep }, named.length, failed)
 }
 
 /**
@@ -601,7 +616,7 @@ function tablesNaming(name: string, maps: readonly unknown[]): { refusing: strin
 
 /** Whether a deploy body carries no handler and no map entry. */
 function emptyDeploy(body: HookDeployBody): boolean {
-  const maps = [body.map, body.validators, body.cache]
+  const maps = [body.map, body.validators, body.cache, body.tables]
   return (body.handlers ?? []).length === 0 && maps.every((map) => map === undefined || (isJsonObject(map) && Object.keys(map).length === 0))
 }
 

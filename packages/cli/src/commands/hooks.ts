@@ -13,6 +13,7 @@ import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
 import { declaredHooks, ensureHooksModule, hookTableOf, hooksReport } from "../model-hooks.js"
+import { isAfterHookEvent, type AfterHookEvent } from "../hook-columns.js"
 import { error, info, plain } from "../ui/messages.js"
 
 export function registerHooks(program: Command): void {
@@ -91,6 +92,27 @@ function sayWiring(name: string, declared: { model: string; event: string }[]): 
   }
 }
 
+/** The scaffold for an `afterChange` or `afterDelete` hook, typed as the event it is wired to. */
+function afterHandlerTemplate(name: string, event: AfterHookEvent, tableType: string): string {
+  const type = event === "afterDelete" ? "AfterDelete" : "AfterChange"
+  return `// ${name}: model hook (${event})
+//
+// Runs after the write has committed, for every writer: the API, Studio, SQL and functions. It
+// cannot change or undo it. Failures are retried, then logged, never surfaced to the caller.
+//
+// Delivery is at least once, so the same change can arrive twice: \`ctx.deliveryId\` is the same
+// each time, so keep the ones you have handled if a repeat would do harm.
+
+import { hook, type ${type} } from "../_supatype/hooks.ts"
+
+const handler: ${type}<${tableType}> = async (ctx) => {
+  console.log(\`\${ctx.table} \${ctx.operation} by \${ctx.user?.sub ?? "anon"} (\${ctx.deliveryId})\`)
+}
+
+export default hook(handler)
+`
+}
+
 /**
  * The scaffold deliberately imports from `../_supatype/hooks.ts`, which `push` generates and
  * `hooks new` writes when it is missing.
@@ -107,21 +129,7 @@ function handlerTemplate(name: string, declared: { model: string; event: string 
   // when no model names it yet.
   const tableType = JSON.stringify(table ?? "your_table")
 
-  if (event.startsWith("after")) {
-    return `// ${name}: model hook (${event})
-//
-// Runs after the write has succeeded. It cannot change or undo it: a rejection here would be a
-// rejection of something that already happened. Failures are logged, not surfaced to the caller.
-
-import { hook, type AfterChange } from "../_supatype/hooks.ts"
-
-const handler: AfterChange<${tableType}> = async (ctx) => {
-  console.log(\`\${ctx.table} \${ctx.operation} by \${ctx.user?.sub ?? "anon"}\`)
-}
-
-export default hook(handler)
-`
-  }
+  if (isAfterHookEvent(event)) return afterHandlerTemplate(name, event, tableType)
 
   return `// ${name}: model hook (${event}) for ${model}
 //

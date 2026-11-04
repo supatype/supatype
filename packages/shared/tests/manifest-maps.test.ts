@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { applyManifestMaps, flattenHookSource, isCacheMap, isHookDeployAnswer, isHookDeployBody, isHookMap, unflattenHookSource } from "../src/index.js"
+import { applyManifestMaps, flattenHookSource, isCacheMap, isHookDeployAnswer, isHookDeployBody, isHookMap, isTableMap, unflattenHookSource } from "../src/index.js"
 
 /**
  * The CLI and the self-host control plane write the manifest's maps and read the hook deploy body;
@@ -32,6 +32,24 @@ describe("the hook deploy contract", () => {
     expect(isHookMap({ t: { beforeChange: { function: "h", onUnavailable: "reject" } } })).toBe(true)
     expect(isHookMap({ t: { beforeChange: { timeout: 5 } } })).toBe(false)
     expect(isCacheMap({ t: { maxTtl: "60" } })).toBe(false)
+  })
+
+  it("reads a table map: per after-hook columns, restricted columns and the key", () => {
+    const tables = { t: { columns: { afterChange: "all", afterDelete: "safe" }, restrictedColumns: ["secret"], primaryKey: ["id"] } }
+    expect(isTableMap(tables)).toBe(true)
+    // A missing event means "safe", so an entry need not name both.
+    expect(isTableMap({ t: { columns: { afterChange: "all" }, restrictedColumns: [], primaryKey: ["id"] } })).toBe(true)
+    expect(isTableMap({ t: { columns: { afterChange: "every" }, restrictedColumns: [], primaryKey: [] } })).toBe(false)
+    expect(isTableMap({ t: { columns: {}, restrictedColumns: "secret", primaryKey: [] } })).toBe(false)
+    expect(isTableMap({ t: { columns: {}, restrictedColumns: [], primaryKey: [1] } })).toBe(false)
+    expect(isHookDeployBody({ handlers: [], map: {}, tables })).toBe(true)
+  })
+
+  it("keeps the table map beside the hook map, never inside it", () => {
+    const manifest: Record<string, unknown> = {}
+    const tables = { t: { columns: { afterChange: "safe" as const }, restrictedColumns: [], primaryKey: ["id"] } }
+    applyManifestMaps(manifest, { hooks: { t: { afterChange: { function: "h" } } }, tables })
+    expect(manifest).toEqual({ hooks: { t: { afterChange: { function: "h" } } }, tables })
   })
 })
 

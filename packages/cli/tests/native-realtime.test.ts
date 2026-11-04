@@ -207,6 +207,7 @@ describe("decodingProblem", () => {
   function database(level: string, slotError?: { code: string }): (sql: string) => Promise<Record<string, unknown>[]> {
     return async (sql) => {
       if (sql.startsWith("SHOW wal_level")) return [{ wal_level: level }]
+      if (sql.includes("max_replication_slots")) return [{ used: "0", max: "10", existing: "", role: "postgres" }]
       if (sql.includes("pg_create_logical_replication_slot") && slotError !== undefined) {
         throw Object.assign(new Error("could not access file"), slotError)
       }
