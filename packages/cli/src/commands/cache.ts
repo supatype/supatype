@@ -4,12 +4,8 @@
 
 import type { Command } from "commander"
 import { existsSync } from "node:fs"
-import {
-  BINARY_COMPONENTS,
-  formatBytes,
-  listCacheEntries,
-  resolveCacheProjectDirs,
-} from "../cache-clean.js"
+import { BINARY_COMPONENTS, listCacheEntries, resolveCacheProjectDirs } from "../cache-clean.js"
+import { formatBytes } from "../byte-size.js"
 import { cleanCachedBinaries } from "../cache-pins.js"
 import { cacheRoot, type Component } from "../binary-cache.js"
 import {
@@ -20,9 +16,28 @@ import {
 } from "../rest-cache-admin.js"
 import { error, info, plain, warn } from "../ui/messages.js"
 import { errorMessage } from "../error-message.js"
+import { cleanOldCliVersions, type CachedCliVersion } from "../cli-old-versions.js"
+import { cliPackageVersion } from "../cli-package-version.js"
 
 function isComponent(value: string): value is Component {
   return (BINARY_COMPONENTS as readonly string[]).includes(value)
+}
+
+/**
+ * The CLI programs the npm package's starter downloaded for other versions, removed or with
+ * `dryRun` listed. Never the running version. A project still on a removed version downloads it
+ * again on its next command.
+ */
+function cleanCliVersions(component: string | undefined, version: string | undefined, dryRun: boolean): CachedCliVersion[] {
+  if (component !== undefined && component !== "cli") return []
+  const { removed, inUse } = cleanOldCliVersions(cliPackageVersion(), {
+    dryRun,
+    // `cache clean 0.8.0` names no component, so its version is not the CLI's.
+    ...(component === "cli" && version !== undefined && version !== "" && { version }),
+  })
+  for (const cli of removed) plain(`  ${dryRun ? "would remove" : "removed"}  cli@${cli.version}  ${formatBytes(cli.bytes)}`)
+  for (const cli of inUse) plain(`  kept     cli@${cli.version}  (in use by a running project)`)
+  return removed
 }
 
 export function registerCache(program: Command): void {
@@ -67,12 +82,14 @@ export function registerCache(program: Command): void {
   cache
     .command("clean [component] [version]")
     .description(
-      "Remove cached binaries not pinned by local project configs.\n" +
+      "Remove cached binaries not pinned by local project configs, and the CLI programs\n" +
+        "npm installs downloaded for versions other than this one.\n" +
         "Use --force to remove everything (legacy behavior).\n" +
         "Examples:\n" +
-        "  supatype cache clean                    # remove unpinned versions\n" +
+        "  supatype cache clean                    # remove unpinned versions and old CLI programs\n" +
         "  supatype cache clean engine             # remove unpinned engine versions\n" +
         "  supatype cache clean engine 0.4.2       # remove one version (warns if pinned)\n" +
+        "  supatype cache clean cli                # remove old CLI programs only\n" +
         "  supatype cache clean --force            # remove all cached binaries",
     )
     .option("--dry-run", "Show what would be removed without deleting")
@@ -93,9 +110,9 @@ export function registerCache(program: Command): void {
           return
         }
 
-        if (component && !isComponent(component)) {
+        if (component && component !== "cli" && !isComponent(component)) {
           error(
-            `Unknown component "${component}". Valid: ${BINARY_COMPONENTS.join(", ")}`,
+            `Unknown component "${component}". Valid: ${[...BINARY_COMPONENTS, "cli"].join(", ")}`,
           )
           process.exitCode = 1
           return
@@ -125,10 +142,12 @@ export function registerCache(program: Command): void {
           plain(`  ${prefix}  ${entry.component}@${entry.version}`)
         }
 
-        if (result.removed.length === 0 && result.skipped.length === 0) {
+        const removed = result.removed.length + cleanCliVersions(component, version, opts?.dryRun ?? false).length
+
+        if (removed === 0 && result.skipped.length === 0) {
           info("Nothing to clean.")
         } else if (opts?.dryRun) {
-          info(`Dry run: ${result.removed.length} entr${result.removed.length === 1 ? "y" : "ies"} would be removed.`)
+          info(`Dry run: ${removed} entr${removed === 1 ? "y" : "ies"} would be removed.`)
         } else {
           info("Done.")
         }

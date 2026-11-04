@@ -169,6 +169,29 @@ dump_failure_logs() {
   "${compose[@]}" logs --tail 40 db 2>&1 || true
 }
 
+# The scaffold's `prepare` is `supatype-prepare`, a bin of @supatype/client. A workspace CLI's
+# scaffold may need a client newer than npm has, so this run installs the checkout's client, then
+# does the rest of what init's own install step does. The install is a bare `npm install`, as
+# init's is: given a package to add, npm does not run the project's own `prepare`.
+install_project_workspace() {
+  if [[ ! -f "$ROOT_DIR/packages/client/dist/index.js" ]]; then
+    echo "ERROR: @supatype/client is not built, run 'pnpm build' first" >&2
+    exit 1
+  fi
+  local tarballs="$WORK_PARENT/tarballs"
+  mkdir -p "$tarballs"
+  local client
+  client="$(cd "$ROOT_DIR/packages/client" && pnpm pack --pack-destination "$tarballs" | grep '\.tgz$' | tail -n 1)"
+  node -e '
+    const [file, client] = process.argv.slice(1)
+    const pkg = JSON.parse(require("fs").readFileSync(file, "utf8"))
+    pkg.dependencies["@supatype/client"] = "file:" + client.split("\\").join("/")
+    require("fs").writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n")
+  ' "$PROJECT_DIR/package.json" "$client"
+  echo "==> npm install, with this checkout's @supatype/client"
+  (cd "$PROJECT_DIR" && npm install --no-audit --no-fund && supatype update)
+}
+
 # Scaffolds the project under $WORK_PARENT with `init` and sets PROJECT_DIR.
 init_project() {
   if [[ -z "$WORK_PARENT" ]]; then
@@ -183,7 +206,9 @@ init_project() {
 
   echo "==> supatype init $PROJECT_NAME (docker default, non-interactive)"
   cd "$WORK_PARENT"
-  supatype init "$PROJECT_NAME" -y --no-admin
+  local init_args=(-y --no-admin)
+  if [[ "$INSTALL_MODE" == workspace ]]; then init_args+=(--no-install); fi
+  supatype init "$PROJECT_NAME" "${init_args[@]}"
 
   PROJECT_DIR="$WORK_PARENT/$PROJECT_NAME"
   if [[ ! -f "$PROJECT_DIR/supatype.config.ts" ]]; then
@@ -196,6 +221,7 @@ init_project() {
     exit 1
   fi
   echo "  Verified docker provider in supatype.config.ts"
+  if [[ "$INSTALL_MODE" == workspace ]]; then install_project_workspace; fi
 }
 
 main() {

@@ -34,7 +34,7 @@ import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { applyForThisRun, splitShellPortUpdates } from "./shell-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
 import { devSessionLockFor, recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
-import { endDevSession, startDevSession } from "./dev-session.js"
+import { endDevSession, showDevStep, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
@@ -61,6 +61,8 @@ import {
   noteUnpinnedImages,
   publishesDbToHost,
   runDockerCompose,
+  runDockerComposeQuietly,
+  settleComposeRuns,
   schemaEngineImageForPush,
   writeSelfHostCompose,
   composeFieldMaskingTier,
@@ -319,10 +321,7 @@ async function startComposeDatabase(
   if (usesExternalDatabase(config)) return
   warnUrlUnsafeComposePasswords(cwd, config)
 
-  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
-    quiet: true,
-    ...(brand !== undefined && { brand }),
-  })
+  const up = await runDockerComposeQuietly(paths.composePath, ["up", "-d", "db"], cwd, project, brand)
   if (up !== 0) {
     onFailure?.()
     exitComposeFailed(up, "Could not start Postgres (compose db service).", brand)
@@ -1576,6 +1575,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   warnProjectAuthProviderSecrets(cwd, config)
 
   console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
+  await showDevStep("Preparing the Docker stack")
   noteUnpinnedImages(cwd)
   const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   if (ensureDevApiConfig(cwd)) {
@@ -1604,6 +1604,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     console.log("[supatype] Shutting down compose...")
     await shutdownState.studioProc?.stop()
     await shutdownState.appProc?.stop()
+    await settleComposeRuns()
     const downStatus = runDockerCompose(paths.composePath, ["down"], cwd, project, { quiet: true })
     if (downStatus === 0) {
       console.log("[supatype] Compose stack stopped.")
@@ -1635,6 +1636,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   if (!usesExternalDatabase(config)) {
     console.log("[supatype] Bringing up Postgres (compose db)...")
+    await showDevStep("Starting Postgres")
   }
   await startComposeDatabase(config, paths, cwd, project, devBrand, 180_000, endDevSession)
   // Settle before DDL: pg_isready can pass slightly before the instance is stable.
@@ -1652,15 +1654,14 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const schemaPath = schemaPathFromProject(config, cwd)
   // `dev --overwrite-drift`, already checked against this engine before the session began.
   const pushOptions: ComposePushOptions = { overwriteDrift: opts.overwriteDrift === true }
+  await showDevStep("Applying the schema")
   const schemaApplied = await applyInitialSchema(cwd, config, paths, schemaPath, project, devBrand, pushOptions)
   // Before the stack starts, so PostgREST comes up on the tier the push actually produced.
   followRecordedTier(cwd, config, { recreate: false })
 
   console.log("[supatype] Bringing up Docker Compose services...")
-  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
-    quiet: true,
-    brand: devBrand,
-  })
+  await showDevStep("Starting services (the first start downloads their images)")
+  const upStatus = await runDockerComposeQuietly(paths.composePath, ["up", "-d"], cwd, project, devBrand)
   if (upStatus !== 0) {
     endDevSession()
     exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
@@ -1668,12 +1669,13 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   if (localServerImage !== undefined) {
     console.log("[supatype] Recreating server with local image...")
-    const recreateStatus = runDockerCompose(
+    await showDevStep("Recreating the server")
+    const recreateStatus = await runDockerComposeQuietly(
       paths.composePath,
       ["up", "-d", "--force-recreate", "--no-deps", "server"],
       cwd,
       project,
-      { quiet: true, brand: devBrand },
+      devBrand,
     )
     if (recreateStatus !== 0) {
       endDevSession()
@@ -1691,12 +1693,13 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     const variable = `SUPATYPE_${service.toUpperCase()}_IMAGE`
     if (readEnvValue(cwd, variable, "").trim() === "") continue
     console.log(`[supatype] Recreating ${service} with pinned image...`)
-    const status = runDockerCompose(
+    await showDevStep(`Recreating ${service}`)
+    const status = await runDockerComposeQuietly(
       paths.composePath,
       ["up", "-d", "--force-recreate", "--no-deps", service],
       cwd,
       project,
-      { quiet: true, brand: devBrand },
+      devBrand,
     )
     if (status !== 0) {
       endDevSession()
@@ -1719,10 +1722,13 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   }
 
   console.log("[supatype] Waiting for API gateway...")
+  await showDevStep("Waiting for the API gateway")
   await waitKongReady(kongPort, 120, { composePath: paths.composePath, cwd, project })
   console.log("[supatype] Waiting for storage API...")
+  await showDevStep("Waiting for storage")
   await waitStorageApiReady(kongPort, serviceRoleKey, 90)
 
+  await showDevStep("Checking for an admin user")
   await ensureFirstAdminUserForProject(cwd, config, {
     compose: { project, composePath: paths.composePath },
   })

@@ -169,7 +169,15 @@ export function reportDockerUnavailable(
 
 /** Exit 1 with a friendly message when Docker is not usable. */
 export function requireDockerDaemon(opts?: DockerReportOptions): void {
-  const probe = probeDockerDaemon()
+  exitUnlessDaemon(probeDockerDaemon(), opts)
+}
+
+/** {@link requireDockerDaemon} without blocking, so the dev dashboard keeps drawing while it asks. */
+export async function requireDockerDaemonAsync(opts?: DockerReportOptions): Promise<void> {
+  exitUnlessDaemon(await probeDockerDaemonAsync(), opts)
+}
+
+function exitUnlessDaemon(probe: DockerDaemonProbe, opts?: DockerReportOptions): void {
   if (probe.ok) return
   // Dev TUI patches console, restore stderr before printing a fatal message.
   if (getActiveDevSession()) {

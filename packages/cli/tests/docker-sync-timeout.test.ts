@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -43,24 +43,32 @@ describe("dockerProgram", () => {
   })
 })
 
+/** When the hung stand-in would write its second file, from its start: well past the call's limit. */
+const SURVIVES_AFTER_MS = 20_000
+
 describe.runIf(process.platform === "win32")("a synchronous docker call that hangs on Windows", () => {
   // Killing the shell at the limit left docker.exe running, holding what it had open. The stand-in
-  // notes that it started, then writes a second file well after the limit: whether that file
+  // notes when it started, then writes a second file well after the limit: whether that file
   // appears shows whether the docker process itself was ended, or only the shell around it.
+  //
+  // The check waits for the moment the stand-in would have written it, measured from when it
+  // started, not from the limit: on a loaded machine the stand-in can take seconds to start, and a
+  // fixed wait either ended too soon to tell or ran out before the stand-in had begun.
   it("ends the hung docker process at its limit, not only the shell around it", async () => {
     const dir = standInDocker()
     const started = join(dir, "started")
     const survived = join(dir, "survived")
     const script = join(dir, "hang.cjs")
-    const write = (path: string): string => `require("node:fs").writeFileSync(${JSON.stringify(path)}, "x")`
-    writeFileSync(script, `${write(started)}; setTimeout(() => ${write(survived)}, 5000)`)
+    const write = (path: string, text: string): string => `require("node:fs").writeFileSync(${JSON.stringify(path)}, ${text})`
+    writeFileSync(script, `${write(started, "String(Date.now())")}; setTimeout(() => ${write(survived, '"x"')}, ${SURVIVES_AFTER_MS})`)
     const env = { ...process.env, PATH: `${dir}${delimiter}${process.env["PATH"] ?? ""}` }
-    const answer = askDockerSync([script], { shell: true, timeoutMs: 3_000, env })
+    const answer = askDockerSync([script], { shell: true, timeoutMs: 10_000, env })
     expect(answer.timedOut).toBe(true)
-    await new Promise((resolve) => setTimeout(resolve, 4_000))
     expect(existsSync(started)).toBe(true)
+    const wouldSurviveAt = Number(readFileSync(started, "utf8")) + SURVIVES_AFTER_MS + 1_000
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, wouldSurviveAt - Date.now())))
     expect(existsSync(survived)).toBe(false)
-  }, 30_000)
+  }, 90_000)
 })
 
 /** A Docker whose `version` says it is paused and whose `info` never answers, as a paused Docker Desktop does. */
