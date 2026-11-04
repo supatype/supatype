@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Symlink skills/supatype → .claude/skills/supatype for monorepo Claude Code dev.
+# Link skills/supatype to .claude/skills/supatype for monorepo Claude Code dev.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/skills/supatype"
@@ -9,10 +9,9 @@ if [[ -e "$DEST" || -L "$DEST" ]]; then
   rm -rf "$DEST"
 fi
 if command -v cygpath >/dev/null 2>&1; then
-  # Git Bash on Windows: use cp when symlinks are unreliable
-  cp -r "$SRC" "$DEST"
-  echo "Copied $SRC → $DEST"
+  # Git Bash on Windows: ln -s silently copies, which drifts. A junction needs no admin rights.
+  cmd //c "mklink /J $(cygpath -w "$DEST") $(cygpath -w "$SRC")" >/dev/null
 else
   ln -s "$SRC" "$DEST"
-  echo "Linked $SRC → $DEST"
 fi
+echo "Linked $DEST to $SRC"
