@@ -5,16 +5,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createClient } from "../src/index.js"
 import { fetchCalls, header, jsonResponse, requestUrl } from "./support/fetch-mock.js"
+import { fakeJwt } from "./support/jwt.js"
 
 const BASE = "http://localhost:18473"
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.test"
 const AUTH = `${BASE}/auth/v1`
-
-function fakeJwt(payload: Record<string, unknown>): string {
-  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
-  const body = btoa(JSON.stringify(payload))
-  return `${header}.${body}.sig`
-}
 
 const RAW_USER = {
   id: "user-1",

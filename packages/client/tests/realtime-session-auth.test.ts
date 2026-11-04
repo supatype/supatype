@@ -22,16 +22,13 @@ import {
 } from "./helpers/mock-websocket.js"
 import { createClient } from "../src/index.js"
 import type { Session } from "../src/types.js"
+import { fakeJwt } from "./support/jwt.js"
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10))
 
 /** What a signed-in caller's headers look like: the bearer is the session, the apikey never is. */
 function bearerHeaders(token: string): Record<string, string> {
   return { apikey: "anon-key", Authorization: `Bearer ${token}` }
-}
-
-function fakeJwt(payload: Record<string, unknown>): string {
-  return `${btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${btoa(JSON.stringify(payload))}.sig`
 }
 
 const ANON_KEY = fakeJwt({ role: "anon" })

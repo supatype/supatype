@@ -35,7 +35,7 @@ export function NewPostForm({ userId }: NewPostFormProps): React.ReactElement {
       return
     }
     // No `status`. A new post is unpublished because `published_at` is null, and the read rule is
-    // what hides it — nothing has to remember to say so.
+    // what hides it, so nothing has to remember to say so.
     const payload = {
       title,
       // `body` is a localized column: it holds every language at once, so a bare value is the
@@ -49,7 +49,8 @@ export function NewPostForm({ userId }: NewPostFormProps): React.ReactElement {
       // was `Record<string, unknown>` and satisfied anything.
       auth_user_id: userId,
     } satisfies TableInsert<"post">
-    const result = await mutate(payload)
+    // Only the slug, to open the new post: a write returns no rows unless asked.
+    const result = await mutate(payload, { select: "slug" })
     if (result.error === null && result.data !== null && result.data.length > 0) {
       const created = result.data[0]
       if (created !== undefined) {

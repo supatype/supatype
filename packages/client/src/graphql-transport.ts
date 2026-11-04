@@ -10,7 +10,7 @@ import type { RequestTransport } from "./fetch-with-retry.js"
 import { GRAPHQL_SCHEMA_QUERY, GraphqlSchemaCache, decodeGraphqlAnswer, readGraphqlSchema, type GraphqlSchema } from "./graphql-json.js"
 import { isJsonObject, refusalText } from "./json.js"
 import { bearerRole } from "./jwt.js"
-import { fetchWithOptional401Retry, type HeadersProvider } from "./query.js"
+import { fetchWithOptional401Retry, type HeadersProvider, type UnauthorizedHandler } from "./query.js"
 import type { SupatypeError } from "./types.js"
 
 /** Where GraphQL requests go and what they carry. Studio builds one per send-as choice. */
@@ -19,7 +19,7 @@ export type GraphqlTransport = {
   readonly endpoint: string
   readonly send: RequestTransport
   readonly headers: HeadersProvider
-  readonly onUnauthorized?: (() => Promise<void>) | undefined
+  readonly onUnauthorized?: UnauthorizedHandler | undefined
   /** Whose schema a request reads, from its headers. Defaults to the bearer token's role. */
   readonly schemaKey?: ((headers: Record<string, string>) => string) | undefined
 }

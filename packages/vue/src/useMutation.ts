@@ -1,13 +1,15 @@
 import { ref, type Ref } from "vue"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { runMutation, type MutationOperation } from "@supatype/client/bindings"
+import { runMutation, type MutationOperation, type MutationRequest } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 
-export interface MutationOptions {
-  filter?: Record<string, unknown> | undefined
-}
+/**
+ * `filter`: equality filters for an update or delete. `select`: return the written rows, `true` for
+ * every column or the columns as `.select()` takes them; without it `data` is null.
+ */
+export type MutationOptions = Pick<MutationRequest, "filter" | "select">
 
 export interface UseMutationReturn<TRow> {
   mutate: (
@@ -29,7 +31,7 @@ export interface UseMutationReturn<TRow> {
  * const { mutate: createPost, loading } = useMutation('posts', 'insert')
  *
  * async function handleSubmit() {
- *   const { data, error } = await createPost({ title: 'Hello', status: 'draft' })
+ *   const { data, error } = await createPost({ title: 'Hello', status: 'draft' }, { select: 'id' })
  * }
  * </script>
  * ```
@@ -54,7 +56,7 @@ export function useMutation<
     error.value = null
 
     try {
-      const outcome = await runMutation<TRow>(client as AnyClient, table, operation, data, options?.filter)
+      const outcome = await runMutation<TRow>(client as AnyClient, table, operation, data, options)
       const result = { data: outcome.data, error: outcome.error }
 
       if (result.error) error.value = result.error
