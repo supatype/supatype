@@ -1,10 +1,8 @@
-import React from "react"
-import { PassThrough } from "node:stream"
 import { afterEach, describe, expect, it } from "vitest"
-import { render } from "ink"
-import { DevDashboard } from "../src/ui/dev/DevDashboard.js"
 import { DevLogBus } from "../src/dev-log-bus.js"
+import { renderDevDashboard } from "../src/dev-session.js"
 import { enqueueDevPrompt, resetDevPromptQueueForTests } from "../src/ui/runtime/dev-prompt-queue.js"
+import { fakeTty, tick } from "./support/fake-tty.js"
 
 /**
  * The dev dashboard has a fixed height and used to set aside six rows for any prompt. A prompt
@@ -16,37 +14,13 @@ const LEFTOVER_STACK_QUESTION =
   'Previous dev session for "fresh-cms" may not have shut down cleanly (stack "supatype-fresh-cms" is still running).' +
   "\n\nStop the orphaned stack before starting?"
 
-function isTtyInput(stream: object): stream is NodeJS.ReadStream {
-  return "setRawMode" in stream && "isTTY" in stream
-}
-
-function isTtyOutput(stream: object): stream is NodeJS.WriteStream {
-  return "columns" in stream && "write" in stream
-}
-
-const tick = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
 /** Render the dashboard on a fake terminal and return the last frame, without escape codes. */
 async function lastFrame(columns: number, rows: number): Promise<string> {
-  const chunks: string[] = []
-  const stdout = Object.assign(new PassThrough(), { columns, rows, isTTY: true })
-  stdout.on("data", (chunk: Buffer) => chunks.push(chunk.toString()))
-  const stdin = Object.assign(new PassThrough(), {
-    isTTY: true,
-    setRawMode: () => undefined,
-    ref: () => undefined,
-    unref: () => undefined,
-  })
-  if (!isTtyInput(stdin) || !isTtyOutput(stdout)) throw new Error("fake streams lack terminal members")
-  const instance = render(React.createElement(DevDashboard, { bus: new DevLogBus() }), {
-    stdin,
-    stdout,
-    patchConsole: false,
-    exitOnCtrlC: false,
-  })
+  const { stdin, stdout, chunks } = fakeTty(columns, rows)
+  const instance = renderDevDashboard(new DevLogBus(), { stdin, stdout, patchConsole: false })
   await tick(100)
   instance.unmount()
-  const frames = chunks.filter((chunk) => chunk.includes("╭"))
+  const frames = chunks().filter((chunk) => chunk.includes("╭"))
   // eslint-disable-next-line no-control-regex
   return (frames[frames.length - 1] ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
 }

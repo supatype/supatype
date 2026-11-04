@@ -1,10 +1,9 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { isJsonObject } from "@supatype/shared"
 import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
-import { resolveInitDependencyVersions } from "../src/init-dependency-versions.js"
 import { mergeSupatypePackageJson } from "../src/init-package-json.js"
 
 /**
@@ -14,7 +13,6 @@ import { mergeSupatypePackageJson } from "../src/init-package-json.js"
 
 const dirs: string[] = []
 afterEach(() => {
-  vi.unstubAllGlobals()
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
@@ -44,15 +42,5 @@ describe("init's @supatype/client dependency", () => {
     expect(merged.dependencies?.["@supatype/client"]).toBe("^0.7.0")
   })
 
-  it("is resolved against the registry like cli and types", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        const versions = url.includes("client") ? { "0.6.0": {} } : { "0.7.0": {} }
-        const latest = url.includes("client") ? "0.6.0" : "0.7.0"
-        return Response.json({ versions, "dist-tags": { latest } })
-      }),
-    )
-    expect((await resolveInitDependencyVersions()).client).toBe("0.6.0")
-  })
+  // How init resolves it against the registry: init-dependency-versions.test.ts.
 })

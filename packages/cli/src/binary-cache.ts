@@ -38,11 +38,11 @@ import {
   writeFileSync,
 } from "node:fs"
 import { chmod } from "node:fs/promises"
-import { homedir } from "node:os"
 import { basename, dirname, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "./link.js"
 import { releasePublicKey } from "./release-public-key.js"
+import { cacheRoot } from "./cache-root.js"
 import { defaultComponentVersion } from "./release-images.js"
 import {
   isDownloadInProgress,
@@ -158,9 +158,7 @@ const checksumsDirPath = (component: Component, version: string): string =>
 // Cache paths
 // ---------------------------------------------------------------------------
 
-export function cacheRoot(): string {
-  return join(homedir(), ".supatype", "cache")
-}
+export { cacheRoot }
 
 export function cachePath(component: Component, version: string): string {
   return join(cacheRoot(), component, version)

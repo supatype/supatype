@@ -144,6 +144,46 @@ jobs:
           pnpm --filter @supatype/example-supabucks build
           pnpm --filter @supatype/example-blog build
 
+  # The CLI as npm installs it: packed, installed into apps with React 19, React 18, no React, and a
+  # React that throws when loaded, running a program compiled from this checkout and served from a
+  # signed local copy of the release CDN. Installed as JavaScript, the CLI's Ink was hoisted into
+  # the app and loaded the app's React; with React 19 every command, and so `npm install` itself
+  # through the scaffold's `prepare`, failed. Every platform the program ships for, because the
+  # starter spawns a different executable on each.
+  cli-packed:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # .bun-version, the Bun the release compiles with.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the CLI and what it depends on
+        run: pnpm turbo run build --filter=@supatype/cli...
+
+      # The key lets the source-built CLI fetch the schema engine `generate` runs, as in
+      # integration.yml. The test release itself is signed with a throwaway key.
+      - name: Test the packed CLI
+        run: pnpm --filter @supatype/cli test:packed
+        env:
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
   # The CLI's own suite on the other platforms it ships for. Path separators, `.exe` suffixes and
   # temp directories differ there, and five Windows-only failures went unseen until a person ran
   # the suite by hand on Windows (C09). Linux runs it in `check` above.

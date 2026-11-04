@@ -20,7 +20,7 @@
     "dev": "tsx src/main.ts",
     "start": "node dist/main.js",
     "typecheck": "tsc --project tests/tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=50%"
   },
   "dependencies": {
     "@supatype/shared": "workspace:*",

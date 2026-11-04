@@ -314,7 +314,6 @@ Supatype ships first-party bindings. Prefer them over wiring the raw client by h
 | `@supatype/svelte` | Stores: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
 | `@supatype/ssr` | Cookie-based client for Server Components, Route Handlers, middleware |
 | `@supatype/ui` | React components styled with Tailwind (`Button`, `Input`, `Card`, `Badge`, `Skeleton`, `ThemeProvider`), plus a Lexical `RichTextEditor` at `@supatype/ui/rich-text`. Needs Tailwind set up to see it: see [`@supatype/ui` setup](#supatypeui-setup) |
-| `@supatype/navigation` | Shared `Header` / `Footer` components |
 
 > **Don't reimplement auth forms or auth state by hand.** Use `@supatype/react-auth` for the UI and `@supatype/react`'s `useAuth` for state. Drop to the raw client only for app-specific data access not covered by the hooks.
 

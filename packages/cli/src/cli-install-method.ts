@@ -2,6 +2,8 @@
  * Detect how the supatype CLI was installed (npm, Homebrew, standalone CDN).
  */
 
+import { cliCacheRoot } from "./cli-program-path.js"
+
 export type CliInstallMethod = "npm" | "homebrew" | "standalone"
 
 function normalizePath(path: string): string {
@@ -39,11 +41,16 @@ export function runningBinaryPath(): string {
   return EMBEDDED_FS_PATH.test(main) ? process.execPath : (process.argv[1] ?? "")
 }
 
-/** The running binary sits in an npm or workspace layout. */
+/**
+ * The running binary sits in an npm or workspace layout. That includes the CLI cache, where the
+ * npm package's starter keeps the program it runs: the version there is the npm package's, so
+ * replacing it would leave the package and the program it starts disagreeing.
+ */
 function hasNpmInstallPath(): boolean {
   const main = normalizePath(runningBinaryPath())
   return (
     main.includes("node_modules") ||
+    main.startsWith(`${normalizePath(cliCacheRoot())}/`) ||
     main.includes("/dist/cli") ||
     main.includes("/bin/supatype.js")
   )

@@ -31,7 +31,8 @@ export function cliModuleUrl(name: string): string {
 
 /**
  * Resolve the absolute path to the tsx CLI entry point.
- * tsx is a direct dependency so this will always succeed after `npm install`.
+ * Only the CLI's JavaScript runs this, which happens in the monorepo, where tsx is a development
+ * dependency. The npm package runs the compiled program, which runs TypeScript itself.
  */
 function findTsxBin(): string {
   try {

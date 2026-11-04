@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("../src/cli-package-version.js", () => ({ cliPackageVersion: () => "0.9.0" }))
+
 import {
   initDependencyVersionsFallback,
   resolveInitDependencyVersions,
@@ -24,13 +27,13 @@ describe("resolveInitDependencyVersions", () => {
 
   it("uses the running CLI version when both packages publish it", async () => {
     mockRegistry({
-      "@supatype/cli": { latest: "0.1.3", versions: ["0.1.1", "0.1.3"] },
-      "@supatype/types": { latest: "0.1.3", versions: ["0.1.1", "0.1.3"] },
+      "@supatype/cli": { latest: "0.10.0", versions: ["0.1.1", "0.9.0", "0.10.0"] },
+      "@supatype/types": { latest: "0.10.0", versions: ["0.1.1", "0.9.0", "0.10.0"] },
     })
 
     const deps = await resolveInitDependencyVersions()
-    expect(deps.cli).toBe("0.1.3")
-    expect(deps.types).toBe("0.1.3")
+    expect(deps.cli).toBe("0.9.0")
+    expect(deps.types).toBe("0.9.0")
   })
 
   it("falls back to npm latest when the running CLI version is unpublished", async () => {
@@ -53,6 +56,31 @@ describe("resolveInitDependencyVersions", () => {
     const deps = await resolveInitDependencyVersions()
     expect(deps.cli).toBe("0.1.3")
     expect(deps.types).toBe("0.1.1")
+  })
+
+  // The client carries the scaffold's `prepare` command, released with the CLI. npm's latest, while
+  // this CLI's own release is still publishing, is a client that may not have it.
+  it("never picks a client older than the running CLI", async () => {
+    mockRegistry({
+      "@supatype/cli": { latest: "0.8.0", versions: ["0.8.0"] },
+      "@supatype/client": { latest: "0.8.0", versions: ["0.8.0"] },
+    })
+
+    const deps = await resolveInitDependencyVersions()
+    expect(deps.cli).toBe("0.8.0")
+    expect(deps.client).toBe("0.9.0")
+  })
+
+  it("never picks a pre-release of the running CLI's own version", async () => {
+    mockRegistry({ "@supatype/client": { latest: "0.9.0-rc.3", versions: ["0.9.0-rc.3"] } })
+
+    expect((await resolveInitDependencyVersions()).client).toBe("0.9.0")
+  })
+
+  it("keeps a client newer than the running CLI", async () => {
+    mockRegistry({ "@supatype/client": { latest: "0.10.0", versions: ["0.10.0"] } })
+
+    expect((await resolveInitDependencyVersions()).client).toBe("0.10.0")
   })
 
   it("falls back to the running CLI version when the registry is unreachable", async () => {
