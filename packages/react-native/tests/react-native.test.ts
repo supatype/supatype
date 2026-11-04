@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest"
 import { AuthClient } from "@supatype/client"
 import {
   asyncStorageAdapter,
@@ -22,6 +22,11 @@ function frameOf(raw: string): Record<string, unknown> {
 
 const AUTH_URL = "http://localhost:9999"
 const ANON = "test-anon"
+
+// Nothing here reaches a real server: a dev stack listening on localhost:9999 would otherwise answer
+// `signInWithOAuth`'s `/settings` lookup. A test that needs answers stubs fetch itself.
+beforeEach(() => vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 }))))
+afterEach(() => vi.unstubAllGlobals())
 
 function memorySecureStore() {
   const store = new Map<string, string>()

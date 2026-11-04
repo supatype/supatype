@@ -250,9 +250,10 @@ const guard: BeforeChange<"posts"> = async (ctx) => {
 export default hook(guard)
 ```
 
-Two things to know about those rows. They come back **as stored** (no row-level filtering, no field
-masking), which is what makes them useful for validation and means you should not echo them into a
-rejection message, since that message reaches the caller. And they are **capped** (100 by default),
+Three things to know about those rows. They are the rows the write will change: the request's own
+filter plus the caller's own update or delete rule, so a hook cannot widen it. They come back **as
+stored**, with no field masking, which is what makes them useful for validation and means you should
+not echo them into a rejection message, since that message reaches the caller. And they are **capped** (100 by default),
 with `truncated` telling you the cap bit, so you can refuse rather than act on a prefix you did not
 choose.
 

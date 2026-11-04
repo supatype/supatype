@@ -78,8 +78,20 @@ export function ensureDevShutdownHooks(): void {
   }
 }
 
-function onSignal(): void {
-  if (Date.now() < ignoreSigintUntil) return
+/**
+ * Two of the same signal this close together are one. Run from npm, dev's starter passes on a
+ * Ctrl+C the terminal also sent dev, so one press arrives twice, milliseconds apart; counted as two,
+ * the second forced the quit. A person pressing again to force quit takes longer than this.
+ */
+const REPEATED_SIGNAL_MS = 500
+let lastSignal: { signal: NodeJS.Signals; at: number } | null = null
+
+function onSignal(signal: NodeJS.Signals): void {
+  const now = Date.now()
+  if (now < ignoreSigintUntil) return
+  const repeat = lastSignal !== null && lastSignal.signal === signal && now - lastSignal.at < REPEATED_SIGNAL_MS
+  lastSignal = { signal, at: now }
+  if (repeat) return
   void runDevShutdown()
 }
 
@@ -301,6 +313,7 @@ export function resetDevShutdownForTests(): void {
   forceQuitRequested = false
   hooksRegistered = false
   ignoreSigintUntil = 0
+  lastSignal = null
   parentWatch?.stop()
   parentWatch = null
 }

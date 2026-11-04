@@ -15,6 +15,7 @@ import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { uniqueFileToken } from "./unique-file-token.js"
 import { envReference, type EnvReference } from "./auth-providers.js"
 import { applyProjectNameOverride } from "./project-name-override.js"
+import { info } from "./ui/messages.js"
 import { isJsonObject } from "@supatype/shared"
 
 /** A config module's default export, as the module printed it. */
@@ -145,12 +146,26 @@ function normalizeProjectJson(raw: unknown): unknown {
  * Load project config from `supatype.config.ts` (or .js/.mjs), merged with
  * optional `supatype.local.config.*` (gitignored overrides), then renamed for this run when
  * SUPATYPE_PROJECT_NAME is set (project-name-override.ts).
+ *
+ * `{ local: false }` leaves the local override out, for the commands that run the project in
+ * production: self-host, deploy, and a push to a standalone stack. The override is the developer's
+ * (`server.mode: "dev"` for a self-host project), and those commands used to deploy with it.
  */
-export function loadConfig(cwd: string = process.cwd()): SupatypeProjectConfig {
-  return applyProjectNameOverride(loadConfigFiles(cwd))
+export function loadConfig(cwd: string = process.cwd(), options: LoadConfigOptions = {}): SupatypeProjectConfig {
+  return applyProjectNameOverride(loadConfigFiles(cwd, options.local !== false))
 }
 
-function loadConfigFiles(cwd: string): SupatypeProjectConfig {
+export interface LoadConfigOptions {
+  /** False to leave `supatype.local.config.*` out, saying so when there is one. */
+  local?: boolean
+}
+
+/** The local override `cwd` has, if any. */
+function localConfigFile(cwd: string): string | undefined {
+  return LOCAL_CONFIG_CANDIDATES.find((name) => existsSync(resolve(cwd, name)))
+}
+
+function loadConfigFiles(cwd: string, withLocal: boolean): SupatypeProjectConfig {
   if (existsSync(resolve(cwd, LEGACY_TOML))) {
     throw new Error(
       `Found ${LEGACY_TOML}, which is no longer supported.\n` +
@@ -169,6 +184,12 @@ function loadConfigFiles(cwd: string): SupatypeProjectConfig {
 
   const baseNorm = normalizeProjectJson(baseRaw.value)
   const base = validateProjectConfig(baseNorm, "supatype.config.ts")
+
+  if (!withLocal) {
+    const skipped = localConfigFile(cwd)
+    if (skipped !== undefined) info(`Using supatype.config.ts without ${skipped}: that override is for local development.`)
+    return base
+  }
 
   const localRaw = loadFirstTsConfig(cwd, LOCAL_CONFIG_CANDIDATES)
   if (localRaw === null) return base

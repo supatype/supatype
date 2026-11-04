@@ -65,6 +65,7 @@ import {
   type DeployTarget,
 } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
+import { composeRenderMode } from "../compose-render-mode.js"
 import { targetFetch } from "../target-client.js"
 import { sayTargetWarning } from "../target-warning.js"
 import { targetRequest } from "../target-request.js"
@@ -108,7 +109,7 @@ export function registerPush(program: Command): void {
       local?: boolean
     }) => {
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = pushConfig(cwd, opts)
       const pgSchema = schemaPgSchema(cwd)
       const ast = pushAst(cwd, config)
       assertModelHooksResolve(cwd, config, ast)
@@ -129,6 +130,21 @@ export function registerPush(program: Command): void {
         "destructive",
       ])
     })
+}
+
+/**
+ * The config a push runs with. A push to a production stack leaves `supatype.local.config.ts` out:
+ * that override is the developer's, and the push used to apply it in production. A production stack
+ * is a linked self-host server, or the project's own docker stack while it runs standalone (or none
+ * runs, which a push starts as standalone).
+ */
+function pushConfig(cwd: string, opts: { connection?: string; direct?: boolean; local?: boolean }): SupatypeProjectConfig {
+  const config = loadConfig(cwd)
+  if (opts.connection || opts.direct === true || opts.local === true) return config
+  const link = loadProjectLink(cwd)
+  if (link !== null) return link.kind === "self-host" ? loadConfig(cwd, { local: false }) : config
+  if (resolveRuntimeProvider(config) !== "docker") return config
+  return composeRenderMode(cwd, config.project.name) === "standalone" ? loadConfig(cwd, { local: false }) : config
 }
 
 /** The schema a push sends: the project's, with its publishing config and its rename journal. */

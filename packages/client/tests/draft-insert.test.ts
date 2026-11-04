@@ -92,9 +92,9 @@ describe("insert on a model that keeps drafts", () => {
     expect(header(readBack?.init ?? {}, "Accept-Profile")).toBe("draft")
   })
 
-  it("returns the row as a plain insert would", async () => {
+  it("returns the row as a plain insert would, once select() asks", async () => {
     serve(draftsServer())
-    const { data, error, count } = await client().from("posts").insert({ title: "Mine" })
+    const { data, error, count } = await client().from("posts").insert({ title: "Mine" }).select()
     expect(error).toBeNull()
     expect(data).toEqual([ROW])
     expect(count).toBe(1)
@@ -109,7 +109,7 @@ describe("insert on a model that keeps drafts", () => {
 
   it("treats a one-row array as one record", async () => {
     const fetch = serve(draftsServer())
-    const { data } = await client().from("posts").insert([{ title: "Mine" }])
+    const { data } = await client().from("posts").insert([{ title: "Mine" }]).select()
     expect(fetchCalls(fetch)[0]?.url).toBe(`${BASE}/rest/v1/rpc/create_record`)
     expect(jsonBody(fetchCalls(fetch)[0]?.init ?? {})["data"]).toEqual({ title: "Mine" })
     expect(data).toEqual([ROW])
@@ -158,8 +158,8 @@ describe("insert on a model that keeps drafts", () => {
 
   it("leaves an empty insert a plain write, which creates nothing", async () => {
     const fetch = serve(mockFetch(() => Promise.resolve(jsonResponse([], 201))))
-    const { data } = await client().from("posts").insert([])
-    expect(fetchCalls(fetch).map((call) => call.url)).toEqual([`${BASE}/rest/v1/posts`])
+    const { data } = await client().from("posts").insert([]).select()
+    expect(fetchCalls(fetch).map((call) => call.url)).toEqual([`${BASE}/rest/v1/posts?select=*`])
     expect(data).toEqual([])
   })
 
@@ -189,7 +189,7 @@ describe("insert on a model that keeps drafts", () => {
 
   it("reaches the framework bindings, which insert through runMutation", async () => {
     const fetch = serve(draftsServer())
-    const outcome = await runMutation(client(), "posts", "insert", { title: "Mine" })
+    const outcome = await runMutation(client(), "posts", "insert", { title: "Mine" }, { select: true })
     expect(fetchCalls(fetch)[0]?.url).toBe(`${BASE}/rest/v1/rpc/create_record`)
     expect(outcome.data).toEqual([ROW])
   })
@@ -201,12 +201,12 @@ describe("insert on a model that keeps no drafts", () => {
     vi.unstubAllGlobals()
   })
 
-  it("is a plain insert asking for the row back", async () => {
+  it("is a plain insert, asking for the row back once select() does", async () => {
     registerDraftModels({ version: 1, tables: { posts: { primaryKey: "id" } } })
     const fetch = serve(mockFetch(() => Promise.resolve(jsonResponse([{ id: 1 }], 201))))
-    await client().from("tags").insert({ label: "news" })
+    await client().from("tags").insert({ label: "news" }).select()
     const [only] = fetchCalls(fetch)
-    expect(only?.url).toBe(`${BASE}/rest/v1/tags`)
+    expect(only?.url).toBe(`${BASE}/rest/v1/tags?select=*`)
     expect(header(only?.init ?? {}, "Prefer")).toContain("return=representation")
   })
 

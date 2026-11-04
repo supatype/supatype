@@ -1,4 +1,5 @@
 import { cliPackageVersion } from "./cli-package-version.js"
+import semver from "semver"
 import { isRecordOf, isShape, isString, isUnknown, optional, type Guard } from "@supatype/shared"
 
 export interface InitDependencyVersions {
@@ -92,6 +93,16 @@ export async function resolveInitDependencyVersions(): Promise<InitDependencyVer
   return {
     cli: resolvePackageVersion(cliMeta, runningCli),
     types: resolvePackageVersion(typesMeta, runningCli),
-    client: resolvePackageVersion(clientMeta, runningCli),
+    client: notOlderThan(resolvePackageVersion(clientMeta, runningCli), runningCli),
   }
+}
+
+/**
+ * The client carries `supatype-prepare`, the scaffold's `prepare`, and is released with the CLI,
+ * so one older than the running CLI may predate it. npm's latest is such a client while this CLI's
+ * own release is still publishing, or failed to: then this CLI's version, which npm will not have
+ * yet, fails the install on that version, where npm's latest failed it on a missing command.
+ */
+function notOlderThan(version: string, floor: string): string {
+  return semver.valid(version) !== null && semver.valid(floor) !== null && semver.lt(version, floor) ? floor : version
 }

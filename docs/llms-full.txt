@@ -230,7 +230,7 @@ Install the client first with `npm install @supatype/client`: the generated file
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -365,7 +365,7 @@ $ npm run build         # static files into public/ or dist/
 $ supatype self-host compose up -d
 ```
 
-> **NOTE:** `supatype self-host compose up` points `DATABASE_URL` in `.env` at the Compose Postgres on `SUPATYPE_DB_PORT` (5432 unless you set it), so `push` and Studio use the same database as the stack. Leave it as it wrote it.
+> **NOTE:** `DATABASE_URL` in `.env` belongs to `supatype dev`. Self-host commands such as `push`, `seed` and `admin` connect to the Compose Postgres on `SUPATYPE_DB_PORT` (5432 unless you set it) for their own run, without rewriting it, so they use the same database as the stack.
 
 ### Upgrading Supatype
 
@@ -790,12 +790,12 @@ Import `createClient` from the client file the CLI generates, not from `@supatyp
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
 
-Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_`, `EXPO_PUBLIC_` and `NEXT_PUBLIC_` copies for other frameworks. Read them rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY`, with `PUBLIC_`, `NEXT_PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. A local stack's values go to `.env.development.local`, which Vite, Next.js and Expo read in development only, so a production build has none of them and the client uses the address the page was served from, which is the API's when Supatype serves your app. A deployment's values (`supatype keys` on a server whose `API_EXTERNAL_URL` is its real address) go to `.env`, which a production build reads. Read these rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 
@@ -904,7 +904,7 @@ await supatype.from("comment").update({ body: "Edited" }).eq("id", commentId)
 await supatype.from("comment").delete().eq("id", commentId)
 ```
 
-A write returns no rows unless you add `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
+A write returns no rows unless you add `.select()`: without it, `data` is `null`. Returning a row needs permission to read it, so leave `.select()` off when the access rules let the caller create a row but not read it. On a write, `single()` and `maybeSingle()` work only after `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
 
 A `RichText` field takes a plain string on write.
 
@@ -1073,6 +1073,8 @@ Queries, `rpc`, `functions.invoke`, auth and most storage calls return `{ data, 
 
 An insert an access rule refuses returns code `42501`. An update or delete that the rules hide matches no rows and returns no error. `single()` with no row returns `PGRST116`.
 
+When the server refuses a request with 401, the client sends it again only if the token expired or was invalid (`PGRST301`, `PGRST303` or "JWT expired"), the caller is signed in, and refreshing the session gave a new token. Any other 401 is returned as `error` after one try, including an anon write that an access rule refuses.
+
 > **NETWORK FAILURES:** A network failure on a query, `rpc`, `graphql` or a function call comes back as `error` with a code: `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`, `NETWORK_DNS_FAILURE` or `NETWORK_ERROR`. A read still answered 429 after its last retry has code `RATE_LIMITED`. Most auth and storage calls throw instead, so wrap them in `try` when the network may fail. Three return the failure as `error` like a query: `storage.listBuckets`, `storage.createBucket` and `auth.refreshSession`. `auth.signOut` ignores a network failure and clears the session on this device anyway.
 
 ### Timeouts and retries
@@ -1124,7 +1126,7 @@ Every example below imports the client from `src/supatype.ts`, created once as s
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -1189,7 +1191,7 @@ For anything `filter` cannot say, such as ranges or embeds with conditions, use 
 
 #### useMutation and useFunction
 
-`useMutation(table, operation)` takes `"insert"`, `"update"`, `"delete"` or `"upsert"` and returns `mutate`, `loading` and `error`. `mutate(data, { filter, publish })` takes the rows to write; `filter` picks the rows for an update or delete, and `publish: true` publishes the drafts an update saves. It does not ask for the written rows back, so call `refetch` on your query afterwards.
+`useMutation(table, operation)` takes `"insert"`, `"update"`, `"delete"` or `"upsert"` and returns `mutate`, `loading` and `error`. `mutate(data, { filter, publish, select })` takes the rows to write; `filter` picks the rows for an update or delete, and `publish: true` publishes the drafts an update saves. Without `select`, the written rows are not returned and `data` is `null`, so call `refetch` on your query afterwards. To get them back, pass `select: true` for every column or a column string such as `select: "id,title"`, written as `.select()` takes it. Returning rows needs permission to read them as well as write them.
 
 `mutate` resolves with `{ data, error, count }`. There are no `onMutate`, `onSuccess` or `onError` callbacks, so an optimistic update and its rollback are yours to write.
 
@@ -1348,7 +1350,7 @@ The query runs on mount. `createMutation` and `createFunction` work like the Vue
 #### How Vue, Svelte and Solid differ from React
 
 - The query option is `columns`, not `select`. `refetchInterval`, `cache` and `draft` are React only.
-- `mutate` takes `filter` but not `publish`.
+- `mutate(data, { filter, select })` takes `filter` and `select` as React's does, but not `publish`. Without `select`, `data` is `null`.
 - `invoke` takes a body only, so the call is always a `POST`.
 - `signIn` and `signUp` take `(email, password)` rather than an object, `signInWithOAuth(provider)` sends the browser to the provider, and there is a `resetPassword(email)`.
 - There is no live preview hook or rich text component.
@@ -1440,7 +1442,7 @@ What the cookie handling does and does not do:
 - Set `cookiePrefix` on both sides if you change the client's `auth.cookiePrefix`. The default is `st`.
 - The server client is built from `@supatype/client`, not your generated client file, so `update(..., { publish: true })` is not accepted on it.
 
-The browser half of a Next.js app needs the URL and anon key in `NEXT_PUBLIC_` variables. `supatype keys` does not write those names, so copy the values across. Server code can read `PUBLIC_SUPATYPE_URL` and `PUBLIC_SUPATYPE_ANON_KEY` directly.
+The browser half of a Next.js app needs the URL and anon key in `NEXT_PUBLIC_` variables. `supatype keys` writes `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY`: a local stack's to `.env.development.local`, which Next.js reads in development only, and a deployment's to `.env`. Server code can read `PUBLIC_SUPATYPE_URL` and `PUBLIC_SUPATYPE_ANON_KEY` the same way.
 
 ## Auth
 
@@ -3127,7 +3129,7 @@ API_EXTERNAL_URL=https://example.com
 SITE_URL=https://example.com
 ```
 
-Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SERVICE_ROLE_KEY` from this `JWT_SECRET` and adds the `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` copies your frontend build reads. Keys from your laptop will not work here, because they were signed with a different secret.
+Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SERVICE_ROLE_KEY` from this `JWT_SECRET` and adds the `VITE_SUPATYPE_URL` (`https://example.com`, from `API_EXTERNAL_URL`) and `VITE_SUPATYPE_ANON_KEY` copies your frontend build reads to `.env`. Keys from your laptop will not work here, because they were signed with a different secret.
 
 #### 6. First boot
 
@@ -4027,6 +4029,8 @@ $ supatype push --help
 
 The npm package needs Node.js 22 or later. It is the install to use on Windows.
 
+The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
+
 On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:
 
 ```sh
@@ -4177,10 +4181,12 @@ All of these need Supatype Cloud, which is coming soon.
 | `update` | Download the latest component binaries and update versions in supatype.config.ts | `--check` |
 | `engine status` | Run the host engine binary's `--version` and show which binary answered |  |
 | `cache list` | List cached component binaries and their sizes | `--project <path>` |
-| `cache clean [component] [version]` | Remove cached binaries not pinned by local project configs | `--dry-run`, `--force`, `--project <path>` |
+| `cache clean [component] [version]` | Remove cached binaries not pinned by local project configs, and CLI programs of other versions (`cache clean cli` for those alone) | `--dry-run`, `--force`, `--project <path>` |
 | `migrate-from-v1` | Codemod runtime model() schema DSL into RFC v2 Model<> type aliases | `--schema <path>`, `--write` |
 
 Binaries are cached in `~/.supatype/cache/`. `cache clean --force` removes every cached binary, pinned or not.
+
+Upgrading an npm install leaves the previous version's program in `~/.supatype/cache/cli/`, since another project may still use it. Once the programs of other versions take more than 250 MB, the CLI says so when it starts, at most once a day. `cache clean` removes them, and never the running version; a project still on a removed version downloads it again on its next command.
 
 ## Licensing
 

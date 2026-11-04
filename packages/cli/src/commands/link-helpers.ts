@@ -203,7 +203,6 @@ export async function runLinkAction(opts: {
         project = ensureNotCancelled(
           await p.text({
             message: "Cloud project slug",
-            placeholder: projectRef,
             defaultValue: projectRef,
           }),
         ).trim()
@@ -211,7 +210,6 @@ export async function runLinkAction(opts: {
         url = ensureNotCancelled(
           await p.text({
             message: localLinkLabel(config),
-            placeholder: "https://api.example.com",
             // This project's own API: its gateway, or the native server. Not the first port `dev` tries.
             defaultValue: resolveProjectApiUrl(cwd, config),
           }),

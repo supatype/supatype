@@ -122,10 +122,10 @@
 <pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
 <span class="k">export</span> <span class="k">const</span> supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL,
+  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
-    <p>Every page in these docs imports the client from this one file. <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code> to <code>.env</code>, with <code>PUBLIC_</code>, <code>EXPO_PUBLIC_</code> and <code>NEXT_PUBLIC_</code> copies for other frameworks. Read them rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
+    <p>Every page in these docs imports the client from this one file. <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code>, <code>NEXT_PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. A local stack's values go to <code>.env.development.local</code>, which Vite, Next.js and Expo read in development only, so a production build has none of them and the client uses the address the page was served from, which is the API's when Supatype serves your app. A deployment's values (<code>supatype keys</code> on a server whose <code>API_EXTERNAL_URL</code> is its real address) go to <code>.env</code>, which a production build reads. Read these rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
     <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
     <p><code>createClient</code> takes these options as well as <code>url</code> and <code>anonKey</code>:</p>
     <div class="tbl"><table>
@@ -207,7 +207,7 @@ console.log(count)</pre></div>
 
 <span class="k">await</span> supatype.from(<span class="s">"comment"</span>).update({ body: <span class="s">"Edited"</span> }).eq(<span class="s">"id"</span>, commentId)
 <span class="k">await</span> supatype.from(<span class="s">"comment"</span>).delete().eq(<span class="s">"id"</span>, commentId)</pre></div>
-    <p>A write returns no rows unless you add <code>.select()</code>. On a delete, <code>.select()</code> returns the rows it deleted. <code>upsert</code> inserts or updates by primary key.</p>
+    <p>A write returns no rows unless you add <code>.select()</code>: without it, <code>data</code> is <code>null</code>. Returning a row needs permission to read it, so leave <code>.select()</code> off when the access rules let the caller create a row but not read it. On a write, <code>single()</code> and <code>maybeSingle()</code> work only after <code>.select()</code>. On a delete, <code>.select()</code> returns the rows it deleted. <code>upsert</code> inserts or updates by primary key.</p>
     <p>A <code>RichText</code> field takes a plain string on write.</p>
     <p>Some owner columns can be left out. A <code>SupatypeAuthUserId</code> field that the <code>create</code> rule names in <code>Owner&lt;&gt;</code>, and that has no default of its own, defaults to the caller. A relation's key, such as <code>author_id</code>, is not filled in, so send it.</p>
 
@@ -322,6 +322,7 @@ console.log(first?.author.name, first?.body.root.children?.[0])</pre></div>
     <p>Queries, <code>rpc</code>, <code>functions.invoke</code>, auth and most storage calls return <code>{ data, error }</code>. Check <code>error</code> before using <code>data</code>.</p>
     <p><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>. Do not test it with <code>instanceof</code>. When a field validator refused the write, <code>field</code> names the column, so you can mark that input.</p>
     <p>An insert an access rule refuses returns code <code>42501</code>. An update or delete that the rules hide matches no rows and returns no error. <code>single()</code> with no row returns <code>PGRST116</code>.</p>
+    <p>When the server refuses a request with 401, the client sends it again only if the token expired or was invalid (<code>PGRST301</code>, <code>PGRST303</code> or "JWT expired"), the caller is signed in, and refreshing the session gave a new token. Any other 401 is returned as <code>error</code> after one try, including an anon write that an access rule refuses.</p>
     <div class="callout warn">
       <span class="callout-label">NETWORK FAILURES</span>
       <p>A network failure on a query, <code>rpc</code>, <code>graphql</code> or a function call comes back as <code>error</code> with a code: <code>NETWORK_TIMEOUT</code>, <code>NETWORK_CONNECTION_REFUSED</code>, <code>NETWORK_DNS_FAILURE</code> or <code>NETWORK_ERROR</code>. A read still answered 429 after its last retry has code <code>RATE_LIMITED</code>. Most auth and storage calls throw instead, so wrap them in <code>try</code> when the network may fail. Three return the failure as <code>error</code> like a query: <code>storage.listBuckets</code>, <code>storage.createBucket</code> and <code>auth.refreshSession</code>. <code>auth.signOut</code> ignores a network failure and clears the session on this device anyway.</p>

@@ -22,6 +22,11 @@ type Risk = NonNullable<Operation["risk"]>
 export interface PlannedChange {
   label: string
   risk: Risk
+  /**
+   * What the change's own statement also makes: a check or foreign key inside its CREATE TABLE or
+   * ADD COLUMN. Shown beneath it, and neither counted nor confirmed on its own.
+   */
+  details?: string[]
 }
 
 /** `foreign_key` as a person says it: `foreign key`. */
@@ -34,14 +39,51 @@ function where(action: ReconcileAction): string {
   return parent ? `${parent}.${name}` : name
 }
 
+/** `PUBLIC` as the ledger names it: a keyword for every role, which nothing is ever granted to. */
+const PUBLIC_GRANTEE = "PUBLIC"
+
+/**
+ * A table grant's change, said as what its statement does, or null for another kind. The engine's
+ * object for one role is "revoke everything, then grant exactly this set", and for PUBLIC only the
+ * revoke: it read as `create table grant posts.PUBLIC`, a grant nothing makes.
+ */
+function grantLabel(action: ReconcileAction): string | null {
+  if (action.key.kind !== "table_grant") return null
+  const { parent: table, name: role } = action.key
+  const revoke = `revoke every privilege on ${table} from ${role}`
+  const sets = role === PUBLIC_GRANTEE ? revoke : `set ${role}'s privileges on ${table}`
+  switch (action.action) {
+    case "create":
+    case "replace":
+      return sets
+    case "recreate":
+      return `${sets} (put back: removed outside Supatype)`
+    case "drop":
+      return revoke
+    case "drift":
+      return role === PUBLIC_GRANTEE
+        ? `PUBLIC was given privileges on ${table} outside Supatype; the push revokes them`
+        : `${role}'s privileges on ${table} were changed outside Supatype; the push puts them back`
+    default:
+      return null
+  }
+}
+
 /**
  * What a reconcile action means for the database, or `null` when it is not a change of its own: a
  * `keep`, a `forget` (ledger only), a `released` object, or any action the engine marks `inline`
  * (a create, recreate, replace or drift fix its parent statement already makes, so it is neither
- * listed twice nor confirmed on its own).
+ * listed twice nor confirmed on its own: {@link plannedChanges} shows it under that statement).
  */
 export function formatReconcileAction(action: ReconcileAction): PlannedChange | null {
   if (action.inline === true && action.action !== "conflict") return null
+  const change = describeAction(action)
+  if (change === null) return null
+  const label = grantLabel(action)
+  return label === null ? change : { ...change, label }
+}
+
+function describeAction(action: ReconcileAction): PlannedChange | null {
   const kind = kindLabel(action)
   const at = where(action)
   switch (action.action) {
@@ -76,12 +118,55 @@ export function formatReconcileAction(action: ReconcileAction): PlannedChange | 
 }
 
 /**
+ * The inline kinds worth a line under their statement: what a schema declares (a check from a
+ * string-literal union, a unique field, a reference). A primary key comes with every table, and a
+ * line for it under each would hide the ones that say something.
+ */
+const SHOWN_INLINE_KINDS: ReadonlySet<string> = new Set(["check", "unique", "foreign_key"])
+
+/** An inline action as a line under its statement: the object, and what happens to it if not a create. */
+function inlineDetail(action: ReconcileAction): string | null {
+  if (action.inline !== true || !SHOWN_INLINE_KINDS.has(action.key.kind)) return null
+  const object = `${kindLabel(action)} ${action.key.name}`
+  switch (action.action) {
+    case "create":
+      return object
+    case "recreate":
+      return `${object}, put back (dropped outside Supatype)`
+    case "replace":
+      return `${object}, replaced`
+    case "drift":
+      return `${object}, put back (changed outside Supatype)`
+    default:
+      return null
+  }
+}
+
+/** The table an object's `parent` names: `posts` for `posts` and for `posts.title`. */
+function parentTable(action: ReconcileAction): string {
+  return action.key.parent.split(".")[0] ?? ""
+}
+
+/**
+ * The operation whose statement makes an inline action: the first one on its table that creates
+ * the table or adds a column, else the first on its table.
+ */
+function parentOperationIndex(operations: readonly Operation[], action: ReconcileAction): number {
+  const table = parentTable(action)
+  const onTable = (op: Operation) => op.table === table
+  const makes = operations.findIndex((op) => onTable(op) && (op.type === "create_table" || op.type === "add_column"))
+  return makes >= 0 ? makes : operations.findIndex(onTable)
+}
+
+/**
  * Everything a push of this plan will do: the differ's operations, then the reconcile's changes.
  * The one list `diff`, `push`, `deploy` and `migrate` count and confirm against, so a change the
  * reconcile plans (a check or a foreign key, say) is never a push that "matches the database".
+ * Inline actions are details of the operation that makes them, not changes of their own.
  */
 export function plannedChanges(diff: Pick<DiffResult, "operations" | "reconcile">): PlannedChange[] {
-  const changes: PlannedChange[] = (diff.operations ?? []).map((op) => ({
+  const operations = diff.operations ?? []
+  const changes: PlannedChange[] = operations.map((op) => ({
     // `AlterColumn` sends `warning: null` when it has nothing to warn about.
     label: typeof op.warning === "string" ? withoutEngineForceAdvice(op.warning) : formatOperation(op),
     risk: op.risk ?? "safe",
@@ -89,8 +174,17 @@ export function plannedChanges(diff: Pick<DiffResult, "operations" | "reconcile"
   for (const action of diff.reconcile ?? []) {
     const change = formatReconcileAction(action)
     if (change) changes.push(change)
+    else attachInline(changes, operations, action)
   }
   return changes
+}
+
+/** Add an inline action to the details of the operation that makes it, when it is worth a line. */
+function attachInline(changes: PlannedChange[], operations: readonly Operation[], action: ReconcileAction): void {
+  const detail = inlineDetail(action)
+  if (detail === null) return
+  const parent = changes[parentOperationIndex(operations, action)]
+  if (parent !== undefined) parent.details = [...(parent.details ?? []), detail]
 }
 
 /** Whether a change needs a person to say yes before a push applies it. */
@@ -173,6 +267,7 @@ export function printDiffOperations(diff: Pick<DiffResult, "operations" | "recon
   console.log(`\n${changes.length} change(s):\n`)
   for (const change of changes) {
     console.log(`  [${RISK_SYMBOL[change.risk]}] ${change.label}  (${RISK_LEGEND[change.risk]})`)
+    for (const detail of change.details ?? []) console.log(`      with ${detail}`)
   }
 
   const dangerous = changes.filter((c) => c.risk === "danger" || c.risk === "destructive").length

@@ -102,12 +102,22 @@ interface TextPromptProps {
 
 type TextPromptSpec = Extract<ActiveFlowPrompt, { kind: "text" }>
 
+/** What a text prompt shows besides its question: its default, or else an example of an answer. */
+export interface TextPromptHints {
+  /** Beside the question, for a default Enter gives: `(default 18478)`. */
+  defaultHint?: string
+  /** In the empty input, for a placeholder that is only an example: `e.g. api.example.com`. */
+  example?: string
+}
+
 /**
- * How a text prompt starts: empty, with its default as the placeholder. The default used to be the
- * input's text, so typing appended to it: a port prompt showing 18478 took `8700` as `184788700`.
+ * A text prompt's hints. The input starts empty: the default used to be its text, so typing
+ * appended to it (18478 then `8700` gave `184788700`). Then the default became the input's
+ * placeholder, and a real default looked exactly like an example meaning "leave empty".
  */
-export function textPromptStart(spec: TextPromptSpec): { value: string; placeholder: string | undefined } {
-  return { value: "", placeholder: spec.defaultValue || spec.placeholder }
+export function textPromptHints(spec: TextPromptSpec): TextPromptHints {
+  if (spec.defaultValue) return { defaultHint: `(default ${spec.defaultValue})` }
+  return spec.placeholder ? { example: `e.g. ${spec.placeholder}` } : {}
 }
 
 /** The answer to a text prompt: what was typed, or its default when nothing was. */
@@ -116,8 +126,8 @@ export function textPromptAnswer(submitted: string, spec: TextPromptSpec): strin
 }
 
 export function TextPrompt({ spec, onSubmit, onCancel }: TextPromptProps): React.ReactElement {
-  const start = textPromptStart(spec)
-  const [value, setValue] = useState(start.value)
+  const hints = textPromptHints(spec)
+  const [value, setValue] = useState("")
   const [error, setError] = useState<string | undefined>()
 
   useInput((_input, key) => {
@@ -126,14 +136,16 @@ export function TextPrompt({ spec, onSubmit, onCancel }: TextPromptProps): React
 
   return (
     <Box flexDirection="column">
-      <Text bold color={theme.brand}>
-        {spec.message}
+      <Text>
+        <Text bold color={theme.brand}>
+          {spec.message}
+        </Text>
+        {hints.defaultHint !== undefined ? <Text dimColor> {hints.defaultHint}</Text> : null}
       </Text>
       <Box>
         <Text color={theme.brand}>› </Text>
         <TextInput
           value={value}
-          {...(start.placeholder !== undefined ? { placeholder: start.placeholder } : {})}
           onChange={setValue}
           onSubmit={(submitted) => {
             const answer = textPromptAnswer(submitted, spec)
@@ -145,6 +157,7 @@ export function TextPrompt({ spec, onSubmit, onCancel }: TextPromptProps): React
             onSubmit(answer)
           }}
         />
+        {value === "" && hints.example !== undefined ? <Text dimColor>{hints.example}</Text> : null}
       </Box>
       {error ? <Text color={theme.error}>{error}</Text> : null}
       <Text dimColor>enter submit · esc cancel</Text>

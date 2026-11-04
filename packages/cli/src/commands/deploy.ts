@@ -86,7 +86,7 @@ export function registerDeploy(program: Command): void {
       overwriteDrift?: boolean
     }) => {
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = loadConfig(cwd, { local: false })
       const link = loadProjectLink(cwd)
       const cloudCfg = loadCloudConfig(cwd)
       const envName = opts.env ?? opts.environment ?? "production"

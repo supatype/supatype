@@ -8,7 +8,7 @@
 
 import type { Command } from "commander"
 import { errorMessage } from "../error-message.js"
-import { copyFileSync, renameSync } from "node:fs"
+import { copyFileSync, renameSync, rmSync } from "node:fs"
 import { cliPackageVersion } from "../cli-package-version.js"
 import { detectCliInstallMethod, runningBinaryPath } from "../cli-install-method.js"
 import { downloadStandaloneCli, fetchStandaloneCliLatestVersion } from "../cli-standalone.js"
@@ -69,10 +69,16 @@ export function registerSelfUpdate(program: Command): void {
 
         const backup = `${currentPath}.bak`
         copyFileSync(currentPath, backup)
+        // A copy beside the target, then renamed over it: the download stays in the CLI cache,
+        // where an npm project on the same version runs it, and a rename can replace a running
+        // executable on Linux and macOS where writing over one cannot.
+        const incoming = `${currentPath}.new`
+        copyFileSync(downloaded, incoming)
         try {
-          renameSync(downloaded, currentPath)
+          renameSync(incoming, currentPath)
         } catch {
-          copyFileSync(downloaded, currentPath)
+          copyFileSync(incoming, currentPath)
+          rmSync(incoming, { force: true })
         }
 
         info(`Updated to v${latest}.`)

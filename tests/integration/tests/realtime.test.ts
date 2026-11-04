@@ -78,6 +78,7 @@ describe("realtime (F15)", () => {
     const { data: inserted, error: insertError } = await admin
       .from("post")
       .insert({ title: "Before", slug })
+      .select()
     assert.ifError(insertError)
     const postId = stringColumn(inserted, "id")[0]
     assert.ok(postId)
@@ -122,6 +123,7 @@ describe("realtime (F15)", () => {
     const { data: inserted, error: insertError } = await admin
       .from("post")
       .insert({ title: "To delete", slug })
+      .select()
     assert.ifError(insertError)
     const postId = stringColumn(inserted, "id")[0]
     assert.ok(postId)
@@ -240,6 +242,7 @@ describe("realtime (F17 RLS)", () => {
       const { data: subB, error: subBError } = await admin
         .from("subscription")
         .insert(newSubscriptionRow(userB.userId, String(Date.now())))
+        .select()
       assert.ifError(subBError)
       created.push(...stringColumn(subB, "id"))
 
@@ -248,6 +251,7 @@ describe("realtime (F17 RLS)", () => {
       const { data: subA, error: subAError } = await admin
         .from("subscription")
         .insert(newSubscriptionRow(userA.userId, String(Date.now() + 1)))
+        .select()
       assert.ifError(subAError)
       created.push(...stringColumn(subA, "id"))
 

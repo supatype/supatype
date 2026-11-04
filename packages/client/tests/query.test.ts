@@ -268,7 +268,7 @@ describe("MutationBuilder: insert", () => {
   it("sends POST with body", async () => {
     const fetch = mockFetch([{ id: "1", title: "New", status: "draft" }])
     vi.stubGlobal("fetch", fetch)
-    const { data, error } = await new MutationBuilder<Post>(BASE, PATH, HEADERS, "POST", { title: "New", status: "draft" })
+    const { data, error } = await new MutationBuilder<Post>(BASE, PATH, HEADERS, "POST", { title: "New", status: "draft" }).select()
     expect(error).toBeNull()
     expect(data?.[0]?.id).toBe("1")
     const { init } = fetchCall(fetch)
@@ -305,9 +305,9 @@ describe("MutationBuilder: update / delete", () => {
     expect(url).toContain("id=eq.1")
   })
 
-  it("204 No Content returns empty data array", async () => {
+  it("204 No Content to delete().select() returns an empty data array", async () => {
     vi.stubGlobal("fetch", mockFetch(null, { status: 204 }))
-    const { data, error } = await new MutationBuilder<Post>(BASE, PATH, HEADERS, "DELETE").eq("id", "1")
+    const { data, error } = await new MutationBuilder<Post>(BASE, PATH, HEADERS, "DELETE").eq("id", "1").select()
     expect(error).toBeNull()
     expect(data).toEqual([])
   })

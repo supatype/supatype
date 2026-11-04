@@ -2,6 +2,7 @@ import type { Command } from "commander"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { readEnvFile, readEnvValue, upsertEnvFile } from "../env-file.js"
+import { frontendEnv, writeFrontendEnv, type FrontendValues } from "../frontend-env.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import { GIVEN_JWT_SECRET_REMEDY, jwtSecretUnwritable } from "../jwt-secret-rules.js"
@@ -164,35 +165,17 @@ function printedKeysSecret(cwd: string, flag: string | undefined): string | unde
 }
 
 /**
- * Every env name a minted key pair is written to, in one place.
+ * The `.env` names a minted key pair is written to, shared with `supatype dev`, which writes the
+ * same pair when it starts a stack. They used to hold separate lists, so a name could be written by
+ * one and forgotten by the other.
  *
- * Shared with `supatype dev`, which writes the same pair when it starts a stack. They used to hold
- * separate lists, so a front end's prefix could be written by one and forgotten by the other, and
- * which names your `.env` ended up with depended on whichever command you happened to run last.
- *
- * The URL names are only included when there is a URL to write, because an empty
- * `VITE_SUPATYPE_URL` is worse than an absent one: the client reads it, finds a blank string, and
- * requests against the page origin without saying why.
+ * The front end's copies (`VITE_`, `PUBLIC_`, `NEXT_PUBLIC_` and `EXPO_PUBLIC_` names for the anon
+ * key and the API address) are not here: frontend-env.ts writes them where a build of their kind
+ * reads them, a local stack's to `.env.development.local` and a deployment's to `.env`. In `.env`,
+ * a production build read the local stack's and shipped them.
  */
-export function anonKeyEnvUpdates(
-  anonKey: string,
-  serviceKey: string,
-  apiUrl?: string | undefined,
-): Record<string, string> {
-  return {
-    ANON_KEY: anonKey,
-    SERVICE_ROLE_KEY: serviceKey,
-    VITE_SUPATYPE_ANON_KEY: anonKey,
-    PUBLIC_SUPATYPE_ANON_KEY: anonKey,
-    EXPO_PUBLIC_SUPATYPE_ANON_KEY: anonKey,
-    NEXT_PUBLIC_SUPATYPE_ANON_KEY: anonKey,
-    ...(apiUrl !== undefined && {
-      VITE_SUPATYPE_URL: apiUrl,
-      PUBLIC_SUPATYPE_URL: apiUrl,
-      EXPO_PUBLIC_SUPATYPE_URL: apiUrl,
-      NEXT_PUBLIC_SUPATYPE_URL: apiUrl,
-    }),
-  }
+export function anonKeyEnvUpdates(anonKey: string, serviceKey: string): Record<string, string> {
+  return { ANON_KEY: anonKey, SERVICE_ROLE_KEY: serviceKey }
 }
 
 /** The API URL a project's `.env` records, for the front-end URL copies, or undefined. */
@@ -216,7 +199,8 @@ export interface WriteKeysContext {
 }
 
 /**
- * Write a minted pair into `dir`'s .env.
+ * Write a minted pair into `dir`'s .env, and the front end's copies where they belong
+ * (frontend-env.ts).
  *
  * Blanks only by default. An anon key already in `.env` is held by clients this command cannot
  * reach, and reissuing it locks them out, so filling what is empty is the useful half and
@@ -238,23 +222,37 @@ export function writeKeysToEnv(
   if (!existsSync(envPath)) return { path: null, written: [], kept: [] }
 
   const existing = context.env ?? readEnvFile(dir)
-  const candidates = anonKeyEnvUpdates(keys.anonKey, keys.serviceKey, recordedApiUrl(existing))
-
   const updates: Record<string, string> = {}
   const kept: string[] = []
-  for (const [name, value] of Object.entries(candidates)) {
+  for (const [name, value] of Object.entries(anonKeyEnvUpdates(keys.anonKey, keys.serviceKey))) {
     // Blank counts as absent: a template ships `ANON_KEY=` and that is exactly the line to fill.
-    const current = existing[name]?.trim() ?? ""
-    if (!force && current !== "") {
-      kept.push(name)
-      continue
-    }
-    updates[name] = value
+    if (!force && (existing[name]?.trim() ?? "") !== "") kept.push(name)
+    else updates[name] = value
   }
 
   const upserts = { ...context.secret, ...updates }
   if (Object.keys(upserts).length > 0) upsertEnvFile(dir, upserts)
-  return { path: envPath, written: Object.keys(updates), kept }
+  const apiUrl = recordedApiUrl(existing)
+  const frontend = writeKeyFrontendEnv(dir, { anonKey: keys.anonKey, ...(apiUrl !== undefined && { apiUrl }) }, force)
+  return { path: envPath, written: [...Object.keys(updates), ...frontend.written], kept: [...kept, ...frontend.kept] }
+}
+
+/**
+ * The front end's copies of the anon key and the recorded URL, where frontend-env.ts puts them:
+ * blanks only unless `force`, as for `.env`. Names outside `.env` are listed with their file, since
+ * the command's output says the rest went to `.env`. An empty URL name is worse than an absent one
+ * (the client reads a blank and requests against the page origin without saying why), so with no
+ * URL recorded none is written.
+ */
+function writeKeyFrontendEnv(
+  dir: string,
+  values: FrontendValues,
+  force: boolean,
+): { written: string[]; kept: string[] } {
+  const { file, written } = writeFrontendEnv(dir, values, { replace: force })
+  const named = (key: string) => (file === ".env" ? key : `${key} (${file})`)
+  const kept = Object.keys(frontendEnv(values)).filter((key) => !written.includes(key))
+  return { written: written.map(named), kept: kept.map(named) }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -505,7 +505,8 @@ export async function createRecord(
     if (result.error !== null) return { id: null, error: result.error }
     return idOf(isJsonObject(result.data) ? result.data["record_id"] : undefined)
   }
-  const result = await client.from(model.tableName).insert(values)
+  // Only the key: the editor opens the new record by it, and a write returns nothing unasked.
+  const result = await client.from(model.tableName).insert(values).select(model.primaryKey)
   if (result.error !== null) return { id: null, error: result.error }
   const row: unknown = Array.isArray(result.data) ? result.data[0] : undefined
   return idOf(isJsonObject(row) ? row[model.primaryKey] : undefined)

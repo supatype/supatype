@@ -31,8 +31,7 @@ import {
   writeSelfHostCompose,
 } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
-import { syncDatabaseUrlPort, warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
-import { databaseUrlSyncMessage } from "../db-port.js"
+import { warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
 import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -54,7 +53,7 @@ export function registerSelfHost(program: Command): void {
     .description("Render deterministic self-host compose artifacts")
     .action(() => {
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = loadConfig(cwd, { local: false })
       requireUrlSafeComposePasswords(cwd, config)
       warnProjectAuthProviderSecrets(cwd, config)
       const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
@@ -68,7 +67,7 @@ export function registerSelfHost(program: Command): void {
     .option("-d, --detach", "Start in detached mode", true)
     .action(async (opts: { detach?: boolean }) => {
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = loadConfig(cwd, { local: false })
       const project = composeProjectName(config.project.name)
       const args = opts.detach ? ["up", "-d"] : ["up"]
       // Before anything is written into .env, as the key and secret checks below are.
@@ -89,11 +88,9 @@ export function registerSelfHost(program: Command): void {
       warnProjectAuthProviderSecrets(cwd, config)
       noteUnpinnedImages(cwd)
       const renderOptions = composeRenderOptions(cwd, config.project.name)
-      // As a push does: a stack started here and never pushed kept whatever DATABASE_URL .env had,
-      // which after a `supatype dev` was the dev database, so seed and admin reached that one. Only a
-      // URL the CLI wrote: an operator's own, an external database's typically, always wins.
-      const dbPort = syncDatabaseUrlPort(cwd, renderOptions.devLocal)
-      if (dbPort !== null) console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
+      // DATABASE_URL in .env is not moved to this stack's port. That line is dev's, and moving it
+      // here had dev and self-host rewriting it in turn (issue 26). Host commands such as seed and
+      // admin reach the running stack's port past a URL the CLI wrote (host-database.ts).
       const status = await withSpinner("Starting self-host Compose stack", async () => {
         const out = writeSelfHostCompose(cwd, config, renderOptions)
         return runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND })
@@ -162,7 +159,7 @@ export function registerSelfHost(program: Command): void {
       }) => {
         logNativeHint("install-service")
         const cwd = process.cwd()
-        const config = loadConfig(cwd)
+        const config = loadConfig(cwd, { local: false })
 
         const systemdDir = opts.outputDir ?? ".supatype/systemd"
         const absSystemdDir = resolve(cwd, systemdDir)
@@ -232,7 +229,7 @@ export function registerSelfHost(program: Command): void {
     .action(async (opts: { port?: string }) => {
       logNativeHint("serve")
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = loadConfig(cwd, { local: false })
 
       const serverBin = await resolveBinary("server", config)
       const port = opts.port ?? String(nativeServerPort(config))
@@ -263,7 +260,7 @@ export function registerSelfHost(program: Command): void {
     .action(() => {
       logNativeHint("reload")
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = loadConfig(cwd, { local: false })
       const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
       const pid = readPid(join(stateDir, "pid"), "server")
 
@@ -296,7 +293,7 @@ export function registerSelfHost(program: Command): void {
     .action(() => {
       logNativeHint("status")
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = loadConfig(cwd, { local: false })
       const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
 
       plain(`Project: ${config.project.name}\n`)
@@ -335,7 +332,7 @@ export function registerSelfHost(program: Command): void {
     .action((opts: { service?: string; lines: string; follow?: boolean }) => {
       logNativeHint("logs")
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = loadConfig(cwd, { local: false })
       const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
       const logDir = join(stateDir, "logs")
 
@@ -384,7 +381,7 @@ export function registerSelfHost(program: Command): void {
     .action((opts: { output?: string; connection?: string }) => {
       logNativeHint("backup")
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const config = loadConfig(cwd, { local: false })
       const conn = opts.connection ?? connectionString(config, devPostgresPassword(cwd), cwd)
       const outFile = opts.output ?? resolve(
         cwd,
@@ -481,7 +478,8 @@ type ComposeFileUse = "start" | "render" | "on-disk"
 
 function runCompose(args: string[], use: ComposeFileUse): number {
   const cwd = process.cwd()
-  const config = loadConfig(cwd)
+  // The committed config, not the developer's local override: this is the self-host stack (issue 24).
+  const config = loadConfig(cwd, { local: false })
   if (use === "start") requireUrlSafeComposePasswords(cwd, config)
   const composePath =
     use === "on-disk"

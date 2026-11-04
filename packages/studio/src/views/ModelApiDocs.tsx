@@ -92,7 +92,7 @@ function buildEndpoints(model: ModelConfig): Endpoint[] {
       ],
       requestBody: bodyObj(writeable),
       response: JSON.stringify(rowObj(), null, 2),
-      sdkSnippet: `const { data, error } = await client\n  .from('${t}')\n  .insert(${bodyObj(writeable)})`,
+      sdkSnippet: `const { data, error } = await client\n  .from('${t}')\n  .insert(${bodyObj(writeable)})\n  .select() // without it, data is null`,
     },
     {
       method: "PATCH",
@@ -104,7 +104,7 @@ function buildEndpoints(model: ModelConfig): Endpoint[] {
         ...writeable.slice(0, 3).map((f) => ({ name: f.name, type: typeof exampleValue(f), required: false, description: f.label || f.name, location: "body" as const, example: exampleText(f) })),
       ],
       requestBody: bodyObj(writeable.slice(0, 3)),
-      sdkSnippet: `const { data, error } = await client\n  .from('${t}')\n  .update({ /* fields to change */ })\n  .eq('${pk}', '${pkEx}')`,
+      sdkSnippet: `const { data, error } = await client\n  .from('${t}')\n  .update({ /* fields to change */ })\n  .eq('${pk}', '${pkEx}')\n  .select() // without it, data is null`,
     },
     {
       method: "DELETE",
@@ -114,7 +114,7 @@ function buildEndpoints(model: ModelConfig): Endpoint[] {
       params: [
         { name: pk, type: "string", required: true, description: `Filter by ${pk}`, location: "query", example: `eq.${pkEx}` },
       ],
-      sdkSnippet: `const { data, error } = await client\n  .from('${t}')\n  .delete()\n  .eq('${pk}', '${pkEx}')`,
+      sdkSnippet: `const { error } = await client\n  .from('${t}')\n  .delete()\n  .eq('${pk}', '${pkEx}')`,
     },
   ]
 }

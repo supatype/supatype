@@ -162,6 +162,22 @@ describe("runtime contract", () => {
     expect(compose).not.toContain("\n  app:\n")
   })
 
+  // The server and the control plane each fell back to a different directory when static_dir was
+  // unset (./public and ./dist), so a deploy wrote where the server did not serve. One rule now,
+  // init's: ./dist for a Vite-built app, else ./public.
+  it.each([
+    ["a site with no build", { mode: "static" as const }, "public"],
+    ["a Vite-built site", { mode: "static" as const, vite_dev_url: "http://127.0.0.1:5173" }, "dist"],
+  ])("serves and deploys %s from one directory when static_dir is unset", (_label, app, dir) => {
+    const compose = renderSelfHostCompose({ ...baseConfig, app })
+    expect(compose).toContain(`SUPATYPE_APP_STATIC_DIR: /project/${dir}`)
+    expect(compose).toContain(`SUPATYPE_STATIC_ROOT: /project/${dir}`)
+  })
+
+  it("deploys an app with no static_dir and no Vite to ./public, as a static one is served", () => {
+    expect(renderSelfHostCompose({ ...baseConfig, app: { mode: "none" } })).toContain("SUPATYPE_STATIC_ROOT: /project/public")
+  })
+
   it("self-host compose configures static app on supatype-server", () => {
     const compose = renderSelfHostCompose({ ...baseConfig, app: { mode: "static", static_dir: "./public" } })
     expect(compose).toContain('SUPATYPE_APP_MODE: static')

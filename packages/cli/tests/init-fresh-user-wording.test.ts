@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { defaultScaffoldOptions, printProductionSteps, scaffold } from "../src/commands/init.js"
+import { defaultScaffoldOptions, initStepBlocks, scaffold } from "../src/commands/init.js"
 import { NATIVE_SERVER_PORT } from "../src/project-config.js"
 
 /**
@@ -33,11 +33,11 @@ describe("init wording", () => {
   })
 
   it("prints no static frontend steps when no app was chosen", () => {
-    const lines: string[] = []
-    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void lines.push(args.map(String).join(" ")))
-    printProductionSteps({ ...defaultScaffoldOptions("w-app"), packageManager: "npm", install: true, generateKeys: true })
-    expect(lines.join("\n")).not.toContain("Static frontend")
-    expect(lines.join("\n")).not.toContain("app add --static")
+    const result = { ...defaultScaffoldOptions("w-app"), packageManager: "npm" as const }
+    const blocks = initStepBlocks({ name: "w-app", result, installed: true, keysGenerated: true, binariesReady: true })
+    const printed = blocks.flatMap((block) => [block.title, ...block.steps, block.after ?? ""]).join("\n")
+    expect(printed).not.toContain("Static frontend")
+    expect(printed).not.toContain("app add --static")
   })
 })
 

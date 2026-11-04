@@ -69,6 +69,53 @@
 
 ### Bug Fixes
 
+* **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
+  app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
+  every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.
+  So did `npm install`, through the scaffold's `prepare: supatype generate`. Installed from npm,
+  `supatype` now runs the same signed program the curl and Homebrew installs run, which carries its
+  own copy of everything it uses. The first run of each version downloads it from
+  releases.supatype.com into `~/.supatype/cache/cli/<version>/`, checked against the release's
+  signed checksums; set `SUPATYPE_CDN_BASE` to use a mirror. The package no longer installs `ink`,
+  `react`, `commander`, `ts-morph`, `tsx` or `bcryptjs` into the app. Linux, macOS (x64, arm64)
+  and Windows x64 are supported; anything else is refused with the list.
+* **self-update:** run by the npm package, `self-update` says to update with npm instead of
+  replacing the program the package starts.
+* **cache:** upgrading an npm install leaves the previous version's program in the cache, since
+  another project may still use it. Once those take more than 250 MB the CLI says so when it
+  starts, at most once a day, and `supatype cache clean` (or `cache clean cli`) removes them,
+  never the running version.
+* **init:** new projects no longer install `tsx`. The CLI runs the project's TypeScript itself.
+* **init:** a project installs for production. Its `prepare` ran `supatype generate`, which npm
+  runs on `npm ci --omit=dev` too, where the CLI (a development dependency) is not installed, so
+  every production install failed with `supatype: not found`. `prepare` is now
+  `supatype-prepare`, a command `@supatype/client` installs, which runs `generate` only where the
+  CLI is installed, as Prisma's client does with the Prisma CLI. A failing `generate` still fails
+  the install. Existing projects `init` is merged into get the same script, and their
+  `@supatype/client` is moved into `dependencies` and raised to a release that has the command.
+  `init` never picks a client older than itself, and replaces the `prepare` earlier releases
+  wrote. A project made before this release keeps that `prepare` until then: set it to
+  `supatype-prepare`, and upgrade `@supatype/client` to this release, the first with that command,
+  listed in `dependencies`.
+* **dev:** a Ctrl+C sent to the npm package's process alone, as an IDE's stop button sends it, stops
+  dev on Linux and macOS, where the starter passes every stop signal on. dev counts the same signal
+  twice within half a second as one press, since a Ctrl+C typed in the terminal reaches it both
+  from the terminal and from the starter; pressing again to force quit still does.
+* **dev:** one Ctrl+C stops `supatype dev`. Ink took the first one itself and closed the dashboard
+  and nothing else, so dev went on running with no screen until a second Ctrl+C.
+* **dev:** the dashboard names what it is waiting on, with a spinner: starting Postgres, applying
+  the schema, starting the services (the first start downloads their images), waiting for the
+  gateway. It showed the logo over an idle log, sometimes for minutes. Starting the Compose stack
+  no longer blocks the screen, so the spinner keeps turning while images download.
+* **init:** a Vite app gets `vite: ^8`, which current `@vitejs/plugin-react` requires (`^6` failed
+  the install with ERESOLVE), and a `build: vite build` script, without which nothing produced the
+  `./dist` that `app.static_dir` serves. A new project's package.json has `"version": "0.1.0"`.
+* **init:** `.env`'s `SITE_URL`, where auth emails send people back to, is the address a static or
+  proxied app is served on (the gateway's port on Docker). It was `http://localhost:3000` for every
+  project, where nothing listened.
+* **init:** in an existing package.json, `@supatype/cli` and `@supatype/types` go in
+  `devDependencies` as they do for a new project, and the `seed` script runs `supatype seed`. It ran
+  `tsx seed.ts`, which loads the seed module without calling it.
 * **functions serve:** a project with `functions/.env.local` serves again. The file was handed to
   Deno as `--env-file <path>`, two arguments, and Deno takes the value only after `=`, so it ran
   `.env.local` as the script and served nothing. `functions new` creates that file, so every project

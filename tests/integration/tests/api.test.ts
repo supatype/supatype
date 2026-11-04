@@ -44,6 +44,7 @@ describe("posts REST CRUD", () => {
     const { data, error } = await client
       .from("post")
       .insert({ title: "Hello Integration", slug })
+      .select()
 
     assert.ifError(error)
     assert.ok(Array.isArray(data) && data.length > 0, "No rows returned")
@@ -66,6 +67,7 @@ describe("posts REST CRUD", () => {
     const { data, error } = await client
       .from("post")
       .update({ title: "Hello Integration (updated)" })
+      .select()
       .eq("id", createdId)
 
     assert.ifError(error)
@@ -105,6 +107,7 @@ describe("writes filtered with or()", () => {
     const { data, error } = await client
       .from("post")
       .insert(slugs.map((slug) => ({ title: `Or filter ${slug}`, slug })))
+      .select()
     assert.ifError(error)
     const slugsBack = strings(data, "slug")
     strings(data, "id").forEach((id, i) => ids.set(slugsBack[i] ?? "", id))
@@ -150,6 +153,7 @@ describe("comments REST CRUD", () => {
     const { data: authorRows, error: authorError } = await client
       .from("author")
       .insert({ email: `comment-test-${suffix}@example.com`, username: `comment-${suffix}`, role: "user" })
+      .select()
     assert.ifError(authorError)
     authorId = strings(authorRows, "id")[0]
     assert.ok(authorId)
@@ -157,6 +161,7 @@ describe("comments REST CRUD", () => {
     const { data, error } = await client
       .from("post")
       .insert({ title: "Temp Post", slug: `temp-${suffix}`, author_id: authorId })
+      .select()
     assert.ifError(error)
     postId = strings(data, "id")[0]
     assert.ok(postId)
@@ -176,6 +181,7 @@ describe("comments REST CRUD", () => {
     const { data, error } = await client
       .from("comment")
       .insert({ body: "Great post!", post_id: postId, author_id: authorId })
+      .select()
 
     assert.ifError(error)
     commentId = strings(data, "id")[0]

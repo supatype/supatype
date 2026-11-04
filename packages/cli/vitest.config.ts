@@ -16,6 +16,8 @@ export default defineConfig({
       "**/dist/**",
       // Spec for src/engine/* (platform, cache, verify, resolve, download), enable when Phase 0.5 modules land.
       "tests/engine-distribution.test.ts",
+      // Packs the CLI and installs it with npm, so it needs the network: `pnpm test:packed`.
+      "tests/packed/**",
     ],
   },
 })
