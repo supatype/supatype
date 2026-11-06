@@ -195,6 +195,11 @@
   address). The install and build steps run through cmd.exe on Windows, where `npm` and `pnpm` could
   not be started without it.
 
+* **init, dev:** Windows no longer asks to let `supatype` through its firewall. Checking whether a
+  port was free bound it on every address (`0.0.0.0`), which Windows treats as a program wanting
+  network access, and it remembers the answer per program file, so it asked again after every CLI
+  upgrade. The check now binds loopback only and connects to the port, which still finds a
+  listener on every address, the kind Docker Compose publishes.
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
   every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.
