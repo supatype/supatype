@@ -16,6 +16,7 @@ import {
 } from "../rest-cache-admin.js"
 import { error, info, plain, warn } from "../ui/messages.js"
 import { errorMessage } from "../error-message.js"
+import { requireLocalStackApi } from "../local-stack-guard.js"
 import { cleanOldCliVersions, type CachedCliVersion } from "../cli-old-versions.js"
 import { cliPackageVersion } from "../cli-package-version.js"
 
@@ -166,6 +167,7 @@ export function registerCache(program: Command): void {
     .action(async (opts: { table?: string; json?: boolean }) => {
       const cwd = process.cwd()
       try {
+        requireLocalStackApi(cwd, "cache rest list")
         const result = await listRestCacheEntries(cwd, { table: opts.table, limit: 100 })
         if (opts.json) {
           plain(JSON.stringify(result, null, 2))
@@ -196,6 +198,7 @@ export function registerCache(program: Command): void {
     .action(async (key: string, opts: { json?: boolean }) => {
       const cwd = process.cwd()
       try {
+        requireLocalStackApi(cwd, "cache rest get")
         const detail = await getRestCacheEntry(cwd, key)
         if (opts.json) {
           plain(JSON.stringify(detail, null, 2))
@@ -219,6 +222,7 @@ export function registerCache(program: Command): void {
     .action(async (key: string) => {
       const cwd = process.cwd()
       try {
+        requireLocalStackApi(cwd, "cache rest delete")
         await deleteRestCacheEntry(cwd, key)
         info(`Deleted ${key}`)
       } catch (e) {
@@ -240,6 +244,7 @@ export function registerCache(program: Command): void {
       }
       const cwd = process.cwd()
       try {
+        requireLocalStackApi(cwd, "cache rest flush")
         await flushRestCache(cwd, opts.table)
         info(opts.table ? `Flushed cache for table ${opts.table}` : "Flushed all REST cache entries")
       } catch (e) {

@@ -39,8 +39,13 @@ export function resolveProjectApiUrl(cwd: string, config?: SupatypeProjectConfig
   return projectApiUrl(cwd, config).replace(/\/+$/, "")
 }
 
+/** The API address the developer named in `.env` (`SUPATYPE_URL`, `SUPATYPE_API_URL`), if any. */
+export function developerApiUrl(cwd: string): string | undefined {
+  return firstEnvUrl(cwd, DEVELOPER_URL_KEYS)
+}
+
 function projectApiUrl(cwd: string, given: SupatypeProjectConfig | undefined): string {
-  const developer = firstEnvUrl(cwd, DEVELOPER_URL_KEYS)
+  const developer = developerApiUrl(cwd)
   if (developer !== undefined) return developer
   const read: ConfigRead = given !== undefined ? { config: given } : readConfig(cwd)
   if (read.config !== undefined && resolveRuntimeProvider(read.config) === "native") {

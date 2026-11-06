@@ -90,6 +90,13 @@ const COMMANDS: Array<[string[], string, number]> = [
   [["doctor"], "doctor", 1],
   [["admin", "list-users"], "admin list-users", 1],
   [["reset", "--yes"], "reset", 1],
+  // Commands that reach only the local stack's API (issue 45): the same rule.
+  [["cache", "rest", "list"], "cache rest list", 1],
+  [["cache", "rest", "get", "k"], "cache rest get", 1],
+  [["cache", "rest", "delete", "k"], "cache rest delete", 1],
+  [["cache", "rest", "flush", "--yes"], "cache rest flush", 1],
+  // No `functions serve` answers on port 1, so the invoke would go to the stack's API.
+  [["functions", "invoke", "hello", "--port", "1"], "functions invoke", 1],
 ]
 
 describe("a command that needs the local stack, with the stack not running", () => {
@@ -100,6 +107,16 @@ describe("a command that needs the local stack, with the stack not running", () 
     )
     expect(code).toBe(exit)
     expect(calls.filter(starts)).toEqual([])
+  }, 60_000)
+
+  it("an API address the developer named in .env is reached as it is", () => {
+    const env = readFileSync(join(dir, ".env"), "utf8")
+    writeFileSync(join(dir, ".env"), `${env}SUPATYPE_URL=http://127.0.0.1:1\n`)
+    try {
+      expect(run(["cache", "rest", "list"]).out).not.toContain("The local stack isn't running")
+    } finally {
+      writeFileSync(join(dir, ".env"), env)
+    }
   }, 60_000)
 
   it("supatype push --connection goes to the database it was given, not to the stack", () => {

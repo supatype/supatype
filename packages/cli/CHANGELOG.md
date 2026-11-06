@@ -13,6 +13,12 @@
   apply, then start the rest of the stack, and `diff` started Postgres and stopped it again. A
   linked project, `--connection`, `connection` in the config and an external database are reached
   as before, and a running stack behaves as before.
+* **cache, functions:** `cache rest list`, `get`, `delete` and `flush`, and a local `functions invoke`
+  that no `functions serve` answers, refuse on a Docker project whose local stack is not running,
+  with the same message as `push` and the other commands that need the stack, naming the command
+  run, and exit 1. They reached the stopped stack's API and failed with `Cannot reach` or a
+  missing `SERVICE_ROLE_KEY`. An API address named by `SUPATYPE_URL` or `SUPATYPE_API_URL` in
+  `.env`, a linked project's `functions invoke`, and a native project are unaffected.
 * **schema:** a `?` on a model field (`due?: string`) is refused, naming `Model.field` and saying to
   write `Optional<>`. It read as nullable but compiled to a `NOT NULL` column.
 * **generate:** `supatype generate --connection` is refused as an unknown option. Generate writes the

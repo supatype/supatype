@@ -17,6 +17,7 @@ import { withEnvValue, withoutEnvValue } from "../env-lines.js"
 import { STOP_SIGNALS } from "../stop-signals.js"
 import { sayTargetWarning } from "../target-warning.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
+import { requireLocalStackApi } from "../local-stack-guard.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
 import {
@@ -924,7 +925,11 @@ function unsetLocalEnv(functionsDir: string, key: string): void {
  * reached whatever else on the machine listened there.
  */
 async function localFunctionsBase(cwd: string, port: string): Promise<string> {
-  return (await runningServeBase(port)) ?? `${resolveProjectApiUrl(cwd)}/functions/v1`
+  const serve = await runningServeBase(port)
+  if (serve !== undefined) return serve
+  // Not a serve, so the stack's API: refused while the stack is stopped (issue 45).
+  requireLocalStackApi(cwd, "functions invoke")
+  return `${resolveProjectApiUrl(cwd)}/functions/v1`
 }
 
 /** The functions worker's answer to a bare request: a 404 listing the functions it serves. */
