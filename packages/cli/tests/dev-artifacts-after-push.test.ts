@@ -36,6 +36,8 @@ const engine = vi.hoisted(() => ({
   pushes: 0,
   refusal: "",
   applied: { status: "applied" } as Record<string, unknown>,
+  /** What a diff answers: the plan `supatype push` shows each role's access from. */
+  planned: { operations: [] } as Record<string, unknown>,
 }))
 
 /** The schema the next push reads, so a test can change it and put it back. */
@@ -53,6 +55,9 @@ vi.mock("../src/engine-client.js", async (importOriginal) => {
 vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-engine-run.js")>()),
   spawnComposeEngine: (_target: unknown, args: readonly string[]) => {
+    if (args.includes("diff")) {
+      return { status: 0, stdout: JSON.stringify(engine.planned), stderr: "", pid: 0, output: [], signal: null }
+    }
     engine.pushes += 1
     const refused = engine.refuseAll || (engine.refuseUnforced && !args.includes("--force"))
     return refused
@@ -167,11 +172,12 @@ async function loadPush(over: Partial<SupatypeProjectConfig>) {
   const { devPushConsentingToDrift } = await import("../src/drift-consent.js")
   const { pushInitialSchema, settleInitialPush } = await import("../src/dev-initial-push.js")
   const config = projectConfig(over)
-  const once = (force: boolean, overwriteDrift = false) =>
+  const once = (force: boolean, overwriteDrift = false, access?: "plan" | "quiet") =>
     runComposeSchemaPush(cwd, config, selfHostComposePaths(cwd), "schema/index.ts", "demo", {
       force,
       overwriteDrift,
       audit: [],
+      ...(access !== undefined && { access }),
     })
   /** A save in a `dev` session, as dev pushes it: asked about drift and data loss, off a terminal. */
   const devSave = () =>
@@ -184,6 +190,8 @@ async function loadPush(over: Partial<SupatypeProjectConfig>) {
         beforeExit: () => undefined,
       }),
     devSave,
+    /** One push of `supatype push`, which shows each role's access first, or of its retry. */
+    pushShowing: (access: "plan" | "quiet") => once(false, false, access),
     /** `supatype push --yes`: unforced first, then forced on the engine's refusal. */
     pushYes: () => pushConsentingToDestructive(once, { yes: true, apply: "supatype push --yes" }),
     /** One push of a `dev` session, off a terminal: a destructive change is refused. */
@@ -201,10 +209,15 @@ beforeEach(() => {
   engine.pushes = 0
   engine.refusal = REFUSAL
   engine.applied = { status: "applied" }
+  engine.planned = { operations: [] }
   schema.ast = { version: 2, models: [] }
   engineRequest.mockReset()
   engineRequest.mockImplementation(async (endpoint) =>
-    endpoint === "/generate" ? { code: "export type Pushed = 1\n" } : { models: [], pushed: true },
+    endpoint === "/generate"
+      ? { code: "export type Pushed = 1\n" }
+      : endpoint === "/diff"
+        ? engine.planned
+        : { models: [], pushed: true },
   )
   enginePush.mockReset()
   enginePush.mockImplementation(async (_cwd, body) => {
@@ -269,6 +282,43 @@ describe.each([
     await pushYes()
     const printed = vi.mocked(console.log).mock.calls.flat().join(" ")
     expect(printed).not.toMatch(/applying schema/i)
+  })
+
+  it("prints the access lines a dev push changed, and only those", async () => {
+    engine.applied = {
+      status: "applied",
+      access: [
+        { model: "Form", table: "form", role: "anon", before: ["read"], after: ["read"] },
+        { model: "Question", table: "question", role: "anon", before: [], after: ["read"] },
+      ],
+    }
+    const { devPush } = await loadPush(over)
+    await devPush()
+    const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join("\n")
+    expect(printed).toContain("Access for anon (signed out):\n  question   none -> read")
+    expect(printed).not.toContain("  form ")
+  })
+
+  it("shows push's whole access block before it applies, and nothing of it once applied", async () => {
+    const access = [{ model: "Form", table: "form", role: "anon", before: ["read"], after: ["read"] }]
+    engine.planned = { operations: [], access }
+    engine.applied = { status: "applied", access: [{ ...access[0], before: [] }] }
+    let pushesWhenShown = -1
+    vi.mocked(console.log).mockImplementation((line: unknown) => {
+      if (String(line).startsWith("Access for anon")) pushesWhenShown = engine.pushes
+    })
+    const { pushShowing } = await loadPush(over)
+    await pushShowing("plan")
+    expect(pushesWhenShown).toBe(0)
+    expect(engine.pushes).toBe(1)
+  })
+
+  it("shows nothing of it on a retried push", async () => {
+    engine.planned = { operations: [], access: [{ model: "Form", table: "form", role: "anon", before: [], after: ["read"] }] }
+    const { pushShowing } = await loadPush(over)
+    await pushShowing("quiet")
+    const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join("\n")
+    expect(printed).not.toContain("Access for")
   })
 
   it("says how many operations the push applied, when the engine says", async () => {

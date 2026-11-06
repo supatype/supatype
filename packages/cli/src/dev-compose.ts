@@ -5,6 +5,7 @@
 import { setTimeout as sleep } from "node:timers/promises"
 import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
+import { printRoleAccess } from "./diff-access.js"
 import { warn } from "./ui/messages.js"
 import { FRONTEND_URL_KEYS, frontendEnv, writeFrontendEnv } from "./frontend-env.js"
 import { withPublishing } from "./model-versioning.js"
@@ -855,6 +856,12 @@ export interface ComposePushOptions {
    * pushes on every save; `supatype push` refuses ({@link writeSchemaSourcePushArtifacts}).
    */
   snapshotOptional?: boolean
+  /**
+   * What to print of each API role's access: `plan`, the whole block before applying (`supatype
+   * push`, which reads a diff for it); `quiet`, nothing (a push retried after a question, whose block
+   * was shown); `changes`, the default, the lines the push changed once applied (`supatype dev`).
+   */
+  access?: "plan" | "changes" | "quiet"
 }
 
 /**
@@ -891,6 +898,7 @@ export async function runComposeSchemaPush(
   // Identity and generated columns only to an engine that reads them (the override's binary is
   // asked by `engineRequest`).
   if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
+  if (opts.access === "plan") await printPlannedAccess(cwd, config)
   try {
     if (hasEngineOverride(config)) await applyViaHostEngine(cwd, config, ast, opts)
     else await applyViaComposeEngine(cwd, config, { paths, composeProject }, opts)
@@ -902,6 +910,24 @@ export async function runComposeSchemaPush(
   _lastFailedAst = null
   if (astRelatesToAuthUsers(ast)) await grantAuthSchemaAccess(paths, cwd, composeProject)
   await refreshSchemaArtifacts(cwd, config, ast)
+}
+
+/**
+ * Each API role's access as the push about to apply leaves it, from a diff of the AST just written.
+ * Only a preview: a diff that fails says so and the push goes on, to report what is wrong itself.
+ */
+async function printPlannedAccess(cwd: string, config: SupatypeProjectConfig): Promise<void> {
+  try {
+    const diff = await dockerDiff(cwd, config)
+    if (diff !== undefined) printRoleAccess(diff)
+  } catch (err) {
+    console.log(`[supatype] Could not read each role's access before the push: ${errorMessage(err)}`)
+  }
+}
+
+/** What a push reports of each role's access once applied: only `changes` prints anything. */
+function appliedAccess(opts: ComposePushOptions): "changes" | "quiet" {
+  return opts.access === undefined || opts.access === "changes" ? "changes" : "quiet"
 }
 
 /** The schema on disk as a push sends it, and that AST serialized for comparing pushes. */
@@ -957,7 +983,7 @@ async function applyViaHostEngine(
       schema_sources_manifest: sources.payload.manifest,
     }),
   }
-  reportAppliedPush(await enginePush(cwd, body, isEnginePushResult))
+  reportAppliedPush(await enginePush(cwd, body, isEnginePushResult), appliedAccess(opts))
 }
 
 /** Apply the AST on disk with the stack's schema-engine container. Throws when it is not applied. */
@@ -1126,7 +1152,7 @@ async function runComposeEnginePush(
 
   if (exitStatus === 0) {
     if (pushResult) {
-      reportAppliedPush(pushResult)
+      reportAppliedPush(pushResult, appliedAccess(opts))
     } else {
       console.log("[supatype] Schema applied.")
     }

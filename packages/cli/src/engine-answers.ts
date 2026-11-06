@@ -20,7 +20,15 @@ import {
   type Guard,
 } from "@supatype/shared"
 import type { DoctorReport } from "./commands/doctor.js"
-import type { AdoptOutcome, DiffResult, DoctorItem, Operation, ReconcileAction, RenameCandidate } from "./engine-client.js"
+import type {
+  AdoptOutcome,
+  DiffResult,
+  DoctorItem,
+  Operation,
+  ReconcileAction,
+  RenameCandidate,
+  RoleAccess,
+} from "./engine-client.js"
 import type { EnginePushResult } from "./engine-push-output.js"
 import type { DatabaseStateJson, DbColumnState } from "./pull-utils.js"
 import type { AppliedRenameRecord } from "./rename-journal.js"
@@ -74,11 +82,22 @@ export const isRenameCandidate: Guard<RenameCandidate> = isShape({
   to: isString,
 })
 
+export const isRoleAccess: Guard<RoleAccess> = isShape({
+  model: isString,
+  table: isString,
+  role: isString,
+  before: isStringArray,
+  after: isStringArray,
+  link: optional(isBoolean),
+  denied: optional(isShape({ verbs: isStringArray, reason: isString })),
+})
+
 export const isDiffResult: Guard<DiffResult> = isShape({
   operations: isArrayOf(isOperation),
   reconcile: optional(isArrayOf(isReconcileAction)),
   warnings: optional(isStringArray),
   renameCandidates: optional(isArrayOf(isRenameCandidate)),
+  access: optional(isArrayOf(isRoleAccess)),
 })
 
 // --- Push ---
@@ -91,6 +110,7 @@ export const isEnginePushResult: Guard<EnginePushResult> = isShape({
   name: optional(isString),
   warnings: optional(isStringArray),
   cache: optional(isShape({ tables: optional(isStringArray), honoured: optional(isBoolean) })),
+  access: optional(isArrayOf(isRoleAccess)),
 })
 
 // --- Doctor and adopt ---
