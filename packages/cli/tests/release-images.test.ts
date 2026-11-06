@@ -14,9 +14,11 @@ import { PINNED_IMAGES } from "../src/generated/release-images.js"
 import { defaultComponentVersion, isReleaseVersion, RELEASE_IMAGES, releaseImages } from "../src/release-images.js"
 import { renderSelfHostCompose, schemaEngineImageForPush } from "../src/self-host-compose.js"
 import { resolveVersionFor } from "../src/binary-cache.js"
+import * as engineFloors from "../src/engine-floor.js"
 import { projectConfig } from "./support/project-config.js"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..")
+const { compareVersions } = engineFloors
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -105,5 +107,29 @@ describe("what runs when the project names no version", () => {
     expect(defaultComponentVersion("realtime", "0.7.0")).toBe("0.7.0")
     expect(defaultComponentVersion("realtime", "")).toBeUndefined()
     expect(defaultComponentVersion("deno", "0.7.0")).toBeUndefined()
+  })
+})
+
+/**
+ * The fixes a release relies on live in the engine and the server, so a pin left behind ships the
+ * CLI without them. 0.9.0 pinned engine v0.8.0 and server v2.2.2: `Default<JSON<T>, ...>` created
+ * no column default, `In<..., Rows<...>>` rules gave `anon` no grant, a blank-email signup was
+ * answered as an anonymous sign-in, and a missing asset was served as the app shell.
+ */
+describe("the pins carry the fixes this CLI relies on", () => {
+  it("runs an engine with JSON defaults and anon grants for Rows rules (schema-engine v0.9.0)", () => {
+    expect(compareVersions(PINNED_IMAGES.engine.tag, "0.9.0")).toBeGreaterThanOrEqual(0)
+  })
+
+  it("runs an engine at or above every floor the CLI checks a pinned project against", () => {
+    const floors = Object.entries(engineFloors).filter(([name]) => name.startsWith("ENGINE_MIN_"))
+    expect(floors.length).toBeGreaterThan(0)
+    for (const [name, floor] of floors) {
+      expect(compareVersions(PINNED_IMAGES.engine.tag, String(floor)), name).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it("runs a server with the signup and static hosting fixes (server v2.3.0)", () => {
+    expect(compareVersions(PINNED_IMAGES.server.tag, "2.3.0")).toBeGreaterThanOrEqual(0)
   })
 })

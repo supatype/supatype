@@ -69,6 +69,17 @@
 
 ### Bug Fixes
 
+* **dev, push, self-host:** a project that does not pin its own versions now runs schema-engine
+  v0.9.0 and server v2.3.0. The 0.9.0 CLI shipped still pinned to engine v0.8.0 and server v2.2.2,
+  so it missed four fixes those releases carry. An access rule built on
+  `In<"col", Rows<"table", "id", Where>>` with a login-free `Where` now grants `anon` the privilege
+  its policy needs, where an anonymous read or insert answered `401 42501 permission denied`.
+  `Default<JSON<string[]>, "[]">` now gives the column its default, where it created `jsonb NOT
+  NULL` with none and an insert that left it out failed with `23502`. A missing file with an
+  extension, such as `/assets/missing-abc.js`, answers `404`, not the app's `index.html` with
+  `200 text/html`. A signup with a password but no email or phone answers `400 validation_failed`,
+  not `anonymous_provider_disabled`, and never creates an anonymous user that drops the password.
+  The next push on an existing project adds the missing grants and defaults.
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
   every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.
