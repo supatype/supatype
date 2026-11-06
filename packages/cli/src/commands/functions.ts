@@ -888,7 +888,7 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
 function setLocalEnv(functionsDir: string, key: string, value: string): void {
   const envPath = resolve(functionsDir, ENV_LOCAL)
   const content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-  writeFileSync(envPath, withEnvValue(content, key, value), "utf8")
+  writeFileSync(envPath, withEnvValue(content, key, value, relative(process.cwd(), envPath)), "utf8")
   info(`Set ${key} in local env file.`)
 }
 

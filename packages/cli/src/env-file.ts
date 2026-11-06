@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { parseEnvText, splitAssignment } from "./dotenv-parse.js"
+import { assertEnvValues } from "./env-value.js"
 
 export { parseEnvText }
 
@@ -93,6 +94,9 @@ function isKeyList(options: UpsertOptions | readonly string[]): options is reado
  * Comments, blank lines and ordering are preserved: this file is edited by hand, and the previous
  * implementation rebuilt it from the assignments alone, so every comment an operator had written
  * disappeared the first time they ran anything that touched `.env`.
+ *
+ * A value with a line break or other control character in it is refused before the file is read
+ * ({@link assertEnvValues}), so the file is left as it was and none of `updates` is written.
  */
 export function upsertEnvFile(
   cwd: string,
@@ -101,64 +105,79 @@ export function upsertEnvFile(
 ): void {
   // Historically the third argument was a plain list of keys to remove unconditionally.
   const opts: UpsertOptions = isKeyList(options) ? { remove: options } : options
-  const removeManaged = new Set(opts.removeManaged ?? [])
-  const removeAlways = new Set(opts.remove ?? [])
-  const managed = new Set(opts.managed ?? [])
-  const label = opts.label ?? MANAGED_MARKER
+  const file = opts.file ?? ".env"
+  assertEnvValues(updates, file)
 
-  const envPath = join(cwd, opts.file ?? ".env")
+  const plan = upsertPlan(updates, opts)
+  const envPath = join(cwd, file)
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-  const lines = parseLines(existing)
-
-  const written = new Set<string>()
-  const kept: EnvLine[] = []
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!
-    const key = line.key
-
-    if (key === undefined) {
-      kept.push(line)
-      continue
-    }
-
-    if (removeAlways.has(key) || (removeManaged.has(key) && line.managed)) {
-      // Drop the marker that introduced it, so no orphan comment is left behind.
-      if (line.managed && isMarker(kept[kept.length - 1]?.text)) kept.pop()
-      continue
-    }
-
-    if (key in updates && written.has(key)) {
-      // A second assignment of a key already rewritten above. Compose reads the last one, so
-      // leaving it would put back the value this write replaced.
-      if (line.managed && isMarker(kept[kept.length - 1]?.text)) kept.pop()
-      continue
-    }
-
-    if (key in updates) {
-      const wantsMarker = managed.has(key)
-      relabel(kept, wantsMarker ? label : undefined)
-      kept.push({ key, text: `${key}=${updates[key]}`, managed: wantsMarker })
-      written.add(key)
-      continue
-    }
-
-    kept.push(line)
-  }
-
-  const appended: string[] = []
-  for (const [key, value] of Object.entries(updates)) {
-    if (written.has(key)) continue
-    if (managed.has(key)) appended.push(label)
-    appended.push(`${key}=${value}`)
-  }
-
-  const body = [...kept.map((l) => l.text), ...appended].join("\n")
+  const { kept, written } = mergeLines(parseLines(existing), plan)
+  const body = [...kept.map((l) => l.text), ...appendedLines(plan, written)].join("\n")
   const next = `${body.replace(/\n+$/, "")}\n`
   // Not written when nothing changed. `.env` is compose's input, and a command that only read the
   // stack (push or doctor with dev running) has no business touching it.
   if (next === existing.replace(/\r\n/g, "\n")) return
   writeFileSync(envPath, next, "utf8")
+}
+
+/** One upsert's updates and its {@link UpsertOptions} as sets, for {@link mergeLines}. */
+interface UpsertPlan {
+  updates: Readonly<Record<string, string>>
+  removeManaged: ReadonlySet<string>
+  removeAlways: ReadonlySet<string>
+  managed: ReadonlySet<string>
+  label: string
+}
+
+function upsertPlan(updates: Readonly<Record<string, string>>, opts: UpsertOptions): UpsertPlan {
+  return {
+    updates,
+    removeManaged: new Set(opts.removeManaged ?? []),
+    removeAlways: new Set(opts.remove ?? []),
+    managed: new Set(opts.managed ?? []),
+    label: opts.label ?? MANAGED_MARKER,
+  }
+}
+
+/** The file's lines with the plan applied in place, and the keys rewritten where they were. */
+function mergeLines(lines: readonly EnvLine[], plan: UpsertPlan): { kept: EnvLine[]; written: Set<string> } {
+  const written = new Set<string>()
+  const kept: EnvLine[] = []
+  for (const line of lines) {
+    const key = line.key
+    if (key === undefined) {
+      kept.push(line)
+      continue
+    }
+    const removed = plan.removeAlways.has(key) || (plan.removeManaged.has(key) && line.managed)
+    // A second assignment of a key rewritten above goes too: compose reads the last one, so
+    // leaving it would put back the value this write replaced.
+    if (removed || (key in plan.updates && written.has(key))) {
+      // Drop the marker that introduced it, so no orphan comment is left behind.
+      if (line.managed && isMarker(kept[kept.length - 1]?.text)) kept.pop()
+      continue
+    }
+    if (!(key in plan.updates)) {
+      kept.push(line)
+      continue
+    }
+    const wantsMarker = plan.managed.has(key)
+    relabel(kept, wantsMarker ? plan.label : undefined)
+    kept.push({ key, text: `${key}=${plan.updates[key]}`, managed: wantsMarker })
+    written.add(key)
+  }
+  return { kept, written }
+}
+
+/** The updates not rewritten in place, as lines for the end of the file, each under its marker. */
+function appendedLines(plan: UpsertPlan, written: ReadonlySet<string>): string[] {
+  const appended: string[] = []
+  for (const [key, value] of Object.entries(plan.updates)) {
+    if (written.has(key)) continue
+    if (plan.managed.has(key)) appended.push(plan.label)
+    appended.push(`${key}=${value}`)
+  }
+  return appended
 }
 
 /**

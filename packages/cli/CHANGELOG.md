@@ -159,6 +159,14 @@
   project's secrets from `.env` and any connection string's password replaced by `***`, before the
   stack is taken down. Either failure now ends dev's dashboard before printing, so what it prints
   reaches the terminal.
+* **init:** the admin email must be one address (an `@`, no spaces), and no answer init asks for,
+  typed or given as `--admin-email` or `--admin-password`, may hold a line break or other control
+  character. A pasted email with carriage returns in it went into `.env` as it was, so the server
+  read each piece as a line of its own, refused to start, and printed the lines that followed in its
+  log, the admin password among them. Init now refuses it before writing any file.
+* **env files:** no command writes a value with a line break or other control character into `.env`,
+  `.env.development.local` or the functions' `.env.local`. It is refused, naming the key and the file
+  and never the value, and the file is left as it was.
 * **dev, push, self-host:** a project that does not pin its own versions now runs schema-engine
   v0.9.0 and server v2.3.0. The 0.9.0 CLI shipped still pinned to engine v0.8.0 and server v2.2.2,
   so it missed four fixes those releases carry. An access rule built on
