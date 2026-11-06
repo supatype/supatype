@@ -20,6 +20,7 @@ Guide for working with Supatype projects. If unsure about a command or flag, run
 | CLI commands | [references/cli.md](references/cli.md) |
 | Seeding | [references/seeding.md](references/seeding.md) |
 | Frontend, client, React hooks + auth components | [references/frontend.md](references/frontend.md) |
+| SAML single sign-on (`auth.sso.saml`, `supatype sso`, `signInWithSSO`, `SSOForm`) | [references/cli.md](references/cli.md#single-sign-on-saml), full guide https://www.supatype.com/docs/sso.html |
 | Production frontend builds (`supatype build`, Vercel, Netlify, CI) | [references/frontend.md](references/frontend.md#production-builds) |
 | REST GET caching (client + server) | [references/caching.md](references/caching.md) |
 | Self-host production | [references/self-host.md](references/self-host.md) |
@@ -143,6 +144,8 @@ and makes every `rpc(...)` name `never`.
 Add `@supatype/client` when wiring a frontend. `supatype dev` applies schema changes locally as you save; `supatype push --env <name>` applies them elsewhere.
 
 **Prefer first-party framework bindings over the raw client.** For React use `@supatype/react` (`SupatypeProvider`, `useAuth`, `useQuery`, `useMutation`, `useSubscription`) and `@supatype/react-auth` (`LoginForm`, `SignUpForm`, `OAuthButton`); equivalents exist for Vue/Solid/Svelte, plus `@supatype/ssr` for server rendering. Don't hand-roll auth forms or auth state. See [references/frontend.md](references/frontend.md).
+
+**SAML single sign-on** is off until `auth: { sso: { saml: { enabled: true } } }` in `supatype.config.ts`; the CLI then writes the signing key `SUPATYPE_SAML_PRIVATE_KEY` to `.env` (never the config). Identity providers are runtime data: `supatype sso add <name> --metadata-url <url> --domains acme.com` (the server fetches the URL, so the IdP must be reachable from its container; `http` only on a dev stack), `sso info` for the SP entity ID and ACS URL, `sso verify-domain` for the `_supatype-challenge.<domain>` TXT record (only a verified domain links SAML sign-ins to existing accounts), `sso rotate-key` with a restart before and after `--promote`. Sign in with `signInWithSSO({ domain })` or `<SSOForm />` (PKCE by default). Guide: https://www.supatype.com/docs/sso.html
 
 ## Common failures
 
