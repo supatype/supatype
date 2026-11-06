@@ -82,15 +82,15 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 Turn SAML on with `auth: { sso: { saml: { enabled: true } } }` in `supatype.config.ts`; the next
 `supatype dev` or `self-host compose up` writes `SUPATYPE_SAML_PRIVATE_KEY` to `.env` (never the
 config). The `sso` commands call the auth admin API on the linked self-hosted deployment, else the
-running local stack (not Supatype Cloud yet).
+running local stack (not Supatype Cloud yet). Every `sso` command warns while SAML is off; providers can still be set up.
 
 | Command | Purpose |
 |---------|---------|
-| `supatype sso add <name>` | Register an identity provider. `--metadata-url <url>` (fetched by the server, so reachable from its container; https, http on a dev stack only) or `--metadata-file <path>`, `--domains a.com,b.com`, `--attribute-mapping-file <path>`, `--name-id-format persistent\|emailAddress\|transient\|unspecified` |
+| `supatype sso add <name>` | Register an identity provider. `--metadata-url <url>` (fetched by the server, so reachable from its container; https, http on a dev stack only; an unreachable one is a 400 `saml_metadata_fetch_failed`: "The server could not fetch SAML metadata from <host>: <reason>...") or `--metadata-file <path>`, `--domains a.com,b.com`, `--attribute-mapping-file <path>`, `--name-id-format persistent\|emailAddress\|transient\|unspecified` |
 | `supatype sso list` / `show <name>` | List providers, or show one (ID, entity ID, domains marked verified or not) |
 | `supatype sso update <name>` | Change in place; same flags, all optional; `--domains` replaces the list. Never remove and re-add: users are tied to the provider's ID |
 | `supatype sso remove <name>` | Remove (`-y` to skip the question) |
-| `supatype sso info` | Print the SP entity ID (= metadata URL), ACS URL and metadata URL; the certificate is in the metadata |
+| `supatype sso info` | Print the SP entity ID (= metadata URL), ACS URL and metadata URL; with SAML on, also the signing certificate as PEM under its SHA-256 fingerprint, read from the served metadata, and during a rotation the next certificate. With SAML off it warns the values are not served yet |
 | `supatype sso verify-domain <name> <domain>` | Print and check the `_supatype-challenge.<domain>` TXT record; exits 1 until verified. Only a verified domain links a SAML sign-in to an existing account with the same email (on an unverified domain that sign-in is refused; with no existing account a new one is made either way). `.supatype.test` counts as verified on a dev stack |
 | `supatype sso rotate-key [--promote] [-y]` | Create `SUPATYPE_SAML_NEXT_PRIVATE_KEY`, restart (metadata lists both certificates), update the IdPs, then `--promote` and restart again |
 

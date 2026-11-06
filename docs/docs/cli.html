@@ -230,12 +230,12 @@
         <tr><td><code>sso show &lt;name&gt;</code></td><td>Show one SAML identity provider</td><td></td></tr>
         <tr><td><code>sso update &lt;name&gt;</code></td><td>Change a SAML identity provider in place. Only the flags given change; --domains replaces the list. New metadata must keep the provider's entity ID</td><td>The flags of <code>add</code>, all optional</td></tr>
         <tr><td><code>sso remove &lt;name&gt;</code></td><td>Remove a SAML identity provider. Users who signed in through it can no longer sign in that way</td><td><code>-y, --yes</code></td></tr>
-        <tr><td><code>sso info</code></td><td>Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata</td><td></td></tr>
+        <tr><td><code>sso info</code></td><td>Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata, and the signing certificate (the next one too during a key rotation), read from the served metadata</td><td></td></tr>
         <tr><td><code>sso verify-domain &lt;name&gt; &lt;domain&gt;</code></td><td>Prove this project owns &lt;domain&gt;, one of provider &lt;name&gt;'s domains, with a DNS TXT record: prints the record to add and checks it. Exits 1 while the domain is not verified</td><td></td></tr>
         <tr><td><code>sso rotate-key</code></td><td>Rotate the SAML signing key: create SUPATYPE_SAML_NEXT_PRIVATE_KEY in .env, published beside the current key while identity providers take the new certificate; then --promote makes it the current key</td><td><code>--promote</code>, <code>-y, --yes</code></td></tr>
       </tbody>
     </table></div>
-    <p>Turn SAML on with <code>auth.sso.saml.enabled</code> in <code>supatype.config.ts</code> first. The <code>sso</code> commands reach the linked self-hosted deployment, or else the local stack, which must be running; they do not work against Supatype Cloud yet. The server, not the CLI, fetches <code>--metadata-url</code>. See <a href="/docs/sso.html">Single sign-on</a>.</p>
+    <p>Turn SAML on with <code>auth.sso.saml.enabled</code> in <code>supatype.config.ts</code> first. The <code>sso</code> commands reach the linked self-hosted deployment, or else the local stack, which must be running; they do not work against Supatype Cloud yet. Each one warns while SAML is off. The server, not the CLI, fetches <code>--metadata-url</code>, and refuses one it cannot reach with <code>saml_metadata_fetch_failed</code>, naming the host and the reason. See <a href="/docs/sso.html">Single sign-on</a>.</p>
 
     <h2 id="self-host">Self-host and deploy</h2>
     <div class="tbl"><table>

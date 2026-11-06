@@ -35,7 +35,7 @@ Restart the stack to apply it: stop and start `supatype dev`, or run `supatype s
 | `rateLimitAssertion` | How many assertions the server accepts from one client every 5 minutes. The server's default is 15 |
 | `externalUrl` | The service provider's base URL, under which `/sso/saml/metadata` and `/sso/saml/acs` are served. The default is your API URL plus `/auth/v1` |
 
-A `SUPATYPE_SAML_*` value in `.env` wins over the config's. While SAML is off, the sign-in routes and the metadata answer 404 with `SAML 2.0 is disabled`. The admin routes keep working, so you can register providers before you turn it on.
+A `SUPATYPE_SAML_*` value in `.env` wins over the config's. While SAML is off, the sign-in routes and the metadata answer 404 with `SAML 2.0 is disabled`. The admin routes keep working, so you can register providers before you turn it on, and every `supatype sso` command warns that SAML is off.
 
 <h2 id="key">The signing key</h2>
 
@@ -58,7 +58,7 @@ An identity provider asks for the service provider's entity ID and its Assertion
 | ACS URL (HTTP-POST binding) | `<API URL>/auth/v1/sso/saml/acs` |
 | NameID format | Persistent is requested; email address is accepted too |
 
-`supatype sso info` prints the entity ID, ACS URL and metadata URL for the local stack, or for the linked deployment. The signing certificate is in the metadata. Have the identity provider send an email attribute (`email` or `mail`), or use the email address as the NameID, and sign the assertion or the whole response. A stable user ID in the `urn:oasis:names:tc:SAML:attribute:subject-id` attribute is used in preference to the NameID when it is sent.
+`supatype sso info` prints the entity ID, ACS URL and metadata URL for the local stack, or for the linked deployment. With SAML on, it also reads the served metadata and prints the signing certificate as PEM under `Signing certificate (SHA-256 <fingerprint>):`, for an identity provider that asks for the certificate rather than the metadata. During a [key rotation](#rotate) it prints the next one too, under `Next signing certificate, published for the key rotation`. While SAML is off it warns that these values are not served: the metadata URL answers 404 until SAML is on and the stack restarted. Have the identity provider send an email attribute (`email` or `mail`), or use the email address as the NameID, and sign the assertion or the whole response. A stable user ID in the `urn:oasis:names:tc:SAML:attribute:subject-id` attribute is used in preference to the NameID when it is sent.
 
 <h2 id="providers">Register an identity provider</h2>
 
@@ -86,7 +86,13 @@ A user who signed in through a provider is tied to that provider's ID. After `re
 
 ### The server fetches the metadata URL
 
-`--metadata-url` is fetched by the Supatype server, not by the CLI. Under Docker the server runs in a container, where `localhost` is the container itself, so the identity provider must be reachable from inside the server's container. When it is not, `add` fails and the server's log names the connection error.
+`--metadata-url` is fetched by the Supatype server, not by the CLI. Under Docker the server runs in a container, where `localhost` is the container itself, so the identity provider must be reachable from inside the server's container. When it is not, `add` or `update` fails with a 400 (`saml_metadata_fetch_failed`) that names the host and the reason:
+
+```sh
+The server could not fetch SAML metadata from localhost:8080: connection refused. The server fetches metadata_url itself, so the URL must be reachable from the server, not only from your machine
+```
+
+The reason is one of `connection refused`, `the host name could not be resolved`, `its TLS certificate is not trusted`, `timed out after 10s`, `it answered with HTTP status <N>` and `the response is not SAML metadata XML`. Metadata given with `--metadata-file` that is not SAML metadata is refused with `metadata_xml is not SAML metadata XML`.
 
 An identity provider such as Keycloak builds its entity ID and sign-in URLs from the host it was reached on. Fetch the metadata through the same name and port the browser uses, or the server keeps endpoints the browser cannot open and an entity ID the provider's responses do not carry. For an identity provider running on your machine, either attach its container to the stack's Docker network under a name the browser also resolves to it (a `*.localhost` name resolves to your machine in browsers), or download the metadata in the browser and register it with `--metadata-file`.
 
@@ -177,7 +183,7 @@ Restart `supatype dev`, or run `supatype self-host compose up -d`, so the server
 
 ### 3. Give every identity provider the new metadata
 
-Have each provider fetch the metadata again, or upload the new file. Providers that check request signatures must take the new certificate before the next step.
+Have each provider fetch the metadata again, upload the new file, or take the next certificate that `supatype sso info` prints during the rotation. Providers that check request signatures must take the new certificate before the next step.
 
 ### 4. Promote the next key
 

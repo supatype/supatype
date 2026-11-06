@@ -138,11 +138,11 @@ On an unlinked project with a self-hosted Compose stack, `functions deploy` uplo
 | `sso show <name>` | Show one SAML identity provider |  |
 | `sso update <name>` | Change a SAML identity provider in place. Only the flags given change; --domains replaces the list. New metadata must keep the provider's entity ID | The flags of `add`, all optional |
 | `sso remove <name>` | Remove a SAML identity provider. Users who signed in through it can no longer sign in that way | `-y, --yes` |
-| `sso info` | Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata |  |
+| `sso info` | Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata, and the signing certificate (the next one too during a key rotation), read from the served metadata |  |
 | `sso verify-domain <name> <domain>` | Prove this project owns &lt;domain&gt;, one of provider &lt;name&gt;'s domains, with a DNS TXT record: prints the record to add and checks it. Exits 1 while the domain is not verified |  |
 | `sso rotate-key` | Rotate the SAML signing key: create SUPATYPE_SAML_NEXT_PRIVATE_KEY in .env, published beside the current key while identity providers take the new certificate; then --promote makes it the current key | `--promote`, `-y, --yes` |
 
-Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `sso` commands reach the linked self-hosted deployment, or else the local stack, which must be running; they do not work against Supatype Cloud yet. The server, not the CLI, fetches `--metadata-url`. See [Single sign-on](/docs/sso.html).
+Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `sso` commands reach the linked self-hosted deployment, or else the local stack, which must be running; they do not work against Supatype Cloud yet. Each one warns while SAML is off. The server, not the CLI, fetches `--metadata-url`, and refuses one it cannot reach with `saml_metadata_fetch_failed`, naming the host and the reason. See [Single sign-on](/docs/sso.html).
 
 <h2 id="self-host">Self-host and deploy</h2>
 
