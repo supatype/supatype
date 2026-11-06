@@ -14,6 +14,8 @@ import {
   type TimedStep,
 } from "../init-setup-steps.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
+import { adminEmailProblem, answerProblem, askText } from "../init-answers.js"
+import { assertEnvValues } from "../env-value.js"
 import { generateAndWriteKeys } from "./keys.js"
 import {
   BUNDLED_DB_USER,
@@ -285,9 +287,19 @@ function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
     delete result.adminEmail
     delete result.adminPassword
   } else if (opts.adminEmail && opts.adminPassword) {
-    result.adminEmail = opts.adminEmail
+    refuseAdminFlags(opts.adminEmail, opts.adminPassword)
+    result.adminEmail = opts.adminEmail.trim()
     result.adminPassword = opts.adminPassword
   }
+}
+
+/** Exits before anything is written when the admin flags hold what the prompts would refuse. */
+function refuseAdminFlags(email: string, password: string): void {
+  const emailProblem = adminEmailProblem(email)
+  const passwordProblem = answerProblem(password)
+  if (emailProblem !== undefined) error(`--admin-email: ${emailProblem}`)
+  if (passwordProblem !== undefined) error(`--admin-password: ${passwordProblem}`)
+  if (emailProblem !== undefined || passwordProblem !== undefined) process.exit(1)
 }
 
 interface InteractiveInitArgs {
@@ -365,27 +377,7 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       }),
     )
 
-    let domain: string | undefined
-    let tlsEmail: string | undefined
-    if (productionTarget === "self-host") {
-      domain = ensureNotCancelled(
-        await p.text({
-          message: "Production domain for ACME TLS (optional, can set later)",
-          placeholder: "api.example.com",
-          defaultValue: "",
-        }),
-      ).trim()
-      if (domain) {
-        tlsEmail =
-          ensureNotCancelled(
-            await p.text({
-              message: "Email for Let's Encrypt (HTTPS) certificates",
-              placeholder: "you@example.com",
-              defaultValue: "",
-            }),
-          ).trim() || undefined
-      }
-    }
+    const tls = productionTarget === "self-host" ? await promptSelfHostTls() : {}
 
     const provider = ensureNotCancelled(
       await p.select<ScaffoldOptions["provider"]>({
@@ -444,8 +436,7 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       provider,
       ...(kongPort !== undefined ? { kongPort } : {}),
       productionTarget,
-      ...(domain !== undefined ? { domain } : {}),
-      ...(tlsEmail !== undefined ? { tlsEmail } : {}),
+      ...tls,
       schemaPath,
       app,
       email,
@@ -459,13 +450,25 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
     }
 }
 
+/** A self-hosted project's domain for ACME TLS, and the email for its certificates when it has one. */
+async function promptSelfHostTls(): Promise<Pick<WizardResult, "domain" | "tlsEmail">> {
+  const domain = (
+    await askText({ message: "Production domain for ACME TLS (optional, can set later)", placeholder: "api.example.com", defaultValue: "" })
+  ).trim()
+  if (!domain) return { domain }
+  const tlsEmail = (
+    await askText({ message: "Email for Let's Encrypt (HTTPS) certificates", placeholder: "you@example.com", defaultValue: "" })
+  ).trim()
+  return { domain, ...(tlsEmail !== "" && { tlsEmail }) }
+}
+
 async function promptProjectName(defaultName: string): Promise<string> {
   return askWithDefault("Project name", defaultName)
 }
 
 /** A text answer, trimmed, or `defaultValue` when it was left empty. */
 async function askWithDefault(message: string, defaultValue: string): Promise<string> {
-  return ensureNotCancelled(await p.text({ message, defaultValue })).trim() || defaultValue
+  return (await askText({ message, defaultValue })).trim() || defaultValue
 }
 
 async function promptProductionStorage(): Promise<StorageProvider> {
@@ -489,12 +492,8 @@ async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?:
 
   p.note("First sign-in to Studio at /studio/, created automatically on supatype dev or push.")
 
-  const adminEmail = ensureNotCancelled(
-    await p.text({
-      message: "Admin email",
-      placeholder: "you@example.com",
-      validate: (value) => (value.trim() ? undefined : "Email is required"),
-    }),
+  const adminEmail = (
+    await askText({ message: "Admin email", placeholder: "you@example.com", validate: adminEmailProblem })
   ).trim()
 
   return { adminEmail, adminPassword: await promptAdminPassword() }
@@ -507,8 +506,9 @@ async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?:
 async function promptAdminPassword(): Promise<string> {
   while (true) {
     const password = ensureNotCancelled(await p.password({ message: "Admin password (min 8 characters)" })).trim()
-    if (password.length < 8) {
-      p.log.warn("Password must be at least 8 characters.")
+    const problem = answerProblem(password) ?? (password.length < 8 ? "Password must be at least 8 characters." : undefined)
+    if (problem !== undefined) {
+      p.log.warn(problem)
       continue
     }
     const confirmed = ensureNotCancelled(await p.password({ message: "Confirm admin password" })).trim()
@@ -724,6 +724,8 @@ export function scaffold(
     writeFileSync(full, content, "utf8")
     file("created", rel)
   }
+  // First, so a value .env cannot hold is refused before any file is written.
+  const env = envTemplate(opts)
 
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) {
@@ -737,7 +739,7 @@ export function scaffold(
     write("supatype.local.config.ts", localConfigTemplate(opts.app))
   }
   write(opts.schemaPath, schemaTemplate())
-  write(".env", envTemplate(opts))
+  write(".env", env)
   scaffoldDevFrontendEnv(dir, opts)
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
@@ -1319,7 +1321,20 @@ export type SiteSettings = Model<{
 `
 }
 
+/**
+ * The values `.env` takes from what init was told, rather than generates, under the key each is
+ * written as. The project name is the database's name and, for SMTP, the sender's.
+ */
+function envAnswers(opts: ScaffoldOptions): Record<string, string> {
+  return {
+    POSTGRES_DB: opts.projectName,
+    ...(opts.adminEmail !== undefined && { SUPATYPE_ADMIN_EMAIL: opts.adminEmail }),
+    ...(opts.adminPassword !== undefined && { SUPATYPE_ADMIN_PASSWORD: opts.adminPassword }),
+  }
+}
+
 function envTemplate(opts: ScaffoldOptions): string {
+  assertEnvValues(envAnswers(opts), ".env")
   const sections: string[] = []
   // Generated, not constant. These reach a server: the previous defaults meant a self-host
   // deployment ran with a password of `postgres` and a JWT secret published in this repo,
