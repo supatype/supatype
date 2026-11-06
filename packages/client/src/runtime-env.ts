@@ -9,6 +9,10 @@
  * Next.js app, the route `@supatype/ssr/next` exports, loaded by the root layout. One build then
  * works for every deployment that serves it. A value the build did carry always wins.
  *
+ * A server that cannot give the values still answers 200, with `{ error: "<why>" }` in their place:
+ * a browser runs no script answered with an error status, and tells the page nothing of why. The
+ * first request quotes that reason, with no request of its own.
+ *
  * Nothing is checked when the client is created. `next build` prerenders every static page, so a
  * client created at module scope runs during the build, which has neither value and sends nothing.
  * The first request is what needs them: it reads the page again at that moment, since the script
@@ -19,6 +23,7 @@
 
 import { MissingClientValuesError, type ClientValue } from "./setup-fault.js"
 import { objectOrEmpty } from "./json.js"
+import { pageEnvScript } from "./page-env-script.js"
 import type { SupatypeClientConfig } from "./types.js"
 
 declare global {
@@ -75,9 +80,9 @@ function httpUrl(value: unknown): string | undefined {
 }
 
 /** The page's `__SUPATYPE_ENV__` fields, each still unchecked; none when it is not an object. */
-function pageEnv(): { url: unknown; anonKey: unknown } {
+function pageEnv(): { url: unknown; anonKey: unknown; error: unknown } {
   const env = objectOrEmpty(globalThis.__SUPATYPE_ENV__)
-  return { url: env["url"], anonKey: env["anonKey"] }
+  return { url: env["url"], anonKey: env["anonKey"], error: env["error"] }
 }
 
 /** What the error says, for the values still missing, by whichever name each is set under. */
@@ -120,17 +125,57 @@ function serverMessage(n: MissingNames): string {
   )
 }
 
-/** The error for the values still missing, naming each one's every name and every fix. */
-function missingClientValuesError(missing: readonly ClientValue[]): MissingClientValuesError {
-  const names: MissingNames = {
+/** The servers that answer `/supatype-env.js`, where its values or its reason come from. */
+const SCRIPT_SERVERS =
+  "the Supatype server, or in a Next.js app the server running the route app/supatype-env.js/route.ts " +
+  "exports from @supatype/ssr/next"
+
+/** In a page whose script set the server's reason in place of the values: that reason is the fix. */
+function reasonMessage(n: MissingNames, script: string, reason: string): string {
+  return (
+    `Supatype client has no ${n.labels}. createClient was given none, and ${script} set no ${n.labels}, ` +
+    `giving the server's reason instead:\n${reason}\n` +
+    `Fix that in the environment of the server that answers it (${SCRIPT_SERVERS}), then reload the ` +
+    `page.\n${buildTimeFix(n)}`
+  )
+}
+
+/** In a page that has the script element and no global: the script is there, and did not run. */
+function scriptDidNotRunMessage(n: MissingNames, script: string): string {
+  return (
+    `Supatype client has no ${n.labels}. createClient was given none, and the page loads ${script}, ` +
+    `but it had set no window.__SUPATYPE_ENV__ by the page's first request. The script did not run in ` +
+    `time: it was blocked, failed to load, ran after the app's own script, or came from a server too ` +
+    `old to serve it.\nOpen ${script} in the browser: it should set window.__SUPATYPE_ENV__. When it ` +
+    `does, load it before the app's own script, without async or defer. When it does not, update the ` +
+    `server that answers it (${SCRIPT_SERVERS}).\n${buildTimeFix(n)}`
+  )
+}
+
+/** In a page: the script's reason when it set one, else whether the page has the script at all. */
+function pageFaultMessage(n: MissingNames): string {
+  const script = pageEnvScript()
+  const reason = present(pageEnv().error)
+  if (reason !== undefined) return reasonMessage(n, script ?? "/supatype-env.js", reason)
+  return script === undefined ? pageMessage(n) : scriptDidNotRunMessage(n, script)
+}
+
+/** Each missing value's label and every name it is set under, as the error words them. */
+function missingNames(missing: readonly ClientValue[]): MissingNames {
+  return {
     labels: missing.map((key) => MISSING_VALUES[key].label).join(" and "),
     buildNames: missing.flatMap((key) => FRONTEND_PREFIXES.map((prefix) => `${prefix}${MISSING_VALUES[key].name}`)).join(", "),
     serverNames: missing.map((key) => MISSING_VALUES[key].name).join(" and "),
     pronoun: missing.length > 1 ? "them" : "it",
   }
+}
+
+/** The error for the values still missing, naming each one's every name and every fix. */
+function missingClientValuesError(missing: readonly ClientValue[]): MissingClientValuesError {
+  const names = missingNames(missing)
   // Read when the error is made, as the page is: a bundler cannot know which side it runs on.
   const onServer = typeof window === "undefined"
-  return new MissingClientValuesError(onServer ? serverMessage(names) : pageMessage(names), missing)
+  return new MissingClientValuesError(onServer ? serverMessage(names) : pageFaultMessage(names), missing)
 }
 
 /**
