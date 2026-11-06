@@ -24,6 +24,8 @@ import {
   ssoApiBaseUrl,
   ssoProviderInput,
   updateSsoProvider,
+  verifySsoDomain,
+  type DomainVerification,
   type SsoFlags,
   type SsoProvider,
 } from "../sso-admin.js"
@@ -48,6 +50,7 @@ export function registerSso(program: Command): void {
   registerRemove(sso)
   registerInfo(sso)
   registerRotateKey(sso)
+  registerVerifyDomain(sso)
 }
 
 /** The flags `add` and `update` share. */
@@ -117,7 +120,7 @@ async function listProviders(): Promise<void> {
     info(`No SAML identity providers on ${endpoint.where}. Add one with: supatype sso add <name> --metadata-url <url>`)
     return
   }
-  const rows = providers.map((p) => [providerName(p), domainsOf(p) || "-", p.saml?.entity_id ?? "-", status(p)])
+  const rows = providers.map((p) => [providerName(p), describeDomains(p) || "-", p.saml?.entity_id ?? "-", status(p)])
   for (const line of table(["NAME", "DOMAINS", "ENTITY ID", "STATUS"], rows)) plain(line)
 }
 
@@ -303,8 +306,14 @@ function providerName(provider: SsoProvider): string {
   return provider.resource_id ?? `(unnamed) ${provider.id}`
 }
 
-function domainsOf(provider: SsoProvider): string {
-  return (provider.domains ?? []).map((d) => d.domain).join(", ")
+/** The provider's domains, each marked verified or not when the server says which. */
+export function describeDomains(provider: SsoProvider): string {
+  return (provider.domains ?? []).map(domainLabel).join(", ")
+}
+
+function domainLabel(domain: { domain: string; verified?: boolean }): string {
+  if (domain.verified === undefined) return domain.domain
+  return `${domain.domain} (${domain.verified ? "verified" : "not verified"})`
 }
 
 function status(provider: SsoProvider): string {
@@ -319,7 +328,7 @@ function printProvider(provider: SsoProvider): void {
     ["Status", status(provider)],
     ["Entity ID", saml?.entity_id ?? "-"],
     ["Metadata", saml?.metadata_url ?? "from XML"],
-    ["Domains", domainsOf(provider) || "-"],
+    ["Domains", describeDomains(provider) || "-"],
     ["NameID format", saml?.name_id_format ?? "(the SP's default, persistent)"],
     ["Attribute mapping", saml?.attribute_mapping === undefined ? "-" : JSON.stringify(saml.attribute_mapping)],
   ]
@@ -331,4 +340,54 @@ function table(header: string[], rows: string[][]): string[] {
   const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)))
   const line = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i] ?? 0)).join("  ").trimEnd()
   return [line(header), ...rows.map(line)]
+}
+
+function registerVerifyDomain(sso: Command): void {
+  sso
+    .command("verify-domain <name> <domain>")
+    .description(
+      "Prove this project owns <domain>, one of provider <name>'s domains, with a DNS TXT record: prints the " +
+        "record to add and checks it. Run it again to check again. A verified domain lets a SAML sign-in " +
+        "link to an existing account with the same email; exits 1 while the domain is not verified.",
+    )
+    .action(guarded(verifyDomain))
+}
+
+async function verifyDomain(name: string, domain: string): Promise<void> {
+  assertProviderName(name)
+  const endpoint = resolveSsoEndpoint(process.cwd(), "verify-domain")
+  const result = await verifySsoDomain(endpoint, name, domain)
+  for (const line of domainVerificationReport(result, name)) plain(line)
+  if (!result.verified) process.exitCode = 1
+}
+
+/** Domains the auth server counts as verified in dev mode, without a DNS lookup. */
+const DEV_VERIFIED_SUFFIX = ".supatype.test"
+
+/** What a domain check found: verified, or the record to add and what DNS answered instead. */
+export function domainVerificationReport(result: DomainVerification, name = "<name>"): string[] {
+  const devNote = result.domain.endsWith(DEV_VERIFIED_SUFFIX)
+    ? [`A domain ending in ${DEV_VERIFIED_SUFFIX} counts as verified on a dev stack, with no DNS lookup; production always checks DNS.`]
+    : []
+  if (result.verified) {
+    const since = result.verified_at ? ` (since ${result.verified_at})` : ""
+    return [`${result.domain} is verified${since}.`, ...devNote]
+  }
+  return [
+    `${result.domain} is not verified yet. Add this DNS record where the domain's DNS is managed:`,
+    "",
+    `  ${result.challenge.name}  TXT  ${result.challenge.value}`,
+    "",
+    ...dnsAnswerLines(result),
+    ...devNote,
+    `DNS changes can take a while to be seen. Check again with: supatype sso verify-domain ${name} ${result.domain}`,
+  ]
+}
+
+/** What DNS answered at the challenge name, when the server says. */
+function dnsAnswerLines(result: DomainVerification): string[] {
+  if (result.found === undefined) return []
+  const found = result.found ?? []
+  if (found.length === 0) return [`No TXT record was found at ${result.challenge.name}.`]
+  return [`DNS answered ${found.map((value) => JSON.stringify(value)).join(", ")} at ${result.challenge.name}, not the token.`]
 }

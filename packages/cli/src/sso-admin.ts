@@ -70,7 +70,9 @@ const isSsoProvider = isShape({
       attribute_mapping: optional(isUnknown),
     }),
   ),
-  domains: optional(nullable(isArrayOf(isShape({ domain: isString })))),
+  domains: optional(
+    nullable(isArrayOf(isShape({ domain: isString, verified: optional(isBoolean), verified_at: optional(nullable(isString)) }))),
+  ),
   created_at: optional(isString),
   updated_at: optional(isString),
 })
@@ -147,8 +149,18 @@ function parseMetadataUrl(value: string): string {
 function parseDomains(value: string): string[] {
   return value
     .split(",")
-    .map((domain) => domain.trim().toLowerCase())
-    .filter((domain) => domain !== "")
+    .filter((domain) => domain.trim() !== "")
+    .map(normalizeDomain)
+}
+
+/** A domain name: dot-separated labels of letters, digits and hyphens, at least two of them. */
+const DOMAIN_NAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+
+/** `value` as the server keeps a domain, lower case without a trailing dot; refused when it is not one. */
+export function normalizeDomain(value: string): string {
+  const domain = value.trim().toLowerCase().replace(/\.$/, "")
+  if (DOMAIN_NAME.test(domain)) return domain
+  throw new Error(`${JSON.stringify(value)} is not a domain name`)
 }
 
 function parseNameIdFormat(value: string): NameIdFormatName {
@@ -287,4 +299,31 @@ export function ssoApiBaseUrl(cwd: string): { baseUrl: string; linked: boolean }
 export function linkedToDeployment(cwd: string): boolean {
   const link = loadProjectLink(cwd)
   return link !== null && link.kind !== "local"
+}
+
+// ---------------------------------------------------------------------------
+// Domain verification
+// ---------------------------------------------------------------------------
+
+const isDomainVerification = isShape({
+  domain: isString,
+  verified: isBoolean,
+  verified_at: optional(nullable(isString)),
+  challenge: isShape({ name: isString, value: isString }),
+  found: optional(nullable(isArrayOf(isString))),
+})
+
+/** The server's answer to a domain check: the TXT record it wants, whether DNS has it, and what DNS had. */
+export type DomainVerification = typeof isDomainVerification extends Guard<infer T> ? T : never
+
+/**
+ * Ask the server to check the `_supatype-challenge.<domain>` TXT record for `domain` of the provider
+ * called `name`, issuing the domain's token the first time it is asked. A verified domain stays
+ * verified; asking again checks again.
+ *
+ * The one place the route is named, so it is the one line to change if the server's differs.
+ */
+export async function verifySsoDomain(endpoint: SsoEndpoint, name: string, domain: string): Promise<DomainVerification> {
+  const path = `${providerPath(name)}/domains/${encodeURIComponent(normalizeDomain(domain))}/verify`
+  return adminCall(endpoint, "POST", path, isDomainVerification)
 }
