@@ -11,7 +11,8 @@
   one; and removes one after saying that users who signed in through it can no longer sign in that
   way. It shows the entity ID and ACS URL to give an identity provider, read from the server's own
   SP metadata, and says when SAML is off, while still letting providers be set up first. Changes are
-  offered to roles that administer the project.
+  offered to owners and admins, the roles the auth server lets change them; developers see the page
+  read-only.
 * **auth:** the SSO page shows whether each of a provider's domains is verified, and a Verify action
   beside an unverified one. Verify asks the auth server to check the domain and shows the DNS TXT
   record to add (`_supatype-challenge.<domain>` and its value), what DNS holds there now, and Check
