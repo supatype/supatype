@@ -66,6 +66,20 @@ describe("watchParent()", () => {
     expect(onGone).toHaveBeenCalledTimes(1)
   })
 
+  // A PowerShell window opened by a launcher that then exits (Start-Process, `start` from a script)
+  // has a parent PID that is already gone. Dev stopped itself two seconds after every start.
+  it("ignores a further ancestor that was already gone when it was added", () => {
+    const state: FakeProbe = { ppid: 4000, dead: new Set([3000]) }
+    const onGone = vi.fn()
+    const w = watch.watchParent(onGone, { probe: probeOf(state), intervalMs: 1000 })
+    w.watchAlso(3000)
+    vi.advanceTimersByTime(10_000)
+    expect(onGone).not.toHaveBeenCalled()
+    state.dead.add(4000)
+    vi.advanceTimersByTime(1000)
+    expect(onGone, "the parent still counts").toHaveBeenCalledTimes(1)
+  })
+
   it("fires once, however long the parent stays gone", () => {
     const state: FakeProbe = { ppid: 4000, dead: new Set([4000]) }
     const onGone = vi.fn()

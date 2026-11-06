@@ -140,6 +140,12 @@
 
 ### Bug Fixes
 
+* **dev:** on Windows, `supatype dev` no longer stops itself two seconds after starting in a shell
+  whose own parent had already exited (a window opened by `Start-Process`, by `start` from a script,
+  or by a terminal launcher that exits). It watches the shell's parent too, and counted one that was
+  gone from the start as the process that started dev exiting. Only an ancestor alive when dev
+  started counts now, so dev still stops when the script or agent that started it is killed.
+
 * **dev, push, self-host:** a project that does not pin its own versions now runs schema-engine
   v0.9.0 and server v2.3.0. The 0.9.0 CLI shipped still pinned to engine v0.8.0 and server v2.2.2,
   so it missed four fixes those releases carry. An access rule built on
