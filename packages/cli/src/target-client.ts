@@ -200,23 +200,29 @@ function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): Ta
 }
 
 /**
+ * Where under the target's base URL a request goes: the control plane's API, or `/auth/v1`, the auth
+ * server behind the same gateway, for its admin API (`supatype sso`).
+ */
+export type TargetApiPrefix = "/api/v1" | "/platform/v1" | "/auth/v1"
+
+/**
  * A request to the control plane or a project's API. The answer is the body's `data` when it has
  * one, else the body. Without a guard it is `unknown`; with one, an answer the guard refuses throws.
  */
 export async function targetFetch(
   baseUrl: string,
-  apiPrefix: "/api/v1" | "/platform/v1",
+  apiPrefix: TargetApiPrefix,
   opts: TargetFetchOptions,
 ): Promise<unknown>
 export async function targetFetch<T>(
   baseUrl: string,
-  apiPrefix: "/api/v1" | "/platform/v1",
+  apiPrefix: TargetApiPrefix,
   opts: TargetFetchOptions,
   guard: Guard<T>,
 ): Promise<T>
 export async function targetFetch(
   baseUrl: string,
-  apiPrefix: "/api/v1" | "/platform/v1",
+  apiPrefix: TargetApiPrefix,
   opts: TargetFetchOptions,
   guard: Guard<unknown> = isUnknown,
 ): Promise<unknown> {

@@ -84,6 +84,13 @@ describe("the auth Configuration page", () => {
     expect(container.textContent).toContain("SUPATYPE_MAILER_AUTOCONFIRM")
   })
 
+  it("says SAML comes from supatype.config.ts or .env, which the compose file now passes", async () => {
+    await render(SELF_HOST, () => Response.json(SETTINGS))
+    const text = container.textContent ?? ""
+    expect(text).toContain("auth.sso.saml.enabled")
+    expect(text).not.toContain("auth server env SUPATYPE_SAML_ENABLED")
+  })
+
   it("says Cloud manages them on Cloud, and names no .env", async () => {
     await render(CLOUD, () => Response.json(SETTINGS))
     expect(container.textContent).toContain("Managed by Supatype Cloud")

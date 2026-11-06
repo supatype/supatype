@@ -37,6 +37,28 @@
 
 ### Features
 
+* **auth:** SAML single sign-on can be turned on from the config: `auth: { sso: { saml: { enabled: true } } }`,
+  with optional `allowEncryptedAssertions`, `relayStateValidity` (seconds), `rateLimitAssertion`
+  (assertions per 5 minutes) and `externalUrl`. `dev`, native `dev` and `self-host compose` pass the
+  `SUPATYPE_SAML_*` settings to the auth server, a `.env` value winning over each, and nothing while
+  SAML is off. The service provider's signing key is generated into `.env` as
+  `SUPATYPE_SAML_PRIVATE_KEY` (RSA 2048) the first time SAML is on and never replaced, since a new
+  key breaks every identity provider that trusts the old certificate. The compose file requires it
+  from `.env` and never holds it. A key written into the config is refused.
+* **sso:** `supatype sso add <name>`, `list`, `show`, `update` and `remove` register SAML identity
+  providers (metadata URL or file, email domains, attribute mapping, NameID format) through the auth
+  server's admin API, on the local stack or a linked self-hosted deployment. A provider is addressed
+  by its name, stored as `resource_id`, and `update` changes it in place: deleting and adding a
+  provider again would leave every user who signed in through it without a way back in. `update`
+  keeps the NameID format unless told to change it. `add` warns when SAML is off.
+* **sso:** `supatype sso info` prints the values an identity provider asks for: entity ID and
+  metadata URL, ACS URL, NameID formats, the `subject-id` attribute preferred to the NameID, and a
+  link to download the metadata XML.
+* **sso:** `supatype sso rotate-key` writes `SUPATYPE_SAML_NEXT_PRIVATE_KEY` into `.env`, which the
+  server publishes beside the current key while identity providers take the new certificate;
+  `supatype sso rotate-key --promote` then makes it the current key, after saying what stops working
+  for an identity provider that has not updated. For a linked deployment it prints the steps to take
+  on the server.
 * **self-host:** `supatype self-host compose up -d` creates the storage buckets the schema declares
   and the first admin user once the stack answers, as `supatype dev` and a push to a running stack
   do. A push no longer starts a stopped stack, so nothing else would have made them. A failure there

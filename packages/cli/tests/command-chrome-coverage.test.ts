@@ -29,6 +29,7 @@ import { registerStatus } from "../src/commands/status.js"
 import { registerLogs } from "../src/commands/logs.js"
 import { registerAdmin } from "../src/commands/admin.js"
 import { registerFunctions } from "../src/commands/functions.js"
+import { registerSso } from "../src/commands/sso.js"
 import { registerPlugins } from "../src/commands/plugins.js"
 import { registerTypes } from "../src/commands/types.js"
 import { registerMigrateFromV1 } from "../src/commands/migrate-from-v1.js"
@@ -92,6 +93,7 @@ function buildProgram(): Command {
   registerLogs(program)
   registerAdmin(program)
   registerFunctions(program)
+  registerSso(program)
   registerPlugins(program)
   registerTypes(program)
   registerMigrateFromV1(program)
@@ -150,6 +152,10 @@ describe("CLI command chrome coverage", () => {
       "generate",
       "logout",
       "whoami",
+      "sso add",
+      "sso list",
+      "sso info",
+      "sso rotate-key",
     ]) {
       expect(wrapped, `${path} should use chrome`).toContain(path)
     }

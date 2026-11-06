@@ -5,6 +5,7 @@ import { readComposeEnvInt, readDotEnvFiles, shellEnvInt } from "./env-file.js"
 import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
+import { validateAuthSso, type AuthSsoConfig } from "./saml-config.js"
 import { validateAuthEmail } from "./mailer-autoconfirm.js"
 import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
@@ -298,6 +299,19 @@ export interface SupatypeProjectConfig {
      * register that URL with the provider. A `SUPATYPE_EXTERNAL_*` value in `.env` wins over this.
      */
     providers?: AuthProvidersConfig
+    /**
+     * Single sign-on with enterprise identity providers. SAML is switched on here, once for every
+     * identity provider; the providers themselves are registered at runtime with `supatype sso add`:
+     *
+     * ```ts
+     * auth: { sso: { saml: { enabled: true } } }
+     * ```
+     *
+     * Rendered as the `SUPATYPE_SAML_*` variables the server reads, for `dev` and for the self-host
+     * compose file. The signing key is generated into `.env` as `SUPATYPE_SAML_PRIVATE_KEY` the first
+     * time SAML is on, and is never in this file. A `SUPATYPE_SAML_*` value in `.env` wins over this.
+     */
+    sso?: AuthSsoConfig
   }
   storage?: {
     /**
@@ -632,6 +646,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateCache(cfg, filename)
   validateSchemaNames(cfg, filename)
   validateAuthProviders(cfg, filename)
+  validateAuthSso(cfg, filename)
   validateAuthEmail(cfg, filename)
   validateCorsOrigins(cfg, filename)
   validateStudioAuth(cfg, filename)

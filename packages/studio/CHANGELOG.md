@@ -4,6 +4,9 @@
 
 ### Bug Fixes
 
+* **auth:** the Configuration page says SAML SSO is set by `auth.sso.saml.enabled` in
+  supatype.config.ts or `SUPATYPE_SAML_ENABLED` in `.env`. It said the variable could only be set in
+  the auth server's environment, which was true while the compose file did not pass it.
 * **logs:** the API logs page says request logging is coming soon, as the other unbuilt log pages
   do. It mounted a log table with search and filters over a list that never filled, which read as a
   project nobody had called.

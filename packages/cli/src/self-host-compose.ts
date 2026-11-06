@@ -33,6 +33,7 @@ import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.
 import { upKeepingKongCurrent, upKeepingKongCurrentAsync } from "./compose-kong.js"
 import { addressPoolExhaustionHint } from "./docker-address-pool.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
+import { composeSamlEnv, ensureSamlPrivateKey } from "./saml-config.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
@@ -603,6 +604,8 @@ export function renderSelfHostCompose(
   const publicApiUrl = `\${API_EXTERNAL_URL:-${externalUrlFallback}}`
   // OAuth providers hang their default callback off the same public URL the server is told it has.
   const authProviderEnv = composeAuthProviderEnv(config, publicApiUrl)
+  // SAML's service provider sits under the same public URL, at /auth/v1 like the OAuth callback.
+  const samlEnv = composeSamlEnv(config, publicApiUrl)
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
   const staticDir = appStaticDir(config)
@@ -1151,7 +1154,7 @@ ${composeEnvLines(mailerUrlPathsEnv())}
       # to get them and a resend or ses provider fell back to the noop mailer.
 ${composeEnvLines(Object.fromEntries(MAILER_PASSTHROUGH_ENV.map((name) => [name, `\${${name}:-}`])))}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
-${authProviderEnv}
+${authProviderEnv}${samlEnv}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started
@@ -1462,6 +1465,8 @@ export function writeSelfHostCompose(
   mkdirSync(paths.dir, { recursive: true })
   // Before the file that requires it is written, so no stack is ever rendered without one.
   ensureControlPlaneSecret(cwd)
+  // The SAML signing key too, once SAML is on: the file requires it, and it must never change.
+  ensureSamlPrivateKey(cwd, config)
   // No functions/ or hooks/ here: the worker mounts the whole project and treats a missing root as
   // nothing to serve, while an empty functions/ made `dev` scaffold function types into projects
   // that have no functions. `functions new` and `init` create it when there is one.

@@ -57,6 +57,7 @@ describe("CLI binary (requires built dist/)", () => {
       "login",
       "logout",
       "whoami",
+      "sso",
     ]
     for (const cmd of commands) {
       expect(stdout, `Expected '${cmd}' in --help output`).toContain(cmd)

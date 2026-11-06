@@ -28,6 +28,7 @@ import { registerStatus } from "./commands/status.js"
 import { registerLogs } from "./commands/logs.js"
 import { registerAdmin } from "./commands/admin.js"
 import { registerFunctions } from "./commands/functions.js"
+import { registerSso } from "./commands/sso.js"
 import { registerHooks } from "./commands/hooks.js"
 import { registerPlugins } from "./commands/plugins.js"
 import { registerTypes } from "./commands/types.js"
@@ -77,6 +78,7 @@ export async function run(): Promise<void> {
   registerLogs(program)
   registerAdmin(program)
   registerFunctions(program)
+  registerSso(program)
   registerHooks(program)
   registerPlugins(program)
   registerTypes(program)
