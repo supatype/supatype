@@ -145,6 +145,11 @@
   or by a terminal launcher that exits). It watches the shell's parent too, and counted one that was
   gone from the start as the process that started dev exiting. Only an ancestor alive when dev
   started counts now, so dev still stops when the script or agent that started it is killed.
+* **dev:** the dashboard's `supatype` pane shows what a save did, as `dev --stream` prints it: the
+  change detected, applied or failed (with its hints), the access lines the save changed, and the
+  generated files written. It stayed at "Services running." through every save: the renderer took
+  the console over once the dashboard was drawn, and the pane's filter dropped the access lines
+  besides.
 
 * **dev, push, self-host:** a project that does not pin its own versions now runs schema-engine
   v0.9.0 and server v2.3.0. The 0.9.0 CLI shipped still pinned to engine v0.8.0 and server v2.2.2,
