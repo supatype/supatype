@@ -33,8 +33,11 @@ export interface SsoProviderActions {
   verifyDomain: (target: DomainTarget) => Promise<VerifyOutcome>
 }
 
-/** The project's SAML providers, and the writes that change them; the list is read again after each. */
-export function useSsoProviders(): { state: SsoProvidersState; actions: SsoProviderActions } {
+/**
+ * The project's SAML providers, read once `enabled` and again on `reload`. Until then the list is
+ * null, so a page that only sometimes needs it makes no request.
+ */
+export function useSsoProviderList(enabled = true): { state: SsoProvidersState; reload: () => Promise<void> } {
   const client = useAdminClient()
   const [state, setState] = useState<SsoProvidersState>({ providers: null, error: null })
 
@@ -43,7 +46,14 @@ export function useSsoProviders(): { state: SsoProvidersState; actions: SsoProvi
     setState("error" in listed ? { providers: null, error: listed.error } : { providers: listed.providers, error: null })
   }, [client])
 
-  useEffect(() => { void reload() }, [reload])
+  useEffect(() => { if (enabled) void reload() }, [enabled, reload])
+  return { state, reload }
+}
+
+/** The project's SAML providers, and the writes that change them; the list is read again after each. */
+export function useSsoProviders(): { state: SsoProvidersState; actions: SsoProviderActions } {
+  const client = useAdminClient()
+  const { state, reload } = useSsoProviderList()
 
   const send = useCallback(async (write: ProviderWrite): Promise<WriteOutcome> => {
     const outcome = await writeSsoProvider(client, write)
