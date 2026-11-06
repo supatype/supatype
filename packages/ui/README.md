@@ -1,8 +1,8 @@
 # `@supatype/ui`
 
-React components for Supatype apps: `Button`, `Input`, `Card`, `Badge`, `Skeleton`, a
-`ThemeProvider`, and a Lexical rich text editor that reads and writes the `RichText` JSON a
-Supatype schema stores.
+React components for Supatype apps: `Button`, the form controls `Input`, `Select`, `Textarea` and
+`Checkbox`, `Card`, `Badge`, `Table`, `Skeleton`, a `ThemeProvider`, and a Lexical rich text editor
+that reads and writes the `RichText` JSON a Supatype schema stores.
 
 ## Install
 
@@ -15,7 +15,7 @@ you use the editor (see [Rich text editor](#rich-text-editor)).
 
 ## Styling: Tailwind is required
 
-`Button`, `Input`, `Card`, `Badge` and `Skeleton` are styled with Tailwind utility classes from
+Every component except the rich text editor is styled with Tailwind utility classes from
 the default palette (`bg-purple-600`, `text-neutral-700`, `dark:bg-neutral-900` and so on). The
 package ships those class names in its JavaScript, not as compiled CSS, so your app's Tailwind
 build has to see them. Without that step the components render unstyled.
@@ -96,8 +96,12 @@ From `@supatype/ui`:
 |---|---|
 | `Button`, `ButtonProps` | button with `variant` (`primary`, `secondary`, `ghost`, `danger`) and `size` (`sm`, `md`, `lg`) |
 | `Input`, `InputProps` | text input with optional `label` and `error` |
+| `Select`, `SelectProps` | native `<select>` with optional `label` and `error`; pass `<option>` children |
+| `Textarea`, `TextareaProps` | multi-line text input with optional `label` and `error` |
+| `Checkbox`, `CheckboxProps` | native checkbox with its `label` beside it and optional `error` |
 | `Card`, `CardProps` | bordered container with `padding` (`sm`, `md`, `lg`) |
 | `Badge`, `BadgeProps` | pill label with `variant` (`default`, `success`, `warning`, `danger`, `purple`) |
+| `Table`, `THead`, `TBody`, `Tr`, `Th`, `Td` | styled native table parts; props `TableProps`, `TableSectionProps`, `TrProps`, `ThProps`, `TdProps` |
 | `Skeleton` | pulsing loading placeholder |
 | `ThemeProvider`, `useTheme` | light, dark or system theme, saved in `localStorage` |
 | `emptyRichTextDocument` | an empty rich text document (one empty paragraph) |
@@ -107,6 +111,62 @@ From `@supatype/ui`:
 | `SerializedEditorState`, `SerializedLexicalNode` | the rich text JSON types |
 
 None of these import Lexical.
+
+## Form controls
+
+`Input`, `Select`, `Textarea` and `Checkbox` wrap the native element, forward their ref to it and
+accept all of its props, so they work with `value`/`onChange`, `defaultValue`, `name` and form
+libraries that register through a ref. Each takes an optional `label` and `error`:
+
+- With no `id`, the control gets a unique one from `React.useId()`, and the label points at it.
+  Pass `id` to choose your own.
+- With an `error`, the control sets `aria-invalid` and adds the error text's id
+  (`<control id>-error`) to `aria-describedby`, keeping any `aria-describedby` you pass.
+
+```tsx
+import { Checkbox, Input, Select, Textarea } from "@supatype/ui"
+
+<Input label="Email" type="email" name="email" error={errors.email} />
+
+<Select label="Role" name="role" defaultValue="member">
+  <option value="member">Member</option>
+  <option value="admin">Admin</option>
+</Select>
+
+<Textarea label="Bio" name="bio" rows={4} />
+
+<Checkbox label="Send me product updates" name="updates" defaultChecked />
+```
+
+`Select` is the browser's own `<select>`, so it keeps native keyboard handling, mobile pickers and
+form submission. `Checkbox` puts its label to the right of the box; clicking either toggles it.
+
+## Table
+
+`Table`, `THead`, `TBody`, `Tr`, `Th` and `Td` render `<table>`, `<thead>`, `<tbody>`, `<tr>`,
+`<th>` and `<td>` with the package's borders and type scale, and accept each element's own props.
+They fetch, sort and page nothing: map your rows into them.
+
+```tsx
+import { Table, TBody, Td, Th, THead, Tr } from "@supatype/ui"
+
+<Table aria-label="Users">
+  <THead>
+    <Tr>
+      <Th scope="col">Name</Th>
+      <Th scope="col">Email</Th>
+    </Tr>
+  </THead>
+  <TBody>
+    {users.map((user) => (
+      <Tr key={user.id}>
+        <Td>{user.name}</Td>
+        <Td>{user.email}</Td>
+      </Tr>
+    ))}
+  </TBody>
+</Table>
+```
 
 ## Rich text editor
 

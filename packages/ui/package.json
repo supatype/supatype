@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json && node scripts/copy-css.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "node --test tests/package.test.mjs tests/input.test.mjs tests/rich-text-editor.test.mjs",
+    "test": "node --test tests/package.test.mjs tests/input.test.mjs tests/form-controls.test.mjs tests/table.test.mjs tests/rich-text-editor.test.mjs",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "peerDependencies": {

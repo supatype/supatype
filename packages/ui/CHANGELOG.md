@@ -12,6 +12,16 @@
   `stringToRichTextDocument`, `normalizeRichTextDefault`) and the `SerializedEditorState` types stay
   in `@supatype/ui`.
 
+### Features
+
+* **ui:** `Select`, `Textarea` and `Checkbox` form controls. Each wraps the native element, takes
+  `label` and `error` the way `Input` does, forwards its ref, and accepts the element's own props.
+  The label points at the control through an id from `React.useId()` unless you pass `id`, and an
+  `error` sets `aria-invalid` and adds the error text to `aria-describedby`.
+* **ui:** `Table`, `THead`, `TBody`, `Tr`, `Th` and `Td`, styled parts that render the native table
+  elements, so screen readers get the table, row, column header and cell roles. They hold no data
+  logic: map your rows into them.
+
 ### Bug Fixes
 
 * **styles:** `@supatype/ui/styles.css` exists. The package exported it, but no build produced it,
