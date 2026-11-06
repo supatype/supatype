@@ -153,6 +153,9 @@ columns. A missing claim is SQL `NULL`, so comparing against a claim that is abs
 denies rather than erroring.
 
 A claim is read as text, as Postgres prints it (`jsonb #>>`): a numeric claim of `10` is `"10"`.
+On engines after 0.9.0, a claim compared with a boolean or number literal (`Literal<false>`,
+`Literal<3>`) is read as that JSON type instead, and a claim of any other type is `NULL`, so it
+denies. Engine 0.9.0 and earlier refuse such a rule at push (`operator does not exist`).
 
 ### Comparisons
 

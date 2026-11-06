@@ -96,12 +96,17 @@ anonymous user needs an email or phone in the same update. See [Email & Password
 
 Anonymous users satisfy `LoggedIn`: they have a valid JWT and a non-null `auth.uid()`.
 
-To restrict an action to **permanent** users only, test the `is_anonymous` claim:
+### Keep anonymous users out
+
+To restrict an action to **registered** users only, test the `is_anonymous` claim as well as the
+sign-in:
 
 ```typescript
 import type {
-  Claim, Int, Literal, LoggedIn, Model, Neq, RelatedTo, SupatypeAuthUser, UUID,
+  All, Claim, Eq, Int, Literal, LoggedIn, Model, RelatedTo, SupatypeAuthUser, UUID,
 } from "@supatype/types"
+
+type Registered = All<[LoggedIn, Eq<Claim<"is_anonymous">, Literal<"false">>]>
 
 export type Order = Model<{
   id: UUID
@@ -110,19 +115,24 @@ export type Order = Model<{
 }, {
   tableName: "orders"
   access: {
-    create: LoggedIn
-    // Only permanent users may delete
-    delete: Neq<Claim<"is_anonymous">, Literal<"true">>
+    read: LoggedIn
+    // Guests can read, only registered users create
+    create: Registered
   }
 }>
 ```
 
-`Claim<>` reads the JWT by dotted path and compares as text, so `Literal<"true">` is the string the
-claim serialises to. The token always carries `is_anonymous`, either `true` or `false`, so this
-comparison has a value to work with for every signed-in caller rather than sometimes being null.
+The auth server puts `is_anonymous` in every access token it issues, `true` for a guest and
+`false` for a real account, so `Registered` admits exactly the users who signed up or added an
+email or phone. A token without the claim, such as one minted by your own code, is denied.
 
-The same rule reads on a **permanent-only** operation, and MFA-gating works the same way with the
-`aal` claim; see [MFA](/docs/auth/mfa.html#requiring-mfa-in-access-rules).
+Write the literal as the string `"false"`: `Claim<>` reads the JWT by dotted path as text, and
+that form works on every engine version. `Literal<false>` means the same thing on engines after
+0.9.0, which read the claim as a JSON boolean when it is compared with a boolean. Engine 0.9.0 and
+earlier refuse it at push with `operator does not exist: text = boolean`.
+
+MFA-gating works the same way with the `aal` claim; see
+[MFA](/docs/auth/mfa.html#requiring-mfa-in-access-rules).
 
 ## Rate limits and cleanup
 
@@ -133,6 +143,12 @@ generated stack does not set. Anonymous users older than **30 days** are deleted
 the auth server's database cleanup is also on (`SUPATYPE_DB_CLEANUP_ENABLED=true`). It is off by
 default and the generated stack does not set it, so without it anonymous users stay until you
 remove them.
+
+With cleanup on, the 30 days count from when the account was created, so a guest still using the
+app is deleted all the same. Rows whose user field declares `onDelete: "cascade"` are deleted with
+it, a `"setNull"` field is cleared, and a field without `onDelete` keeps an id that no longer
+matches a user. Prompt guests to add an email or phone before then: once they do, `is_anonymous`
+is `false` and the cleanup leaves them alone.
 
 Consider enabling captcha (`SUPATYPE_SECURITY_CAPTCHA_ENABLED`) on production projects to reduce abuse.
 
