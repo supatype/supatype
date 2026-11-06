@@ -118,6 +118,21 @@
   TypeScript's lib files, so the schema reader knew no `Array` or `Record`: `JSON<string[]>` was
   written as `{}` and `JSON<Record<string, number>>` as `Json`. The CLI now carries those files
   (#27).
+* **dev:** the dashboard's `app` pane shows the proxy app's output whole. A line that reached the
+  CLI in two reads was shown as two lines, a CRLF line kept its carriage return, and a line printed
+  twice in a row was dropped the second time, so repeated request errors showed once. An app that
+  crashed on every start showed its error after the first crash only, followed by nothing but
+  `process exited ... restarting` lines: each restart's identical error was taken for a repeat of
+  the run before. The same applies to Studio, realtime and the other processes dev runs, and to
+  `--stream`, where each line is written once.
+
+  Freeing the proxy app's port no longer freezes the dashboard. The port scan ran synchronously
+  before the app's first start and before every restart, and on Windows it took over ten seconds,
+  during which no process's output appeared. It now runs in the background, and the app is still
+  spawned only once the stale listener is killed. The scan also matches only a listener on exactly
+  the app's port: on Windows it also killed listeners on longer ports that started with the same
+  digits (5285 matched 52851), and on macOS and Linux it killed every process connected to the
+  port, a browser on the dev server included.
 
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
