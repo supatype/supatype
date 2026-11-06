@@ -46,7 +46,7 @@ function startingFields(editing: SsoProvider | null): FormFields {
     source: editing && editing.metadataUrl === null ? "xml" : "url",
     url: editing?.metadataUrl ?? "",
     xml: "",
-    domains: editing?.domains.join(", ") ?? "",
+    domains: editing?.domains.map((d) => d.domain).join(", ") ?? "",
     nameIdFormat: editing?.nameIdFormat ?? "",
     mapping: editing?.attributeMapping ? JSON.stringify(editing.attributeMapping, null, 2) : "",
   }

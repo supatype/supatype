@@ -18,13 +18,24 @@ export interface AttributeMapping {
   keys: Record<string, unknown>
 }
 
+/**
+ * One email domain a provider signs in, and whether a DNS TXT record has proven it. Until it is
+ * verified, a SAML login whose email already has an account is refused; once verified, it links.
+ */
+export interface SsoDomain {
+  domain: string
+  verified: boolean
+  /** When it was verified (ISO 8601), or null. */
+  verifiedAt: string | null
+}
+
 export interface SsoProvider {
   id: string
   /** The provider's name, or null for one registered without one. */
   resourceId: string | null
   entityId: string
   metadataUrl: string | null
-  domains: string[]
+  domains: SsoDomain[]
   disabled: boolean
   /** The NameID format asked for, or "" for the server's default (persistent). */
   nameIdFormat: string
@@ -59,9 +70,15 @@ function stringOr<T>(value: unknown, fallback: T): string | T {
   return isString(value) && value !== "" ? value : fallback
 }
 
-function domainsOf(raw: unknown): string[] {
+/** A domain as the server sends it; an older server without `verified` reads as unverified. */
+function domainOf(raw: unknown): SsoDomain | null {
+  if (!isJsonObject(raw) || !isString(raw["domain"])) return null
+  return { domain: raw["domain"], verified: raw["verified"] === true, verifiedAt: stringOr(raw["verified_at"], null) }
+}
+
+function domainsOf(raw: unknown): SsoDomain[] {
   if (!Array.isArray(raw)) return []
-  return raw.flatMap((d) => (isJsonObject(d) && isString(d["domain"]) ? [d["domain"]] : []))
+  return raw.map(domainOf).filter((d): d is SsoDomain => d !== null)
 }
 
 function mappingOf(raw: unknown): AttributeMapping | null {
@@ -177,6 +194,67 @@ export async function listSsoProviders(client: SupatypeClient): Promise<{ provid
     const items = (await readJsonObject(res))["items"]
     const providers = Array.isArray(items) ? items.map(parseSsoProvider).filter((p): p is SsoProvider => p !== null) : []
     return { providers }
+  } catch (err) {
+    return { error: unreachable(err) }
+  }
+}
+
+/** The DNS TXT record that proves a domain: its name and the value it must hold. */
+export interface DomainChallenge {
+  name: string
+  value: string
+}
+
+/** The verify endpoint's answer: the domain's state, its record, and what DNS held there. */
+export interface DomainVerification {
+  domain: string
+  verified: boolean
+  verifiedAt: string | null
+  challenge: DomainChallenge
+  /** The TXT values DNS returned at the challenge name; null when no lookup was made. */
+  found: string[] | null
+}
+
+/** One domain of one provider: what a verification is about. */
+export interface DomainTarget {
+  provider: SsoProvider
+  domain: string
+}
+
+/** A verification's answer, or the reason there is none. */
+export type VerifyOutcome = DomainVerification | { error: string }
+
+/** The answer of a verification that has one; null while none has come or when it was refused. */
+export function verificationOf(outcome: VerifyOutcome | null): DomainVerification | null {
+  return outcome === null || "error" in outcome ? null : outcome
+}
+
+function foundOf(raw: unknown): string[] | null {
+  return Array.isArray(raw) ? raw.filter(isString) : null
+}
+
+/** The verify endpoint's answer, read defensively; null when it names no challenge record. */
+export function parseDomainVerification(raw: unknown): DomainVerification | null {
+  const domain = domainOf(raw)
+  if (domain === null || !isJsonObject(raw) || !isJsonObject(raw["challenge"])) return null
+  const { name, value } = raw["challenge"]
+  if (!isString(name) || !isString(value)) return null
+  return { ...domain, challenge: { name, value }, found: foundOf(raw["found"]) }
+}
+
+/**
+ * Ask the server to check `domain` of `provider`: the first call issues its token, and every call
+ * looks the record up. The answer, or the reason there is none.
+ */
+export async function verifySsoDomain(
+  client: SupatypeClient,
+  target: DomainTarget,
+): Promise<VerifyOutcome> {
+  const url = `${providersUrl(client, providerAddress(target.provider))}/domains/${encodeURIComponent(target.domain)}/verify`
+  try {
+    const res = await fetch(url, { method: "POST", headers: adminHeaders(client), credentials: "include" })
+    if (!res.ok) return { error: await refusal(res, `verify ${target.domain}`) }
+    return parseDomainVerification(await readJsonObject(res)) ?? { error: "The auth server's answer names no DNS record to add" }
   } catch (err) {
     return { error: unreachable(err) }
   }
