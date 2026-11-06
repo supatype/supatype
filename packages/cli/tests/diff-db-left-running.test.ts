@@ -84,6 +84,13 @@ vi.mock("../src/engine-client.js", async (importOriginal) => ({
 const DIFF = vi.hoisted(() => ({ operations: [], warnings: [] }))
 
 const { diffSchemaDocker } = await import("../src/dev-compose.js")
+const { requireLocalStack } = await import("../src/local-stack-guard.js")
+
+/** `supatype diff` as the command runs it: the local-stack guard, then the diff. */
+async function diffAsTheCommandDoes(cwd: string, config: SupatypeProjectConfig): Promise<unknown> {
+  requireLocalStack(cwd, config, "diff")
+  return diffSchemaDocker(cwd, config)
+}
 
 const base: SupatypeProjectConfig = {
   project: { name: "acme" },
@@ -146,7 +153,7 @@ describe.each(engines)("supatype diff through %s on a running stack", (_label, c
 
   it("refuses a stack whose database container is not running, rather than start it", async () => {
     docker.serverRunning = true
-    await expect(diffSchemaDocker(cwd, config)).rejects.toThrow("The local stack isn't running")
+    await expect(diffAsTheCommandDoes(cwd, config)).rejects.toThrow("The local stack isn't running")
     expect(docker.compose).toEqual([])
   })
 })

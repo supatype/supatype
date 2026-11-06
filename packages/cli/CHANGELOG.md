@@ -192,6 +192,12 @@
   the engine's stdin open with nothing written to it. Every program the CLI runs for its output,
   the host engine and each `docker` call (so the engine run by `compose run`), now gets a closed
   stdin after any input it is sent.
+* **adopt, doctor, pull and every command that reaches the local stack's database:** on a running
+  stack whose `db` container was stopped on its own, these refuse with the "local stack isn't
+  running" message, as `diff` and `push` do, and leave it stopped. `adopt` and `doctor` ran the
+  engine with `docker compose run`, which started `db` as its dependency, so `adopt` answered
+  "Nothing to adopt" with the database running again; `pull` went on to the stopped database and
+  printed nothing.
 * **dev:** on Windows, `supatype dev` no longer stops itself two seconds after starting in a shell
   whose own parent had already exited (a window opened by `Start-Process`, by `start` from a script,
   or by a terminal launcher that exits). It watches the shell's parent too, and counted one that was
