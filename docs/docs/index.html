@@ -222,7 +222,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> supatype self-host compose up -d
 <span class="pr">$</span> supatype push</pre></div>
-    <p><code>compose up</code> writes the compose file itself, so there is no separate render step. The gateway listens on <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;</code>, the port in <code>SUPATYPE_KONG_PORT</code> in <code>.env</code> (18473 when it is unset), with Studio at <code>/studio/</code>. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.</p>
+    <p><code>compose up</code> writes the compose file itself, so there is no separate render step. Once the stack answers, it creates the storage buckets the schema declares and the first admin user, as <code>supatype dev</code> does. The gateway listens on <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;</code>, the port in <code>SUPATYPE_KONG_PORT</code> in <code>.env</code> (18473 when it is unset), with Studio at <code>/studio/</code>. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.</p>
     <div class="callout">
       <span class="callout-label">REST BEFORE THE FIRST PUSH</span>
       <p>Until the first <code>supatype push</code>, every REST request answers <code>503</code> with <code>PGRST002</code>: PostgREST will not serve until the schemas it exposes exist, and the push creates them. After a push PostgREST can take up to about 30 seconds to notice, so <code>push</code> waits (at most 40 seconds) until REST answers, printing one line while it does.</p>

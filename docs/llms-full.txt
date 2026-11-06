@@ -289,7 +289,7 @@ $ supatype self-host compose up -d
 $ supatype push
 ```
 
-`compose up` writes the compose file itself, so there is no separate render step. The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYPE_KONG_PORT` in `.env` (18473 when it is unset), with Studio at `/studio/`. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.
+`compose up` writes the compose file itself, so there is no separate render step. Once the stack answers, it creates the storage buckets the schema declares and the first admin user, as `supatype dev` does. The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYPE_KONG_PORT` in `.env` (18473 when it is unset), with Studio at `/studio/`. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.
 
 > **REST BEFORE THE FIRST PUSH:** Until the first `supatype push`, every REST request answers `503` with `PGRST002`: PostgREST will not serve until the schemas it exposes exist, and the push creates them. After a push PostgREST can take up to about 30 seconds to notice, so `push` waits (at most 40 seconds) until REST answers, printing one line while it does.
 

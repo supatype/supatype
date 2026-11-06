@@ -22,6 +22,10 @@
 
 ### Features
 
+* **self-host:** `supatype self-host compose up -d` creates the storage buckets the schema declares
+  and the first admin user once the stack answers, as `supatype dev` and a push to a running stack
+  do. A push no longer starts a stopped stack, so nothing else would have made them. A failure there
+  is a warning: the stack is up.
 * **init:** a static app's `index.html` (and the page Vite builds it from) loads
   `<script src="/supatype-env.js" vite-ignore></script>` in its head, so the built site takes the address and
   anon key of whichever deployment serves it. Only where the committed config serves the app's
