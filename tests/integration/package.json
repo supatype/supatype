@@ -18,6 +18,7 @@
     "@supatype/types": "workspace:*"
   },
   "devDependencies": {
+    "@supatype/storage": "workspace:*",
     "@types/node": "^22",
     "tsx": "^4.19.2",
     "typescript": "^5",
