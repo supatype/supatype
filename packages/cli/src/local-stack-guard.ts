@@ -74,7 +74,7 @@ export function requireLocalStackApi(cwd: string, command: string): void {
 }
 
 /** The project's config, or undefined outside a project; a config that will not load still throws. */
-function projectConfigIfAny(cwd: string): SupatypeProjectConfig | undefined {
+export function projectConfigIfAny(cwd: string): SupatypeProjectConfig | undefined {
   try {
     return loadConfig(cwd)
   } catch (err) {
