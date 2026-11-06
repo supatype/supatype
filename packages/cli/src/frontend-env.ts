@@ -70,9 +70,22 @@ export function frontendEnv(values: FrontendValues): Record<string, string> {
 }
 
 /**
+ * The server's own names for a local stack's values, which a Next.js app's `/supatype-env.js` route
+ * and server client read: `next dev` loads {@link DEV_FRONTEND_ENV_FILE}, so the route answers in
+ * development. Only ever written there, never to `.env`, where a production server sets its own.
+ */
+function localServerEnv(values: FrontendValues): Record<string, string> {
+  return {
+    ...(values.apiUrl !== undefined && { SUPATYPE_URL: values.apiUrl }),
+    ...(values.anonKey !== undefined && { SUPATYPE_ANON_KEY: values.anonKey }),
+  }
+}
+
+/**
  * Write the front end's names for `values` where a build of that kind reads them: a local stack's
- * to {@link DEV_FRONTEND_ENV_FILE}, taking the CLI's local copies out of `.env` and `.env.local`;
- * anything else to `.env`. Returns the file and the names written to it.
+ * to {@link DEV_FRONTEND_ENV_FILE} with the server's names beside them (localServerEnv), taking the
+ * CLI's local copies out of `.env` and `.env.local`; anything else to `.env`. Returns the file
+ * and the names written to it.
  */
 export function writeFrontendEnv(
   dir: string,
@@ -82,8 +95,9 @@ export function writeFrontendEnv(
   const local = options.local ?? (values.apiUrl !== undefined && isLocalUrl(values.apiUrl))
   const file = local ? DEV_FRONTEND_ENV_FILE : ".env"
   const current = readEnvFile(dir, file)
+  const named = local ? { ...frontendEnv(values), ...localServerEnv(values) } : frontendEnv(values)
   const updates = Object.fromEntries(
-    Object.entries(frontendEnv(values)).filter(([key]) => options.replace !== false || !current[key]?.trim()),
+    Object.entries(named).filter(([key]) => options.replace !== false || !current[key]?.trim()),
   )
   if (Object.keys(updates).length > 0) upsertEnvFile(dir, updates, { file })
   if (local) reportMoved(removeLocalCopies(dir, values))

@@ -63,6 +63,7 @@ import {
   VITE_BUILD_DIR,
 } from "../project-config.js"
 import { cliDatabaseUrlLines } from "../database-url-owner.js"
+import { scaffoldNextRuntimeEnv } from "../init-next-runtime-env.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -741,6 +742,9 @@ export function scaffold(
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
   scaffoldAppAssets(dir, opts, write)
+  // The Next.js counterpart of the static page's script tag: the client and @supatype/ssr ship
+  // together, so the route's package is added at the client's range.
+  scaffoldNextRuntimeEnv(dir, write, `^${deps.client}`)
 
   if (opts.helloFunction) scaffoldHelloFunction(dir, write)
   scaffoldGitignore(dir, write)
@@ -819,6 +823,15 @@ function staticDirRelative(staticDir: string): string {
   return staticDir.trim().replace(/^\.\//, "").replace(/\/+$/, "") || "public"
 }
 
+/**
+ * Whether the committed config has Supatype serve the app's files: a static app, and a proxied one
+ * with a production target, whose committed config serves its build (appConfigLines). Only such a
+ * server answers `/supatype-env.js`; a proxied app is served by its own.
+ */
+function servedStatically(opts: Pick<ScaffoldOptions, "productionTarget" | "app">): boolean {
+  return opts.app.mode === "static" || (opts.app.mode === "proxy" && opts.productionTarget !== "later")
+}
+
 function scaffoldAppAssets(
   dir: string,
   opts: ScaffoldOptions,
@@ -833,7 +846,7 @@ function scaffoldAppAssets(
     write(rel, content)
   }
 
-  const holding = holdingPageTemplate(opts.projectName, initLocalApiUrl(opts))
+  const holding = holdingPageTemplate(opts.projectName, initLocalApiUrl(opts), servedStatically(opts))
   const hasVite = Boolean(opts.app.viteDevUrl)
 
   if (opts.app.mode === "static") {
@@ -842,7 +855,7 @@ function scaffoldAppAssets(
     return
   }
 
-  if (opts.app.mode === "proxy" && opts.productionTarget !== "later") {
+  if (servedStatically(opts)) {
     writeUnlessExists("dist/index.html", holding)
     if (hasVite) scaffoldVite(dir, opts, writeUnlessExists, holding)
     return
@@ -1035,7 +1048,7 @@ function appConfigLines(app: ScaffoldAppOptions, productionTarget: ProductionTar
     return [`  app: {`, `    mode: "static",`, `    static_dir: "${staticDirOf(app)}",${built}`, `  },`]
   }
   if (app.mode === "proxy") {
-    if (productionTarget !== "later") {
+    if (servedStatically({ app, productionTarget })) {
       return [
         `  app: {`,
         `    mode: "static",`,
@@ -1096,7 +1109,18 @@ function initSiteUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort" | "app"
   return opts.app.mode === "none" ? "http://localhost:3000" : initLocalApiUrl(opts)
 }
 
-function holdingPageTemplate(projectName: string, apiUrl: string): string {
+/**
+ * The deployment's address and anon key, from the server that serves the page, for a build that
+ * carried none. A classic script in the head runs before any module script, wherever the app puts
+ * its own. Where no Supatype server answers it (Vite's dev server, opened directly, sends its
+ * index.html back) the script fails with one console error and the page runs on: only that script
+ * is lost, and the dev build has its values from `.env.development.local` anyway.
+ */
+const RUNTIME_ENV_SCRIPT = `
+    <!-- The deployment's API address and anon key, from the server that serves this page. -->
+    <script src="/supatype-env.js"></script>`
+
+function holdingPageTemplate(projectName: string, apiUrl: string, runtimeEnv: boolean): string {
   const name = escapeHtml(projectName)
   return `<!doctype html>
 <html lang="en">
@@ -1104,7 +1128,7 @@ function holdingPageTemplate(projectName: string, apiUrl: string): string {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${name}: Supatype</title>
-    <meta name="description" content="A Supatype project. Define your types, we generate your platform." />
+    <meta name="description" content="A Supatype project. Define your types, we generate your platform." />${runtimeEnv ? RUNTIME_ENV_SCRIPT : ""}
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />

@@ -38,6 +38,8 @@ import {
   type Guard,
 } from "./json.js"
 import { decodeJwtPayload } from "./jwt.js"
+import { rethrowSetupFault } from "./setup-fault.js"
+import { settle, type Deferred } from "./runtime-env.js"
 
 export type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
@@ -135,8 +137,8 @@ function snakeCaseUser(user: Record<string, unknown>): Record<string, unknown> {
 }
 
 export class AuthClient {
-  private readonly url: string
-  private readonly baseHeaders: Record<string, string>
+  private readonly urlSource: Deferred<string>
+  private readonly baseHeadersSource: Deferred<Record<string, string>>
   private currentSession: Session | null = null
   private readonly listeners = new Map<string, AuthListener>()
   private listenerIdCounter = 0
@@ -163,9 +165,13 @@ export class AuthClient {
   /** In-memory PKCE code_verifier for the in-flight OAuth / OTP redirect. */
   private codeVerifier: string | null = null
 
-  constructor(url: string, baseHeaders: Record<string, string>, opts: AuthClientOptions = {}) {
-    this.url = url
-    this.baseHeaders = baseHeaders
+  /**
+   * `url` and `baseHeaders` may be functions, read for each request. `createClient` passes
+   * functions, so a client made before the page has said where the API is fails only at a request.
+   */
+  constructor(url: Deferred<string>, baseHeaders: Deferred<Record<string, string>>, opts: AuthClientOptions = {}) {
+    this.urlSource = url
+    this.baseHeadersSource = baseHeaders
     this.persistSession = opts.persistSession ?? true
     this.autoRefreshToken = opts.autoRefreshToken ?? true
     this.refreshExpiredToken = opts.refreshExpiredToken ?? true
@@ -187,6 +193,16 @@ export class AuthClient {
     if (this.autoRefreshToken && this.currentSession !== null && this.isAccessTokenExpired(this.currentSession)) {
       void this.ensureValidSession()
     }
+  }
+
+  /** The auth address, read now. */
+  private get url(): string {
+    return settle(this.urlSource)
+  }
+
+  /** The anon headers every auth request starts from, read now. */
+  private get baseHeaders(): Record<string, string> {
+    return settle(this.baseHeadersSource)
   }
 
   /** The session the client starts with: the one passed in, else the persisted one. */
@@ -760,6 +776,8 @@ export class AuthClient {
       }
       return await this._parseAuthResponse(res)
     } catch (err) {
+      // Not a refused refresh: nothing was sent, and the session may be perfectly good.
+      rethrowSetupFault(err)
       const message = err instanceof Error ? err.message : "Refresh failed"
       this._setSession(null)
       return { data: { session: null }, error: { message } }

@@ -6,8 +6,11 @@ import { postBodyIn } from "@/lib/rich-text"
 
 type Post = TableRow<"post">
 
-const url = process.env["NEXT_PUBLIC_SUPATYPE_URL"] ?? "http://localhost:18473"
-const anonKey = process.env["NEXT_PUBLIC_SUPATYPE_ANON_KEY"] ?? ""
+// Rendered on the server for each request, so it reads the server's own values first, the same
+// SUPATYPE_URL and SUPATYPE_ANON_KEY lib/supatype-server.ts and /supatype-env.js use. The
+// NEXT_PUBLIC_ names, fixed into the build, are only the fallback for a dev server without them.
+const url = process.env["SUPATYPE_URL"] ?? process.env["NEXT_PUBLIC_SUPATYPE_URL"]
+const anonKey = process.env["SUPATYPE_ANON_KEY"] ?? process.env["NEXT_PUBLIC_SUPATYPE_ANON_KEY"]
 
 /**
  * A post as it will read once published, shown to someone holding a preview link.

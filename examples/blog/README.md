@@ -28,7 +28,7 @@ pnpm build                               # the CLI and the libraries run from th
 cd examples/blog
 echo "JWT_SECRET=$(openssl rand -base64 48)" > .env
 pnpm exec supatype keys --write          # mints ANON_KEY and SERVICE_ROLE_KEY into .env
-cp .env.local.example .env.local         # paste ANON_KEY from .env into NEXT_PUBLIC_SUPATYPE_ANON_KEY
+cp .env.local.example .env.local         # paste ANON_KEY from .env into both *_SUPATYPE_ANON_KEY lines
 pnpm exec supatype dev                   # the stack, and Next on :3001 behind it
 ```
 
@@ -40,6 +40,18 @@ To publish a post, sign in to Studio at `http://localhost:18473/studio/` with an
 
 ```bash
 pnpm exec supatype admin create-user --email you@example.com --password <password> --role admin
+```
+
+### One build, any deployment
+
+`pnpm build` needs no Supatype values. Start the server with `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`
+set instead, and `app/supatype-env.js/route.ts` (`@supatype/ssr/next`) gives the browser client the
+running server's pair when a page loads; the root layout loads it before the app. The server client
+reads the same two.
+
+```bash
+pnpm build
+SUPATYPE_URL=https://api.example.com SUPATYPE_ANON_KEY=<anon key> pnpm start
 ```
 
 ## Checked in CI

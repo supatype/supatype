@@ -1,4 +1,5 @@
 import type { SupatypeError as SupatypeErrorShape } from "./types.js"
+import { rethrowSetupFault } from "./setup-fault.js"
 
 /**
  * Typed error hierarchy for the Supatype SDK.
@@ -232,8 +233,12 @@ export const ErrorCodes = {
  *
  * The client's fetch throws typed errors (a timeout, a rate limit after the last retry), and their
  * code and status are what lets a caller tell "try again later" from "the server is gone".
+ *
+ * A client with no address or anon key is rethrown instead: that request was never sent, and the
+ * fix is in the app's setup, which a result an app may never read would hide.
  */
 export function transportFailure(e: unknown): SupatypeErrorShape {
+  rethrowSetupFault(e)
   if (e instanceof SupatypeError) {
     return {
       message: e.message,
