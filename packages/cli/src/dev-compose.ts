@@ -1570,6 +1570,26 @@ export function composeGatewayHostPort(
 }
 
 /**
+ * What a started stack needs once it answers: the gateway and storage waited for, then the schema's
+ * declared buckets and the first admin user. A push to a running stack runs it after its `up -d`,
+ * and `self-host compose up` after its own, so no command depends on a push to start the stack and
+ * create them (issue 41).
+ */
+export async function provisionStartedStack(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  stack: { composePath: string; project: string; gatewayPort: number },
+  ast: ExtractedSchemaAstV2,
+  serviceRoleKey: string,
+): Promise<void> {
+  const { composePath, project, gatewayPort } = stack
+  await waitKongReady(gatewayPort, 120, { composePath, cwd, project })
+  await waitStorageApiReady(gatewayPort, serviceRoleKey, 90)
+  await provisionDockerStorageBuckets(ast, gatewayPort, serviceRoleKey)
+  await ensureFirstAdminUserForProject(cwd, config, { compose: { project, composePath } })
+}
+
+/**
  * After a compose push: the rest of the stack up, then what the schema asks of it once it answers
  * (buckets, the first admin), then REST, which is the last to catch up with the new schema.
  */
@@ -1585,13 +1605,7 @@ async function bringPushedStackUp(
   if (upGateway !== 0) {
     exitComposeFailed(upGateway, "Could not start the Compose gateway stack.", brand)
   }
-  await waitKongReady(gatewayPort, 120, { composePath: paths.composePath, cwd, project })
-  await waitStorageApiReady(gatewayPort, keys.serviceRoleKey, 90)
-  await provisionDockerStorageBuckets(ast, gatewayPort, keys.serviceRoleKey)
-
-  await ensureFirstAdminUserForProject(cwd, config, {
-    compose: { project, composePath: paths.composePath },
-  })
+  await provisionStartedStack(cwd, config, { composePath: paths.composePath, project, gatewayPort }, ast, keys.serviceRoleKey)
 
   // Last, so the admin user and the buckets are not held up by it. `supatype dev` never comes
   // through here: it pushes before PostgREST starts, so PostgREST finds the schemas on its first try.

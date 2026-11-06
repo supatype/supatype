@@ -12,8 +12,11 @@ import { join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { spawnSync } from "node:child_process"
 import { gzipSync } from "node:zlib"
-import { loadConfig } from "../config.js"
-import { connectionString, nativeServerPort } from "../project-config.js"
+import { loadConfig, loadSchemaAst } from "../config.js"
+import { COMPOSE_DEV_KONG_PORT, connectionString, nativeServerPort, schemaPathFromProject, type SupatypeProjectConfig } from "../project-config.js"
+import { readComposeEnvInt } from "../env-file.js"
+import { withPublishing } from "../model-versioning.js"
+import { devApiKeys } from "../dev-api-keys.js"
 import { devPostgresPassword } from "../local-secrets.js"
 import { splitPassword } from "../host-database.js"
 import { fillMissingKeys } from "./keys.js"
@@ -98,6 +101,8 @@ export function registerSelfHost(program: Command): void {
       if (status !== 0) {
         exitComposeFailed(status, "Could not start the self-host Compose stack.", SELF_HOST_BRAND)
       }
+      // Attached, `up` returns only once the stack has stopped, so there is nothing to provision.
+      if (opts.detach === true) await provisionAfterUp(cwd, config, project, renderOptions.devLocal)
       await warnIfHandWrittenUrlSilent(cwd)
     })
 
@@ -416,6 +421,24 @@ export function registerSelfHost(program: Command): void {
 }
 
 const SELF_HOST_BRAND = { intro: "Self-host deployment" }
+
+/**
+ * The schema's declared buckets and the first admin user, on the stack `up` has just started, once
+ * it answers (issue 41): as `dev` and a push to a running stack do, so nothing waits on a push to
+ * start the stack and make them. A failure is warned about; the stack itself is up.
+ */
+async function provisionAfterUp(cwd: string, config: SupatypeProjectConfig, project: string, devLocal: boolean): Promise<void> {
+  try {
+    const { composeGatewayHostPort, provisionStartedStack } = await import("../dev-compose.js")
+    const kongPort = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
+    const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", kongPort)
+    const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
+    const stack = { composePath: selfHostComposePaths(cwd).composePath, project, gatewayPort }
+    await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey)
+  } catch (err) {
+    warn(`The stack is up, but its storage buckets or first admin user could not be created: ${errorMessage(err)}`)
+  }
+}
 
 /**
  * `self-host compose down`. The volumes hold the database and every stored file, so removing them
