@@ -187,6 +187,11 @@
 
 ### Bug Fixes
 
+* **pull:** `supatype pull` no longer hangs at "Introspecting database...". The engine reads its
+  input from stdin when it is not given an input file, `introspect` is given none, and the CLI left
+  the engine's stdin open with nothing written to it. Every program the CLI runs for its output,
+  the host engine and each `docker` call (so the engine run by `compose run`), now gets a closed
+  stdin after any input it is sent.
 * **dev:** on Windows, `supatype dev` no longer stops itself two seconds after starting in a shell
   whose own parent had already exited (a window opened by `Start-Process`, by `start` from a script,
   or by a terminal launcher that exits). It watches the shell's parent too, and counted one that was
