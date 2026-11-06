@@ -59,6 +59,12 @@
   `supatype sso rotate-key --promote` then makes it the current key, after saying what stops working
   for an identity provider that has not updated. For a linked deployment it prints the steps to take
   on the server.
+* **sso:** `supatype sso verify-domain <name> <domain>` proves the project owns one of a provider's
+  domains: it prints the DNS TXT record to add (`_supatype-challenge.<domain>` and its token), asks
+  the auth server to check it, and says whether the domain is verified or what DNS answered instead,
+  exiting 1 until it is. Running it again checks again. `sso show` and `sso list` mark each domain
+  verified or not. On a dev stack a domain ending in `.supatype.test` counts as verified with no DNS
+  lookup.
 * **self-host:** `supatype self-host compose up -d` creates the storage buckets the schema declares
   and the first admin user once the stack answers, as `supatype dev` and a push to a running stack
   do. A push no longer starts a stopped stack, so nothing else would have made them. A failure there

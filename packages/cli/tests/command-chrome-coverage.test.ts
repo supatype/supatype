@@ -156,6 +156,7 @@ describe("CLI command chrome coverage", () => {
       "sso list",
       "sso info",
       "sso rotate-key",
+      "sso verify-domain",
     ]) {
       expect(wrapped, `${path} should use chrome`).toContain(path)
     }
