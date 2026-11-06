@@ -136,11 +136,18 @@ describe.each(engines)("supatype diff through %s", (_label, config) => {
   })
 })
 
-describe("supatype diff through the schema-engine container on a running stack", () => {
+// Issue 46: the host engine's diff ran `up -d db` on a stack whose database was already up.
+describe.each(engines)("supatype diff through %s on a running stack", (_label, config) => {
   it("starts nothing", async () => {
     stackRunning()
-    await diffSchemaDocker(cwd, engines[0]![1])
+    await diffSchemaDocker(cwd, config)
     expect(docker.compose.filter((args) => args[0] === "up")).toEqual([])
+  })
+
+  it("refuses a stack whose database container is not running, rather than start it", async () => {
+    docker.serverRunning = true
+    await expect(diffSchemaDocker(cwd, config)).rejects.toThrow("The local stack isn't running")
+    expect(docker.compose).toEqual([])
   })
 })
 
