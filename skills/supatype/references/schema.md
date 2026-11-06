@@ -32,12 +32,20 @@ export type Profile = Model<{
 |------|---------|
 | `Public` | Anyone (including anon) |
 | `Private` | No direct API access |
-| `LoggedIn` | Authenticated users |
+| `LoggedIn` | Authenticated users, anonymous sign-ins included |
 | `Owner<"field">` | Row owner via `"id"`, a `UUID` or `SupatypeAuthUserId` field, or a relation's key (`"author_id"`) |
 | `OwnerFrom<"relation">` | Owner via related model |
 | `Role<"admin">` | Users with named role |
 
 Define `access` per operation: `read`, `create`, `update`, `delete`.
+
+An anonymous sign-in (`signInAnonymously`, on with `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true`) is a real user, so it passes `LoggedIn`. To admit only registered users, also test the `is_anonymous` claim the auth server puts in every access token:
+
+```typescript
+type Registered = All<[LoggedIn, Eq<Claim<"is_anonymous">, Literal<"false">>]>
+```
+
+Use the string `"false"`, which works on every engine; `Literal<false>` is refused at push by engine 0.9.0 and earlier. A token without the claim is denied. With `SUPATYPE_DB_CLEANUP_ENABLED=true` the auth server deletes anonymous users 30 days after creation, even active ones, and `onDelete: "cascade"` rows go with them, so prompt guests to add an email or phone first.
 
 Owner rules are checked when the schema is read. The owner must be `"id"`, a relation whose key is on this model, or a `UUID` / `SupatypeAuthUserId` field. Owning through a relation is followed one relation deep, and the related model must be a user model (keyed by `SupatypeAuthUserId`) or have an Owner rule of its own; anything else is an error. A plain `UUID` owner works but warns: declare it `SupatypeAuthUserId` if it holds an auth user id.
 
