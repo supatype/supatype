@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { nodeExecutable } from "./node-executable.js"
 import { ProcessManager } from "./process-manager.js"
 
 /**
@@ -52,7 +53,7 @@ export function startStudioViteDevServer(opts: StudioDevServerOptions): ProcessM
 
   const basePath = opts.basePath ?? "/"
   return new ProcessManager(
-    process.execPath,
+    nodeExecutable(viteJs),
     [viteJs, "--port", String(STUDIO_DEV_PORT), "--strictPort", "--host"],
     {
       label: "studio",
