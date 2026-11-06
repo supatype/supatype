@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, afterEach, type MockInstance } from "vitest"
-import { createClient, MutationBuilder, QueryBuilder, type AnyDatabase, type SupatypeClient } from "@supatype/client"
+import { MissingClientValuesError, createClient, MutationBuilder, QueryBuilder, type AnyDatabase, type SupatypeClient } from "@supatype/client"
 
 /**
  * What every framework binding owes a request that throws instead of answering `{ data, error }`.
@@ -23,9 +23,10 @@ export interface ThrownErrorBinding {
   auth(): BindingState
 }
 
-class SetupFault extends Error {
+/** The setup fault a client with no address throws: one of the SDK's errors, held as it is. */
+class SetupFault extends MissingClientValuesError {
   constructor() {
-    super("Supatype client has no API address")
+    super("Supatype client has no API address", ["url"])
     this.name = "SetupFault"
   }
 }

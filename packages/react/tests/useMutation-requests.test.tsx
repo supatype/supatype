@@ -128,7 +128,8 @@ describe("useMutation requests", () => {
     const sent = stubFetch()
     const result = await mutateOnce(operation, data)
     expect(sent).toEqual([])
-    expect(result).toEqual({ data: null, error: { message }, count: null })
+    expect({ ...result, error: { ...result.error } }).toEqual({ data: null, error: { message }, count: null })
+    expect(result.error).toBeInstanceOf(Error)
   })
 })
 

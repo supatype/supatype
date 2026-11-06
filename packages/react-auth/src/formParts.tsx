@@ -103,7 +103,8 @@ type Settled<T> = { data: T; error: null } | { error: SupatypeError }
  * for the same reason; a form has somewhere to show it, so it becomes the form's error here.
  */
 function thrownError(err: unknown): SupatypeError {
-  if (err instanceof MissingClientValuesError) return { message: err.message }
+  // Already one of the family, so the form shows it as it is.
+  if (err instanceof MissingClientValuesError) return err
   return transportFailure(err)
 }
 

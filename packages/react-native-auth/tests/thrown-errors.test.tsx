@@ -8,6 +8,7 @@
 
 import React from "react"
 import { afterEach, describe, it, expect, vi, type MockInstance } from "vitest"
+import { MissingClientValuesError } from "@supatype/client"
 import { create, act, type ReactTestRenderer } from "react-test-renderer"
 import { Text } from "react-native"
 
@@ -30,9 +31,10 @@ import { MagicLinkForm } from "../src/MagicLinkForm.js"
 import { ResetPassword } from "../src/ResetPassword.js"
 import { SignUpForm } from "../src/SignUpForm.js"
 
-class SetupFault extends Error {
+/** The setup fault a client with no address throws: one of the SDK's errors, held as it is. */
+class SetupFault extends MissingClientValuesError {
   constructor() {
-    super("Supatype client has no API address")
+    super("Supatype client has no API address", ["url"])
     this.name = "SetupFault"
   }
 }

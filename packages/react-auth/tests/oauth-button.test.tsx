@@ -1,7 +1,7 @@
 import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, create, type ReactTestInstance } from "react-test-renderer"
-import type { AuthRedirectError, SupatypeError } from "@supatype/client"
+import { AuthRedirectError, SupatypeError } from "@supatype/client"
 import { OAuthButton } from "../src/index.js"
 import { fire, stringProp } from "./props.js"
 
@@ -45,7 +45,7 @@ describe("OAuthButton errors", () => {
   it("calls onError and stays on the page when the provider is not enabled", async () => {
     const location = { href: "https://app.example/" }
     vi.stubGlobal("window", { location })
-    const error = { message: "Sign-in with github is not enabled for this project.", code: "provider_disabled" }
+    const error = new SupatypeError({ message: "Sign-in with github is not enabled for this project.", code: "provider_disabled" })
     auth.signInWithOAuth.mockResolvedValue({ data: { url: "", provider: "github" }, error })
     const onError = vi.fn()
 
@@ -57,7 +57,7 @@ describe("OAuthButton errors", () => {
   })
 
   it("reports a refusal the server sent back in the URL to the button that started it", async () => {
-    auth.error = { message: "Signups not allowed", code: "signup_disabled", provider: "github" }
+    auth.error = new AuthRedirectError({ message: "Signups not allowed", code: "signup_disabled", provider: "github" })
     const onGitHub = vi.fn()
     const onGoogle = vi.fn()
 

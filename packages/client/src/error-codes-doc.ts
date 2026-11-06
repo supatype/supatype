@@ -20,7 +20,7 @@ export interface ErrorCodeEntry {
   /** HTTP status code typically associated with this error. */
   httpStatus?: number | undefined
   /** Category grouping. */
-  category: "auth" | "postgrest" | "storage" | "realtime" | "network"
+  category: "auth" | "postgrest" | "storage" | "realtime" | "network" | "setup"
 }
 
 export const ERROR_CODES_DOCUMENTATION: readonly ErrorCodeEntry[] = [
@@ -304,6 +304,14 @@ export const ERROR_CODES_DOCUMENTATION: readonly ErrorCodeEntry[] = [
     suggestion: "Wait for the Retry-After period. Implement client-side debouncing/throttling.",
     httpStatus: 429,
     category: "network",
+  },
+  // ── Setup errors ─────────────────────────────────────────────────────────
+  {
+    code: "MISSING_CLIENT_VALUES",
+    description: "A request was made by a client with no API address or no anon key, so nothing was sent.",
+    suggestion:
+      "Pass url and anonKey to createClient, set them at build time, or load /supatype-env.js before the app. The error names each value and every name it can be set under.",
+    category: "setup",
   },
 ] as const
 

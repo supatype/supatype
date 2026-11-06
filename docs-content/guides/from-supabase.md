@@ -116,7 +116,7 @@ The query builder reads the same way. The differences are in the setup: `createC
 
 - Session fields are camel case: `session.accessToken`, `session.refreshToken`, `session.expiresAt`.
 - Row changes are subscribed from the table: `supatype.from("comment").subscribe(cb, { event: "INSERT" })`. Each change reaches only subscribers allowed to read that row.
-- `error` is a plain object with `message` and, when known, `code`. An insert an access rule refuses returns `42501`. See [Errors](/docs/client.html#errors).
+- `error` is a `SupatypeError` (an `Error`) with `message` and, when known, `code` and `status`. An insert an access rule refuses returns `42501`. See [Errors](/docs/client.html#errors).
 - A function is a Deno module with a default export, `handler(req, ctx)`. The project URL and keys come from `ctx`, not the environment. `supatype functions new hello` writes one to start from.
 
 <h2 id="existing-database">Bringing an existing database</h2>

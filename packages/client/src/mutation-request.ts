@@ -1,5 +1,6 @@
 import type { AnyClient } from "./index.js"
-import type { DraftUpdateOptions, QueryResult, SupatypeError } from "./types.js"
+import type { DraftUpdateOptions, QueryResult } from "./types.js"
+import { SupatypeError } from "./errors.js"
 import { isRowsOf } from "./caller-types.js"
 
 export type MutationOperation = "insert" | "update" | "delete" | "upsert"
@@ -74,7 +75,7 @@ export async function runMutation<TRow>(
   request: MutationRequest = {},
 ): Promise<MutationOutcome<TRow>> {
   const pending = mutationRequest(client.from(table), operation, data, request)
-  if (typeof pending === "string") return { data: null, error: { message: pending }, count: null }
+  if (typeof pending === "string") return { data: null, error: new SupatypeError({ message: pending }), count: null }
   const result = await pending
   return { data: isRowsOf<TRow>(result.data) ? result.data : null, error: result.error, count: result.count }
 }

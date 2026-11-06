@@ -1,4 +1,5 @@
 import type { TableRelationship } from "./select-types.js"
+import type { SupatypeError } from "./errors.js"
 
 // ─── Auth types ───────────────────────────────────────────────────────────────
 
@@ -126,7 +127,11 @@ export type OtpType =
 
 // ─── Error type ───────────────────────────────────────────────────────────────
 
-export interface SupatypeError {
+/** The class every result error is; its fields are `SupatypeErrorFields`. */
+export type { SupatypeError }
+
+/** The fields a `SupatypeError` carries, as given to its constructor and as its JSON. */
+export interface SupatypeErrorFields {
   message: string
   status?: number | undefined
   code?: string | undefined
@@ -153,15 +158,8 @@ export interface SupatypeError {
   details?: string | undefined
 }
 
-/**
- * A sign-in the auth server refused and reported back in the redirect URL.
- *
- * `provider` names the OAuth provider this browser started the sign-in with, when the client
- * remembers one, so an app showing one button per provider can put the message by the right one.
- */
-export interface AuthRedirectError extends SupatypeError {
-  provider?: string | undefined
-}
+/** A sign-in refused in the redirect URL: the class, with the provider it was started with. */
+export type { AuthRedirectError } from "./errors.js"
 
 // ─── Query result ─────────────────────────────────────────────────────────────
 

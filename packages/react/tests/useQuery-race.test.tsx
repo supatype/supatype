@@ -7,7 +7,7 @@
 import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, create, type ReactTestRenderer } from "react-test-renderer"
-import { createClient, QueryBuilder, type AnyDatabase, type QueryResult } from "@supatype/client"
+import { createClient, QueryBuilder, SupatypeError, type AnyDatabase, type QueryResult } from "@supatype/client"
 import { SupatypeProvider } from "../src/context.js"
 import { useQuery } from "../src/useQuery.js"
 
@@ -76,7 +76,7 @@ describe("useQuery when an older read finishes last", () => {
   it("keeps the newer rows over the older read's returned error", async () => {
     const { tree, older, newer } = await twoReadsInFlight()
     await act(async () => newer.resolve(rows(2)))
-    await act(async () => older.resolve({ data: null, error: { message: "permission denied" }, count: null }))
+    await act(async () => older.resolve({ data: null, error: new SupatypeError({ message: "permission denied" }), count: null }))
     expect(textOf(tree)).toBe('rows: [{"id":2}]')
   })
 

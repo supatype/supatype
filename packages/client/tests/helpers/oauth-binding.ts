@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
-import type { AuthRedirectError, Session, SupatypeError } from "../../src/types.js"
+import type { Session } from "../../src/types.js"
+import { AuthRedirectError, SupatypeError } from "../../src/errors.js"
 
 /**
  * What every framework binding's auth primitive owes an OAuth sign-in.
@@ -71,7 +72,7 @@ export function describeOAuthBinding(
     })
 
     it("stays on the page and returns the error when the provider is not enabled", async () => {
-      const refusal = { message: "Sign-in with github is not enabled for this project.", code: "provider_disabled" }
+      const refusal = new SupatypeError({ message: "Sign-in with github is not enabled for this project.", code: "provider_disabled" })
       harness.auth.signInWithOAuth.mockResolvedValue({ data: { url: "", provider: "github" }, error: refusal })
 
       const { error } = await mount(harness).signInWithOAuth("github")
@@ -81,7 +82,7 @@ export function describeOAuthBinding(
     })
 
     it("exposes a refusal the server sent back in the URL", async () => {
-      harness.redirectError = { message: "Signups not allowed", code: "signup_disabled", provider: "github" }
+      harness.redirectError = new AuthRedirectError({ message: "Signups not allowed", code: "signup_disabled", provider: "github" })
 
       const probe = mount(harness)
       await settle()

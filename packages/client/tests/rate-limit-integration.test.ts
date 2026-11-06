@@ -120,7 +120,7 @@ describe("Task 91: SDK rate limit integration", () => {
       expect.fail("Should have thrown RateLimitError")
     } catch (err) {
       expect(err).toBeInstanceOf(RateLimitError)
-      expect(err).toMatchObject({ retryAfterSeconds: 2, statusCode: 429, code: "RATE_LIMITED" })
+      expect(err).toMatchObject({ retryAfterSeconds: 2, status: 429, code: "RATE_LIMITED" })
     }
     vi.useFakeTimers()
   })

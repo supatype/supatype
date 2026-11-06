@@ -1,31 +1,13 @@
 /**
- * The setup fault a client with no address or anon key reports, and the one rule for it.
+ * The one rule for a setup fault: a client with no address or anon key.
  *
- * Kept out of errors.ts, which the main entry re-exports whole: `MissingClientValuesError` is public
- * (index.ts exports it by name, so an app can catch it), and `rethrowSetupFault` is not.
+ * `MissingClientValuesError` lives in errors.ts with the rest of the error family, which the main
+ * entry re-exports whole; `rethrowSetupFault` is kept here because it is not public.
  */
 
-/** The two values a client cannot send a request without. */
-export type ClientValue = "url" | "anonKey"
+import { MissingClientValuesError } from "./errors.js"
 
-/**
- * A request made by a client that has no API address or no anon key.
- *
- * Thrown by the request, never by `createClient`: a client created at module scope runs while a
- * framework prerenders a page, which sends nothing and needs neither. It is a setup fault rather
- * than an answer from the server, so no request turns it into `{ data: null, error }`
- * (transportFailure rethrows it): an app that only reads `data` would show an empty page instead.
- */
-export class MissingClientValuesError extends Error {
-  /** Which of the two values were still missing when the request was made. */
-  readonly missing: readonly ClientValue[]
-
-  constructor(message: string, missing: readonly ClientValue[]) {
-    super(message)
-    this.name = "MissingClientValuesError"
-    this.missing = missing
-  }
-}
+export { MissingClientValuesError, type ClientValue } from "./errors.js"
 
 /**
  * Throw `e` again when it is a setup fault (a client with no address or anon key). Every catch-all
