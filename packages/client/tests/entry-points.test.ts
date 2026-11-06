@@ -40,3 +40,10 @@ describe("entry points", () => {
     expect(pkg).toHaveProperty(["exports", "./bindings"], { types: "./dist/bindings.d.ts", import: "./dist/bindings.js" })
   })
 })
+
+describe("the missing-values error on the main entry", () => {
+  it("exports MissingClientValuesError, which an app may catch, and not the internal rethrow helper", () => {
+    expect(main).toHaveProperty("MissingClientValuesError")
+    expect(main).not.toHaveProperty("rethrowSetupFault")
+  })
+})

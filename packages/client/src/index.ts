@@ -23,6 +23,7 @@ import { isJsonObject, isString, readJsonObject, refusalText } from "./json.js"
 import { jwtRole } from "./jwt.js"
 import { createGraphqlRunner } from "./graphql-transport.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
+import { ClientTarget, settle, type Deferred } from "./runtime-env.js"
 import type {
   AnyDatabase,
   AugmentedDatabase,
@@ -101,6 +102,7 @@ export type { RealtimeEvent, RealtimePayload, ChannelStatus, PresenceEntry } fro
 // The bindings' shared subscription helpers are on `@supatype/client/bindings`, not here.
 export type { TableSubscribeOptions, TableSubscription } from "./table-subscription.js"
 export * from "./errors.js"
+export { MissingClientValuesError, type ClientValue } from "./setup-fault.js"
 
 // Called by the generated `supatype/generated/client.ts`, which is how a project tells the client which
 // columns hold values a JSON parser would destroy. Exported because generated code imports it;
@@ -154,7 +156,8 @@ class TableClient<
   TTables extends Record<string, TableDef> = Record<string, TableDef>,
   TName extends string = string,
 > {
-  private readonly baseUrl: string
+  /** Handed to each query as it is, so a deferred address is read only when the query is sent. */
+  private readonly baseUrl: Deferred<string>
   private readonly table: string
   private readonly path: string
   private readonly getHeaders: HeadersProvider
@@ -173,7 +176,7 @@ class TableClient<
   private profile: string | undefined
 
   constructor(
-    baseUrl: string,
+    baseUrl: Deferred<string>,
     table: string,
     getHeaders: HeadersProvider,
     realtime: RealtimeClient,
@@ -491,13 +494,13 @@ export interface FunctionInvokeOptions {
 }
 
 class FunctionsClient {
-  private readonly baseUrl: string
+  private readonly baseUrl: Deferred<string>
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: UnauthorizedHandler | undefined
   private readonly doFetch: RequestTransport
 
   constructor(
-    baseUrl: string,
+    baseUrl: Deferred<string>,
     getHeaders: HeadersProvider,
     doFetch: RequestTransport,
     onUnauthorized?: UnauthorizedHandler | undefined,
@@ -541,7 +544,7 @@ class FunctionsClient {
     try {
       const res = await fetchWithOptional401Retry(
         this.doFetch,
-        `${this.baseUrl}/functions/v1/${functionName}`,
+        `${settle(this.baseUrl)}/functions/v1/${functionName}`,
         fetchOpts,
         resolveHeaders,
         this.onUnauthorized,
@@ -607,11 +610,22 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabas
   ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>>
 }
 
+/** The headers a request carries as the anon role: the anon key, then the caller's own. */
+function anonHeaders(anonKey: string, extra: Record<string, string>): Record<string, string> {
+  return { apikey: anonKey, Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json", ...extra }
+}
+
 export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   config: SupatypeClientConfig,
 ): SupatypeClient<TDatabase> {
+  // The address and anon key as given, else as the page sets them, read when a request is made
+  // (runtime-env.ts). Every request asks through these two, so the first one made without them
+  // throws the error naming them, and creating the client never does.
+  const target = new ClientTarget(config)
+  const address = (): string => target.resolve().url
+
   // Warn early if a direct Postgres URL is used in a serverless environment
-  warnIfServerlessDirectConnection(config.url)
+  if (config.url !== undefined && config.url !== "") warnIfServerlessDirectConnection(config.url)
 
   // A client with both is a route sending admin credentials down a path meant for strangers, which
   // is precisely what the preview link exists to remove. Thrown rather than warned: the two are
@@ -629,19 +643,19 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   const previewCredential =
     config.previewCode === undefined || config.previewCode === ""
       ? null
-      : new PreviewCredential(config.url, config.previewCode)
+      : new PreviewCredential(address, config.previewCode)
 
   // `headers` may be a function, read on every request: Studio changes the acting mode it asks for
   // without rebuilding its client (and losing its session and sockets).
   const extraHeaders = (): Record<string, string> =>
     typeof config.headers === "function" ? config.headers() : (config.headers ?? {})
 
-  const baseHeaders: Record<string, string> = {
-    apikey: config.anonKey,
-    Authorization: `Bearer ${config.anonKey}`,
-    "Content-Type": "application/json",
-    ...extraHeaders(),
-  }
+  // The caller's extra headers as they were when the client was made, as the anon headers have
+  // always carried them; each request adds them again as they are by then (getAuthHeaders).
+  const initialExtraHeaders = extraHeaders()
+  let anon: Record<string, string> | undefined
+  const baseHeaders = (): Record<string, string> =>
+    (anon ??= anonHeaders(target.resolve().anonKey, initialExtraHeaders))
 
   // Create a retry-aware fetch bound to client-level config
   const doFetch = createRetryFetch({
@@ -649,7 +663,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     timeout: config.timeout,
   })
 
-  const auth = new AuthClient(`${config.url}/auth/v1`, baseHeaders, {
+  const auth = new AuthClient(() => `${address()}/auth/v1`, baseHeaders, {
     initialSession: config.initialSession,
     persistSession: config.auth?.persistSession,
     autoRefreshToken: config.auth?.autoRefreshToken,
@@ -679,7 +693,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     if (previewCredential !== null) {
       // Throws when the link will not resolve. The query layer turns that into an ordinary
       // `{ data: null, error }`, so a revoked link reads as a message rather than as a crash.
-      return { ...baseHeaders, Authorization: `Bearer ${await previewCredential.token()}` }
+      return { ...baseHeaders(), Authorization: `Bearer ${await previewCredential.token()}` }
     }
     await auth.ensureValidSession()
     const token = auth.currentAccessToken
@@ -688,10 +702,10 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       // Guardrail: malformed sessions can carry a JWT with empty role, which
       // PostgREST rejects ("role \"\" does not exist"). Fall back to anon.
       if (role !== null && role.trim().length > 0) {
-        return { ...baseHeaders, Authorization: `Bearer ${token}` }
+        return { ...baseHeaders(), Authorization: `Bearer ${token}` }
       }
     }
-    return baseHeaders
+    return baseHeaders()
   }
 
   // Every request's headers: its credential, then the caller's own extra headers as they are now.
@@ -706,22 +720,29 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   // request carried the anon key for the life of the page. An app's per-user storage policies saw
   // `anon` rather than the caller, and through Studio's proxy the request was refused outright,
   // because an anon key carries no `sub` and the proxy requires one.
-  const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders, doFetch)
+  const storage = new StorageClient(() => `${address()}/storage/v1`, getAuthHeaders, doFetch)
 
   // The same provider the other sub-clients get, not `baseHeaders`.
   //
-  // `baseHeaders` is built once and never mutated, so handing it over pinned every socket to the
+  // `baseHeaders` only ever carries the anon key, so handing it over pinned every socket to the
   // anon key for the life of the page. Realtime enforces RLS, so on a table that is not
   // anon-readable the socket reported SUBSCRIBED and delivered nothing, which is exactly the
   // failure the storage note above describes.
-  const realtime = new RealtimeClient(`${config.url}/realtime/v1`, getAuthHeaders)
+  const realtime = new RealtimeClient(() => `${address()}/realtime/v1`, getAuthHeaders)
 
   const onUnauthorized = config.serviceRoleKey
     ? undefined
     : (refusedToken: string): Promise<boolean> => auth.refreshRefusedSession(refusedToken)
 
-  const functions = new FunctionsClient(config.url, getAuthHeaders, doFetch, onUnauthorized)
-  const runGraphql = createGraphqlRunner({ endpoint: `${config.url}/graphql/v1`, send: doFetch, headers: getAuthHeaders, onUnauthorized })
+  const functions = new FunctionsClient(address, getAuthHeaders, doFetch, onUnauthorized)
+  const runGraphql = createGraphqlRunner({
+    get endpoint(): string {
+      return `${address()}/graphql/v1`
+    },
+    send: doFetch,
+    headers: getAuthHeaders,
+    onUnauthorized,
+  })
 
   // Signing in has to reach an already-open socket.
   //
@@ -746,10 +767,13 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     TTables extends Record<string, TableDef> = Record<string, TableDef>,
     TName extends string = string,
   >(table: string): TableClient<TDef, TTables, TName> =>
-    new TableClient<TDef, TTables, TName>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized, doFetch)
+    new TableClient<TDef, TTables, TName>(address, table, getAuthHeaders, realtime, queryCache, onUnauthorized, doFetch)
 
   return {
-    url: config.url,
+    /** The API address: as given, else as the page has set it; empty while neither has one. */
+    get url(): string {
+      return target.currentUrl()
+    },
     serviceRoleKey: config.serviceRoleKey,
 
     from<TTable extends keyof TDatabase["public"]["Tables"] & string>(
@@ -817,7 +841,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       try {
         res = await fetchWithOptional401Retry(
           doFetch,
-          `${config.url}/rest/v1/rpc/${fn}`,
+          `${address()}/rest/v1/rpc/${fn}`,
           {
             method,
             ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),

@@ -234,4 +234,24 @@ describe("the generated client, as TypeScript reads it", () => {
   it("types rich text and blocks read through graphql() as their values, not strings", () => {
     expect(compileGeneratedClient(generateProjectClient(jsonFieldsAst) + GRAPHQL_USE)).toEqual([])
   })
+
+  // A build that was not given them has `undefined` for both, and the client then reads the page's
+  // `__SUPATYPE_ENV__`. Requiring a string made every app write `!` or its own guard, and a guard
+  // on a value the bundler knows is `undefined` is folded into a throw that hides the cause.
+  it("takes an address and anon key that may be undefined, as a build leaves them", () => {
+    expect(compileGeneratedClient(generateProjectClient(plainAst) + UNSET_ENV_USE)).toEqual([])
+  })
 })
+
+/** An app setting up its client from build-time names that may be unset, as Next.js types them. */
+const UNSET_ENV_USE = `
+import { createClient } from "@supatype/client"
+
+declare const unsetAtBuild: { NEXT_PUBLIC_SUPATYPE_URL: string | undefined; NEXT_PUBLIC_SUPATYPE_ANON_KEY: string | undefined }
+
+export const fromBuild = createClient({
+  url: unsetAtBuild.NEXT_PUBLIC_SUPATYPE_URL,
+  anonKey: unsetAtBuild.NEXT_PUBLIC_SUPATYPE_ANON_KEY,
+})
+export const fromPage = createClient({})
+`

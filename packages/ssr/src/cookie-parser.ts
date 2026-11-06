@@ -1,5 +1,6 @@
 import type { Session, User } from "@supatype/client"
 import type { CookieToSet } from "./types.js"
+import { decodeBase64, isJsonObject, jwtClaims } from "./jwt-claims.js"
 
 /** The prefix `@supatype/client` names its session cookie with: `st-auth-token`. */
 export const DEFAULT_COOKIE_PREFIX = "st"
@@ -29,11 +30,6 @@ export function parseSessionFromCookies(
   return null
 }
 
-/** True for a JSON object: not null, not an array. */
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
 function parseSessionValue(value: string): Session | null {
   try {
     return normalizeSession(JSON.parse(decodeURIComponent(value)))
@@ -42,17 +38,6 @@ function parseSessionValue(value: string): Session | null {
     return normalizeSession(JSON.parse(decodeBase64(value)))
   } catch { /* not base64 JSON */ }
   return null
-}
-
-/**
- * Base64 or base64url text decoded as UTF-8, with `atob` and `TextDecoder` rather than Node's
- * `Buffer`: the server client also runs on edge runtimes, which have no `Buffer`. Throws on input
- * that is not base64.
- */
-function decodeBase64(text: string): string {
-  const standard = text.replace(/-/g, "+").replace(/_/g, "/")
-  const binary = atob(standard + "=".repeat((4 - (standard.length % 4)) % 4))
-  return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)))
 }
 
 /**
@@ -76,18 +61,12 @@ function normalizeSession(r: unknown): Session | null {
 }
 
 function isJwtExpired(token: string): boolean {
-  const parts = token.split(".")
-  if (parts.length !== 3) return true
-  try {
-    const payload = JSON.parse(decodeBase64(parts[1]!))
-    // A payload that is not an object reads as expired, as it did when reading it threw.
-    if (!isJsonObject(payload)) return true
-    const exp = typeof payload["exp"] === "number" ? payload["exp"] : null
-    if (exp === null) return false
-    return Date.now() / 1000 > exp
-  } catch {
-    return true
-  }
+  // A token that is not a JWT, or whose payload is not an object, reads as expired.
+  const payload = jwtClaims(token)
+  if (payload === null) return true
+  const exp = typeof payload["exp"] === "number" ? payload["exp"] : null
+  if (exp === null) return false
+  return Date.now() / 1000 > exp
 }
 
 function normalizeUser(raw: Record<string, unknown>): User {

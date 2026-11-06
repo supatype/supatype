@@ -11,6 +11,7 @@ import { PostgrestErrorCodes, transportFailure } from "./errors.js"
 import { plainFetch, type FetchOptions, type RequestTransport } from "./fetch-with-retry.js"
 import { isJsonObject, isOneOf, readJsonObject, refusalText } from "./json.js"
 import { bearerRole } from "./jwt.js"
+import { settle, type Deferred } from "./runtime-env.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -232,7 +233,7 @@ export function parseContentRangeTotal(header: string | null): number | null {
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 
 export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<QueryResult<TRow[]>> {
-  private readonly baseUrl: string
+  private readonly base: Deferred<string>
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: UnauthorizedHandler | undefined
@@ -244,7 +245,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
   private readonly head: boolean
 
   constructor(
-    baseUrl: string,
+    baseUrl: Deferred<string>,
     path: string,
     headers: Record<string, string> | HeadersProvider,
     columns?: string | undefined,
@@ -254,7 +255,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     transport: RequestTransport = plainFetch,
   ) {
     super()
-    this.baseUrl = baseUrl
+    this.base = baseUrl
     this.path = path
     this.getHeaders = asHeadersProvider(headers)
     this.onUnauthorized = onUnauthorized
@@ -352,6 +353,11 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null | undefined,
   ): PromiseLike<R1 | R2> {
     return this._fetch({}).then(onfulfilled, onrejected)
+  }
+
+/** The address, read now: a deferred one is only known when the request is sent. */
+  private get baseUrl(): string {
+    return settle(this.base)
   }
 
   private buildRequestUrl(): string {
@@ -538,7 +544,7 @@ function rowNotSelected(): { data: null; error: SupatypeError; count: null } {
 export class MutationBuilder<TRow, TTables = unknown, TName extends string = string, TResult = null>
   extends FilterBuilder
   implements PromiseLike<QueryResult<TResult>> {
-  private readonly baseUrl: string
+  private readonly base: Deferred<string>
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: UnauthorizedHandler | undefined
@@ -553,7 +559,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   private returning = false
 
   constructor(
-    baseUrl: string,
+    baseUrl: Deferred<string>,
     path: string,
     headers: Record<string, string> | HeadersProvider,
     method: HttpMethod,
@@ -563,7 +569,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     transport: RequestTransport = plainFetch,
   ) {
     super()
-    this.baseUrl = baseUrl
+    this.base = baseUrl
     this.path = path
     this.getHeaders = asHeadersProvider(headers)
     this.onUnauthorized = onUnauthorized
@@ -653,6 +659,11 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
       // writing it back would fail now that the generated types declare one.
       ...(this.body !== undefined && { body: stringifyWithBigInts(this.body) }),
     }
+  }
+
+/** The address, read now: a deferred one is only known when the request is sent. */
+  private get baseUrl(): string {
+    return settle(this.base)
   }
 
   private async _execute(fetchHeaders: Record<string, string> = {}): Promise<QueryResult<TRow[]>> {
@@ -748,7 +759,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     if (!this.returning) return this.nothingReturned()
     const select = readBackColumns(this.params.get("select"), target.primaryKey, keys.length)
     const result = await new QueryBuilder<Record<string, unknown>>(
-      this.baseUrl,
+      this.base,
       this.path,
       this.getHeaders,
       select,

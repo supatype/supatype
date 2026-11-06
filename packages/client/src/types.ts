@@ -414,10 +414,19 @@ export interface SelectQueryOptions {
 }
 
 export interface SupatypeClientConfig {
-  /** Base URL of the Supatype gateway (e.g. http://localhost:18473) */
-  url: string
-  /** Anon JWT key */
-  anonKey: string
+  /**
+   * Base URL of the Supatype gateway (e.g. http://localhost:18473). Left out, or empty as a bundler
+   * leaves an unset name, it is read from `window.__SUPATYPE_ENV__` (set by
+   * `<script src="/supatype-env.js">`) when the first request is made. It is never guessed from the
+   * page's own address: with neither, that request throws `MissingClientValuesError`.
+   */
+  url?: string | undefined
+  /**
+   * Anon JWT key. Left out, or empty, it is read from `window.__SUPATYPE_ENV__` when the first
+   * request is made; with neither, that request throws `MissingClientValuesError` naming the
+   * variables to set. `createClient` itself never throws for either.
+   */
+  anonKey?: string | undefined
   /**
    * Service role key: bypasses row-level security.
    * Only set this in trusted server-side or developer-tool contexts.

@@ -1,6 +1,7 @@
 import type { SupatypeError } from "./types.js"
 import { transportFailure } from "./errors.js"
 import { plainFetch, type RequestTransport } from "./fetch-with-retry.js"
+import { settle, type Deferred } from "./runtime-env.js"
 import {
   isArrayOf,
   isBoolean,
@@ -191,7 +192,7 @@ async function storageRefusal(res: Response, fallback: string): Promise<string> 
 }
 
 export class StorageClient {
-  private readonly url: string
+  private readonly base: Deferred<string>
   private readonly headers: AuthHeaders
   private readonly send: RequestTransport
 
@@ -206,14 +207,19 @@ export class StorageClient {
    * Every other client on this object already took the same function. Storage was the one that did
    * not.
    */
-  constructor(url: string, headers: AuthHeaders, transport: RequestTransport = plainFetch) {
+  constructor(url: Deferred<string>, headers: AuthHeaders, transport: RequestTransport = plainFetch) {
     this.send = transport
-    this.url = url
+    this.base = url
     this.headers = headers
   }
 
+  /** The storage address, read now: a deferred one is only known when a request is made. */
+  private get url(): string {
+    return settle(this.base)
+  }
+
   from(bucket: string): BucketClient {
-    return new BucketClient(this.url, bucket, this.headers, this.send)
+    return new BucketClient(this.base, bucket, this.headers, this.send)
   }
 
   /**
@@ -273,16 +279,21 @@ export class StorageClient {
 }
 
 export class BucketClient {
-  private readonly url: string
+  private readonly base: Deferred<string>
   private readonly bucket: string
   private readonly headers: AuthHeaders
   private readonly send: RequestTransport
 
-  constructor(url: string, bucket: string, headers: AuthHeaders, transport: RequestTransport = plainFetch) {
+  constructor(url: Deferred<string>, bucket: string, headers: AuthHeaders, transport: RequestTransport = plainFetch) {
     this.send = transport
-    this.url = url
+    this.base = url
     this.bucket = bucket
     this.headers = headers
+  }
+
+  /** The storage address, read now: a deferred one is only known when a request is made. */
+  private get url(): string {
+    return settle(this.base)
   }
 
   async upload(

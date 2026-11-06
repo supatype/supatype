@@ -21,6 +21,7 @@
  */
 
 import { readJsonObject } from "./json.js"
+import { settle, type Deferred } from "./runtime-env.js"
 
 /** Milliseconds of slack before expiry at which the token is treated as spent. */
 const REFRESH_SKEW_MS = 5_000
@@ -47,14 +48,14 @@ export class PreviewLinkError extends Error {
  * for as long as any request is outstanding, and this needs two strings.
  */
 export class PreviewCredential {
-  readonly #endpoint: string
+  readonly #baseUrl: Deferred<string>
   readonly #code: string
   #token: string | null = null
   #expiresAtMs = 0
   #inFlight: Promise<string> | null = null
 
-  constructor(baseUrl: string, code: string) {
-    this.#endpoint = `${baseUrl.replace(/\/$/, "")}/preview-links/resolve`
+  constructor(baseUrl: Deferred<string>, code: string) {
+    this.#baseUrl = baseUrl
     this.#code = code
   }
 
@@ -71,9 +72,12 @@ export class PreviewCredential {
   }
 
   async #exchange(): Promise<string> {
+    // Read before the request rather than inside it: a client with no address throws the error that
+    // says so, not one calling the link invalid.
+    const endpoint = `${settle(this.#baseUrl).replace(/\/$/, "")}/preview-links/resolve`
     let response: Response
     try {
-      response = await fetch(this.#endpoint, {
+      response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: this.#code }),

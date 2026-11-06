@@ -22,6 +22,32 @@
 
 ### Features
 
+* **init:** a static app's `index.html` (and the page Vite builds it from) loads
+  `<script src="/supatype-env.js"></script>` in its head, so the built site takes the address and
+  anon key of whichever deployment serves it. Only where the committed config serves the app's
+  files; a proxied app's page is left as it was.
+* **init:** in a Next.js App Router app, init writes `app/supatype-env.js/route.ts` (or under
+  `src/app`, and `route.js` without a `tsconfig.json`), which serves `/supatype-env.js` from
+  `@supatype/ssr/next` with the running server's `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, adds
+  `@supatype/ssr` to the app's dependencies, and loads the script first in the root layout's
+  `<body>` with `next/script`'s `beforeInteractive`. One `next build` then runs against any
+  deployment. A route or layout that already has it is left alone; a layout init cannot edit
+  safely (no single `<body>`, or a `Script` that is not `next/script`) is left as it is, and the two
+  lines to add are printed. A Pages Router app gets nothing written and the steps printed. A static
+  export (`output: "export"` in `next.config`, read as text) gets neither the route nor the script,
+  since `next build` cannot export a dynamic route; init says to build it with
+  `supatype build -- next build`, or to let Supatype hosting serve it.
+* **dev, init, keys:** a local stack's values in `.env.development.local` now include
+  `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` beside the frontend copies, so a Next.js app's
+  `/supatype-env.js` route and its server client find them in `next dev` instead of refusing with 503.
+  A deployment's values in `.env` still get only the frontend names. The CLI never loads
+  `.env.development.local` into its own environment, so `supatype build` does not take these as
+  values the host set.
+* **client:** the generated client takes `url` and `anonKey` as `string | undefined` and, for one
+  missing, reads the page's `window.__SUPATYPE_ENV__` at its first request; with neither, that
+  request throws naming the variables to set, `supatype build` and the Next.js route, instead of
+  sending requests the gateway refuses. Creating the client never throws, so `next build` can
+  prerender a page that creates one at module scope.
 * **push:** `--run-hooks` fires after-hooks for the rows a push's own data migrations rewrite (column
   conversions, block moves, kind changes). Without it they are skipped, as seeds are. Against an
   engine whose capabilities do not list `run_hooks`, the push stops before anything is sent.

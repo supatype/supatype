@@ -21,13 +21,14 @@ import { createServerClient } from "@supatype/ssr"
 import { cookies } from "next/headers"
 import type { Database } from "@/types/database"
 
-const url = process.env.NEXT_PUBLIC_SUPATYPE_URL!
-const anonKey = process.env.NEXT_PUBLIC_SUPATYPE_ANON_KEY!
+// The address and anon key come from SUPATYPE_URL and SUPATYPE_ANON_KEY in the server's
+// environment, read on each call, so the same build runs against whichever deployment it is
+// started for. Pass them first, as createServerClient(url, anonKey, options), to use others.
 
 // Server Components: no `setAll`, so the client never refreshes the session.
 export async function createClient() {
   const cookieStore = await cookies()
-  return createServerClient<Database>(url, anonKey, {
+  return createServerClient<Database>({
     cookies: {
       getAll() { return cookieStore.getAll() },
     },
@@ -37,7 +38,7 @@ export async function createClient() {
 // Route Handlers and Server Actions: a refreshed session goes back to the browser.
 export async function createWritableClient() {
   const cookieStore = await cookies()
-  return createServerClient<Database>(url, anonKey, {
+  return createServerClient<Database>({
     cookies: {
       getAll() { return cookieStore.getAll() },
       setAll(cookiesToSet) {
@@ -71,6 +72,40 @@ const { data: { session } } = await supatype.auth.getSession()
 // session is null if no valid cookie is present. Without `setAll` it is the cookie's session as it
 // is: its access token may have expired, since that client never refreshes it.
 ```
+
+### The browser client's values at run time (`@supatype/ssr/next`)
+
+`next build` prerenders static pages without the deployment's values. Serve them to the page when
+it loads instead, from the same two server variables, with a route and one line in the root layout:
+
+```ts
+// app/supatype-env.js/route.ts
+export { GET } from "@supatype/ssr/next"
+export const dynamic = "force-dynamic"
+```
+
+```tsx
+// app/layout.tsx
+import Script from "next/script"
+
+// inside <body>, before anything else:
+<Script src="/supatype-env.js" strategy="beforeInteractive" />
+```
+
+Write the `dynamic` line in the route file itself: Next's build reads a route's segment config
+from that file's own source and does not recognize a re-exported one. `GET` answers
+`window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` from `SUPATYPE_URL` and
+`SUPATYPE_ANON_KEY` as the server has them on each request, with `Cache-Control: no-cache`, the same
+body and headers the Supatype server gives its own `/supatype-env.js`. Switched off with
+`SUPATYPE_PUBLIC_ENV=false` it answers 404 `no-store`. Misconfigured it answers 503 `no-store`,
+naming the setting to fix: `SUPATYPE_ANON_KEY` or `SUPATYPE_URL` unset, `SUPATYPE_PUBLIC_ENV` set to
+a word other than true/1/yes/on or false/0/no/off (blank counts as on), or the anon key variable
+holding a service role token. No key is echoed, and no service role value is ever read.
+
+The browser client, created with no `url` or `anonKey` (or with `NEXT_PUBLIC_` names left unset at
+build time), reads `window.__SUPATYPE_ENV__` at its first request. A client created at module scope
+does not throw while the build prerenders a page; its first request throws, naming what to set,
+when neither the build nor the page supplied the values.
 
 ### Cookie adapter interface
 
@@ -120,9 +155,11 @@ createServerClient(url, anonKey, {
 
 ## API
 
-### `createServerClient<TDatabase>(url, anonKey, options)`
+### `createServerClient<TDatabase>(url, anonKey, options)`, or `createServerClient<TDatabase>(options)`
 
-Returns a fully-typed `SupatypeClient` pre-loaded with the user's session from cookies. The returned client has the same API as the browser client, `.from()`, `.auth`, `.storage`, `.rpc()`, etc.
+`url` and `anonKey` default to `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` from the server's environment
+when left out, `undefined` or empty, and where one of those is unset to `NEXT_PUBLIC_SUPATYPE_URL` or
+`NEXT_PUBLIC_SUPATYPE_ANON_KEY`. Returns a fully-typed `SupatypeClient` pre-loaded with the user's session from cookies. The returned client has the same API as the browser client, `.from()`, `.auth`, `.storage`, `.rpc()`, etc.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
