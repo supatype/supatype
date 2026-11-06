@@ -2745,6 +2745,8 @@ $ supatype seed --environment staging
 
 `--status` lists each applied file with its status, when it ran, how long it took, and whether the file has changed since. `--environment` names the environment for an `{ environment }` condition.
 
+A Docker project's local stack has to be running: with it stopped, `supatype seed` starts nothing and exits 2, saying to start it with `supatype dev`, or `supatype self-host compose up -d` on a server. `--connection` seeds the database it names either way.
+
 A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass `--force` only when you mean to seed the linked project.
 
 Each file is one transaction. Without `--atomic`, a failure in the third file leaves the first two applied, and the report says so.
@@ -4520,7 +4522,9 @@ On an unlinked project with a self-hosted Compose stack, `functions deploy` uplo
 
 Every `self-host compose` command renders `.supatype/self-host/docker-compose.yml` again before it runs. The file names each bind mount by its absolute path on this machine, and names its Compose project `supatype-` plus `project.name`. So `docker compose -f .supatype/self-host/docker-compose.yml` run by hand reaches the same stack, and a project moved to another folder is picked up by the next command.
 
-A render keeps the stack in the mode it runs in. While `supatype dev` runs for the project, commands such as `push`, `update` and `self-host compose` render dev mode. Otherwise they use the mode of the running `server` container, and standalone when none is running. So a push to a production stack leaves it standalone.
+A render keeps the stack in the mode it runs in. While `supatype dev` runs for the project, commands such as `push`, `update` and `self-host compose` render dev mode. Otherwise they use the mode of the running `server` container, so a push to a production stack leaves it standalone.
+
+Commands that reach the local stack's database or API need that stack running: `push`, `diff`, `adopt`, `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull`, `admin` and `db check`. With it stopped they start nothing and refuse with `The local stack isn't running. Start it with `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push` again.`, naming the command run. `seed` exits 2, the others 1. A linked project, `--connection`, `connection` in the config and an external database are reached as they are.
 
 `build` takes each value from the first of: the environment (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` or any framework's name), the `/supatype-env.json` of the server the environment's URL names (for the anon key only, so CI can set just `SUPATYPE_URL`), the linked environment, and a `.env` that records a deployment (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass `--allow-local`, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself `supatype build` is refused rather than run again. `deploy` builds the app the same way. See [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html).
 

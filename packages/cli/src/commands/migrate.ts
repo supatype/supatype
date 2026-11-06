@@ -1,3 +1,4 @@
+import { requireLocalStack } from "../local-stack-guard.js"
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { writeFileSync } from "node:fs"
@@ -134,6 +135,7 @@ export function registerMigrate(program: Command): void {
     .option("--env <name>", "Target environment when linked")
     .option("--direct", "Use local engine subprocess (skip control plane)")
     .action(async (opts: MigrationsTargetOptions) => {
+      requireLocalStack(process.cwd(), loadConfig(process.cwd()), "migrations list", opts)
       const list = await targetListMigrations(migrationsTarget(process.cwd(), opts))
       if (list.length === 0) {
         info("No migrations applied.")
@@ -160,6 +162,7 @@ export function registerMigrate(program: Command): void {
     .action(async (opts: MigrateOptions) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      requireLocalStack(cwd, config, "migrate", { connection: opts.connection, direct: true })
       const connection = resolveHostDatabaseUrl(cwd, config, { connection: opts.connection, allowDerived: true }).dsn
       const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
@@ -194,6 +197,7 @@ export function registerMigrate(program: Command): void {
     }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      requireLocalStack(cwd, config, "rollback", opts)
       const pgSchema = schemaPgSchema(cwd)
       const link = loadProjectLink(cwd)
       const useDirect = opts.direct || Boolean(opts.connection)
@@ -238,6 +242,7 @@ export function registerMigrate(program: Command): void {
       }
 
       const config = loadConfig()
+      requireLocalStack(process.cwd(), config, "reset", { connection: opts.connection, direct: true })
       const connection = resolveHostDatabaseUrl(process.cwd(), config, { connection: opts.connection, allowDerived: true }).dsn
       const cwd = process.cwd()
 

@@ -133,6 +133,7 @@ import { waitForDatabaseAfterUp } from "./dev-db-ready.js"
 import {
   DERIVED_DSN_SOURCE,
   hostComposeDbUrl,
+  NoStackRunning,
   requireRunningStack,
   resolveHostDatabaseUrl,
   stackHostDbUrl,
@@ -146,7 +147,7 @@ import {
 } from "./compose-db-roles.js"
 import { spawnComposeEngine, spawnComposeEngineSync } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
-import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
+import { claimDevRenderMode, composeRenderMode, composeRenderOptions, runningStackMode, type ComposeRenderMode } from "./compose-render-mode.js"
 import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 import { mailerProviderEnv } from "./mailer-env.js"
 import { fetchWithin } from "./fetch-within.js"
@@ -1395,70 +1396,29 @@ export async function adoptSchemaDocker(
  * `overrides.engine` is set: then Postgres is published to the host and diff runs
  * through the local engine binary.
  *
- * A dry run leaves the machine as it found it: a database the diff had to start is stopped again
- * afterwards. It used to be left running.
+ * Only against a stack that is running (issue 41): a stopped one is refused, not started. The diff
+ * used to start Postgres itself, and stop it again afterwards.
  */
 export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("diffSchemaDocker requires provider: docker")
   }
   const project = composeProjectName(config.project.name)
-  const brand = { intro: "Schema diff" }
   if (hasEngineOverride(config)) {
-    return withComposeDatabaseStarted(cwd, config, project, () => ensureDockerDbPublishedForHostEngine(cwd, config, brand), () =>
-      diffWithHostEngine(cwd, config),
-    )
+    await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Schema diff" })
+    return diffWithHostEngine(cwd, config)
   }
-
+  const running = runningStackMode(cwd, config.project.name)
+  if (running === undefined && !usesExternalDatabase(config)) throw new NoStackRunning("diff")
   // A diff of a standalone stack must not write dev values over the operator's .env (SH1). A dev
-  // stack's is brought up to date as push does: compose interpolates the whole file, so a project
-  // that has not yet run `dev` can lack values `up -d db` needs.
-  const mode = composeRenderMode(cwd, config.project.name)
+  // stack's is brought up to date as push does: compose interpolates the whole file.
+  const mode = running ?? "standalone"
   if (mode === "dev") {
     const { anonKey, serviceRoleKey } = devApiKeys(cwd)
     ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, await resolveKongPort(cwd, project), undefined)
   }
-
   const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
-  return withComposeDatabaseStarted(cwd, config, project, () => startComposeDatabase(config, paths, cwd, project, brand), () =>
-    diffWithComposeEngine(cwd, config, paths, project),
-  )
-}
-
-/**
- * `run` with the stack's database up, `start` bringing it up, then stopped again when it was not
- * running before. One that a `supatype dev` session or a running stack is using is left as it was.
- */
-async function withComposeDatabaseStarted<T>(
-  cwd: string,
-  config: SupatypeProjectConfig,
-  project: string,
-  start: () => Promise<void>,
-  run: () => Promise<T>,
-): Promise<T> {
-  const stack = { project, composePath: selfHostComposePaths(cwd).composePath }
-  // An external database is not the stack's to start or stop.
-  const wasStopped = !usesExternalDatabase(config) && !composeServiceIsRunning(cwd, stack, "db")
-  let started = false
-  try {
-    await start()
-    started = true
-    return await run()
-  } finally {
-    // A start that failed after `up -d db` (its health wait, the host publish) has still brought
-    // the container up; one refused before it (no stack running) has started nothing to stop.
-    if (wasStopped && (started || composeServiceIsRunning(cwd, stack, "db"))) stopComposeDatabase(cwd, stack)
-  }
-}
-
-/** Stop the stack's database, saying so rather than failing the command whose result is already in hand. */
-function stopComposeDatabase(cwd: string, stack: ComposeStack): void {
-  try {
-    const status = runDockerCompose(stack.composePath, ["stop", "db"], cwd, stack.project, { quiet: true })
-    if (status !== 0) warn("Could not stop the Postgres container this command started. Stop it with `supatype self-host compose stop db`.")
-  } catch (err) {
-    warn(`Could not stop the Postgres container this command started: ${errorMessage(err)}`)
-  }
+  return diffWithComposeEngine(cwd, config, paths, project)
 }
 
 /** The diff from the host engine binary, against the database published to the host. */
@@ -1514,6 +1474,11 @@ function unparsedDiffError(rawOutput: string): never {
  * `supatype push` when `provider: docker`. Uses in-compose schema-engine unless
  * `overrides.engine` is set: then Postgres is published to the host and push runs
  * through the local engine binary (AST v2, contributor builds).
+ *
+ * Only to a stack that is running (issue 41): a stopped one is refused, not started. The push used
+ * to start Postgres, apply, then start the rest of the stack, and exited 1 with the schema applied
+ * when that start failed. An external database is applied to with no stack running, and then no
+ * stack is started.
  */
 export async function pushSchemaDocker(
   cwd: string,
@@ -1524,36 +1489,51 @@ export async function pushSchemaDocker(
     throw new Error("pushSchemaDocker requires provider: docker")
   }
   const project = composeProjectName(config.project.name)
-  // The stack's own mode, never dev by default: a push to a production stack used to render it as
-  // dev and recreate it that way, and write dev values over the operator's .env (SH1). A host
-  // engine is handed the database derived from the running stack, so with none running it refuses
-  // before anything starts (M1b).
-  const hostEngineDerivesDb = hasEngineOverride(config) && !usesExternalDatabase(config)
-  const mode = hostEngineDerivesDb
-    ? requireRunningStack(cwd, config.project.name)
-    : composeRenderMode(cwd, config.project.name)
+  const running = pushStackMode(cwd, config)
+  const mode = running ?? "standalone"
   const kongPort = await resolveKongPort(cwd, project)
   if (mode === "dev") await prepareDevComposeEnv(cwd, config, project, kongPort)
-  const gatewayPort = composeGatewayHostPort(config, mode, kongPort)
-  const { anonKey, serviceRoleKey } = devApiKeys(cwd)
-
   const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
-  const pushBrand = { intro: "Push schema" }
+  const stack = { paths, project, gatewayPort: composeGatewayHostPort(config, mode, kongPort), brand: { intro: "Push schema" } }
 
-  await startComposeDatabase(config, paths, cwd, project, pushBrand)
+  if (running !== undefined) await startComposeDatabase(config, paths, cwd, project, stack.brand)
   if (!usesExternalDatabase(config)) await privatizeTableDefaults(paths, cwd, project)
-
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await runComposeSchemaPush(cwd, config, paths, schemaPath, project, opts)
   // `up -d` below recreates PostgREST when the tier changed its environment.
   await followRecordedTier(cwd, config, { recreate: false })
+  if (running === undefined) {
+    console.log("[supatype] Schema pushed. The local stack isn't running, so nothing else was started.")
+    return
+  }
+  await bringUpAfterApply(() => bringPushedStackUp(cwd, config, stack, ast, devApiKeys(cwd)))
+}
 
-  await bringPushedStackUp(cwd, config, { paths, project, gatewayPort, brand: pushBrand }, ast, {
-    anonKey,
-    serviceRoleKey,
-  })
-  console.log("[supatype] Schema pushed.")
+/**
+ * The mode of the stack a push goes to, or undefined for an external database with no stack
+ * running. A stopped stack with its own database is refused ({@link NoStackRunning}). The stack's
+ * own mode, never dev by default: a push to a production stack used to render it as dev and
+ * recreate it that way, and write dev values over the operator's .env (SH1).
+ */
+function pushStackMode(cwd: string, config: SupatypeProjectConfig): ComposeRenderMode | undefined {
+  const running = runningStackMode(cwd, config.project.name)
+  if (running === undefined && !usesExternalDatabase(config)) throw new NoStackRunning("push")
+  return running
+}
+
+/**
+ * What a push does on a running stack after it applied: `up -d` for what the schema changed, then
+ * the buckets, the first admin and the REST wait. The schema is in by then, so a step that fails
+ * does not fail the push (issue 41): it is warned about, and the push exits 0.
+ */
+async function bringUpAfterApply(bringUp: () => Promise<void>): Promise<void> {
+  try {
+    await bringUp()
+    console.log("[supatype] Schema pushed.")
+  } catch (err) {
+    warn(`The schema was applied, but a step after it failed: ${errorMessage(err)}`)
+  }
 }
 
 /**
@@ -1602,9 +1582,8 @@ async function bringPushedStackUp(
 ): Promise<void> {
   const { paths, project, gatewayPort, brand } = stack
   const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true, brand })
-  if (upGateway !== 0) {
-    exitComposeFailed(upGateway, "Could not start the Compose gateway stack.", brand)
-  }
+  // Thrown, not exited: the schema is applied by now (bringUpAfterApply).
+  if (upGateway !== 0) throw new Error(`docker compose up exited with status ${upGateway}`)
   await provisionStartedStack(cwd, config, { composePath: paths.composePath, project, gatewayPort }, ast, keys.serviceRoleKey)
 
   // Last, so the admin user and the buckets are not held up by it. `supatype dev` never comes

@@ -3,6 +3,7 @@
 // `npx supatype admin create-user`, create an admin user in the project's
 // auth.users table. First admin is ensured on `supatype dev` or `supatype push`.
 
+import { requireLocalStack } from "../local-stack-guard.js"
 import type { Command } from "commander"
 import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -117,8 +118,10 @@ export function studioLoginHint(studioUrl: string | undefined): string {
 function resolveAdminConnection(
   cwd: string,
   config: SupatypeProjectConfig,
+  command: string,
   override?: string,
 ): string {
+  requireLocalStack(cwd, config, command, { connection: override, direct: true })
   return resolveHostDatabaseUrl(cwd, config, { connection: override, allowDerived: true }).dsn
 }
 
@@ -143,7 +146,7 @@ export function registerAdmin(program: Command): void {
       }) => {
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = resolveAdminConnection(cwd, config, opts.connection)
+        const connection = resolveAdminConnection(cwd, config, "admin create-user", opts.connection)
 
         const email = opts.email ?? (await promptText("Admin email"))
         if (!email || !email.includes("@")) {
@@ -204,7 +207,7 @@ export function registerAdmin(program: Command): void {
         assertStudioRole(opts.role)
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = resolveAdminConnection(cwd, config, opts.connection)
+        const connection = resolveAdminConnection(cwd, config, "admin set-role", opts.connection)
 
         const pg = await importPg()
         const pool = new pg.Pool({ connectionString: connection, max: 2 })
@@ -238,7 +241,7 @@ export function registerAdmin(program: Command): void {
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const connection = resolveAdminConnection(cwd, config, opts.connection)
+      const connection = resolveAdminConnection(cwd, config, "admin list-users", opts.connection)
 
       const pg = await importPg()
       const pool = new pg.Pool({ connectionString: connection, max: 2 })

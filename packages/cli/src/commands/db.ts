@@ -5,6 +5,7 @@
  *   supatype db check: does this database meet what Supatype needs of it?
  */
 
+import { requireLocalStack } from "../local-stack-guard.js"
 import type { Command } from "commander"
 import { errorMessage } from "../error-message.js"
 import { DatabaseConnectFailed, withDatabase } from "../db-rows.js"
@@ -153,6 +154,7 @@ export function registerDb(program: Command): void {
       if (!url || !schema) {
         try {
           const config = loadConfig(cwd)
+          if (url === undefined) requireLocalStack(cwd, config, "db check", { direct: true })
           url = url ?? resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn
           schema = schema ?? config.schema?.pg_schema ?? "public"
         } catch (err) {

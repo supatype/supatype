@@ -214,7 +214,7 @@ async function doctor(opts: DoctorOptions): Promise<void> {
   // As push sends it: the engine refuses a versioned schema that carries no publishing config.
   const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
-  const target = await schemaCommandTarget(cwd, config, opts)
+  const target = await schemaCommandTarget(cwd, config, opts, "doctor")
   // Asked before the preview, so an engine that would record drift nobody was shown is refused
   // before anyone is asked to agree to it.
   await requireTargetFeatures(target, [

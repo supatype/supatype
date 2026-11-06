@@ -287,6 +287,7 @@ db.$sql(
 <span class="pr">$</span> supatype seed --connection &lt;dsn&gt; <span class="c"># another database</span>
 <span class="pr">$</span> supatype seed --environment staging</pre></div>
     <p><code>--status</code> lists each applied file with its status, when it ran, how long it took, and whether the file has changed since. <code>--environment</code> names the environment for an <code>{ environment }</code> condition.</p>
+    <p>A Docker project's local stack has to be running: with it stopped, <code>supatype seed</code> starts nothing and exits 2, saying to start it with <code>supatype dev</code>, or <code>supatype self-host compose up -d</code> on a server. <code>--connection</code> seeds the database it names either way.</p>
     <p>A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass <code>--force</code> only when you mean to seed the linked project.</p>
     <p>Each file is one transaction. Without <code>--atomic</code>, a failure in the third file leaves the first two applied, and the report says so.</p>
     <p>Errors name your schema, such as <code>Tag.name is already taken</code>, with the file and position. Exit code <code>1</code> means a seed failed. Exit code <code>2</code> means the run could not start.</p>

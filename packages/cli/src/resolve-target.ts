@@ -49,6 +49,7 @@ import {
   resolveCloudRefreshToken,
 } from "./cloud-credentials.js"
 import { TargetApiError, targetFetch, type TargetFetchOptions } from "./target-client.js"
+import { requireLocalStack } from "./local-stack-guard.js"
 import { CAPABILITIES_TTL_MS, capabilitiesCache, rememberCapabilities, type CapabilitiesCache } from "@supatype/shared"
 import {
   adoptNeeds,
@@ -627,7 +628,10 @@ export async function schemaCommandTarget(
   cwd: string,
   config: SupatypeProjectConfig,
   opts: { connection?: string; env?: string; direct?: boolean },
+  command: string,
 ): Promise<DeployTarget> {
+  // Before anything starts: a stopped local stack is refused, not started (issue 41).
+  requireLocalStack(cwd, config, command, opts)
   if (opts.direct || opts.connection) {
     return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
   }

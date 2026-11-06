@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$FAKE_DOCKER_NODE" "$(dirname "$0")/docker.cjs" "$@"

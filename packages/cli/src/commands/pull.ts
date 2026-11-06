@@ -1,3 +1,4 @@
+import { requireLocalStack } from "../local-stack-guard.js"
 import type { Command } from "commander"
 import { writeFileSync } from "node:fs"
 import { loadConfig } from "../config.js"
@@ -19,6 +20,7 @@ export function registerPull(program: Command): void {
     .action(async (opts: { connection?: string; out?: string; dryRun?: boolean }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      requireLocalStack(cwd, config, "pull", { connection: opts.connection, direct: true })
       const connection = await resolveHostEngineDatabaseUrl(cwd, config, opts.connection)
       const pgSchema = config.schema?.pg_schema ?? "public"
 

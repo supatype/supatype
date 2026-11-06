@@ -4,6 +4,15 @@
 
 ### Breaking Changes
 
+* **push, diff, seed and every command that reaches the local stack:** these commands no longer
+  start the local stack. On a Docker project with the stack stopped, `push`, `diff`, `adopt`,
+  `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull`, `admin`
+  and `db check` refuse before doing anything: "The local stack isn't running. Start it with
+  `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push`
+  again." (naming the command run). `seed` exits 2, the others 1. `push` used to start Postgres,
+  apply, then start the rest of the stack, and `diff` started Postgres and stopped it again. A
+  linked project, `--connection`, `connection` in the config and an external database are reached
+  as before, and a running stack behaves as before.
 * **schema:** a `?` on a model field (`due?: string`) is refused, naming `Model.field` and saying to
   write `Optional<>`. It read as nullable but compiled to a `NOT NULL` column.
 * **generate:** `supatype generate --connection` is refused as an unknown option. Generate writes the
@@ -519,6 +528,10 @@
 * **init:** `supatype init` uses an exported `SUPATYPE_KONG_PORT` as the project's gateway port, in
   `.env` and in what it prints, and the wizard does not ask for one. It chose its own port, so `.env`
   and the "API on" line named a port the stack, which binds the shell's, never listened on.
+* **push:** a Docker push that applied the schema exits 0 when a step after it fails on the running
+  stack (its `up -d`, the gateway wait, the buckets or the first admin), warning `The schema was
+  applied, but a step after it failed` with the reason. A start that failed on a port another
+  program held made push exit 1 with the schema in.
 
 
 ## 0.7.0

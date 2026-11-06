@@ -34,6 +34,7 @@ import {
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { composeDbHostPort, redact, resolveHostDatabaseUrl } from "../host-database.js"
+import { requireLocalStack } from "../local-stack-guard.js"
 import { collectSeed } from "../seed-runner.js"
 import { errorMessage } from "../error-message.js"
 import { connectAuthUsersByKey } from "../seed-auth-connect.js"
@@ -115,6 +116,8 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
 
   let dsn: string
   try {
+    // A stack that is not running is the environment not set up, so 2 as for any other.
+    requireLocalStack(cwd, config, "seed", { connection: opts.connection, direct: true })
     dsn = resolveHostDatabaseUrl(cwd, config, {
       connection: opts.connection,
       allowDerived: true,
