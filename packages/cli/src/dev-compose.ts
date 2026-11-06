@@ -37,7 +37,7 @@ import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { applyForThisRun, splitShellPortUpdates } from "./shell-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
 import { devSessionLockFor, recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
-import { endDevSession, showDevStep, startDevSession } from "./dev-session.js"
+import { endDevSession, showDevStep, startDevSession, withSavePushOutput } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
@@ -1912,14 +1912,17 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     shutdownState.schemaWatcher = watchDevSchema({
       dir: schemaDir,
       changedSinceLastPush: () => schemaChangedSinceLastPush(schemaPath, cwd, config),
+      // The failure is reported inside the scope too, so its hints reach the dashboard.
       push: (why) => {
-        console.log(`\n[supatype] ${why}, pushing schema...`)
-        runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project, pushOptions)
-          .then(async () => {
-            const updatedAst = loadSchemaAst(schemaPath, cwd)
-            await provisionDockerStorageBuckets(updatedAst, kongPort, serviceRoleKey)
-          })
-          .catch(reportDevPushFailure)
+        void withSavePushOutput(async () => {
+          console.log(`\n[supatype] ${why}, pushing schema...`)
+          try {
+            await runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project, pushOptions)
+            await provisionDockerStorageBuckets(loadSchemaAst(schemaPath, cwd), kongPort, serviceRoleKey)
+          } catch (err) {
+            reportDevPushFailure(err)
+          }
+        })
       },
     })
     // The worker imports its handlers once; without this an edited function kept its old code.

@@ -14,7 +14,8 @@ vi.mock("../src/dev-shutdown.js", async (importOriginal) => ({
 import type { Instance } from "ink"
 import { DevLogBus } from "../src/dev-log-bus.js"
 import { requestDevShutdown } from "../src/dev-shutdown.js"
-import { renderDevDashboard } from "../src/dev-session.js"
+import { DevSession, renderDevDashboard, withSavePushOutput } from "../src/dev-session.js"
+import { reportAppliedPush } from "../src/engine-push-output.js"
 import { enqueueDevPrompt, resetDevPromptQueueForTests } from "../src/ui/runtime/dev-prompt-queue.js"
 import { fakeTty, tick, type FakeTty } from "./support/fake-tty.js"
 
@@ -32,8 +33,7 @@ afterEach(() => {
 /** The dashboard on a fake terminal, given a moment to subscribe to `bus`. */
 async function mount(bus: DevLogBus): Promise<FakeTty & { instance: Instance }> {
   const tty = fakeTty(120, 40)
-  // Ink wraps the console in a Console of its own, which vitest's console cannot construct.
-  instance = renderDevDashboard(bus, { stdin: tty.stdin, stdout: tty.stdout, patchConsole: false })
+  instance = renderDevDashboard(bus, { stdin: tty.stdin, stdout: tty.stdout })
   await tick()
   return { ...tty, instance }
 }
@@ -82,5 +82,40 @@ describe("the dev dashboard", () => {
     await tick()
     expect(tty.drawn()).toContain("Create an admin user now?")
     expect(tty.drawn()).not.toContain("Checking for an admin user")
+  })
+})
+
+// The supatype pane stayed at "Services running." through every save: Ink's own console patch,
+// taken when the dashboard mounted, sent the push's lines past the pane, and the pane's filter
+// dropped the access lines a save changed. `dev --stream` printed all of it.
+describe("a save's push on the dashboard", () => {
+  it("shows what the save did on the supatype pane, once each", async () => {
+    const tty = fakeTty(160, 50)
+    const session = new DevSession("tui")
+    session.enableConsoleCapture(false)
+    session.startInk({ stdin: tty.stdin, stdout: tty.stdout })
+    try {
+      await tick()
+      await withSavePushOutput(async () => {
+        console.log("\n[supatype] Change detected in index.ts, pushing schema...")
+        reportAppliedPush({
+          status: "applied",
+          operations: 2,
+          access: [{ model: "Post", table: "posts", role: "anon", before: [], after: ["read"] }],
+        })
+        console.log("[supatype] Types written to src/supatype.ts")
+      })
+      await tick()
+      expect(session.bus.getTask("stack")?.lines).toEqual([
+        "Change detected in index.ts, pushing schema...",
+        "Applied 2 operation(s).",
+        "Access for anon (signed out):",
+        "  posts   none -> read",
+        "Types written to src/supatype.ts",
+      ])
+      expect(tty.drawn()).toContain("none -> read")
+    } finally {
+      session.stop()
+    }
   })
 })

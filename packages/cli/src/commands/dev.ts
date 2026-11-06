@@ -96,7 +96,7 @@ import {
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
 import { postgrestHookActorEnv } from "../hook-actor.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { beginDevSession, endDevSession, resolveDevUiMode, showDevStep, startDevSession } from "../dev-session.js"
+import { beginDevSession, endDevSession, resolveDevUiMode, showDevStep, startDevSession, withSavePushOutput } from "../dev-session.js"
 import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
@@ -754,9 +754,12 @@ export function registerDev(program: Command): void {
           dir: schemaDir,
           changedSinceLastPush: async () =>
             JSON.stringify((await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast) !== _lastReadAst,
+          // pushSaved reports its own failure, inside the scope, so its hints reach the dashboard.
           push: (why) => {
-            console.log(`\n[supatype] ${why}, checking schema...`)
-            void pushSaved()
+            void withSavePushOutput(async () => {
+              console.log(`\n[supatype] ${why}, checking schema...`)
+              await pushSaved()
+            })
           },
         })
       }

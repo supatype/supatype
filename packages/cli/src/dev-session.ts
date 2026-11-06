@@ -3,11 +3,12 @@
  */
 
 import { render, type Instance, type RenderOptions } from "ink"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { setTimeout as sleep } from "node:timers/promises"
 import { prepareStdinForInk } from "./ui/runtime/stdin-after-ink.js"
 import React from "react"
 import type { ProcessOptions } from "./process-manager.js"
-import { filterDevSubprocessLine, filterStackLogLine, formatConsoleArgs } from "./dev-log-filter.js"
+import { filterCommandLogLine, filterDevSubprocessLine, filterStackLogLine, formatConsoleArgs } from "./dev-log-filter.js"
 import { DevLogBus, type DevLogLevel } from "./dev-log-bus.js"
 import { DevDashboard } from "./ui/dev/DevDashboard.js"
 import { ensureDevShutdownHooks } from "./dev-shutdown.js"
@@ -124,13 +125,30 @@ export function appendDevTaskLog(
   write(`${prefix} ${line}`)
 }
 
+/** Set while a push a save set off runs, for every line it logs however deep in it. */
+const savePushScope = new AsyncLocalStorage<true>()
+
+/**
+ * Runs the push a save set off, with what it logs shown on the supatype pane as `--stream` prints
+ * it. The pane keeps only the lines of dev's own it knows, and the access lines a save changed (and
+ * the push's warnings and hints) are none of those, so they were dropped. Inside this only Docker's
+ * progress is dropped, as a command's log is filtered.
+ */
+export function withSavePushOutput<T>(push: () => Promise<T>): Promise<T> {
+  return savePushScope.run(true, push)
+}
+
 /**
  * The dashboard, mounted. Ctrl+C is the dashboard's to handle: it starts dev's shutdown. Left to
  * Ink, the first Ctrl+C unmounted the dashboard and nothing else, so dev kept running with no screen
  * until a second one reached it as a signal.
+ *
+ * The console is the session's (enableConsoleCapture), not Ink's. Ink's own patch, taken as it
+ * mounted, replaced the session's: every line dev logged after that was written past the pane, so
+ * the supatype pane stayed at "Services running." through every save.
  */
-export function renderDevDashboard(bus: DevLogBus, streams: Pick<RenderOptions, "stdin" | "stdout" | "patchConsole"> = {}): Instance {
-  return render(React.createElement(DevDashboard, { bus }), { ...streams, exitOnCtrlC: false })
+export function renderDevDashboard(bus: DevLogBus, streams: Pick<RenderOptions, "stdin" | "stdout"> = {}): Instance {
+  return render(React.createElement(DevDashboard, { bus }), { ...streams, patchConsole: false, exitOnCtrlC: false })
 }
 
 export class DevSession {
@@ -166,11 +184,11 @@ export class DevSession {
     this.consoleCaptured = true
   }
 
-  startInk(): void {
+  startInk(streams: Pick<RenderOptions, "stdin" | "stdout"> = {}): void {
     if (!this.isTui() || this.ink) return
     // A prompt before dev started stopped stdin's read when it ended; the dashboard needs it.
     prepareStdinForInk()
-    this.ink = renderDevDashboard(this.bus)
+    this.ink = renderDevDashboard(this.bus, streams)
   }
 
   stop(): void {
@@ -206,9 +224,10 @@ export function enhanceProcessOptions(label: string, opts: ProcessOptions): Proc
 }
 
 function appendFilteredStackLine(bus: DevLogBus, line: string, level: DevLogLevel): void {
+  const keep = savePushScope.getStore() === true ? filterCommandLogLine : filterStackLogLine
   for (const part of line.split(/\r?\n/)) {
     if (!part.trim()) continue
-    if (!filterStackLogLine(part)) continue
+    if (!keep(part)) continue
     bus.append("stack", part, level)
   }
 }
