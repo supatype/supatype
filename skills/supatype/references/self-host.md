@@ -93,7 +93,7 @@ load, so one build without them runs on every deployment that serves it. A self-
 `supatype build --env <name>` fetches the anon key from `/supatype-env.json`, over HTTPS only, and so does a CI build given only `SUPATYPE_URL`: no link or service role key in CI.
 `server.public_env: false` in `supatype.config.ts` renders `SUPATYPE_PUBLIC_ENV=false` and both
 answer 404: for an API-only project. A deployment that means to publish and cannot (no anon key, no
-URL, or a service role key in `SUPATYPE_ANON_KEY`) answers 503 `no-store` naming the setting. It does not make the anon key secret; it never was one. Other
+URL, or a service role key in `SUPATYPE_ANON_KEY`) answers `/supatype-env.json` 503 `no-store` naming every setting, and `/supatype-env.js` 200 `no-store` setting only `{"error":"<the same text>"}`, which the browser client throws on its first request. Turning them off does not make the anon key secret; it never was one. Other
 hosts: [frontend.md](frontend.md#production-builds).
 
 ## Production compose workflow

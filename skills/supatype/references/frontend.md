@@ -108,8 +108,13 @@ the page's origin. `createClient` itself never throws, so `next build` can prere
 creates one at module scope; the first request made with no address or no anon key throws
 `MissingClientValuesError` (`Supatype client has no anon key. createClient was given none, and the
 page had set no window.__SUPATYPE_ENV__ by its first request. ...`), naming the variables,
-`supatype build`, the script tag and the Next.js route. REST, rpc, auth, storage, functions, GraphQL
-and realtime all throw it rather than returning `{ data: null, error }`. Do not add an
+`supatype build`, the script tag and the Next.js route. A server that cannot give the values answers
+the script 200 with `window.__SUPATYPE_ENV__ = {"error":"..."}` (a browser runs no script answered
+with an error status, and tells the page nothing of why), and the first request quotes that reason,
+naming every setting to fix, with no request of its own. A page that has the script element but no
+`window.__SUPATYPE_ENV__` is told the script did not run (blocked, failed to load, ran too late, or
+a server too old to serve it) and to open it in the browser. REST, rpc, auth, storage, functions,
+GraphQL and realtime all throw it rather than returning `{ data: null, error }`. Do not add an
 `if (!key) throw` of your own: a bundler that knows the name is unset can fold it into a throw that
 hides the cause, and an `?? window.location.origin` on the URL stops the page's value from ever
 being read.
@@ -260,7 +265,9 @@ without `--print frontend` is refused.
 
 When Supatype serves the app, the server answers `GET /supatype-env.js` with
 `window.__SUPATYPE_ENV__ = {"url":...,"anonKey":...};` (and `/supatype-env.json` with the same
-object), `Cache-Control: no-cache`, whatever the app mode. `supatype init` adds
+object), `Cache-Control: no-cache`, whatever the app mode. Misconfigured (no anon key, no URL, or a
+service role key as the anon key), `/supatype-env.json` is 503 `no-store` naming every setting to
+fix, and `/supatype-env.js` is 200 `no-store` setting only `{"error":"<the same text>"}`. `supatype init` adds
 `<script src="/supatype-env.js" vite-ignore></script>` to a static app's `index.html`; with it, a build made
 with no values (`npm run build`) runs on every deployment that serves it. Values the build carried
 win over the script. Keep `vite-ignore`: the project has no such file, so without it every `vite
@@ -291,9 +298,10 @@ build` or Supatype hosting. A Pages Router app gets nothing written; init prints
 
 `GET` answers `window.__SUPATYPE_ENV__ = {"url":...,"anonKey":...};` from `SUPATYPE_URL` and
 `SUPATYPE_ANON_KEY` in the running server's environment, `Cache-Control: no-cache`. 404 `no-store`
-only when `SUPATYPE_PUBLIC_ENV=false`; 503 `no-store` naming the variable when `SUPATYPE_URL` or
-`SUPATYPE_ANON_KEY` is unset (`public env unavailable: SUPATYPE_ANON_KEY is not set on this
-server`) or the anon key is a service role token. The Supatype server answers its own
+only when `SUPATYPE_PUBLIC_ENV=false`; 200 `no-store` setting only `error`, a reason naming every
+variable to fix, one per line, when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset
+(`{"error":"public env unavailable: SUPATYPE_ANON_KEY is not set on this server"}`), the anon key
+is a service role token, or `SUPATYPE_PUBLIC_ENV` is a word it cannot read. The Supatype server answers its own
 `/supatype-env.js` the same way. `createServerClient({ cookies })` defaults its address and anon
 key to the same two variables, then to `NEXT_PUBLIC_SUPATYPE_URL` / `NEXT_PUBLIC_SUPATYPE_ANON_KEY`
 (`createServerClient(url, anonKey, { cookies })` still works). With neither, its first request

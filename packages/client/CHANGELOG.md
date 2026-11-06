@@ -51,6 +51,15 @@
   is no page, the error names `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` as the server's variables to
   set first, then the build-time names, rather than a `window.__SUPATYPE_ENV__` no server has.
   `MissingClientValuesError` is exported for an app to catch.
+* **client:** a page whose `/supatype-env.js` gave it no values is told why on its first call. A
+  misconfigured server now answers the script 200 with `window.__SUPATYPE_ENV__ = {"error":"..."}`,
+  since a browser runs no script answered with an error status and tells the page nothing of why,
+  and every first call (table reads and writes, rpc, functions, GraphQL, auth, realtime and storage)
+  throws `MissingClientValuesError` quoting that reason, with no request of its own. A page that has
+  the script element but no `window.__SUPATYPE_ENV__` at all is no longer told to add the tag: the
+  error says the script did not run (blocked, failed to load, ran after the app's own script, or
+  from a server too old to serve it) and to open it in the browser. A page with no element is told
+  to add it, as before.
 
 * **auth:** a request refused with 401 is sent again only when the server said the token was
   expired or invalid (`PGRST301`, `PGRST303`, or "JWT expired"), a session was there to refresh, and
