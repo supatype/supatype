@@ -183,7 +183,7 @@ export function SsoView(): React.ReactElement {
       <p className="text-sm text-muted-foreground">SAML 2.0 identity providers your users can sign in with, chosen by their email domain.</p>
       {settings && !samlOn && <SamlOffNotice />}
       <ServiceProviderCard sp={sp} />
-      {!canChange && <p className="text-xs text-muted-foreground">Only roles that administer the project can change SSO providers.</p>}
+      {!canChange && <p className="text-xs text-muted-foreground">Only owners and admins can change SSO providers.</p>}
       {state.error !== null && <ErrorBanner message={state.error} />}
       {edits.actionError !== null && <ErrorBanner message={edits.actionError} />}
       {state.providers === null && state.error === null && <LoadingRows />}

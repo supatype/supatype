@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { SsoView } from "../src/views/auth/SsoView.js"
 import { isJsonObject } from "../src/lib/json.js"
@@ -19,9 +19,10 @@ import { act, button, elementOf, findButton, isolateEachTest, mount, settle, tes
  * identity provider is given, read from the server's own SP metadata, and says when SAML is off.
  */
 
-const access = vi.hoisted(() => ({
-  current: { role: "admin" as string | null, permissions: { administer: true } as Record<string, boolean>, settled: true },
-}))
+const access = vi.hoisted(() => {
+  const admin = () => ({ role: "admin" as string | null, permissions: { administer: true, manageMembers: true } as Record<string, boolean>, settled: true })
+  return { admin, current: admin() }
+})
 
 vi.mock("../src/hooks/useStudioCapability.js", () => ({
   useStudioCapability: () => ({
@@ -36,6 +37,11 @@ vi.mock("../src/hooks/useStudioCapability.js", () => ({
 }))
 
 isolateEachTest()
+
+// Each test that plays another role sets it; every test starts as an admin.
+afterEach(() => {
+  access.current = access.admin()
+})
 
 const API = "http://localhost:8000/studio/proxy"
 const CLIENT = testClient({ url: API, token: "token" })
@@ -411,15 +417,11 @@ describe("verifying a provider's domains", () => {
     expect(writes()[0]?.body).toMatchObject({ domains: ["acme.test", "acme.example"] })
   })
 
-  it("shows the state but offers no Verify to a role that does not administer the project", async () => {
+  it("shows the state but offers no Verify to a viewer", async () => {
     access.current = { role: "viewer", permissions: { administer: false }, settled: true }
-    try {
-      const container = await render({ samlEnabled: true, providers: [ACME] })
-      expect(badges(row(container, "acme"))).toEqual(["Verified", "Unverified", "Enabled"])
-      expect(findButton(container, "Verify acme.example")).toBeUndefined()
-    } finally {
-      access.current = { role: "admin", permissions: { administer: true }, settled: true }
-    }
+    const container = await render({ samlEnabled: true, providers: [ACME] })
+    expect(badges(row(container, "acme"))).toEqual(["Verified", "Unverified", "Enabled"])
+    expect(findButton(container, "Verify acme.example")).toBeUndefined()
   })
 })
 
@@ -435,15 +437,19 @@ describe("removing a provider", () => {
 })
 
 describe("roles", () => {
-  it("offers no changes to a role that does not administer the project", async () => {
+  it("shows a developer the page read-only: only owners and admins change SSO providers", async () => {
+    access.current = { role: "developer", permissions: { administer: true, manageUsers: true, manageMembers: false }, settled: true }
+    const container = await render({ samlEnabled: true, providers: [ACME] })
+    expect(row(container, "acme").textContent).toContain("acme.example")
+    for (const label of ["Add provider", "Edit", "Disable", "Remove", "Verify acme.example"]) expect(findButton(container, label)).toBeUndefined()
+    expect(container.textContent).toContain("Only owners and admins can change SSO providers.")
+  })
+
+  it("offers no changes to a viewer", async () => {
     access.current = { role: "viewer", permissions: { administer: false }, settled: true }
-    try {
-      const container = await render({ samlEnabled: true, providers: [ACME] })
-      expect(row(container, "acme").textContent).toContain("acme.test")
-      for (const label of ["Add provider", "Edit", "Disable", "Remove"]) expect(findButton(container, label)).toBeUndefined()
-    } finally {
-      access.current = { role: "admin", permissions: { administer: true }, settled: true }
-    }
+    const container = await render({ samlEnabled: true, providers: [ACME] })
+    expect(row(container, "acme").textContent).toContain("acme.test")
+    for (const label of ["Add provider", "Edit", "Disable", "Remove"]) expect(findButton(container, label)).toBeUndefined()
   })
 
   it("builds the page from the shared primitives", async () => {
