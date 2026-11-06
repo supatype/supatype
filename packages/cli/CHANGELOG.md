@@ -48,6 +48,22 @@
   request throws naming the variables to set, `supatype build` and the Next.js route, instead of
   sending requests the gateway refuses. Creating the client never throws, so `next build` can
   prerender a page that creates one at module scope.
+* **diff:** every `supatype diff` ends with what `anon` (signed out) and `authenticated` (signed
+  in) may do on each model's table once the push applies, one line per table (`question   read`,
+  `profile    none`). A line the push changes shows what it is now as well
+  (`question   none -> read`). The engine grants `anon` a privilege only where it can prove the rule
+  needs no login, so a rule meant to be public that leaves signed-out callers with `401 42501` is
+  seen before the push (issue 16). Printed also when there are no changes; an engine older than the
+  summary prints no block. Many-to-many junction tables are listed too, as `post_tags (link)`, and
+  a link whose end reads it through its own read rule says what it denies and why
+  (`none   (read denied: an end's read rule reads this link table)`).
+
+* **push:** prints the same access block before it applies or asks to confirm, in a terminal and
+  with `--yes` alike.
+
+* **dev:** after a push applies, prints the access lines it changed (`question   none -> read`),
+  and nothing when no line changed.
+
 * **push:** `--run-hooks` fires after-hooks for the rows a push's own data migrations rewrite (column
   conversions, block moves, kind changes). Without it they are skipped, as seeds are. Against an
   engine whose capabilities do not list `run_hooks`, the push stops before anything is sent.

@@ -260,7 +260,8 @@ const RISK_LEGEND: Record<Risk, string> = {
 export function printDiffOperations(diff: Pick<DiffResult, "operations" | "reconcile">): void {
   const changes = plannedChanges(diff)
   if (changes.length === 0) {
-    console.log("No changes.")
+    // Ends with a blank line, as a list of changes does, so what follows starts apart from it.
+    console.log("No changes.\n")
     return
   }
 

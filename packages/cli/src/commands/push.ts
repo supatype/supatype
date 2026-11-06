@@ -36,7 +36,9 @@ import {
   printDiffOperations,
   printDiffWarnings,
   securityDrift,
+  type PlannedChange,
 } from "../diff-output.js"
+import { printRoleAccess } from "../diff-access.js"
 import { printPushWarnings } from "../engine-push-output.js"
 import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
 import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from "../destructive-consent.js"
@@ -206,11 +208,15 @@ async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushR
   if (run.runHooks === true) await requireDockerFeatures(cwd, config, [RUN_HOOKS_NEED])
   const engine: DockerPushEngine = hasEngineOverride(config) ? "host" : "compose"
   const runHooks = run.runHooks === true
+  // Each role's access is shown before the first attempt applies; one retried after a question
+  // has shown it already.
+  let attempts = 0
+  const access = () => (attempts++ === 0 ? "plan" : "quiet")
   const applying = (overwriteDrift: boolean) =>
     pushConsentingToDestructive(
       (force) =>
         withSpinner(dockerApplyMessage(force, engine), () =>
-          pushSchemaDocker(cwd, config, { overwriteDrift, force, audit, runHooks }),
+          pushSchemaDocker(cwd, config, { overwriteDrift, force, audit, runHooks, access: access() }),
         ),
       { yes: run.yes, apply: "supatype push --yes" },
       consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
@@ -257,6 +263,17 @@ export async function consentToSecurityDrift(
   return (await askToOverwrite()) ? true : null
 }
 
+/** Whether the risky changes may go ahead: `--yes`, or a yes in a terminal. None asks nothing. */
+async function confirmRiskyChanges(changes: readonly PlannedChange[], run: PushRun): Promise<boolean> {
+  const risky = changes.filter(isRisky)
+  if (risky.length === 0 || run.yes) return true
+  if (!isInteractive()) {
+    logSkippedConfirm(`${risky.length} risky change(s) require confirmation`)
+    return false
+  }
+  return confirm(`${risky.length} risky change(s) above. Proceed?`, { default: false })
+}
+
 async function pushViaTarget(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -282,26 +299,13 @@ async function pushViaTarget(
   const changes = plannedChanges(diff)
   printDiffWarnings(diff)
 
-  if (changes.length === 0) {
-    info("Schema matches the database (no DDL). Syncing Studio metadata...")
-  } else {
-    printDiffOperations(diff)
-    const risky = changes.filter(isRisky)
-    if (risky.length > 0 && !run.yes) {
-      if (!isInteractive()) {
-        logSkippedConfirm(`${risky.length} risky change(s) require confirmation`)
-        plain("Aborted.")
-        return
-      }
-      const confirmed = await confirm(
-        `${risky.length} risky change(s) above. Proceed?`,
-        { default: false },
-      )
-      if (!confirmed) {
-        plain("Aborted.")
-        return
-      }
-    }
+  if (changes.length === 0) info("Schema matches the database (no DDL). Syncing Studio metadata...")
+  else printDiffOperations(diff)
+  // What each API role is left with, before anything is asked or applied (issue 16).
+  printRoleAccess(diff)
+  if (!(await confirmRiskyChanges(changes, run))) {
+    plain("Aborted.")
+    return
   }
 
   const overwriteDrift = await consentToSecurityDrift(diff, run)

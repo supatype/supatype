@@ -121,6 +121,24 @@ export interface DiffResult {
   warnings?: string[]
   /** Drops and adds a person may have meant as renames. Absent from engines that guessed them. */
   renameCandidates?: RenameCandidate[]
+  /** What each API role may do on each model's table, now and after the push. Absent from older engines. */
+  access?: RoleAccess[]
+}
+
+/**
+ * One API role's access to one model's table (schema-engine `access_summary::RoleAccess`), as rule
+ * verbs (`read`, `create`, `update`, `delete`): what the database grants now, and what the push leaves.
+ */
+export interface RoleAccess {
+  model: string
+  table: string
+  role: string
+  before: string[]
+  after: string[]
+  /** A many-to-many junction table: a link between two models. */
+  link?: boolean
+  /** What a link denies every API role because the engine could not derive it, and why. */
+  denied?: { verbs: string[]; reason: string }
 }
 
 /**
