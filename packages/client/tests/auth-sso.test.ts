@@ -4,6 +4,7 @@ import { SupatypeError } from "../src/errors.js"
 import { createCodeChallengeS256, PKCE_METHOD_S256 } from "../src/pkce.js"
 import { fetchCall, fetchReturning, jsonBody } from "./support/fetch-mock.js"
 import { stubBrowser } from "./support/browser.js"
+import { liveAccessToken } from "./support/jwt.js"
 
 /**
  * `signInWithSSO`: SAML single sign-on, started by the user's email domain or a provider's ID.
@@ -21,6 +22,10 @@ const PROVIDER_ID = "8a6f1f4e-2b1c-4f5e-9d3a-6b7c8d9e0f1a"
 
 const PAGE = "https://app.example/login"
 
+/** The challenge fields a PKCE sign-in adds to the /sso body. */
+const ANY_STRING: unknown = expect.any(String)
+const PKCE_FIELDS = { code_challenge: ANY_STRING, code_challenge_method: PKCE_METHOD_S256 }
+
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -37,7 +42,7 @@ describe("signInWithSSO request", () => {
     const { url, init } = fetchCall(fetch)
     expect(url).toBe(`${AUTH_URL}/sso`)
     expect(init.method).toBe("POST")
-    expect(jsonBody(init)).toEqual({ domain: "acme.com", skip_http_redirect: true })
+    expect(jsonBody(init)).toEqual({ domain: "acme.com", skip_http_redirect: true, ...PKCE_FIELDS })
   })
 
   it("posts a provider ID as provider_id, with no domain", async () => {
@@ -47,7 +52,7 @@ describe("signInWithSSO request", () => {
 
     await new AuthClient(AUTH_URL, HEADERS).signInWithSSO({ providerId: PROVIDER_ID })
 
-    expect(jsonBody(fetchCall(fetch).init)).toEqual({ provider_id: PROVIDER_ID, skip_http_redirect: true })
+    expect(jsonBody(fetchCall(fetch).init)).toEqual({ provider_id: PROVIDER_ID, skip_http_redirect: true, ...PKCE_FIELDS })
   })
 
   it("sends redirectTo as redirect_to and the captcha token where the server checks it", async () => {
@@ -65,17 +70,32 @@ describe("signInWithSSO request", () => {
       skip_http_redirect: true,
       redirect_to: "https://app.example/welcome",
       supatype_meta_security: { captcha_token: "cap-1" },
+      ...PKCE_FIELDS,
     })
   })
 })
 
 describe("signInWithSSO PKCE", () => {
-  it("sends no challenge by default, as signInWithOAuth's implicit default", async () => {
+  it("sends the S256 challenge of a stored verifier by default", async () => {
     const { store } = stubBrowser(PAGE)
     const fetch = fetchReturning({ url: IDP_URL })
     vi.stubGlobal("fetch", fetch)
 
     await new AuthClient(AUTH_URL, HEADERS).signInWithSSO({ domain: "acme.com" })
+
+    const verifier = store.get(VERIFIER_KEY)
+    expect(verifier).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    const body = jsonBody(fetchCall(fetch).init)
+    expect(body["code_challenge"]).toBe(createCodeChallengeS256(verifier!))
+    expect(body["code_challenge_method"]).toBe(PKCE_METHOD_S256)
+  })
+
+  it("sends no challenge for flowType implicit", async () => {
+    const { store } = stubBrowser(PAGE)
+    const fetch = fetchReturning({ url: IDP_URL })
+    vi.stubGlobal("fetch", fetch)
+
+    await new AuthClient(AUTH_URL, HEADERS).signInWithSSO({ domain: "acme.com", options: { flowType: "implicit" } })
 
     const body = jsonBody(fetchCall(fetch).init)
     expect(body["code_challenge"]).toBeUndefined()
@@ -83,18 +103,14 @@ describe("signInWithSSO PKCE", () => {
     expect(store.has(VERIFIER_KEY)).toBe(false)
   })
 
-  it("sends the S256 challenge of a stored verifier for flowType pkce", async () => {
+  it("leaves signInWithOAuth's default implicit", async () => {
     const { store } = stubBrowser(PAGE)
-    const fetch = fetchReturning({ url: IDP_URL })
-    vi.stubGlobal("fetch", fetch)
+    vi.stubGlobal("fetch", fetchReturning({ external: { github: true } }))
 
-    await new AuthClient(AUTH_URL, HEADERS).signInWithSSO({ domain: "acme.com", options: { flowType: "pkce" } })
+    const { data } = await new AuthClient(AUTH_URL, HEADERS).signInWithOAuth({ provider: "github" })
 
-    const verifier = store.get(VERIFIER_KEY)
-    expect(verifier).toMatch(/^[A-Za-z0-9_-]{43}$/)
-    const body = jsonBody(fetchCall(fetch).init)
-    expect(body["code_challenge"]).toBe(createCodeChallengeS256(verifier!))
-    expect(body["code_challenge_method"]).toBe(PKCE_METHOD_S256)
+    expect(new URL(data.url).searchParams.has("code_challenge")).toBe(false)
+    expect(store.has(VERIFIER_KEY)).toBe(false)
   })
 
   it("remembers the sign-in as SSO, so a refusal sent back in the URL names it", async () => {
@@ -177,5 +193,68 @@ describe("signInWithSSO errors", () => {
       // @ts-expect-error: one of domain or providerId, never both
       client.signInWithSSO({ domain: "acme.com", providerId: PROVIDER_ID })
     expect(typeof both).toBe("function")
+  })
+})
+
+const RAW_USER = {
+  id: "user-sso",
+  email: "sso-tester@acme.supatype.test",
+  created_at: "2026-11-06T00:00:00Z",
+  updated_at: "2026-11-06T00:00:00Z",
+  app_metadata: { provider: "sso:0b4a7c1e" },
+  user_metadata: {},
+}
+
+describe("an SSO sign-in coming back to the app", () => {
+  it("exchanges the code of a sign-in this browser started for a session", async () => {
+    const started = stubBrowser(PAGE)
+    vi.stubGlobal("fetch", fetchReturning({ url: IDP_URL }))
+    await new AuthClient(AUTH_URL, HEADERS).signInWithSSO({ domain: "acme.supatype.test" })
+    const verifier = started.store.get(VERIFIER_KEY)
+
+    const { replaceState } = stubBrowser("https://app.example/home?code=sso-code-1", Object.fromEntries(started.store))
+    const fetch = fetchReturning({ access_token: liveAccessToken(), refresh_token: "rt-sso", expires_in: 3600, token_type: "bearer", user: RAW_USER })
+    vi.stubGlobal("fetch", fetch)
+    const client = new AuthClient(AUTH_URL, HEADERS)
+    const { error } = await client.initialize()
+
+    expect(error).toBeNull()
+    const { url, init } = fetchCall(fetch)
+    expect(url).toBe(`${AUTH_URL}/token?grant_type=pkce`)
+    expect(jsonBody(init)).toEqual({ auth_code: "sso-code-1", code_verifier: verifier })
+    expect((await client.getSession()).data.session?.user.id).toBe("user-sso")
+    expect(replaceState).toHaveBeenCalledWith(null, "", "https://app.example/home")
+  })
+
+  it("signs in from tokens in the fragment for an identity-provider-initiated login it did not start", async () => {
+    const token = liveAccessToken()
+    const { replaceState } = stubBrowser(`https://app.example/#access_token=${token}&refresh_token=rt-idp&expires_in=3600&token_type=bearer`)
+    const fetch = fetchReturning(RAW_USER)
+    vi.stubGlobal("fetch", fetch)
+    const client = new AuthClient(AUTH_URL, HEADERS)
+    const { error } = await client.initialize()
+
+    expect(error).toBeNull()
+    expect(fetchCall(fetch).url).toBe(`${AUTH_URL}/user`)
+    const { data } = await client.getSession()
+    expect(data.session?.accessToken).toBe(token)
+    expect(data.session?.user.id).toBe("user-sso")
+    expect(replaceState).toHaveBeenCalledWith(null, "", "https://app.example/")
+  })
+
+  it("takes fragment tokens even while a PKCE sign-in it started is still waiting", async () => {
+    const token = liveAccessToken()
+    stubBrowser(`https://app.example/#access_token=${token}&refresh_token=rt-idp&expires_in=3600&token_type=bearer`, {
+      [VERIFIER_KEY]: "abandoned-verifier",
+      [PROVIDER_KEY]: "sso",
+    })
+    const fetch = fetchReturning(RAW_USER)
+    vi.stubGlobal("fetch", fetch)
+    const client = new AuthClient(AUTH_URL, HEADERS)
+    const { error } = await client.initialize()
+
+    expect(error).toBeNull()
+    expect(fetch.mock.calls.map(([input]) => String(input))).toEqual([`${AUTH_URL}/user`])
+    expect((await client.getSession()).data.session?.accessToken).toBe(token)
   })
 })

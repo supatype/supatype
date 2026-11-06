@@ -8,9 +8,8 @@ import type {
   Factor,
   OtpType,
   Session,
-  SignInWithSSODomain,
+  SignInWithSSOCredentials,
   SignInWithSSOOptions,
-  SignInWithSSOProvider,
   SignInWithSSOResult,
   User,
   UserIdentity,
@@ -525,10 +524,11 @@ export class AuthClient {
    * the auth server, which sends them on to `redirectTo`; the client finishes the sign-in on start,
    * as it does for OAuth. A refusal (no provider for the domain, a disabled one) is returned and the
    * page stays put.
+   *
+   * PKCE by default (`flowType`), unlike `signInWithOAuth`: the sign-in comes back as a `?code=`
+   * this browser exchanges with its stored verifier.
    */
-  signInWithSSO(params: SignInWithSSODomain): Promise<SignInWithSSOResult>
-  signInWithSSO(params: SignInWithSSOProvider): Promise<SignInWithSSOResult>
-  async signInWithSSO(params: SignInWithSSODomain | SignInWithSSOProvider): Promise<SignInWithSSOResult> {
+  async signInWithSSO(params: SignInWithSSOCredentials): Promise<SignInWithSSOResult> {
     const res = await this.send(`${this.url}/sso`, {
       method: "POST",
       headers: this.baseHeaders,
@@ -546,14 +546,15 @@ export class AuthClient {
   }
 
   /** The `/sso` body: the domain or the provider's ID, the caller's options, and any PKCE challenge. */
-  private async ssoRequestBody(params: SignInWithSSODomain | SignInWithSSOProvider): Promise<Record<string, unknown>> {
+  private async ssoRequestBody(params: SignInWithSSOCredentials): Promise<Record<string, unknown>> {
     const opts: SignInWithSSOOptions = params.options ?? {}
-    const body: Record<string, unknown> = "domain" in params ? { domain: params.domain } : { provider_id: params.providerId }
+    const body: Record<string, unknown> = params.domain !== undefined ? { domain: params.domain } : { provider_id: params.providerId }
     // A fetch cannot follow the server's 303 to another origin, so ask for the URL as JSON.
     body["skip_http_redirect"] = true
     if (opts.redirectTo !== undefined) body["redirect_to"] = opts.redirectTo
     if (opts.captchaToken !== undefined) body["supatype_meta_security"] = { captcha_token: opts.captchaToken }
-    return opts.flowType === "pkce" ? { ...body, ...(await this.beginPkce()) } : body
+    const flowType = opts.flowType ?? "pkce"
+    return flowType === "pkce" ? { ...body, ...(await this.beginPkce()) } : body
   }
 
   /**
@@ -614,8 +615,8 @@ export class AuthClient {
 
   /**
    * Exchange a PKCE auth code for a session (`POST /token?grant_type=pkce`).
-   * Requires a prior `signInWithOAuth({ options: { flowType: "pkce" } })` (or OTP with PKCE)
-   * so the matching `code_verifier` is available in memory / storage.
+   * Requires a prior PKCE sign-in in this browser (`signInWithSSO`, or `signInWithOAuth` or OTP with
+   * `flowType: "pkce"`), so the matching `code_verifier` is available in memory / storage.
    */
   async exchangeCodeForSession(authCode: string): Promise<{
     data: { session: Session | null; user: User | null }
@@ -626,7 +627,7 @@ export class AuthClient {
       return {
         data: { session: null, user: null },
         error: new SupatypeError({
-          message: "Missing PKCE code_verifier. Start OAuth with flowType: \"pkce\" first.",
+          message: "Missing PKCE code_verifier. Start the sign-in (SSO, or OAuth with flowType: \"pkce\") in this browser first.",
           status: 400,
         }),
       }
