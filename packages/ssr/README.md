@@ -97,8 +97,11 @@ from that file's own source and does not recognize a re-exported one. `GET` answ
 `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` from `SUPATYPE_URL` and
 `SUPATYPE_ANON_KEY` as the server has them on each request, with `Cache-Control: no-cache`, the same
 body and headers the Supatype server gives its own `/supatype-env.js`. Switched off with
-`SUPATYPE_PUBLIC_ENV=false` it answers 404 `no-store`. Misconfigured it answers 503 `no-store`,
-naming the setting to fix: `SUPATYPE_ANON_KEY` or `SUPATYPE_URL` unset, `SUPATYPE_PUBLIC_ENV` set to
+`SUPATYPE_PUBLIC_ENV=false` it answers 404 `no-store`. Misconfigured it still answers 200, with
+`Cache-Control: no-store` and `window.__SUPATYPE_ENV__ = {"error":"..."};`, since a browser runs no
+script answered with an error status and tells the page nothing of why. The browser client throws
+that reason on its first call. It names every setting to fix, one line each and the key's first:
+`SUPATYPE_ANON_KEY` or `SUPATYPE_URL` unset (both named when both are), `SUPATYPE_PUBLIC_ENV` set to
 a word other than true/1/yes/on or false/0/no/off (blank counts as on), or the anon key variable
 holding a service role token. No key is echoed, and no service role value is ever read.
 
