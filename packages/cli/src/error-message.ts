@@ -80,6 +80,22 @@ export function redact(dsn: string): string {
   return dsn.replace(/(:\/\/[^:/@]+:)[^@]*(@)/, "$1***$2")
 }
 
+/** Shorter than this, a value is too likely to be an ordinary word to hide every time it appears. */
+const MIN_SECRET_LENGTH = 6
+
+/**
+ * `text` (a container's log, say) with every one of `secrets` replaced by `***`, and the password
+ * of every connection string in it removed as {@link redact} does. A server that cannot read its
+ * configuration prints the lines it choked on, and those can hold a password (issue 37).
+ */
+export function redactSecrets(text: string, secrets: readonly string[]): string {
+  const hidden = [...new Set(secrets.filter((secret) => secret.length >= MIN_SECRET_LENGTH))]
+    // Longest first, so a secret that contains another is hidden whole.
+    .sort((a, b) => b.length - a.length)
+    .reduce((out, secret) => out.split(secret).join("***"), text)
+  return hidden.replace(/(:\/\/[^:/@\s]+:)[^@\s]*(@)/g, "$1***$2")
+}
+
 /** The codes a refused connection carries: Node's errno, and Bun's own name for it. */
 const REFUSED_CODES: ReadonlySet<string> = new Set(["ECONNREFUSED", "ConnectionRefused"])
 
