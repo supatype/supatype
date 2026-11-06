@@ -35,6 +35,7 @@ Contact: GitHub and Discord, linked from the site. Licensing questions: licensin
 - [CLI reference](https://www.supatype.com/docs/cli.html): Every supatype command with its subcommands and main flags
 - [Local development](https://www.supatype.com/docs/#local-dev): `supatype init` and `supatype dev` run a full local stack
 - [Self-hosting](https://www.supatype.com/docs/#self-host): Docker Compose on a server you own
+- [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html): Give a production build its API URL and anon key with `supatype build`, `supatype keys --print frontend` or `/supatype-env.js`, on Vercel, Netlify, Cloudflare Pages, GitHub Actions and your own server, and why the anon key is public
 - [Upgrading](https://www.supatype.com/docs/#upgrading): Updating images and binaries, then pushing the schema
 - [Running in production](https://www.supatype.com/docs/#production): Status, logs, backups with pg_dump, and rolling back a push
 - [Upgrade notes for 0.7.0](https://github.com/supatype/supatype/blob/main/UPGRADING.md): Ownership checks, declared renames, identity columns, blocks under `data`, realtime DELETE rules, lock waits, CORS, licence

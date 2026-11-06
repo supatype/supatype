@@ -189,7 +189,37 @@ Link your local Supatype project to the self-hosted instance:
 supatype link --url https://api.your-domain.com --token <SERVICE_ROLE_KEY>
 ```
 
-## Step 6: Deploy on every push
+## Step 6: Serve your frontend
+
+To have the stack serve a static app, record where its build goes, once, and commit
+`supatype.config.ts`:
+
+```bash
+supatype app add --static ./dist
+```
+
+Then build it on the server with `supatype build` rather than `npm run build`, and start the
+stack:
+
+```bash
+supatype build
+supatype self-host compose up -d
+```
+
+`supatype build` runs the package.json `build` script with the deployment's API URL and anon key
+under every framework's name (`VITE_`, `PUBLIC_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_`). On the server it
+reads them from `.env`: `API_EXTERNAL_URL` (or `PUBLIC_SUPATYPE_URL`) and `ANON_KEY`. When either is
+missing, or `API_EXTERNAL_URL` is still a `localhost` address, it stops before the build starts and
+lists every source it tried, instead of building a site that renders a blank page.
+
+The server also answers `/supatype-env.js` with its own address and anon key. An `index.html` that
+loads it with `<script src="/supatype-env.js"></script>` (`supatype init` adds the tag for a static
+app) gets both values when the page loads, so one build runs on every deployment that serves it.
+For an API-only project, set `server.public_env: false` in `supatype.config.ts` to turn that
+address off; the anon key is public either way. Building on Vercel, Netlify, Cloudflare Pages or
+in CI is covered in [Deploy your frontend](/docs/deploying-your-frontend.html).
+
+## Step 7: Deploy on every push
 
 A GitHub Action can SSH in and run the same commands you ran by hand:
 
@@ -214,7 +244,12 @@ jobs:
             npm install
             supatype self-host compose up -d
             supatype push
+            supatype build
+            supatype self-host compose up -d
 ```
+
+The second `compose up -d` picks up the new build. For a project with no frontend, leave out the
+last two lines.
 
 The repository secrets it needs:
 

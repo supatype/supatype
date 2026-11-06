@@ -84,6 +84,7 @@
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/deploying-your-frontend.html">Deploy your frontend</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
       <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
@@ -123,14 +124,14 @@
 <tr><td><code>@supatype/svelte</code></td><td><code>setSupatypeClient</code>, <code>getSupatypeClient</code>, <code>createQuery</code>, <code>createMutation</code>, <code>createFunction</code>, <code>createAuth</code>, <code>createSubscription</code></td></tr>
 <tr><td><code>@supatype/solid</code></td><td><code>SupatypeContext</code>, <code>useSupatype</code>, <code>createQuery</code>, <code>createMutation</code>, <code>createFunction</code>, <code>createAuth</code>, <code>createSubscription</code></td></tr>
 <tr><td><code>@supatype/react-native</code></td><td><code>createNativeClient</code>, <code>secureStoreAdapter</code>, <code>asyncStorageAdapter</code>, <code>openOAuth</code>, <code>createAuthUrlListener</code></td></tr>
-<tr><td><code>@supatype/ssr</code></td><td><code>createServerClient</code></td></tr>
+<tr><td><code>@supatype/ssr</code></td><td><code>createServerClient</code>, and <code>GET</code> from <code>@supatype/ssr/next</code></td></tr>
 </tbody></table></div>
-<p>Every example below imports the client from <code>src/supatype.ts</code>, created once as shown in <a href="/docs/client.html#setup">Client: Create the client</a>. With Vite, read the values <code>supatype keys</code> writes to <code>.env</code>:</p>
+<p>Every example below imports the client from <code>src/supatype.ts</code>, created once as shown in <a href="/docs/client.html#setup">Client: Create the client</a>. With Vite, read the names <code>supatype dev</code> writes for development and <code>supatype build</code> sets for a production build:</p>
 <div class="cb"><div class="cb-bar"><span>src/supatype.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
 <span class="k">export</span> <span class="k">const</span> supatype = createClient({
-  url: <span class="k">import</span>.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: <span class="k">import</span>.meta.env.VITE_SUPATYPE_URL,
   anonKey: <span class="k">import</span>.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
 <p>Sign-in screens are covered on <a href="/docs/auth.html#ui">Auth: Pre-built UI</a>, and the subscription hooks on <a href="/docs/realtime.html#hooks">Realtime: Framework hooks</a>. This page does not repeat them.</p>
@@ -326,16 +327,47 @@ createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span 
 <p>Wrap the app in <code>SupatypeProvider</code> from <code>@supatype/react</code> and use the same hooks as on the web. The native client does not read sessions from a URL by itself, which is why the listener is there.</p>
 <p><code>openOAuth(client, { provider, redirectTo, webBrowser })</code> runs an OAuth sign-in in <code>expo-web-browser</code> with PKCE and returns the session, or <code>cancelled: true</code> when the user closes the browser. The ready-made native screens are on <a href="/docs/auth.html#ui">Auth: Pre-built UI</a>.</p>
 
-<h2 id="nextjs">Next.js server code</h2>
-<p>In the browser the client copies the session into a cookie named <code>st-auth-token</code> (path <code>/</code>, <code>SameSite=Lax</code>, <code>Secure</code> on HTTPS). <code>createServerClient</code> from <code>@supatype/ssr</code> reads that cookie on the server and builds a client signed in as the same user. Use it in Server Components, Route Handlers and middleware.</p>
+<h2 id="nextjs">Next.js</h2>
+<p><code>next build</code> prerenders pages before any deployment's values exist, so a Next.js app takes them when it runs instead. One route serves the browser client its address and anon key on each page load, from <code>SUPATYPE_URL</code> and <code>SUPATYPE_ANON_KEY</code> in the server's environment, and the server client reads the same two variables. The same build then runs against whichever deployment it is started for. <code>supatype init</code> writes both pieces into an App Router app:</p>
+<div class="cb"><div class="cb-bar"><span>app/supatype-env.js/route.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">export</span> { GET } <span class="k">from</span> <span class="s">"@supatype/ssr/next"</span>
+<span class="k">export</span> <span class="k">const</span> dynamic = <span class="s">"force-dynamic"</span></pre></div>
+<div class="cb"><div class="cb-bar"><span>app/layout.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="t">Script</span> <span class="k">from</span> <span class="s">"next/script"</span>
+
+<span class="k">export</span> <span class="k">default</span> <span class="k">function</span> <span class="t">RootLayout</span>({ children }: { children: <span class="t">React</span>.<span class="t">ReactNode</span> }) {
+  <span class="k">return</span> (
+    &lt;html lang=<span class="s">"en"</span>&gt;
+      &lt;body&gt;
+        &lt;<span class="t">Script</span> src=<span class="s">"/supatype-env.js"</span> strategy=<span class="s">"beforeInteractive"</span> /&gt;
+        {children}
+      &lt;/body&gt;
+    &lt;/html&gt;
+  )
+}</pre></div>
+<p>Keep the <code>dynamic</code> line in the route file itself: Next reads a route's segment config from its own source and ignores a re-exported one. The route answers <code>window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};</code> with <code>Cache-Control: no-cache</code>, as the Supatype server's own <code>/supatype-env.js</code> does. It answers 404 only when <code>SUPATYPE_PUBLIC_ENV</code> is <code>false</code>, and 503, not cached, with a body naming the variable when <code>SUPATYPE_URL</code> or <code>SUPATYPE_ANON_KEY</code> is unset or <code>SUPATYPE_ANON_KEY</code> holds a service role key. The browser client, created with <code>NEXT_PUBLIC_SUPATYPE_URL</code> and <code>NEXT_PUBLIC_SUPATYPE_ANON_KEY</code> left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in <a href="/docs/deploying-your-frontend.html#nextjs">Deploy your frontend: Next.js</a>.</p>
+<p>In a Pages Router app, <code>init</code> writes nothing and prints the steps instead: create the same route file under <code>app/supatype-env.js/</code>, beside <code>pages/</code>; in <code>pages/_document.tsx</code>, import <code>Script</code> from <code>next/script</code> and put the same <code>&lt;Script&gt;</code> tag inside <code>&lt;Head&gt;</code>; then add <code>@supatype/ssr</code> to the app's dependencies. For a static export (<code>output: "export"</code> in <code>next.config</code>), which cannot serve a route, <code>init</code> writes neither piece and prints <code>supatype build -- next build</code>, or Supatype hosting, whose server answers <code>/supatype-env.js</code> itself.</p>
+
+<h3 id="nextjs-server">Server components, route handlers and middleware</h3>
+<p>In the browser the client copies the session into a cookie named <code>st-auth-token</code> (path <code>/</code>, <code>SameSite=Lax</code>, <code>Secure</code> on HTTPS). <code>createServerClient</code> from <code>@supatype/ssr</code> reads that cookie on the server and builds a client signed in as the same user. Given only its options, it takes the address and anon key from <code>SUPATYPE_URL</code> and <code>SUPATYPE_ANON_KEY</code>, read on each call, and where one is unset, from <code>NEXT_PUBLIC_SUPATYPE_URL</code> or <code>NEXT_PUBLIC_SUPATYPE_ANON_KEY</code>. With neither, its first request throws an error saying it is running on a server and naming <code>SUPATYPE_URL</code> and <code>SUPATYPE_ANON_KEY</code>. Pass them first, as <code>createServerClient(url, anonKey, options)</code>, to use others.</p>
 <div class="cb"><div class="cb-bar"><span>src/supatype-server.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { cookies } <span class="k">from</span> <span class="s">"next/headers"</span>
 <span class="k">import</span> { createServerClient } <span class="k">from</span> <span class="s">"@supatype/ssr"</span>
 
+<span class="c">// Server Components: no setAll, so the client never refreshes the session.</span>
 <span class="k">export</span> <span class="k">async</span> <span class="k">function</span> serverClient() {
   <span class="k">const</span> store = <span class="k">await</span> cookies()
-  <span class="k">return</span> createServerClient(process.env.PUBLIC_SUPATYPE_URL!, process.env.PUBLIC_SUPATYPE_ANON_KEY!, {
-    cookies: { getAll: () =&gt; store.getAll(), setAll: () =&gt; {} },
+  <span class="k">return</span> createServerClient({ cookies: { getAll: () =&gt; store.getAll() } })
+}
+
+<span class="c">// Route Handlers and Server Actions: a refreshed session goes back to the browser.</span>
+<span class="k">export</span> <span class="k">async</span> <span class="k">function</span> writableServerClient() {
+  <span class="k">const</span> store = <span class="k">await</span> cookies()
+  <span class="k">return</span> createServerClient({
+    cookies: {
+      getAll: () =&gt; store.getAll(),
+      setAll: (cookiesToSet) =&gt; cookiesToSet.forEach(({ name, value, options }) =&gt; store.set(name, value, options ?? {})),
+    },
   })
 }</pre></div>
 <div class="cb"><div class="cb-bar"><span>app/posts/page.tsx</span><button type="button" class="cb-copy">Copy</button></div>
@@ -347,31 +379,36 @@ createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span 
   <span class="k">const</span> { data: posts } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id, title, body"</span>)
   <span class="k">return</span> posts?.map((post) =&gt; &lt;<span class="t">RichText</span> key={post.id} content={post.body} as=<span class="s">"article"</span> /&gt;)
 }</pre></div>
-<p>A Route Handler uses <code>serverClient()</code> the same way. In middleware, read the cookies from the request and check the user with the auth server:</p>
+<p>A Route Handler uses <code>writableServerClient()</code> the same way. Middleware can write cookies, so refresh the session there, before the page renders, and check the user with the auth server:</p>
 <div class="cb"><div class="cb-bar"><span>middleware.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { <span class="t">NextResponse</span>, <span class="k">type</span> <span class="t">NextRequest</span> } <span class="k">from</span> <span class="s">"next/server"</span>
 <span class="k">import</span> { createServerClient } <span class="k">from</span> <span class="s">"@supatype/ssr"</span>
 
 <span class="k">export</span> <span class="k">async</span> <span class="k">function</span> middleware(request: <span class="t">NextRequest</span>) {
-  <span class="k">const</span> supatype = createServerClient(process.env.PUBLIC_SUPATYPE_URL!, process.env.PUBLIC_SUPATYPE_ANON_KEY!, {
-    cookies: { getAll: () =&gt; request.cookies.getAll(), setAll: () =&gt; {} },
+  <span class="k">const</span> response = <span class="t">NextResponse</span>.next()
+  <span class="k">const</span> supatype = createServerClient({
+    cookies: {
+      getAll: () =&gt; request.cookies.getAll(),
+      setAll: (cookiesToSet) =&gt; cookiesToSet.forEach(({ name, value, options }) =&gt; response.cookies.set(name, value, options ?? {})),
+    },
   })
   <span class="k">const</span> { data } = <span class="k">await</span> supatype.auth.getUser()
   <span class="k">if</span> (!data.user) <span class="k">return</span> <span class="t">NextResponse</span>.redirect(<span class="k">new</span> <span class="t">URL</span>(<span class="s">"/sign-in"</span>, request.url))
-  <span class="k">return</span> <span class="t">NextResponse</span>.next()
+  <span class="k">return</span> response
 }
 
 <span class="k">export</span> <span class="k">const</span> config = { matcher: [<span class="s">"/account/:path*"</span>] }</pre></div>
 <p>What the cookie handling does and does not do:</p>
 <ul>
-<li>It only reads. The <code>cookies</code> option needs both <code>getAll</code> and <code>setAll</code>, but <code>createServerClient</code> never calls <code>setAll</code>, so a no-op is fine. The browser client keeps the cookie fresh.</li>
-<li>A cookie whose access token has expired is ignored, and the server client runs as an anonymous caller. A page rendered after a long idle shows the signed-out view until the browser refreshes the session.</li>
+<li>Without <code>setAll</code>, as in a Server Component, the client never refreshes the session: an expired access token is sent as it is, and the API refuses it. A refresh there would spend the browser's refresh token and keep the new one to itself, so the browser's own next refresh would be refused. Do not pass a <code>setAll</code> that does nothing to get round this.</li>
+<li>With <code>setAll</code>, the client refreshes an expired access token when a request it makes finds it expired, and writes every change to the session (a refresh, a sign-in, a sign-out) back through <code>setAll</code>.</li>
+<li>A cookie whose access token has expired is kept only when it has a refresh token. Otherwise the server client runs as an anonymous caller.</li>
 <li>The cookie is decoded, not verified. Queries made with it are checked by the API, so access rules hold. But do not trust <code>auth.getSession()</code> on the server to decide who someone is: call <code>auth.getUser()</code>, which asks the auth server, as the middleware above does.</li>
-<li>Decoding the cookie uses Node's <code>Buffer</code>. Where <code>Buffer</code> is missing, every cookie reads as expired, so run middleware on the Node.js runtime.</li>
+<li>Decoding uses <code>atob</code> and <code>TextDecoder</code>, not Node's <code>Buffer</code>, so it works on the edge runtime too.</li>
 <li>Set <code>cookiePrefix</code> on both sides if you change the client's <code>auth.cookiePrefix</code>. The default is <code>st</code>.</li>
 <li>The server client is built from <code>@supatype/client</code>, not your generated client file, so <code>update(..., { publish: true })</code> is not accepted on it.</li>
 </ul>
-<p>The browser half of a Next.js app needs the URL and anon key in <code>NEXT_PUBLIC_</code> variables. <code>supatype keys</code> writes <code>NEXT_PUBLIC_SUPATYPE_URL</code> and <code>NEXT_PUBLIC_SUPATYPE_ANON_KEY</code>: a local stack's to <code>.env.development.local</code>, which Next.js reads in development only, and a deployment's to <code>.env</code>. Server code can read <code>PUBLIC_SUPATYPE_URL</code> and <code>PUBLIC_SUPATYPE_ANON_KEY</code> the same way.</p>
+<p>In development, <code>supatype dev</code>, <code>init</code> and <code>keys --write</code> write a local stack's <code>SUPATYPE_URL</code> and <code>SUPATYPE_ANON_KEY</code>, with the <code>NEXT_PUBLIC_</code> copies, to <code>.env.development.local</code>, which Next.js reads in development only, so the route answers in <code>next dev</code>. A value fixed into the build that way always wins over the route's.</p>
 
     <nav class="pn" aria-label="More pages">
       <a href="/docs/client.html"><small>PREVIOUS</small><span>Client</span></a>
@@ -387,7 +424,7 @@ createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span 
     <a href="#svelte">Svelte</a>
     <a href="#solid">Solid</a>
     <a href="#react-native">React Native</a>
-    <a href="#nextjs">Next.js server code</a>
+    <a href="#nextjs">Next.js</a>
   </nav>
 </div>
 

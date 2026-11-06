@@ -84,6 +84,7 @@
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/deploying-your-frontend.html">Deploy your frontend</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
       <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
@@ -142,7 +143,7 @@
       <tbody>
         <tr><td><code>init [name]</code></td><td>Scaffold a new Supatype project</td><td><code>-y, --defaults</code>, <code>--no-install</code>, <code>--no-keys</code>, <code>--admin-email</code>, <code>--admin-password</code>, <code>--no-admin</code></td></tr>
         <tr><td><code>dev</code></td><td>Start local Postgres, apply schema, and run supatype-server</td><td><code>--no-watch</code>, <code>--stream</code>, <code>--port &lt;port&gt;</code>, <code>--reset-db</code> (Docker only), <code>--yes</code>, <code>--overwrite-drift</code></td></tr>
-        <tr><td><code>keys</code></td><td>Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET</td><td><code>--write</code>, <code>--force</code>, <code>--secret &lt;secret&gt;</code>, <code>--exp-years &lt;years&gt;</code> (default 10)</td></tr>
+        <tr><td><code>keys</code></td><td>Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET and fill the blank ones in .env (printed instead when there is no .env, or with --print)</td><td><code>--print [target]</code>, <code>--env &lt;name&gt;</code> and <code>--allow-local</code> (with <code>--print frontend</code>), <code>--force</code>, <code>--secret &lt;secret&gt;</code>, <code>--exp-years &lt;years&gt;</code> (default 10), <code>--write</code></td></tr>
         <tr><td><code>status</code></td><td>Show linked target status or local stack services</td><td><code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>logs</code></td><td>Tail logs from the local stack</td><td><code>--service &lt;name&gt;</code>, <code>--since &lt;duration&gt;</code> (default 5m), <code>-f, --follow</code></td></tr>
         <tr><td><code>app add [dir]</code></td><td>Configure app routing: <code>--static</code> for a built site, or proxy to a dev server</td><td><code>--static</code>, <code>--port &lt;port&gt;</code> (default 3000), <code>--upstream &lt;url&gt;</code></td></tr>
@@ -157,7 +158,7 @@
       </tbody>
     </table></div>
     <p><code>--role</code> is <code>admin</code>, <code>developer</code>, <code>editor</code> or <code>viewer</code>. See <a href="/docs/studio-roles.html#grant">Studio roles</a>. The first-run steps are in <a href="/docs/#local-dev">Local development</a>.</p>
-    <p><code>keys</code> prints the keys unless you pass <code>--write</code>, which fills blank keys in <code>.env</code>. Add <code>--force</code> to replace keys already there.</p>
+    <p><code>keys</code> fills the blank keys in <code>.env</code> when there is one, and prints them when there is none or with <code>--print</code>. Add <code>--force</code> to replace keys already there. <code>--write</code> is kept for older scripts. <code>keys --print frontend</code> prints a deployment's API URL and anon key instead, under every framework's name, one <code>NAME=value</code> line each, for a host's settings or <code>$GITHUB_ENV</code>. It reads them as <code>build</code> does, below, and takes <code>--allow-local</code> for a local stack's values.</p>
     <p><code>dev</code> and <code>self-host compose up</code> refuse a <code>JWT_SECRET</code> shorter than 32 characters before starting anything, because the REST API cannot start with one. <code>init</code> generates a 64-character secret. To replace a short one, generate a longer secret (for example with <code>openssl rand -base64 48</code>), put it in <code>.env</code> as <code>JWT_SECRET</code>, then run <code>supatype keys --write --force</code> to sign new keys with it.</p>
 
     <h2 id="schema">Schema and database</h2>
@@ -233,7 +234,8 @@
         <tr><td><code>link</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json)</td><td><code>--url &lt;url&gt;</code>, <code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--fix-gitignore</code></td></tr>
         <tr><td><code>envs list</code></td><td>List linked environments</td><td></td></tr>
         <tr><td><code>envs use &lt;name&gt;</code></td><td>Set the default environment</td><td></td></tr>
-        <tr><td><code>deploy</code></td><td>Deploy schema and app, Supatype Cloud by default when linked (<code>supatype link</code>); pass <code>--local</code> for engine + your database</td><td><code>--env &lt;name&gt;</code> (default <code>production</code>), <code>--schema-only</code>, <code>--app-only</code>, <code>--skip-build</code>, <code>--preview</code>, <code>--yes</code>, <code>--overwrite-drift</code></td></tr>
+        <tr><td><code>build [command...]</code></td><td>Run your app's production build with the deployment's API URL and anon key under every front-end name (VITE_, PUBLIC_, NEXT_PUBLIC_, EXPO_PUBLIC_). Runs the package.json build script unless a command follows --. Refuses to start when either value is missing</td><td><code>--env &lt;name&gt;</code>, <code>--allow-local</code>, <code>-- &lt;command...&gt;</code></td></tr>
+        <tr><td><code>deploy</code></td><td>Deploy schema and app, Supatype Cloud by default when linked (<code>supatype link</code>); pass <code>--local</code> for engine + your database</td><td><code>--env &lt;name&gt;</code> (default <code>production</code>), <code>--schema-only</code>, <code>--app-only</code>, <code>--skip-build</code>, <code>--preview</code>, <code>--yes</code>, <code>--overwrite-drift</code>, <code>--allow-local</code></td></tr>
         <tr><td><code>deploy rollback</code></td><td>Roll back to the previous static site deployment</td><td><code>--to &lt;id&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>deploy status</code></td><td>Show current deployment status</td><td><code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>deploy logs [version]</code></td><td>Show build logs for a deployment</td><td><code>--env &lt;name&gt;</code></td></tr>
@@ -241,6 +243,7 @@
     </table></div>
     <p>Every <code>self-host compose</code> command renders <code>.supatype/self-host/docker-compose.yml</code> again before it runs. The file names each bind mount by its absolute path on this machine, and names its Compose project <code>supatype-</code> plus <code>project.name</code>. So <code>docker compose -f .supatype/self-host/docker-compose.yml</code> run by hand reaches the same stack, and a project moved to another folder is picked up by the next command.</p>
     <p>A render keeps the stack in the mode it runs in. While <code>supatype dev</code> runs for the project, commands such as <code>push</code>, <code>update</code> and <code>self-host compose</code> render dev mode. Otherwise they use the mode of the running <code>server</code> container, and standalone when none is running. So a push to a production stack leaves it standalone.</p>
+    <p><code>build</code> takes each value from the first of: the environment (<code>SUPATYPE_URL</code>, <code>SUPATYPE_ANON_KEY</code> or any framework's name), the <code>/supatype-env.json</code> of the server the environment's URL names (for the anon key only, so CI can set just <code>SUPATYPE_URL</code>), the linked environment, and a <code>.env</code> that records a deployment (<code>PUBLIC_SUPATYPE_URL</code> or <code>API_EXTERNAL_URL</code>, and <code>ANON_KEY</code>). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass <code>--allow-local</code>, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself <code>supatype build</code> is refused rather than run again. <code>deploy</code> builds the app the same way. See <a href="/docs/deploying-your-frontend.html">Deploy your frontend</a>.</p>
     <p>For a self-hosted stack, <code>link --url</code> takes the stack's gateway URL and <code>--token</code> its <code>SERVICE_ROLE_KEY</code>. The full walkthrough is in <a href="/docs/#self-host">Self-host</a> and <a href="/deploy-vm-github-actions.html">Deploy to a VM with GitHub Actions</a>.</p>
 
     <h2 id="cloud">Supatype Cloud</h2>

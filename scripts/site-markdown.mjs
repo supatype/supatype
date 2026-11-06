@@ -47,7 +47,7 @@ function languageOf(name, url) {
   if (name === "typescript") return "ts"
   if (name === "tsx") return "tsx"
   if (name.endsWith(".env") || name.endsWith(".conf")) return "ini"
-  const extension = name.match(/\.(ts|tsx|js|mjs|json|ya?ml|sql|toml|vue|svelte|prisma|sh)$/)?.[1]
+  const extension = name.match(/\.(ts|tsx|js|mjs|json|ya?ml|sql|toml|vue|svelte|prisma|sh|html)$/)?.[1]
   if (extension) return extension
   // A before-and-after pair on a TypeScript snippet, or the generated types folder.
   if (/^(before|after): /.test(name) || name === "supatype/generated") return "ts"

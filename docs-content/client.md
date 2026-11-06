@@ -23,12 +23,14 @@ Import `createClient` from the client file the CLI generates, not from `@supatyp
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
 
-Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY`, with `PUBLIC_`, `NEXT_PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. A local stack's values go to `.env.development.local`, which Vite, Next.js and Expo read in development only, so a production build has none of them and the client uses the address the page was served from, which is the API's when Supatype serves your app. A deployment's values (`supatype keys` on a server whose `API_EXTERNAL_URL` is its real address) go to `.env`, which a production build reads. Read these rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+Every page in these docs imports the client from this one file. In development, `supatype init`, `supatype dev` and `supatype keys` write the local stack's `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY`, with `PUBLIC_`, `NEXT_PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks, to `.env.development.local`. Vite, Next.js and Expo read that file in development only, so a production build never ships them. Read these rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+
+A production build gets your deployment's values from `supatype build`, which runs your build command with them, or from the host's settings. When Supatype serves the app, the page can read them from the server instead, with `<script src="/supatype-env.js"></script>` in `index.html`; a Next.js app serves the same script from a route ([Frameworks: Next.js](/docs/frameworks.html#nextjs)). For each value the build did not carry, the client reads the one that script set, at its first request. It never guesses the address from the page. `createClient` itself never throws, so a page that creates the client at module scope still prerenders. The first request made with no address or no anon key throws a `MissingClientValuesError` naming what is missing and the variables to set, rather than returning it as `{ data: null, error }`. [Deploy your frontend](/docs/deploying-your-frontend.html) covers each host.
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 

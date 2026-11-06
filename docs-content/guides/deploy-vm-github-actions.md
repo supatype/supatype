@@ -121,7 +121,7 @@ $ cd /opt/my-blog
 $ npm install
 $ supatype self-host compose up -d
 $ supatype push
-$ npm run build
+$ supatype build
 $ supatype self-host compose up -d
 ```
 
@@ -174,7 +174,7 @@ jobs:
             git reset --hard origin/main
             npm ci
             supatype push
-            npm run build
+            supatype build
             supatype self-host compose up -d
 ```
 
@@ -206,7 +206,8 @@ Watch the run under **Actions** on GitHub. When it succeeds, load your gateway U
 | --- | --- |
 | SSH fails | The firewall allows port 22, and `VM_SSH_KEY` matches the VM's `authorized_keys`. |
 | `supatype push` fails | Compose is up, and `DATABASE_URL` points at `localhost:5432`. If it refused a change that needs your consent, see [The workflow](#workflow). |
-| Site unchanged | `npm run build` writes to the directory in `app.static_dir`, then re-run `supatype self-host compose up -d`. |
+| Site unchanged | `supatype build` writes to the directory in `app.static_dir`, then re-run `supatype self-host compose up -d`. |
+| `supatype build` fails | It lists each source it tried for the API URL and anon key. On the VM both come from `.env`: `API_EXTERNAL_URL` must be the public address, not `localhost`, and `ANON_KEY` must be set. See [Deploy your frontend](/docs/deploying-your-frontend.html#missing). |
 
 :::note[Rather not run it yourself?]
 Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](/#cloud), or [book a call](/#contact) about self-hosting with support.

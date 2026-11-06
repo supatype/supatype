@@ -20,6 +20,7 @@ Guide for working with Supatype projects. If unsure about a command or flag, run
 | CLI commands | [references/cli.md](references/cli.md) |
 | Seeding | [references/seeding.md](references/seeding.md) |
 | Frontend, client, React hooks + auth components | [references/frontend.md](references/frontend.md) |
+| Production frontend builds (`supatype build`, Vercel, Netlify, CI) | [references/frontend.md](references/frontend.md#production-builds) |
 | REST GET caching (client + server) | [references/caching.md](references/caching.md) |
 | Self-host production | [references/self-host.md](references/self-host.md) |
 
@@ -108,7 +109,7 @@ for older scripts. For wiring a front end, see [references/frontend.md](referenc
 import { createClient } from "./supatype/generated/client"
 
 const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 
@@ -117,9 +118,20 @@ const { data: created } = await supatype.from("post").insert({ title: "Hello" })
 ```
 
 The CLI writes the local stack's URL and anon key to `.env.development.local`, read in development
-only, and a deployment's real values to `.env`. A production build without them falls back to the
-page's own origin, which is the API's when Supatype serves the app. See
-[references/frontend.md](references/frontend.md#frontend-env-files).
+only, so a production build gets neither from it. **Build for production with `supatype build`**
+(`supatype build -- vite build`, or bare to run the package.json `build` script): it runs the build
+with the deployment's URL and anon key under every framework prefix, from the environment, else (anon key
+only) the `/supatype-env.json` of the server that URL names, else the linked environment
+(`--env <name>`), else a `.env` recording a deployment; a key held for another deployment is
+skipped. It refuses to start when
+either is missing or the URL is local (`--allow-local` overrides). For a host's settings,
+`supatype keys --print frontend --env <name>` prints the same values as `NAME=value` lines. When
+Supatype serves the app, `<script src="/supatype-env.js"></script>` in `index.html` gives the page
+both values at load time; a Next.js app serves the same script from `app/supatype-env.js/route.ts`
+(`export { GET } from "@supatype/ssr/next"`, see [frontend.md](references/frontend.md#nextjs)). Pass the
+values straight to `createClient` with no guard of your own: creating it never throws, and its first
+request throws a `MissingClientValuesError` naming what is missing. See
+[references/frontend.md](references/frontend.md#production-builds).
 
 Writes (`insert`, `update`, `upsert`, `delete`) return `data: null` unless you chain `.select()`;
 `.single()` and `.maybeSingle()` on a write need `.select()` before them.
@@ -142,6 +154,10 @@ Add `@supatype/client` when wiring a frontend. `supatype dev` applies schema cha
 | Docker still running after dev | Run `supatype self-host compose down`; check Docker Desktop for orphaned `supatype-*` stacks |
 | Renamed project, old containers | Next `supatype dev` offers to stop the old stack; or `docker compose -p supatype-<old-name> down` |
 | Missing JWT keys | `supatype keys` (fills the blank keys in `.env`) |
+| Production site is a blank page; console says `Supatype client has no anon key.` | The build had no anon key. Build with `supatype build` and set `SUPATYPE_URL` in the host's settings (the anon key is fetched from that server's `/supatype-env.json`; set `SUPATYPE_ANON_KEY` too only if it does not publish one). `supatype keys --print frontend` prints both |
+| `No anon key for a production build of the front end.` (or `No API URL ...`) | `supatype build` found no usable value in the environment, the server the URL names, the link or `.env`; the lines under it say why for each. Set `SUPATYPE_ANON_KEY` / `SUPATYPE_URL`, or run `supatype build --env <name>` on a linked project |
+| ``The package.json build script calls `supatype build` itself, so running it again would never end.`` | package.json's `build` script is `supatype build`. Put the real command there (`vite build`), and run `supatype build` from the host or CI instead |
+| Next.js page works locally, deployed one throws `Supatype client has no API address and anon key.` | Set `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` in the host where the app runs (not `NEXT_PUBLIC_`): `/supatype-env.js` answers 503 naming the one that is unset. Check the app has `app/supatype-env.js/route.ts` and the root layout loads `/supatype-env.js` with `beforeInteractive` |
 | `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` | Put a longer secret in `.env` (`openssl rand -base64 48`), then `supatype keys --force` |
 | REST answers `503` / `PGRST002` on a fresh self-host stack | Expected until the first `supatype push`; push waits up to 40 s for REST to load the schema |
 | ``The process that started `supatype dev` has exited, so dev is stopping its stack.`` | The starter (script, CI step, agent command) exited. Keep `dev` in the foreground, or use `supatype self-host compose up -d` |
