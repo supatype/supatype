@@ -5,7 +5,7 @@
  * `next build` prerenders the static pages without the deployment's values, and the client then
  * reads them from `window.__SUPATYPE_ENV__` at its first request. This route sets that global from
  * `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` as the running server has them, with the same body,
- * headers and refusals as the Supatype server's own `/supatype-env.js`. Put it at
+ * headers and misconfigured answer as the Supatype server's own `/supatype-env.js`. Put it at
  * `app/supatype-env.js/route.ts`:
  *
  *     export { GET } from "@supatype/ssr/next"
@@ -36,64 +36,65 @@ const SCRIPT_GLOBAL = "window.__SUPATYPE_ENV__"
 /** `<`, `>`, `&` and the two JavaScript line separators, escaped in the body as Go's JSON does. */
 const SCRIPT_UNSAFE = new Set([0x3c, 0x3e, 0x26, 0x2028, 0x2029])
 
-/** The deployment's values for the page, or why there are none to give. */
-type PublicEnv = { url: string; anonKey: string } | { refusal: string; status: RefusalStatus }
+/**
+ * The deployment's values for the page; or the reason it is misconfigured, a fault to fix; or
+ * switched off, as if there were no route.
+ */
+type PublicEnv = { url: string; anonKey: string } | { error: string } | "off"
 
 /**
- * 404 when the route is switched off, as if there were none; 503 when it is on but the deployment
- * is misconfigured, a fault to fix rather than an absence, as the Supatype server answers.
+ * `GET /supatype-env.js`: the script setting `window.__SUPATYPE_ENV__`. Misconfigured, it is still
+ * 200 and sets only `error`, the reason, because a browser runs no script answered with an error
+ * status and tells the page nothing of why: this is the one way the client can name the fault on
+ * its first call. Switched off it is 404, as the Supatype server answers.
  */
-type RefusalStatus = 404 | 503
-
-/** `GET /supatype-env.js`: the script setting `window.__SUPATYPE_ENV__`, or why there is none. */
 export function GET(): Response {
   const env = readPublicEnv()
-  if ("refusal" in env) return refuse(env.refusal, env.status)
-  const doc = { url: env.url, anonKey: env.anonKey }
-  const body = `${SCRIPT_GLOBAL} = ${escapeForScript(JSON.stringify(doc))};\n`
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/javascript; charset=utf-8",
-      // Revalidated on every load: the values change when the deployment's configuration does.
-      "Cache-Control": "no-cache",
-      "X-Content-Type-Options": "nosniff",
-    },
-  })
+  if (env === "off") return notFound()
+  // A reason is kept by nothing, so the fixed configuration is read on the next load. Values are
+  // revalidated on every load: they change when the deployment's configuration does.
+  return script(env, "error" in env ? "no-store" : "no-cache")
 }
 
-/** The values to serve, read from the environment now, or the refusal the server would give. */
+/** The values to serve, read from the environment now, or why there are none. */
 function readPublicEnv(): PublicEnv {
   const enabled = publicEnvSwitch(serverEnv(PUBLIC_ENV_SWITCH))
-  if (enabled === false) return { refusal: "404 page not found", status: 404 }
+  if (enabled === false) return "off"
   // A word it cannot read is a fault to fix, not a choice to turn the route off.
-  if (enabled !== true) return { refusal: enabled.invalid, status: 503 }
+  if (enabled !== true) return { error: enabled.invalid }
   // Both, or neither: a page given only the key fails at its first request for want of an address,
-  // and a 503 naming the variable says why, where the deployment is configured.
+  // and the reason naming the variables says why, where the deployment is configured. Every fault
+  // is named in one reason, one per line and the key's first, so a single visit fixes them all.
   const url = publicUrl(serverEnv(SERVER_URL_ENV))
   const anonKey = serverEnv(SERVER_ANON_KEY_ENV)
-  if (anonKey === undefined) return notSet(SERVER_ANON_KEY_ENV)
-  if (url === undefined) return notSet(SERVER_URL_ENV)
-  if (jwtClaims(anonKey)?.["role"] === "service_role") {
-    return {
-      refusal:
-        `public env unavailable: ${SERVER_ANON_KEY_ENV} holds a service_role token, which must never ` +
-        "reach a browser. Set it to the project's anon key.",
-      status: 503,
-    }
+  const keyFault = anonKeyFault(anonKey)
+  const urlFault = url === undefined ? notSet(SERVER_URL_ENV) : undefined
+  if (url === undefined || anonKey === undefined || keyFault !== undefined) {
+    const faults = [keyFault, urlFault].filter((fault): fault is string => fault !== undefined)
+    return { error: faults.join("\n") }
   }
   return { url, anonKey }
 }
 
-/** The refusal for a variable the server does not have, as the Supatype server words it. */
-function notSet(name: string): PublicEnv {
-  return { refusal: `public env unavailable: ${name} is not set on this server`, status: 503 }
+/** Why the anon key variable cannot be served, or undefined when it can. */
+function anonKeyFault(anonKey: string | undefined): string | undefined {
+  if (anonKey === undefined) return notSet(SERVER_ANON_KEY_ENV)
+  if (jwtClaims(anonKey)?.["role"] !== "service_role") return undefined
+  return (
+    `public env unavailable: ${SERVER_ANON_KEY_ENV} holds a service_role token, which must never ` +
+    "reach a browser. Set it to the project's anon key."
+  )
+}
+
+/** The reason line for a variable the server does not have, as the Supatype server words it. */
+function notSet(name: string): string {
+  return `public env unavailable: ${name} is not set on this server`
 }
 
 /**
  * `SUPATYPE_PUBLIC_ENV` as the server reads it: on when blank or 1, true, yes or on; off for 0, false,
  * no or off. Any other word stops the server from starting; here, with no start to stop, the route
- * is 503 naming the variable and the words it takes.
+ * is a reason naming the variable and the words it takes.
  */
 function publicEnvSwitch(raw: string | undefined): boolean | { invalid: string } {
   const value = (raw ?? "").toLowerCase()
@@ -122,10 +123,23 @@ function escapeForScript(json: string): string {
   return out
 }
 
-/** A refusal nothing keeps, so the next configuration change is seen at once, as the server answers. */
-function refuse(message: string, status: RefusalStatus): Response {
-  return new Response(`${message}\n`, {
-    status,
+/** The statement setting `window.__SUPATYPE_ENV__` to `doc`, with the server's headers. */
+function script(doc: object, cacheControl: "no-cache" | "no-store"): Response {
+  const body = `${SCRIPT_GLOBAL} = ${escapeForScript(JSON.stringify(doc))};\n`
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/javascript; charset=utf-8",
+      "Cache-Control": cacheControl,
+      "X-Content-Type-Options": "nosniff",
+    },
+  })
+}
+
+/** A 404 nothing keeps, so switching the route back on is seen at once, as the server answers. */
+function notFound(): Response {
+  return new Response("404 page not found\n", {
+    status: 404,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
