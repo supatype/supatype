@@ -196,6 +196,13 @@
   reported as stopped, and dev exited before `down` ran, leaving the exit hook's fallback to stop
   the stack. Stopping a stack that was just running no longer asks: `down` runs at once, and says
   so itself if Docker really is gone.
+* **diff, push, dev, self-host:** a Docker that is slow to answer is no longer reported as not
+  running. `supatype diff`, straight after one that failed on a port clash, said `Docker is
+  installed but the daemon is not running` with `Docker did not answer within 15s`, while `docker
+  info` answered in under a second. A check that times out is now asked once more, and if Docker is
+  still silent the CLI says `Docker did not answer in time` and that it may be busy. "Not running"
+  is said only when the docker CLI reports it cannot connect; a paused Docker Desktop is called
+  paused, and any other `docker info` failure is shown as Docker printed it.
 * **dev:** a proxy app whose start script is `vite` starts again. The compiled program ran
   `vite.js` with itself rather than Node, so the app task exited with `error: unknown command
   '<app>/node_modules/vite/bin/vite.js'`, was restarted for the rest of the session, and every app

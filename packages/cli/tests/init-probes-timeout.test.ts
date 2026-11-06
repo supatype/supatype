@@ -36,7 +36,7 @@ describe("init's questions to Docker and npm", () => {
 
   it("reports a Docker daemon that does not answer, rather than waiting on it", async () => {
     const probe = await within(2_000, probeDockerDaemonAsync(hangs, 100))
-    expect(probe).toMatchObject({ ok: false, reason: "daemon_unavailable" })
+    expect(probe).toMatchObject({ ok: false, reason: "daemon_unresponsive" })
     expect(probe.ok === false ? probe.detail : "").toMatch(/did not answer within/)
   })
 
