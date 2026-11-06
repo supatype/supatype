@@ -100,6 +100,12 @@
   naming neither the address nor the fix. A linked server that refuses the connection is named the
   same way, without the `supatype dev` advice. `supatype functions invoke` says `Cannot reach <url>`
   under the compiled CLI too; it printed Bun's words instead.
+* **dev:** stopping `supatype dev` no longer says `Docker is installed but the daemon is not
+  running` while Docker is up. The shutdown's `docker compose down` first asked the daemon whether
+  it was running, giving `docker info` 15 s; a Docker busy enough to be slower than that was
+  reported as stopped, and dev exited before `down` ran, leaving the exit hook's fallback to stop
+  the stack. Stopping a stack that was just running no longer asks: `down` runs at once, and says
+  so itself if Docker really is gone.
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
   every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.
