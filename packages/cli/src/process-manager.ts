@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { enhanceProcessOptions } from "./dev-session.js"
+import { errorMessage } from "./error-message.js"
 
 export interface ProcessOptions {
   /** Human-readable label (used in log prefix and PID filename). */
@@ -28,15 +29,80 @@ export interface ProcessOptions {
   onExit?: () => void
   /** Use shell to spawn (required for pnpm/npm/yarn .cmd shims on Windows). */
   shell?: boolean
-  /** When set (TUI mode), receive log lines instead of writing to stdout/stderr. */
+  /**
+   * When set (TUI mode), receive log lines instead of writing to stdout/stderr. Each is a whole
+   * line without its line ending, and a line just received from the other stream is not repeated.
+   */
   onLine?: (line: string, stream: "stdout" | "stderr") => void
   /** Return false to drop a line before logging. */
   shouldLogLine?: (line: string) => boolean
-  /** Called before auto-restart after a non-zero exit (e.g. free a stale port). */
-  beforeRestart?: () => void
+  /**
+   * Called before the first spawn (e.g. free a stale port). The spawn waits for a returned promise,
+   * and goes ahead when it rejects, after reporting why.
+   */
+  beforeStart?: () => void | Promise<void>
+  /** Called before auto-restart after a non-zero exit, and awaited like `beforeStart`. */
+  beforeRestart?: () => void | Promise<void>
 }
 
 const RESET = "\x1b[0m"
+
+type OutputStream = "stdout" | "stderr"
+
+/**
+ * Drops the carriage return that ends a CRLF line. A line redrawn with bare carriage returns (a
+ * progress counter) keeps only its last state, which is what a terminal would show.
+ */
+function lastCarriageSegment(line: string): string {
+  const trimmed = line.endsWith("\r") ? line.slice(0, -1) : line
+  return trimmed.slice(trimmed.lastIndexOf("\r") + 1)
+}
+
+/**
+ * Turns a stream's reads into whole lines. A read ends wherever the pipe's buffer did, so a line
+ * can arrive in pieces, and each piece was logged as a line of its own. The text after the last
+ * newline now waits for the rest of its line, or for the stream to end.
+ */
+export class LineBuffer {
+  private pending = ""
+
+  constructor(private readonly emit: (line: string) => void) {}
+
+  push(text: string): void {
+    const parts = (this.pending + text).split("\n")
+    const tail = parts.pop() ?? ""
+    // A progress line redrawn with bare carriage returns would otherwise grow for as long as it
+    // runs. Only its last state is kept; a final "\r" stays, as it may be half of a CRLF.
+    const redrawn = tail.lastIndexOf("\r", tail.length - 2)
+    this.pending = redrawn >= 0 ? tail.slice(redrawn + 1) : tail
+    for (const part of parts) this.emit(lastCarriageSegment(part))
+  }
+
+  /** Emit the unterminated tail: the stream has ended and nothing more of it is coming. */
+  flush(): void {
+    if (this.pending === "") return
+    const rest = this.pending
+    this.pending = ""
+    this.emit(lastCarriageSegment(rest))
+  }
+}
+
+/**
+ * npm prints a script's banner to both streams, so a line just logged from the other stream is a
+ * repeat. The same line twice on one stream is the program's own output (two identical request
+ * errors, say) and was being dropped along with the banners.
+ */
+class CrossStreamRepeats {
+  private lastLine: string | null = null
+  private lastStream: OutputStream | null = null
+
+  isRepeat(line: string, stream: OutputStream): boolean {
+    const repeat = this.lastLine === line && this.lastStream !== stream
+    this.lastLine = line
+    this.lastStream = stream
+    return repeat
+  }
+}
 
 export class ProcessManager {
   private child: ChildProcess | null = null
@@ -51,8 +117,7 @@ export class ProcessManager {
     onExit: () => void
     shell: boolean
   }
-  /** Skip immediate duplicate lines (npm prints script banners to both streams). */
-  private lastLoggedLine = ""
+  private readonly prefix: string
 
   constructor(
     private readonly bin: string,
@@ -71,12 +136,15 @@ export class ProcessManager {
       ...merged,
     }
     this.backoffMs = this.opts.initialBackoffMs
+    this.prefix = this.opts.colour
+      ? `${this.opts.colour}[${this.opts.label}]${RESET} `
+      : `[${this.opts.label}] `
   }
 
   /** Start the process. Returns immediately, the process runs in the background. */
   start(): void {
     this.stopped = false
-    this.spawn()
+    void this.spawnAfter(this.opts.beforeStart)
   }
 
   /** Stop the process and clear the PID file. */
@@ -114,88 +182,91 @@ export class ProcessManager {
     await this.clearPid()
   }
 
+  /** Spawns once `hook` has finished, unless stop() was called while it ran. */
+  private async spawnAfter(hook: (() => void | Promise<void>) | undefined): Promise<void> {
+    try {
+      await hook?.()
+    } catch (err) {
+      this.report(`could not prepare the start, starting anyway: ${errorMessage(err)}`)
+    }
+    this.spawn()
+  }
+
   private spawn(): void {
     if (this.stopped) return
 
-    const env = { ...process.env, ...this.opts.env } as NodeJS.ProcessEnv
-    this.child = spawn(this.bin, this.args, {
-      env,
+    const child = spawn(this.bin, this.args, {
+      env: { ...process.env, ...this.opts.env } as NodeJS.ProcessEnv,
       cwd: this.opts.cwd,
       stdio: "pipe",
       ...(this.opts.shell ? { shell: true } : {}),
     })
+    this.child = child
+    if (child.pid) this.writePid(child.pid)
+    this.pipeOutput(child)
 
-    const pid = this.child.pid
-    if (pid) this.writePid(pid)
-
-    const prefix = this.opts.colour
-      ? `${this.opts.colour}[${this.opts.label}]${RESET} `
-      : `[${this.opts.label}] `
-
-    const logLine = (line: string, stream: NodeJS.WriteStream): void => {
-      if (!line) return
-      if (this.opts.shouldLogLine && !this.opts.shouldLogLine(line)) return
-      if (this.opts.onLine) {
-        if (line !== this.lastLoggedLine) {
-          this.lastLoggedLine = line
-          this.opts.onLine(line, stream === process.stderr ? "stderr" : "stdout")
-        }
-        return
-      }
-      if (line === this.lastLoggedLine) return
-      this.lastLoggedLine = line
-      stream.write(prefix + line + "\n")
-    }
-
-    this.child.stdout?.on("data", (chunk: Buffer) => {
-      for (const line of chunk.toString().split("\n")) {
-        logLine(line, process.stdout)
-      }
-    })
-
-    this.child.stderr?.on("data", (chunk: Buffer) => {
-      for (const line of chunk.toString().split("\n")) {
-        logLine(line, process.stderr)
-      }
-    })
-
-    this.child.once("error", (err) => {
+    child.once("error", (err) => {
       if (this.stopped) return
-      const message = `${prefix}failed to start: ${err.message}\n`
-      if (this.opts.onLine) {
-        this.opts.onLine(`failed to start: ${err.message}`, "stderr")
-      } else {
-        process.stderr.write(message)
-      }
-      setTimeout(() => {
-        this.opts.beforeRestart?.()
-        this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
-        this.spawn()
-      }, this.backoffMs)
+      this.report(`failed to start: ${err.message}`)
+      this.scheduleRestart()
     })
 
-    this.child.once("exit", (code, signal) => {
+    child.once("exit", (code, signal) => {
       if (this.stopped) return
-
       if (code === 0) {
         this.opts.onExit()
         return
       }
-
       const reason = signal ? `signal ${signal}` : `code ${code}`
-      const restartMsg = `${prefix}process exited (${reason}), restarting in ${this.backoffMs}ms\n`
-      if (this.opts.onLine) {
-        this.opts.onLine(`process exited (${reason}), restarting in ${this.backoffMs}ms`, "stderr")
-      } else {
-        process.stderr.write(restartMsg)
-      }
-
-      setTimeout(() => {
-        this.opts.beforeRestart?.()
-        this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
-        this.spawn()
-      }, this.backoffMs)
+      this.report(`process exited (${reason}), restarting in ${this.backoffMs}ms`)
+      this.scheduleRestart()
     })
+  }
+
+  /**
+   * Logs the child's output a whole line at a time. Repeats are tracked per run: carried over, a
+   * crashing program's error was dropped on every restart as a repeat of the run before, so the
+   * log showed it once and then only the restarts.
+   */
+  private pipeOutput(child: ChildProcess): void {
+    const repeats = new CrossStreamRepeats()
+    for (const stream of ["stdout", "stderr"] as const) {
+      const lines = new LineBuffer((line) => this.logLine(line, stream, repeats))
+      const source = child[stream]
+      if (!source) continue
+      // Decoded as a stream, so a character split across two reads (Vite's "➜") stays whole.
+      source.setEncoding("utf8")
+      source.on("data", (text: string) => lines.push(text))
+      source.on("end", () => lines.flush())
+    }
+  }
+
+  private logLine(line: string, stream: OutputStream, repeats: CrossStreamRepeats): void {
+    if (!line) return
+    if (this.opts.shouldLogLine && !this.opts.shouldLogLine(line)) return
+    if (repeats.isRepeat(line, stream)) return
+    if (this.opts.onLine) {
+      this.opts.onLine(line, stream)
+      return
+    }
+    const target = stream === "stderr" ? process.stderr : process.stdout
+    target.write(this.prefix + line + "\n")
+  }
+
+  /** A message of the manager's own about the process: the dashboard pane, or stderr. */
+  private report(message: string): void {
+    if (this.opts.onLine) {
+      this.opts.onLine(message, "stderr")
+      return
+    }
+    process.stderr.write(`${this.prefix}${message}\n`)
+  }
+
+  private scheduleRestart(): void {
+    setTimeout(() => {
+      this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
+      void this.spawnAfter(this.opts.beforeRestart)
+    }, this.backoffMs)
   }
 
   private writePid(pid: number): void {
