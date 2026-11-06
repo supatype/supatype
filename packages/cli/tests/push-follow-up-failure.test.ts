@@ -31,6 +31,11 @@ vi.mock("../src/compose-render-mode.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-render-mode.js")>()),
   runningStackMode: () => docker.mode,
 }))
+// A running stack's `db` runs with it.
+vi.mock("../src/compose-kong.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/compose-kong.js")>()),
+  composeServiceIsRunning: (_cwd: string, _stack: unknown, service: string) => service === "db" && docker.mode !== undefined,
+}))
 vi.mock("../src/dev-ports.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/dev-ports.js")>()),
   ensureKongPort: async () => 55560,
@@ -128,6 +133,14 @@ describe("supatype push on a docker project", () => {
     await pushSchemaDocker(cwd, config, { audit: [] })
     expect(docker.engineRuns).toBe(1)
     expect(printed.join("\n")).toMatch(/The schema was applied, but a step after it failed/)
+  })
+
+  // Issue 46: the push ran `up -d db` (and waited on it) before applying, on a stack already up.
+  it("on a running stack, does not start its database again", async () => {
+    docker.mode = "dev"
+    exitThrows()
+    await pushSchemaDocker(cwd, config, { audit: [] })
+    expect(docker.compose.filter((args) => args.join(" ") === "up -d db")).toEqual([])
   })
 
   it("applies to an external database with no stack running, and starts nothing", async () => {

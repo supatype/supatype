@@ -207,14 +207,18 @@ function projectDatabaseUrl(cwd: string, config: SupatypeProjectConfig, inNetwor
 }
 
 /**
- * When `provider: docker` and `overrides.engine` is set, ensure Postgres is published
- * on the host (SUPATYPE_DEV_DB_PORT) so the local engine binary can connect.
+ * When `provider: docker` and `overrides.engine` is set: the stack's Postgres, which the local
+ * engine binary reaches on the host port the compose file publishes. Every layout publishes `db`
+ * ({@link publishesDbToHost}), dev on SUPATYPE_DEV_DB_PORT and standalone on SUPATYPE_DB_PORT, so
+ * on a running stack it is already there. Nothing is started (issue 46): this ran `up -d db`, and
+ * on a dev stack moved the dev port first, under a database that was already up. A stack that is
+ * not running, or whose `db` container is not, is refused instead.
  */
-export async function ensureDockerDbPublishedForHostEngine(
+export function ensureDockerDbPublishedForHostEngine(
   cwd: string,
   config: SupatypeProjectConfig,
-  brand?: DockerBrandOptions,
-): Promise<void> {
+  command?: string,
+): void {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("ensureDockerDbPublishedForHostEngine requires provider: docker")
   }
@@ -225,15 +229,20 @@ export async function ensureDockerDbPublishedForHostEngine(
     )
   }
 
-  const project = composeProjectName(config.project.name)
-  // A standalone stack already publishes its database (SUPATYPE_DB_PORT), and its .env is the
-  // operator's: only a dev stack gets the dev port and the dev values (SH1). With no stack running
-  // the URL the engine is handed cannot be derived, so refuse before starting anything (M1b).
-  const mode = requireRunningStack(cwd, config.project.name)
-  if (mode === "dev") await prepareDevComposeEnv(cwd, config, project, await resolveKongPort(cwd, project))
+  // With no stack running the URL the engine is handed cannot be derived (M1b).
+  requireRunningStack(cwd, config.project.name)
+  requireStackDatabase(cwd, config, command)
+}
 
-  const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
-  await startComposeDatabase(config, paths, cwd, project, brand)
+/**
+ * Refuse ({@link NoStackRunning}) a running stack whose `db` container is not running, rather than
+ * start it: a compose `up -d db`, or a `compose run` of the engine, which starts `db` as its
+ * dependency. An external database is not the stack's to check.
+ */
+function requireStackDatabase(cwd: string, config: SupatypeProjectConfig, command?: string): void {
+  if (usesExternalDatabase(config)) return
+  const stack = { project: composeProjectName(config.project.name), composePath: selfHostComposePaths(cwd).composePath }
+  if (!composeServiceIsRunning(cwd, stack, "db")) throw new NoStackRunning(command)
 }
 
 /**
@@ -265,10 +274,10 @@ export async function resolveHostEngineDatabaseUrl(
   // The URL comes from the one resolver every host-side command uses. It is resolved first so a
   // derived URL with no stack running refuses before anything starts (M1b), and a DATABASE_URL
   // someone set is used without one. Then, when it is this project's local docker Postgres, the
-  // database is published so the URL reaches something.
+  // stack's database is checked to be running, which is what the URL reaches.
   const resolved = resolveHostDatabaseUrl(cwd, config, { connection: explicit, allowDerived: true })
   if (resolved.source === DERIVED_DSN_SOURCE && usesLocalDockerEngineDb(config, explicit)) {
-    await ensureDockerDbPublishedForHostEngine(cwd, config)
+    ensureDockerDbPublishedForHostEngine(cwd, config)
   }
   return resolved.dsn
 }
@@ -1362,7 +1371,7 @@ export async function adoptSchemaDocker(
   // either as "every conflict".
   if (keys !== undefined) await requireDockerFeatures(cwd, config, [adoptKeysNeed(keys)])
   if (hasEngineOverride(config)) {
-    await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Adopt" })
+    ensureDockerDbPublishedForHostEngine(cwd, config, "adopt")
     await ensureEngine()
     return engineRequest(
       "/adopt",
@@ -1405,11 +1414,12 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   }
   const project = composeProjectName(config.project.name)
   if (hasEngineOverride(config)) {
-    await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Schema diff" })
+    ensureDockerDbPublishedForHostEngine(cwd, config, "diff")
     return diffWithHostEngine(cwd, config)
   }
   const running = runningStackMode(cwd, config.project.name)
   if (running === undefined && !usesExternalDatabase(config)) throw new NoStackRunning("diff")
+  if (running !== undefined) requireStackDatabase(cwd, config, "diff")
   // A diff of a standalone stack must not write dev values over the operator's .env (SH1). A dev
   // stack's is brought up to date as push does: compose interpolates the whole file.
   const mode = running ?? "standalone"
@@ -1496,7 +1506,8 @@ export async function pushSchemaDocker(
   const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
   const stack = { paths, project, gatewayPort: composeGatewayHostPort(config, mode, kongPort), brand: { intro: "Push schema" } }
 
-  if (running !== undefined) await startComposeDatabase(config, paths, cwd, project, stack.brand)
+  // The database of a running stack is up already: checked, not started again (issue 46).
+  if (running !== undefined) requireStackDatabase(cwd, config, "push")
   if (!usesExternalDatabase(config)) await privatizeTableDefaults(paths, cwd, project)
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)

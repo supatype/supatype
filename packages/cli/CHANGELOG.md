@@ -538,6 +538,13 @@
   stack (its `up -d`, the gateway wait, the buckets or the first admin), warning `The schema was
   applied, but a step after it failed` with the reason. A start that failed on a port another
   program held made push exit 1 with the schema in.
+* **push, diff, adopt, pull:** on a running stack these no longer run `docker compose up -d db`
+  before they reach its database. Every layout already publishes Postgres on the port the host
+  engine connects to, so the call had nothing to start, and could recreate the database container
+  when its definition had changed; with `overrides.engine` on a dev stack it could also move the dev
+  database port under a running database first. A running stack whose `db`
+  container has stopped is now refused with the "local stack isn't running" message rather than
+  having its database started.
 
 
 ## 0.7.0
