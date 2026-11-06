@@ -18,7 +18,7 @@ import { p, printLogo } from "./ui/prompts.js"
 
 export type DockerDaemonProbe =
   | { ok: true }
-  | { ok: false; reason: "cli_missing" | "daemon_unavailable"; detail?: string }
+  | { ok: false; reason: "cli_missing" | "daemon_unavailable" | "daemon_unresponsive"; detail?: string }
 
 export type DockerBrandOptions = {
   intro: string
@@ -34,17 +34,32 @@ type ProbeAnswer = Omit<DockerAnswer, "timedOut">
 
 const VERSION_ARGS = ["version", "--format", "{{.Client.Version}}"]
 
-/** A daemon that did not answer within `timeoutMs`. */
+/**
+ * A daemon that did not answer within `timeoutMs`. Not proof that it is down: a Docker still busy
+ * with the last command (a `compose up` that failed on a port clash, say) can be slow to answer
+ * `docker info` and quick again a moment later (issue 33).
+ */
 function silentDaemon(timeoutMs: number): DockerDaemonProbe {
-  return { ok: false, reason: "daemon_unavailable", detail: `Docker did not answer within ${Math.round(timeoutMs / 1000)}s` }
+  return { ok: false, reason: "daemon_unresponsive", detail: `Docker did not answer within ${Math.round(timeoutMs / 1000)}s` }
+}
+
+/** Whether `probe` is a silence, which is asked about once more before it is reported. */
+function isSilence(probe: DockerDaemonProbe): boolean {
+  return !probe.ok && probe.reason === "daemon_unresponsive"
 }
 
 /**
  * Returns whether the Docker CLI is on PATH and the daemon accepts connections. Synchronous because
  * `requireDockerDaemon` guards `runDockerCompose`, which every compose command calls synchronously;
- * each question is still given up on after {@link DOCKER_QUERY_TIMEOUT_MS}.
+ * each question is still given up on after {@link DOCKER_QUERY_TIMEOUT_MS}, and a silence is asked
+ * about once more (see {@link silentDaemon}).
  */
 export function probeDockerDaemon(): DockerDaemonProbe {
+  const first = probeDockerDaemonOnce()
+  return isSilence(first) ? probeDockerDaemonOnce() : first
+}
+
+function probeDockerDaemonOnce(): DockerDaemonProbe {
   const ask = { shell: process.platform === "win32", timeoutMs: DOCKER_QUERY_TIMEOUT_MS }
   const version = askDockerSync(VERSION_ARGS, ask)
   if (version.timedOut) return silentDaemon(DOCKER_QUERY_TIMEOUT_MS)
@@ -70,6 +85,15 @@ export async function probeDockerDaemonAsync(runner?: DockerRunner, timeoutMs?: 
   return info.timedOut ? silent : verdictFromInfo(info, version)
 }
 
+/**
+ * {@link probeDockerDaemonAsync}, asked once more after a silence, as {@link probeDockerDaemon} is.
+ * For a command that is about to use Docker; `init` only warns, so it asks once and does not wait.
+ */
+export async function probeDockerDaemonRetrying(runner?: DockerRunner, timeoutMs?: number): Promise<DockerDaemonProbe> {
+  const first = await probeDockerDaemonAsync(runner, timeoutMs)
+  return isSilence(first) ? probeDockerDaemonAsync(runner, timeoutMs) : first
+}
+
 /** The verdict `docker version` alone gives, or null when it takes `docker info` to tell. */
 function verdictFromVersion(version: ProbeAnswer): DockerDaemonProbe | null {
   if (version.missing) return { ok: false, reason: "cli_missing" }
@@ -93,37 +117,59 @@ function verdictFromInfo(info: ProbeAnswer, version: ProbeAnswer): DockerDaemonP
   return { ok: false, reason: "daemon_unavailable", ...(detail ? { detail } : {}) }
 }
 
-function shouldShowDockerDetail(probe: Extract<DockerDaemonProbe, { ok: false }>): boolean {
-  if (!probe.detail) return false
-  const lower = probe.detail.toLowerCase()
-  if (probe.reason !== "daemon_unavailable") return true
+type DockerFailure = Extract<DockerDaemonProbe, { ok: false }>
+
+/**
+ * What the docker CLI says when nothing is listening: the Unix socket's "Cannot connect", and on
+ * Windows "error during connect" (older) or "failed to connect to the docker API" (Docker 28 on).
+ */
+const CANNOT_CONNECT = /cannot connect to the docker daemon|error during connect|failed to connect to the docker api|is the docker daemon running/i
+
+/** How a daemon the CLI could reach but not use is described, from what the docker CLI said. */
+function daemonState(probe: DockerFailure): "paused" | "not_running" | "failed" {
+  const detail = probe.detail ?? ""
+  if (/paused/i.test(detail)) return "paused"
+  return CANNOT_CONNECT.test(detail) ? "not_running" : "failed"
+}
+
+function shouldShowDockerDetail(probe: DockerFailure): boolean {
+  if (!probe.detail || probe.reason === "daemon_unresponsive") return false
   // Skip raw daemon stderr when we already print a clearer hint.
-  return !lower.includes("paused") && !lower.includes("cannot connect")
+  return probe.reason !== "daemon_unavailable" || daemonState(probe) === "failed"
 }
 
-function dockerUnavailableHeadline(probe: Extract<DockerDaemonProbe, { ok: false }>): string {
-  if (probe.reason === "cli_missing") {
-    return "Docker is not installed or not on your PATH."
-  }
-  return "Docker is installed but the daemon is not running."
+const DAEMON_HEADLINES = {
+  paused: "Docker is installed but Docker Desktop is paused.",
+  not_running: "Docker is installed but the daemon is not running.",
+  failed: "Docker is installed but `docker info` failed.",
+} as const
+
+function dockerUnavailableHeadline(probe: DockerFailure): string {
+  if (probe.reason === "cli_missing") return "Docker is not installed or not on your PATH."
+  if (probe.reason === "daemon_unresponsive") return "Docker did not answer in time."
+  return DAEMON_HEADLINES[daemonState(probe)]
 }
 
-function dockerUnavailableHints(probe: Extract<DockerDaemonProbe, { ok: false }>): string[] {
-  const hints: string[] = []
-
+/** The first hint: what to do about this failure. */
+function dockerRemedy(probe: DockerFailure): string {
   if (probe.reason === "cli_missing") {
-    hints.push(
-      "Install Docker Desktop (https://www.docker.com/products/docker-desktop/) or add the docker CLI to PATH.",
-    )
-  } else if (probe.detail?.toLowerCase().includes("paused")) {
-    hints.push("Unpause Docker Desktop from the whale menu or Dashboard, then try again.")
-  } else if (platform() === "win32" || platform() === "darwin") {
-    hints.push("Start Docker Desktop, then try again.")
-  } else {
-    hints.push("Start the Docker daemon (e.g. sudo systemctl start docker), then try again.")
+    return "Install Docker Desktop (https://www.docker.com/products/docker-desktop/) or add the docker CLI to PATH."
   }
+  if (probe.reason === "daemon_unresponsive") {
+    return `${probe.detail ?? "Docker did not answer"}. It may be busy (starting up, or finishing another command): try again in a moment.`
+  }
+  if (daemonState(probe) === "paused") return "Unpause Docker Desktop from the whale menu or Dashboard, then try again."
+  if (platform() === "win32" || platform() === "darwin") return "Start Docker Desktop, then try again."
+  return "Start the Docker daemon (e.g. sudo systemctl start docker), then try again."
+}
 
-  hints.push('To develop without Docker, set provider: "native" in supatype.config.ts.')
+function dockerUnavailableHints(probe: DockerFailure): string[] {
+  const hints: string[] = [dockerRemedy(probe)]
+
+  // A Docker that is only slow is not a reason to stop using it.
+  if (probe.reason !== "daemon_unresponsive") {
+    hints.push('To develop without Docker, set provider: "native" in supatype.config.ts.')
+  }
 
   if (shouldShowDockerDetail(probe)) {
     const firstLine = probe.detail!.split(/\r?\n/).find((line) => line.trim().length > 0)
@@ -174,7 +220,7 @@ export function requireDockerDaemon(opts?: DockerReportOptions): void {
 
 /** {@link requireDockerDaemon} without blocking, so the dev dashboard keeps drawing while it asks. */
 export async function requireDockerDaemonAsync(opts?: DockerReportOptions): Promise<void> {
-  exitUnlessDaemon(await probeDockerDaemonAsync(), opts)
+  exitUnlessDaemon(await probeDockerDaemonRetrying(), opts)
 }
 
 function exitUnlessDaemon(probe: DockerDaemonProbe, opts?: DockerReportOptions): void {
