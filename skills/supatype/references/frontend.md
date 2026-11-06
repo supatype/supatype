@@ -97,17 +97,29 @@ copies. Where they go depends on whose values they are:
 `supatype init` (docker), `supatype dev` and `supatype keys` all follow this. Writing a local
 stack's values also removes the CLI's old localhost copies from `.env` and `.env.local`, and says
 so, so a production build no longer ships `localhost` or the dev anon key. `ANON_KEY` and
-`SERVICE_ROLE_KEY` themselves stay in `.env`.
+`SERVICE_ROLE_KEY` themselves stay in `.env`. A production build on a CI host (Vercel, Netlify,
+Cloudflare Pages, GitHub Actions) reads none of these files: see
+[Production builds](#production-builds).
 
-Read the URL with the page origin as the fallback. A production build has no local values, so it
-calls the origin it was served from, which is the API's when Supatype (Kong) serves the app:
+Pass both names straight to `createClient`. For a value the build did not carry, the client reads
+the page's `window.__SUPATYPE_ENV__` (set by `<script src="/supatype-env.js">` when Supatype serves
+the app, or by the Next.js route below), at its first request. It never guesses the address from
+the page's origin. `createClient` itself never throws, so `next build` can prerender a page that
+creates one at module scope; the first request made with no address or no anon key throws
+`MissingClientValuesError` (`Supatype client has no anon key. createClient was given none, and the
+page had set no window.__SUPATYPE_ENV__ by its first request. ...`), naming the variables,
+`supatype build`, the script tag and the Next.js route. REST, rpc, auth, storage, functions, GraphQL
+and realtime all throw it rather than returning `{ data: null, error }`. Do not add an
+`if (!key) throw` of your own: a bundler that knows the name is unset can fold it into a throw that
+hides the cause, and an `?? window.location.origin` on the URL stops the page's value from ever
+being read.
 
 ```typescript
 // The generated client, not "@supatype/client": it registers which models keep drafts.
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -187,14 +199,117 @@ For SSR frameworks or when Supatype should spawn the dev server:
 2. `supatype dev` starts the `start` script and proxies through Kong
 3. `vite_dev_url` optional if upstream already points at Vite
 
-## Production static build
+## Production builds
 
-```bash
-npm run build
-supatype self-host compose up -d
+`supatype build [--env <name>] [--allow-local] [-- <command...>]` runs the production build (the
+package.json `build` script through the project's package manager, or the command after `--`) with
+the deployment's API URL and anon key under every prefix (`VITE_`, `PUBLIC_`, `NEXT_PUBLIC_`,
+`EXPO_PUBLIC_`). It writes no file, never passes the service role key, and exits with the build's
+own code. Each value comes from the first source holding it:
+
+1. The environment: `SUPATYPE_URL` / `SUPATYPE_ANON_KEY` or any prefixed name. A host's settings win.
+2. For the anon key only: `<URL>/supatype-env.json` of the server the environment's URL names
+   (`SUPATYPE_URL` or a prefixed name), HTTPS for an address that is not local, a local one only
+   with `--allow-local`, so CI can set just the URL. A 503 there reads `the server at <url> is not
+   set up to publish its anon key: <reason>`.
+3. The linked environment (`--env`, else the link's default). Cloud: the environment's address and
+   the control plane's keys route (needs `supatype login` or `SUPATYPE_ACCESS_TOKEN`, as owner or
+   admin). Self-host: the link's address and `<address>/supatype-env.json`, fetched over HTTPS only
+   for an address that is not local.
+4. `.env` recording a deployment: `PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY` (the
+   server's own `.env`).
+
+A local address in the first source holding the URL is refused, not skipped (`--allow-local`
+overrides), and so is a service role key offered as the anon key. An anon key is used only for the
+URL being built for: one a source holds for another deployment (a link to A beside `SUPATYPE_URL`
+naming B) is listed as `skipped ... not the URL being built for`. The refusal lists every source
+tried and exits 1 before the build starts. `.supatype/link.json` is gitignored, so a CI host has no
+link: set `SUPATYPE_URL` in its settings and wrap the build; the anon key is fetched from that
+server. Set `SUPATYPE_ANON_KEY` as well only when the server does not publish it
+(`server.public_env: false`, or plain `http://`). No service role key or link is needed in CI.
+
+Keep the real command (`vite build`) in package.json's `build` script. A bare `supatype build` run
+from inside a build it started (`SUPATYPE_BUILD_ACTIVE=1`), as a `"build": "supatype build"` script
+would be, refuses with ``The package.json build script calls `supatype build` itself, so running it again
+would never end.`` A nested `supatype build -- <command>` still runs.
+
+| Where it builds | What to run |
+|-----------------|-------------|
+| On the self-host server | `supatype build`, then `supatype self-host compose up -d` (reads `.env`) |
+| Vercel | Env var `SUPATYPE_URL` (plus `SUPATYPE_ANON_KEY` if the server does not publish it); `vercel.json` `"buildCommand": "npx supatype build"`. A Next.js app needs no wrapper: see [Next.js](#nextjs) |
+| Netlify | Same env var; `netlify.toml` `[build] command = "npx supatype build"` |
+| Cloudflare Pages | Same variable; build command `npx supatype build` |
+| GitHub Actions | `run: npx supatype build` with `env: SUPATYPE_URL: ${{ vars.SUPATYPE_URL }}` (and `SUPATYPE_ANON_KEY` if the server does not publish it) |
+| A laptop, for a linked deployment | `supatype build --env production` |
+
+**Allow the app's origin (CORS).** A self-hosted API answers browsers only from `SITE_URL`'s origin
+and the listed ones. An app served anywhere else (Vercel, Netlify, Cloudflare Pages, a Next.js app on
+its own server, a dev server on another port) is refused: preflight `403`, browser `Failed to fetch`.
+Add its origin (`scheme://host[:port]`, each preview URL counts) to `api.corsOrigins` in
+`supatype.config.ts` or `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` (comma-separated), then
+`supatype self-host compose restart server`; or add it in Studio, Settings > CORS tab (no restart; a
+saved list replaces the default until reset). On Supatype Cloud, add it in Studio. Supatype hosting
+needs nothing: the app is on the API's origin. `supatype dev` allows every origin, so it shows only
+against a deployed API. See [config.md](config.md) (`api.corsOrigins`) and
+`https://www.supatype.com/docs/deploying-your-frontend.html#cors`.
+
+`supatype keys --print frontend [--env <name>] [--allow-local]` prints the same values, one `NAME=value` per line
+and nothing else on stdout, to paste into a host's settings or append to `$GITHUB_ENV`. Same
+sources, same refusals; `--allow-local` takes a local stack's address. `--env` or `--allow-local`
+without `--print frontend` is refused.
+
+When Supatype serves the app, the server answers `GET /supatype-env.js` with
+`window.__SUPATYPE_ENV__ = {"url":...,"anonKey":...};` (and `/supatype-env.json` with the same
+object), `Cache-Control: no-cache`, whatever the app mode. `supatype init` adds
+`<script src="/supatype-env.js"></script>` to a static app's `index.html`; with it, a build made
+with no values (`npm run build`) runs on every deployment that serves it. Values the build carried
+win over the script. `server.public_env: false` turns both addresses off (404) for an API-only
+project; the anon key is public either way.
+
+### Next.js
+
+`next build` prerenders without the deployment's values, so a Next.js app takes them at run time.
+`supatype init` writes, for an App Router app (under `src/app` when that is where it lives, and
+`route.js` without a `tsconfig.json`):
+
+```ts
+// app/supatype-env.js/route.ts
+export { GET } from "@supatype/ssr/next"
+export const dynamic = "force-dynamic" // in this file: Next ignores a re-exported segment config
 ```
 
-See [references/self-host.md](references/self-host.md) and `examples/self-host/README.md` for TLS, DNS, and compose.
+and, first inside the root layout's `<body>`,
+`<Script src="/supatype-env.js" strategy="beforeInteractive" />` with
+`import Script from "next/script"`, plus `@supatype/ssr` in dependencies. A layout it cannot edit
+safely is left alone and the two lines are printed. For a static export (`output: "export"` in
+`next.config`) init writes no route, layout script or dependency, and prints `supatype build -- next
+build` or Supatype hosting. A Pages Router app gets nothing written; init prints the steps: the same route under `app/`, the `<Script>` inside `<Head>` in
+`pages/_document.tsx`, and the dependency.
+
+`GET` answers `window.__SUPATYPE_ENV__ = {"url":...,"anonKey":...};` from `SUPATYPE_URL` and
+`SUPATYPE_ANON_KEY` in the running server's environment, `Cache-Control: no-cache`. 404 `no-store`
+only when `SUPATYPE_PUBLIC_ENV=false`; 503 `no-store` naming the variable when `SUPATYPE_URL` or
+`SUPATYPE_ANON_KEY` is unset (`public env unavailable: SUPATYPE_ANON_KEY is not set on this
+server`) or the anon key is a service role token. The Supatype server answers its own
+`/supatype-env.js` the same way. `createServerClient({ cookies })` defaults its address and anon
+key to the same two variables, then to `NEXT_PUBLIC_SUPATYPE_URL` / `NEXT_PUBLIC_SUPATYPE_ANON_KEY`
+(`createServerClient(url, anonKey, { cookies })` still works). With neither, its first request
+throws ``Supatype client has no API address and anon key. It was given none, and it is running on
+a server, where there is no page to read them from.`` and names `SUPATYPE_URL` and
+`SUPATYPE_ANON_KEY`. In `next dev` the route answers from `.env.development.local`, where
+`supatype dev`, `init` and `keys --write` put the local stack's `SUPATYPE_URL` and
+`SUPATYPE_ANON_KEY`.
+
+So on Vercel, Netlify or a Node server running `next start`: set `SUPATYPE_URL` and
+`SUPATYPE_ANON_KEY` where the app runs, keep the build command `next build`, and leave the
+`NEXT_PUBLIC_SUPATYPE_*` names unset in production (a value fixed into the build wins over the
+route's). One build then runs against any deployment. A static export has no server for the
+route: `supatype build -- next build`, or let Supatype host the export
+(`supatype app add --static ./out`), whose server answers `/supatype-env.js` itself (add the
+`<Script>` to the root layout).
+
+See [self-host.md](self-host.md) and `examples/self-host/README.md` for TLS, DNS, and compose, and
+the docs page "Deploy your frontend" (`https://www.supatype.com/docs/deploying-your-frontend.html`).
 
 ## Query patterns
 
@@ -312,7 +427,7 @@ Supatype ships first-party bindings. Prefer them over wiring the raw client by h
 | `@supatype/vue` | Composables: `useAuth`, `useQuery`, `useMutation`, `useSubscription` |
 | `@supatype/solid` | Primitives: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
 | `@supatype/svelte` | Stores: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
-| `@supatype/ssr` | Cookie-based client for Server Components, Route Handlers, middleware |
+| `@supatype/ssr` | Cookie-based client for Server Components, Route Handlers, middleware (address and anon key default to `SUPATYPE_URL` / `SUPATYPE_ANON_KEY`); `@supatype/ssr/next` exports `GET` for `app/supatype-env.js/route.ts` ([Next.js](#nextjs)) |
 | `@supatype/ui` | React components styled with Tailwind (`Button`, `Input`, `Card`, `Badge`, `Skeleton`, `ThemeProvider`), plus a Lexical `RichTextEditor` at `@supatype/ui/rich-text`. Needs Tailwind set up to see it: see [`@supatype/ui` setup](#supatypeui-setup) |
 
 > **Don't reimplement auth forms or auth state by hand.** Use `@supatype/react-auth` for the UI and `@supatype/react`'s `useAuth` for state. Drop to the raw client only for app-specific data access not covered by the hooks.
@@ -520,7 +635,7 @@ render read only. An `Input` with no `id` gets one from `React.useId()`, and wit
 |------|--------|----------|
 | Static + `vite_dev_url` | `app.mode: "static"`; `supatype dev` does not start Vite, so run `npm run vite` beside it | Only a hand-written config: init never leaves a Vite app this way; Kong serves built assets in prod |
 | Proxy | `app.mode: "proxy"`, `upstream`, `start: "vite"` | One `npm run dev` starts the stack and Vite (what init writes into `supatype.local.config.ts` for every Vite app) |
-| Static SSG (Astro, etc.) | `build.framework`, `static_dir` | `npm run build` then compose serves `dist/` |
+| Static SSG (Astro, etc.) | `build.framework`, `static_dir` | `supatype build` then compose serves `dist/` |
 
 Local dev URL: the one init and `supatype dev` print, `http://localhost:<SUPATYPE_KONG_PORT>` from
 `.env` (18473 or the next free port when init ran).

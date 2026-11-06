@@ -82,6 +82,7 @@ export default localConfig
 | `server.port` | supatype-server port (native dev) |
 | `server.domain` | Custom domain for self-host HTTPS (e.g. `"demo.example.com"`) |
 | `server.tls` | `{ email, provider }`: Let's Encrypt contact email; `provider: "kong"` (default, Kong ACME) or `"none"` (stay HTTP). Set via `supatype add domain` |
+| `server.public_env` | `false` turns off the server's `GET /supatype-env.json` and `GET /supatype-env.js` (both answer 404), rendered as `SUPATYPE_PUBLIC_ENV=false` for self-host compose, dev compose and native dev. Unset (the default) leaves them on: they publish the API URL and anon key for `supatype build` and a page's `<script src="/supatype-env.js">`. For an API-only project. The anon key is public either way, so this does not make it a secret. Anything but a boolean is refused |
 | `app.mode` | `"none"`, `"static"`, or `"proxy"` |
 | `app.static_dir` | Built static assets directory |
 | `app.vite_dev_url` | Vite dev server URL for HMR (`/_vite/*`) when using **static** mode locally, e.g. `http://127.0.0.1:5173`. Sets `SUPATYPE_VITE_DEV_URL` during `supatype dev` |
@@ -123,8 +124,8 @@ API_EXTERNAL_URL=http://localhost:18473
 The front end's copies (`VITE_SUPATYPE_URL`, `VITE_SUPATYPE_ANON_KEY` and their `PUBLIC_`,
 `NEXT_PUBLIC_`, `EXPO_PUBLIC_` twins) are not in `.env` for a local stack: they go to
 `.env.development.local`, read in development only, so a production build never ships localhost or
-the dev anon key. A deployment's real values go to `.env`. See
-[frontend.md](frontend.md#frontend-env-files).
+the dev anon key. A production build gets a deployment's values from `supatype build` (see
+[frontend.md](frontend.md#production-builds)).
 
 `supatype dev` **does not** rewrite `POSTGRES_PASSWORD` or `JWT_SECRET`. It reads them, so a
 generated secret reaches production intact. It does rewrite the keys derived from them

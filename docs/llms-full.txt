@@ -230,7 +230,7 @@ Install the client first with `npm install @supatype/client`: the generated file
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -313,6 +313,8 @@ $ supatype app add --static ./public
 
 This writes `app.mode: "static"` to `supatype.config.ts`. Commit it. It is a one-time step, not something to repeat on the server.
 
+On the server, build the app with `supatype build` rather than `npm run build`. It runs the same build script with the API URL and anon key from `.env`, and stops before building when either is missing. [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html) covers building on other hosts.
+
 #### 5. Turn on HTTPS
 
 Point an A record for your domain at the server and open ports 80 and 443. Then:
@@ -348,7 +350,7 @@ Local and self-hosted environments read the same committed config. What differs 
 | Change | Local | Self-hosted |
 | --- | --- | --- |
 | Schema | `supatype push` | `supatype push` |
-| Frontend | Nothing with the dev proxy. Otherwise `npm run build` | `npm run build`, then `compose up -d` |
+| Frontend | Nothing with the dev proxy. Otherwise `npm run build` | `supatype build`, then `compose up -d` |
 | `supatype.config.ts` | Restart `supatype dev` | `compose up -d` |
 | `.env` | Restart `supatype dev` | `compose up -d`, or `compose restart <service>` for one service |
 
@@ -361,7 +363,7 @@ $ cd my-app
 $ git pull
 $ npm install           # if package.json changed
 $ supatype push         # schema migrations
-$ npm run build         # static files into public/ or dist/
+$ supatype build        # the build script, with .env's API URL and anon key
 $ supatype self-host compose up -d
 ```
 
@@ -790,12 +792,14 @@ Import `createClient` from the client file the CLI generates, not from `@supatyp
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
 
-Every page in these docs imports the client from this one file. `supatype init`, `supatype dev` and `supatype keys` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY`, with `PUBLIC_`, `NEXT_PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks. A local stack's values go to `.env.development.local`, which Vite, Next.js and Expo read in development only, so a production build has none of them and the client uses the address the page was served from, which is the API's when Supatype serves your app. A deployment's values (`supatype keys` on a server whose `API_EXTERNAL_URL` is its real address) go to `.env`, which a production build reads. Read these rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+Every page in these docs imports the client from this one file. In development, `supatype init`, `supatype dev` and `supatype keys` write the local stack's `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY`, with `PUBLIC_`, `NEXT_PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks, to `.env.development.local`. Vite, Next.js and Expo read that file in development only, so a production build never ships them. Read these rather than copying a URL from an example: `init` picks a free gateway port for each project, kept in `.env` as `API_EXTERNAL_URL`.
+
+A production build gets your deployment's values from `supatype build`, which runs your build command with them, or from the host's settings. When Supatype serves the app, the page can read them from the server instead, with `<script src="/supatype-env.js"></script>` in `index.html`; a Next.js app serves the same script from a route ([Frameworks: Next.js](https://www.supatype.com/docs/frameworks.html#nextjs)). For each value the build did not carry, the client reads the one that script set, at its first request. It never guesses the address from the page. `createClient` itself never throws, so a page that creates the client at module scope still prerenders. The first request made with no address or no anon key throws a `MissingClientValuesError` naming what is missing and the variables to set, rather than returning it as `{ data: null, error }`. [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html) covers each host.
 
 The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
 
@@ -1116,9 +1120,9 @@ Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, a
 | `@supatype/svelte` | `setSupatypeClient`, `getSupatypeClient`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription` |
 | `@supatype/solid` | `SupatypeContext`, `useSupatype`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription` |
 | `@supatype/react-native` | `createNativeClient`, `secureStoreAdapter`, `asyncStorageAdapter`, `openOAuth`, `createAuthUrlListener` |
-| `@supatype/ssr` | `createServerClient` |
+| `@supatype/ssr` | `createServerClient`, and `GET` from `@supatype/ssr/next` |
 
-Every example below imports the client from `src/supatype.ts`, created once as shown in [Client: Create the client](https://www.supatype.com/docs/client.html#setup). With Vite, read the values `supatype keys` writes to `.env`:
+Every example below imports the client from `src/supatype.ts`, created once as shown in [Client: Create the client](https://www.supatype.com/docs/client.html#setup). With Vite, read the names `supatype dev` writes for development and `supatype build` sets for a production build:
 
 `src/supatype.ts`:
 
@@ -1126,7 +1130,7 @@ Every example below imports the client from `src/supatype.ts`, created once as s
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -1382,9 +1386,41 @@ Wrap the app in `SupatypeProvider` from `@supatype/react` and use the same hooks
 
 `openOAuth(client, { provider, redirectTo, webBrowser })` runs an OAuth sign-in in `expo-web-browser` with PKCE and returns the session, or `cancelled: true` when the user closes the browser. The ready-made native screens are on [Auth: Pre-built UI](https://www.supatype.com/docs/auth.html#ui).
 
-### Next.js server code
+### Next.js
 
-In the browser the client copies the session into a cookie named `st-auth-token` (path `/`, `SameSite=Lax`, `Secure` on HTTPS). `createServerClient` from `@supatype/ssr` reads that cookie on the server and builds a client signed in as the same user. Use it in Server Components, Route Handlers and middleware.
+`next build` prerenders pages before any deployment's values exist, so a Next.js app takes them when it runs instead. One route serves the browser client its address and anon key on each page load, from `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` in the server's environment, and the server client reads the same two variables. The same build then runs against whichever deployment it is started for. `supatype init` writes both pieces into an App Router app:
+
+`app/supatype-env.js/route.ts`:
+
+```ts
+export { GET } from "@supatype/ssr/next"
+export const dynamic = "force-dynamic"
+```
+
+`app/layout.tsx`:
+
+```tsx
+import Script from "next/script"
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <Script src="/supatype-env.js" strategy="beforeInteractive" />
+        {children}
+      </body>
+    </html>
+  )
+}
+```
+
+Keep the `dynamic` line in the route file itself: Next reads a route's segment config from its own source and ignores a re-exported one. The route answers `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` with `Cache-Control: no-cache`, as the Supatype server's own `/supatype-env.js` does. It answers 404 only when `SUPATYPE_PUBLIC_ENV` is `false`, and 503, not cached, with a body naming the variable when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset or `SUPATYPE_ANON_KEY` holds a service role key. The browser client, created with `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY` left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in [Deploy your frontend: Next.js](https://www.supatype.com/docs/deploying-your-frontend.html#nextjs).
+
+In a Pages Router app, `init` writes nothing and prints the steps instead: create the same route file under `app/supatype-env.js/`, beside `pages/`; in `pages/_document.tsx`, import `Script` from `next/script` and put the same `<Script>` tag inside `<Head>`; then add `@supatype/ssr` to the app's dependencies. For a static export (`output: "export"` in `next.config`), which cannot serve a route, `init` writes neither piece and prints `supatype build -- next build`, or Supatype hosting, whose server answers `/supatype-env.js` itself.
+
+#### Server components, route handlers and middleware
+
+In the browser the client copies the session into a cookie named `st-auth-token` (path `/`, `SameSite=Lax`, `Secure` on HTTPS). `createServerClient` from `@supatype/ssr` reads that cookie on the server and builds a client signed in as the same user. Given only its options, it takes the address and anon key from `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, read on each call, and where one is unset, from `NEXT_PUBLIC_SUPATYPE_URL` or `NEXT_PUBLIC_SUPATYPE_ANON_KEY`. With neither, its first request throws an error saying it is running on a server and naming `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`. Pass them first, as `createServerClient(url, anonKey, options)`, to use others.
 
 `src/supatype-server.ts`:
 
@@ -1392,10 +1428,20 @@ In the browser the client copies the session into a cookie named `st-auth-token`
 import { cookies } from "next/headers"
 import { createServerClient } from "@supatype/ssr"
 
+// Server Components: no setAll, so the client never refreshes the session.
 export async function serverClient() {
   const store = await cookies()
-  return createServerClient(process.env.PUBLIC_SUPATYPE_URL!, process.env.PUBLIC_SUPATYPE_ANON_KEY!, {
-    cookies: { getAll: () => store.getAll(), setAll: () => {} },
+  return createServerClient({ cookies: { getAll: () => store.getAll() } })
+}
+
+// Route Handlers and Server Actions: a refreshed session goes back to the browser.
+export async function writableServerClient() {
+  const store = await cookies()
+  return createServerClient({
+    cookies: {
+      getAll: () => store.getAll(),
+      setAll: (cookiesToSet) => cookiesToSet.forEach(({ name, value, options }) => store.set(name, value, options ?? {})),
+    },
   })
 }
 ```
@@ -1413,7 +1459,7 @@ export default async function Page() {
 }
 ```
 
-A Route Handler uses `serverClient()` the same way. In middleware, read the cookies from the request and check the user with the auth server:
+A Route Handler uses `writableServerClient()` the same way. Middleware can write cookies, so refresh the session there, before the page renders, and check the user with the auth server:
 
 `middleware.ts`:
 
@@ -1422,12 +1468,16 @@ import { NextResponse, type NextRequest } from "next/server"
 import { createServerClient } from "@supatype/ssr"
 
 export async function middleware(request: NextRequest) {
-  const supatype = createServerClient(process.env.PUBLIC_SUPATYPE_URL!, process.env.PUBLIC_SUPATYPE_ANON_KEY!, {
-    cookies: { getAll: () => request.cookies.getAll(), setAll: () => {} },
+  const response = NextResponse.next()
+  const supatype = createServerClient({
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll: (cookiesToSet) => cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options ?? {})),
+    },
   })
   const { data } = await supatype.auth.getUser()
   if (!data.user) return NextResponse.redirect(new URL("/sign-in", request.url))
-  return NextResponse.next()
+  return response
 }
 
 export const config = { matcher: ["/account/:path*"] }
@@ -1435,14 +1485,15 @@ export const config = { matcher: ["/account/:path*"] }
 
 What the cookie handling does and does not do:
 
-- It only reads. The `cookies` option needs both `getAll` and `setAll`, but `createServerClient` never calls `setAll`, so a no-op is fine. The browser client keeps the cookie fresh.
-- A cookie whose access token has expired is ignored, and the server client runs as an anonymous caller. A page rendered after a long idle shows the signed-out view until the browser refreshes the session.
+- Without `setAll`, as in a Server Component, the client never refreshes the session: an expired access token is sent as it is, and the API refuses it. A refresh there would spend the browser's refresh token and keep the new one to itself, so the browser's own next refresh would be refused. Do not pass a `setAll` that does nothing to get round this.
+- With `setAll`, the client refreshes an expired access token when a request it makes finds it expired, and writes every change to the session (a refresh, a sign-in, a sign-out) back through `setAll`.
+- A cookie whose access token has expired is kept only when it has a refresh token. Otherwise the server client runs as an anonymous caller.
 - The cookie is decoded, not verified. Queries made with it are checked by the API, so access rules hold. But do not trust `auth.getSession()` on the server to decide who someone is: call `auth.getUser()`, which asks the auth server, as the middleware above does.
-- Decoding the cookie uses Node's `Buffer`. Where `Buffer` is missing, every cookie reads as expired, so run middleware on the Node.js runtime.
+- Decoding uses `atob` and `TextDecoder`, not Node's `Buffer`, so it works on the edge runtime too.
 - Set `cookiePrefix` on both sides if you change the client's `auth.cookiePrefix`. The default is `st`.
 - The server client is built from `@supatype/client`, not your generated client file, so `update(..., { publish: true })` is not accepted on it.
 
-The browser half of a Next.js app needs the URL and anon key in `NEXT_PUBLIC_` variables. `supatype keys` writes `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY`: a local stack's to `.env.development.local`, which Next.js reads in development only, and a deployment's to `.env`. Server code can read `PUBLIC_SUPATYPE_URL` and `PUBLIC_SUPATYPE_ANON_KEY` the same way.
+In development, `supatype dev`, `init` and `keys --write` write a local stack's `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, with the `NEXT_PUBLIC_` copies, to `.env.development.local`, which Next.js reads in development only, so the route answers in `next dev`. A value fixed into the build that way always wins over the route's.
 
 ## Auth
 
@@ -3022,6 +3073,299 @@ $ supatype admin list-users
 - Nobody can change their own Studio role or remove their own access.
 - The last admin cannot be removed. Make someone else an admin first.
 
+## Deploy your frontend
+
+Source: https://www.supatype.com/docs/deploying-your-frontend.html
+
+A production build of your app needs two values: your deployment's API URL and its anon key. This page shows how each host gets them, and what you see when one is missing.
+
+Pre-1.0: APIs and config may change between releases.
+
+### What a build needs
+
+`supatype init`, `supatype dev` and `supatype keys` write a local stack's URL and anon key to `.env.development.local`. Vite, Next.js and Expo read that file in development only, so a production build never ships `localhost`, and gets neither value from it. A production build gets them in one of three ways:
+
+| Way | Use it when |
+| --- | --- |
+| `supatype build` | You run the build command, on any host. It gives the build both values under every framework's name, and refuses to start without them. |
+| `supatype keys --print frontend` | You paste the values into a host's settings. It prints each name and value as a `NAME=value` line. |
+| `<script src="/supatype-env.js">` | Supatype serves the app, or it is a Next.js app with the route [below](https://www.supatype.com/docs/deploying-your-frontend.html#nextjs). The page reads both values from the server when it loads, so one build runs on every deployment that serves it. |
+
+Each framework reads its own names. `supatype build` and `keys --print frontend` give all of them:
+
+| Framework | API URL | Anon key |
+| --- | --- | --- |
+| Vite | `VITE_SUPATYPE_URL` | `VITE_SUPATYPE_ANON_KEY` |
+| SvelteKit, Astro | `PUBLIC_SUPATYPE_URL` | `PUBLIC_SUPATYPE_ANON_KEY` |
+| Next.js | `NEXT_PUBLIC_SUPATYPE_URL` | `NEXT_PUBLIC_SUPATYPE_ANON_KEY` |
+| Expo | `EXPO_PUBLIC_SUPATYPE_URL` | `EXPO_PUBLIC_SUPATYPE_ANON_KEY` |
+
+Pass the values straight to `createClient`, as [Client: Create the client](https://www.supatype.com/docs/client.html#setup) does, with no check of your own in front of it. A bundler that knows a name is unset can turn such a check into a throw that hides the reason. The client checks for itself, and names what is missing.
+
+### supatype build
+
+```sh
+$ supatype build                                # runs the package.json build script
+$ supatype build -- vite build                  # or the command after --
+$ supatype build --env staging -- npm run build # for one linked environment
+```
+
+Keep the real build command, such as `vite build`, in package.json's `build` script. A build script that is itself `supatype build` is refused, since a bare `supatype build` runs that script: it stops and says the build script calls `supatype build` itself, so running it again would never end. A command after `--` runs even inside another build.
+
+It runs your build with the deployment's API URL and anon key under all four prefixes. It writes no file: the values live only in the build's environment. The exit code is the build's own, so CI behaves as it did before. Each value is looked for on its own, in this order:
+
+| Source | Where it looks |
+| --- | --- |
+| The environment | `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, or any of the names above. A host's own settings always win. |
+| The server the URL names | For the anon key only, when the environment holds a URL: `<URL>/supatype-env.json`, the key that server publishes. HTTPS for an address that is not local, a local one only with `--allow-local`. A 503 there reads `the server at <url> is not set up to publish its anon key:` and the setting the server names. |
+| The linked environment | The one `--env` names, else the link's default. Supatype Cloud: the environment's address, and its anon key from the control plane, which needs `supatype login` (or `SUPATYPE_ACCESS_TOKEN`) as an owner or admin. Self-host: the link's address, and the anon key the server publishes at `/supatype-env.json`, fetched only over HTTPS for an address that is not local. |
+| `.env` | `PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`, as the server's own `.env` holds them. |
+
+The first source holding a value decides it. A local address there, such as `localhost` or `127.0.0.1`, stops the build rather than being passed over, because a production build would ship it. Pass `--allow-local` to build against a local stack anyway. A service role key offered as the anon key stops the build too: the service role key never reaches a build. An anon key counts only for the URL being built for: with `SUPATYPE_URL` naming one deployment and a link to another, the link's key is listed as `skipped ... not the URL being built for`, never paired with the wrong address.
+
+`.supatype/link.json` holds secrets and is never committed, so a CI host has no link. There, set `SUPATYPE_URL` in the host's settings: `supatype build` fetches the anon key from `<SUPATYPE_URL>/supatype-env.json`, copies both to every framework's names, and stops the build when one is missing. Set `SUPATYPE_ANON_KEY` as well only when that server does not publish it (`server.public_env: false`, or a plain `http://` address). `supatype deploy` builds your app with the same values, and takes `--allow-local` too.
+
+### Supatype hosts it
+
+When a self-hosted stack serves your app (`app.mode: "static"`), its server answers `/supatype-env.js` with its own address and anon key:
+
+```sh
+$ curl https://example.com/supatype-env.js
+window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."};
+```
+
+`supatype init` puts the tag in a static app's `index.html`, in the head, so it runs before the app's own script. For an app made another way, add it yourself:
+
+`index.html`:
+
+```html
+<script src="/supatype-env.js"></script>
+```
+
+The client reads `window.__SUPATYPE_ENV__` for any value the build did not carry, at its first request. It never guesses the address from the page. A value the build did carry always wins. So a build made with neither value, by a plain `npm run build`, runs on every deployment that serves it. Served from the API's own origin, it needs no [allowed origin](https://www.supatype.com/docs/deploying-your-frontend.html#cors) either. To build on the server instead:
+
+`vm`:
+
+```sh
+$ supatype app add --static ./dist   # once, then commit supatype.config.ts
+$ supatype build                     # reads API_EXTERNAL_URL and ANON_KEY from .env
+$ supatype self-host compose up -d
+```
+
+> **IF THE KEY IS MISSING:** `supatype build` stops before the build starts and lists every source it tried, as shown in [When a value is missing](https://www.supatype.com/docs/deploying-your-frontend.html#missing). A page built without the key and served without the script tag, or by a server with `server.public_env: false`, makes its first request throw in the browser console: `Supatype client has no anon key.`
+
+> **CLOUD:** For Supatype Cloud, `supatype build --env <name>` and `supatype deploy` read the environment's anon key from the control plane, so a build on a linked machine needs nothing set by hand. Each Cloud environment's API also answers `/supatype-env.json` and `/supatype-env.js` on its own address. On a CI host, use the sections below.
+
+### Next.js
+
+A Next.js app does not need its values at build time. `next build` prerenders pages without them, and the route `app/supatype-env.js/route.ts` serves them to each page load from `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` in the server's environment. `createServerClient` reads the same two, for Server Components, Route Handlers and middleware. `supatype init` writes the route and the root layout's script for an App Router app; [Frameworks: Next.js](https://www.supatype.com/docs/frameworks.html#nextjs) shows both, and the server client. So one build runs on every environment: set the two variables where the app runs. In development the route answers too: `supatype dev`, `init` and `keys --write` put the local stack's `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` in `.env.development.local`, which `next dev` reads.
+
+| Host | What to set |
+| --- | --- |
+| Vercel | `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` under the project's Environment Variables, for each environment. The build command stays `next build`. |
+| Netlify | The same two, under the site's Environment variables. |
+| Your own Node server | The same two, in the environment of the process that runs `next start`. |
+
+`vm`:
+
+```sh
+$ npm run build
+$ SUPATYPE_URL=https://api.example.com SUPATYPE_ANON_KEY=eyJhbGciOi... npm start
+```
+
+`supatype keys --print frontend` prints the values to copy. The route is read on every page load and the server client on every call, so the same build started with another deployment's two values runs against that one. A value fixed into the build under `NEXT_PUBLIC_SUPATYPE_URL` or `NEXT_PUBLIC_SUPATYPE_ANON_KEY` still wins over the route's, so leave those unset in production. A Next.js app on its own host or server is on another origin from the API: add its address to the API's allowed origins, as in [Allow your app's origin](https://www.supatype.com/docs/deploying-your-frontend.html#cors). The server client uses them only where `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset.
+
+A static export (`output: "export"` in `next.config`) has no server to run the route, so `init` writes no route, no layout script and no `@supatype/ssr` for it, and prints the two ways instead: build with the values, `supatype build -- next build`, or have Supatype host the export (`supatype app add --static ./out`), whose server answers `/supatype-env.js` itself; add the `<Script>` tag to the root layout for that.
+
+A Pages Router app gets nothing written by `init`, which prints these steps instead: create the same route file under `app/supatype-env.js/`, beside `pages/`; in `pages/_document.tsx`, import `Script` from `next/script` and put `<Script src="/supatype-env.js" strategy="beforeInteractive" />` inside `<Head>`; add `@supatype/ssr` to the app's dependencies, and set the two variables where it runs.
+
+> **IF THE KEY IS MISSING:** The build still succeeds, and the page renders. With `SUPATYPE_ANON_KEY` or `SUPATYPE_URL` unset, `/supatype-env.js` answers 503, not cached, naming the variable: `public env unavailable: SUPATYPE_ANON_KEY is not set on this server`. It answers 503 too when `SUPATYPE_ANON_KEY` holds a service role key, and 404 only when `SUPATYPE_PUBLIC_ENV` is off. The browser client's first request then throws `Supatype client has no API address and anon key. createClient was given none, and the page had set no window.__SUPATYPE_ENV__ by its first request.`, naming the route and the two variables. A server client given neither throws on its first request: `Supatype client has no API address and anon key. It was given none, and it is running on a server, where there is no page to read them from.`, followed by `Set SUPATYPE_URL and SUPATYPE_ANON_KEY in the server's environment`.
+
+### Vercel
+
+Print the values for the deployment on your own machine, where the project is linked:
+
+```sh
+$ supatype keys --print frontend --env production
+VITE_SUPATYPE_URL=https://api.example.com
+PUBLIC_SUPATYPE_URL=https://api.example.com
+NEXT_PUBLIC_SUPATYPE_URL=https://api.example.com
+EXPO_PUBLIC_SUPATYPE_URL=https://api.example.com
+VITE_SUPATYPE_ANON_KEY=eyJhbGciOi...
+PUBLIC_SUPATYPE_ANON_KEY=eyJhbGciOi...
+NEXT_PUBLIC_SUPATYPE_ANON_KEY=eyJhbGciOi...
+EXPO_PUBLIC_SUPATYPE_ANON_KEY=eyJhbGciOi...
+```
+
+In the Vercel project's settings, under Environment Variables, add `SUPATYPE_URL` with that value, for each environment you deploy. `supatype build` fetches the anon key from the server it names; add `SUPATYPE_ANON_KEY` too if that server does not publish it. Then have Vercel build through the wrapper:
+
+`vercel.json`:
+
+```json
+{
+  "buildCommand": "npx supatype build"
+}
+```
+
+`supatype build` copies the two values to `NEXT_PUBLIC_`, `VITE_` and the other names, then runs your build script. A Next.js app needs no wrapper on Vercel: see [Next.js](https://www.supatype.com/docs/deploying-your-frontend.html#nextjs).
+
+Then allow the site on the API: add its `*.vercel.app` address and any custom domain to the allowed origins, as in [Allow your app's origin](https://www.supatype.com/docs/deploying-your-frontend.html#cors).
+
+> **IF THE KEY IS MISSING:** The deployment fails at its build step, before your build starts. The build log shows `No anon key for a production build of the front end.`, each source tried, and ends `or set SUPATYPE_ANON_KEY.`
+
+### Netlify
+
+Under the site's configuration, in Environment variables, add `SUPATYPE_URL`, and `SUPATYPE_ANON_KEY` only if the server does not publish its key, with the values `supatype keys --print frontend` prints. Then set the build command:
+
+`netlify.toml`:
+
+```toml
+[build]
+  command = "npx supatype build"
+  publish = "dist"
+```
+
+`publish` is your build's output directory: `dist` for Vite, `build` for SvelteKit's static adapter. Then add the site's `*.netlify.app` address and any custom domain to the API's allowed origins, as in [Allow your app's origin](https://www.supatype.com/docs/deploying-your-frontend.html#cors).
+
+> **IF THE KEY IS MISSING:** The deploy fails in its build step with the same refusal, and nothing is published: the site keeps serving the last deploy that built.
+
+### Cloudflare Pages
+
+In the Pages project's settings:
+
+| Setting | Value |
+| --- | --- |
+| Build command | `npx supatype build` |
+| Build output directory | Your build's output, such as `dist` |
+| Variables and Secrets | `SUPATYPE_URL`, from `supatype keys --print frontend`, and `SUPATYPE_ANON_KEY` only if the server does not publish its key |
+
+Then add the project's `*.pages.dev` address and any custom domain to the API's allowed origins, as in [Allow your app's origin](https://www.supatype.com/docs/deploying-your-frontend.html#cors).
+
+> **IF THE KEY IS MISSING:** The build fails, and its log shows the refusal with each source tried. A variable added after the last build reaches only the next one, so retry the deployment once it is set.
+
+### GitHub Actions
+
+Store `SUPATYPE_URL` as a repository variable, under Settings, Secrets and variables, Actions. `supatype build` fetches the anon key from the server it names, so a self-hosted deployment needs nothing more: no link and no service role key in CI. Where the server does not publish the key, store `SUPATYPE_ANON_KEY` too; it is public, so a variable, not a secret, will do.
+
+`.github/workflows/build.yml`:
+
+```yml
+name: Build
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx supatype build
+        env:
+          SUPATYPE_URL: ${{ vars.SUPATYPE_URL }}
+          # Only where the server does not publish its key:
+          # SUPATYPE_ANON_KEY: ${{ vars.SUPATYPE_ANON_KEY }}
+```
+
+Publish the output however you deploy it, and add the address it is served from to the API's allowed origins ([Allow your app's origin](https://www.supatype.com/docs/deploying-your-frontend.html#cors)). To give every later step the values under every framework's name instead, run `npx supatype keys --print frontend >> "$GITHUB_ENV"` with the same `env:`. To deploy to your own server over SSH and build there, follow [Deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html).
+
+> **IF THE KEY IS MISSING:** The `npx supatype build` step fails and the job stops there. A variable that does not exist reaches the step as an empty string, which counts as not set.
+
+### Your own server
+
+On the server that runs the stack, `supatype build` needs nothing more: its `.env` records the deployment's `API_EXTERNAL_URL` and `ANON_KEY`.
+
+`vm`:
+
+```sh
+$ cd /opt/my-app
+$ git pull
+$ npm install
+$ supatype push
+$ supatype build
+$ supatype self-host compose up -d
+```
+
+To build somewhere else, such as your laptop, set `SUPATYPE_URL` to the deployment's address, or link the deployment and name it:
+
+```sh
+$ supatype link --env production --url https://api.example.com --token "$SERVICE_ROLE_KEY"
+$ supatype build --env production
+```
+
+Then copy the output to whatever serves it, and add that server's address to the API's allowed origins ([Allow your app's origin](https://www.supatype.com/docs/deploying-your-frontend.html#cors)); built on the stack's own server and served by it, the app needs nothing. For a self-hosted link the anon key comes from `https://api.example.com/supatype-env.json`. It is fetched over HTTPS only, so a link to a plain `http://` address that is not local gives no key; set `SUPATYPE_ANON_KEY` instead. A Supatype Cloud link reads the key from the control plane.
+
+> **IF THE KEY IS MISSING:** On the server, `anon key from .env: no ANON_KEY` means the keys were never made: run `supatype keys`. `is a local address, which a production build would ship` means `API_EXTERNAL_URL` in `.env` is still a `localhost` address: set it to the server's public one.
+
+### Allow your app's origin
+
+A self-hosted API answers browsers only from the origin of its `SITE_URL` and the origins you list. An app served from anywhere else, such as Vercel, Netlify, Cloudflare Pages, a Next.js server of its own or a dev server on another port, is refused: the preflight gets 403, and the browser reports `Failed to fetch`. When Supatype serves the app, it is on the API's own origin and needs nothing here.
+
+List the app's origin in `supatype.config.ts`, or in `.env` as `SUPATYPE_CORS_ALLOW_ORIGINS`, comma-separated. Each entry is `scheme://host[:port]`, with no path:
+
+`supatype.config.ts`:
+
+```ts
+// supatype.config.ts (excerpt)
+api: { corsOrigins: ["https://my-app.vercel.app", "https://www.example.com"] },
+```
+
+`.env`:
+
+```ini
+SUPATYPE_CORS_ALLOW_ORIGINS=https://my-app.vercel.app,https://www.example.com
+```
+
+`vm`:
+
+```sh
+$ supatype self-host compose restart server
+```
+
+The restart renders the compose file again and recreates the server with the new list. Owners, admins and developers can instead add the origin in Studio, on the Settings page's CORS tab, which needs no restart; a list saved there replaces the default until it is reset, and the site URL stays allowed whatever is saved. On Supatype Cloud, add it there. Each preview deployment with its own address is another origin. `supatype dev` allows every origin, so a local stack never shows this. The rest of the rules are under [Self-hosting](https://www.supatype.com/docs/#self-host), in Allowed origins.
+
+### When a value is missing
+
+At build time, `supatype build` stops before the build starts, exits 1, and lists every source it tried for each value:
+
+```sh
+$ supatype build
+[supatype] No anon key for a production build of the front end.
+  found    API URL from the environment: SUPATYPE_URL
+  not set  anon key from the environment: none of SUPATYPE_ANON_KEY, VITE_SUPATYPE_ANON_KEY, PUBLIC_SUPATYPE_ANON_KEY, NEXT_PUBLIC_SUPATYPE_ANON_KEY, EXPO_PUBLIC_SUPATYPE_ANON_KEY is set
+  not set  anon key from the server SUPATYPE_URL names: the server at https://api.example.com is not set up to publish its anon key: public env unavailable: SUPATYPE_ANON_KEY is not set on this server
+  not set  anon key from the linked environment: no .supatype/link.json (run `supatype link`)
+  not set  anon key from .env: no ANON_KEY
+
+Run `supatype build --env <name>` for a linked deployment, or set SUPATYPE_ANON_KEY.
+```
+
+`supatype keys --print frontend` reads the same sources, refuses the same way, and names itself as the command to run. It takes `--allow-local` too, for printing a local stack's values: `supatype keys --print frontend --allow-local`. At run time, creating the client never throws, so `next build` can prerender a page that creates one at module scope. The first request a client makes without the anon key throws a `MissingClientValuesError` instead, so the browser console says what is wrong rather than the page going blank. The error starts `Supatype client has no anon key. createClient was given none, and the page had set no window.__SUPATYPE_ENV__ by its first request.` and goes on to name the build-time variables, `supatype build`, the script tag, and for Next.js the route and the server's `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`. With no address either, it starts `Supatype client has no API address and anon key.`
+
+### The anon key is public
+
+The anon key is not a secret. Every browser that loads your app holds it, which is why the server can publish it and a CI host can keep it as a plain variable. What protects your data is the [access rules](https://www.supatype.com/docs/schema.html#access) in your schema, which every request made with the anon key goes through.
+
+The service role key passes every rule, so it never goes near a build. `supatype build` and `keys --print frontend` never output it, and refuse a service role key offered as the anon key. The server never serves it.
+
+`/supatype-env.json` and `/supatype-env.js` are on by default. For an API-only project, with no frontend for the server to serve, turn them off:
+
+`supatype.config.ts`:
+
+```ts
+// supatype.config.ts (excerpt)
+server: {
+  public_env: false,
+},
+```
+
+The next `supatype self-host compose up -d` gives the server `SUPATYPE_PUBLIC_ENV=false`, and both addresses answer 404. A deployment that means to publish and cannot (no anon key, no URL, or a service role key in `SUPATYPE_ANON_KEY`) answers 503 instead, with no caching and a body naming the setting to fix. `supatype dev` does the same. Turning them off does not make the anon key secret: every client of the API still holds it. It only stops the server publishing it, and `supatype build` for that deployment then needs `SUPATYPE_ANON_KEY` set.
+
 ## Deploy to a VM with GitHub Actions
 
 Source: https://www.supatype.com/deploy-vm-github-actions.html
@@ -3140,7 +3484,7 @@ $ cd /opt/my-blog
 $ npm install
 $ supatype self-host compose up -d
 $ supatype push
-$ npm run build
+$ supatype build
 $ supatype self-host compose up -d
 ```
 
@@ -3193,7 +3537,7 @@ jobs:
             git reset --hard origin/main
             npm ci
             supatype push
-            npm run build
+            supatype build
             supatype self-host compose up -d
 ```
 
@@ -3221,7 +3565,8 @@ Watch the run under **Actions** on GitHub. When it succeeds, load your gateway U
 | --- | --- |
 | SSH fails | The firewall allows port 22, and `VM_SSH_KEY` matches the VM's `authorized_keys`. |
 | `supatype push` fails | Compose is up, and `DATABASE_URL` points at `localhost:5432`. If it refused a change that needs your consent, see [The workflow](https://www.supatype.com/deploy-vm-github-actions.html#workflow). |
-| Site unchanged | `npm run build` writes to the directory in `app.static_dir`, then re-run `supatype self-host compose up -d`. |
+| Site unchanged | `supatype build` writes to the directory in `app.static_dir`, then re-run `supatype self-host compose up -d`. |
+| `supatype build` fails | It lists each source it tried for the API URL and anon key. On the VM both come from `.env`: `API_EXTERNAL_URL` must be the public address, not `localhost`, and `ANON_KEY` must be set. See [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html#missing). |
 
 > **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
 
@@ -4054,7 +4399,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 | --- | --- | --- |
 | `init [name]` | Scaffold a new Supatype project | `-y, --defaults`, `--no-install`, `--no-keys`, `--admin-email`, `--admin-password`, `--no-admin` |
 | `dev` | Start local Postgres, apply schema, and run supatype-server | `--no-watch`, `--stream`, `--port <port>`, `--reset-db` (Docker only), `--yes`, `--overwrite-drift` |
-| `keys` | Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET | `--write`, `--force`, `--secret <secret>`, `--exp-years <years>` (default 10) |
+| `keys` | Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET and fill the blank ones in .env (printed instead when there is no .env, or with --print) | `--print [target]`, `--env <name>` and `--allow-local` (with `--print frontend`), `--force`, `--secret <secret>`, `--exp-years <years>` (default 10), `--write` |
 | `status` | Show linked target status or local stack services | `--env <name>` |
 | `logs` | Tail logs from the local stack | `--service <name>`, `--since <duration>` (default 5m), `-f, --follow` |
 | `app add [dir]` | Configure app routing: `--static` for a built site, or proxy to a dev server | `--static`, `--port <port>` (default 3000), `--upstream <url>` |
@@ -4069,7 +4414,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 
 `--role` is `admin`, `developer`, `editor` or `viewer`. See [Studio roles](https://www.supatype.com/docs/studio-roles.html#grant). The first-run steps are in [Local development](https://www.supatype.com/docs/#local-dev).
 
-`keys` prints the keys unless you pass `--write`, which fills blank keys in `.env`. Add `--force` to replace keys already there.
+`keys` fills the blank keys in `.env` when there is one, and prints them when there is none or with `--print`. Add `--force` to replace keys already there. `--write` is kept for older scripts. `keys --print frontend` prints a deployment's API URL and anon key instead, under every framework's name, one `NAME=value` line each, for a host's settings or `$GITHUB_ENV`. It reads them as `build` does, below, and takes `--allow-local` for a local stack's values.
 
 `dev` and `self-host compose up` refuse a `JWT_SECRET` shorter than 32 characters before starting anything, because the REST API cannot start with one. `init` generates a 64-character secret. To replace a short one, generate a longer secret (for example with `openssl rand -base64 48`), put it in `.env` as `JWT_SECRET`, then run `supatype keys --write --force` to sign new keys with it.
 
@@ -4143,7 +4488,8 @@ On an unlinked project with a self-hosted Compose stack, `functions deploy` uplo
 | `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
 | `envs list` | List linked environments |  |
 | `envs use <name>` | Set the default environment |  |
-| `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass `--local` for engine + your database | `--env <name>` (default `production`), `--schema-only`, `--app-only`, `--skip-build`, `--preview`, `--yes`, `--overwrite-drift` |
+| `build [command...]` | Run your app's production build with the deployment's API URL and anon key under every front-end name (VITE_, PUBLIC_, NEXT_PUBLIC_, EXPO_PUBLIC_). Runs the package.json build script unless a command follows --. Refuses to start when either value is missing | `--env <name>`, `--allow-local`, `-- <command...>` |
+| `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass `--local` for engine + your database | `--env <name>` (default `production`), `--schema-only`, `--app-only`, `--skip-build`, `--preview`, `--yes`, `--overwrite-drift`, `--allow-local` |
 | `deploy rollback` | Roll back to the previous static site deployment | `--to <id>`, `--env <name>` |
 | `deploy status` | Show current deployment status | `--env <name>` |
 | `deploy logs [version]` | Show build logs for a deployment | `--env <name>` |
@@ -4151,6 +4497,8 @@ On an unlinked project with a self-hosted Compose stack, `functions deploy` uplo
 Every `self-host compose` command renders `.supatype/self-host/docker-compose.yml` again before it runs. The file names each bind mount by its absolute path on this machine, and names its Compose project `supatype-` plus `project.name`. So `docker compose -f .supatype/self-host/docker-compose.yml` run by hand reaches the same stack, and a project moved to another folder is picked up by the next command.
 
 A render keeps the stack in the mode it runs in. While `supatype dev` runs for the project, commands such as `push`, `update` and `self-host compose` render dev mode. Otherwise they use the mode of the running `server` container, and standalone when none is running. So a push to a production stack leaves it standalone.
+
+`build` takes each value from the first of: the environment (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` or any framework's name), the `/supatype-env.json` of the server the environment's URL names (for the anon key only, so CI can set just `SUPATYPE_URL`), the linked environment, and a `.env` that records a deployment (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass `--allow-local`, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself `supatype build` is refused rather than run again. `deploy` builds the app the same way. See [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html).
 
 For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The full walkthrough is in [Self-host](https://www.supatype.com/docs/#self-host) and [Deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html).
 
