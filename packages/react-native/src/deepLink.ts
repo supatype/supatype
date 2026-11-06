@@ -1,4 +1,5 @@
 import type { Session, SupatypeClient, SupatypeError } from "@supatype/client"
+import { reportThrown } from "@supatype/client/bindings"
 
 export interface LinkingSubscription {
   remove(): void
@@ -65,16 +66,21 @@ export function createAuthUrlListener(
 ): () => void {
   let active = true
 
+  // A link that throws instead of answering (a client with no API address, say) still fails the
+  // sign-in, so `onError` hears it rather than an unhandled rejection nobody is listening for.
+  const thrown = (e: unknown): void => {
+    opts.onError?.(reportThrown("createAuthUrlListener", e))
+  }
   const onUrl = (event: { url: string }): void => {
-    void handleUrl(client, event.url, opts)
+    void handleUrl(client, event.url, opts).catch(thrown)
   }
 
   const subscription = opts.linking.addEventListener("url", onUrl)
 
   void opts.linking.getInitialURL().then((url) => {
     if (!active || url === null) return
-    void handleUrl(client, url, opts)
-  })
+    return handleUrl(client, url, opts)
+  }).catch(thrown)
 
   return () => {
     active = false

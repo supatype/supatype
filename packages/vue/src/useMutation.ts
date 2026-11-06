@@ -1,7 +1,7 @@
 import { ref, type Ref } from "vue"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { runMutation, type MutationOperation, type MutationRequest } from "@supatype/client/bindings"
+import { reportThrown, runMutation, type MutationOperation, type MutationRequest } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 
@@ -62,9 +62,9 @@ export function useMutation<
       if (result.error) error.value = result.error
       return result
     } catch (e) {
-      const err = { message: e instanceof Error ? e.message : "Unknown error" }
-      error.value = err
-      return { data: null, error: err }
+      const thrown = reportThrown(`useMutation("${table}", "${operation}")`, e)
+      error.value = thrown
+      return { data: null, error: thrown }
     } finally {
       loading.value = false
     }

@@ -21,6 +21,8 @@ const BINDING_EXPORTS = [
   "isRowsOf",
   "isCallerValue",
   "runMutation",
+  "reportThrown",
+  "latestRowsReader",
   "livePreviewMessage",
   "previewMessageOf",
   "originOf",

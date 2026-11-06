@@ -14,6 +14,7 @@ import type { Session, SupatypeError } from "@supatype/client"
 import { useAuth } from "@supatype/react"
 import { useAuthTheme } from "./theme.js"
 import { fieldStyles } from "./styles.js"
+import { settleAuthRequest } from "./authRequest.js"
 
 export interface SignUpFormLabels {
   title?: string | undefined
@@ -62,24 +63,21 @@ export function SignUpForm({
   async function handleSubmit(): Promise<void> {
     setErrorMessage(null)
     setLoading(true)
-    try {
-      const { data, error } = await signUp({
-        email,
-        password,
-        ...(metadata !== undefined && { options: { data: metadata } }),
-      })
-      if (error !== null) {
-        setErrorMessage(error.message)
-        onError?.(error)
-      } else {
-        if (data.session === null) {
-          setConfirmed(true)
-        }
-        onSuccess?.(data.session)
-      }
-    } finally {
-      setLoading(false)
+    const result = await settleAuthRequest("SignUpForm", () => signUp({
+      email,
+      password,
+      ...(metadata !== undefined && { options: { data: metadata } }),
+    }))
+    setLoading(false)
+    if (result.error !== null) {
+      setErrorMessage(result.error.message)
+      onError?.(result.error)
+      return
     }
+    if (result.data.session === null) {
+      setConfirmed(true)
+    }
+    onSuccess?.(result.data.session)
   }
 
   if (confirmed) {

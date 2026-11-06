@@ -1,7 +1,7 @@
 import { writable, type Readable } from "svelte/store"
 import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
-import { isCallerValue } from "@supatype/client/bindings"
+import { isCallerValue, reportThrown } from "@supatype/client/bindings"
 
 export interface FunctionStore<TResponse> {
   invoke: (body?: unknown) => Promise<{ data: TResponse | null; error: SupatypeError | null }>
@@ -33,6 +33,11 @@ export function createFunction<
       data.set(answer.data)
       if (answer.error) error.set(answer.error)
       return answer
+    } catch (e) {
+      const thrown = reportThrown(`createFunction("${functionName}")`, e)
+      data.set(null)
+      error.set(thrown)
+      return { data: null, error: thrown }
     } finally {
       loading.set(false)
     }

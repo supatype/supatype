@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import type { Session, User, AuthChangeEvent, AuthRedirectError, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { reportThrown } from "@supatype/client/bindings"
 
 export interface UseAuthReturn {
   /** The currently authenticated user, or null if not signed in. */
@@ -67,6 +68,12 @@ export function useAuth(): UseAuthReturn {
       if (!active) return
       setSession(data.session)
       setError(redirectError)
+      setLoading(false)
+    }).catch((e: unknown) => {
+      // Starting threw (a client with no API address, say): there is no session to wait for.
+      const thrown = reportThrown("useAuth", e)
+      if (!active) return
+      setError(thrown)
       setLoading(false)
     })
 

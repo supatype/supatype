@@ -2,7 +2,7 @@ import { createSignal } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { runMutation, type MutationOperation, type MutationRequest } from "@supatype/client/bindings"
+import { reportThrown, runMutation, type MutationOperation, type MutationRequest } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 
@@ -47,9 +47,9 @@ export function createMutation<
       if (result.error) setError(result.error)
       return result
     } catch (e) {
-      const err = { message: e instanceof Error ? e.message : "Unknown error" }
-      setError(err)
-      return { data: null, error: err }
+      const thrown = reportThrown(`createMutation("${table}", "${operation}")`, e)
+      setError(thrown)
+      return { data: null, error: thrown }
     } finally {
       setLoading(false)
     }

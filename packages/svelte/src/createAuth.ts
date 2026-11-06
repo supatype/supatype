@@ -1,7 +1,7 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
 import type { AugmentedDatabase, AnyDatabase, AuthRedirectError, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
-import { startOAuthRedirect } from "@supatype/client/bindings"
+import { reportThrown, startOAuthRedirect } from "@supatype/client/bindings"
 import { getSupatypeClient } from "./context.js"
 
 export interface AuthStore {
@@ -39,7 +39,9 @@ export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>():
       user.set(data.session.user)
     }
     loading.set(false)
-  }).catch(() => {
+  }).catch((e: unknown) => {
+    // Starting threw (a client with no API address, say): there is no session to wait for.
+    error.set(reportThrown("createAuth", e))
     loading.set(false)
   })
 
