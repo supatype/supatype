@@ -73,6 +73,7 @@ import {
 } from "./self-host-compose.js"
 import { composeServiceIsRunning } from "./compose-kong.js"
 import type { ComposeStack } from "./compose-db-psql.js"
+import type { ProcessManager } from "./process-manager.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 import { hasEngineOverride } from "./binary-cache.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
@@ -1610,6 +1611,34 @@ async function devStackDbPort(cwd: string, config: SupatypeProjectConfig, projec
   return port
 }
 
+/** What dev's compose shutdown stops before the stack itself: its watchers and the processes it ran. */
+export interface DevComposeShutdownState {
+  studioProc: ProcessManager | null
+  appProc: ProcessManager | null
+  schemaWatcher: { close: () => void } | null
+  functionsWatcher: { close: () => void } | null
+}
+
+/** Stop the watchers and processes dev started, then bring the compose stack down. */
+export async function stopDevComposeStack(state: DevComposeShutdownState, stack: ComposeStack, cwd: string): Promise<void> {
+  state.schemaWatcher?.close()
+  state.schemaWatcher = null
+  state.functionsWatcher?.close()
+  state.functionsWatcher = null
+  console.log("[supatype] Shutting down compose...")
+  await state.studioProc?.stop()
+  await state.appProc?.stop()
+  await settleComposeRuns()
+  // Docker was answering a moment ago, so the daemon probe is skipped: a slow `docker info` made it
+  // report the daemon down and exit before `down` ran (issue 33).
+  const downStatus = runDockerCompose(stack.composePath, ["down"], cwd, stack.project, { quiet: true, skipDaemonProbe: true })
+  if (downStatus === 0) {
+    console.log("[supatype] Compose stack stopped.")
+  } else {
+    console.warn(`[supatype] Compose down exited with status ${downStatus}.`)
+  }
+}
+
 export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, opts: DevComposeOptions): Promise<void> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("runDevCompose requires provider: docker")
@@ -1647,36 +1676,14 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     console.log("[supatype] API config written to .supatype/api-config.json")
   }
 
-  type StudioProc = Awaited<ReturnType<typeof startStudioViteDevServer>>
-  type AppProc = ReturnType<typeof startProxyDevApp>
-  const shutdownState: {
-    studioProc: StudioProc
-    appProc: AppProc
-    schemaWatcher: { close: () => void } | null
-    functionsWatcher: { close: () => void } | null
-  } = {
+  const shutdownState: DevComposeShutdownState = {
     studioProc: null,
     appProc: null,
     schemaWatcher: null,
     functionsWatcher: null,
   }
 
-  registerDevShutdown(async () => {
-    shutdownState.schemaWatcher?.close()
-    shutdownState.schemaWatcher = null
-    shutdownState.functionsWatcher?.close()
-    shutdownState.functionsWatcher = null
-    console.log("[supatype] Shutting down compose...")
-    await shutdownState.studioProc?.stop()
-    await shutdownState.appProc?.stop()
-    await settleComposeRuns()
-    const downStatus = runDockerCompose(paths.composePath, ["down"], cwd, project, { quiet: true })
-    if (downStatus === 0) {
-      console.log("[supatype] Compose stack stopped.")
-    } else {
-      console.warn(`[supatype] Compose down exited with status ${downStatus}.`)
-    }
-  }, {
+  registerDevShutdown(() => stopDevComposeStack(shutdownState, { project, composePath: paths.composePath }, cwd), {
     cwd,
     compose: { cwd, composePath: paths.composePath, composeProject: project },
   })
@@ -1825,7 +1832,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   startDevSession()
 
-  let studioProc: StudioProc = null
+  let studioProc: ProcessManager | null = null
   const studioOverride = config.overrides?.studio
   if (studioOverride) {
     studioProc = startStudioViteDevServer({

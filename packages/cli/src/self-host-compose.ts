@@ -1493,6 +1493,13 @@ export interface RunDockerComposeOptions {
   quiet?: boolean
   /** Logo + Clack intro when Docker preflight fails (TTY). */
   brand?: DockerBrandOptions
+  /**
+   * Run compose without first asking whether the daemon is up. For stopping a stack that was just
+   * running, where the answer is already known: a Docker busy enough to be slow with `docker info`
+   * made the question say the daemon was down and exit before `down` ran (issue 33). Compose still
+   * reports its own failure if Docker really is gone.
+   */
+  skipDaemonProbe?: boolean
 }
 
 /** Exit with a friendly compose failure message. */
@@ -1534,7 +1541,7 @@ export function runDockerCompose(
   composeProject?: string,
   options?: RunDockerComposeOptions,
 ): number {
-  requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
+  if (options?.skipDaemonProbe !== true) requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
   const quiet = options?.quiet === true
   const runCompose = () =>
     askDockerSync(composeInvocation(composePath, args, projectRoot, composeProject, quiet), {
