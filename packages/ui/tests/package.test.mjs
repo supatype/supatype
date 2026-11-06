@@ -134,7 +134,8 @@ test("the tarball has no source or declaration maps", () => {
 
 test("the tarball ships dist, styles, README, CHANGELOG and LICENSE, and no sources", () => {
   const files = packedFiles()
-  for (const want of ["dist/index.js", "dist/rich-text.js", "dist/rich-text.d.ts", "dist/styles.css", "README.md", "CHANGELOG.md", "LICENSE"]) {
+  const components = ["Select", "Textarea", "Checkbox", "Table", "field"].flatMap((name) => [`dist/${name}.js`, `dist/${name}.d.ts`])
+  for (const want of ["dist/index.js", "dist/rich-text.js", "dist/rich-text.d.ts", "dist/styles.css", ...components, "README.md", "CHANGELOG.md", "LICENSE"]) {
     assert.ok(files.includes(want), `tarball lacks ${want}`)
   }
   const stray = files.filter((f) => f.startsWith("src/") || f.endsWith(".tsbuildinfo") || f.startsWith("tests/"))
