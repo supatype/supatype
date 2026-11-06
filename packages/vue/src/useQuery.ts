@@ -2,7 +2,7 @@ import { ref, shallowRef, onMounted, onUnmounted, watch, type Ref } from "vue"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isRowsOf } from "@supatype/client/bindings"
+import { latestRowsReader } from "@supatype/client/bindings"
 
 export interface UseQueryOptions {
   columns?: string | undefined
@@ -44,57 +44,9 @@ export function useQuery<
   options?: UseQueryOptions | undefined,
 ): UseQueryReturn<TRow> {
   const client = useSupatype<TDatabase>()
-  // Shallow: each fetch replaces the rows whole, and `ref` would type them as `UnwrapRef<TRow>`.
-  const data = shallowRef<TRow[] | null>(null)
-  const error = ref<SupatypeError | null>(null)
-  const loading = ref(false)
-
+  const { data, error, loading, read } = latestRows<TRow>(client as AnyClient, table)
   const fetchData = async () => {
-    // Check enabled
-    const enabled = options?.enabled
-    if (enabled !== undefined) {
-      const isEnabled = typeof enabled === "boolean" ? enabled : enabled.value
-      if (!isEnabled) return
-    }
-
-    loading.value = true
-    error.value = null
-
-    try {
-      // Through the untyped client: the generated row types do not survive a table name known
-      // only at run time, so the rows are typed as `TRow` once they arrive.
-      let query = (client as AnyClient).from(table).select(options?.columns)
-
-      if (options?.filter) {
-        for (const [col, val] of Object.entries(options.filter)) {
-          query = query.eq(col, val)
-        }
-      }
-
-      if (options?.order) {
-        query = query.order(options.order.column, {
-          ascending: options.order.ascending ?? true,
-        })
-      }
-
-      if (options?.limit !== undefined) {
-        query = query.limit(options.limit)
-      }
-
-      if (options?.offset !== undefined) {
-        query = query.range(options.offset, options.offset + (options.limit ?? 100) - 1)
-      }
-
-      const result = await query
-      data.value = isRowsOf<TRow>(result.data) ? result.data : null
-      if (result.error) {
-        error.value = result.error
-      }
-    } catch (e) {
-      error.value = { message: e instanceof Error ? e.message : "Unknown error" }
-    } finally {
-      loading.value = false
-    }
+    if (isEnabled(options?.enabled)) await read(options)
   }
 
   onMounted(fetchData)
@@ -111,4 +63,29 @@ export function useQuery<
   }
 
   return { data, error, loading, refetch: fetchData }
+}
+
+/** `enabled` as a plain boolean: a ref is read now, and absent means enabled. */
+function isEnabled(enabled: Ref<boolean> | boolean | undefined): boolean {
+  return enabled === undefined || (typeof enabled === "boolean" ? enabled : enabled.value)
+}
+
+/** The refs a query shows, fed by reads of which only the newest may change them. */
+function latestRows<TRow>(client: AnyClient, table: string) {
+  // Shallow: each fetch replaces the rows whole, and `ref` would type them as `UnwrapRef<TRow>`.
+  const data = shallowRef<TRow[] | null>(null)
+  const error = ref<SupatypeError | null>(null)
+  const loading = ref(false)
+  const read = latestRowsReader<TRow>(client, table, `useQuery("${table}")`, {
+    started: () => {
+      loading.value = true
+      error.value = null
+    },
+    settled: (rows, refusal) => {
+      data.value = rows
+      error.value = refusal
+      loading.value = false
+    },
+  })
+  return { data, error, loading, read }
 }

@@ -14,6 +14,7 @@ import type { Session, SupatypeError } from "@supatype/client"
 import { useSupatype } from "@supatype/react"
 import { useAuthTheme } from "./theme.js"
 import { fieldStyles } from "./styles.js"
+import { settleAuthRequest } from "./authRequest.js"
 
 export interface ResetPasswordLabels {
   requestTitle?: string | undefined
@@ -71,41 +72,41 @@ export function ResetPassword({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
 
+  function refused(error: SupatypeError): void {
+    setErrorMessage(error.message)
+    onError?.(error)
+  }
+
   async function handleRequest(): Promise<void> {
     setErrorMessage(null)
     setLoading(true)
-    try {
-      const { error } = await client.auth.resetPasswordForEmail(
-        email,
-        redirectTo !== undefined ? { redirectTo } : undefined,
-      )
-      if (error !== null) {
-        setErrorMessage(error.message)
-        onError?.(error)
-      } else {
-        setSent(true)
-        onRequestSent?.()
-      }
-    } finally {
-      setLoading(false)
+    const result = await settleAuthRequest("ResetPassword", () =>
+      client.auth.resetPasswordForEmail(email, redirectTo !== undefined ? { redirectTo } : undefined),
+    )
+    setLoading(false)
+    if (result.error !== null) {
+      refused(result.error)
+      return
     }
+    setSent(true)
+    onRequestSent?.()
   }
 
   async function handleUpdate(): Promise<void> {
     setErrorMessage(null)
     setLoading(true)
-    try {
-      const { error } = await client.auth.updateUser({ password })
-      if (error !== null) {
-        setErrorMessage(error.message)
-        onError?.(error)
-        return
-      }
+    const result = await settleAuthRequest("ResetPassword", async () => {
+      const updated = await client.auth.updateUser({ password })
+      if (updated.error !== null) return { data: null, error: updated.error }
       const { data } = await client.auth.getSession()
-      onPasswordUpdated?.(data.session)
-    } finally {
-      setLoading(false)
+      return { data: data.session, error: null }
+    })
+    setLoading(false)
+    if (result.error !== null) {
+      refused(result.error)
+      return
     }
+    onPasswordUpdated?.(result.data)
   }
 
   if (mode === "request" && sent) {

@@ -54,3 +54,11 @@
   the refresh produced a different token. Every 401 used to be sent twice, an anon write a row rule
   refused among them. The refresh now runs even when the local clock still calls the token valid,
   since the server has said otherwise.
+* **bindings:** `reportThrown(where, thrown)` turns a request that threw instead of answering
+  `{ data, error }` into the binding's `error`, and logs it once with `console.error`. A thrown
+  `Error` is kept as it is, so `instanceof` still names it; the SDK's own error classes get the shape
+  a failed request answers with. Every framework binding uses it, so none can leave `loading` set
+  for good when a request throws.
+* **bindings:** `latestRowsReader(client, table, where, view)` is the read the Vue, Svelte and
+  Solid queries share, where only the newest request may change what the binding shows. An older
+  read that lands last is dropped, rows, returned error or throw alike; a throw is still logged.

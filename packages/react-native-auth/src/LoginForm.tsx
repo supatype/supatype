@@ -14,6 +14,7 @@ import type { Session, SupatypeError } from "@supatype/client"
 import { useAuth } from "@supatype/react"
 import { useAuthTheme } from "./theme.js"
 import { fieldStyles } from "./styles.js"
+import { settleAuthRequest } from "./authRequest.js"
 
 export interface LoginFormLabels {
   title?: string | undefined
@@ -59,17 +60,13 @@ export function LoginForm({
   async function handleSubmit(): Promise<void> {
     setErrorMessage(null)
     setLoading(true)
-    try {
-      const { data, error } = await signIn({ email, password })
-      if (error !== null) {
-        const msg = `${l.errorPrefix}${error.message}`
-        setErrorMessage(msg)
-        onError?.(error)
-      } else if (data.session !== null) {
-        onSuccess?.(data.session)
-      }
-    } finally {
-      setLoading(false)
+    const result = await settleAuthRequest("LoginForm", () => signIn({ email, password }))
+    setLoading(false)
+    if (result.error !== null) {
+      setErrorMessage(`${l.errorPrefix}${result.error.message}`)
+      onError?.(result.error)
+    } else if (result.data.session !== null) {
+      onSuccess?.(result.data.session)
     }
   }
 

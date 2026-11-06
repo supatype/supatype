@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react"
 import type { AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isCallerValue } from "@supatype/client/bindings"
+import { isCallerValue, reportThrown } from "@supatype/client/bindings"
 
 export interface FunctionCallOptions {
   /** HTTP method. Default: POST */
@@ -64,6 +64,11 @@ export function useFunction<
         setData(answer.data)
         if (answer.error !== null) setError(answer.error)
         return answer
+      } catch (e) {
+        const thrown = reportThrown(`useFunction("${functionName}")`, e)
+        setData(null)
+        setError(thrown)
+        return { data: null, error: thrown }
       } finally {
         setLoading(false)
       }

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isRowsOf } from "@supatype/client/bindings"
+import { isRowsOf, reportThrown } from "@supatype/client/bindings"
 
 export interface UseQueryOptions {
   /** PostgREST select expression (default: '*') */
@@ -69,81 +69,103 @@ export function useQuery<
   options?: UseQueryOptions | undefined,
 ): UseQueryResult<TRow> {
   const client = useSupatype<TDatabase>()
-  const [data, setData] = useState<TRow[] | null>(null)
-  const [error, setError] = useState<SupatypeError | null>(null)
-  const [count, setCount] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [state, setState] = useState<RowsState<TRow>>({ data: null, error: null, count: null, loading: true })
+  const latest = useRef(0)
 
   // Stable reference to options for the effect dep
   const optionsJson = JSON.stringify(options)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const execute = useCallback(async () => {
+    const request = ++latest.current
+    // Only the latest request is shown: an older one that lands after it is dropped, whatever it
+    // brought, so it cannot replace newer rows or an error the newer request did not have.
+    const show = (next: Partial<RowsState<TRow>>): void => {
+      if (request === latest.current) setState((current) => ({ ...current, ...next }))
+    }
     if (options?.enabled === false) {
-      setLoading(false)
+      show({ loading: false })
       return
     }
-    setLoading(true)
-
-    // Through the untyped client: the generated row types do not survive a table name known only
-    // at run time, so the rows are typed as `TRow` once they arrive.
-    const source = (client as AnyClient).from(table)
-    // A draft read is the same request against a different schema, so it branches here rather than
-    // duplicating every filter below.
-    let query = (options?.draft === true ? source.draft() : source).select(
-      options?.select ?? "*",
-    )
-
-    if (options?.filter !== undefined) {
-      for (const [col, val] of Object.entries(options.filter)) {
-        query = query.eq(col, val)
-      }
-    }
-    if (options?.order !== undefined) {
-      query = query.order(options.order.column, { ascending: options.order.ascending ?? true })
-    }
-    if (options?.limit !== undefined) {
-      query = query.limit(options.limit)
-    }
-    if (options?.offset !== undefined && options.limit !== undefined) {
-      query = query.range(options.offset, options.offset + options.limit - 1)
-    }
-    if (options?.cache !== undefined) {
-      query = query.cache(options.cache)
-    }
-
-    const result = await query
-    setData(isRowsOf<TRow>(result.data) ? result.data : null)
-    setError(result.error)
-    setCount(result.count)
-    setLoading(false)
+    show({ loading: true })
+    show(await settledRows<TRow>(client as AnyClient, table, options))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, table, optionsJson])
 
+  useRunAndRefetch(execute, options?.refetchInterval)
+  useRerunOnIdentityChange(client.auth, execute)
+
+  return { ...state, refetch: () => void execute() }
+}
+
+/** What the hook shows: the latest request's answer, and whether one is in flight. */
+interface RowsState<TRow> {
+  data: TRow[] | null
+  error: SupatypeError | null
+  count: number | null
+  loading: boolean
+}
+
+/**
+ * The read's answer as the hook shows it. A request that throws (a client with no API address, say)
+ * ends like one that was refused, and is reported even when a newer request has replaced it.
+ */
+async function settledRows<TRow>(
+  client: AnyClient,
+  table: string,
+  options: UseQueryOptions | undefined,
+): Promise<RowsState<TRow>> {
+  try {
+    const result = await readRows(client, table, options)
+    return { data: isRowsOf<TRow>(result.data) ? result.data : null, error: result.error, count: result.count, loading: false }
+  } catch (e) {
+    return { data: null, error: reportThrown(`useQuery("${table}")`, e), count: null, loading: false }
+  }
+}
+
+/** Run `execute` now and whenever it changes, and every `interval` milliseconds when one is set. */
+function useRunAndRefetch(execute: () => Promise<void>, interval: number | undefined): void {
   useEffect(() => {
     void execute()
+    if (interval === undefined) return undefined
+    const timer = setInterval(() => void execute(), interval)
+    return () => clearInterval(timer)
+  }, [execute, interval])
+}
 
-    if (options?.refetchInterval !== undefined) {
-      intervalRef.current = setInterval(() => void execute(), options.refetchInterval)
-    }
-    return () => {
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [execute])
-
-  // Re-run when the signed-in identity changes. See `onIdentityChange` for which changes count.
-  //
-  // Through a ref, and keyed on the client alone: keying on `execute` would re-subscribe every time
-  // `optionsJson` changed, and each re-subscribe takes a fresh baseline from the emission
-  // `onAuthStateChange` makes at registration. A sign-in landing in that window would be read as
-  // the baseline rather than as a change, and the query would never re-run.
+/**
+ * Re-run when the signed-in identity changes. See `onIdentityChange` for which changes count.
+ *
+ * Through a ref, and keyed on the auth client alone: keying on `execute` would re-subscribe every
+ * time the options changed, and each re-subscribe takes a fresh baseline from the emission
+ * `onAuthStateChange` makes at registration. A sign-in landing in that window would be read as the
+ * baseline rather than as a change, and the query would never re-run.
+ */
+function useRerunOnIdentityChange(auth: AnyClient["auth"], execute: () => Promise<void>): void {
   const executeRef = useRef(execute)
   executeRef.current = execute
-  useEffect(() => onIdentityChange(client.auth, () => void executeRef.current()), [client])
+  useEffect(() => onIdentityChange(auth, () => void executeRef.current()), [auth])
+}
 
-  return { data, error, count, loading, refetch: () => void execute() }
+/**
+ * The read `options` describe. Through the untyped client: the generated row types do not survive
+ * a table name known only at run time, so the hook types the rows as `TRow` once they arrive.
+ */
+function readRows(client: AnyClient, table: string, options: UseQueryOptions | undefined) {
+  const source = client.from(table)
+  // A draft read is the same request against a different schema, so it branches here rather than
+  // duplicating every filter below.
+  let query = (options?.draft === true ? source.draft() : source).select(options?.select ?? "*")
+  for (const [col, val] of Object.entries(options?.filter ?? {})) {
+    query = query.eq(col, val)
+  }
+  if (options?.order !== undefined) {
+    query = query.order(options.order.column, { ascending: options.order.ascending ?? true })
+  }
+  if (options?.limit !== undefined) {
+    query = query.limit(options.limit)
+  }
+  if (options?.offset !== undefined && options.limit !== undefined) {
+    query = query.range(options.offset, options.offset + options.limit - 1)
+  }
+  return options?.cache !== undefined ? query.cache(options.cache) : query
 }

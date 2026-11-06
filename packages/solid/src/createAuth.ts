@@ -1,7 +1,7 @@
 import { createSignal, onMount, onCleanup } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { AugmentedDatabase, AnyDatabase, AuthRedirectError, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
-import { startOAuthRedirect } from "@supatype/client/bindings"
+import { reportThrown, startOAuthRedirect } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 
 export interface AuthResult {
@@ -32,6 +32,14 @@ export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>():
   let unsubscribe: (() => void) | null = null
 
   onMount(async () => {
+    // Subscribe before awaiting anything: a cleanup while the client is still starting can only
+    // remove a listener that already exists.
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event: AuthChangeEvent, newSession: Session | null) => {
+      setSession(() => newSession)
+      setUser(() => newSession?.user ?? null)
+    })
+    unsubscribe = () => subscription.unsubscribe()
+
     try {
       // The initial session, once the client has finished any sign-in the page's URL carries
       const { error: redirectError } = await client.auth.initialize()
@@ -41,16 +49,12 @@ export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>():
         setSession(() => data.session)
         setUser(() => data.session!.user)
       }
-    } catch {
-      // Ignore: user is not authenticated
+    } catch (e) {
+      // Starting threw (a client with no API address, say): there is no session to wait for.
+      const thrown = reportThrown("createAuth", e)
+      setError(() => thrown)
     }
     setLoading(false)
-
-    const { data: { subscription } } = client.auth.onAuthStateChange((_event: AuthChangeEvent, newSession: Session | null) => {
-      setSession(() => newSession)
-      setUser(() => newSession?.user ?? null)
-    })
-    unsubscribe = () => subscription.unsubscribe()
   })
 
   onCleanup(() => {

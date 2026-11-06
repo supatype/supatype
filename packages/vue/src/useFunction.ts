@@ -1,7 +1,7 @@
 import { ref, shallowRef, type Ref } from "vue"
 import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isCallerValue } from "@supatype/client/bindings"
+import { isCallerValue, reportThrown } from "@supatype/client/bindings"
 
 export interface UseFunctionReturn<TResponse> {
   invoke: (body?: unknown) => Promise<{ data: TResponse | null; error: SupatypeError | null }>
@@ -50,6 +50,11 @@ export function useFunction<
       data.value = answer.data
       if (answer.error) error.value = answer.error
       return answer
+    } catch (e) {
+      const thrown = reportThrown(`useFunction("${functionName}")`, e)
+      data.value = null
+      error.value = thrown
+      return { data: null, error: thrown }
     } finally {
       loading.value = false
     }

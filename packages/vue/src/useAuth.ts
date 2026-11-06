@@ -1,6 +1,6 @@
 import { ref, onMounted, onUnmounted, type Ref } from "vue"
 import type { AugmentedDatabase, AnyDatabase, AuthRedirectError, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
-import { startOAuthRedirect } from "@supatype/client/bindings"
+import { reportThrown, startOAuthRedirect } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 
 export interface UseAuthReturn {
@@ -52,6 +52,14 @@ export function useAuth<TDatabase extends AnyDatabase = AugmentedDatabase>(): Us
   let unsubscribe: (() => void) | null = null
 
   onMounted(async () => {
+    // Subscribe before awaiting anything: an unmount while the client is still starting runs the
+    // cleanup below, which can only remove a listener that already exists.
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event: AuthChangeEvent, newSession: Session | null) => {
+      session.value = newSession
+      user.value = newSession?.user ?? null
+    })
+    unsubscribe = () => subscription.unsubscribe()
+
     // Initial session, once the client has finished any sign-in the page's URL carries
     try {
       error.value = (await client.auth.initialize()).error
@@ -60,17 +68,11 @@ export function useAuth<TDatabase extends AnyDatabase = AugmentedDatabase>(): Us
         session.value = data.session
         user.value = data.session.user
       }
-    } catch {
-      // Ignore: user is not authenticated
+    } catch (e) {
+      // Starting threw (a client with no API address, say): there is no session to wait for.
+      error.value = reportThrown("useAuth", e)
     }
     loading.value = false
-
-    // Subscribe to auth changes
-    const { data: { subscription } } = client.auth.onAuthStateChange((event: AuthChangeEvent, newSession: Session | null) => {
-      session.value = newSession
-      user.value = newSession?.user ?? null
-    })
-    unsubscribe = () => subscription.unsubscribe()
   })
 
   onUnmounted(() => {
