@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { SpawnSyncReturns } from "node:child_process"
+import type { FakeRun } from "./support/fake-exec-file.js"
 
 /**
  * CL-N2: local `supatype dev` made every new table in `public` readable by `anon` (and writable by
@@ -8,14 +9,20 @@ import type { SpawnSyncReturns } from "node:child_process"
  * grants are the engine's, written from the schema's access rules.
  */
 
-interface SpawnOptions { input?: string }
-const spawnSync = vi.fn<(cmd: string, args: readonly string[], opts: SpawnOptions) => Partial<SpawnSyncReturns<string>>>(
+interface SpawnOptions { input?: string | undefined }
+// psql runs through `execFile`, asynchronously, with the SQL on its stdin.
+const ran = vi.fn<(cmd: string, args: readonly string[], opts: SpawnOptions) => Partial<SpawnSyncReturns<string>>>(
   () => ({ status: 0, stdout: "", stderr: "" }),
 )
-vi.mock("node:child_process", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:child_process")>()),
-  spawnSync: (cmd: string, args: readonly string[], opts: SpawnOptions) => spawnSync(cmd, args, opts),
-}))
+vi.mock("node:child_process", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:child_process")>()
+  const { fakeExecFile } = await import("./support/fake-exec-file.js")
+  const answer = (cmd: string, args: readonly string[], opts: SpawnOptions): FakeRun => {
+    const run = ran(cmd, args, opts)
+    return { status: run.status ?? null, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }
+  }
+  return { ...real, execFile: fakeExecFile(answer, () => new real.ChildProcess()) }
+})
 
 const { nativeRolesSql, PRIVATE_TABLE_DEFAULTS_SQL } = await import("../src/native-roles-sql.js")
 const { privatizeTableDefaults } = await import("../src/compose-db-roles.js")
@@ -50,9 +57,9 @@ describe("the docker dev database", () => {
     expect(PRIVATE_TABLE_DEFAULTS_SQL).not.toMatch(OPEN_TABLE_GRANT)
   })
 
-  it("runs that inside the db container as the bundled superuser", () => {
-    privatizeTableDefaults({ composePath: "/p/.supatype/self-host/docker-compose.yml" }, process.cwd(), "supatype-acme")
-    const [cmd, args, opts] = spawnSync.mock.calls.at(-1) ?? []
+  it("runs that inside the db container as the bundled superuser", async () => {
+    await privatizeTableDefaults({ composePath: "/p/.supatype/self-host/docker-compose.yml" }, process.cwd(), "supatype-acme")
+    const [cmd, args, opts] = ran.mock.calls.at(-1) ?? []
     expect(cmd).toBe("docker")
     expect(args).toEqual(expect.arrayContaining(["exec", "-T", "db", "psql"]))
     expect(opts?.input).toBe(PRIVATE_TABLE_DEFAULTS_SQL)

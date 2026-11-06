@@ -143,7 +143,7 @@ import {
   reconcileAuthenticatorPassword,
   reconcileSqlEditorPassword,
 } from "./compose-db-roles.js"
-import { spawnComposeEngine } from "./compose-engine-run.js"
+import { spawnComposeEngine, spawnComposeEngineSync } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
 import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
@@ -900,7 +900,7 @@ export async function runComposeSchemaPush(
   }
   _lastPushedAst = astJson
   _lastFailedAst = null
-  if (astRelatesToAuthUsers(ast)) grantAuthSchemaAccess(paths, cwd, composeProject)
+  if (astRelatesToAuthUsers(ast)) await grantAuthSchemaAccess(paths, cwd, composeProject)
   await refreshSchemaArtifacts(cwd, config, ast)
 }
 
@@ -1008,7 +1008,7 @@ async function runComposeSchemaPushQueued(
       _composePushQueued = false
       await runDevSchemaPush(cwd, config, paths, schemaPath, composeProject, opts)
     } while (_composePushQueued)
-    followRecordedTier(cwd, config, { recreate: true })
+    await followRecordedTier(cwd, config, { recreate: true })
   } finally {
     _composePushInFlight = false
   }
@@ -1022,16 +1022,16 @@ async function runComposeSchemaPushQueued(
  * recreated so a running stack serves the new search path now; a caller about to run
  * `compose up -d` leaves that to it.
  */
-export function followRecordedTier(
+export async function followRecordedTier(
   cwd: string,
   config: SupatypeProjectConfig,
   opts: { recreate: boolean },
-): void {
+): Promise<void> {
   if (usesExternalDatabase(config)) return
   const project = composeProjectName(config.project.name)
   const paths = selfHostComposePaths(cwd)
   const served = composeFieldMaskingTier(cwd, config)
-  const recorded = recordDatabaseTier(cwd, { project, composePath: paths.composePath })
+  const recorded = await recordDatabaseTier(cwd, { project, composePath: paths.composePath })
   if (recorded === undefined || sameApiSurface(config, served, recorded)) return
   writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   console.log(`[supatype] The database runs field masking tier "${recorded}"; PostgREST follows it.`)
@@ -1147,7 +1147,7 @@ export async function dockerEngineCapabilities(cwd: string, config: SupatypeProj
     const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
     const target = { cwd, project: composeProjectName(config.project.name), composePath: paths.composePath, engineImage }
     return checkedCapabilities((args) => {
-      const run = spawnComposeEngine(target, args, { runFlags: ["--no-deps"] })
+      const run = spawnComposeEngineSync(target, args, { runFlags: ["--no-deps"] })
       return { status: run.status, stdout: run.stdout, stderr: run.error ?? run.stderr }
     })
   }
@@ -1260,7 +1260,7 @@ async function runComposeEngine(
 ): Promise<EngineRun> {
   const engineImage = await schemaEngineImageForPush(config, cwd)
   const target = { cwd, project: composeProject, composePath: paths.composePath, engineImage }
-  const result = spawnComposeEngine(target, engineArgs, {
+  const result = await spawnComposeEngine(target, engineArgs, {
     secrets: { DATABASE_URL: projectDatabaseUrl(cwd, config, true) },
   })
   return {
@@ -1498,13 +1498,13 @@ export async function pushSchemaDocker(
   const pushBrand = { intro: "Push schema" }
 
   await startComposeDatabase(config, paths, cwd, project, pushBrand)
-  if (!usesExternalDatabase(config)) privatizeTableDefaults(paths, cwd, project)
+  if (!usesExternalDatabase(config)) await privatizeTableDefaults(paths, cwd, project)
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await runComposeSchemaPush(cwd, config, paths, schemaPath, project, opts)
   // `up -d` below recreates PostgREST when the tier changed its environment.
-  followRecordedTier(cwd, config, { recreate: false })
+  await followRecordedTier(cwd, config, { recreate: false })
 
   await bringPushedStackUp(cwd, config, { paths, project, gatewayPort, brand: pushBrand }, ast, {
     anonKey,
@@ -1717,9 +1717,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await warnIfHandWrittenUrlSilent(cwd)
 
   if (!usesExternalDatabase(config)) {
-    reconcileAuthenticatorPassword(paths, cwd, project)
-    reconcileSqlEditorPassword(paths, cwd, project)
-    privatizeTableDefaults(paths, cwd, project)
+    await reconcileAuthenticatorPassword(paths, cwd, project)
+    await reconcileSqlEditorPassword(paths, cwd, project)
+    await privatizeTableDefaults(paths, cwd, project)
   }
 
   // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
@@ -1729,7 +1729,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await showDevStep("Applying the schema")
   const schemaApplied = await applyInitialSchema(cwd, config, paths, schemaPath, project, devBrand, pushOptions)
   // Before the stack starts, so PostgREST comes up on the tier the push actually produced.
-  followRecordedTier(cwd, config, { recreate: false })
+  await followRecordedTier(cwd, config, { recreate: false })
 
   console.log("[supatype] Bringing up Docker Compose services...")
   await showDevStep("Starting services (the first start downloads their images)")

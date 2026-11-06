@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { SpawnSyncReturns } from "node:child_process"
+import type { FakeRun } from "./support/fake-exec-file.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 /**
@@ -13,11 +14,22 @@ import type { SupatypeProjectConfig } from "../src/project-config.js"
  */
 
 type Spawned = Partial<SpawnSyncReturns<string>>
-const spawnSync = vi.fn<(cmd: string, args: readonly string[]) => Spawned>()
-vi.mock("node:child_process", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:child_process")>()),
-  spawnSync: (cmd: string, args: readonly string[]) => spawnSync(cmd, args),
-}))
+// Every docker call, whichever way it is made: compose rendering through `spawnSync`, the tier
+// query through `execFile`, since it runs after every docker dev push while the dashboard does.
+const ran = vi.fn<(cmd: string, args: readonly string[]) => Spawned>()
+vi.mock("node:child_process", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:child_process")>()
+  const { fakeExecFile } = await import("./support/fake-exec-file.js")
+  const answer = (cmd: string, args: readonly string[]): FakeRun => {
+    const run = ran(cmd, args)
+    return { status: run.status ?? null, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }
+  }
+  return {
+    ...real,
+    spawnSync: (cmd: string, args: readonly string[]) => ran(cmd, args),
+    execFile: fakeExecFile(answer, () => new real.ChildProcess()),
+  }
+})
 
 const { readRecordedTier, recordDatabaseTier, recordedTierPath, sameApiSurface, tierFromEngine, writeRecordedTier } =
   await import("../src/recorded-field-masking-tier.js")
@@ -33,7 +45,7 @@ const stack = { project: "supatype-acme", composePath: "/x/.supatype/self-host/d
 
 /** The database answers `recorded` to the tier query; everything else docker is asked fails. */
 function databaseRecords(recorded: string): void {
-  spawnSync.mockImplementation((cmd, args) =>
+  ran.mockImplementation((cmd, args) =>
     cmd === "docker" && args.includes("psql")
       ? { status: 0, stdout: `${recorded}\n`, stderr: "" }
       : { status: 1, stdout: "", stderr: "" },
@@ -49,7 +61,7 @@ function searchPath(dir: string, cfg: SupatypeProjectConfig = config): string | 
 let dir: string
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "supatype-recorded-tier-"))
-  spawnSync.mockReset()
+  ran.mockReset()
   databaseRecords("")
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
@@ -75,21 +87,21 @@ describe("the recorded tier", () => {
     expect(readRecordedTier(dir)).toBeUndefined()
   })
 
-  it("is read from the stack's database and kept", () => {
+  it("is read from the stack's database and kept", async () => {
     databaseRecords("views")
-    expect(recordDatabaseTier(dir, stack)).toBe("views")
+    expect(await recordDatabaseTier(dir, stack)).toBe("views")
     expect(readRecordedTier(dir)).toBe("views")
     databaseRecords("extension")
-    expect(recordDatabaseTier(dir, stack)).toBe("extension")
+    expect(await recordDatabaseTier(dir, stack)).toBe("extension")
     expect(readRecordedTier(dir)).toBe("extension")
   })
 
-  it("is left alone when the database cannot say", () => {
+  it("is left alone when the database cannot say", async () => {
     writeRecordedTier(dir, "views")
-    spawnSync.mockReturnValue({ status: 1, stdout: "", stderr: "no such service: db" })
-    expect(recordDatabaseTier(dir, stack)).toBeUndefined()
+    ran.mockReturnValue({ status: 1, stdout: "", stderr: "no such service: db" })
+    expect(await recordDatabaseTier(dir, stack)).toBeUndefined()
     databaseRecords("broken")
-    expect(recordDatabaseTier(dir, stack)).toBeUndefined()
+    expect(await recordDatabaseTier(dir, stack)).toBeUndefined()
     expect(readRecordedTier(dir)).toBe("views")
   })
 

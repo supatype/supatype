@@ -18,7 +18,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { composeDbPsql, type ComposeStack } from "./compose-db-psql.js"
-import { askDockerSync, DOCKER_EXEC_TIMEOUT_MS } from "./docker-exec.js"
+import { askDocker, DOCKER_EXEC_TIMEOUT_MS } from "./docker-exec.js"
 import { readJsonObjectFile } from "./json-file.js"
 import type { FieldMaskingTier } from "./field-masking-tier.js"
 import { postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
@@ -72,17 +72,17 @@ export function writeRecordedTier(cwd: string, tier: FieldMaskingTier): void {
  * The tier `stack`'s database recorded on its last push, read in its `db` container. Undefined
  * when it cannot be read (no stack, no push yet, a pre-0.7 engine), which leaves the prediction.
  */
-export function queryRecordedTier(cwd: string, stack: ComposeStack): FieldMaskingTier | undefined {
+export async function queryRecordedTier(cwd: string, stack: ComposeStack): Promise<FieldMaskingTier | undefined> {
   const { args, env } = composeDbPsql(cwd, stack, ["-tAc", RECORDED_TIER_QUERY])
-  // Synchronous: read while compose is rendered, which is synchronous.
-  const result = askDockerSync(args, { cwd: dirname(stack.composePath), env, timeoutMs: DOCKER_EXEC_TIMEOUT_MS })
+  // Asynchronous: read after every docker dev push, while the dashboard runs.
+  const result = await askDocker(args, { cwd: dirname(stack.composePath), env, timeoutMs: DOCKER_EXEC_TIMEOUT_MS })
   if (result.status !== 0) return undefined
   return tierFromEngine(result.stdout)
 }
 
 /** Read `stack`'s recorded tier and keep it. Undefined, and nothing kept, when it cannot be read. */
-export function recordDatabaseTier(cwd: string, stack: ComposeStack): FieldMaskingTier | undefined {
-  const recorded = queryRecordedTier(cwd, stack)
+export async function recordDatabaseTier(cwd: string, stack: ComposeStack): Promise<FieldMaskingTier | undefined> {
+  const recorded = await queryRecordedTier(cwd, stack)
   if (recorded !== undefined && recorded !== readRecordedTier(cwd)) writeRecordedTier(cwd, recorded)
   return recorded
 }
