@@ -106,6 +106,13 @@
   reported as stopped, and dev exited before `down` ran, leaving the exit hook's fallback to stop
   the stack. Stopping a stack that was just running no longer asks: `down` runs at once, and says
   so itself if Docker really is gone.
+* **dev:** a proxy app whose start script is `vite` starts again. The compiled program ran
+  `vite.js` with itself rather than Node, so the app task exited with `error: unknown command
+  '<app>/node_modules/vite/bin/vite.js'`, was restarted for the rest of the session, and every app
+  route answered 502. `vite.js` for the app and for `overrides.studio`, and a `.js` entry named by
+  `overrides.realtime` or `overrides.storage`, now run with the `node` on PATH; with none there,
+  dev stops and says Node.js is needed. The dev log names the program it runs, where it used to
+  say `node vite.js` whatever ran (#28).
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
   every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.

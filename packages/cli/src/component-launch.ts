@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isShape, isString } from "@supatype/shared"
 import { readJsonFile } from "./json-file.js"
+import { nodeExecutable } from "./node-executable.js"
 
 export interface ComponentLaunchSpec {
   bin: string
@@ -17,7 +18,7 @@ const CLI_PKG_DIR = dirname(fileURLToPath(import.meta.url))
 
 /** Node on `entry` for a `.js`, `.mjs` or `.cjs` file, the file itself otherwise. */
 function launchFor(path: string): ComponentLaunchSpec {
-  return /\.(c|m)?js$/.test(path) ? { bin: process.execPath, args: [path] } : { bin: path, args: [] }
+  return /\.(c|m)?js$/.test(path) ? { bin: nodeExecutable(path), args: [path] } : { bin: path, args: [] }
 }
 
 /** The launch an `overrides.<name>` path names, resolved against `cwd`; throws when it is missing. */

@@ -6,6 +6,7 @@ import { execSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { detectPackageManager } from "./framework.js"
+import { nodeExecutable } from "../node-executable.js"
 import { parsePackageJson } from "../package-json.js"
 import { appendDevTaskLog } from "../dev-session.js"
 import { ProcessManager, readPid } from "../process-manager.js"
@@ -93,7 +94,8 @@ export function freeProxyDevPort(pidDir: string, port: number): void {
 /**
  * When a package.json script only runs Vite, spawn node + vite.js directly.
  * Avoids Windows shell shims (pnpm → bash → vite) that orphan the real server
- * and break PID-based cleanup / auto-restart.
+ * and break PID-based cleanup / auto-restart. Throws when the compiled binary
+ * finds no Node to run vite.js with (see node-executable.ts).
  */
 export function resolveViteDirectSpawn(
   appDir: string,
@@ -113,7 +115,7 @@ export function resolveViteDirectSpawn(
   const viteJs = join(appDir, "node_modules", "vite", "bin", "vite.js")
   if (!existsSync(viteJs)) return null
 
-  return { bin: process.execPath, args: [viteJs], shell: false }
+  return { bin: nodeExecutable(viteJs), args: [viteJs], shell: false }
 }
 
 /**
@@ -151,13 +153,7 @@ export function startProxyDevApp(
   const args = directVite?.args ?? (pm === "yarn" ? [script] : ["run", script])
   const useShell = directVite ? false : process.platform === "win32"
 
-  appendDevTaskLog(
-    "app",
-    "app",
-    directVite
-      ? `Proxy mode: running node vite.js (${appDir})`
-      : `Proxy mode: running ${bin} ${args.join(" ")} (${appDir})`,
-  )
+  appendDevTaskLog("app", "app", `Proxy mode: running ${bin} ${args.join(" ")} (${appDir})`)
 
   if (upstreamPort) freeProxyDevPort(pidDir, upstreamPort)
 
