@@ -36,7 +36,14 @@ function settingRows(s: AuthSettings): SettingRow[] {
       fromDotEnv: false,
     },
     { label: "SMS provider", value: s.sms_provider || "None", on: s.sms_provider !== "", envVar: "SUPATYPE_SMS_PROVIDER", fromDotEnv: false },
-    { label: "SAML SSO", value: enabled(s.saml_enabled), on: s.saml_enabled, envVar: "SUPATYPE_SAML_ENABLED", fromDotEnv: false },
+    {
+      label: "SAML SSO",
+      value: enabled(s.saml_enabled),
+      on: s.saml_enabled,
+      envVar: "SUPATYPE_SAML_ENABLED",
+      fromDotEnv: true,
+      configKey: "auth.sso.saml.enabled",
+    },
     { label: "Passkeys", value: enabled(s.passkeys_enabled), on: s.passkeys_enabled, envVar: "SUPATYPE_PASSKEY_ENABLED", fromDotEnv: false },
   ]
 }
