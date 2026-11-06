@@ -2,6 +2,13 @@ import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { runCommand, tempProject } from "./support/command-run.js"
+
+// The project's stack runs: one that does not is refused before any address is chosen (issue 45).
+vi.mock("../src/compose-render-mode.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/compose-render-mode.js")>()),
+  runningStackMode: () => "dev",
+}))
+
 import { registerFunctions } from "../src/commands/functions.js"
 
 /**
