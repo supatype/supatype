@@ -26,6 +26,15 @@ export function userAdministrationOffered(capability: OfferedCapability): boolea
   return offers(capability, "manageUsers")
 }
 
+/**
+ * Adding, changing and removing the project's SAML identity providers. Project administration, as
+ * the project's settings and functions are, rather than user administration: a provider decides who
+ * can sign in at all.
+ */
+export function ssoProviderChangesOffered(capability: OfferedCapability): boolean {
+  return offers(capability, "administer")
+}
+
 /** Changing content (rows and files): every role but the viewer, who reads. */
 export function contentWriteOffered(capability: OfferedCapability): boolean {
   return offers(capability, "write")

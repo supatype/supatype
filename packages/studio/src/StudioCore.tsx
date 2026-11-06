@@ -76,6 +76,7 @@ import { UsersView } from "./views/auth/UsersView.js"
 import { PoliciesView } from "./views/auth/PoliciesView.js"
 import { ProvidersView } from "./views/auth/ProvidersView.js"
 import { ConfigurationView } from "./views/auth/ConfigurationView.js"
+import { SsoView } from "./views/auth/SsoView.js"
 import { EmailTemplatesView } from "./views/auth/EmailTemplatesView.js"
 
 // Storage sub-pages
@@ -479,7 +480,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="authentication/configuration"   element={gated(PROJECT_USERS, <ConfigurationView />)} />
               <Route path="authentication/email-templates" element={gated(PROJECT_USERS, <EmailTemplatesView />)} />
               <Route path="authentication/hooks"    element={<ComingSoon title="Auth Hooks" description="Configure pre/post hooks for auth events. Coming soon." />} />
-              <Route path="authentication/sso"      element={<ComingSoon title="SSO & OAuth Clients" description="SAML 2.0, OIDC, and OAuth2 client management. Coming soon." />} />
+              <Route path="authentication/sso"             element={gated(PROJECT_USERS, <SsoView />)} />
               <Route path="authentication/security" element={<ComingSoon title="Attack Protection" description="CAPTCHA, IP blocking, leaked password detection, rate limits. Coming soon." />} />
 
               {/* Observability (Logs + Metrics + Advisors) */}
