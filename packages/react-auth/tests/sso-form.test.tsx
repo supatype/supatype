@@ -4,6 +4,7 @@
  */
 
 import React from "react"
+import { PKCE_METHOD_S256 } from "@supatype/client"
 import { act } from "react-test-renderer"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { SSOForm } from "../src/index.js"
@@ -12,6 +13,10 @@ import { fire } from "./props.js"
 
 const IDP_URL = "https://idp.example/sso?SAMLRequest=abc"
 const PROVIDER_KEY = "supatype.auth.session-oauth-provider"
+
+/** The challenge fields signInWithSSO adds by default, as it starts a PKCE sign-in. */
+const ANY_STRING: unknown = expect.any(String)
+const PKCE_FIELDS = { code_challenge: ANY_STRING, code_challenge_method: PKCE_METHOD_S256 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -28,7 +33,7 @@ describe("SSOForm", () => {
 
     const sso = sent.find((r) => r.url.pathname === "/auth/v1/sso")
     expect(sso?.method).toBe("POST")
-    expect(sso?.body).toEqual({ domain: "acme.com", skip_http_redirect: true, redirect_to: "https://app.example/home" })
+    expect(sso?.body).toEqual({ domain: "acme.com", skip_http_redirect: true, redirect_to: "https://app.example/home", ...PKCE_FIELDS })
     expect(assign).toHaveBeenCalledWith(IDP_URL)
     expect(onSuccess).toHaveBeenCalledWith(IDP_URL)
     expect(textOf(renderer.root.findByProps({ role: "status" }))).toBe("Redirecting to your identity provider…")
@@ -41,7 +46,7 @@ describe("SSOForm", () => {
     type(renderer, "st-sso-email", "acme.com")
     await submit(renderer)
 
-    expect(sent.find((r) => r.url.pathname === "/auth/v1/sso")?.body).toEqual({ domain: "acme.com", skip_http_redirect: true })
+    expect(sent.find((r) => r.url.pathname === "/auth/v1/sso")?.body).toEqual({ domain: "acme.com", skip_http_redirect: true, ...PKCE_FIELDS })
   })
 
   it("refuses an address with no domain without asking the server", async () => {

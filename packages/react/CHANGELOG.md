@@ -11,6 +11,12 @@
   through `useMutation`. A delete returns `null` rather than `[]`, and its rows with `select`.
   `filter` and `publish` keep their meaning.
 
+### Features
+
+* **useAuth:** `signInWithSSO({ domain })` or `signInWithSSO({ providerId })`, beside
+  `signInWithOAuth`: the client's SAML sign-in, which sends the browser to the identity provider
+  (unless `options.skipBrowserRedirect`) and returns its URL.
+
 ### Bug Fixes
 
 * **useQuery, useMutation, useFunction, useAuth:** a request that throws instead of answering

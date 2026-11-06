@@ -4,6 +4,7 @@ import { createClient } from "../src/index.js"
 import type { AuthChangeEvent } from "../src/types.js"
 import { fetchCall, fetchReturning, jsonBody } from "./support/fetch-mock.js"
 import { stubBrowser } from "./support/browser.js"
+import { liveAccessToken } from "./support/jwt.js"
 
 /**
  * The OAuth return: the auth server sends the browser back with the session in the URL, as tokens in
@@ -29,11 +30,6 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
 }
 
-function accessToken(): string {
-  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")
-  return `eyJhbGciOiJub25lIn0.${payload}.sig`
-}
-
 function recordEvents(client: AuthClient): AuthChangeEvent[] {
   const events: AuthChangeEvent[] = []
   client.onAuthStateChange((event) => { events.push(event) })
@@ -47,7 +43,7 @@ afterEach(() => {
 
 describe("detectSessionInUrl", () => {
   it("signs in from implicit-grant tokens in the fragment and cleans the URL", async () => {
-    const token = accessToken()
+    const token = liveAccessToken()
     const { replaceState } = stubBrowser(
       `https://app.example/welcome?tab=1#access_token=${token}&refresh_token=rt-1&expires_in=3600&token_type=bearer&provider_token=gh&sb=`,
     )
@@ -71,7 +67,7 @@ describe("detectSessionInUrl", () => {
     const { replaceState, store } = stubBrowser("https://app.example/cb?next=%2Fhome&code=auth-code-1", {
       [VERIFIER_KEY]: "verifier-1",
     })
-    const fetch = fetchReturning({ access_token: accessToken(), refresh_token: "rt-2", expires_in: 3600, token_type: "bearer", user: RAW_USER })
+    const fetch = fetchReturning({ access_token: liveAccessToken(), refresh_token: "rt-2", expires_in: 3600, token_type: "bearer", user: RAW_USER })
     vi.stubGlobal("fetch", fetch)
 
     const client = new AuthClient(AUTH_URL, HEADERS)
@@ -117,7 +113,7 @@ describe("detectSessionInUrl", () => {
   })
 
   it("does nothing when the app opts out", async () => {
-    const { replaceState } = stubBrowser(`https://app.example/#access_token=${accessToken()}&refresh_token=rt-1`)
+    const { replaceState } = stubBrowser(`https://app.example/#access_token=${liveAccessToken()}&refresh_token=rt-1`)
     const fetch = vi.fn()
     vi.stubGlobal("fetch", fetch)
 
@@ -131,7 +127,7 @@ describe("detectSessionInUrl", () => {
   })
 
   it("is on by default through createClient", async () => {
-    stubBrowser(`https://app.example/#access_token=${accessToken()}&refresh_token=rt-1`)
+    stubBrowser(`https://app.example/#access_token=${liveAccessToken()}&refresh_token=rt-1`)
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(RAW_USER)))
 
     const client = createClient({ url: "http://localhost:9999", anonKey: "anon" })

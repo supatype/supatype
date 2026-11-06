@@ -75,7 +75,12 @@ export interface SignInWithSSOOptions {
   captchaToken?: string | undefined
   /** Return the identity provider's URL and leave the browser where it is. */
   skipBrowserRedirect?: boolean | undefined
-  /** Default: `implicit`, as `signInWithOAuth`. Pass `pkce` to get a `?code=` back instead of tokens. */
+  /**
+   * Default: `pkce`, so the session comes back as a `?code=` only this browser can exchange, never
+   * as tokens in the URL. `implicit` returns tokens in the fragment. (`signInWithOAuth` defaults to
+   * `implicit`.) A sign-in the identity provider starts always comes back implicit, and the client
+   * accepts it either way.
+   */
   flowType?: AuthFlowType | undefined
 }
 
@@ -83,6 +88,7 @@ export interface SignInWithSSOOptions {
 export interface SignInWithSSODomain {
   /** The domain of the user's email address: `acme.com`. */
   domain: string
+  providerId?: never
   options?: SignInWithSSOOptions | undefined
 }
 
@@ -90,8 +96,12 @@ export interface SignInWithSSODomain {
 export interface SignInWithSSOProvider {
   /** The provider's UUID, as the admin API reports it. */
   providerId: string
+  domain?: never
   options?: SignInWithSSOOptions | undefined
 }
+
+/** What `signInWithSSO` takes: an email domain or a provider's ID, never both. */
+export type SignInWithSSOCredentials = SignInWithSSODomain | SignInWithSSOProvider
 
 /** What `signInWithSSO` answers: the identity provider's URL, or why there is none. */
 export interface SignInWithSSOResult {
