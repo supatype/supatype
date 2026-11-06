@@ -88,7 +88,7 @@ prefixed copies, and otherwise builds a site that renders a blank page without a
 The server answers `GET /supatype-env.js` (`window.__SUPATYPE_ENV__ = {"url":...,"anonKey":...};`)
 and `GET /supatype-env.json` with its address (`SUPATYPE_URL`, else `API_EXTERNAL_URL`) and anon
 key, `Cache-Control: no-cache`, in every app mode; never the service role key. An `index.html` with
-`<script src="/supatype-env.js"></script>` (init adds it for a static app) gets the values at page
+`<script src="/supatype-env.js" vite-ignore></script>` (init adds it for a static app) gets the values at page
 load, so one build without them runs on every deployment that serves it. A self-host link's
 `supatype build --env <name>` fetches the anon key from `/supatype-env.json`, over HTTPS only, and so does a CI build given only `SUPATYPE_URL`: no link or service role key in CI.
 `server.public_env: false` in `supatype.config.ts` renders `SUPATYPE_PUBLIC_ENV=false` and both

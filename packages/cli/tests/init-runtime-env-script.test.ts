@@ -10,9 +10,10 @@ import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
  * The server answers it with the deployment's address and anon key, and the client reads them when
  * the build carried none, so one build works on every deployment that serves it. The tag belongs
  * only where the committed config serves the app statically: a proxied app is served by its own
- * server, which has no such file.
+ * server, which has no such file. `vite-ignore` keeps `vite build` from warning, on every build,
+ * that it cannot bundle a script the project does not have (manual test #36).
  */
-const SCRIPT_TAG = '<script src="/supatype-env.js"></script>'
+const SCRIPT_TAG = '<script src="/supatype-env.js" vite-ignore></script>'
 const dirs: string[] = []
 
 afterEach(() => {

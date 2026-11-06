@@ -254,6 +254,8 @@ describe("resolveFrontendValues: the server the environment's URL names, refusal
     fetchMock.mockResolvedValue(json({ error: "not_found" }, 404))
     const message = await refusal(resolve({ processEnv: { SUPATYPE_URL: API } }))
     expect(message).toContain(`${API}/supatype-env.json answered 404`)
+    // It said "or is older than the address", which reads as nothing.
+    expect(message).toContain("server.public_env set to false, or runs a release too old to serve it")
     expect(message).toContain("SUPATYPE_ANON_KEY")
   })
 })

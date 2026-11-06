@@ -126,8 +126,8 @@ only) the `/supatype-env.json` of the server that URL names, else the linked env
 skipped. It refuses to start when
 either is missing or the URL is local (`--allow-local` overrides). For a host's settings,
 `supatype keys --print frontend --env <name>` prints the same values as `NAME=value` lines. When
-Supatype serves the app, `<script src="/supatype-env.js"></script>` in `index.html` gives the page
-both values at load time; a Next.js app serves the same script from `app/supatype-env.js/route.ts`
+Supatype serves the app, `<script src="/supatype-env.js" vite-ignore></script>` in `index.html` gives the page
+both values at load time (`vite-ignore` stops `vite build` warning that it cannot bundle the script); a Next.js app serves the same script from `app/supatype-env.js/route.ts`
 (`export { GET } from "@supatype/ssr/next"`, see [frontend.md](references/frontend.md#nextjs)). Pass the
 values straight to `createClient` with no guard of your own: creating it never throws, and its first
 request throws a `MissingClientValuesError` naming what is missing. See

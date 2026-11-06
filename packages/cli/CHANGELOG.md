@@ -23,7 +23,7 @@
 ### Features
 
 * **init:** a static app's `index.html` (and the page Vite builds it from) loads
-  `<script src="/supatype-env.js"></script>` in its head, so the built site takes the address and
+  `<script src="/supatype-env.js" vite-ignore></script>` in its head, so the built site takes the address and
   anon key of whichever deployment serves it. Only where the committed config serves the app's
   files; a proxied app's page is left as it was.
 * **init:** in a Next.js App Router app, init writes `app/supatype-env.js/route.ts` (or under
@@ -167,6 +167,14 @@
 * **env files:** no command writes a value with a line break or other control character into `.env`,
   `.env.development.local` or the functions' `.env.local`. It is refused, naming the key and the file
   and never the value, and the file is left as it was.
+* **init:** the runtime env script init puts in `index.html` carries `vite-ignore`, so `vite build`
+  no longer warns, on every build, `<script src="/supatype-env.js"> in "/index.html" can't be
+  bundled without type="module" attribute`. Vite leaves the tag in the built page, without the
+  attribute, and it still runs before the app's own script. A page init wrote before keeps its tag
+  and its warning until `vite-ignore` is added by hand.
+* **build:** a server that answers 404 at `/supatype-env.json` is reported as having
+  `server.public_env` set to false or running a release too old to serve it, in place of "or is
+  older than the address".
 * **dev, push, self-host:** a project that does not pin its own versions now runs schema-engine
   v0.9.0 and server v2.3.0. The 0.9.0 CLI shipped still pinned to engine v0.8.0 and server v2.2.2,
   so it missed four fixes those releases carry. An access rule built on
