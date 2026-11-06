@@ -39,6 +39,8 @@ export interface ComposeService {
   ports: string
   /** How long it has been up, as Docker reports it. */
   status: string
+  /** The container's last exit code, when Docker reports one. */
+  exitCode?: number
 }
 
 /**
@@ -116,6 +118,7 @@ export function parseComposePs(stdout: string): ComposeService[] {
       state: typeof record["State"] === "string" ? record["State"] : "unknown",
       ports: typeof record["Publishers"] === "string" ? record["Publishers"] : formatPorts(record["Publishers"]),
       status: typeof record["Status"] === "string" ? record["Status"] : "",
+      ...(typeof record["ExitCode"] === "number" && { exitCode: record["ExitCode"] }),
     })
   }
   services.sort((a, b) => a.service.localeCompare(b.service))

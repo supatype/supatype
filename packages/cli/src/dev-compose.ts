@@ -150,6 +150,7 @@ import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type Compo
 import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 import { mailerProviderEnv } from "./mailer-env.js"
 import { fetchWithin } from "./fetch-within.js"
+import { composeStackWatch, exitedServiceFailure, type StackWatch, type WatchedStack } from "./stack-exit-watch.js"
 import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
 
 /**
@@ -600,37 +601,53 @@ async function reportUnhealthyStack(composePath: string, cwd: string, project: s
   console.error("")
 }
 
-async function waitKongReady(
+/** One look at the gateway's two health routes: whether both answer OK, and what each said. */
+async function gatewayHealth(base: string): Promise<{ ready: boolean; auth: string; realtime: string }> {
+  try {
+    const [auth, realtime] = await Promise.all([
+      fetchWithin(`${base}/auth/v1/health`, 2000),
+      fetchWithin(`${base}/realtime/v1/health`, 2000),
+    ])
+    return { ready: auth.ok && realtime.ok, auth: `HTTP ${auth.status}`, realtime: `HTTP ${realtime.status}` }
+  } catch (err) {
+    return { ready: false, auth: errorMessage(err), realtime: errorMessage(err) }
+  }
+}
+
+/**
+ * Wait for the gateway at `kongPort`, watching `stack`'s essential services as it goes: one that
+ * has exited will not come back, so the wait stops there and prints its exit code and last log
+ * lines before the caller's cleanup removes them (issue 38). Either failure ends dev's dashboard
+ * first, so what it prints reaches the terminal rather than a screen that is about to close.
+ */
+export async function waitKongReady(
   kongPort: number,
   maxSec: number,
-  stack?: { composePath: string; cwd: string; project: string },
+  stack?: WatchedStack & { watch?: StackWatch },
 ): Promise<void> {
   const base = loopbackBase(kongPort)
+  const watched = stack === undefined ? undefined : { watch: stack.watch ?? composeStackWatch(stack), cwd: stack.cwd }
   // Remembered so the failure can name the unhealthy upstream. Blaming "the
   // Kong gateway" sent more than one investigation after Kong when Kong was
   // fine and a service behind it was not.
-  let lastAuth = "no response"
-  let lastRealtime = "no response"
+  let last = { auth: "no response", realtime: "no response" }
   for (let i = 0; i < maxSec; i++) {
-    try {
-      const [auth, realtime] = await Promise.all([
-        fetchWithin(`${base}/auth/v1/health`, 2000),
-        fetchWithin(`${base}/realtime/v1/health`, 2000),
-      ])
-      lastAuth = `HTTP ${auth.status}`
-      lastRealtime = `HTTP ${realtime.status}`
-      if (auth.ok && realtime.ok) return
-    } catch (err) {
-      lastAuth = lastRealtime = errorMessage(err)
+    const [health, exited] = await Promise.all([gatewayHealth(base), watched?.watch.exited().catch(() => undefined)])
+    if (health.ready) return
+    last = health
+    if (exited !== undefined && watched !== undefined) {
+      endDevSession()
+      throw await exitedServiceFailure(exited, watched)
     }
     await sleep(1000)
   }
   if (stack !== undefined) {
+    endDevSession()
     await reportUnhealthyStack(stack.composePath, stack.cwd, stack.project)
   }
   throw new Error(
     `Gateway at ${base} did not become ready within ${maxSec}s ` +
-      `(auth/v1/health: ${lastAuth}, realtime/v1/health: ${lastRealtime})`,
+      `(auth/v1/health: ${last.auth}, realtime/v1/health: ${last.realtime})`,
   )
 }
 

@@ -151,6 +151,14 @@
   the console over once the dashboard was drawn, and the pane's filter dropped the access lines
   besides.
 
+* **dev, push:** a stack service that exits while the CLI waits for the API gateway stops the wait.
+  With the server container exited on a fatal config error, `supatype dev` sat at `Waiting for API
+  gateway...` for 120 s, failed naming the gateway's health, and then removed the containers, so
+  the server's log was gone. The wait now watches `db`, `kong`, `server`, `realtime` and `storage`:
+  once one has exited it says which, with its exit code, and prints its last 30 log lines with the
+  project's secrets from `.env` and any connection string's password replaced by `***`, before the
+  stack is taken down. Either failure now ends dev's dashboard before printing, so what it prints
+  reaches the terminal.
 * **dev, push, self-host:** a project that does not pin its own versions now runs schema-engine
   v0.9.0 and server v2.3.0. The 0.9.0 CLI shipped still pinned to engine v0.8.0 and server v2.2.2,
   so it missed four fixes those releases carry. An access rule built on
