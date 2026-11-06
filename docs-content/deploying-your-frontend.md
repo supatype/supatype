@@ -68,11 +68,14 @@ $ curl https://example.com/supatype-env.js
 window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."};
 ```
 
-`supatype init` puts the tag in a static app's `index.html`, in the head, so it runs before the app's own script. For an app made another way, add it yourself:
+`supatype init` puts the tag in a static app's `index.html`, in the head, so it runs before the app's own script. For an app made another way, add it yourself, before the app's own script:
 
 ```html title="index.html"
 <script src="/supatype-env.js" vite-ignore></script>
+<script type="module" src="/src/main.ts"></script>
 ```
+
+Load it as a plain script, without `async` or `defer`, before the app's own script. A plain script in the head has always run before any module script, wherever the app puts its own; with `async` it can run after it. When it has not run by the client's first request, that request throws, saying the page loads the script but it set no `window.__SUPATYPE_ENV__` in time.
 
 `vite-ignore` tells Vite to leave the tag as it is. The project has no such file, since the server answers it, so without the attribute every `vite build` warns `<script src="/supatype-env.js"> in "/index.html" can't be bundled without type="module" attribute`. Vite drops the attribute from the page it builds, and a browser ignores it, so the same tag does for a page with no build step. Do not make it `type="module"`: Vite then tries to bundle it, and the build fails with `Failed to resolve /supatype-env.js`.
 

@@ -50,6 +50,7 @@ The server checks every Studio request against this table.
 | Use the realtime inspector | Yes | Yes | No | No |
 | Manage API keys, CORS and domains | Yes | Yes | No | No |
 | Manage the app's users | Yes | Yes | No | No |
+| Change [SSO providers](/docs/sso.html#studio) and verify their domains | Yes | No | No | No |
 | Create, change and delete buckets | Yes | Yes | No | No |
 | Give and remove Studio roles | Yes | No | No | No |
 

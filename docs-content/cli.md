@@ -129,6 +129,21 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 
 On an unlinked project with a self-hosted Compose stack, `functions deploy` uploads nothing: the worker serves `functions/` from disk, so it lists the functions and prints the command that restarts the worker. Otherwise it deploys to the linked project, or to Supatype Cloud. On a self-hosted stack, read function logs in Studio. See [Functions](/docs/functions.html).
 
+<h2 id="sso">Single sign-on</h2>
+
+| Command | Description | Useful flags |
+| --- | --- | --- |
+| `sso add <name>` | Register a SAML identity provider. &lt;name&gt; is how every other sso command refers to it | `--metadata-url <url>` or `--metadata-file <path>` (one is required), `--domains <list>`, `--attribute-mapping-file <path>`, `--name-id-format <format>` |
+| `sso list` | List the SAML identity providers |  |
+| `sso show <name>` | Show one SAML identity provider |  |
+| `sso update <name>` | Change a SAML identity provider in place. Only the flags given change; --domains replaces the list. New metadata must keep the provider's entity ID | The flags of `add`, all optional |
+| `sso remove <name>` | Remove a SAML identity provider. Users who signed in through it can no longer sign in that way | `-y, --yes` |
+| `sso info` | Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata |  |
+| `sso verify-domain <name> <domain>` | Prove this project owns &lt;domain&gt;, one of provider &lt;name&gt;'s domains, with a DNS TXT record: prints the record to add and checks it. Exits 1 while the domain is not verified |  |
+| `sso rotate-key` | Rotate the SAML signing key: create SUPATYPE_SAML_NEXT_PRIVATE_KEY in .env, published beside the current key while identity providers take the new certificate; then --promote makes it the current key | `--promote`, `-y, --yes` |
+
+Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `sso` commands reach the linked self-hosted deployment, or else the local stack, which must be running; they do not work against Supatype Cloud yet. The server, not the CLI, fetches `--metadata-url`. See [Single sign-on](/docs/sso.html).
+
 <h2 id="self-host">Self-host and deploy</h2>
 
 | Command | Description | Useful flags |

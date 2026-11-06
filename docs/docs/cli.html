@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -220,6 +221,22 @@
     </table></div>
     <p>On an unlinked project with a self-hosted Compose stack, <code>functions deploy</code> uploads nothing: the worker serves <code>functions/</code> from disk, so it lists the functions and prints the command that restarts the worker. Otherwise it deploys to the linked project, or to Supatype Cloud. On a self-hosted stack, read function logs in Studio. See <a href="/docs/functions.html">Functions</a>.</p>
 
+    <h2 id="sso">Single sign-on</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
+      <tbody>
+        <tr><td><code>sso add &lt;name&gt;</code></td><td>Register a SAML identity provider. &lt;name&gt; is how every other sso command refers to it</td><td><code>--metadata-url &lt;url&gt;</code> or <code>--metadata-file &lt;path&gt;</code> (one is required), <code>--domains &lt;list&gt;</code>, <code>--attribute-mapping-file &lt;path&gt;</code>, <code>--name-id-format &lt;format&gt;</code></td></tr>
+        <tr><td><code>sso list</code></td><td>List the SAML identity providers</td><td></td></tr>
+        <tr><td><code>sso show &lt;name&gt;</code></td><td>Show one SAML identity provider</td><td></td></tr>
+        <tr><td><code>sso update &lt;name&gt;</code></td><td>Change a SAML identity provider in place. Only the flags given change; --domains replaces the list. New metadata must keep the provider's entity ID</td><td>The flags of <code>add</code>, all optional</td></tr>
+        <tr><td><code>sso remove &lt;name&gt;</code></td><td>Remove a SAML identity provider. Users who signed in through it can no longer sign in that way</td><td><code>-y, --yes</code></td></tr>
+        <tr><td><code>sso info</code></td><td>Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata</td><td></td></tr>
+        <tr><td><code>sso verify-domain &lt;name&gt; &lt;domain&gt;</code></td><td>Prove this project owns &lt;domain&gt;, one of provider &lt;name&gt;'s domains, with a DNS TXT record: prints the record to add and checks it. Exits 1 while the domain is not verified</td><td></td></tr>
+        <tr><td><code>sso rotate-key</code></td><td>Rotate the SAML signing key: create SUPATYPE_SAML_NEXT_PRIVATE_KEY in .env, published beside the current key while identity providers take the new certificate; then --promote makes it the current key</td><td><code>--promote</code>, <code>-y, --yes</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>Turn SAML on with <code>auth.sso.saml.enabled</code> in <code>supatype.config.ts</code> first. The <code>sso</code> commands reach the linked self-hosted deployment, or else the local stack, which must be running; they do not work against Supatype Cloud yet. The server, not the CLI, fetches <code>--metadata-url</code>. See <a href="/docs/sso.html">Single sign-on</a>.</p>
+
     <h2 id="self-host">Self-host and deploy</h2>
     <div class="tbl"><table>
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
@@ -295,6 +312,7 @@
     <a href="#schema">Schema and database</a>
     <a href="#data">Data and seeds</a>
     <a href="#functions">Functions and hooks</a>
+    <a href="#sso">Single sign-on</a>
     <a href="#self-host">Self-host and deploy</a>
     <a href="#cloud">Supatype Cloud</a>
     <a href="#misc">Binaries and updates</a>

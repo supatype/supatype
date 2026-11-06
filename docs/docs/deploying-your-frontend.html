@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -163,9 +164,11 @@
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> curl https://example.com/supatype-env.js
 window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."};</pre></div>
-    <p><code>supatype init</code> puts the tag in a static app's <code>index.html</code>, in the head, so it runs before the app's own script. For an app made another way, add it yourself:</p>
+    <p><code>supatype init</code> puts the tag in a static app's <code>index.html</code>, in the head, so it runs before the app's own script. For an app made another way, add it yourself, before the app's own script:</p>
     <div class="cb"><div class="cb-bar"><span>index.html</span><button type="button" class="cb-copy">Copy</button></div>
-<pre>&lt;script src="/supatype-env.js" vite-ignore&gt;&lt;/script&gt;</pre></div>
+<pre>&lt;script src="/supatype-env.js" vite-ignore&gt;&lt;/script&gt;
+&lt;script type="module" src="/src/main.ts"&gt;&lt;/script&gt;</pre></div>
+    <p>Load it as a plain script, without <code>async</code> or <code>defer</code>, before the app's own script. A plain script in the head has always run before any module script, wherever the app puts its own; with <code>async</code> it can run after it. When it has not run by the client's first request, that request throws, saying the page loads the script but it set no <code>window.__SUPATYPE_ENV__</code> in time.</p>
     <p><code>vite-ignore</code> tells Vite to leave the tag as it is. The project has no such file, since the server answers it, so without the attribute every <code>vite build</code> warns <code>&lt;script src="/supatype-env.js"&gt; in "/index.html" can't be bundled without type="module" attribute</code>. Vite drops the attribute from the page it builds, and a browser ignores it, so the same tag does for a page with no build step. Do not make it <code>type="module"</code>: Vite then tries to bundle it, and the build fails with <code>Failed to resolve /supatype-env.js</code>.</p>
     <p>The client reads <code>window.__SUPATYPE_ENV__</code> for any value the build did not carry, at its first request. It never guesses the address from the page. A value the build did carry always wins. So a build made with neither value, by a plain <code>npm run build</code>, runs on every deployment that serves it. Served from the API's own origin, it needs no <a href="#cors">allowed origin</a> either. To build on the server instead:</p>
     <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>

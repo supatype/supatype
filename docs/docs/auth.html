@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html" aria-current="page">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -137,6 +138,7 @@
         <tr><td>OAuth</td><td><code>signInWithOAuth({ provider })</code></td><td>Off until a provider is configured</td></tr>
         <tr><td>Provider ID token (native Apple or Google sign-in)</td><td><code>signInWithIdToken</code></td><td>Off until the provider is configured</td></tr>
         <tr><td>Anonymous</td><td><code>signInAnonymously</code></td><td>Off</td></tr>
+        <tr><td>SAML single sign-on, by email domain</td><td><code>signInWithSSO({ domain })</code> or <code>signInWithSSO({ providerId })</code></td><td>Off until <code>auth.sso.saml.enabled</code>. See <a href="/docs/sso.html">Single sign-on</a></td></tr>
       </tbody>
     </table></div>
     <p>Password reset is <code>resetPasswordForEmail</code>, and <code>updateUser</code> changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise <code>SUPATYPE_PASSWORD_MIN_LENGTH</code>.</p>
@@ -265,7 +267,7 @@ window.location.assign(data.url)
     <div class="tbl"><table>
       <thead><tr><th scope="col">Package</th><th scope="col">Components</th></tr></thead>
       <tbody>
-        <tr><td><code>@supatype/react-auth</code></td><td><code>LoginForm</code>, <code>SignUpForm</code>, <code>OAuthButton</code></td></tr>
+        <tr><td><code>@supatype/react-auth</code></td><td><code>LoginForm</code>, <code>SignUpForm</code>, <code>ForgotPasswordForm</code>, <code>UpdatePasswordForm</code>, <code>MagicLinkForm</code>, <code>OAuthButton</code>, <code>SSOForm</code> (see <a href="/docs/sso.html#sign-in">Single sign-on</a>)</td></tr>
         <tr><td><code>@supatype/react-native-auth</code></td><td><code>LoginForm</code>, <code>SignUpForm</code>, <code>MagicLinkForm</code>, <code>OAuthButton</code>, <code>ResetPassword</code>, <code>AuthGate</code>, <code>AuthThemeProvider</code></td></tr>
       </tbody>
     </table></div>
@@ -344,7 +346,7 @@ window.location.assign(data.url)
 
     <nav class="pn" aria-label="More pages">
       <a href="/docs/frameworks.html"><small>PREVIOUS</small><span>Frameworks</span></a>
-      <a href="/docs/storage.html" class="next"><small>NEXT</small><span>Storage</span></a>
+      <a href="/docs/sso.html" class="next"><small>NEXT</small><span>Single sign-on</span></a>
     </nav>
   </main>
 

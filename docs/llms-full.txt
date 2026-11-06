@@ -967,7 +967,7 @@ Once signed in, every request carries the user's token, so access rules see them
 
 When the project asks new users to confirm their email, `signUp` returns `session: null` and does not sign the user in. They sign in once they have confirmed.
 
-`getUser()` fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on `supatype.auth` too.
+`getUser()` fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on `supatype.auth` too, and so is SAML single sign-on: `signInWithSSO({ domain })` or `signInWithSSO({ providerId })` sends the browser to the organisation's identity provider, with PKCE by default. See [Single sign-on](https://www.supatype.com/docs/sso.html#sign-in).
 
 ### Storage
 
@@ -1525,6 +1525,7 @@ Each method below is a call on `supatype.auth`. The [client page](https://www.su
 | OAuth | `signInWithOAuth({ provider })` | Off until a provider is configured |
 | Provider ID token (native Apple or Google sign-in) | `signInWithIdToken` | Off until the provider is configured |
 | Anonymous | `signInAnonymously` | Off |
+| SAML single sign-on, by email domain | `signInWithSSO({ domain })` or `signInWithSSO({ providerId })` | Off until `auth.sso.saml.enabled`. See [Single sign-on](https://www.supatype.com/docs/sso.html) |
 
 Password reset is `resetPasswordForEmail`, and `updateUser` changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise `SUPATYPE_PASSWORD_MIN_LENGTH`.
 
@@ -1697,7 +1698,7 @@ Two packages give you ready-made sign-in screens. Both use `useAuth()` from `@su
 
 | Package | Components |
 | --- | --- |
-| `@supatype/react-auth` | `LoginForm`, `SignUpForm`, `OAuthButton` |
+| `@supatype/react-auth` | `LoginForm`, `SignUpForm`, `ForgotPasswordForm`, `UpdatePasswordForm`, `MagicLinkForm`, `OAuthButton`, `SSOForm` (see [Single sign-on](https://www.supatype.com/docs/sso.html#sign-in)) |
 | `@supatype/react-native-auth` | `LoginForm`, `SignUpForm`, `MagicLinkForm`, `OAuthButton`, `ResetPassword`, `AuthGate`, `AuthThemeProvider` |
 
 #### Web
@@ -1793,6 +1794,222 @@ The server reads the project's `.env` when it starts, so `SUPATYPE_*` auth varia
 > **SELF-HOST:** Self-host turns auto-confirm on unless you set `SUPATYPE_MAILER_AUTOCONFIRM=false`. Set it, and configure email delivery, before you open sign-up to the public.
 
 To create users from a seed file, see [Seeding users](https://www.supatype.com/docs/seeding.html#users).
+
+## Single sign-on
+
+Source: https://www.supatype.com/docs/sso.html
+
+SAML 2.0 single sign-on lets people sign in to your app through their organisation's identity provider, such as Okta, Microsoft Entra ID, Google Workspace or Keycloak. The provider is chosen by the domain of the user's email address.
+
+The auth server is the SAML service provider. You turn SAML on once in `supatype.config.ts`. Identity providers are runtime data, usually one per customer, so you register them with `supatype sso`, in Studio, or through the admin API, never in the config. SAML works on `supatype dev` and on self-hosted stacks. It is not on Supatype Cloud yet.
+
+### Turn SAML on
+
+`supatype.config.ts`:
+
+```ts
+auth: {
+  sso: {
+    saml: { enabled: true },
+  },
+},
+```
+
+Restart the stack to apply it: stop and start `supatype dev`, or run `supatype self-host compose up -d` on a server. The section takes these fields:
+
+| Field | What it does |
+| --- | --- |
+| `enabled` | Required. `true` turns SAML on, and the CLI generates the signing key the first time it sees it |
+| `allowEncryptedAssertions` | Accept encrypted assertions, and publish the key for encryption in the service provider metadata |
+| `relayStateValidity` | How long, in seconds, a sign-in your app starts may take at the identity provider. The server's default is 120 |
+| `rateLimitAssertion` | How many assertions the server accepts from one client every 5 minutes. The server's default is 15 |
+| `externalUrl` | The service provider's base URL, under which `/sso/saml/metadata` and `/sso/saml/acs` are served. The default is your API URL plus `/auth/v1` |
+
+A `SUPATYPE_SAML_*` value in `.env` wins over the config's. While SAML is off, the sign-in routes and the metadata answer 404 with `SAML 2.0 is disabled`. The admin routes keep working, so you can register providers before you turn it on.
+
+### The signing key
+
+The service provider signs its requests with an RSA key, and its certificate is made from that key alone. The first `supatype dev` or `supatype self-host compose up` with SAML on writes a new key to the project's `.env` as `SUPATYPE_SAML_PRIVATE_KEY`. On a self-hosted server that is the `.env` in the server's project directory. The CLI never prints the key, and never replaces one that is there.
+
+The key never goes in `supatype.config.ts`, which is committed: a `privateKey` field under `auth.sso.saml` is refused with the variable to use instead. The generated Compose file names the variable and refuses to start without it, but never holds the value.
+
+> **KEEP THE KEY:** Every identity provider you set up trusts the certificate made from this key. Back `.env` up with your other secrets. A lost or changed key breaks every provider until each one is given the new metadata. To change it on purpose, [rotate it](https://www.supatype.com/docs/sso.html#rotate).
+
+### What to give the identity provider
+
+An identity provider asks for the service provider's entity ID and its Assertion Consumer Service (ACS) URL, or for its metadata, which holds both and the certificate:
+
+| Value | Where |
+| --- | --- |
+| Entity ID and metadata URL (the same address) | `<API URL>/auth/v1/sso/saml/metadata` |
+| Metadata as a file | `<API URL>/auth/v1/sso/saml/metadata?download=true` |
+| ACS URL (HTTP-POST binding) | `<API URL>/auth/v1/sso/saml/acs` |
+| NameID format | Persistent is requested; email address is accepted too |
+
+`supatype sso info` prints the entity ID, ACS URL and metadata URL for the local stack, or for the linked deployment. The signing certificate is in the metadata. Have the identity provider send an email attribute (`email` or `mail`), or use the email address as the NameID, and sign the assertion or the whole response. A stable user ID in the `urn:oasis:names:tc:SAML:attribute:subject-id` attribute is used in preference to the NameID when it is sent.
+
+### Register an identity provider
+
+```sh
+$ supatype sso add acme --metadata-url https://idp.acme.com/metadata --domains acme.com
+$ supatype sso list
+$ supatype sso show acme
+```
+
+The name you give `add` is how every other `sso` command refers to the provider. It may use letters, digits, `.`, `_` and `-`, starting with a letter or digit. The commands reach the linked self-hosted deployment when the project is linked, and the local stack otherwise, which must be running. They call the admin API with the service role key from `.env`, or the link's token.
+
+| Flag (`add` and `update`) | What it sets |
+| --- | --- |
+| `--metadata-url <url>` | The identity provider's metadata URL. The server fetches it, and fetches it again when the copy it keeps goes stale |
+| `--metadata-file <path>` | The metadata XML from a file, instead of a URL. Update it by hand when the identity provider changes its certificate |
+| `--domains <list>` | Email domains that sign in through this provider, comma-separated. On `update` it replaces the list. A domain belongs to one provider only |
+| `--attribute-mapping-file <path>` | JSON that maps assertion attributes to user metadata: `{ "keys": { "<field>": { "name": "<attribute>" } } }`, each entry with `name` or `names`, and optional `default` and `array` |
+| `--name-id-format <format>` | The NameID format to request: `persistent`, `emailAddress`, `transient` or `unspecified` |
+
+`add` needs `--metadata-url` or `--metadata-file`, never both. `update <name>` changes only what its flags give, in place, and new metadata must keep the provider's entity ID. `remove <name>` asks first, or takes `-y`.
+
+> **CHANGE, DO NOT RE-ADD:** A user who signed in through a provider is tied to that provider's ID. After `remove`, those users can no longer sign in that way, and adding a provider with the same name later makes a new one that their accounts are not linked to. Use `update` to change a provider.
+
+#### The server fetches the metadata URL
+
+`--metadata-url` is fetched by the Supatype server, not by the CLI. Under Docker the server runs in a container, where `localhost` is the container itself, so the identity provider must be reachable from inside the server's container. When it is not, `add` fails and the server's log names the connection error.
+
+An identity provider such as Keycloak builds its entity ID and sign-in URLs from the host it was reached on. Fetch the metadata through the same name and port the browser uses, or the server keeps endpoints the browser cannot open and an entity ID the provider's responses do not carry. For an identity provider running on your machine, either attach its container to the stack's Docker network under a name the browser also resolves to it (a `*.localhost` name resolves to your machine in browsers), or download the metadata in the browser and register it with `--metadata-file`.
+
+A metadata URL must be HTTPS. Plain `http://` is accepted only on a dev stack (`supatype dev`), for a local identity provider; a self-hosted stack refuses it with `metadata_url is not a HTTPS URL`.
+
+### Verify a domain
+
+A provider with domains may only sign in email addresses on those domains. Any other address is refused with `SAML Assertion email is not on a domain of this identity provider`. A domain routes sign-ins as soon as it is added, but it is not verified until you prove you own it, and only a verified domain links a sign-in to an account that already exists.
+
+```sh
+$ supatype sso verify-domain acme acme.com
+acme.com is not verified yet. Add this DNS record where the domain's DNS is managed:
+
+  _supatype-challenge.acme.com  TXT  supatype-domain-verification=...
+
+No TXT record was found at _supatype-challenge.acme.com.
+DNS changes can take a while to be seen. Check again with: supatype sso verify-domain acme acme.com
+```
+
+The first run issues the domain's token and prints the TXT record to add at `_supatype-challenge.<domain>`. Each run checks DNS, and the command exits 1 until the record holds the token. Once seen, the domain stays verified, and the record may be removed. There is no periodic check after that. `sso list` and `sso show` mark each domain verified or not verified.
+
+On a dev stack, a domain ending in `.supatype.test` counts as verified with no DNS lookup, so you can try linking locally. It still reads as not verified until `verify-domain` has run for it. A self-hosted stack always checks DNS.
+
+#### What verification changes
+
+The first time someone signs in through a provider, the server looks for an existing account with the same email: a password, magic link, phone or OAuth account, not another SSO user.
+
+- No account: a new one is created, verified domain or not.
+- An account, and the email's domain is verified for this provider: the sign-in is linked to that account. It keeps its ID, its email and every way it already signed in, and gains an `sso:<provider ID>` identity.
+- An account, and the domain is not verified: the sign-in is refused with `This email already has an account. Ask your administrator to verify the domain so they can be linked.` No second account is ever made for the same address.
+- Several accounts whose email differs only in letter case: the one whose email is exactly the address the identity provider sent, letter for letter, is the one considered. When none matches exactly, the sign-in is refused with `More than one account has this email. Ask your administrator to merge them before signing in with SSO.`
+
+### Sign users in
+
+A sign-in your app starts asks the server for the identity provider's URL by the user's email domain, or by the provider's ID, and sends the browser there:
+
+`typescript`:
+
+```ts
+const { error } = await supatype.auth.signInWithSSO({
+  domain: "acme.com",
+  options: { redirectTo: window.location.href },
+})
+if (error) console.error(error.message)
+```
+
+Pass `{ domain }` or `{ providerId }`, never both. `providerId` is the provider's UUID, the `ID` line of `sso show`, not its name. A domain with no provider is refused with `No SSO provider assigned for this domain`, and a disabled provider with `SSO Provider is currently disabled`; the page stays where it is. `options` also takes `captchaToken`, `skipBrowserRedirect` to get the URL back without navigating, and `flowType`. `useAuth()` from `@supatype/react` has `signInWithSSO` too.
+
+The sign-in uses PKCE by default, unlike `signInWithOAuth`. The browser comes back to `redirectTo` with `?code=` in the address and no tokens, and the client exchanges the code when it starts, with the verifier it saved in this browser when the sign-in began. So `redirectTo` must be a page of the same app that creates the client, opened in the same browser: usually the page that started the sign-in. It is honoured on `SITE_URL`'s host, a loopback address, or an entry in `SUPATYPE_URI_ALLOW_LIST`; without it, or for any other address, the browser lands on `SITE_URL`. `initialize()` resolves once the exchange is done, as it does for [OAuth](https://www.supatype.com/docs/auth.html#oauth).
+
+#### The pre-built form
+
+`src/SignInWithSSO.tsx`:
+
+```tsx
+import { SupatypeProvider } from "@supatype/react"
+import { SSOForm } from "@supatype/react-auth"
+import { supatype } from "./supatype"
+
+export function SignInWithSSO() {
+  return (
+    <SupatypeProvider client={supatype}>
+      <SSOForm redirectTo={window.location.href} onError={(error) => console.error(error.message)} />
+    </SupatypeProvider>
+  )
+}
+```
+
+`SSOForm` asks for a work email and starts the sign-in for its domain. It takes `redirectTo`, `onSuccess` (called with the identity provider's URL), `onError`, `className`, `classNames` and `labels`, like the other [auth forms](https://www.supatype.com/docs/auth.html#ui). A refusal from the server, on the way out or the way back, shows above the field and goes to `onError`.
+
+#### Sign-ins the identity provider starts
+
+When a user opens your app from the identity provider's dashboard, there is no sign-in in your app to come back to. The server sends the browser to `SITE_URL`, or to a RelayState URL the provider sends when it is allowed, with the tokens in the fragment (`#access_token=...`), since no browser holds a PKCE verifier for it. The client accepts this whatever its `flowType`: it stores the session and clears the fragment. So the page at `SITE_URL` must create the client.
+
+A sign-in the server refuses on the way back, from either side, lands on `SITE_URL` with `error`, `error_code` and `error_description` in the query, and `initialize()` resolves with that error.
+
+### Rotate the signing key
+
+Rotation runs two keys side by side, so identity providers can take the new certificate before the old one stops working.
+
+#### 1. Create the next key
+
+```sh
+$ supatype sso rotate-key
+```
+
+This writes `SUPATYPE_SAML_NEXT_PRIVATE_KEY` to `.env`, or keeps the one already there.
+
+#### 2. Restart the stack
+
+Restart `supatype dev`, or run `supatype self-host compose up -d`, so the server loads the next key. Until then nothing has changed. From the restart, the metadata lists two certificates, the current one and the next. Requests are still signed with the current key, and encrypted assertions are decrypted with either.
+
+#### 3. Give every identity provider the new metadata
+
+Have each provider fetch the metadata again, or upload the new file. Providers that check request signatures must take the new certificate before the next step.
+
+#### 4. Promote the next key
+
+```sh
+$ supatype sso rotate-key --promote
+```
+
+It asks first, or takes `-y`; with no terminal it needs `-y`. The next key replaces `SUPATYPE_SAML_PRIVATE_KEY`, and `SUPATYPE_SAML_NEXT_PRIVATE_KEY` is removed.
+
+#### 5. Restart again
+
+After this restart the server signs with the new key and the metadata lists one certificate. A provider that never took the new certificate now fails its signature check.
+
+On a project linked to a self-hosted deployment, the key is in the server's environment, not your `.env`, so `rotate-key` prints these steps for you to run in the server's project directory instead.
+
+### In Studio
+
+Authentication > SSO lists the providers with their entity IDs, domains and status, and, while SAML is on, the entity ID and ACS URL to give an identity provider. There you can add a provider from a metadata URL or XML, edit it, disable and enable it, remove it, and verify a domain: the Verify dialog shows the TXT record and checks it. The page says when SAML is off.
+
+Only owners and admins can change providers and verify domains; on a self-hosted project that means admins. The server enforces it, not just the page. Developers see the page read-only, with `Only owners and admins can change SSO providers.` Editors and viewers have no Authentication pages. See [Studio roles](https://www.supatype.com/docs/studio-roles.html). The Users list marks each user who signed in through SAML with their `sso:<provider ID>` identity.
+
+### The admin API
+
+An app that lets its own customers set up SSO calls the auth server's admin API from its server, with the service role key. Never call it from the browser: the service role key passes every access rule.
+
+```sh
+$ curl -X POST https://api.example.com/auth/v1/admin/sso/providers \
+    -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"type":"saml","resource_id":"acme","metadata_url":"https://idp.acme.com/metadata","domains":["acme.com"]}'
+```
+
+| Route under `/auth/v1` | What it does |
+| --- | --- |
+| `GET /admin/sso/providers` | Lists providers as `{ "items": [...] }`, without their metadata XML. Filter with `?resource_id=` or `?resource_id_prefix=` |
+| `POST /admin/sso/providers` | Creates one. `type: "saml"`, and `metadata_url` or `metadata_xml`; optional `domains`, `attribute_mapping`, `name_id_format`, `resource_id` and `disabled` |
+| `GET /admin/sso/providers/{id}` | One provider, with its domains and whether each is verified |
+| `PUT /admin/sso/providers/{id}` | Changes the fields given. `domains` replaces the list, new metadata must keep the entity ID, and `disabled: true` turns the provider off |
+| `DELETE /admin/sso/providers/{id}` | Removes the provider |
+| `POST /admin/sso/providers/{id}/domains/{domain}/verify` | Issues the domain's token the first time, checks DNS, and answers `domain`, `verified`, `verified_at`, the `challenge` record (`name` and `value`) and what DNS returned in `found` |
+
+`{id}` is the provider's UUID, or `resource_` followed by its `resource_id`: `resource_acme`. `resource_id` is the name `supatype sso` uses, so give each customer's provider a stable one and change the provider with `PUT` rather than deleting and creating it again. The admin routes work while SAML is off.
 
 ## Storage
 
@@ -2966,7 +3183,7 @@ The same page has an **Invoke** tab to call a function, and **Environment Variab
 | Screen | For |
 | --- | --- |
 | Dashboard | Totals and recent activity for users, records, storage and the database |
-| Authentication | Users (including their Studio access), access policies, providers, configuration and email templates. Configuration is read-only: change those settings in `.env` and restart the stack. A template saved under Email Templates is kept in the database until **Reset to default** removes it. See [Auth](https://www.supatype.com/docs/auth.html) |
+| Authentication | Users (including their Studio access), access policies, providers, SAML single sign-on (see [Single sign-on](https://www.supatype.com/docs/sso.html#studio)), configuration and email templates. Configuration is read-only: change those settings in `.env` and restart the stack. A template saved under Email Templates is kept in the database until **Reset to default** removes it. See [Auth](https://www.supatype.com/docs/auth.html) |
 | Settings | API keys, CORS origins and database settings |
 | Realtime | Channels, clients, a live stream and a broadcast tester, where the deployment's control plane supports the inspector |
 
@@ -3017,6 +3234,7 @@ The server checks every Studio request against this table.
 | Use the realtime inspector | Yes | Yes | No | No |
 | Manage API keys, CORS and domains | Yes | Yes | No | No |
 | Manage the app's users | Yes | Yes | No | No |
+| Change [SSO providers](https://www.supatype.com/docs/sso.html#studio) and verify their domains | Yes | No | No | No |
 | Create, change and delete buckets | Yes | Yes | No | No |
 | Give and remove Studio roles | Yes | No | No | No |
 
@@ -3154,13 +3372,16 @@ $ curl https://example.com/supatype-env.js
 window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."};
 ```
 
-`supatype init` puts the tag in a static app's `index.html`, in the head, so it runs before the app's own script. For an app made another way, add it yourself:
+`supatype init` puts the tag in a static app's `index.html`, in the head, so it runs before the app's own script. For an app made another way, add it yourself, before the app's own script:
 
 `index.html`:
 
 ```html
 <script src="/supatype-env.js" vite-ignore></script>
+<script type="module" src="/src/main.ts"></script>
 ```
+
+Load it as a plain script, without `async` or `defer`, before the app's own script. A plain script in the head has always run before any module script, wherever the app puts its own; with `async` it can run after it. When it has not run by the client's first request, that request throws, saying the page loads the script but it set no `window.__SUPATYPE_ENV__` in time.
 
 `vite-ignore` tells Vite to leave the tag as it is. The project has no such file, since the server answers it, so without the attribute every `vite build` warns `<script src="/supatype-env.js"> in "/index.html" can't be bundled without type="module" attribute`. Vite drops the attribute from the page it builds, and a browser ignores it, so the same tag does for a page with no build step. Do not make it `type="module"`: Vite then tries to bundle it, and the build fails with `Failed to resolve /supatype-env.js`.
 
@@ -4499,6 +4720,21 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `hooks list` | Show the hooks the schema declares and whether each one can run |  |
 
 On an unlinked project with a self-hosted Compose stack, `functions deploy` uploads nothing: the worker serves `functions/` from disk, so it lists the functions and prints the command that restarts the worker. Otherwise it deploys to the linked project, or to Supatype Cloud. On a self-hosted stack, read function logs in Studio. See [Functions](https://www.supatype.com/docs/functions.html).
+
+### Single sign-on
+
+| Command | Description | Useful flags |
+| --- | --- | --- |
+| `sso add <name>` | Register a SAML identity provider. <name> is how every other sso command refers to it | `--metadata-url <url>` or `--metadata-file <path>` (one is required), `--domains <list>`, `--attribute-mapping-file <path>`, `--name-id-format <format>` |
+| `sso list` | List the SAML identity providers |  |
+| `sso show <name>` | Show one SAML identity provider |  |
+| `sso update <name>` | Change a SAML identity provider in place. Only the flags given change; --domains replaces the list. New metadata must keep the provider's entity ID | The flags of `add`, all optional |
+| `sso remove <name>` | Remove a SAML identity provider. Users who signed in through it can no longer sign in that way | `-y, --yes` |
+| `sso info` | Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata |  |
+| `sso verify-domain <name> <domain>` | Prove this project owns <domain>, one of provider <name>'s domains, with a DNS TXT record: prints the record to add and checks it. Exits 1 while the domain is not verified |  |
+| `sso rotate-key` | Rotate the SAML signing key: create SUPATYPE_SAML_NEXT_PRIVATE_KEY in .env, published beside the current key while identity providers take the new certificate; then --promote makes it the current key | `--promote`, `-y, --yes` |
+
+Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `sso` commands reach the linked self-hosted deployment, or else the local stack, which must be running; they do not work against Supatype Cloud yet. The server, not the CLI, fetches `--metadata-url`. See [Single sign-on](https://www.supatype.com/docs/sso.html).
 
 ### Self-host and deploy
 
