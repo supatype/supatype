@@ -2,9 +2,24 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { execFileSync } from "node:child_process"
 import { scaffold, defaultScaffoldOptions } from "../src/commands/init.js"
 
 let tmpRoot: string
+
+/**
+ * Whether git ignores a path under `cwd`. `check-ignore -q` exits 0 for ignored and 1 for not;
+ * anything else (git missing, not a repository) is rethrown so it cannot read as "not ignored".
+ */
+function gitIgnores(cwd: string, relPath: string): boolean {
+  try {
+    execFileSync("git", ["check-ignore", "-q", relPath], { cwd, stdio: "pipe" })
+    return true
+  } catch (err) {
+    if (typeof err === "object" && err !== null && "status" in err && err.status === 1) return false
+    throw err
+  }
+}
 
 beforeEach(() => {
   tmpRoot = join(tmpdir(), `dt-init-test-${Date.now()}`)
@@ -181,6 +196,17 @@ describe("scaffold()", () => {
     expect(content).toContain("node_modules/")
     expect(content).toContain(".supatype/")
     expect(content).toContain("supatype.local.config.ts")
+  })
+
+  // Issue 30: apps write their client to src/lib/supatype.ts, and init's template ignored that
+  // path, so a commit left the client out and a fresh clone did not build. Asked of git itself,
+  // because the question is what git does with the file, not what the template text looks like.
+  it(".gitignore does not ignore the app's own client or type files", () => {
+    scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
+    execFileSync("git", ["init", "-q", "."], { cwd: tmpRoot })
+    for (const rel of ["src/lib/supatype.ts", "src/types/supatype.d.ts"]) {
+      expect(gitIgnores(tmpRoot, rel), `${rel} should be committable`).toBe(false)
+    }
   })
 
   it("seed.ts references the project name", () => {
