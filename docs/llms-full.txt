@@ -2593,7 +2593,7 @@ $ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'
 ```
 
-`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
+`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. It exits 1 when the function answers with a status of 400 or above, so a script can tell a failed call (a 404 for a function that does not exist, say) from one that worked. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
 
 ### Self-host
 
@@ -4716,7 +4716,7 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | --- | --- | --- |
 | `functions new <name>` | Scaffold a new edge function |  |
 | `functions serve` | Start a local Deno server that serves all functions with hot reload | `--port <port>` (default 18472), `--env-file <path>` (default `.env.local`) |
-| `functions invoke <name>` | Invoke a local or deployed function | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
+| `functions invoke <name>` | Invoke a local or deployed function; exits 1 when it answers 400 or above | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
 | `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
 | `functions delete <name>` **Cloud** | Remove a deployed function |  |
@@ -4766,7 +4766,7 @@ Every `self-host compose` command renders `.supatype/self-host/docker-compose.ym
 
 A render keeps the stack in the mode it runs in. While `supatype dev` runs for the project, commands such as `push`, `update` and `self-host compose` render dev mode. Otherwise they use the mode of the running `server` container, so a push to a production stack leaves it standalone.
 
-Commands that reach the local stack's database or API need that stack running: `push`, `diff`, `adopt`, `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull`, `admin`, `db check`, `cache rest`, and `functions invoke` when no `functions serve` answers. With it stopped they start nothing and refuse with `The local stack isn't running. Start it with `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push` again.`, naming the command run. `seed` exits 2, the others 1. A linked project, `--connection`, `connection` in the config and an external database are reached as they are, and so is an API address named by `SUPATYPE_URL` or `SUPATYPE_API_URL` in `.env`.
+Commands that reach the local stack's database or API need that stack running: `push`, `diff`, `adopt`, `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull`, `admin`, `cache rest`, and `functions invoke` when no `functions serve` answers. With it stopped they start nothing and refuse with `The local stack isn't running. Start it with `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push` again.`, naming the command run. `seed` exits 2, the others 1. A linked project, `--connection`, `connection` in the config and an external database are reached as they are, and so is an API address named by `SUPATYPE_URL` or `SUPATYPE_API_URL` in `.env`.
 
 `build` takes each value from the first of: the environment (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` or any framework's name), the `/supatype-env.json` of the server the environment's URL names (for the anon key only, so CI can set just `SUPATYPE_URL`), the linked environment, and a `.env` that records a deployment (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass `--allow-local`, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself `supatype build` is refused rather than run again. `deploy` builds the app the same way. See [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html).
 

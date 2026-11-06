@@ -182,7 +182,7 @@ $ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'
 ```
 
-`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
+`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. It exits 1 when the function answers with a status of 400 or above, so a script can tell a failed call (a 404 for a function that does not exist, say) from one that worked. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
 
 <h2 id="self-host">Self-host</h2>
 
