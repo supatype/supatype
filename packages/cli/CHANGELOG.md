@@ -200,6 +200,11 @@
   network access, and it remembers the answer per program file, so it asked again after every CLI
   upgrade. The check now binds loopback only and connects to the port, which still finds a
   listener on every address, the kind Docker Compose publishes.
+* **npm, install:** the compiled `supatype` program no longer reads `.env`, `.env.local`,
+  `.env.development.local` or `bunfig.toml` from the directory it runs in. It loaded the project's
+  files into its own environment, which the CLI under Node never did, so the project's
+  `SERVICE_ROLE_KEY` sent `diff` and `push` to a local stack's API instead of its database, and a
+  `bunfig.toml` `preload` ran its code inside the CLI. The CLI reads the files it needs itself.
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
   every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.

@@ -90,7 +90,11 @@ for entry in "${TARGETS[@]}"; do
 
   # The executable inside the archive is always called `supatype`, whatever the archive is
   # named, so install.sh and Homebrew need no per-platform knowledge.
-  bun build "$ENTRY" --compile --target="$target" --outfile "$work/stage/$exe" >/dev/null
+  #
+  # A compiled program loads .env files and bunfig.toml from the directory it runs in unless told
+  # not to, and the CLI runs in a project: it read the project's secrets into its own environment
+  # and ran a bunfig.toml preload. The CLI reads the files it needs itself, as it does under Node.
+  bun build "$ENTRY" --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --target="$target" --outfile "$work/stage/$exe" >/dev/null
 
   case "$archive" in
     *.zip) ( cd "$work/stage" && zip -q "$OUT_DIR/$archive" "$exe" ) ;;
