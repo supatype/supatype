@@ -80,6 +80,14 @@
   `200 text/html`. A signup with a password but no email or phone answers `400 validation_failed`,
   not `anonymous_provider_disabled`, and never creates an anonymous user that drops the password.
   The next push on an existing project adds the missing grants and defaults.
+* **dev, init, keys:** the front end's copies of the API address and the anon key
+  (`VITE_SUPATYPE_URL`, `VITE_SUPATYPE_ANON_KEY` and their `PUBLIC_`, `NEXT_PUBLIC_` and
+  `EXPO_PUBLIC_` twins) for a local stack are written to `.env.development.local`, not `.env` or
+  `.env.local`, and removed from those two files. A production build read the local stack's
+  `http://localhost:<port>` address and key from `.env` and shipped them. A production build now
+  reads no anon key unless one is set for it: `supatype keys` writes the copies to `.env` only when
+  `.env` records a non-local `PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `self-host compose
+  up` writes only `ANON_KEY` and `SERVICE_ROLE_KEY`. Shipped in 0.9.0 without an entry here.
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
   every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.
