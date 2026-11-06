@@ -15,7 +15,7 @@ import {
   UpdatePasswordForm,
   type AuthFormClassNames,
 } from "../src/index.js"
-import { classesOf, render, submit, textOf, type } from "./helpers.js"
+import { classesOf, render, stubFetch, submit, textOf, type } from "./helpers.js"
 
 const USER = {
   id: "user-1",
@@ -42,29 +42,6 @@ const CLASS_NAMES: AuthFormClassNames = {
   input: "t-input",
   submit: "t-submit",
   message: "t-message",
-}
-
-interface SentRequest {
-  url: URL
-  method: string
-  body: unknown
-  authorization: string | null
-}
-
-/** Stub `fetch` with one answer and record every request the client sends. */
-function stubFetch(status: number, body: unknown): SentRequest[] {
-  const sent: SentRequest[] = []
-  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
-    const headers = new Headers(init?.headers)
-    sent.push({
-      url: new URL(input),
-      method: init?.method ?? "GET",
-      body: typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null,
-      authorization: headers.get("Authorization"),
-    })
-    return new Response(JSON.stringify(body), { status })
-  }))
-  return sent
 }
 
 afterEach(() => {

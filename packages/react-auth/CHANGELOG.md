@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Features
+
+* **sso:** `SSOForm` signs the user in through their organisation's SAML identity provider. It
+  takes a work email (or a bare domain), calls `signInWithSSO` with its domain and sends the
+  browser to the identity provider. Like the other forms it disables itself while the request
+  runs, shows the server's refusal (no provider for the domain, a disabled one) and calls
+  `onError`. A sign-in the server refused on the way back is shown above the field and passed to
+  `onError` too, through the same hook `OAuthButton` uses for its provider. It takes
+  `redirectTo`, `onSuccess`, `onError`, `className`, `labels` and `classNames`.
+
 ### Bug Fixes
 
 * **forms:** a form over a client with no API address or anon key shows the client's

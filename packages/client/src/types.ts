@@ -65,6 +65,40 @@ export type AuthChangeEvent =
  */
 export type AuthFlowType = "pkce" | "implicit"
 
+// ─── SAML single sign-on ────────────────────────────────────────────────────
+
+/** How `signInWithSSO` starts and ends. */
+export interface SignInWithSSOOptions {
+  /** Where the browser lands once signed in; honoured on the site URL's host or the redirect allow list. */
+  redirectTo?: string | undefined
+  /** The CAPTCHA token, when the project requires one. */
+  captchaToken?: string | undefined
+  /** Return the identity provider's URL and leave the browser where it is. */
+  skipBrowserRedirect?: boolean | undefined
+  /** Default: `implicit`, as `signInWithOAuth`. Pass `pkce` to get a `?code=` back instead of tokens. */
+  flowType?: AuthFlowType | undefined
+}
+
+/** Sign in through the SAML identity provider registered for the user's email domain. */
+export interface SignInWithSSODomain {
+  /** The domain of the user's email address: `acme.com`. */
+  domain: string
+  options?: SignInWithSSOOptions | undefined
+}
+
+/** Sign in through one SAML identity provider, named by its ID. */
+export interface SignInWithSSOProvider {
+  /** The provider's UUID, as the admin API reports it. */
+  providerId: string
+  options?: SignInWithSSOOptions | undefined
+}
+
+/** What `signInWithSSO` answers: the identity provider's URL, or why there is none. */
+export interface SignInWithSSOResult {
+  data: { url: string }
+  error: SupatypeError | null
+}
+
 // ─── MFA types ──────────────────────────────────────────────────────────────
 
 export interface AuthMFAEnrollResponse {
