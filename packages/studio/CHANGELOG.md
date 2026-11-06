@@ -12,6 +12,12 @@
   way. It shows the entity ID and ACS URL to give an identity provider, read from the server's own
   SP metadata, and says when SAML is off, while still letting providers be set up first. Changes are
   offered to roles that administer the project.
+* **auth:** the SSO page shows whether each of a provider's domains is verified, and a Verify action
+  beside an unverified one. Verify asks the auth server to check the domain and shows the DNS TXT
+  record to add (`_supatype-challenge.<domain>` and its value), what DNS holds there now, and Check
+  again. The page explains that until a domain is verified, a SAML login whose email already has an
+  account is refused, and once it is verified such logins link to that account. Its SAML-off notice
+  names `auth.sso.saml.enabled` in supatype.config.ts, then a restart of `supatype dev`.
 
 ### Bug Fixes
 

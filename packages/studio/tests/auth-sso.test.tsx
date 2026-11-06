@@ -53,15 +53,29 @@ const ACME = {
     name_id_format: EMAIL_FORMAT,
     attribute_mapping: { keys: { email: { name: "mail" } } },
   },
-  domains: [{ domain: "acme.test" }, { domain: "acme.example" }],
+  domains: [
+    { domain: "acme.test", verified: true, verified_at: "2026-11-06T12:00:00Z" },
+    { domain: "acme.example", verified: false, verified_at: null },
+  ],
+}
+
+/** ACME once acme.example has been verified. */
+const ACME_VERIFIED = {
+  ...ACME,
+  domains: [
+    { domain: "acme.test", verified: true, verified_at: "2026-11-06T12:00:00Z" },
+    { domain: "acme.example", verified: true, verified_at: "2026-11-06T13:00:00Z" },
+  ],
 }
 
 const LEGACY = {
   id: "0b4a7c1e-0000-4000-8000-000000000002",
   disabled: true,
   saml: { entity_id: "https://legacy.test/saml" },
-  domains: [],
+  domains: [{ domain: "legacy.test", verified: false, verified_at: null }],
 }
+
+const CHALLENGE_VALUE = "st-verify-6c1f0a"
 
 const SP_METADATA = `<?xml version="1.0"?>
 <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="http://localhost:18500/auth/v1/sso/saml/metadata">
@@ -82,6 +96,8 @@ interface World {
   samlEnabled: boolean
   providers: unknown[]
   refuse?: { status: number; body: unknown }
+  /** What DNS holds at a domain's challenge name, as the verify endpoint reports it. */
+  dns?: { verified: boolean; found: string[] | null }
 }
 
 let calls: Call[] = []
@@ -92,6 +108,18 @@ function bodyOf(init: RequestInit | undefined): Record<string, unknown> | null {
   return isJsonObject(parsed) ? parsed : null
 }
 
+/** The verify endpoint's answer for `domain`: the challenge record, and what DNS holds there. */
+function verification(world: World, domain: string): Response {
+  const dns = world.dns ?? { verified: false, found: null }
+  return Response.json({
+    domain,
+    verified: dns.verified,
+    verified_at: dns.verified ? "2026-11-06T13:00:00Z" : null,
+    challenge: { name: `_supatype-challenge.${domain}`, value: CHALLENGE_VALUE },
+    found: dns.found,
+  })
+}
+
 /** The auth server, as the view reaches it through the Studio proxy. */
 function answer(world: World, call: Call): Response {
   if (call.url.endsWith("/auth/v1/settings")) return Response.json({ external: {}, saml_enabled: world.samlEnabled })
@@ -100,6 +128,8 @@ function answer(world: World, call: Call): Response {
   }
   if (call.method !== "GET" && world.refuse) return Response.json(world.refuse.body, { status: world.refuse.status })
   if (call.method === "GET") return Response.json({ items: world.providers })
+  const verify = /\/domains\/([^/]+)\/verify$/.exec(call.url)
+  if (verify) return verification(world, decodeURIComponent(verify[1] ?? ""))
   return Response.json(ACME, { status: call.method === "POST" ? 201 : 200 })
 }
 
@@ -189,6 +219,8 @@ describe("what the identity provider is given", () => {
   it("says SAML is off, and still lets providers be set up first", async () => {
     const container = await render({ samlEnabled: false, providers: [] })
     expect(container.textContent).toContain("SAML is off for this project")
+    expect(container.textContent).toContain("auth.sso.saml.enabled")
+    expect(container.textContent).toContain("supatype.config.ts")
     expect(container.textContent).toContain("SUPATYPE_SAML_ENABLED")
     expect(container.textContent).not.toContain("/auth/v1/sso/saml/acs")
     expect(findButton(container, "Add provider")).toBeDefined()
@@ -298,6 +330,96 @@ describe("changing a provider in place", () => {
     await press("Edit", row(container, "acme"))
     await press("Save changes", dialog())
     expect(writes().map((c) => c.method)).toEqual(["PUT"])
+  })
+})
+
+/** The badge texts in a row, in order. */
+function badges(scope: ParentNode): string[] {
+  return [...scope.querySelectorAll("[data-ui=badge]")].map((b) => b.textContent ?? "")
+}
+
+const VERIFY_URL = `${PROVIDERS_URL}/resource_acme/domains/acme.example/verify`
+
+describe("verifying a provider's domains", () => {
+  it("shows whether each domain is verified", async () => {
+    const container = await render({ samlEnabled: true, providers: [ACME] })
+    expect(badges(row(container, "acme"))).toEqual(["Verified", "Unverified", "Enabled"])
+  })
+
+  it("offers Verify only for a domain that is not verified yet", async () => {
+    const container = await render({ samlEnabled: true, providers: [ACME] })
+    expect(findButton(row(container, "acme"), "Verify acme.example")).toBeDefined()
+    expect(findButton(row(container, "acme"), "Verify acme.test")).toBeUndefined()
+  })
+
+  it("says what verifying changes for a SAML login whose email already has an account", async () => {
+    const container = await render({ samlEnabled: true, providers: [ACME] })
+    expect(container.textContent).toContain("Until a domain is verified, a SAML login whose email already has an account is refused")
+    expect(container.textContent).toContain("Once it is verified, such logins link to the existing account")
+  })
+
+  it("asks the server to check the domain and shows the TXT record to add", async () => {
+    const container = await render({ samlEnabled: true, providers: [ACME] })
+    await press("Verify acme.example", row(container, "acme"))
+    expect(writes()).toEqual([{ method: "POST", url: VERIFY_URL, body: null }])
+    const text = dialog().textContent ?? ""
+    expect(text).toContain("_supatype-challenge.acme.example")
+    expect(text).toContain(CHALLENGE_VALUE)
+    expect(text).toContain("TXT")
+    expect(text).toContain("No TXT record was found")
+  })
+
+  it("shows what DNS holds when it is not the record asked for", async () => {
+    const container = await render({ samlEnabled: true, providers: [ACME], dns: { verified: false, found: ["old-token"] } })
+    await press("Verify acme.example", row(container, "acme"))
+    expect(dialog().textContent).toContain("old-token")
+  })
+
+  it("checks again on request, and once verified says logins now link and shows it in the list", async () => {
+    const world: World = { samlEnabled: true, providers: [ACME] }
+    const container = await render(world)
+    await press("Verify acme.example", row(container, "acme"))
+    world.dns = { verified: true, found: [CHALLENGE_VALUE] }
+    world.providers = [ACME_VERIFIED]
+    await press("Check again", dialog())
+    expect(writes().map((c) => c.url)).toEqual([VERIFY_URL, VERIFY_URL])
+    expect(dialog().textContent).toContain("acme.example is verified")
+    expect(dialog().textContent).toContain("now link")
+    expect(findButton(dialog(), "Check again")).toBeUndefined()
+    await press("Close", dialog())
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(badges(row(container, "acme"))).toEqual(["Verified", "Verified", "Enabled"])
+  })
+
+  it("shows the server's refusal in the dialog", async () => {
+    const refuse = { status: 404, body: { code: 404, error_code: "sso_domain_not_found", msg: 'Domain "acme.example" is not a domain of this SSO provider' } }
+    const container = await render({ samlEnabled: true, providers: [ACME], refuse })
+    await press("Verify acme.example", row(container, "acme"))
+    expect(dialog().textContent).toContain("is not a domain of this SSO provider")
+  })
+
+  it("addresses a provider with no name by its ID", async () => {
+    const container = await render({ samlEnabled: true, providers: [LEGACY] })
+    await press("Verify legacy.test", row(container, LEGACY.id))
+    expect(writes()[0]?.url).toBe(`${PROVIDERS_URL}/${LEGACY.id}/domains/legacy.test/verify`)
+  })
+
+  it("keeps the domain names when a provider is edited", async () => {
+    const container = await render({ samlEnabled: true, providers: [ACME] })
+    await press("Edit", row(container, "acme"))
+    await press("Save changes", dialog())
+    expect(writes()[0]?.body).toMatchObject({ domains: ["acme.test", "acme.example"] })
+  })
+
+  it("shows the state but offers no Verify to a role that does not administer the project", async () => {
+    access.current = { role: "viewer", permissions: { administer: false }, settled: true }
+    try {
+      const container = await render({ samlEnabled: true, providers: [ACME] })
+      expect(badges(row(container, "acme"))).toEqual(["Verified", "Unverified", "Enabled"])
+      expect(findButton(container, "Verify acme.example")).toBeUndefined()
+    } finally {
+      access.current = { role: "admin", permissions: { administer: true }, settled: true }
+    }
   })
 })
 

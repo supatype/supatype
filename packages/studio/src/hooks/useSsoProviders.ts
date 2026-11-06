@@ -5,11 +5,15 @@ import {
   listSsoProviders,
   providerAddress,
   updateBody,
+  verificationOf,
+  verifySsoDomain,
   writeSsoProvider,
+  type DomainTarget,
   type ProviderWrite,
   type ServiceProviderValues,
   type SsoProvider,
   type SsoProviderDraft,
+  type VerifyOutcome,
   type WriteOutcome,
 } from "../lib/sso-providers.js"
 import { useAdminClient } from "./useAdminClient.js"
@@ -25,6 +29,8 @@ export interface SsoProviderActions {
   update: (provider: SsoProvider, draft: SsoProviderDraft) => Promise<WriteOutcome>
   setDisabled: (provider: SsoProvider, disabled: boolean) => Promise<WriteOutcome>
   remove: (provider: SsoProvider) => Promise<WriteOutcome>
+  /** Check one domain's DNS record; the list is read again once it is verified. Stable across renders. */
+  verifyDomain: (target: DomainTarget) => Promise<VerifyOutcome>
 }
 
 /** The project's SAML providers, and the writes that change them; the list is read again after each. */
@@ -45,7 +51,15 @@ export function useSsoProviders(): { state: SsoProvidersState; actions: SsoProvi
     return outcome
   }, [client, reload])
 
+  const verifyDomain = useCallback(async (target: DomainTarget): Promise<VerifyOutcome> => {
+    const checked = await verifySsoDomain(client, target)
+    // Not awaited: the dialog shows the answer now, and the list catches up when it is read.
+    if (verificationOf(checked)?.verified === true) void reload()
+    return checked
+  }, [client, reload])
+
   const actions: SsoProviderActions = {
+    verifyDomain,
     create: (draft) => send({ method: "POST", body: createBody(draft) }),
     update: (provider, draft) => send({ method: "PUT", address: providerAddress(provider), body: updateBody(draft) }),
     setDisabled: (provider, disabled) => send({ method: "PUT", address: providerAddress(provider), body: { disabled } }),

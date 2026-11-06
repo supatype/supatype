@@ -3,11 +3,17 @@ import { Badge, Button, Card, ConfirmButton, LoadingRows, PageHeader, Table, Tab
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useAuthSettings } from "../../hooks/useAuthSettings.js"
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard.js"
-import { useServiceProvider, useSsoProviders, type ServiceProviderState, type SsoProviderActions } from "../../hooks/useSsoProviders.js"
+import {
+  useServiceProvider,
+  useSsoProviders,
+  type ServiceProviderState,
+  type SsoProviderActions,
+} from "../../hooks/useSsoProviders.js"
 import { useStudioCapability } from "../../hooks/useStudioCapability.js"
 import { ssoProviderChangesOffered } from "../../lib/capability-offers.js"
-import { providerName, type SsoProvider, type WriteOutcome } from "../../lib/sso-providers.js"
+import { providerName, type DomainTarget, type SsoProvider, type WriteOutcome } from "../../lib/sso-providers.js"
+import { CopyRow } from "./CopyRow.js"
+import { DomainList, LinkingNote, VerifyDomainDialog } from "./SsoDomains.js"
 import { SsoProviderForm, type ProviderFormTask } from "./SsoProviderForm.js"
 
 /**
@@ -18,26 +24,17 @@ import { SsoProviderForm, type ProviderFormTask } from "./SsoProviderForm.js"
  * provider can be set up before SAML is turned on; the page says when it is off.
  */
 
+function Code({ children }: { children: string }): React.ReactElement {
+  return <code className="font-mono text-xs text-foreground">{children}</code>
+}
+
 function SamlOffNotice(): React.ReactElement {
   return (
     <Card className="p-4 text-sm text-muted-foreground">
       SAML is off for this project, so nobody can sign in through these providers yet. Turn it on with{" "}
-      <code className="font-mono text-xs text-foreground">SUPATYPE_SAML_ENABLED=true</code> in the auth
-      server&apos;s environment and restart the stack. Providers added now are kept and used once it is on.
+      <Code>auth.sso.saml.enabled: true</Code> in supatype.config.ts (or <Code>SUPATYPE_SAML_ENABLED=true</Code> in
+      the project&apos;s .env), then restart <Code>supatype dev</Code>. Providers added now are kept and used once it is on.
     </Card>
-  )
-}
-
-function SpValue({ label, value }: { label: string; value: string }): React.ReactElement {
-  const { copied, copy } = useCopyToClipboard()
-  return (
-    <tr className="border-b border-border last:border-0">
-      <Td className="px-4 py-3 whitespace-nowrap">{label}</Td>
-      <Td className="px-4 py-3"><code className="font-mono text-xs text-foreground break-all">{value}</code></Td>
-      <Td className="px-4 py-3 text-right">
-        <Button size="xs" variant="ghost" aria-label={`Copy ${label}`} onClick={() => { copy(value) }}>{copied ? "Copied" : "Copy"}</Button>
-      </Td>
-    </tr>
   )
 }
 
@@ -53,8 +50,8 @@ function ServiceProviderCard({ sp }: { sp: ServiceProviderState }): React.ReactE
       </p>
       <Table>
         <tbody>
-          <SpValue label="Entity ID and metadata URL" value={sp.values.entityId} />
-          <SpValue label="ACS URL" value={sp.values.acsUrl} />
+          <CopyRow label="Entity ID and metadata URL" value={sp.values.entityId} />
+          <CopyRow label="ACS URL" value={sp.values.acsUrl} />
         </tbody>
       </Table>
     </Card>
@@ -66,6 +63,7 @@ interface RowChanges {
   edit: (provider: SsoProvider) => void
   toggle: (provider: SsoProvider) => void
   remove: (provider: SsoProvider) => void
+  verify: (target: DomainTarget) => void
 }
 
 function removeQuestion(name: string): { title: string; detail: string; answer: string } {
@@ -91,7 +89,7 @@ function ProviderRow({ provider, changes }: { provider: SsoProvider; changes: Ro
     <tr className={tableRowClass(false)}>
       <Td className="px-4 py-3 font-medium">{providerName(provider)}</Td>
       <Td className="px-4 py-3 font-mono text-xs break-all">{provider.entityId}</Td>
-      <Td className="px-4 py-3">{provider.domains.length > 0 ? provider.domains.join(", ") : <span className="text-muted-foreground">None</span>}</Td>
+      <Td className="px-4 py-3"><DomainList provider={provider} verify={changes?.verify ?? null} /></Td>
       <Td className="px-4 py-3"><Badge variant={provider.disabled ? "outline" : "green"}>{provider.disabled ? "Disabled" : "Enabled"}</Badge></Td>
       {changes && <Td className="px-4 py-3"><RowButtons provider={provider} changes={changes} /></Td>}
     </tr>
@@ -111,36 +109,62 @@ function ProvidersTable({ providers, changes }: { providers: SsoProvider[]; chan
       {changes && <Th className="px-4 py-2.5"><span className="sr-only">Actions</span></Th>}
     </>
   )
-  return <TableCard head={head}>{providers.map((p) => <ProviderRow key={p.id} provider={p} changes={changes} />)}</TableCard>
+  return (
+    <>
+      <TableCard head={head}>{providers.map((p) => <ProviderRow key={p.id} provider={p} changes={changes} />)}</TableCard>
+      {providers.some((p) => p.domains.length > 0) && <LinkingNote />}
+    </>
+  )
 }
 
-/** Which form is open: none, adding, or changing one provider. */
-type FormState = { open: false } | { open: true; editing: SsoProvider | null }
+/** What is open over the page: nothing, the add or edit form, or one domain's verification. */
+type Panel = { kind: "none" } | { kind: "form"; editing: SsoProvider | null } | { kind: "verify"; target: DomainTarget }
+
+const CLOSED: Panel = { kind: "none" }
 
 interface Changes {
   changes: RowChanges
   actionError: string | null
+  close: () => void
   formTask: (editing: SsoProvider | null) => ProviderFormTask
 }
 
 /** The row changes and the form task, a refused row change reported where it can be seen. */
-function useChanges(actions: SsoProviderActions, setForm: (f: FormState) => void): Changes {
+function useChanges(actions: SsoProviderActions, open: (panel: Panel) => void): Changes {
   const [actionError, setActionError] = useState<string | null>(null)
   const report = (outcome: Promise<WriteOutcome>): void => {
     setActionError(null)
     outcome.then(setActionError, (err: unknown) => { setActionError(err instanceof Error ? err.message : String(err)) })
   }
+  const close = (): void => { open(CLOSED) }
   const changes: RowChanges = {
-    edit: (provider) => { setForm({ open: true, editing: provider }) },
+    edit: (provider) => { open({ kind: "form", editing: provider }) },
     toggle: (provider) => { report(actions.setDisabled(provider, !provider.disabled)) },
     remove: (provider) => { report(actions.remove(provider)) },
+    verify: (target) => { open({ kind: "verify", target }) },
   }
   const formTask = (editing: SsoProvider | null): ProviderFormTask => ({
     editing,
     save: (draft) => (editing ? actions.update(editing, draft) : actions.create(draft)),
-    close: () => { setForm({ open: false }) },
+    close,
   })
-  return { changes, actionError, formTask }
+  return { changes, actionError, close, formTask }
+}
+
+/** The form or the Verify dialog, whichever is open. */
+function OpenPanel({ panel, changes, actions }: {
+  panel: Panel
+  changes: Changes
+  actions: SsoProviderActions
+}): React.ReactElement | null {
+  switch (panel.kind) {
+    case "form":
+      return <SsoProviderForm task={changes.formTask(panel.editing)} />
+    case "verify":
+      return <VerifyDomainDialog target={panel.target} verify={actions.verifyDomain} onClose={changes.close} />
+    case "none":
+      return null
+  }
 }
 
 export function SsoView(): React.ReactElement {
@@ -149,9 +173,9 @@ export function SsoView(): React.ReactElement {
   const sp = useServiceProvider(samlOn)
   const { state, actions } = useSsoProviders()
   const canChange = ssoProviderChangesOffered(useStudioCapability())
-  const [form, setForm] = useState<FormState>({ open: false })
-  const { changes, actionError, formTask } = useChanges(actions, setForm)
-  const add = canChange ? <Button variant="primary" onClick={() => { setForm({ open: true, editing: null }) }}>Add provider</Button> : undefined
+  const [panel, setPanel] = useState<Panel>(CLOSED)
+  const edits = useChanges(actions, setPanel)
+  const add = canChange ? <Button variant="primary" onClick={() => { setPanel({ kind: "form", editing: null }) }}>Add provider</Button> : undefined
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -161,10 +185,10 @@ export function SsoView(): React.ReactElement {
       <ServiceProviderCard sp={sp} />
       {!canChange && <p className="text-xs text-muted-foreground">Only roles that administer the project can change SSO providers.</p>}
       {state.error !== null && <ErrorBanner message={state.error} />}
-      {actionError !== null && <ErrorBanner message={actionError} />}
+      {edits.actionError !== null && <ErrorBanner message={edits.actionError} />}
       {state.providers === null && state.error === null && <LoadingRows />}
-      {state.providers && <ProvidersTable providers={state.providers} changes={canChange ? changes : null} />}
-      {form.open && <SsoProviderForm task={formTask(form.editing)} />}
+      {state.providers && <ProvidersTable providers={state.providers} changes={canChange ? edits.changes : null} />}
+      <OpenPanel panel={panel} changes={edits} actions={actions} />
     </div>
   )
 }
