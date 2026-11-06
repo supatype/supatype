@@ -45,6 +45,10 @@ export type {
   Session,
   AuthChangeEvent,
   AuthFlowType,
+  SignInWithSSODomain,
+  SignInWithSSOOptions,
+  SignInWithSSOProvider,
+  SignInWithSSOResult,
   SupatypeErrorFields,
   QueryResult,
   MaskedField,
@@ -89,7 +93,7 @@ export type { SelectRow, SelectError, TableRelationship } from "./select-types.j
  */
 export type AnyClient = SupatypeClient<AnyDatabase>
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
-export { AuthClient } from "./auth.js"
+export { AuthClient, SSO_PROVIDER } from "./auth.js"
 export { onIdentityChange, type IdentitySource } from "./identity.js"
 export { QueryBuilder, MutationBuilder, type HeadersProvider, type RequestTransport, type UnauthorizedHandler } from "./query.js"
 export { QueryCache, defaultQueryCache } from "./query-cache.js"

@@ -12,8 +12,9 @@
  * ```
  */
 
-import React, { useEffect, useRef, useState, type ReactNode } from "react"
+import React, { useState, type ReactNode } from "react"
 import { useAuth } from "@supatype/react"
+import { useRedirectError } from "./useRedirectError.js"
 
 export interface OAuthButtonProps {
   /** OAuth provider name (e.g. "github", "google", "apple"). */
@@ -85,20 +86,6 @@ function defaultStyle(busy: boolean): React.CSSProperties {
     transition: "background-color 0.15s, border-color 0.15s",
     lineHeight: 1,
   }
-}
-
-/**
- * Report a refusal the auth server sent back in the URL, when this button's provider started it.
- *
- * Through a ref so an inline `onError` does not report the same refusal on every render.
- */
-function useRedirectError(provider: string, onError: OAuthButtonProps["onError"]): void {
-  const { error } = useAuth()
-  const onErrorRef = useRef(onError)
-  onErrorRef.current = onError
-  useEffect(() => {
-    if (error !== null && error.provider === provider) onErrorRef.current?.(error)
-  }, [error, provider])
 }
 
 /**

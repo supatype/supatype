@@ -3,6 +3,7 @@ import { AuthClient } from "../src/auth.js"
 import { createClient } from "../src/index.js"
 import type { AuthChangeEvent } from "../src/types.js"
 import { fetchCall, fetchReturning, jsonBody } from "./support/fetch-mock.js"
+import { stubBrowser } from "./support/browser.js"
 
 /**
  * The OAuth return: the auth server sends the browser back with the session in the URL, as tokens in
@@ -31,22 +32,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 function accessToken(): string {
   const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")
   return `eyJhbGciOiJub25lIn0.${payload}.sig`
-}
-
-/** A browser at `href`, with a localStorage holding `stored`. */
-function stubBrowser(href: string, stored: Record<string, string> = {}) {
-  const store = new Map(Object.entries(stored))
-  const replaceState = vi.fn<(state: unknown, unused: string, url: string) => void>()
-  vi.stubGlobal("window", {
-    location: { href, protocol: "https:" },
-    history: { state: null, replaceState },
-    localStorage: {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => { store.set(k, v) },
-      removeItem: (k: string) => { store.delete(k) },
-    },
-  })
-  return { replaceState, store }
 }
 
 function recordEvents(client: AuthClient): AuthChangeEvent[] {

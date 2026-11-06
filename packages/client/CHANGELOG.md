@@ -32,6 +32,15 @@
 
 ### Features
 
+* **auth:** `auth.signInWithSSO({ domain })` or `auth.signInWithSSO({ providerId })` signs in
+  through a SAML identity provider registered on the project. It asks `POST /auth/v1/sso` for the
+  identity provider's URL, returns it as `data.url`, and sends the browser there unless
+  `options.skipBrowserRedirect` is set. `options` also takes `redirectTo`, `captchaToken` and
+  `flowType` (`implicit` by default, as `signInWithOAuth`; `pkce` sends the S256 challenge). A
+  refusal (`sso_provider_not_found`, `sso_provider_disabled`) is the returned `SupatypeError`, and
+  the page stays put. Passing both a domain and a provider ID is a type error. A refusal the auth
+  server sends back in the URL after an SSO sign-in is an `AuthRedirectError` whose `provider` is
+  the exported `SSO_PROVIDER` (`"sso"`).
 * **client:** `createClient`'s `url` and `anonKey` are optional. One left out, or empty as a bundler
   leaves an unset name, is read from `window.__SUPATYPE_ENV__` when the first request is made. The
   page sets it with `<script src="/supatype-env.js">`, which a Supatype server answers, and which a

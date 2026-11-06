@@ -8,6 +8,10 @@ import type {
   Factor,
   OtpType,
   Session,
+  SignInWithSSODomain,
+  SignInWithSSOOptions,
+  SignInWithSSOProvider,
+  SignInWithSSOResult,
   User,
   UserIdentity,
 } from "./types.js"
@@ -64,6 +68,11 @@ const DEFAULT_COOKIE_PREFIX = "st"
 /** Storage key suffixes for the state an OAuth redirect has to survive. */
 const VERIFIER_SUFFIX = "-code-verifier"
 const PROVIDER_SUFFIX = "-oauth-provider"
+/**
+ * What a SAML sign-in is remembered as: the `provider` of an `AuthRedirectError` the auth server
+ * sent back in the URL for a sign-in `signInWithSSO` started.
+ */
+export const SSO_PROVIDER = "sso"
 const DEBUG_AUTH = typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1"
 
 /**
@@ -502,11 +511,49 @@ export class AuthClient {
     }
     const flowType = opts.options?.flowType ?? "implicit"
     if (flowType === "pkce") {
-      await this.beginPkce()
-      url.searchParams.set("code_challenge", createCodeChallengeS256(this.codeVerifier!))
-      url.searchParams.set("code_challenge_method", PKCE_METHOD_S256)
+      for (const [key, value] of Object.entries(await this.beginPkce())) url.searchParams.set(key, value)
     }
     return { data: { url: url.toString(), provider: opts.provider }, error: null }
+  }
+
+  /**
+   * Sign in with SAML single sign-on, through the identity provider registered for the user's email
+   * domain, or one named by its ID.
+   *
+   * Asks `POST /sso` for the identity provider's URL and sends the browser there, unless
+   * `skipBrowserRedirect` is set or there is no browser. The identity provider returns the user to
+   * the auth server, which sends them on to `redirectTo`; the client finishes the sign-in on start,
+   * as it does for OAuth. A refusal (no provider for the domain, a disabled one) is returned and the
+   * page stays put.
+   */
+  signInWithSSO(params: SignInWithSSODomain): Promise<SignInWithSSOResult>
+  signInWithSSO(params: SignInWithSSOProvider): Promise<SignInWithSSOResult>
+  async signInWithSSO(params: SignInWithSSODomain | SignInWithSSOProvider): Promise<SignInWithSSOResult> {
+    const res = await this.send(`${this.url}/sso`, {
+      method: "POST",
+      headers: this.baseHeaders,
+      body: JSON.stringify(await this.ssoRequestBody(params)),
+    })
+    if (!res.ok) return { data: { url: "" }, error: await this._parseError(res) }
+    const url = (await readJsonObject(res))["url"]
+    if (typeof url !== "string" || url === "") {
+      const message = "The auth server answered /sso without a sign-in URL"
+      return { data: { url: "" }, error: new SupatypeError({ message, status: res.status }) }
+    }
+    await this.writeFlowItem(PROVIDER_SUFFIX, SSO_PROVIDER)
+    if (params.options?.skipBrowserRedirect !== true && typeof window !== "undefined") window.location.assign(url)
+    return { data: { url }, error: null }
+  }
+
+  /** The `/sso` body: the domain or the provider's ID, the caller's options, and any PKCE challenge. */
+  private async ssoRequestBody(params: SignInWithSSODomain | SignInWithSSOProvider): Promise<Record<string, unknown>> {
+    const opts: SignInWithSSOOptions = params.options ?? {}
+    const body: Record<string, unknown> = "domain" in params ? { domain: params.domain } : { provider_id: params.providerId }
+    // A fetch cannot follow the server's 303 to another origin, so ask for the URL as JSON.
+    body["skip_http_redirect"] = true
+    if (opts.redirectTo !== undefined) body["redirect_to"] = opts.redirectTo
+    if (opts.captchaToken !== undefined) body["supatype_meta_security"] = { captcha_token: opts.captchaToken }
+    return opts.flowType === "pkce" ? { ...body, ...(await this.beginPkce()) } : body
   }
 
   /**
@@ -1251,10 +1298,15 @@ export class AuthClient {
     return value
   }
 
-  private async beginPkce(): Promise<void> {
+  /**
+   * Start a PKCE flow: a fresh verifier, kept for the redirect, and the challenge parameters the
+   * auth server takes with it (as `/authorize` query parameters or `/sso` body fields).
+   */
+  private async beginPkce(): Promise<{ code_challenge: string; code_challenge_method: string }> {
     const verifier = generateCodeVerifier()
     this.codeVerifier = verifier
     await this.writeFlowItem(VERIFIER_SUFFIX, verifier)
+    return { code_challenge: createCodeChallengeS256(verifier), code_challenge_method: PKCE_METHOD_S256 }
   }
 
   private async readCodeVerifier(): Promise<string | null> {
