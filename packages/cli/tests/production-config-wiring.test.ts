@@ -41,6 +41,8 @@ vi.mock("../src/config.js", async (importOriginal) => ({
 vi.mock("../src/compose-render-mode.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-render-mode.js")>()),
   composeRenderMode: () => loads.mode,
+  // The stack runs, in that mode: a push to a stopped stack is refused before it loads more (issue 41).
+  runningStackMode: () => loads.mode,
 }))
 
 const { registerSelfHost } = await import("../src/commands/self-host.js")

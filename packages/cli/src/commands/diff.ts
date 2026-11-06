@@ -1,5 +1,6 @@
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
+import { requireLocalStack } from "../local-stack-guard.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { resolveRuntimeProvider, schemaPathFromProject, type SupatypeProjectConfig } from "../project-config.js"
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
@@ -25,6 +26,7 @@ export function registerDiff(program: Command): void {
     .action(async (opts: DiffOptions) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      requireLocalStack(cwd, config, "diff", opts)
       const ast = await withSpinner("Loading schema", async () =>
         withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
       )

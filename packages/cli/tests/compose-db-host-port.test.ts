@@ -200,7 +200,7 @@ describe("what a docker push prints", () => {
  */
 describe("host-side commands with no stack running", () => {
   const NO_STACK =
-    "No stack is running for acme. Start it with `supatype dev` or `supatype self-host compose up -d`."
+    "The local stack isn't running. Start it with `supatype dev`, or `supatype self-host compose up -d` on a server"
 
   beforeEach(() => {
     docker.running = false

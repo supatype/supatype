@@ -56,12 +56,20 @@ export function hostComposeDbUrl(cwd: string, port: number | string): string {
   return devDatabaseUrl(cwd, `127.0.0.1:${port}`)
 }
 
-/** No stack runs for the project, so there is no stack database to derive. */
+/**
+ * What a command is told when it needs the project's local stack and the stack is not running.
+ * One sentence for every such command (issue 41): none of them starts Postgres or the stack itself
+ * any more, so each names the two ways to start it. `command` names the command run, when known.
+ */
+export function localStackNotRunningMessage(command?: string): string {
+  const again = command === undefined ? "run this again" : `run \`supatype ${command}\` again`
+  return `The local stack isn't running. Start it with \`supatype dev\`, or \`supatype self-host compose up -d\` on a server, then ${again}.`
+}
+
+/** The project's local stack is not running, so there is no stack database or API to reach. */
 export class NoStackRunning extends Error {
-  constructor(readonly projectName: string) {
-    super(
-      `No stack is running for ${projectName}. Start it with \`supatype dev\` or \`supatype self-host compose up -d\`.`,
-    )
+  constructor(readonly command?: string) {
+    super(localStackNotRunningMessage(command))
     this.name = "NoStackRunning"
   }
 }
@@ -73,7 +81,7 @@ export class NoStackRunning extends Error {
  */
 export function requireRunningStack(cwd: string, projectName: string): ComposeRenderMode {
   const mode = runningStackMode(cwd, projectName)
-  if (mode === undefined) throw new NoStackRunning(projectName)
+  if (mode === undefined) throw new NoStackRunning()
   return mode
 }
 

@@ -1,5 +1,6 @@
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
+import { requireLocalStack } from "../local-stack-guard.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
@@ -112,6 +113,7 @@ export function registerPush(program: Command): void {
     }) => {
       const cwd = process.cwd()
       const config = pushConfig(cwd, opts)
+      requireLocalStack(cwd, config, "push", { connection: opts.connection, direct: opts.direct === true || opts.local === true })
       const pgSchema = schemaPgSchema(cwd)
       const ast = pushAst(cwd, config)
       assertModelHooksResolve(cwd, config, ast)

@@ -191,9 +191,10 @@ describe("supatype push against the project's compose stack (SH1)", () => {
     expect(envValue("DATABASE_URL")).toBe("postgresql://supatype_admin:operator-password@localhost:5432/acme")
   })
 
-  it("renders a stack nobody started as standalone", async () => {
-    await expect(pushSchemaDocker(cwd, config)).rejects.toThrow("rendered")
-    expect(rendered.options[0]?.devLocal).toBe(false)
+  // Issue 41: a stack nobody started is refused, not started as standalone, and nothing is rendered.
+  it("refuses a stack nobody started, rendering nothing", async () => {
+    await expect(pushSchemaDocker(cwd, config)).rejects.toThrow("The local stack isn't running")
+    expect(rendered.options).toEqual([])
   })
 
   it("waits on the port a standalone stack with TLS publishes its gateway on, 80", () => {

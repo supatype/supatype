@@ -1,6 +1,8 @@
 import type { Command } from "commander"
 import { writeFileSync } from "node:fs"
+import { loadConfig } from "../config.js"
 import { loadProjectLink } from "../link.js"
+import { requireLocalStack } from "../local-stack-guard.js"
 import { resolveTarget, targetSchemaIntrospect, schemaPgSchema } from "../resolve-target.js"
 import type { DatabaseStateJson } from "../pull-utils.js"
 import { printIntrospectSummary } from "../pull-utils.js"
@@ -23,6 +25,7 @@ export function registerIntrospect(program: Command): void {
       out?: string
     }) => {
       const cwd = process.cwd()
+      requireLocalStack(cwd, loadConfig(cwd), "introspect", opts)
       const pgSchema = schemaPgSchema(cwd)
 
       const linked = loadProjectLink(cwd)
