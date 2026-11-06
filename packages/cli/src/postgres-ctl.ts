@@ -567,13 +567,15 @@ export async function waitReady(opts: PgOptions, timeoutMs = 10_000): Promise<vo
 // ---------------------------------------------------------------------------
 
 /**
- * Can this port be bound, on the addresses that matter?
+ * Can this port be bound on loopback?
  *
- *   - `0.0.0.0` is what Docker publishes on and what compose has to bind.
- *   - `127.0.0.1` catches a listener bound to loopback only, which a wildcard bind can be allowed
- *     to sit alongside on some platforms.
+ * Only loopback, never `0.0.0.0`. Windows asks the user to let a program through its firewall the
+ * first time it listens on any other address, and remembers the answer per program file, so a
+ * wildcard probe asked on every CLI upgrade. A wildcard listener, which is what compose publishes,
+ * already answers the loopback connect in {@link isPortInUse}. A Windows excluded port range
+ * refuses a loopback bind too (EACCES).
  */
-async function bindFails(port: number, host: string): Promise<boolean> {
+async function bindFails(port: number, host: "127.0.0.1"): Promise<boolean> {
   const { createServer } = await import("node:net")
   return new Promise((resolve) => {
     const server = createServer()
@@ -621,7 +623,7 @@ export async function connectSucceeds(port: number, timeoutMs = 400, host = "127
  */
 export async function isPortInUse(port: number): Promise<boolean> {
   if (await connectSucceeds(port)) return true
-  return (await bindFails(port, "0.0.0.0")) || (await bindFails(port, "127.0.0.1"))
+  return bindFails(port, "127.0.0.1")
 }
 
 // ---------------------------------------------------------------------------
