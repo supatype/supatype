@@ -21,7 +21,6 @@ async function lastFrame(columns: number, rows: number): Promise<string> {
   await tick(100)
   instance.unmount()
   const frames = chunks().filter((chunk) => chunk.includes("╭"))
-  // eslint-disable-next-line no-control-regex
   return (frames[frames.length - 1] ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
 }
 

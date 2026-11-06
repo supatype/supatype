@@ -33,3 +33,18 @@ export function verifyJwt(token: string, secret: string): Record<string, unknown
 export function base64url(str: string): string {
   return Buffer.from(str, "utf8").toString("base64url")
 }
+
+/**
+ * The `role` claim of a token, read without checking its signature, or undefined when it is not a
+ * JWT with one. For telling a service role key from an anon key, never for trusting either.
+ */
+export function unverifiedJwtRole(token: string): string | undefined {
+  const body = token.split(".")[1]
+  if (body === undefined) return undefined
+  try {
+    const claims: unknown = JSON.parse(Buffer.from(body, "base64url").toString("utf8"))
+    return isJsonObject(claims) && typeof claims["role"] === "string" ? claims["role"] : undefined
+  } catch {
+    return undefined
+  }
+}

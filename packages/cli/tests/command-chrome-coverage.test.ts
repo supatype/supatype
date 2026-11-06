@@ -24,6 +24,7 @@ import { registerLogin } from "../src/commands/login.js"
 import { registerEngine } from "../src/commands/engine.js"
 import { registerDb } from "../src/commands/db.js"
 import { registerDeploy } from "../src/commands/deploy.js"
+import { registerBuild } from "../src/commands/build.js"
 import { registerStatus } from "../src/commands/status.js"
 import { registerLogs } from "../src/commands/logs.js"
 import { registerAdmin } from "../src/commands/admin.js"
@@ -86,6 +87,7 @@ function buildProgram(): Command {
   registerEngine(program)
   registerDb(program)
   registerDeploy(program)
+  registerBuild(program)
   registerStatus(program)
   registerLogs(program)
   registerAdmin(program)
@@ -130,6 +132,7 @@ describe("CLI command chrome coverage", () => {
       "pg psql",
       "functions serve",
       "self-host compose logs",
+      "build",
     ]) {
       expect(excluded, `${path} should skip chrome`).toContain(path)
     }

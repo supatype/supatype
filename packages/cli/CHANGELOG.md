@@ -66,6 +66,35 @@
   generates a secret when the shell's is unusable, and never exits mid-wizard over the keys.
 * **keys, dev:** `NEXT_PUBLIC_SUPATYPE_ANON_KEY` is written beside the `VITE_`, `PUBLIC_` and
   `EXPO_PUBLIC_` copies, and `NEXT_PUBLIC_SUPATYPE_URL` wherever the other URL copies are.
+* **build:** `supatype build [--env <name>] [--allow-local] [-- <command...>]` runs the app's
+  production build (the package.json `build` script through the project's package manager, or the
+  command after `--`) with the deployment's API URL and anon key under every front-end name
+  (`VITE_`, `PUBLIC_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_`). Each value comes from the first of: the
+  environment (any of those names, or `SUPATYPE_URL` / `SUPATYPE_ANON_KEY`), so a host's own
+  settings win; for the anon key alone, the `/supatype-env.json` of the server the environment's
+  URL names, for CI that sets only the URL; the linked environment (Supatype Cloud's keys route, or
+  a self-hosted server's `/supatype-env.json`); a `.env` recording a deployment
+  (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). A server's address is fetched over
+  HTTPS only, unless it is local. A 404 there is reported as the address switched off
+  (`server.public_env: false`), and a 503 as a server not set up to publish its anon key, quoting
+  its reason on one line with anything shaped like a JWT withheld. An anon key from the link, a server or `.env` goes into the build
+  only when it is for the same deployment as the URL (compared by scheme, host and port, ignoring a
+  trailing slash and `/auth/v1`); otherwise the refusal says whose it is. The build does not start when either is missing, or when the address is local
+  unless `--allow-local` is passed, and the refusal lists every source it tried. Nothing is written
+  to a file, the service role key is never given to the build, and the exit code is the build's
+  own. A bare `supatype build` run from inside one (a package.json `"build": "supatype build"`) is
+  refused rather than running the build script again without end; a command after `--` still runs.
+* **keys:** `supatype keys --print frontend [--env <name>] [--allow-local]` prints those same
+  front-end names and values as `NAME=value` lines, and nothing else on stdout, for a host's
+  settings or `$GITHUB_ENV`. Bare `--print` still prints the key pair. An unknown target is refused,
+  listing the valid ones, and `--env` or `--allow-local` without `--print frontend` is refused.
+  `keys --help` states the `--exp-years` default once.
+* **config:** `server.public_env: false` renders `SUPATYPE_PUBLIC_ENV=false` into the server (self-host
+  and dev compose, and native dev), turning off its `/supatype-env.json` and `/supatype-env.js` for
+  an API-only project. Absent, the server's default (on) applies. A value that is not a boolean is
+  refused.
+* **init:** the "When you're ready to deploy" steps build the app with `supatype build --env
+  production` once the deployment is linked, for Supatype Cloud and self-host.
 
 ### Bug Fixes
 
@@ -133,6 +162,12 @@
   the app's port: on Windows it also killed listeners on longer ports that started with the same
   digits (5285 matched 52851), and on macOS and Linux it killed every process connected to the
   port, a browser on the dev server included.
+* **deploy:** the app's build is given the deployment's anon key, through the resolver `supatype
+  build` uses. It got the URL copies only, and those from the control plane's address rather than
+  the project's, so a deployed app rendered a blank page. A deploy whose build would get no URL or
+  anon key now stops before building, listing what it tried (`--allow-local` takes a local
+  address). The install and build steps run through cmd.exe on Windows, where `npm` and `pnpm` could
+  not be started without it.
 
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and

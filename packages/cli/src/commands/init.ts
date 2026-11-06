@@ -1704,12 +1704,18 @@ export function initSecretLines(): string[] {
   return INIT_SECRETS.map(([name, description]) => `${name.padEnd(width)}${description}`)
 }
 
+/**
+ * The app's production build, given the linked deployment's API URL and anon key. Without it a
+ * production build read neither, and the deployed app rendered a blank page (issue 29).
+ */
+const BUILD_STEP = "supatype build --env production   # your app's production build, with the deployment's URL and anon key"
+
 /** Taking the project to production, for a target that has one. No frontend block: `supatype app add` covers that. */
 function deployBlock(result: InitStepsArgs["result"]): InitStepBlock | undefined {
   if (result.productionTarget === "cloud") {
     return {
       title: "When you're ready to deploy (Supatype Cloud):",
-      steps: ["supatype login", "supatype link --env production --project <ref>", "supatype push --env production"],
+      steps: ["supatype login", "supatype link --env production --project <ref>", "supatype push --env production", BUILD_STEP],
     }
   }
   if (result.productionTarget === "self-host") {
@@ -1729,6 +1735,7 @@ export function selfHostDeploySteps(result: Partial<Pick<WizardResult, "domain" 
     return [
       "supatype self-host compose up -d   # on your server: the Docker stack",
       link,
+      BUILD_STEP,
       "Later, optionally: set server.domain and server.tls.email in supatype.config.ts for automatic HTTPS",
     ]
   }
@@ -1738,6 +1745,7 @@ export function selfHostDeploySteps(result: Partial<Pick<WizardResult, "domain" 
     ...(result.tlsEmail ? [] : ["3. Set server.tls.email in supatype.config.ts (required for HTTPS)"]),
     "supatype self-host compose up -d   # Kong provisions HTTPS automatically",
     link,
+    BUILD_STEP,
     `Your Supatype platform goes live at https://${domain}`,
     "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certificates outlive restarts)",
   ]
