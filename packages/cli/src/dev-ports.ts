@@ -295,10 +295,11 @@ async function firstRunKongPort(cwd: string, prompt: boolean, reserved: Readonly
 }
 
 /**
- * Wizard / init: pick a Kong port without writing `.env` (scaffold writes it). Neither the default
- * offered nor a port typed in may be one another Supatype stack is configured with (M2). A port
- * exported in the shell is taken without asking, as {@link chooseInitKongPort} does: compose binds it
- * whatever is typed here.
+ * Wizard / init: pick a Kong port without writing `.env` (scaffold writes it). The default offered
+ * is never one another Supatype stack is configured with (M2). A port typed in that something is
+ * listening on is asked again; one only a stopped stack is configured with is the person's to
+ * choose, with a warning. A port exported in the shell is taken without asking, as
+ * {@link chooseInitKongPort} does: compose binds it whatever is typed here.
  */
 export async function promptKongPortChoice(
   reader: ComposePortReader = dockerComposePortReader,
@@ -311,9 +312,10 @@ export async function promptKongPortChoice(
   }
   const reserved = await reservedComposePorts(reader)
   const port = await askKongPort(await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved))
-  if (await portTaken(port, reserved)) {
+  if (await isPortInUse(port)) {
     return promptPortConflictWithoutPersist(port, "init", reserved)
   }
+  warnIfReserved(port, reserved)
   return port
 }
 
@@ -337,19 +339,36 @@ async function askKongPort(freeDefault: number): Promise<number> {
   return parseHostPortInput(value)!
 }
 
+/**
+ * A port chosen by hand that only a stopped Supatype stack is configured with. Docker reserves a
+ * port only while a container runs, so it is free now; the clash comes when both stacks run.
+ */
+function warnIfReserved(port: number, reserved: ReadonlySet<number>): void {
+  if (reserved.has(port)) p.log.warn(`${reservedPortClash(port)}: stop one before starting the other, or pick another port.`)
+}
+
+/** What is wrong with a port another Supatype stack is configured with, running or not. */
+function reservedPortClash(port: number): string {
+  return `Port ${port} is configured for another Supatype stack, and the two stacks cannot run at once`
+}
+
+/**
+ * The prompt's headline: what is actually true of `port`. At init it was refused for being in use or
+ * for another stack being configured with it, and `reserved` says which without probing it again.
+ */
+function conflictHeadline(port: number, reason: "in_use" | "init", reserved: ReadonlySet<number>): string {
+  if (reason === "in_use") return `Port ${port} is in use, another Supatype project or service may already be bound to it.`
+  return reserved.has(port) ? `${reservedPortClash(port)}.` : `Port ${port} is in use on this machine.`
+}
+
 async function promptPortConflictWithoutPersist(
   blockedPort: number,
   reason: "in_use" | "init",
   reserved: ReadonlySet<number> = NO_PORTS,
 ): Promise<number> {
   const suggested = await findNextFreePort(blockedPort + 1, reserved)
-  const headline =
-    reason === "init"
-      ? `Port ${blockedPort} is in use on this machine, or another Supatype stack is configured with it.`
-      : `Port ${blockedPort} is in use, another Supatype project or service may already be bound to it.`
-
   const choice = await p.select<"suggested" | "custom" | "cancel">({
-    message: headline,
+    message: conflictHeadline(blockedPort, reason, reserved),
     options: [
       {
         value: "suggested",
@@ -367,36 +386,19 @@ async function promptPortConflictWithoutPersist(
   }
 
   if (choice === "suggested") return suggested
+  return askFreeKongPort(suggested, reserved)
+}
 
-  const custom = await p.text({
-    message: "Local API gateway port (Kong)",
-    defaultValue: String(suggested),
-    validate: (value) => {
-      const port = parseHostPortInput(value ?? "")
-      if (!port) return `Enter a port between ${MIN_PORT} and ${MAX_PORT}.`
-      return undefined
-    },
-  })
-
-  if (isCancel(custom)) {
-    p.cancel("Cancelled.")
-    process.exit(0)
+/** Ask for a port until one typed is not listening; every answer so far is kept meanwhile. */
+async function askFreeKongPort(suggested: number, reserved: ReadonlySet<number>): Promise<number> {
+  for (;;) {
+    const port = await askKongPort(suggested)
+    if (!(await isPortInUse(port))) {
+      warnIfReserved(port, reserved)
+      return port
+    }
+    p.log.warn(`Port ${port} is in use on this machine. Pick another port, or stop the service using it.`)
   }
-
-  const port = parseHostPortInput(custom)
-  if (!port) {
-    p.cancel("Invalid port.")
-    process.exit(1)
-  }
-
-  if (await portTaken(port, reserved)) {
-    fatalError(`Port ${port} is still in use.`, [
-      "Pick another port or stop the service using it.",
-      "Check Docker Desktop for other Supatype stacks.",
-    ])
-  }
-
-  return port
 }
 
 export interface EnsureDevDbPortOptions {
