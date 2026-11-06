@@ -102,7 +102,7 @@ Cloudflare Pages, GitHub Actions) reads none of these files: see
 [Production builds](#production-builds).
 
 Pass both names straight to `createClient`. For a value the build did not carry, the client reads
-the page's `window.__SUPATYPE_ENV__` (set by `<script src="/supatype-env.js">` when Supatype serves
+the page's `window.__SUPATYPE_ENV__` (set by `<script src="/supatype-env.js" vite-ignore>` when Supatype serves
 the app, or by the Next.js route below), at its first request. It never guesses the address from
 the page's origin. `createClient` itself never throws, so `next build` can prerender a page that
 creates one at module scope; the first request made with no address or no anon key throws
@@ -261,9 +261,12 @@ without `--print frontend` is refused.
 When Supatype serves the app, the server answers `GET /supatype-env.js` with
 `window.__SUPATYPE_ENV__ = {"url":...,"anonKey":...};` (and `/supatype-env.json` with the same
 object), `Cache-Control: no-cache`, whatever the app mode. `supatype init` adds
-`<script src="/supatype-env.js"></script>` to a static app's `index.html`; with it, a build made
+`<script src="/supatype-env.js" vite-ignore></script>` to a static app's `index.html`; with it, a build made
 with no values (`npm run build`) runs on every deployment that serves it. Values the build carried
-win over the script. `server.public_env: false` turns both addresses off (404) for an API-only
+win over the script. Keep `vite-ignore`: the project has no such file, so without it every `vite
+build` warns that the script `can't be bundled without type="module" attribute`. Vite drops the
+attribute from the built page. Never add `type="module"` to it: Vite then tries to bundle it, and
+the build fails with `Failed to resolve /supatype-env.js`. `server.public_env: false` turns both addresses off (404) for an API-only
 project; the anon key is public either way.
 
 ### Next.js

@@ -23,7 +23,7 @@ Pre-1.0: APIs and config may change between releases.
 | --- | --- |
 | `supatype build` | You run the build command, on any host. It gives the build both values under every framework's name, and refuses to start without them. |
 | `supatype keys --print frontend` | You paste the values into a host's settings. It prints each name and value as a `NAME=value` line. |
-| `<script src="/supatype-env.js">` | Supatype serves the app, or it is a Next.js app with the route [below](#nextjs). The page reads both values from the server when it loads, so one build runs on every deployment that serves it. |
+| `<script src="/supatype-env.js" vite-ignore>` | Supatype serves the app, or it is a Next.js app with the route [below](#nextjs). The page reads both values from the server when it loads, so one build runs on every deployment that serves it. |
 
 Each framework reads its own names. `supatype build` and `keys --print frontend` give all of them:
 
@@ -71,8 +71,10 @@ window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."
 `supatype init` puts the tag in a static app's `index.html`, in the head, so it runs before the app's own script. For an app made another way, add it yourself:
 
 ```html title="index.html"
-<script src="/supatype-env.js"></script>
+<script src="/supatype-env.js" vite-ignore></script>
 ```
+
+`vite-ignore` tells Vite to leave the tag as it is. The project has no such file, since the server answers it, so without the attribute every `vite build` warns `<script src="/supatype-env.js"> in "/index.html" can't be bundled without type="module" attribute`. Vite drops the attribute from the page it builds, and a browser ignores it, so the same tag does for a page with no build step. Do not make it `type="module"`: Vite then tries to bundle it, and the build fails with `Failed to resolve /supatype-env.js`.
 
 The client reads `window.__SUPATYPE_ENV__` for any value the build did not carry, at its first request. It never guesses the address from the page. A value the build did carry always wins. So a build made with neither value, by a plain `npm run build`, runs on every deployment that serves it. Served from the API's own origin, it needs no [allowed origin](#cors) either. To build on the server instead:
 
@@ -261,19 +263,23 @@ The restart renders the compose file again and recreates the server with the new
 
 <h2 id="missing">When a value is missing</h2>
 
-At build time, `supatype build` stops before the build starts, exits 1, and lists every source it tried for each value:
+At build time, `supatype build` stops before the build starts, exits 1, and lists every source it tried for each value. With nothing set, in a project that is not linked:
 
 ```sh
 $ supatype build
-[supatype] No anon key for a production build of the front end.
-  found    API URL from the environment: SUPATYPE_URL
+✗ No API URL and no anon key for a production build of the front end.
+  not set  API URL from the environment: none of SUPATYPE_URL, VITE_SUPATYPE_URL, PUBLIC_SUPATYPE_URL, NEXT_PUBLIC_SUPATYPE_URL, EXPO_PUBLIC_SUPATYPE_URL is set
   not set  anon key from the environment: none of SUPATYPE_ANON_KEY, VITE_SUPATYPE_ANON_KEY, PUBLIC_SUPATYPE_ANON_KEY, NEXT_PUBLIC_SUPATYPE_ANON_KEY, EXPO_PUBLIC_SUPATYPE_ANON_KEY is set
-  not set  anon key from the server SUPATYPE_URL names: the server at https://api.example.com is not set up to publish its anon key: public env unavailable: SUPATYPE_ANON_KEY is not set on this server
+  not set  anon key from the server SUPATYPE_URL names: no API URL in the environment to ask
+  not set  API URL from the linked environment: no .supatype/link.json (run `supatype link`)
   not set  anon key from the linked environment: no .supatype/link.json (run `supatype link`)
+  not set  API URL from .env: no PUBLIC_SUPATYPE_URL or API_EXTERNAL_URL
   not set  anon key from .env: no ANON_KEY
 
-Run `supatype build --env <name>` for a linked deployment, or set SUPATYPE_ANON_KEY.
+Run `supatype build --env <name>` for a linked deployment, or set SUPATYPE_URL and SUPATYPE_ANON_KEY.
 ```
+
+The first line starts with `✗` in a terminal, and with `[supatype]` in a CI log or anywhere else the output is not a terminal. With `SUPATYPE_URL` set it starts `No anon key for a production build of the front end.`, and the line for the server the URL names says what that server answered.
 
 `supatype keys --print frontend` reads the same sources, refuses the same way, and names itself as the command to run. It takes `--allow-local` too, for printing a local stack's values: `supatype keys --print frontend --allow-local`. At run time, creating the client never throws, so `next build` can prerender a page that creates one at module scope. The first request a client makes without the anon key throws a `MissingClientValuesError` instead, so the browser console says what is wrong rather than the page going blank. The error starts `Supatype client has no anon key. createClient was given none, and the page had set no window.__SUPATYPE_ENV__ by its first request.` and goes on to name the build-time variables, `supatype build`, the script tag, and for Next.js the route and the server's `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`. With no address either, it starts `Supatype client has no API address and anon key.`
 

@@ -122,7 +122,7 @@ export async function publishedAnonKey(apiUrl: string, allowLocal: boolean): Pro
  */
 async function publishedKeyAnswer(res: Response, url: string, apiUrl: string): Promise<FrontendFinding> {
   if (res.status === 404) {
-    return { note: `${url} answered 404: the server has server.public_env set to false, or is older than the address` }
+    return { note: `${url} answered 404: the server has server.public_env set to false, or runs a release too old to serve it` }
   }
   if (res.status === 503) {
     return { note: `the server at ${apiUrl} is not set up to publish its anon key: ${await oneLineReason(res)}` }

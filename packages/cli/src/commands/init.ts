@@ -1116,11 +1116,15 @@ function initSiteUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort" | "app"
  * carried none. A classic script in the head runs before any module script, wherever the app puts
  * its own. Where no Supatype server answers it (Vite's dev server, opened directly, sends its
  * index.html back) the script fails with one console error and the page runs on: only that script
- * is lost, and the dev build has its values from `.env.development.local` anyway.
+ * is lost, and the dev build has its values from `.env.development.local` anyway. `vite-ignore`
+ * tells Vite to leave the tag as it is: without it, every `vite build` warned that it could not
+ * bundle a script the project does not have. Vite drops the attribute from the page it builds, and
+ * a browser ignores it in a page nothing builds.
  */
 const RUNTIME_ENV_SCRIPT = `
-    <!-- The deployment's API address and anon key, from the server that serves this page. -->
-    <script src="/supatype-env.js"></script>`
+    <!-- The deployment's API address and anon key, from the server that serves this page.
+         vite-ignore tells Vite to leave it out of the bundle, so the build does not warn. -->
+    <script src="/supatype-env.js" vite-ignore></script>`
 
 function holdingPageTemplate(projectName: string, apiUrl: string, runtimeEnv: boolean): string {
   const name = escapeHtml(projectName)

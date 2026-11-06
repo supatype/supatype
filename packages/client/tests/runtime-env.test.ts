@@ -90,7 +90,7 @@ describe("createClient without an address or anon key", () => {
       expect(message).toContain(`${prefix}SUPATYPE_ANON_KEY`)
     }
     expect(message).toContain("supatype build")
-    expect(message).toContain('<script src="/supatype-env.js"></script>')
+    expect(message).toContain('<script src="/supatype-env.js" vite-ignore></script>')
     expect(message).toContain("app/supatype-env.js/route.ts")
     expect(message).toContain("@supatype/ssr/next")
     expect(message).toContain('strategy="beforeInteractive"')

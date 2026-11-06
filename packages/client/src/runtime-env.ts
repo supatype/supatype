@@ -101,7 +101,7 @@ function pageMessage(n: MissingNames): string {
   return (
     `Supatype client has no ${n.labels}. createClient was given none, and the page had set no ` +
     `window.__SUPATYPE_ENV__ by its first request.\n` +
-    `When Supatype hosts the app, add <script src="/supatype-env.js"></script> to index.html before ` +
+    `When Supatype hosts the app, add <script src="/supatype-env.js" vite-ignore></script> to index.html before ` +
     `the app's own script, and the server fills them in when the page loads. In a Next.js app, ` +
     `export GET from @supatype/ssr/next in app/supatype-env.js/route.ts, load it in the root layout ` +
     `with <Script src="/supatype-env.js" strategy="beforeInteractive" />, and set ${n.serverNames} ` +

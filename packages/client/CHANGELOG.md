@@ -35,6 +35,9 @@
 
 ### Bug Fixes
 
+* **client:** `MissingClientValuesError` gives the script tag as
+  `<script src="/supatype-env.js" vite-ignore></script>`, the form `vite build` leaves alone. The
+  tag it gave made every `vite build` warn that it could not bundle the script.
 * **client:** the first request a client makes with no address or no anon key throws
   `MissingClientValuesError`, naming what is missing, every frontend name to set (`VITE_`, `PUBLIC_`,
   `NEXT_PUBLIC_`, `EXPO_PUBLIC_`), `supatype build`, the `/supatype-env.js` script tag, and for
