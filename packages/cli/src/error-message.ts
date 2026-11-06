@@ -70,6 +70,36 @@ export function errorCode(err: unknown): string | undefined {
   return typeof err.code === "string" ? err.code : undefined
 }
 
+/**
+ * A connection string with its password removed.
+ *
+ * Every one of these reaches a terminal, and often a CI log. Printing a DSN to explain where
+ * it came from should not be how a password ends up somewhere it is kept.
+ */
+export function redact(dsn: string): string {
+  return dsn.replace(/(:\/\/[^:/@]+:)[^@]*(@)/, "$1***$2")
+}
+
+/** The codes a refused connection carries: Node's errno, and Bun's own name for it. */
+const REFUSED_CODES: ReadonlySet<string> = new Set(["ECONNREFUSED", "ConnectionRefused"])
+
+/** How far down a chain of causes {@link isConnectionRefused} looks. */
+const CAUSE_DEPTH = 4
+
+/**
+ * Whether `err` is a refused connection, as either runtime's fetch reports one. Node rejects with
+ * `TypeError: fetch failed` and puts the errno error, or an AggregateError of one per address, in
+ * its `cause`. Bun, which the compiled CLI runs on, rejects with `code: "ConnectionRefused"` and
+ * "Unable to connect. Is the computer able to access the url?", naming nothing.
+ */
+export function isConnectionRefused(err: unknown, depth = 0): boolean {
+  if (!(err instanceof Error) || depth > CAUSE_DEPTH) return false
+  const code = errorCode(err)
+  if ((code !== undefined && REFUSED_CODES.has(code)) || err.message.startsWith("Unable to connect.")) return true
+  const inner: readonly unknown[] = err instanceof AggregateError ? err.errors : []
+  return [err.cause, ...inner].some((next) => isConnectionRefused(next, depth + 1))
+}
+
 /** What Node's network errors mean, in words, by their code. */
 const NETWORK_FAILURES: Readonly<Record<string, string>> = {
   ECONNREFUSED: "connection refused",

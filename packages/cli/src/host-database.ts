@@ -21,6 +21,7 @@ import { composeDbPublish } from "./db-port.js"
 import { readComposeEnvInt } from "./env-file.js"
 import { devDatabaseUrl, devPostgresPassword } from "./local-secrets.js"
 import { databaseUrlState } from "./database-url-owner.js"
+import { redact } from "./error-message.js"
 import {
   externalDatabaseUrl,
   localDSN,
@@ -30,6 +31,8 @@ import {
 } from "./project-config.js"
 
 export { COMPOSE_DEV_DB_PORT } from "./db-port.js"
+// Kept here for its callers; it lives beside the other failure text so the HTTP client can use it.
+export { redact } from "./error-message.js"
 
 /**
  * The host port a docker project's Postgres is published on in the stack's layout: the variable
@@ -245,16 +248,6 @@ function runningDatabaseUrl(root: string, config: SupatypeProjectConfig): string
   if (resolveRuntimeProvider(config) !== "docker") return derivedDsn(root, config)
   const mode = runningStackMode(root, config.project.name)
   return mode === undefined ? undefined : hostComposeDbUrl(root, composeDbHostPort(root, mode))
-}
-
-/**
- * A connection string with its password removed.
- *
- * Every one of these reaches a terminal, and often a CI log. Printing a DSN to explain where
- * it came from should not be how a password ends up somewhere it is kept.
- */
-export function redact(dsn: string): string {
-  return dsn.replace(/(:\/\/[^:/@]+:)[^@]*(@)/, "$1***$2")
 }
 
 /**

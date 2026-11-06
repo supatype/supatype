@@ -75,4 +75,17 @@ describe("functions invoke", () => {
     await runCommand(registerFunctions, ["functions", "invoke", "hello", "--local", "--port", "19124"], project.dir)
     expect(called).toEqual(["http://localhost:18700/functions/v1/hello"])
   })
+
+  // Issue 31's sibling: the compiled CLI's fetch (Bun) rejects a refused connection with a plain
+  // Error, not Node's TypeError, so "Cannot reach" was never said and Bun's words were printed.
+  it("says which address it could not reach when the compiled CLI's fetch is refused", async () => {
+    writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
+    const bunRefused = Object.assign(new Error("Unable to connect. Is the computer able to access the url?"), {
+      code: "ConnectionRefused",
+    })
+    vi.stubGlobal("fetch", () => Promise.reject(bunRefused))
+    const run = await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
+    expect(run.output).toContain("Cannot reach http://localhost:18700/functions/v1/hello")
+    expect(run.exitCode).toBe(1)
+  })
 })

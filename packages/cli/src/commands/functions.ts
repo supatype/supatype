@@ -1,5 +1,5 @@
 import type { Command } from "commander"
-import { errorMessage } from "../error-message.js"
+import { errorMessage, isConnectionRefused } from "../error-message.js"
 import {
   existsSync,
   mkdirSync,
@@ -774,7 +774,8 @@ function printInvokeAnswer(status: number, duration: number, responseBody: strin
 
 /** Ends the command with why the function could not be called. */
 function reportInvokeFailure(url: string, err: unknown): never {
-  if (err instanceof TypeError && errorMessage(err).includes("fetch")) {
+  // Node's fetch fails with a TypeError; the compiled CLI's (Bun) with a plain Error of its own.
+  if (isConnectionRefused(err) || (err instanceof TypeError && errorMessage(err).includes("fetch"))) {
     error(`Cannot reach ${url}`)
     error("Is the function server running? Start it with: npx supatype functions serve")
   } else {

@@ -279,8 +279,12 @@ export function apiFetchOpts(
     ...(target.orgId !== undefined ? { orgId: target.orgId } : {}),
     ...(target.mode === "cloud" ? { environment: target.environment } : {}),
     ...(authRefresh !== undefined ? { authRefresh } : {}),
+    ...(target.mode === "local" ? { unreachableHint: LOCAL_STACK_DOWN_HINT } : {}),
   }
 }
+
+/** What to do when a local target's gateway refuses the connection: its stack is not running. */
+const LOCAL_STACK_DOWN_HINT = "The local stack is not running: start it with `supatype dev`, then run this again."
 
 function projectPath(target: DeployTarget, subpath: string): string {
   return `/projects/${target.projectRef}${subpath}`
