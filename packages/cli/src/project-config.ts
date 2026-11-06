@@ -106,6 +106,13 @@ export interface SupatypeProjectConfig {
      * or in `.env`, wins over it.
      */
     realtimePort?: number
+    /**
+     * Whether the server publishes the API URL and anon key at `/supatype-env.json` and
+     * `/supatype-env.js`, which `supatype build` and a page's script tag read. Default: true. False
+     * for an API-only project; rendered to the server as `SUPATYPE_PUBLIC_ENV=false`. The anon key
+     * is public either way: every browser that loads the app holds it.
+     */
+    public_env?: boolean
     /** Domain for ACME TLS certificate (mode=standalone). */
     domain?: string
     /**
@@ -628,9 +635,26 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateAuthEmail(cfg, filename)
   validateCorsOrigins(cfg, filename)
   validateStudioAuth(cfg, filename)
+  validatePublicEnv(cfg, filename)
 
   if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)
   return cfg
+}
+
+/**
+ * What the server is told about `server.public_env`: `SUPATYPE_PUBLIC_ENV=false` when it is turned
+ * off, nothing otherwise, so the server's own default (on) applies. Compose and native dev both
+ * render it from here.
+ */
+export function publicEnvServerEnv(cfg: SupatypeProjectConfig): Record<string, string> {
+  return cfg.server.public_env === false ? { SUPATYPE_PUBLIC_ENV: "false" } : {}
+}
+
+/** `server.public_env`, when set, is a boolean: a string "false" would read as on. */
+function validatePublicEnv(cfg: Readonly<Record<string, unknown>>, filename: string): void {
+  const value = objectAt(cfg, "server")?.["public_env"]
+  if (value === undefined || typeof value === "boolean") return
+  throw new Error(`${filename}: server.public_env must be true or false, got ${JSON.stringify(value)}`)
 }
 
 /**

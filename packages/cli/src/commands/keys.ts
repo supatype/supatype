@@ -2,7 +2,7 @@ import type { Command } from "commander"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { readEnvFile, readEnvValue, upsertEnvFile } from "../env-file.js"
-import { frontendEnv, writeFrontendEnv, type FrontendValues } from "../frontend-env.js"
+import { frontendEnv, recordedApiUrl, writeFrontendEnv, type FrontendValues } from "../frontend-env.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import { GIVEN_JWT_SECRET_REMEDY, jwtSecretUnwritable } from "../jwt-secret-rules.js"
@@ -15,13 +15,17 @@ import {
 } from "../local-secrets.js"
 import { fatalError } from "../ui/fatal.js"
 import { error, plain, warn } from "../ui/messages.js"
+import { printTarget } from "./keys-print.js"
 
 interface KeysOptions {
   secret?: string
   expYears: string
-  print?: boolean
+  /** `--print` alone (true), or the thing `--print <target>` names. */
+  print?: boolean | string
   write?: boolean
   force?: boolean
+  env?: string
+  allowLocal?: boolean
 }
 
 export function registerKeys(program: Command): void {
@@ -35,18 +39,28 @@ export function registerKeys(program: Command): void {
       "--secret <secret>",
       "JWT secret (default: .env's JWT_SECRET, else the JWT_SECRET env var). Writing into .env, it must match .env's",
     )
-    .option("--exp-years <years>", "Token expiry in years (default: 10)", "10")
-    .option("--print", "Only print the keys, even when there is a .env to write them to")
+    .option("--exp-years <years>", "Token expiry in years", "10")
+    .option(
+      "--print [target]",
+      "Only print the keys, even when there is a .env to write them to. `--print frontend` prints a " +
+        "deployment's front-end names instead (NAME=value lines: API URL and anon key under every prefix)",
+    )
+    .option("--env <name>", "With --print frontend: the linked environment (default: the link's default)")
+    .option("--allow-local", "With --print frontend: take a local stack's address, which is otherwise refused")
     .option("--write", "Write the keys into .env. The default when there is one; kept for older scripts")
     .option("--force", "Replace every key already in .env rather than filling blanks")
-    .action((opts: KeysOptions) => {
+    .action(async (opts: KeysOptions) => {
+      if (opts.print !== undefined && opts.write === true) {
+        error("--print and --write contradict each other. Pass one.")
+        process.exit(1)
+      }
+      if (typeof opts.print === "string" || opts.env !== undefined || opts.allowLocal === true) {
+        await printTarget(opts.print, { env: opts.env, allowLocal: opts.allowLocal === true })
+        return
+      }
       const expYears = parseInt(opts.expYears, 10)
       if (isNaN(expYears) || expYears < 1) {
         error("--exp-years must be a positive integer")
-        process.exit(1)
-      }
-      if (opts.print === true && opts.write === true) {
-        error("--print and --write contradict each other. Pass one.")
         process.exit(1)
       }
 
@@ -176,11 +190,6 @@ function printedKeysSecret(cwd: string, flag: string | undefined): string | unde
  */
 export function anonKeyEnvUpdates(anonKey: string, serviceKey: string): Record<string, string> {
   return { ANON_KEY: anonKey, SERVICE_ROLE_KEY: serviceKey }
-}
-
-/** The API URL a project's `.env` records, for the front-end URL copies, or undefined. */
-function recordedApiUrl(env: Record<string, string>): string | undefined {
-  return env["PUBLIC_SUPATYPE_URL"] || env["API_EXTERNAL_URL"] || undefined
 }
 
 export interface WriteKeysResult {

@@ -16,6 +16,7 @@ import {
   hooksPathFromProject,
   preferredFunctionsPathFromProject,
   realtimeEnabled,
+  publicEnvServerEnv,
   serviceRoleRoutes,
   selfHostTlsEnabled,
   usesExternalDatabase,
@@ -476,6 +477,16 @@ function corsOriginsEnv(config: SupatypeProjectConfig): string {
   const configured = (config.api?.corsOrigins ?? []).map((o) => o.trim()).filter((o) => o !== "")
   const fromEnv = "${SUPATYPE_CORS_ALLOW_ORIGINS:-}"
   return configured.length > 0 ? `${configured.join(",")},${fromEnv}` : fromEnv
+}
+
+/**
+ * The server's `SUPATYPE_PUBLIC_ENV` line, ending in a newline, for `server.public_env: false`;
+ * empty otherwise, leaving the server's default.
+ */
+function publicEnvForCompose(config: SupatypeProjectConfig): string {
+  const value = publicEnvServerEnv(config)["SUPATYPE_PUBLIC_ENV"]
+  if (value === undefined) return ""
+  return `      # server.public_env: no /supatype-env.json or /supatype-env.js.\n      SUPATYPE_PUBLIC_ENV: "${value}"\n`
 }
 
 function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean): string {
@@ -1087,7 +1098,7 @@ ${mounts.projectState}
       SUPATYPE_STORAGE_URL: http://storage:5000
       SUPATYPE_URL: ${publicApiUrl}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
-      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
+${publicEnvForCompose(config)}      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SQL_DATABASE_URL: "${ownerUrl}"
       # The SQL editor's own login, not a superuser. The owner URL above stays: the server falls
       # back to it and uses it for role membership.

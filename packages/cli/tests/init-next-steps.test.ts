@@ -96,6 +96,24 @@ describe("init's next steps for a self-host project", () => {
     expect(steps).toEqual(["cd acme", "pnpm install", "pnpm dev", "Open http://localhost:18480"])
   })
 
+  /**
+   * Issue 29: a production build read no anon key, so a deployed app rendered a blank page. The
+   * deploy steps build the app with `supatype build` once the deployment is linked, so the build is
+   * given that deployment's address and key.
+   */
+  it.each(["", "api.example.com"])("builds the app with supatype build after linking (domain %o)", (domain) => {
+    const steps = commands(selfHostDeploySteps({ domain }))
+    const link = steps.findIndex((step) => step.startsWith("supatype link"))
+    expect(link).toBeGreaterThanOrEqual(0)
+    expect(steps.indexOf("supatype build --env production")).toBeGreaterThan(link)
+  })
+
+  it("builds the app with supatype build after pushing to Supatype Cloud", () => {
+    const blocks = initStepBlocks(args({ result: { ...args().result, productionTarget: "cloud" } }))
+    const steps = commands(blocks.at(-1)!.steps)
+    expect(steps.indexOf("supatype build --env production")).toBeGreaterThan(steps.indexOf("supatype push --env production"))
+  })
+
   it("prints no deploy block when production is decided later", () => {
     const titles = initStepBlocks(args({ result: { ...args().result, productionTarget: "later" } })).map((b) => b.title)
     expect(titles.some((title) => /deploy/i.test(title))).toBe(false)

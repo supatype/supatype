@@ -24,7 +24,7 @@ const PREFIXES = ["VITE_", "PUBLIC_", "NEXT_PUBLIC_", "EXPO_PUBLIC_"] as const
 export const FRONTEND_URL_KEYS: readonly string[] = PREFIXES.map((prefix) => `${prefix}SUPATYPE_URL`)
 
 /** The front end's names for the anon key. */
-const FRONTEND_ANON_KEYS: readonly string[] = PREFIXES.map((prefix) => `${prefix}SUPATYPE_ANON_KEY`)
+export const FRONTEND_ANON_KEYS: readonly string[] = PREFIXES.map((prefix) => `${prefix}SUPATYPE_ANON_KEY`)
 
 /** The files the CLI used to write a local stack's front-end values to. */
 const FORMER_FILES = [".env", ".env.local"] as const
@@ -36,6 +36,14 @@ export function isLocalUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * The API URL a project's `.env` records for its deployment: `PUBLIC_SUPATYPE_URL`, else
+ * `API_EXTERNAL_URL`, or undefined.
+ */
+export function recordedApiUrl(env: Record<string, string>): string | undefined {
+  return env["PUBLIC_SUPATYPE_URL"] || env["API_EXTERNAL_URL"] || undefined
 }
 
 /** What a front end is told: the API address, the anon key, or both. */
