@@ -205,6 +205,15 @@
   files into its own environment, which the CLI under Node never did, so the project's
   `SERVICE_ROLE_KEY` sent `diff` and `push` to a local stack's API instead of its database, and a
   `bunfig.toml` `preload` ran its code inside the CLI. The CLI reads the files it needs itself.
+* **dev:** saving the schema no longer freezes the dev dashboard while the push runs. The engine's
+  push, its `parse` and `admin` runs, the compose engine run on a docker project, and the two `psql`
+  calls a docker push makes after it (the `auth.users` grant and reading the field-masking tier)
+  were all synchronous, so for as long as a push took no process's output appeared and the
+  dashboard did not redraw. They now run in the background, and so does asking git who is
+  pushing. Native dev also pushes one save at a time, as docker dev already did: a save made during
+  a push is pushed once that push is done. Every command that runs the engine runs it the same
+  way, with the same results and errors.
+
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
   every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.

@@ -18,6 +18,8 @@ import type { DestructiveConsentDeps } from "../destructive-consent.js"
 import { reportDevPushFailure } from "../push-refusal.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
+import { runCaptured } from "../run-captured.js"
+import { serialRuns } from "../serial-runs.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 import { hasEnvValue, readDotEnvFiles } from "../env-file.js"
@@ -742,14 +744,19 @@ export function registerDev(program: Command): void {
           reload: functionsWatch.reload,
         })
         const { watchDevSchema } = await import("../dev-schema-watch.js")
+        // One push at a time: a save during a push is pushed once it is done, as docker dev queues it.
+        // A hook the push declares is served once the worker's routes name it.
+        const pushSaved = serialRuns(
+          () => runSchemaPush(schemaPush).then(() => functionsWatch.refresh()),
+          reportUnlessStopping(reportDevPushFailure),
+        )
         watchDevSchema({
           dir: schemaDir,
           changedSinceLastPush: async () =>
             JSON.stringify((await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast) !== _lastReadAst,
           push: (why) => {
             console.log(`\n[supatype] ${why}, checking schema...`)
-            // A hook the push declares is served once the worker's routes name it.
-            runSchemaPush(schemaPush).then(() => functionsWatch.refresh()).catch(reportUnlessStopping(reportDevPushFailure))
+            void pushSaved()
           },
         })
       }
@@ -995,8 +1002,8 @@ async function writeNativeSchemaArtifacts(
 }
 
 /** The storage buckets the schema declares, as the engine resolves them; none when it cannot say. */
-function declaredBuckets(engineBin: string, cwd: string, astPath: string): ParsedStorageBucket[] {
-  const parseResult = spawnSync(engineBin, ["parse", "-i", astPath], { cwd, stdio: "pipe", encoding: "utf8" })
+async function declaredBuckets(engineBin: string, cwd: string, astPath: string): Promise<ParsedStorageBucket[]> {
+  const parseResult = await runCaptured(engineBin, ["parse", "-i", astPath], { cwd })
   if (parseResult.status !== 0 || !parseResult.stdout) return []
   try {
     const resolvedAst: unknown = JSON.parse(parseResult.stdout)
@@ -1016,7 +1023,7 @@ async function provisionDeclaredBuckets(
   astPath: string,
   paths: { storagePath?: string | undefined; storageApi?: StorageApi | undefined },
 ): Promise<void> {
-  const buckets = declaredBuckets(engineBin, cwd, astPath)
+  const buckets = await declaredBuckets(engineBin, cwd, astPath)
   if (buckets.length === 0 || paths.storagePath === undefined) return
   await provisionNativeBuckets(buckets, { storagePath: paths.storagePath, storageApi: paths.storageApi })
 }
@@ -1044,11 +1051,7 @@ async function writeNativeAdminConfig(
   ast: ExtractedSchemaAstV2,
   config: import("../project-config.js").SupatypeProjectConfig | undefined,
 ): Promise<void> {
-  const adminResult = spawnSync(paths.engineBin, ["admin", "-i", paths.astPath], {
-    cwd: paths.cwd,
-    stdio: "pipe",
-    encoding: "utf8",
-  })
+  const adminResult = await runCaptured(paths.engineBin, ["admin", "-i", paths.astPath], { cwd: paths.cwd })
   if (adminResult.status !== 0 || !adminResult.stdout) return
   const { withAdminRoles } = await import("../studio-admin-roles.js")
   let admin: unknown

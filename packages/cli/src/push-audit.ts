@@ -9,6 +9,7 @@
 import { execFileSync } from "node:child_process"
 import { hostname, userInfo } from "node:os"
 import type { Capabilities } from "./engine-ownership-gate.js"
+import { runCaptured } from "./run-captured.js"
 
 /** Where the author is read from: git's config, and the OS. Injectable for tests. */
 export interface AuthorSources {
@@ -116,7 +117,32 @@ export type PushAuditFields = Record<keyof typeof AUDIT_FLAGS, string>
 
 /** The audit fields of a push from the project at `cwd`. */
 export function pushAuditFields(cwd: string): PushAuditFields {
-  return { pushed_by: projectAuthor(cwd), pushed_via: "cli", pushed_from: resolvePushedFrom() }
+  return auditFieldsBy(projectAuthor(cwd))
+}
+
+function auditFieldsBy(author: string): PushAuditFields {
+  return { pushed_by: author, pushed_via: "cli", pushed_from: resolvePushedFrom() }
+}
+
+/** git's config value for `key` at `cwd`, asked without holding the process while git answers. */
+async function gitConfigAnswer(cwd: string, key: string): Promise<string | undefined> {
+  const run = await runCaptured("git", ["config", "--get", key], { cwd })
+  const value = run.status === 0 ? run.stdout.trim() : ""
+  return value === "" ? undefined : value
+}
+
+/**
+ * {@link projectAuthor} for a push, which runs while the dev dashboard does: git is asked without
+ * blocking, and the answer is kept for every caller after.
+ */
+async function projectAuthorWithoutBlocking(cwd: string): Promise<string> {
+  const known = authors.get(cwd)
+  if (known !== undefined) return known
+  const [name, email] = await Promise.all([gitConfigAnswer(cwd, "user.name"), gitConfigAnswer(cwd, "user.email")])
+  const answers = { "user.name": name, "user.email": email }
+  const author = resolveAuthor({ git: (key) => answers[key], osUser: osUserName })
+  authors.set(cwd, author)
+  return author
 }
 
 /** The audit fields in `body`, as the engine binary's `push` flags. */
@@ -136,5 +162,6 @@ export async function auditWhenSupported(
   capabilities: () => Promise<Capabilities>,
 ): Promise<PushAuditFields | undefined> {
   const caps = await capabilities().catch(() => undefined)
-  return caps?.features.has("push_audit") === true ? pushAuditFields(cwd) : undefined
+  if (caps?.features.has("push_audit") !== true) return undefined
+  return auditFieldsBy(await projectAuthorWithoutBlocking(cwd))
 }
