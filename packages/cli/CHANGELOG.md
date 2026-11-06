@@ -113,6 +113,12 @@
   `overrides.realtime` or `overrides.storage`, now run with the `node` on PATH; with none there,
   dev stops and says Node.js is needed. The dev log names the program it runs, where it used to
   say `node vite.js` whatever ran (#28).
+* **generate:** a `JSON<T>` column is typed as its `T` again in the generated types, augmentation
+  and client, as it was in 0.8.0. Since 0.9.0, npm runs the compiled CLI, which carried none of
+  TypeScript's lib files, so the schema reader knew no `Array` or `Record`: `JSON<string[]>` was
+  written as `{}` and `JSON<Record<string, number>>` as `Json`. The CLI now carries those files
+  (#27).
+
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
   every command failed with `Cannot read properties of undefined (reading 'ReactCurrentOwner')`.
