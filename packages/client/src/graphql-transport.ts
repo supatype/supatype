@@ -5,13 +5,12 @@
  * credential, because pg_graphql shows each role only what it may use. It is cached per role, so a
  * refreshed token for the same role reuses it.
  */
-import { transportFailure } from "./errors.js"
+import { SupatypeError, transportFailure } from "./errors.js"
 import type { RequestTransport } from "./fetch-with-retry.js"
 import { GRAPHQL_SCHEMA_QUERY, GraphqlSchemaCache, decodeGraphqlAnswer, readGraphqlSchema, type GraphqlSchema } from "./graphql-json.js"
 import { isJsonObject, refusalText } from "./json.js"
 import { bearerRole } from "./jwt.js"
 import { fetchWithOptional401Retry, type HeadersProvider, type UnauthorizedHandler } from "./query.js"
-import type { SupatypeError } from "./types.js"
 
 /** Where GraphQL requests go and what they carry. Studio builds one per send-as choice. */
 export type GraphqlTransport = {
@@ -63,7 +62,7 @@ async function post(transport: GraphqlTransport, body: Record<string, unknown>, 
     const json: unknown = await res.json()
     return { json, res }
   } catch {
-    return { failure: { message: `GraphQL endpoint returned a non-JSON response (HTTP ${res.status} ${res.statusText})` } }
+    return { failure: new SupatypeError({ message: `GraphQL endpoint returned a non-JSON response (HTTP ${res.status} ${res.statusText})` }) }
   }
 }
 
@@ -82,16 +81,16 @@ function schemaKey(headers: Record<string, string>): string {
 /** What a GraphQL endpoint's JSON answer means: its data, and the first error it reports. */
 function graphqlResult(json: unknown, res: Response): GraphqlAnswer {
   if (!isJsonObject(json)) {
-    return { data: null, error: { message: `GraphQL endpoint returned JSON that is not an object (HTTP ${res.status})`, status: res.status } }
+    return { data: null, error: new SupatypeError({ message: `GraphQL endpoint returned JSON that is not an object (HTTP ${res.status})`, status: res.status }) }
   }
   const data = json["data"] ?? null
   if (!res.ok) {
     const message = refusalText(json) ?? `GraphQL request failed (HTTP ${res.status})`
-    return { data, error: { message, status: res.status } }
+    return { data, error: new SupatypeError({ message, status: res.status }) }
   }
   const errors = json["errors"]
   if (errors === undefined) return { data, error: null }
   const first = Array.isArray(errors) ? errors[0] : undefined
   const message = isJsonObject(first) && typeof first["message"] === "string" ? first["message"] : "GraphQL error"
-  return { data, error: { message } }
+  return { data, error: new SupatypeError({ message }) }
 }

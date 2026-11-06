@@ -1,5 +1,4 @@
-import type { SupatypeError } from "./types.js"
-import { transportFailure } from "./errors.js"
+import { SupatypeError, transportFailure } from "./errors.js"
 import { plainFetch, type RequestTransport } from "./fetch-with-retry.js"
 import { settle, type Deferred } from "./runtime-env.js"
 import {
@@ -246,7 +245,7 @@ export class StorageClient {
   async listBuckets(): Promise<{ data: StorageBucketMeta[] | null; error: SupatypeError | null }> {
     try {
       const res = await this.send(`${this.url}/bucket`, { headers: await this.headers() })
-      if (!res.ok) return { data: null, error: { message: await storageRefusal(res, "Failed to list buckets") } }
+      if (!res.ok) return { data: null, error: new SupatypeError({ message: await storageRefusal(res, "Failed to list buckets") }) }
       return { data: await readBuckets(res), error: null }
     } catch (e) {
       return { data: null, error: transportFailure(e) }
@@ -270,7 +269,7 @@ export class StorageClient {
         headers: { ...(await this.headers()), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
-      if (!res.ok) return { data: null, error: { message: await storageRefusal(res, "Failed to create bucket") } }
+      if (!res.ok) return { data: null, error: new SupatypeError({ message: await storageRefusal(res, "Failed to create bucket") }) }
       return { data: { name }, error: null }
     } catch (e) {
       return { data: null, error: transportFailure(e) }
@@ -315,7 +314,7 @@ export class BucketClient {
       body: file,
     })
     if (!res.ok) {
-      return { data: null, error: { message: await storageRefusal(res, "Upload failed"), status: res.status } }
+      return { data: null, error: new SupatypeError({ message: await storageRefusal(res, "Upload failed"), status: res.status }) }
     }
     return { data: { path }, error: null }
   }
@@ -327,7 +326,7 @@ export class BucketClient {
     const url = this.buildObjectUrl("authenticated", path, options?.transform)
     const res = await this.send(url, { headers: await this.headers() })
     if (!res.ok) {
-      return { data: null, error: { message: await storageRefusal(res, "Download failed"), status: res.status } }
+      return { data: null, error: new SupatypeError({ message: await storageRefusal(res, "Download failed"), status: res.status }) }
     }
     const blob = await res.blob()
     return { data: blob, error: null }
@@ -369,7 +368,7 @@ export class BucketClient {
       body: JSON.stringify({ expiresIn }),
     })
     if (!res.ok) {
-      return { data: null, error: { message: await storageRefusal(res, "Failed to create signed URL"), status: res.status } }
+      return { data: null, error: new SupatypeError({ message: await storageRefusal(res, "Failed to create signed URL"), status: res.status }) }
     }
     const json = await readJson(res, isShape({ signedURL: isString }))
     return { data: { signedUrl: this.absoluteObjectUrl(json.signedURL) }, error: null }
@@ -398,7 +397,7 @@ export class BucketClient {
       body: JSON.stringify({ prefixes: paths }),
     })
     if (!res.ok) {
-      return { data: null, error: { message: await storageRefusal(res, "Delete failed"), status: res.status } }
+      return { data: null, error: new SupatypeError({ message: await storageRefusal(res, "Delete failed"), status: res.status }) }
     }
     return { data: await readJson(res, isRemovedObjects), error: null }
   }
@@ -426,7 +425,7 @@ export class BucketClient {
       body: JSON.stringify(body),
     })
     if (!res.ok) {
-      return { data: null, count: null, error: { message: await storageRefusal(res, "List failed"), status: res.status } }
+      return { data: null, count: null, error: new SupatypeError({ message: await storageRefusal(res, "List failed"), status: res.status }) }
     }
     return { data: await readJson(res, isStorageEntries), count: countHeader(res), error: null }
   }

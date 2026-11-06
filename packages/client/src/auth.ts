@@ -1,7 +1,6 @@
 import type {
   AuthChangeEvent,
   AuthFlowType,
-  AuthRedirectError,
   AuthMFAChallengeResponse,
   AuthMFAEnrollResponse,
   AuthMFAListFactorsResponse,
@@ -9,7 +8,6 @@ import type {
   Factor,
   OtpType,
   Session,
-  SupatypeError,
   User,
   UserIdentity,
 } from "./types.js"
@@ -40,6 +38,7 @@ import {
 import { decodeJwtPayload } from "./jwt.js"
 import { rethrowSetupFault } from "./setup-fault.js"
 import { settle, type Deferred } from "./runtime-env.js"
+import { AuthRedirectError, SupatypeError } from "./errors.js"
 
 export type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
@@ -84,7 +83,7 @@ function authErrorFromBody(body: Record<string, unknown>, status: number): Supat
   const message =
     text("msg") ?? text("message") ?? text("error_description") ?? text("error") ??
     `Auth request failed (HTTP ${status})`
-  return { message, status, ...(code !== undefined && { code }) }
+  return new SupatypeError({ message, status, ...(code !== undefined && { code }) })
 }
 
 /** The assurance levels the client reports; the server's unused `aal3` reads as unknown. */
@@ -258,12 +257,12 @@ export class AuthClient {
     const provider = await this.takeFlowItem(PROVIDER_SUFFIX)
     this.currentSession = null
     const { error } = await this.getSessionFromUrl(href).catch((err: unknown) => ({
-      error: { message: err instanceof Error ? err.message : "Could not finish the sign-in" },
+      error: new SupatypeError({ message: err instanceof Error ? err.message : "Could not finish the sign-in" }, { cause: err }),
     }))
     cleanBrowserUrl(href)
     if (error === null) return { error: null }
     this._setSession(null)
-    return { error: { ...error, ...(provider !== null && { provider }) } }
+    return { error: new AuthRedirectError({ ...error.toJSON(), ...(provider !== null && { provider }) }, { cause: error }) }
   }
 
   /** A URL with tokens or a refusal, or with a `code` for a PKCE flow this client started. */
@@ -490,7 +489,7 @@ export class AuthClient {
     // navigating there shows as raw text; asking first lets the caller show a message instead.
     if (await this.providerDisabled(opts.provider)) {
       const message = `Sign-in with ${opts.provider} is not enabled for this project.`
-      return { data: { url: "", provider: opts.provider }, error: { message, status: 400, code: "provider_disabled" } }
+      return { data: { url: "", provider: opts.provider }, error: new SupatypeError({ message, status: 400, code: "provider_disabled" }) }
     }
     await this.writeFlowItem(PROVIDER_SUFFIX, opts.provider)
     const url = this.endpoint("/authorize", opts.options?.redirectTo)
@@ -579,10 +578,10 @@ export class AuthClient {
     if (verifier === null) {
       return {
         data: { session: null, user: null },
-        error: {
+        error: new SupatypeError({
           message: "Missing PKCE code_verifier. Start OAuth with flowType: \"pkce\" first.",
           status: 400,
-        },
+        }),
       }
     }
     const res = await this.send(`${this.url}/token?grant_type=pkce`, {
@@ -609,7 +608,7 @@ export class AuthClient {
     if (params === null) {
       return {
         data: { session: null, user: null },
-        error: { message: `Invalid redirect URL: ${url}`, status: 400 },
+        error: new SupatypeError({ message: `Invalid redirect URL: ${url}`, status: 400 }),
       }
     }
     const { query, fragment: hashParams } = params
@@ -649,10 +648,10 @@ export class AuthClient {
 
     return {
       data: { session: null, user: null },
-      error: {
+      error: new SupatypeError({
         message: "No auth code or tokens found in redirect URL",
         status: 400,
-      },
+      }),
     }
   }
 
@@ -757,11 +756,11 @@ export class AuthClient {
     error: SupatypeError | null
   }> {
     if (this.currentSession === null) {
-      return { data: { session: null }, error: { message: "No active session" } }
+      return { data: { session: null }, error: new SupatypeError({ message: "No active session" }) }
     }
     if (!this.currentSession.refreshToken?.trim()) {
       this._setSession(null)
-      return { data: { session: null }, error: { message: "No refresh token" } }
+      return { data: { session: null }, error: new SupatypeError({ message: "No refresh token" }) }
     }
     try {
       const res = await this.send(`${this.url}/token?grant_type=refresh_token`, {
@@ -780,7 +779,7 @@ export class AuthClient {
       rethrowSetupFault(err)
       const message = err instanceof Error ? err.message : "Refresh failed"
       this._setSession(null)
-      return { data: { session: null }, error: { message } }
+      return { data: { session: null }, error: new SupatypeError({ message }, { cause: err }) }
     }
   }
 
@@ -803,7 +802,7 @@ export class AuthClient {
     data?: Record<string, unknown> | undefined
   }): Promise<{ data: { user: User | null }; error: SupatypeError | null }> {
     if (this.currentSession === null) {
-      return { data: { user: null }, error: { message: "Not authenticated" } }
+      return { data: { user: null }, error: new SupatypeError({ message: "Not authenticated" }) }
     }
     const res = await this.send(`${this.url}/user`, {
       method: "PUT",
@@ -944,7 +943,7 @@ export class AuthClient {
         error: SupatypeError | null
       }> => {
         if (this.currentSession === null) {
-          return { data: null, error: { message: "Not authenticated" } }
+          return { data: null, error: new SupatypeError({ message: "Not authenticated" }) }
         }
         const body: Record<string, unknown> = {
           factor_type: params.factorType,
@@ -993,7 +992,7 @@ export class AuthClient {
         error: SupatypeError | null
       }> => {
         if (this.currentSession === null) {
-          return { data: null, error: { message: "Not authenticated" } }
+          return { data: null, error: new SupatypeError({ message: "Not authenticated" }) }
         }
         const body: Record<string, unknown> = {}
         if (params.channel !== undefined) body["channel"] = params.channel
@@ -1037,7 +1036,7 @@ export class AuthClient {
         if (this.currentSession === null) {
           return {
             data: { session: null, user: null },
-            error: { message: "Not authenticated" },
+            error: new SupatypeError({ message: "Not authenticated" }),
           }
         }
         const res = await this.send(
@@ -1097,7 +1096,7 @@ export class AuthClient {
         error: SupatypeError | null
       }> => {
         if (this.currentSession === null) {
-          return { data: null, error: { message: "Not authenticated" } }
+          return { data: null, error: new SupatypeError({ message: "Not authenticated" }) }
         }
         const res = await this.send(
           `${this.url}/factors/${params.factorId}`,
@@ -1125,7 +1124,7 @@ export class AuthClient {
       }> => {
         const userResult = await this.getUser()
         if (userResult.error !== null || userResult.data.user === null) {
-          return { data: null, error: userResult.error ?? { message: "Could not get user" } }
+          return { data: null, error: userResult.error ?? new SupatypeError({ message: "Could not get user" }) }
         }
         const allFactors: Factor[] = userResult.data.user.factors ?? []
         const verifiedFactors = allFactors.filter((f) => f.status === "verified")
@@ -1152,16 +1151,16 @@ export class AuthClient {
         error: SupatypeError | null
       }> => {
         if (this.currentSession === null) {
-          return { data: null, error: { message: "Not authenticated" } }
+          return { data: null, error: new SupatypeError({ message: "Not authenticated" }) }
         }
         // Decode the JWT payload to read the aal and amr claims
         const parts = this.currentSession.accessToken.split(".")
         if (parts.length !== 3) {
-          return { data: null, error: { message: "Invalid access token format" } }
+          return { data: null, error: new SupatypeError({ message: "Invalid access token format" }) }
         }
         const payload = decodeJwtPayload(parts[1]!)
         if (payload === null) {
-          return { data: null, error: { message: "Failed to decode access token" } }
+          return { data: null, error: new SupatypeError({ message: "Failed to decode access token" }) }
         }
         const { currentLevel, methods } = assuranceClaims(payload)
         try {
@@ -1172,7 +1171,7 @@ export class AuthClient {
           const nextLevel = hasVerifiedFactors ? "aal2" : "aal1"
           return { data: { currentLevel, nextLevel, currentAuthenticationMethods: methods }, error: null }
         } catch {
-          return { data: null, error: { message: "Failed to decode access token" } }
+          return { data: null, error: new SupatypeError({ message: "Failed to decode access token" }) }
         }
       },
     }

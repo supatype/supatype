@@ -17,7 +17,7 @@ import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
 import type { RealtimePayload } from "./realtime.js"
 import { subscribeToTable, type TableSubscribeOptions, type TableSubscription } from "./table-subscription.js"
-import { PostgrestError, transportFailure } from "./errors.js"
+import { PostgrestError, SupatypeError, transportFailure } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
 import { isJsonObject, isString, readJsonObject, refusalText } from "./json.js"
 import { jwtRole } from "./jwt.js"
@@ -31,7 +31,6 @@ import type {
   RpcResult,
   SupatypeFunctions,
   SupatypeClientConfig,
-  SupatypeError,
   RpcOptions,
   SelectQueryOptions,
   TableDef,
@@ -46,8 +45,7 @@ export type {
   Session,
   AuthChangeEvent,
   AuthFlowType,
-  SupatypeError,
-  AuthRedirectError,
+  SupatypeErrorFields,
   QueryResult,
   MaskedField,
   RpcResult,
@@ -347,7 +345,7 @@ class TableClient<
     if (model !== undefined) return { editThrough: { table: this.table, primaryKey: model.primaryKey, publish } }
     if (!publish) return undefined
     const message = `{ publish: true } applies to a model that keeps drafts, and "${this.table}" is not one this client knows of. Import the client from the generated ${GENERATED_CLIENT_IMPORT}, which says which models keep drafts.`
-    return { refusal: { message } }
+    return { refusal: new SupatypeError({ message }) }
   }
 
   delete(): MutationBuilder<TDef["Row"], TTables, TName> {
@@ -407,11 +405,11 @@ function isDeclaredReturn<T>(value: unknown): value is T {
 function functionError(body: Record<string, unknown>, status: number): SupatypeError {
   const workerCode = isString(body["message"]) ? body["error"] : undefined
   const code = isString(body["code"]) ? body["code"] : isString(workerCode) ? workerCode : undefined
-  return {
+  return new SupatypeError({
     message: refusalText(body) ?? `Function returned ${status}`,
     status,
     ...(code !== undefined && { code }),
-  }
+  })
 }
 
 /**
@@ -856,7 +854,9 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
 
       if (!res.ok) {
         const body = await readJsonObject(res)
-        const pgError = PostgrestError.fromResponse(
+        // A PostgrestError is one of the family: its own fields are the result's, hint and details
+        // only when the server gave them.
+        const error = PostgrestError.fromResponse(
           {
             message: refusalText(body),
             code: typeof body["code"] === "string" ? body["code"] : undefined,
@@ -865,16 +865,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
           },
           res.status,
         )
-        return {
-          data: null,
-          error: {
-            message: pgError.message,
-            status: pgError.statusCode,
-            code: pgError.code,
-            ...(pgError.hint !== null && pgError.hint !== "" && { hint: pgError.hint }),
-            ...(pgError.details !== null && pgError.details !== "" && { details: pgError.details }),
-          },
-        }
+        return { data: null, error }
       }
 
       if (method === "HEAD" || res.status === 204) {

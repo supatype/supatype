@@ -10,16 +10,17 @@
 import React from "react"
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest"
 import { act, create, type ReactTestRenderer } from "react-test-renderer"
-import { createClient, MutationBuilder, QueryBuilder, type AnyDatabase, type SupatypeClient } from "@supatype/client"
+import { MissingClientValuesError, createClient, MutationBuilder, QueryBuilder, type AnyDatabase, type SupatypeClient } from "@supatype/client"
 import { SupatypeProvider } from "../src/context.js"
 import { useQuery } from "../src/useQuery.js"
 import { useMutation, type UseMutationResult } from "../src/useMutation.js"
 import { useFunction, type UseFunctionResult } from "../src/useFunction.js"
 import { useAuth } from "../src/useAuth.js"
 
-class SetupFault extends Error {
+/** The setup fault a client with no address throws: one of the SDK's errors, held as it is. */
+class SetupFault extends MissingClientValuesError {
   constructor() {
-    super("Supatype client has no API address")
+    super("Supatype client has no API address", ["url"])
     this.name = "SetupFault"
   }
 }

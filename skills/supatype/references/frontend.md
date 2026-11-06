@@ -358,7 +358,11 @@ Access rules in `schema/index.ts` enforce what each role can do.
   expired or invalid (`PGRST301`, `PGRST303`, or "JWT expired"), there was a session to refresh,
   and the refresh produced a different token. A row rule refusing an anon write (401 `42501`) is
   not sent twice.
-- **Errors.** Every call returns `{ data, error }`. REST errors carry PostgREST 14 codes: database
+- **Errors.** Every call returns `{ data, error }`. `error` is a `SupatypeError` (an `Error`
+  class exported from `@supatype/client`, with `message`, `code?`, `status?`, `field?`, `hint?`,
+  `details?`), so `error instanceof SupatypeError` holds and `String(error)` is readable. A
+  network failure is the `NetworkError` itself; every thrown SDK error is a `SupatypeCodedError`
+  (required `code`, `helpUrl`, status as `status`). REST errors carry PostgREST 14 codes: database
   errors as bare SQLSTATE (`23505`, `23503`, `42501`), PostgREST's own as `PGRST...`
   (`PGRST116` from `.single()`, `PGRST205` unknown table, `PGRST204` unknown column, `PGRST301`
   bad token, `PGRST303` expired token). Constants: `PostgrestErrorCodes` from `@supatype/client`.

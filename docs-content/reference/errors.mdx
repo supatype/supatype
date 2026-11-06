@@ -126,7 +126,14 @@ A channel reports trouble through the status passed to its `subscribe` callback:
 
 ## Client SDK errors
 
-The client SDK returns every error as a `SupatypeError` object:
+The client SDK returns every error as a `SupatypeError`, a class exported from `@supatype/client`
+and a subclass of `Error`, so `error instanceof SupatypeError` holds and `String(error)` reads as
+its message. Its own fields are `message` and, when known, `code`, `status`, `field`, `hint` and
+`details`; JSON and spread give exactly those. The errors the SDK throws (`NetworkError`,
+`RateLimitError`, `AuthError`, `PostgrestError`, `StorageError`, `RealtimeError` and
+`MissingClientValuesError`) are `SupatypeCodedError`s, a subclass that always has a `code` and adds
+a `helpUrl`; their HTTP status is `status` too. A request that failed in transit resolves with the
+`NetworkError` itself as its `error`.
 
 ```typescript
 import { createClient } from "@supatype/client"

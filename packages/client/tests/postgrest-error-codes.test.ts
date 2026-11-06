@@ -50,14 +50,14 @@ describe("single() without exactly one row", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(emptyArray()))
     const { error } = await new QueryBuilder("http://x", "/rest/v1/t", {}).single()
     vi.unstubAllGlobals()
-    expect(error).toEqual({ message: SINGLE_ROW_MESSAGE, code: "PGRST116" })
+    expect({ ...error }).toEqual({ message: SINGLE_ROW_MESSAGE, code: "PGRST116" })
   })
 
   it("a write words it as PostgREST does", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(emptyArray()))
     const { error } = await new MutationBuilder("http://x", "/rest/v1/t", {}, "PATCH", {}).select().single()
     vi.unstubAllGlobals()
-    expect(error).toEqual({ message: SINGLE_ROW_MESSAGE, code: "PGRST116" })
+    expect({ ...error }).toEqual({ message: SINGLE_ROW_MESSAGE, code: "PGRST116" })
   })
 })
 
@@ -73,13 +73,13 @@ describe("a field validator's refusal", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(refused()))
     const { error } = await new QueryBuilder("http://x", "/rest/v1/t", {})
     vi.unstubAllGlobals()
-    expect(error).toEqual({ message: "That reads as shouting.", status: 422, field: "body" })
+    expect({ ...error }).toEqual({ message: "That reads as shouting.", status: 422, field: "body" })
   })
 
   it("keeps the field on a write, which is where a validator runs", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(refused()))
     const { error } = await new MutationBuilder("http://x", "/rest/v1/t", { body: "HELLO" }, "POST", {})
     vi.unstubAllGlobals()
-    expect(error).toEqual({ message: "That reads as shouting.", status: 422, field: "body" })
+    expect({ ...error }).toEqual({ message: "That reads as shouting.", status: 422, field: "body" })
   })
 })

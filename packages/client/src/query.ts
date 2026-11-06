@@ -1,13 +1,13 @@
 import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.js"
 import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
-import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError, TableDef } from "./types.js"
+import type { MaskedField, QueryResult, SelectQueryOptions, TableDef } from "./types.js"
 import { DRAFT_SCHEMA, PUBLISHING_SCHEMA } from "./types.js"
 import { createCall, createdKeys, inCreatedOrder, readBackColumns } from "./draft-create.js"
 import type { SelectRow } from "./select-types.js"
 import { parseRowsExactly, tableFromPath } from "./exact-response.js"
 import { stringifyWithBigInts } from "./exact-values.js"
 import { FilterBuilder } from "./filters.js"
-import { PostgrestErrorCodes, transportFailure } from "./errors.js"
+import { PostgrestErrorCodes, SupatypeError, transportFailure } from "./errors.js"
 import { plainFetch, type FetchOptions, type RequestTransport } from "./fetch-with-retry.js"
 import { isJsonObject, isOneOf, readJsonObject, refusalText } from "./json.js"
 import { bearerRole } from "./jwt.js"
@@ -36,7 +36,7 @@ function callerRows<TRow>(value: unknown): TRow[] | null {
 
 /** The body was JSON but not rows: PostgREST does not answer a table request that way. */
 function notRows(status: number): SupatypeError {
-  return { message: `Unexpected response body: expected rows (HTTP ${status})`, status }
+  return new SupatypeError({ message: `Unexpected response body: expected rows (HTTP ${status})`, status })
 }
 
 /**
@@ -65,7 +65,7 @@ export function parseMaskedFields(header: string | null): MaskedField[] | undefi
  * the same error whether PostgREST refused the request or the client found the rows wrong.
  */
 function notOneRow(): SupatypeError {
-  return { message: "Cannot coerce the result to a single JSON object", code: PostgrestErrorCodes.NOT_FOUND }
+  return new SupatypeError({ message: "Cannot coerce the result to a single JSON object", code: PostgrestErrorCodes.NOT_FOUND })
 }
 
 /**
@@ -75,7 +75,7 @@ function notOneRow(): SupatypeError {
  * validator only ever runs on a write, so the column it named never reached the caller.
  */
 function refusal(err: Record<string, unknown>, status: number): SupatypeError {
-  return {
+  return new SupatypeError({
     message: refusalText(err) ?? String(err["hint"] ?? "Request failed"),
     status,
     ...(err["code"] !== undefined && { code: String(err["code"]) }),
@@ -84,7 +84,7 @@ function refusal(err: Record<string, unknown>, status: number): SupatypeError {
     ...(typeof err["field"] === "string" && { field: err["field"] }),
     ...(typeof err["hint"] === "string" && err["hint"] !== "" && { hint: err["hint"] }),
     ...(typeof err["details"] === "string" && err["details"] !== "" && { details: err["details"] }),
-  }
+  })
 }
 
 /** The refusal a failed request answered with, logged with `context` when auth debugging is on. */
@@ -113,7 +113,7 @@ async function readRefusal(
  */
 function readRows<TRow>(body: string, path: string, status: number, count: number | null): QueryResult<TRow[]> {
   const parsed = parseRowsExactly(body, tableFromPath(path))
-  if (!parsed.ok) return { data: null, error: { message: parsed.message, status }, count: null }
+  if (!parsed.ok) return { data: null, error: new SupatypeError({ message: parsed.message, status }), count: null }
   const rows = callerRows<TRow>(parsed.value)
   if (rows === null) return { data: null, error: notRows(status), count: null }
   return { data: rows, error: null, count }
@@ -530,7 +530,7 @@ function isWriteResult<TResult>(value: unknown): value is TResult {
 /** `single()` or `maybeSingle()` on a write that asked for no rows, refused before anything is sent. */
 function rowNotSelected(): { data: null; error: SupatypeError; count: null } {
   const message = "A write returns no rows until select() asks for them: call select() before single() or maybeSingle()"
-  return { data: null, error: { message }, count: null }
+  return { data: null, error: new SupatypeError({ message }), count: null }
 }
 
 /**
@@ -790,7 +790,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     const table = body["model_table"]
     if (!res.ok) return readRefusal(res, `[supatype:mutation] ${fn} failed`, async () => ({ url, table }))
     const answer: unknown = await res.json().catch(() => null)
-    return createdKeys(answer) ?? { message: `${fn} answered without the record ids`, status: res.status }
+    return createdKeys(answer) ?? new SupatypeError({ message: `${fn} answered without the record ids`, status: res.status })
   }
 }
 

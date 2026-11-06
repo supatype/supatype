@@ -4,12 +4,13 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { AuthClient } from "@supatype/client"
+import { MissingClientValuesError, AuthClient } from "@supatype/client"
 import { createAuthUrlListener, type LinkingLike } from "../src/index.js"
 
-class SetupFault extends Error {
+/** The setup fault a client with no address throws: one of the SDK's errors, held as it is. */
+class SetupFault extends MissingClientValuesError {
   constructor() {
-    super("Supatype client has no API address")
+    super("Supatype client has no API address", ["url"])
     this.name = "SetupFault"
   }
 }

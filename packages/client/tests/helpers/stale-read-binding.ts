@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, afterEach } from "vitest"
-import { createClient, QueryBuilder, type AnyDatabase, type QueryResult, type SupatypeClient } from "@supatype/client"
+import { createClient, QueryBuilder, SupatypeError, type AnyDatabase, type QueryResult, type SupatypeClient } from "@supatype/client"
 
 /**
  * What every framework binding's query owes a read that finishes after a newer one: nothing.
@@ -83,7 +83,7 @@ export function describeStaleReadBinding(
       const { probe, older, newer, newerDone } = await twoReadsInFlight()
       newer.resolve(rows(2))
       await newerDone
-      older.resolve({ data: null, error: { message: "permission denied" }, count: null })
+      older.resolve({ data: null, error: new SupatypeError({ message: "permission denied" }), count: null })
       await settle()
       expect(probe.data()).toEqual([{ id: 2 }])
       expect(probe.error()).toBeNull()

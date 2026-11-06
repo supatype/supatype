@@ -5,13 +5,13 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { reportThrown } from "../src/thrown-error.js"
-import { NetworkError, RateLimitError } from "../src/errors.js"
+import { MissingClientValuesError, NetworkError, RateLimitError, SupatypeError } from "../src/errors.js"
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function quietly(thrown: unknown): unknown {
+function quietly(thrown: unknown): ReturnType<typeof reportThrown> {
   vi.spyOn(console, "error").mockImplementation(() => undefined)
   return reportThrown("useQuery(\"posts\")", thrown)
 }
@@ -25,30 +25,35 @@ describe("reportThrown", () => {
     expect(logged).toHaveBeenCalledWith("[supatype] useQuery(\"posts\"): the request threw.", thrown)
   })
 
-  it("keeps a plain Error as it is, so instanceof still names it", () => {
-    class SetupFault extends Error {
-      readonly missing = ["url"]
-    }
-    const thrown = new SetupFault("no address")
+  it("keeps one of the SDK's own errors as it is, so instanceof still names it", () => {
+    const thrown = new MissingClientValuesError("no address", ["url"])
     expect(quietly(thrown)).toBe(thrown)
   })
 
-  it("gives the SDK's own errors the shape a failed request answers with", () => {
-    expect(quietly(new RateLimitError(3))).toEqual({
+  it("holds any other Error as the cause of a SupatypeError with its message", () => {
+    const thrown = new Error("no address")
+    const held = quietly(thrown)
+    expect(held).toBeInstanceOf(SupatypeError)
+    expect((held as Error).cause).toBe(thrown)
+    expect({ ...(held as object) }).toEqual({ message: "no address" })
+  })
+
+  it("gives the SDK's own errors the JSON a failed request answers with", () => {
+    expect(JSON.parse(JSON.stringify(quietly(new RateLimitError(3))))).toEqual({
       message: "Rate limited. Retry after 3 seconds.",
       code: "RATE_LIMITED",
       status: 429,
     })
-    expect(quietly(new NetworkError("offline"))).toEqual({ message: "offline", code: "NETWORK_ERROR" })
+    expect({ ...quietly(new NetworkError("offline")) }).toEqual({ message: "offline", code: "NETWORK_ERROR" })
   })
 
   it("wraps an Error whose fields do not fit, keeping its message", () => {
     const thrown = Object.assign(new Error("socket hang up"), { code: 104 })
-    expect(quietly(thrown)).toEqual({ message: "socket hang up" })
+    expect({ ...quietly(thrown) }).toEqual({ message: "socket hang up" })
   })
 
   it("wraps a thrown string or anything else", () => {
-    expect(quietly("bad thing")).toEqual({ message: "bad thing" })
-    expect(quietly({ nope: true })).toEqual({ message: "Unknown error" })
+    expect({ ...quietly("bad thing") }).toEqual({ message: "bad thing" })
+    expect({ ...quietly({ nope: true }) }).toEqual({ message: "Unknown error" })
   })
 })

@@ -133,7 +133,7 @@ describe("auth and storage use the client's transport", () => {
       fetchReturning({ code: 429, error_code: "over_request_rate_limit", msg: "Request rate limit reached" }, 429),
     )
     const { error } = await client().auth.signInWithPassword({ email: "a@example.com", password: "pw" })
-    expect(error).toEqual({ message: "Request rate limit reached", status: 429, code: "over_request_rate_limit" })
+    expect({ ...error }).toEqual({ message: "Request rate limit reached", status: 429, code: "over_request_rate_limit" })
   })
 
   it("a storage upload that never answers ends at the timeout", { timeout: 2000 }, async () => {

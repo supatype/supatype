@@ -71,7 +71,7 @@ describe("storage bodies", () => {
   it("reports a refusal whose body is null with the fallback message", async () => {
     vi.stubGlobal("fetch", fetchReturning(null, 500))
     const { error } = await storage().from("avatars").upload("a.png", new Blob(["x"]))
-    expect(error).toEqual({ message: "Upload failed", status: 500 })
+    expect({ ...error }).toEqual({ message: "Upload failed", status: 500 })
   })
 })
 
@@ -170,13 +170,13 @@ describe("a functions worker refusal", () => {
   it("reads a handler's lone `error` string as the message, not the code", async () => {
     vi.stubGlobal("fetch", fetchReturning({ error: "Email already taken" }, 400))
     const { error } = await client().functions.invoke("fn")
-    expect(error).toEqual({ message: "Email already taken", status: 400 })
+    expect({ ...error }).toEqual({ message: "Email already taken", status: 400 })
   })
 
   it("reads the message the way every other refusal is read, `msg` and an empty `message` included", async () => {
     vi.stubGlobal("fetch", fetchReturning({ message: "", msg: "Rate limited" }, 429))
     const { error } = await client().functions.invoke("fn")
-    expect(error).toEqual({ message: "Rate limited", status: 429 })
+    expect({ ...error }).toEqual({ message: "Rate limited", status: 429 })
   })
 
   it("leaves the code unset when `error` is not a string", async () => {

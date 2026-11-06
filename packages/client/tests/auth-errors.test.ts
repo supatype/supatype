@@ -51,7 +51,7 @@ describe("auth errors carry the server's error code", () => {
       const client = await signedIn()
       vi.stubGlobal("fetch", fetchReturning(API_ERROR, 422))
       const { error } = await call(client)
-      expect(error).toEqual({ message: API_ERROR.msg, status: 422, code: "weak_password" })
+      expect({ ...error }).toEqual({ message: API_ERROR.msg, status: 422, code: "weak_password" })
     })
   }
 
@@ -59,7 +59,7 @@ describe("auth errors carry the server's error code", () => {
     const client = await signedIn()
     vi.stubGlobal("fetch", fetchReturning(OAUTH_ERROR, 400))
     const { error } = await client.refreshSession()
-    expect(error).toEqual({ message: OAUTH_ERROR.error_description, status: 400, code: "invalid_grant" })
+    expect({ ...error }).toEqual({ message: OAUTH_ERROR.error_description, status: 400, code: "invalid_grant" })
   })
 
   it("a body that is not JSON still gives a message and the status", async () => {
@@ -79,6 +79,6 @@ describe("redirect errors carry the server's error code", () => {
     const { error } = await client.getSessionFromUrl(
       "https://app.example/#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired",
     )
-    expect(error).toEqual({ message: "Email link is invalid or has expired", status: 400, code: "otp_expired" })
+    expect({ ...error }).toEqual({ message: "Email link is invalid or has expired", status: 400, code: "otp_expired" })
   })
 })

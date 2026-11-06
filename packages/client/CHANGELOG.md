@@ -4,6 +4,17 @@
 
 ### Breaking Changes
 
+* **errors:** one error family. `SupatypeError` is a class, exported as a value and a type, and
+  every error a result carries is one: `message` and, when known, `code`, `status`, `field`,
+  `hint` and `details`, its JSON and spread exactly those fields. It replaces the `SupatypeError`
+  interface. The SDK's thrown errors are its subclass `SupatypeCodedError` (the class that used to
+  be called `SupatypeError`), keeping a required `code` and `helpUrl`: `AuthError`,
+  `PostgrestError`, `StorageError`, `RealtimeError`, `NetworkError`, `RateLimitError` and now
+  `MissingClientValuesError` (code `MISSING_CLIENT_VALUES`), so `instanceof SupatypeError` holds for
+  all of them. Their `statusCode` is renamed `status`, the one name for it. `PostgrestError`'s
+  `details` and `hint` are absent rather than `null` when the server gave none, and an rpc refusal
+  is the `PostgrestError` itself. `AuthRedirectError` is a class too, with `provider` as one more
+  own field. `SupatypeErrorFields` is the fields' type, as the constructor takes them.
 * **query:** `insert`, `update`, `upsert` and `delete` ask for no rows back and resolve to
   `data: null`, as postgrest-js does. Chain `.select()` (or `.select(columns)`) to get the written
   rows. Returning a row needs the right to read it, so a table whose rules let a caller create but
@@ -74,3 +85,13 @@
 * **bindings:** `latestRowsReader(client, table, where, view)` is the read the Vue, Svelte and
   Solid queries share, where only the newest request may change what the binding shows. An older
   read that lands last is dropped, rows, returned error or throw alike; a throw is still logged.
+* **client:** the `error` of every `{ data, error }` result is now an `Error`, a `SupatypeError`,
+  rather than a plain object. A network failure used to resolve `{ message: "fetch failed", code }`,
+  so `error instanceof Error` was false and `String(error)` printed "[object Object]", which is what
+  a page rendering the error showed for an unreachable server or a CORS refusal. It is now the
+  `NetworkError` the transport threw, reading `NetworkError: fetch failed` with a stack. Its JSON is
+  the same `message`, `code`, `status`, `field`, `hint` and `details` as before; a test comparing
+  the error with `toEqual` against a plain object needs `{ ...error }`, since Vitest tells an Error
+  from one. Server refusals, client-side refusals (`Not authenticated`) and `reportThrown` follow
+  suit: `reportThrown` keeps an SDK error as it is and holds any other thrown value as the `cause`
+  of a `SupatypeError`.

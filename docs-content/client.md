@@ -280,7 +280,7 @@ Using another GraphQL client? `readGraphqlSchema` reads the `data` of an introsp
 
 Queries, `rpc`, `functions.invoke`, auth and most storage calls return `{ data, error }`. Check `error` before using `data`.
 
-`error` is a plain object with `message` and, when known, `code`, `status`, `details` and `hint`. Do not test it with `instanceof`. When a field validator refused the write, `field` names the column, so you can mark that input.
+`error` is a `SupatypeError`, an `Error` with `message` and, when known, `code`, `status`, `details` and `hint`, so `error instanceof SupatypeError` holds and `String(error)` reads `SupatypeError: <message>`. Its own fields are only those, so spreading it or turning it into JSON gives exactly them. A failure in transit is the SDK error the client threw, such as a `NetworkError` (`error instanceof NetworkError`); those are `SupatypeCodedError`s, which always carry a `code` and a `helpUrl`. When a field validator refused the write, `field` names the column, so you can mark that input.
 
 An insert an access rule refuses returns code `42501`. An update or delete that the rules hide matches no rows and returns no error. `single()` with no row returns `PGRST116`.
 
