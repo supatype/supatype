@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Features
+
+* **auth:** an SSO page for the project's SAML identity providers, replacing "SSO is coming soon".
+  It lists each provider by name with its entity ID, domains and whether it is enabled; adds one
+  from a metadata URL or an uploaded or pasted metadata XML, with its domains, NameID format and an
+  optional attribute mapping; edits one in place, keeping its NameID format; disables and enables
+  one; and removes one after saying that users who signed in through it can no longer sign in that
+  way. It shows the entity ID and ACS URL to give an identity provider, read from the server's own
+  SP metadata, and says when SAML is off, while still letting providers be set up first. Changes are
+  offered to roles that administer the project.
+
 ### Bug Fixes
 
 * **auth:** the Configuration page says SAML SSO is set by `auth.sso.saml.enabled` in

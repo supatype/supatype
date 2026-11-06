@@ -8,7 +8,7 @@ import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
 import { testClient } from "./support.js"
 
 /**
- * Replication, Warehouse, Backups, SSO, AI Usage and the Realtime Inspector and its settings are
+ * Replication, Warehouse, Backups, AI Usage and the Realtime Inspector and its settings are
  * not built anywhere, Cloud included.
  *
  * Self-host used to mark them "Available on Supatype Cloud" with a Cloud badge, which told somebody
@@ -51,7 +51,6 @@ const ENTRIES: Array<{ path: string; label: string; note: string }> = [
   { path: "/database/overview", label: "Replication", note: "Read replicas are coming soon" },
   { path: "/database/overview", label: "Warehouse", note: "The analytical warehouse is coming soon" },
   { path: "/database/overview", label: "Backups", note: "Managed backups are coming soon" },
-  { path: "/authentication/users", label: "SSO", note: "SSO is coming soon" },
   { path: "/ai/usage", label: "Usage", note: "AI usage tracking is coming soon" },
   { path: "/realtime", label: "Inspector", note: "The Realtime Inspector is coming soon" },
   { path: "/realtime", label: "Settings", note: "Realtime settings are coming soon" },
@@ -76,4 +75,12 @@ describe.each([
       expect(html).not.toMatch(/>Cloud</)
     },
   )
+
+  it("lists SSO as a page of its own now that it is built", () => {
+    const html = panel("/authentication/users", platform)
+    const tag = entryTag(html, "SSO")
+    expect(tag).toMatch(/^<button/)
+    expect(tag).not.toContain("aria-disabled")
+    expect(html).not.toContain("SSO is coming soon")
+  })
 })

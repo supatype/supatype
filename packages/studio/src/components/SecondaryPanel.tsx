@@ -115,6 +115,7 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
           { label: "Users",            href: "/authentication/users" },
           { label: "Policies",         href: "/authentication/policies" },
           { label: "Providers",        href: "/authentication/providers" },
+          { label: "SSO",              href: "/authentication/sso" },
           { label: "Configuration",    href: "/authentication/configuration" },
           { label: "Email Templates",  href: "/authentication/email-templates" },
         ],
@@ -123,7 +124,6 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
         label: "Coming Soon",
         items: [
           { label: "Hooks",    href: "/authentication/hooks", unavailable: { note: "Auth hooks are not built yet" } },
-          { label: "SSO",      href: "/authentication/sso", unavailable: { note: "SSO is coming soon" } },
           { label: "Security", href: "/authentication/security", unavailable: { note: "Attack protection settings are not built yet" } },
         ],
       },
