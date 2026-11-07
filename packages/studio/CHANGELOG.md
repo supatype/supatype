@@ -24,11 +24,11 @@
 
 * **auth:** the Users provider filter offers each SAML provider by name, `sso:acme`, and lists the
   users who signed in through it. It offered only the providers switched on in the config, so a
-  user with an `sso:acme` badge could not be filtered to.
+  user with an `sso:acme` badge could not be filtered to. A provider is offered for as long as it
+  is set up, whether SAML is on or not, so its users can still be found.
 * **auth:** the Users list and a user's linked identities name a SAML user's identity provider,
   `sso:acme`, where they showed `sso:` and the provider's full ID. A provider that has been removed,
-  or was added without a name, is shown by the first block of its ID. The providers are read only
-  when a user on screen signed in through one.
+  or was added without a name, is shown by the first block of its ID.
 * **auth:** a viewer can open the SSO page, read-only, as a developer can. It refused them with
   "can't manage the project's users". Editors still have no SSO page.
 * **auth:** the Configuration page says SAML SSO is set by `auth.sso.saml.enabled` in

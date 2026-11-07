@@ -187,6 +187,11 @@
 
 ### Bug Fixes
 
+* **migrate, reset, rollback, migrations list, rename --prune, pull, deploy --local:** on the local
+  stack's own database these run the project's engine image, as `push`, `diff` and `seed` do. They
+  ran the engine binary cached on this machine, so with an engine image chosen, `migrate` wrote SQL
+  from the released engine that `push` no longer ran. A `--connection` to another database still
+  runs the binary here.
 * **seed:** `supatype seed` and `npm run seed` work from the standalone binary on Windows. Every
   seed file failed with "Cannot find module 'B:\~BUN\root\seed-ir.js'": the seed ran from a temp
   file that could not import the CLI's own modules out of the binary. The binary now collects a
