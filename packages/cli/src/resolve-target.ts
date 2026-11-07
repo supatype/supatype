@@ -3,7 +3,8 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
 import type { AdoptOutcome, ComposeEngine, DiffResult } from "./engine-client.js"
-import { asTheEngineRefused, ensureEngine, enginePush, engineRequest } from "./engine-client.js"
+import { asTheEngineRefused, ensureEngine, enginePush } from "./engine-client.js"
+import { engineRequestIn } from "./stack-engine.js"
 import {
   isAdoptOutcome,
   isDatabaseStateJson,
@@ -368,8 +369,7 @@ async function engineHere<T>(
   body: Record<string, unknown>,
   guard: Guard<T>,
 ): Promise<T> {
-  if (target.compose === undefined) await ensureEngine()
-  return engineRequest(endpoint, body, guard, target.compose)
+  return engineRequestIn(target.compose, endpoint, body, guard)
 }
 
 /** Whether `target` runs the engine binary here rather than asking a control plane. */

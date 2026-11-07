@@ -7,12 +7,13 @@ import { printPushWarnings, type EnginePushResult } from "../engine-push-output.
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
-import { ensureEngine, engineRequest } from "../engine-client.js"
+import { engineRequestIn, stackEngine } from "../stack-engine.js"
 import { isEnginePushResult, isMigrateAnswer } from "../engine-answers.js"
 import { plannedChanges } from "../diff-output.js"
 import { loadProjectLink } from "../link.js"
 import {
   resolveTarget,
+  schemaCommandTarget,
   targetSchemaDiff,
   targetSchemaRollback,
   targetListMigrations,
@@ -89,11 +90,12 @@ export interface MigrationsTargetOptions {
   direct?: boolean
 }
 
-/** The linked environment, unless `--direct` or `--connection` asks for a database directly. */
-export function migrationsTarget(cwd: string, opts: MigrationsTargetOptions): DeployTarget {
-  const useDirect = opts.direct === true || Boolean(opts.connection)
-  if (loadProjectLink(cwd) && !useDirect) return resolveTarget(cwd, { env: opts.env })
-  return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
+/**
+ * The linked environment, unless `--direct` or `--connection` asks for a database directly; else
+ * the local stack, read by the engine push runs (issue 63), as `adopt` and `doctor` are.
+ */
+export function migrationsTarget(cwd: string, opts: MigrationsTargetOptions, command: string): Promise<DeployTarget> {
+  return schemaCommandTarget(cwd, loadConfig(cwd), opts, command)
 }
 
 /**
@@ -135,8 +137,7 @@ export function registerMigrate(program: Command): void {
     .option("--env <name>", "Target environment when linked")
     .option("--direct", "Use local engine subprocess (skip control plane)")
     .action(async (opts: MigrationsTargetOptions) => {
-      requireLocalStack(process.cwd(), loadConfig(process.cwd()), "migrations list", opts)
-      const list = await targetListMigrations(migrationsTarget(process.cwd(), opts))
+      const list = await targetListMigrations(await migrationsTarget(process.cwd(), opts, "migrations list"))
       if (list.length === 0) {
         info("No migrations applied.")
         return
@@ -166,8 +167,9 @@ export function registerMigrate(program: Command): void {
       const connection = resolveHostDatabaseUrl(cwd, config, { connection: opts.connection, allowDerived: true }).dsn
       const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
-      await ensureEngine()
-      const result = await engineRequest(
+      const engine = await stackEngine(cwd, config, opts.connection, connection)
+      const result = await engineRequestIn(
+        engine,
         "/migrate",
         migrateRequest(ast, connection, schemaPgSchema(cwd), opts),
         isMigrateAnswer,
@@ -197,21 +199,9 @@ export function registerMigrate(program: Command): void {
     }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      requireLocalStack(cwd, config, "rollback", opts)
       const pgSchema = schemaPgSchema(cwd)
-      const link = loadProjectLink(cwd)
-      const useDirect = opts.direct || Boolean(opts.connection)
-
-      let target
-      if (link && !useDirect && !opts.connection) {
-        target = resolveTarget(cwd, { env: opts.env })
-      } else {
-        target = resolveTarget(cwd, {
-          env: opts.env,
-          direct: true,
-          connection: opts.connection,
-        })
-      }
+      // The engine push runs on the local stack (issue 63), as migrations list does.
+      const target = await schemaCommandTarget(cwd, config, opts, "rollback")
 
       const result = await targetSchemaRollback(target, { schema: pgSchema })
       info(result.message ?? "Rolled back.")
@@ -246,9 +236,9 @@ export function registerMigrate(program: Command): void {
       const connection = resolveHostDatabaseUrl(process.cwd(), config, { connection: opts.connection, allowDerived: true }).dsn
       const cwd = process.cwd()
 
-      await ensureEngine()
       const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
-      const result = await engineRequest(
+      const result = await engineRequestIn(
+        await stackEngine(cwd, config, opts.connection, connection),
         "/push",
         { ast, database_url: connection, schema: "public", force: true },
         isEnginePushResult,

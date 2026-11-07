@@ -3,10 +3,9 @@ import type { Command } from "commander"
 import { writeFileSync } from "node:fs"
 import { loadConfig } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
-import { ensureEngine, engineRequest } from "../engine-client.js"
+import { capabilitiesIn, engineRequestIn, stackEngine } from "../stack-engine.js"
 import { isDatabaseStateJson } from "../engine-answers.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
-import { engineCapabilities } from "../engine-ownership-gate.js"
 import { databaseStateToSchemaScaffold, type DatabaseStateJson } from "../pull-utils.js"
 import { info, plain } from "../ui/messages.js"
 
@@ -24,17 +23,18 @@ export function registerPull(program: Command): void {
       const connection = await resolveHostEngineDatabaseUrl(cwd, config, opts.connection)
       const pgSchema = config.schema?.pg_schema ?? "public"
 
-      await ensureEngine()
+      const engine = await stackEngine(cwd, config, opts.connection, connection)
 
       info("Introspecting database...")
-      const state = await engineRequest(
+      const state = await engineRequestIn(
+        engine,
         "/introspect",
         { database_url: connection, schema: pgSchema },
         isDatabaseStateJson,
       )
 
       // Identity, generated and serial columns are drafted as such only for an engine that reads them.
-      const identityColumns = (await engineCapabilities()).features.has("identity_columns")
+      const identityColumns = (await capabilitiesIn(engine)).features.has("identity_columns")
       const scaffold = databaseStateToSchemaScaffold(state, { identityColumns })
       const defaultOut = schemaPathFromProject(config, cwd)
 

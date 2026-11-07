@@ -23,10 +23,11 @@ import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
 import { isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
-import { ensureEngine, enginePush, engineRequest, type DiffResult } from "../engine-client.js"
+import { enginePush, type DiffResult } from "../engine-client.js"
+import { engineRequestIn, requireEngineFeaturesIn, stackEngine } from "../stack-engine.js"
 import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
 import { formatSecurityDrift, plannedChanges, securityDrift } from "../diff-output.js"
-import { OVERWRITE_DRIFT_NEED, requireEngineFeatures } from "../engine-ownership-gate.js"
+import { OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js"
 import {
   resolveAppConfig,
   validateStaticMode,
@@ -188,16 +189,14 @@ export function registerDeploy(program: Command): void {
 
         if (opts.local) {
           step("Schema Push (local)")
-          await ensureEngine()
-          if (overwriteDrift) await requireEngineFeatures([OVERWRITE_DRIFT_NEED])
+          const databaseUrl = resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn
+          const engine = await stackEngine(cwd, config, undefined, databaseUrl)
+          if (overwriteDrift) await requireEngineFeaturesIn(engine, [OVERWRITE_DRIFT_NEED])
 
-          const diff = await engineRequest(
+          const diff = await engineRequestIn(
+            engine,
             "/diff",
-            {
-              ast,
-              database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
-              schema: pgSchema(config),
-            },
+            { ast, database_url: databaseUrl, schema: pgSchema(config) },
             isDiffResult,
           )
 
@@ -215,12 +214,13 @@ export function registerDeploy(program: Command): void {
                 cwd,
                 {
                   ast,
-                  database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
+                  database_url: databaseUrl,
                   schema: pgSchema(config),
                   force: true,
                   ...(overwriteDrift && { overwrite_drift: true }),
                 },
                 isEnginePushResult,
+                engine,
               ),
             )
             info("Schema changes applied.")

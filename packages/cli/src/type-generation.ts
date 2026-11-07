@@ -16,7 +16,8 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve, sep } from "node:path"
 import { generateClientAugmentation } from "./augmentation-generator.js"
-import { ensureEngine, engineRequest, type ComposeEngine } from "./engine-client.js"
+import type { ComposeEngine } from "./engine-client.js"
+import { engineRequestIn } from "./stack-engine.js"
 import { isGenerateAnswer } from "./engine-answers.js"
 import { generateProjectClient } from "./client-generator.js"
 
@@ -154,8 +155,7 @@ async function generate(
   req: GenerateTypesRequest,
   body: Record<string, unknown>,
 ): Promise<{ code?: string; message?: string }> {
-  if (req.engine === undefined) await ensureEngine()
-  return engineRequest("/generate", body, isGenerateAnswer, req.engine)
+  return engineRequestIn(req.engine, "/generate", body, isGenerateAnswer)
 }
 
 /**
