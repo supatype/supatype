@@ -18,7 +18,7 @@ import { userAdministrationOffered, adminAccountChangeOffered, accountRemovalOff
 import { authRefusalText } from "../lib/auth-refusal.js"
 import { useAuthSettings } from "../hooks/useAuthSettings.js"
 import { useSsoProviderList } from "../hooks/useSsoProviders.js"
-import { identityProviderLabel, isSsoIdentity, ssoIdentityProvider, ssoProviderLabel, type SsoProvider } from "../lib/sso-providers.js"
+import { identityProviderLabel, ssoIdentityProvider, ssoProviderLabel, type SsoProvider } from "../lib/sso-providers.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import {
@@ -625,19 +625,6 @@ function providersOf(raw: AuthUserResponse): AuthIdentity[] {
   return [{ provider: "email", provider_id: raw.id, linked_at: raw.created_at ?? "" }]
 }
 
-function signsInWithSso(user: AuthUser): boolean {
-  return user.providers.some((p) => isSsoIdentity(p.provider))
-}
-
-/**
- * The project's SAML providers, for the users on screen and the provider filter. They are read
- * through the SSO page's own hook, and only once SAML is on or a user on screen signed in through one.
- */
-function useSsoProviderNames(shown: Array<AuthUser | null>, samlOn: boolean): readonly SsoProvider[] | null {
-  const needed = samlOn || shown.some((u) => u !== null && signsInWithSso(u))
-  return useSsoProviderList(needed).state.providers
-}
-
 /** The SAML providers a {@link ProviderBadge} names a user's identity provider from. */
 const SsoProviderNames = createContext<readonly SsoProvider[] | null>(null)
 
@@ -930,7 +917,9 @@ export function AuthManagement(): React.ReactElement {
     [authAdminFetch, selectedUserId],
   )
   const sessions = sessionsData ?? []
-  const ssoProviders = useSsoProviderNames([...users, selectedUser], authSettings?.saml_enabled === true)
+  // Read whether SAML is on or not: a provider set up while it is off still has users to find and
+  // name, and the filter offers it for as long as it is set up.
+  const ssoProviders = useSsoProviderList().state.providers
   const [editingUser, setEditingUser] = useState<AuthUser | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [showInviteForm, setShowInviteForm] = useState(false)

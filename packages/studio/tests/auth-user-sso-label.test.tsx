@@ -34,7 +34,11 @@ const EMAIL_ONLY = { ...samlUser("33333333-3333-3333-3333-333333333333", "lin@ex
 isolateEachTest()
 
 /** Stub the auth server with `users`, and return the URLs it was asked for. */
-function stubFetch(users: Array<Record<string, unknown>>, settings: Record<string, unknown> = { mailer_autoconfirm: true }): string[] {
+function stubFetch(
+  users: Array<Record<string, unknown>>,
+  settings: Record<string, unknown> = { mailer_autoconfirm: true },
+  providers: Array<Record<string, unknown>> = [ACME],
+): string[] {
   const urls: string[] = []
   vi.stubGlobal("fetch", async (url: string) => {
     urls.push(url)
@@ -42,7 +46,7 @@ function stubFetch(users: Array<Record<string, unknown>>, settings: Record<strin
       return Response.json({ sub: "admin-id", role: "admin", mode: "self", permissions: { manageUsers: true } })
     }
     if (url.endsWith("/auth/v1/settings")) return Response.json(settings)
-    if (url.endsWith("/auth/v1/admin/sso/providers")) return Response.json({ items: [ACME] })
+    if (url.endsWith("/auth/v1/admin/sso/providers")) return Response.json({ items: providers })
     if (url.includes("/auth/v1/admin/users/")) return Response.json(users.find((u) => url.includes(String(u["id"]))) ?? users[0])
     if (url.includes("/auth/v1/admin/users")) return Response.json({ users, aud: "authenticated" })
     return Response.json({ rows: [], members: [], roles: [], sessions: [] })
@@ -86,11 +90,6 @@ describe("a SAML user's provider badge", () => {
     expect(dialog.textContent).not.toContain(`sso:${ACME_ID}`)
   })
 
-  it("does not ask for the SSO providers when no user on the page signed in through one", async () => {
-    const urls = stubFetch([EMAIL_ONLY])
-    await renderUsers("/auth/users")
-    expect(urls.some((u) => u.includes("/admin/sso/providers"))).toBe(false)
-  })
 })
 
 /** Issue 62: the provider filter offered only the switched-on providers, never a SAML one. */
@@ -115,8 +114,14 @@ describe("the Users provider filter", () => {
     expect(urls.some((u) => u.includes(`provider=sso%3A${ACME_ID}`))).toBe(true)
   })
 
-  it("offers no SAML choice while SAML is off", async () => {
+  it("offers a SAML provider set up while SAML is off, so its users can still be found", async () => {
     stubFetch([EMAIL_ONLY], { mailer_autoconfirm: true, external: { email: true } })
+    const select = providerSelect(await renderUsers("/auth/users"))
+    expect([...select.options].map((o) => o.textContent)).toEqual(["All providers", "email", "sso:acme"])
+  })
+
+  it("offers no SAML choice when no SAML provider is set up", async () => {
+    stubFetch([EMAIL_ONLY], { mailer_autoconfirm: true, saml_enabled: true, external: { email: true } }, [])
     const select = providerSelect(await renderUsers("/auth/users"))
     expect([...select.options].map((o) => o.value)).toEqual(["all", "email"])
   })

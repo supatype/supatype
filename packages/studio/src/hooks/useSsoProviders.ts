@@ -34,10 +34,10 @@ export interface SsoProviderActions {
 }
 
 /**
- * The project's SAML providers, read once `enabled` and again on `reload`. Until then the list is
- * null, so a page that only sometimes needs it makes no request.
+ * The project's SAML providers, read on mount and again on `reload`. Until the first
+ * answer the list is null.
  */
-export function useSsoProviderList(enabled = true): { state: SsoProvidersState; reload: () => Promise<void> } {
+export function useSsoProviderList(): { state: SsoProvidersState; reload: () => Promise<void> } {
   const client = useAdminClient()
   const [state, setState] = useState<SsoProvidersState>({ providers: null, error: null })
 
@@ -46,7 +46,7 @@ export function useSsoProviderList(enabled = true): { state: SsoProvidersState; 
     setState("error" in listed ? { providers: null, error: listed.error } : { providers: listed.providers, error: null })
   }, [client])
 
-  useEffect(() => { if (enabled) void reload() }, [enabled, reload])
+  useEffect(() => { void reload() }, [reload])
   return { state, reload }
 }
 
