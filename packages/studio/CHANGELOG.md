@@ -22,6 +22,12 @@
 
 ### Bug Fixes
 
+* **auth:** the Users list and a user's linked identities name a SAML user's identity provider,
+  `sso:acme`, where they showed `sso:` and the provider's full ID. A provider that has been removed,
+  or was added without a name, is shown by the first block of its ID. The providers are read only
+  when a user on screen signed in through one.
+* **auth:** a viewer can open the SSO page, read-only, as a developer can. It refused them with
+  "can't manage the project's users". Editors still have no SSO page.
 * **auth:** the Configuration page says SAML SSO is set by `auth.sso.saml.enabled` in
   supatype.config.ts or `SUPATYPE_SAML_ENABLED` in `.env`. It said the variable could only be set in
   the auth server's environment, which was true while the compose file did not pass it.

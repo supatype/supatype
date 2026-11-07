@@ -107,6 +107,27 @@ export function providerName(provider: SsoProvider): string {
   return provider.resourceId ?? provider.id
 }
 
+/** How the auth server names a SAML identity's provider: `sso:` and the provider's ID. */
+const SSO_IDENTITY_PREFIX = "sso:"
+
+/** Whether an identity's provider string is a SAML provider's. */
+export function isSsoIdentity(provider: string): boolean {
+  return provider.startsWith(SSO_IDENTITY_PREFIX)
+}
+
+/**
+ * What an identity's provider is shown as. A SAML one keeps `sso:`, so it reads as single sign-on
+ * beside `email` or `github`, and is named by its provider's resource ID (`sso:acme`); one whose
+ * provider is gone, unnamed, or not yet read, by the first block of its ID. Every other provider is
+ * shown as it is.
+ */
+export function identityProviderLabel(provider: string, providers: readonly SsoProvider[] | null): string {
+  if (!isSsoIdentity(provider)) return provider
+  const id = provider.slice(SSO_IDENTITY_PREFIX.length)
+  const name = providers?.find((p) => p.id === id)?.resourceId ?? id.split("-")[0]
+  return `${SSO_IDENTITY_PREFIX}${name}`
+}
+
 /** The path segment that addresses `provider` in the admin API. */
 export function providerAddress(provider: SsoProvider): string {
   return provider.resourceId !== null ? `resource_${encodeURIComponent(provider.resourceId)}` : encodeURIComponent(provider.id)

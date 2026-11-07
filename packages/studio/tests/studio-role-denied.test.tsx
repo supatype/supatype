@@ -33,14 +33,24 @@ const CONFIG = testConfig({
 })
 const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
 
+/** The reads the SSO page is built from, which schema view opens as well (issue 53): a copy of `ssoPagePaths` and the `/auth/v1/admin/sso` reads in supatype/server internal/studioauth/capability.go. */
+const SSO_PAGE_READS = ["/auth/v1/admin/sso/providers", "/auth/v1/settings", "/auth/v1/sso/saml/metadata"]
+
+/** Whether the server lets `role` read `path` through the auth API. */
+function readsAuth(role: string, path: string): boolean {
+  return administers(role) || (permissionsOf(role)["schemaView"] === true && SSO_PAGE_READS.some((read) => path.endsWith(read)))
+}
+
 /** The server as `role` meets it: the admin plane and the auth admin API refuse who may not use them. */
 function serverFor(role: string): (input: string) => Promise<Response> {
   return async (input) => {
     const path = new URL(input).pathname
     if (path.endsWith("/studio/auth/verify")) return Response.json({ role, mode: "studio", permissions: permissionsOf(role) })
-    if (path.includes("/admin/v1/") || path.includes("/auth/v1/")) {
-      if (!administers(role)) return Response.json({ error: "Forbidden: service_role required" }, { status: 403 })
+    if ((path.includes("/admin/v1/") && !administers(role)) || (path.includes("/auth/v1/") && !readsAuth(role, path))) {
+      return Response.json({ error: "Forbidden: service_role required" }, { status: 403 })
     }
+    if (path.endsWith("/auth/v1/admin/sso/providers")) return Response.json({ items: [] })
+    if (path.endsWith("/auth/v1/settings")) return Response.json({ saml_enabled: false })
     if (path.endsWith("/admin/v1/cache")) return Response.json({ entries: [], cursor: "0" })
     if (path.endsWith("/admin/v1/config/rest")) return Response.json({ cache_max_ttl: 60, cache_tables: null, declared: {} })
     if (path.endsWith("/storage/v1/bucket")) return Response.json([{ id: "default", name: "default", public: false }])
@@ -126,6 +136,20 @@ describe("a viewer, who reads and does not change", () => {
     expect(text(page)).toContain("Max Connections")
     expect(text(page)).toContain("Your Studio role (viewer) can't manage the database credentials.")
     expect(findButton(page, "Rotate Password")).toBeUndefined()
+  })
+
+  it("reads the SSO page, with no control that changes a provider", async () => {
+    const page = await studioAs("viewer", "/authentication/sso")
+    expect(text(page)).not.toContain("Your Studio role")
+    expect(text(page)).toContain("No SAML providers yet")
+    expect(text(page)).toContain("Only owners and admins can change SSO providers.")
+    expect(text(page)).not.toContain("service_role required")
+    expect(findButton(page, "Add provider")).toBeUndefined()
+  })
+
+  it("still tells an editor, who has no schema view, why the SSO page is closed", async () => {
+    const page = await studioAs("editor", "/authentication/sso")
+    expect(text(page)).toContain("Your Studio role (editor) can't view the SSO providers.")
   })
 
   it("offers a developer the credentials", async () => {
