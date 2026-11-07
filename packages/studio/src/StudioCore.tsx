@@ -210,6 +210,8 @@ const SCHEMA: RoleRequirement = { needs: "schemaView", activity: "view the schem
 const DATABASE_SCHEMA: RoleRequirement = { needs: "schemaView", activity: "view the database schema" }
 const ACCESS_POLICIES: RoleRequirement = { needs: "schemaView", activity: "view access policies" }
 const PROJECT_USERS: RoleRequirement = { needs: "manageUsers", activity: "manage the project's users" }
+/** The SSO page reads like the members list: a viewer sees the providers, an admin changes them (issue 53). */
+const SSO_PROVIDERS: RoleRequirement = { needs: ["manageUsers", "schemaView"], activity: "view the SSO providers" }
 const API_SETTINGS: RoleRequirement = { needs: "administer", activity: "change the API settings" }
 const FUNCTIONS: RoleRequirement = { needs: "administer", activity: "manage functions" }
 const REALTIME: RoleRequirement = { needs: "realtimeInspect", activity: "use the Realtime Inspector" }
@@ -480,7 +482,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="authentication/configuration"   element={gated(PROJECT_USERS, <ConfigurationView />)} />
               <Route path="authentication/email-templates" element={gated(PROJECT_USERS, <EmailTemplatesView />)} />
               <Route path="authentication/hooks"    element={<ComingSoon title="Auth Hooks" description="Configure pre/post hooks for auth events. Coming soon." />} />
-              <Route path="authentication/sso"             element={gated(PROJECT_USERS, <SsoView />)} />
+              <Route path="authentication/sso"             element={gated(SSO_PROVIDERS, <SsoView />)} />
               <Route path="authentication/security" element={<ComingSoon title="Attack Protection" description="CAPTCHA, IP blocking, leaked password detection, rate limits. Coming soon." />} />
 
               {/* Observability (Logs + Metrics + Advisors) */}
