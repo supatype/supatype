@@ -156,8 +156,8 @@ Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `ss
 | `self-host compose logs` | Tail compose logs | `--service <name>`, `-f, --follow` |
 | `add domain [domain]` | Add a custom domain with automatic HTTPS (self-host) | `--email <email>` for Let's Encrypt |
 | `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
-| `envs list` | List linked environments |  |
-| `envs use <name>` | Set the default environment |  |
+| `envs list` | List linked environments, and the default commands use: `environments` in supatype.config.ts when it names one, else this checkout&apos;s |  |
+| `envs use <name>` | Set this checkout&apos;s default environment. `environments.default` in supatype.config.ts wins over it, and `envs use` says so |  |
 | `build [command...]` | Run your app's production build with the deployment's API URL and anon key under every front-end name (VITE_, PUBLIC_, NEXT_PUBLIC_, EXPO_PUBLIC_). Runs the package.json build script unless a command follows --. Refuses to start when either value is missing | `--env <name>`, `--allow-local`, `-- <command...>` |
 | `deploy` | Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass `--local` for engine + your database | `--env <name>` (default `production`), `--schema-only`, `--app-only`, `--skip-build`, `--preview`, `--yes`, `--overwrite-drift`, `--allow-local` |
 | `deploy rollback` | Roll back to the previous static site deployment | `--to <id>`, `--env <name>` |
