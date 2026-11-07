@@ -109,10 +109,11 @@ export function loadBranchContext(cwd: string): BranchContext | null {
 
 /**
  * The environment `config` names for this checkout: its default, else the one its branch defaults
- * give the current git branch. From the config the caller already read: reading it runs it in a
- * child process, and a second read made every linked command half a second slower.
+ * give the current git branch. It comes ahead of `supatype envs use`'s choice. From the config the
+ * caller already read: reading it runs it in a child process, and a second read made every linked
+ * command half a second slower.
  */
-function resolveBranchDefaults(cwd: string, config: SupatypeProjectConfig): string | undefined {
+export function configEnvironment(cwd: string, config: SupatypeProjectConfig): string | undefined {
   if (config.environments?.default) return config.environments.default
   const branchDefaults = config.environments?.branchDefaults
   if (!branchDefaults) return undefined
@@ -191,14 +192,14 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     }
   }
 
-  const envName = resolveEnvironmentName(
-    link,
-    flags.env ?? resolveBranchDefaults(cwd, config),
-  )
+  const fromConfig = flags.env === undefined ? configEnvironment(cwd, config) : undefined
+  const envName = resolveEnvironmentName(link, flags.env ?? fromConfig)
   const envTarget = getEnvironmentTarget(link, envName)
   if (!envTarget) {
+    // Named by the config, not by --env or `envs use` (issue 58): say so, or the fix is not findable.
+    const why = fromConfig === undefined ? "" : ` supatype.config.ts's environments names it, ahead of supatype envs use.`
     throw new Error(
-      `Environment "${envName}" not linked. Run: supatype link --env ${envName} ... or supatype envs list`,
+      `Environment "${envName}" not linked.${why} Run: supatype link --env ${envName} ... or supatype envs list`,
     )
   }
 

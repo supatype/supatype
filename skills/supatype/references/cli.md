@@ -33,8 +33,8 @@ All targets use `.supatype/link.json` with an `environments` map:
 | `supatype link --project <ref>` | Link to Supatype Cloud (uses platform access token) |
 | `supatype link --url <api> --token <key>` | Link to self-host (the server's `SERVICE_ROLE_KEY`, which `supatype keys` puts in its `.env`) |
 | `supatype link --env staging --url ... --token ...` | Add another environment |
-| `supatype envs list` | List linked environments |
-| `supatype envs use <name>` | Set default environment |
+| `supatype envs list` | List linked environments and the default commands use (`environments` in supatype.config.ts wins over `envs use`) |
+| `supatype envs use <name>` | Set this checkout's default environment; warns when the config names another |
 | `supatype envs create <staging\|preview>` | Create a Supatype Cloud environment and add it to link.json (cloud link only; any other name is refused). For self-host, use `supatype link --env <name> --url ... --token ...` |
 | `supatype domains list` / `add <domain>` / `verify <id>` / `remove <id>` | Cloud custom domains; `verify` and `remove` take the ID `list` prints |
 

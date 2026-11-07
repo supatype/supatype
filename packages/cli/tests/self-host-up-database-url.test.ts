@@ -24,6 +24,11 @@ vi.mock("../src/compose-render-mode.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-render-mode.js")>()),
   composeRenderOptions: () => ({ devLocal: compose.devLocal }),
 }))
+// `compose up` checks the stack's published ports first (issue 57): nothing holds them here.
+vi.mock("../src/compose-services.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/compose-services.js")>()),
+  takenComposePorts: async () => [],
+}))
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: () => false }))
 
 import { registerSelfHost } from "../src/commands/self-host.js"

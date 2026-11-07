@@ -187,6 +187,21 @@
 
 ### Bug Fixes
 
+* **sso:** `supatype sso info` prints the signing certificate from the server's own metadata. It
+  said "it lists no certificate" because it only read a `<X509Certificate>` with nothing after the
+  name, and the server writes `<X509Certificate xmlns="...">`.
+* **init:** the reasons around the Kong port prompt can be read. A port typed that is in use is
+  asked for again with the reason above the question, and a port only a stopped Supatype stack is
+  configured with is taken only after a yes to "Use it anyway?". Both were logged between prompts,
+  and the next prompt's redraw wiped them before anyone could read them.
+* **self-host:** `supatype self-host compose up` checks the ports the stack publishes before it
+  starts anything, and names the port, the service and how to see what holds it. Docker used to fail
+  on the port after starting some containers. A stack whose gateway never answers is now reported as
+  "started but is not serving", with exit 1; it said "The stack is up" and exited 0.
+* **envs:** `supatype envs list` names the default commands actually use, and says when it comes
+  from `environments` in supatype.config.ts, which wins over `envs use`. `envs use` says so too when
+  the config names another environment, rather than "Default environment set". A command refused for
+  an environment that is not linked says when the config named it.
 * **pull:** `supatype pull` no longer hangs at "Introspecting database...". The engine reads its
   input from stdin when it is not given an input file, `introspect` is given none, and the CLI left
   the engine's stdin open with nothing written to it. Every program the CLI runs for its output,

@@ -20,6 +20,11 @@ const projectConfig: SupatypeProjectConfig = {
   app: { mode: "none" },
 }
 
+// `compose up` checks the stack's published ports first (issue 57): nothing holds them here.
+vi.mock("../src/compose-services.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/compose-services.js")>()),
+  takenComposePorts: async () => [],
+}))
 vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
   loadConfig: () => projectConfig,

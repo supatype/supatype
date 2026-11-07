@@ -12,6 +12,11 @@ import { runCommand, tempProject } from "./support/command-run.js"
  */
 const compose = vi.hoisted(() => ({ calls: [] as string[][], admins: 0 }))
 
+// `compose up` checks the stack's published ports first (issue 57): nothing holds them here.
+vi.mock("../src/compose-services.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/compose-services.js")>()),
+  takenComposePorts: async () => [],
+}))
 vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/self-host-compose.js")>()),
   writeSelfHostCompose: (cwd: string) => ({ composePath: join(cwd, "docker-compose.yml"), kongPath: "" }),

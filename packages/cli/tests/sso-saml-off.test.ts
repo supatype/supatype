@@ -113,11 +113,19 @@ const CURRENT =
 const NEXT =
   "MIICCjCCAXOgAwIBAgIUcL1fJJgp5VjaGqk0buw37afa3YcwDQYJKoZIhvcNAQELBQAwFjEUMBIGA1UEAwwLU0FNTCB0ZXN0IGIwIBcNMjYxMTA2MjE1NzAwWhgPMjEyNjEwMTMyMTU3MDBaMBYxFDASBgNVBAMMC1NBTUwgdGVzdCBiMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDF6J952lQMR7c+Iy+3iANdMkNU1lWZt5tbfwuuvQFSiXoX0MSEBlLZFrj9WsVisnG+ZTzwHTnuNPIYmmwIjaIByQ/321iK2GSJRCinGGsMwts1YeFiieP9F2/9e/qPcc1u1jTz++Vc55pUIQ76KVK18wTguGoETBH0e57xstMeOwIDAQABo1MwUTAdBgNVHQ4EFgQUlAibLDDk1gT2C1lU+LIjUQv/Hq0wHwYDVR0jBBgwFoAUlAibLDDk1gT2C1lU+LIjUQv/Hq0wDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOBgQADDkexTTnsl259GDH4v0RKt5KUN/LT3qzlolvUy8+mkHg5UDAOlnsdudlWgBEIDGic18G0S6oTMO8Rq0uUt8crX/U4ir5p0UpiKGGkBLHxhVlJomWSj8YljEYXHI05aRKOdlEDR70UYRJp7bi3RUWg+DALiOLlRZ4v4ExIp8/Seg=="
 
-/** SP metadata as the server writes it: a signing and an encryption descriptor per certificate. */
-function metadata(certificates: readonly string[]): string {
+/**
+ * SP metadata as the server writes it: a signing and an encryption descriptor per certificate, each
+ * element declaring its namespace with an `xmlns` attribute (issue 56). `prefixed` writes the
+ * `ds:` form other servers use instead.
+ */
+function metadata(certificates: readonly string[], prefixed = false): string {
+  const DSIG = "http://www.w3.org/2000/09/xmldsig#"
   const descriptor = (use: string, cert: string): string =>
-    `<KeyDescriptor use="${use}"><ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:X509Data>` +
-    `<ds:X509Certificate>${cert}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></KeyDescriptor>`
+    prefixed
+      ? `<KeyDescriptor use="${use}"><ds:KeyInfo xmlns:ds="${DSIG}"><ds:X509Data>` +
+        `<ds:X509Certificate>${cert}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></KeyDescriptor>`
+      : `<KeyDescriptor use="${use}"><KeyInfo xmlns="${DSIG}"><X509Data xmlns="${DSIG}">` +
+        `<X509Certificate xmlns="${DSIG}">${cert}</X509Certificate></X509Data></KeyInfo></KeyDescriptor>`
   const keys = certificates.flatMap((cert) => [descriptor("signing", cert), descriptor("encryption", cert)])
   return `<EntityDescriptor><SPSSODescriptor>${keys.join("")}</SPSSODescriptor></EntityDescriptor>`
 }
@@ -143,6 +151,11 @@ describe("sso info with SAML on", () => {
     expect(out).toContain("-----BEGIN CERTIFICATE-----\nMIICCjCCAXOgAwIBAgIUI+ubPPG94II1Q8Y5Xbe7kxJI4AIw")
     expect(out).toMatch(/Signing certificate \(SHA-256 ([0-9A-F]{2}:){31}[0-9A-F]{2}\)/)
     expect(out).not.toMatch(/Next/)
+  })
+
+  it("reads a certificate written with a ds: prefix too", async () => {
+    await runInfo(metadata([CURRENT], true))
+    expect(printed()).toContain("-----BEGIN CERTIFICATE-----\nMIICCjCCAXOgAwIBAgIUI+ubPPG94II1Q8Y5Xbe7kxJI4AIw")
   })
 
   it("prints the next certificate too while a rotation publishes it", async () => {

@@ -34,6 +34,9 @@ import {
   writeSelfHostCompose,
 } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
+import { takenComposePorts, type ComposeContext, type PublishedPort } from "../compose-services.js"
+import { isPortInUse, portCheckCommand } from "../postgres-ctl.js"
+import { fatalError } from "../ui/fatal.js"
 import { warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
 import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
@@ -94,10 +97,11 @@ export function registerSelfHost(program: Command): void {
       // DATABASE_URL in .env is not moved to this stack's port. That line is dev's, and moving it
       // here had dev and self-host rewriting it in turn (issue 26). Host commands such as seed and
       // admin reach the running stack's port past a URL the CLI wrote (host-database.ts).
-      const status = await withSpinner("Starting self-host Compose stack", async () => {
-        const out = writeSelfHostCompose(cwd, config, renderOptions)
-        return runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND })
-      })
+      const out = writeSelfHostCompose(cwd, config, renderOptions)
+      await requireComposePortsFree({ composePath: out.composePath, projectRoot: cwd, projectName: project })
+      const status = await withSpinner("Starting self-host Compose stack", async () =>
+        runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND }),
+      )
       if (status !== 0) {
         exitComposeFailed(status, "Could not start the self-host Compose stack.", SELF_HOST_BRAND)
       }
@@ -425,19 +429,49 @@ const SELF_HOST_BRAND = { intro: "Self-host deployment" }
 /**
  * The schema's declared buckets and the first admin user, on the stack `up` has just started, once
  * it answers (issue 41): as `dev` and a push to a running stack do, so nothing waits on a push to
- * start the stack and make them. A failure is warned about; the stack itself is up.
+ * start the stack and make them. A failure to make them is warned about. A stack that never answers
+ * through its gateway is not up, and says so with exit 1 (issue 57).
  */
 async function provisionAfterUp(cwd: string, config: SupatypeProjectConfig, project: string, devLocal: boolean): Promise<void> {
+  const { composeGatewayHostPort, provisionStartedStack, StackNotServing } = await import("../dev-compose.js")
   try {
-    const { composeGatewayHostPort, provisionStartedStack } = await import("../dev-compose.js")
     const kongPort = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
     const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", kongPort)
     const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
     const stack = { composePath: selfHostComposePaths(cwd).composePath, project, gatewayPort }
     await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey)
   } catch (err) {
-    warn(`The stack is up, but its storage buckets or first admin user could not be created: ${errorMessage(err)}`)
+    if (!(err instanceof StackNotServing)) {
+      warn(`The stack is up, but its storage buckets or first admin user could not be created: ${errorMessage(err)}`)
+      return
+    }
+    // Containers that started but never answered are not a stack that is up (issue 57).
+    error(`The stack started but is not serving: ${errorMessage(err)}`)
+    plain("Check: supatype self-host compose logs. A container left with no network by a failed start")
+    plain("comes back with: supatype self-host compose restart <service>")
+    process.exitCode = 1
   }
+}
+
+/**
+ * Refuse `up` before it starts anything when a port the stack publishes is held by something else.
+ * Docker otherwise starts some containers, fails on the port, and leaves them for the next `up`,
+ * which the run behind issue 57 found with no network at all.
+ */
+async function requireComposePortsFree(ctx: ComposeContext): Promise<void> {
+  // A check that cannot read the compose file stops nothing: `up` itself says what is wrong with it.
+  const taken = await takenComposePorts(ctx, isPortInUse).catch((): PublishedPort[] => [])
+  const first = taken[0]
+  if (first === undefined) return
+  fatalError(
+    `Port ${first.port} is already in use, and the stack's ${first.service} service publishes it.`,
+    [
+      ...taken.slice(1).map((t) => `Port ${t.port} (${t.service}) is in use too.`),
+      `Check: ${portCheckCommand(first.port)}`,
+      "Stop what holds it (another Supatype stack's `supatype dev` or compose stack, say), then run this again.",
+    ],
+    { brand: SELF_HOST_BRAND },
+  )
 }
 
 /**
