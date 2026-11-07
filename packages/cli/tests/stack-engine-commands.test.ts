@@ -19,7 +19,7 @@ const composeEngine = vi.hoisted(
   (): ComposeEngine => ({
     target: { cwd: "", project: "p", composePath: "", engineImage: "img" },
     databaseUrl: "postgresql://db/app",
-    capabilities: async () => ({ version: "0.9.1", features: new Set<string>() }),
+    capabilities: async () => ({ version: "0.9.1", source: "engine", features: new Set<string>() }),
   }),
 )
 const engineCalls = vi.hoisted(() => [] as Array<{ endpoint: string; engine: ComposeEngine | undefined }>)
@@ -40,7 +40,7 @@ vi.mock("../src/engine-client.js", async (importOriginal) => ({
 }))
 vi.mock("../src/engine-ownership-gate.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/engine-ownership-gate.js")>()),
-  engineCapabilities: async () => ({ version: "0.9.0", features: new Set<string>() }),
+  engineCapabilities: async () => ({ version: "0.9.0", source: "engine", features: new Set<string>() }),
 }))
 vi.mock("../src/dev-compose.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/dev-compose.js")>()),
