@@ -96,3 +96,26 @@ describe("functions invoke", () => {
     expect(run.exitCode).toBe(1)
   })
 })
+
+// Issue 55: a 404 printed its status and exited 0, so a script could not tell the call failed.
+describe("functions invoke's exit code", () => {
+  afterEach(() => {
+    process.exitCode = undefined
+  })
+
+  it("is 1 when the function answers 400 or above, with the status and body still printed", async () => {
+    writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response('{"error":"not_found"}', { status: 404 })))
+    const run = await runCommand(registerFunctions, ["functions", "invoke", "nope"], project.dir)
+    expect(run.output).toContain("Status: 404")
+    expect(run.output).toContain('"error": "not_found"')
+    expect(process.exitCode).toBe(1)
+  })
+
+  it("is left at 0 when the function answers below 400", async () => {
+    writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
+    const run = await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
+    expect(run.output).toContain("Status: 200")
+    expect(process.exitCode ?? 0).toBe(0)
+  })
+})

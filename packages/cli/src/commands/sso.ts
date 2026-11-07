@@ -12,6 +12,7 @@ import { errorMessage } from "../error-message.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import { AUTH_ROUTES_PATH, SAML_NEXT_PRIVATE_KEY_ENV, SAML_PRIVATE_KEY_ENV, samlEnabled } from "../saml-config.js"
 import { createNextSamlKey, promoteNextSamlKey } from "../saml-key-rotation.js"
+import { fetchSpCertificates, type SpCertificate } from "../saml-sp-certificate.js"
 import {
   NAME_ID_FORMATS,
   assertProviderName,
@@ -44,6 +45,11 @@ export function registerSso(program: Command): void {
       "SAML single sign-on: register identity providers, print the service provider's values, rotate its key.\n" +
         "Turn SAML on with auth.sso.saml.enabled in supatype.config.ts.",
     )
+  // Every subcommand works with SAML off, so providers can be set up first, and each one says so.
+  // `info` says it in its own words, as part of what it prints.
+  sso.hook("preAction", (_sso, action) => {
+    if (action.name() !== "info") warnIfSamlOff(process.cwd())
+  })
   registerAdd(sso)
   registerReadCommands(sso)
   registerUpdate(sso)
@@ -93,7 +99,6 @@ async function addProvider(name: string, flags: SsoFlags): Promise<void> {
   const provider = await createSsoProvider(endpoint, name, input)
   info(`Added SAML provider ${name} to ${endpoint.where}.`)
   printProvider(provider)
-  warnIfSamlOff(process.cwd())
   plain("\nGive the identity provider this project's service provider values: supatype sso info")
 }
 
@@ -174,16 +179,51 @@ async function removeProvider(name: string, opts: { yes?: boolean }): Promise<vo
 function registerInfo(sso: Command): void {
   sso
     .command("info")
-    .description("Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata")
-    .action(
-      guarded(async () => {
-        const cwd = process.cwd()
-        const config = loadConfig(cwd)
-        for (const line of serviceProviderInfo(samlServiceProviderUrl(config, ssoApiBaseUrl(cwd).baseUrl))) plain(line)
-        const off = samlOffWarning(config)
-        if (off !== undefined) warn(off)
-      }),
+    .description(
+      "Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata, " +
+        "and the signing certificate (the next one too during a key rotation), read from the served metadata",
     )
+    .action(guarded(printServiceProviderInfo))
+}
+
+async function printServiceProviderInfo(): Promise<void> {
+  const cwd = process.cwd()
+  const config = loadConfig(cwd)
+  const samlUrl = samlServiceProviderUrl(config, ssoApiBaseUrl(cwd).baseUrl)
+  for (const line of serviceProviderInfo(samlUrl)) plain(line)
+  const metadata = spMetadataUrl(samlUrl)
+  const off = samlOffWarning(config)
+  if (off !== undefined) {
+    warn(
+      `${off} Until then these values are not served: ${metadata} answers 404, ` +
+        "and the signing certificate is published there.",
+    )
+    return
+  }
+  let certificates: SpCertificate[]
+  try {
+    certificates = await fetchSpCertificates(metadata)
+  } catch (err) {
+    warn(
+      `Could not read the signing certificate from ${metadata}: ${errorMessage(err)}. It is in the metadata ` +
+        "there once the stack is up; an identity provider given the metadata URL reads it itself.",
+    )
+    return
+  }
+  for (const line of certificateLines(certificates)) plain(line)
+}
+
+/** Each certificate as PEM under its fingerprint: the current one, then the next during a rotation. */
+export function certificateLines(certificates: readonly SpCertificate[]): string[] {
+  return certificates.flatMap((cert, index) => [
+    "",
+    `${index === 0 ? "Signing certificate" : "Next signing certificate, published for the key rotation"} (SHA-256 ${cert.fingerprint256}):`,
+    cert.pem,
+  ])
+}
+
+function spMetadataUrl(samlUrl: string): string {
+  return `${samlUrl}/sso/saml/metadata`
 }
 
 /** Where the service provider is: `auth.sso.saml.externalUrl`, else the API's `/auth/v1`, as the stack sets it. */
@@ -194,7 +234,7 @@ export function samlServiceProviderUrl(config: SupatypeProjectConfig, apiBaseUrl
 
 /** The values an identity provider asks for, for the service provider at `samlUrl`. */
 export function serviceProviderInfo(samlUrl: string): string[] {
-  const metadata = `${samlUrl}/sso/saml/metadata`
+  const metadata = spMetadataUrl(samlUrl)
   const row = (label: string, value: string): string => `  ${label.padEnd(26)}${value}`
   return [
     "Service provider values to give your identity provider:",
@@ -217,11 +257,11 @@ export function samlOffWarning(config: SupatypeProjectConfig): string | undefine
   if (samlEnabled(config)) return undefined
   return (
     "SAML is off for this project: set auth.sso.saml.enabled to true in supatype.config.ts and restart the " +
-    "stack. Providers can be registered first, but nobody can sign in through them until then."
+    "stack. Providers can be set up first, but nobody can sign in through them until then."
   )
 }
 
-/** {@link samlOffWarning} for the project in `cwd`, when its config can be read. */
+/** {@link samlOffWarning} for the project in `cwd`, when its config can be read. Every subcommand but `info` runs it. */
 function warnIfSamlOff(cwd: string): void {
   let config: SupatypeProjectConfig
   try {
@@ -266,7 +306,7 @@ function overlapSteps(): string[] {
     "During the overlap the server lists both certificates in its SP metadata, signs requests with the",
     "current key, and decrypts assertions with either. Next:",
     "  1. Restart the stack (supatype dev, or supatype self-host compose up) so the server loads the key.",
-    "  2. Give every identity provider the new metadata (supatype sso info prints the link).",
+    "  2. Give every identity provider the new metadata or certificate (supatype sso info prints both).",
     "  3. Then make the new key current: supatype sso rotate-key --promote",
   ]
 }
@@ -296,7 +336,7 @@ function serverRotationSteps(): string[] {
     "On the server:",
     `  1. Set ${SAML_NEXT_PRIVATE_KEY_ENV} to a new key and restart it. In the server's project directory,`,
     "     supatype sso rotate-key writes one into its .env.",
-    "  2. Give every identity provider the new metadata (supatype sso info prints the link).",
+    "  2. Give every identity provider the new metadata or certificate (supatype sso info prints both).",
     `  3. Move that value to ${SAML_PRIVATE_KEY_ENV}, remove ${SAML_NEXT_PRIVATE_KEY_ENV}, and restart`,
     "     (supatype sso rotate-key --promote in the server's project directory).",
   ]

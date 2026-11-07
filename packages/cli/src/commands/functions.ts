@@ -125,7 +125,9 @@ export function registerFunctions(program: Command): void {
 
   fnCmd
     .command("invoke <name>")
-    .description("Invoke a local or deployed function")
+    .description(
+      "Invoke a local or deployed function and print its status and body. Exits 1 when it answers with a status of 400 or above.",
+    )
     .option("--data <json>", "JSON body to send", "{}")
     .option("--auth", "Send a token: your Cloud session on a Cloud link, a test JWT on this machine; refused for a self-hosted server")
     .option(
@@ -734,6 +736,8 @@ async function invoke(cwd: string, name: string, opts: InvokeOptions): Promise<v
     const res = await fetchWithin(url, 30_000, { method: "POST", headers, body })
     const duration = Date.now() - start
     printInvokeAnswer(res.status, duration, await res.text())
+    // A script has only the exit code to tell a failed call by; the body is printed either way.
+    if (res.status >= 400) process.exitCode = 1
   } catch (err) {
     reportInvokeFailure(url, err)
   }
