@@ -110,6 +110,16 @@ export function providerName(provider: SsoProvider): string {
 /** How the auth server names a SAML identity's provider: `sso:` and the provider's ID. */
 const SSO_IDENTITY_PREFIX = "sso:"
 
+/** How `provider`'s users' identities are shown: `sso:` and its name, else the first block of its ID. */
+export function ssoProviderLabel(provider: SsoProvider): string {
+  return `${SSO_IDENTITY_PREFIX}${provider.resourceId ?? provider.id.split("-")[0]}`
+}
+
+/** The provider string the auth server records on an identity made through `provider`. */
+export function ssoIdentityProvider(provider: SsoProvider): string {
+  return `${SSO_IDENTITY_PREFIX}${provider.id}`
+}
+
 /** Whether an identity's provider string is a SAML provider's. */
 export function isSsoIdentity(provider: string): boolean {
   return provider.startsWith(SSO_IDENTITY_PREFIX)
@@ -124,8 +134,8 @@ export function isSsoIdentity(provider: string): boolean {
 export function identityProviderLabel(provider: string, providers: readonly SsoProvider[] | null): string {
   if (!isSsoIdentity(provider)) return provider
   const id = provider.slice(SSO_IDENTITY_PREFIX.length)
-  const name = providers?.find((p) => p.id === id)?.resourceId ?? id.split("-")[0]
-  return `${SSO_IDENTITY_PREFIX}${name}`
+  const known = providers?.find((p) => p.id === id)
+  return known ? ssoProviderLabel(known) : `${SSO_IDENTITY_PREFIX}${id.split("-")[0]}`
 }
 
 /** The path segment that addresses `provider` in the admin API. */

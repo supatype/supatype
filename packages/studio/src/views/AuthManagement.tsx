@@ -18,7 +18,7 @@ import { userAdministrationOffered, adminAccountChangeOffered, accountRemovalOff
 import { authRefusalText } from "../lib/auth-refusal.js"
 import { useAuthSettings } from "../hooks/useAuthSettings.js"
 import { useSsoProviderList } from "../hooks/useSsoProviders.js"
-import { identityProviderLabel, isSsoIdentity, type SsoProvider } from "../lib/sso-providers.js"
+import { identityProviderLabel, isSsoIdentity, ssoIdentityProvider, ssoProviderLabel, type SsoProvider } from "../lib/sso-providers.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import {
@@ -630,11 +630,11 @@ function signsInWithSso(user: AuthUser): boolean {
 }
 
 /**
- * The project's SAML providers, for the users on screen. They are read through the SSO page's own
- * hook, and only once a user on screen has signed in through one.
+ * The project's SAML providers, for the users on screen and the provider filter. They are read
+ * through the SSO page's own hook, and only once SAML is on or a user on screen signed in through one.
  */
-function useSsoProviderNames(shown: Array<AuthUser | null>): readonly SsoProvider[] | null {
-  const needed = shown.some((u) => u !== null && signsInWithSso(u))
+function useSsoProviderNames(shown: Array<AuthUser | null>, samlOn: boolean): readonly SsoProvider[] | null {
+  const needed = samlOn || shown.some((u) => u !== null && signsInWithSso(u))
   return useSsoProviderList(needed).state.providers
 }
 
@@ -838,10 +838,18 @@ function userRangeText(page: UserPage): string {
   return `Users ${first}-${first + page.users.length - 1} of ${page.total}`
 }
 
-/** The providers to filter by: those the project has switched on, or the common ones until it says. */
-function providerChoices(external: Record<string, boolean> | undefined): string[] {
+/**
+ * The providers to filter by: those the project has switched on, or the common ones until it says,
+ * then each SAML provider, by the identity provider its users carry and labelled as their badge is.
+ */
+function providerChoices(
+  external: Record<string, boolean> | undefined,
+  ssoProviders: readonly SsoProvider[] | null,
+): Array<{ value: string; label: string }> {
   const enabled = Object.entries(external ?? {}).filter(([name, on]) => on && name !== "anonymous_users").map(([name]) => name)
-  return enabled.length > 0 ? enabled : providerFilters.slice(1)
+  const named = (enabled.length > 0 ? enabled : providerFilters.slice(1)).map((name) => ({ value: name, label: name }))
+  const sso = (ssoProviders ?? []).map((p) => ({ value: ssoIdentityProvider(p), label: ssoProviderLabel(p) }))
+  return [...named, ...sso]
 }
 
 export function AuthManagement(): React.ReactElement {
@@ -922,7 +930,7 @@ export function AuthManagement(): React.ReactElement {
     [authAdminFetch, selectedUserId],
   )
   const sessions = sessionsData ?? []
-  const ssoProviders = useSsoProviderNames([...users, selectedUser])
+  const ssoProviders = useSsoProviderNames([...users, selectedUser], authSettings?.saml_enabled === true)
   const [editingUser, setEditingUser] = useState<AuthUser | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [showInviteForm, setShowInviteForm] = useState(false)
@@ -1120,7 +1128,7 @@ export function AuthManagement(): React.ReactElement {
           </Select>
           <Select className="w-[140px]" value={filters.provider} onChange={(e) => setFilters({ ...filters, provider: e.target.value })}>
             <option value="all">All providers</option>
-            {providerChoices(authSettings?.external).map((p) => <option key={p} value={p}>{p}</option>)}
+            {providerChoices(authSettings?.external, ssoProviders).map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
           </Select>
           <Button onClick={() => setShowInviteForm(true)}>Invite User</Button>
           <Button variant="primary" onClick={() => setShowCreateForm(true)}>+ Create User</Button>

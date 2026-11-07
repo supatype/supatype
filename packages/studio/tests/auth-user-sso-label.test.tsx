@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest"
-import React from "react"
+import React, { act } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
@@ -34,14 +34,14 @@ const EMAIL_ONLY = { ...samlUser("33333333-3333-3333-3333-333333333333", "lin@ex
 isolateEachTest()
 
 /** Stub the auth server with `users`, and return the URLs it was asked for. */
-function stubFetch(users: Array<Record<string, unknown>>): string[] {
+function stubFetch(users: Array<Record<string, unknown>>, settings: Record<string, unknown> = { mailer_autoconfirm: true }): string[] {
   const urls: string[] = []
   vi.stubGlobal("fetch", async (url: string) => {
     urls.push(url)
     if (url.endsWith("/studio/auth/verify")) {
       return Response.json({ sub: "admin-id", role: "admin", mode: "self", permissions: { manageUsers: true } })
     }
-    if (url.endsWith("/auth/v1/settings")) return Response.json({ mailer_autoconfirm: true })
+    if (url.endsWith("/auth/v1/settings")) return Response.json(settings)
     if (url.endsWith("/auth/v1/admin/sso/providers")) return Response.json({ items: [ACME] })
     if (url.includes("/auth/v1/admin/users/")) return Response.json(users.find((u) => url.includes(String(u["id"]))) ?? users[0])
     if (url.includes("/auth/v1/admin/users")) return Response.json({ users, aud: "authenticated" })
@@ -90,6 +90,35 @@ describe("a SAML user's provider badge", () => {
     const urls = stubFetch([EMAIL_ONLY])
     await renderUsers("/auth/users")
     expect(urls.some((u) => u.includes("/admin/sso/providers"))).toBe(false)
+  })
+})
+
+/** Issue 62: the provider filter offered only the switched-on providers, never a SAML one. */
+describe("the Users provider filter", () => {
+  function providerSelect(root: ParentNode): HTMLSelectElement {
+    const select = [...root.querySelectorAll("select")].find((s) => s.options[0]?.textContent === "All providers")
+    if (!select) throw new Error("no provider filter rendered")
+    return select
+  }
+
+  it("offers each SAML provider by name, and filters by its identity provider", async () => {
+    const urls = stubFetch([EMAIL_ONLY], { mailer_autoconfirm: true, saml_enabled: true, external: { email: true } })
+    const select = providerSelect(await renderUsers("/auth/users"))
+    const options = [...select.options].map((o) => [o.value, o.textContent])
+    expect(options).toEqual([["all", "All providers"], ["email", "email"], [`sso:${ACME_ID}`, "sso:acme"]])
+
+    await act(async () => {
+      select.value = `sso:${ACME_ID}`
+      select.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    await settle()
+    expect(urls.some((u) => u.includes(`provider=sso%3A${ACME_ID}`))).toBe(true)
+  })
+
+  it("offers no SAML choice while SAML is off", async () => {
+    stubFetch([EMAIL_ONLY], { mailer_autoconfirm: true, external: { email: true } })
+    const select = providerSelect(await renderUsers("/auth/users"))
+    expect([...select.options].map((o) => o.value)).toEqual(["all", "email"])
   })
 })
 
