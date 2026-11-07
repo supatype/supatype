@@ -143,6 +143,7 @@ import {
   stop as pgStop,
   waitReady as pgWaitReady,
   isPortInUse,
+  portCheckCommand,
 } from "../postgres-ctl.js"
 import {
   isPasswordRejected,
@@ -151,11 +152,6 @@ import {
   requireSuperuserPassword,
   superuserPasswordMissingMessage,
 } from "../native-pg-auth.js"
-function portCheckCommand(port: number): string {
-  return process.platform === "win32"
-    ? `netstat -ano | findstr :${port}`
-    : `lsof -i :${port}`
-}
 
 /** The ports native dev binds, each with what usually holds it and how to move it. */
 interface NativeDevPorts {

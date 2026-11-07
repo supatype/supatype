@@ -1547,6 +1547,11 @@ export function composeGatewayHostPort(
   return selfHostTlsEnabled(config, mode === "dev") ? 80 : kongPort
 }
 
+/** A stack `up` started that never answered through its gateway: not up, whatever `up` said (issue 57). */
+export class StackNotServing extends Error {
+  override readonly name = "StackNotServing"
+}
+
 /**
  * What a started stack needs once it answers: the gateway and storage waited for, then the schema's
  * declared buckets and the first admin user. A push to a running stack runs it after its `up -d`,
@@ -1561,7 +1566,11 @@ export async function provisionStartedStack(
   serviceRoleKey: string,
 ): Promise<void> {
   const { composePath, project, gatewayPort } = stack
-  await waitKongReady(gatewayPort, 120, { composePath, cwd, project })
+  try {
+    await waitKongReady(gatewayPort, 120, { composePath, cwd, project })
+  } catch (err) {
+    throw new StackNotServing(errorMessage(err), { cause: err })
+  }
   await waitStorageApiReady(gatewayPort, serviceRoleKey, 90)
   await provisionDockerStorageBuckets(ast, gatewayPort, serviceRoleKey)
   await ensureFirstAdminUserForProject(cwd, config, { compose: { project, composePath } })

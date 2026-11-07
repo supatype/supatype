@@ -29,8 +29,8 @@ describe("parseComposePs", () => {
     ].join("\n")
 
     expect(parseComposePs(stdout)).toEqual([
-      { service: "db", container: "supatype-demo-db-1", state: "exited", ports: "", status: "Exited (1)" },
-      { service: "server", container: "supatype-demo-server-1", state: "running", ports: "", status: "Up 2 minutes" },
+      { service: "db", container: "supatype-demo-db-1", state: "exited", ports: "", hostPorts: [], status: "Exited (1)" },
+      { service: "server", container: "supatype-demo-server-1", state: "running", ports: "", hostPorts: [], status: "Up 2 minutes" },
     ])
   })
 

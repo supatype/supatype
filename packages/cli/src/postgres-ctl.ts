@@ -626,6 +626,11 @@ export async function isPortInUse(port: number): Promise<boolean> {
   return bindFails(port, "127.0.0.1")
 }
 
+/** The command that shows what holds `port`, for this platform. */
+export function portCheckCommand(port: number): string {
+  return process.platform === "win32" ? `netstat -ano | findstr :${port}` : `lsof -i :${port}`
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
