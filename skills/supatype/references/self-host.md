@@ -221,7 +221,7 @@ supatype admin list-users
 | `admin` | everything: members, auth users, keys, domains, CORS list, elevated access |
 | `developer` | everything an admin may do except grant Studio roles |
 | `editor` | read and write rows; Data Explorer works, schema screens do not |
-| `viewer` | read rows, schema screens and logs; changes nothing |
+| `viewer` | read rows, schema screens, logs and SSO providers; changes nothing |
 
 - **SQL editor** (and creating or dropping tables, views, functions, triggers, types, policies,
   extensions, RLS switches): owner, admin, developer. It signs in as `supatype_sql_editor`, a
