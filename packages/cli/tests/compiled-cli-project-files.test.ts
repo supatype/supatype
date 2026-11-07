@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -58,5 +58,27 @@ describe.skipIf(!hasBun)("the compiled CLI", () => {
     const run = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { PATH: process.env["PATH"] ?? "" } })
     expect(run.status, run.stderr).toBe(0)
     expect(JSON.parse(run.stdout.trim())).toEqual([null, null, null])
+  }, 120_000)
+
+  // Issue 61: a seed's builder imports `@supatype/cli/seed` from the project's node_modules, and a
+  // compiled program reads no package.json at run time unless told to, so it resolved no package
+  // there: "Cannot find module '@supatype/cli/seed'". Every seed failed from the binary.
+  it("resolves a package from the project's node_modules, by its exports", () => {
+    dir = mkdtempSync(join(tmpdir(), "supatype-compiled-"))
+    const pkg = join(dir, "node_modules", "@probe", "lib")
+    mkdirSync(join(pkg, "dist"), { recursive: true })
+    const exports = { "./seed": "./dist/seed.js" }
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@probe/lib", type: "module", exports }))
+    writeFileSync(join(pkg, "dist", "seed.js"), "export const answer = 42\n")
+    writeFileSync(join(dir, "seed.ts"), 'import { answer } from "@probe/lib/seed"\nconsole.log(answer)\n')
+    writeFileSync(join(dir, "probe.ts"), 'import { pathToFileURL } from "node:url"\nawait import(pathToFileURL(process.argv[2] ?? "").href)\n')
+    const exe = join(dir, process.platform === "win32" ? "probe.exe" : "probe")
+    const flags = [...releaseCompileFlags(), "--outfile", exe]
+    const build = spawnSync("bun", ["build", join(dir, "probe.ts"), ...flags], { encoding: "utf8", shell: process.platform === "win32" })
+    expect(build.status, build.stderr).toBe(0)
+    const env = { PATH: process.env["PATH"] ?? "" }
+    const run = spawnSync(exe, [join(dir, "seed.ts")], { cwd: dir, encoding: "utf8", env })
+    expect(run.status, run.stderr).toBe(0)
+    expect(run.stdout.trim()).toBe("42")
   }, 120_000)
 })

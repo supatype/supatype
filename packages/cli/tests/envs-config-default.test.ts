@@ -86,6 +86,17 @@ describe("envs with environments.default in the config", () => {
   })
 })
 
+// Round 2 of the retest: with production named by the config but not linked, `envs list` starred
+// nothing and gave no next step.
+describe("envs list when the default is not linked", () => {
+  it("says so, and how to link it", async () => {
+    project.config = { ...BASE, environments: { default: "qa" } }
+    await envs("list")
+    expect(said.plain).toContain("Default: qa (from supatype.config.ts environments, not linked: run supatype link --env qa)\n")
+    expect(said.plain.some((line) => line.startsWith(" *"))).toBe(false)
+  })
+})
+
 describe("envs with no default in the config", () => {
   beforeEach(() => {
     project.config = BASE

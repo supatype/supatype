@@ -93,6 +93,17 @@ describe("init's Kong port prompt", () => {
     expect(selects).toEqual(["Port 18480 is in use on this machine."])
   })
 
+  it("gives one reason for a port a running stack holds, at every prompt", async () => {
+    listening.add(18500)
+    typed.push("18500", "18500", "18490")
+    chosen.push("custom")
+    expect(await promptKongPortChoice(STOPPED_STACK_ON_18500, {})).toBe(18490)
+    const reason = "Port 18500 is in use by another Supatype stack configured with it."
+    expect(selects).toEqual([reason])
+    expect(texts[2]?.startsWith(`${reason} Pick another port`)).toBe(true)
+    expect(confirms).toEqual([])
+  })
+
   it("asks before taking a port only a stopped stack is configured with", async () => {
     typed.push("18500")
     confirmed.push(true)

@@ -91,7 +91,12 @@ export function registerEnvs(program: Command): void {
       // Worked out as resolveTarget does, so the default named is the one commands use.
       const current = resolveEnvironmentName(link, fromConfig)
       plain(`\nProject: ${link.projectRef} (${link.kind})`)
-      plain(`Default: ${current}${fromConfig === undefined ? "" : " (from supatype.config.ts environments)"}\n`)
+      // A default that is not linked has no row to star, so the line itself says what to do.
+      const notes = [
+        ...(fromConfig === undefined ? [] : ["from supatype.config.ts environments"]),
+        ...(link.environments[current] ? [] : [`not linked: run supatype link --env ${current}`]),
+      ]
+      plain(`Default: ${current}${notes.length === 0 ? "" : ` (${notes.join(", ")})`}\n`)
       for (const [name, env] of Object.entries(link.environments)) {
         const mark = name === current ? " *" : "  "
         plain(`${mark} ${name.padEnd(14)} ${env.apiUrl}`)

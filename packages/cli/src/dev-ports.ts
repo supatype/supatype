@@ -209,7 +209,7 @@ async function promptPortConflict(
   reason: "in_use" | "init",
   reserved: ReadonlySet<number> = NO_PORTS,
 ): Promise<number> {
-  const port = await promptPortConflictWithoutPersist(blockedPort, reason, reserved)
+  const port = await promptPortConflictWithoutPersist(blockedPort, await conflictHeadline(blockedPort, reason, reserved), reserved)
   persistKongPort(cwd, port)
   return port
 }
@@ -316,7 +316,7 @@ export async function promptKongPortChoice(
   const freeDefault = await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved)
   const port = await askKongPort(freeDefault)
   if (await isPortInUse(port)) {
-    return promptPortConflictWithoutPersist(port, "init", reserved)
+    return promptPortConflictWithoutPersist(port, portRefusal(port, true, reserved), reserved)
   }
   if (await acceptsReservedPort(port, reserved)) return port
   return askFreeKongPort(freeDefault, reserved, PICK_UNRESERVED)
@@ -363,21 +363,33 @@ function reservedPortClash(port: number): string {
 
 /**
  * The prompt's headline: what is actually true of `port`. At init it was refused for being in use or
- * for another stack being configured with it, and `reserved` says which without probing it again.
+ * for another stack being configured with it, or both.
  */
-function conflictHeadline(port: number, reason: "in_use" | "init", reserved: ReadonlySet<number>): string {
+async function conflictHeadline(port: number, reason: "in_use" | "init", reserved: ReadonlySet<number>): Promise<string> {
   if (reason === "in_use") return `Port ${port} is in use, another Supatype project or service may already be bound to it.`
-  return reserved.has(port) ? `${reservedPortClash(port)}.` : `Port ${port} is in use on this machine.`
+  return portRefusal(port, await isPortInUse(port), reserved)
 }
 
+/**
+ * Why init did not take `port`, from whether something listens on it and whether another Supatype
+ * stack is configured with it: the same words at every prompt (issue 59).
+ */
+function portRefusal(port: number, listening: boolean, reserved: ReadonlySet<number>): string {
+  if (!listening) return `${reservedPortClash(port)}.`
+  return reserved.has(port)
+    ? `Port ${port} is in use by another Supatype stack configured with it.`
+    : `Port ${port} is in use on this machine.`
+}
+
+/** Offer the next free port, another typed in, or cancel, under `headline`: why `blockedPort` was not taken. */
 async function promptPortConflictWithoutPersist(
   blockedPort: number,
-  reason: "in_use" | "init",
+  headline: string,
   reserved: ReadonlySet<number> = NO_PORTS,
 ): Promise<number> {
   const suggested = await findNextFreePort(blockedPort + 1, reserved)
   const choice = await p.select<"suggested" | "custom" | "cancel">({
-    message: conflictHeadline(blockedPort, reason, reserved),
+    message: headline,
     options: [
       {
         value: "suggested",
@@ -407,7 +419,7 @@ async function askFreeKongPort(suggested: number, reserved: ReadonlySet<number>,
   for (;;) {
     const port = await askKongPort(suggested, why)
     if (await isPortInUse(port)) {
-      why = `Port ${port} is in use on this machine. Pick another port, or stop the service using it.`
+      why = `${portRefusal(port, true, reserved)} Pick another port, or stop the service using it.`
     } else if (await acceptsReservedPort(port, reserved)) {
       return port
     } else {
