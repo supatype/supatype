@@ -16,9 +16,13 @@ export interface SpCertificate {
 
 const METADATA_TIMEOUT_MS = 10_000
 
-/** The certificates in SP metadata, in order and once each (a key is listed for signing and encryption). */
+/**
+ * The certificates in SP metadata, in order and once each (a key is listed for signing and encryption).
+ * The element may carry a namespace prefix (`ds:X509Certificate`) or attributes: the server writes
+ * `<X509Certificate xmlns="...">`, which a pattern wanting `>` straight after the name missed (issue 56).
+ */
 export function spCertificates(metadataXml: string): SpCertificate[] {
-  const bodies = [...metadataXml.matchAll(/<(?:[\w-]+:)?X509Certificate>([^<]+)<\/(?:[\w-]+:)?X509Certificate>/g)]
+  const bodies = [...metadataXml.matchAll(/<(?:[\w-]+:)?X509Certificate\b[^>]*>([^<]+)<\/(?:[\w-]+:)?X509Certificate>/g)]
     .map((match) => (match[1] ?? "").replace(/\s+/g, ""))
     .filter((body, index, all) => body !== "" && all.indexOf(body) === index)
   return bodies.map((body) => {

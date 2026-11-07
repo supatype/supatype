@@ -205,8 +205,8 @@ async function printServiceProviderInfo(): Promise<void> {
     certificates = await fetchSpCertificates(metadata)
   } catch (err) {
     warn(
-      `Could not read the signing certificate from ${metadata}: ${errorMessage(err)}. It is in the metadata ` +
-        "there once the stack is up; an identity provider given the metadata URL reads it itself.",
+      `Could not read the signing certificate from ${metadata}: ${errorMessage(err)}. ` +
+        "An identity provider given the metadata URL reads it from there itself.",
     )
     return
   }
