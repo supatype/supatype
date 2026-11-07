@@ -22,6 +22,9 @@
 
 ### Bug Fixes
 
+* **auth:** the Users provider filter offers each SAML provider by name, `sso:acme`, and lists the
+  users who signed in through it. It offered only the providers switched on in the config, so a
+  user with an `sso:acme` badge could not be filtered to.
 * **auth:** the Users list and a user's linked identities name a SAML user's identity provider,
   `sso:acme`, where they showed `sso:` and the provider's full ID. A provider that has been removed,
   or was added without a name, is shown by the first block of its ID. The providers are read only

@@ -187,6 +187,18 @@
 
 ### Bug Fixes
 
+* **seed:** `supatype seed` and `npm run seed` work from the standalone binary on Windows. Every
+  seed file failed with "Cannot find module 'B:\~BUN\root\seed-ir.js'": the seed ran from a temp
+  file that could not import the CLI's own modules out of the binary. The binary now collects a
+  seed by running itself, as it already does to read the config. It also resolves packages from the
+  project's node_modules, which it could not do at all, so a seed builder's `@supatype/cli/seed`
+  import is found.
+* **init:** a Kong port typed that another running Supatype stack holds gets one reason at every
+  prompt, "Port N is in use by another Supatype stack configured with it.". The first prompt said
+  it was configured for another stack and the next said it was in use on this machine.
+* **envs:** `envs list` says when the default environment is not linked, and how to link it:
+  "Default: production (from supatype.config.ts environments, not linked: run supatype link --env
+  production)". No environment was starred and nothing said why.
 * **sso:** `supatype sso info` prints the signing certificate from the server's own metadata. It
   said "it lists no certificate" because it only read a `<X509Certificate>` with nothing after the
   name, and the server writes `<X509Certificate xmlns="...">`.
