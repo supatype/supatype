@@ -44,6 +44,11 @@ vi.mock("../src/compose-render-mode.js", async (importOriginal) => ({
   // The stack runs, in that mode: a push to a stopped stack is refused before it loads more (issue 41).
   runningStackMode: () => loads.mode,
 }))
+// Its database runs too: a stack whose `db` was stopped is refused as well (issue 48).
+vi.mock("../src/compose-kong.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/compose-kong.js")>()),
+  composeServiceIsRunning: () => true,
+}))
 
 const { registerSelfHost } = await import("../src/commands/self-host.js")
 const { registerDeploy } = await import("../src/commands/deploy.js")

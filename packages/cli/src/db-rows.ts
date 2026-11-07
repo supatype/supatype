@@ -7,7 +7,8 @@
  */
 
 import { isJsonObject } from "@supatype/shared"
-import { errorMessage } from "./error-message.js"
+import { databaseUrlHostPort } from "./db-port.js"
+import { errorMessage, isConnectionRefused, redact } from "./error-message.js"
 import type { Client } from "pg"
 
 /** One row, keyed by column name, with values not yet checked. */
@@ -38,20 +39,40 @@ export class DatabaseConnectFailed extends Error {
 /**
  * Connect to `url`, run `use` with the client, and end the connection whatever happens. `pg` is
  * loaded here, on first use, as each caller loaded it before. A failure to connect throws
- * {@link DatabaseConnectFailed}, so a caller can say so in its own words.
+ * {@link DatabaseConnectFailed}, worded by {@link connectFailedMessage}. `source` says where the URL
+ * came from (`--connection`, a `.env` file), for the message to name.
  */
-export async function withDatabase<T>(url: string, use: (client: Client) => Promise<T>): Promise<T> {
+export async function withDatabase<T>(
+  url: string,
+  use: (client: Client) => Promise<T>,
+  source = "the database URL",
+): Promise<T> {
   const { default: pg } = await import("pg")
   const client = new pg.Client({ connectionString: url })
   try {
     await client.connect()
   } catch (err) {
     await client.end().catch(() => undefined)
-    throw new DatabaseConnectFailed(errorMessage(err), { cause: err })
+    throw new DatabaseConnectFailed(connectFailedMessage(url, source, err), { cause: err })
   }
   try {
     return await use(client)
   } finally {
     await client.end().catch(() => undefined)
   }
+}
+
+/**
+ * Why a connection to `url` failed, naming the address tried (never the password) and, for a
+ * refused one, what to check. "connect ECONNREFUSED 127.0.0.1:54329" named neither where the URL
+ * came from nor what to do about it.
+ */
+function connectFailedMessage(url: string, source: string, err: unknown): string {
+  const address = databaseUrlHostPort(url)
+  const where = address === undefined || address.host === "" ? "the database" : `${address.host}:${address.port}`
+  if (!isConnectionRefused(err)) return `Could not connect to ${where} (from ${source}): ${redact(errorMessage(err))}`
+  return (
+    `Could not connect to ${where}: the connection was refused, so no Postgres is listening there. ` +
+    `Check that the database is running and that ${source} names the right host and port`
+  )
 }

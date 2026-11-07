@@ -5,6 +5,7 @@
  * `push` started the whole stack and `diff` started Postgres. A linked target, `--connection`, a
  * `connection` in the config and an external database are reached as they are.
  */
+import { composeServiceIsRunning } from "./compose-kong.js"
 import { runningStackMode } from "./compose-render-mode.js"
 import { loadConfig, rethrowIfConfigBroken } from "./config.js"
 import { isLocalDatabaseUrl } from "./db-port.js"
@@ -12,6 +13,7 @@ import { NoStackRunning } from "./host-database.js"
 import { loadProjectLink } from "./link.js"
 import { resolveRuntimeProvider, usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
 import { developerApiUrl } from "./resolve-api-url.js"
+import { composeProjectName, selfHostComposePaths } from "./self-host-compose.js"
 
 /** How a command was told to reach its database: one named for this run, and whether it skips the link. */
 export interface StackRoute {
@@ -34,14 +36,28 @@ export function reachesLocalStack(config: SupatypeProjectConfig, connection?: st
 
 /**
  * Refuse `supatype <command>` with {@link NoStackRunning} when it would reach the project's local
- * stack and no stack runs for it: no `supatype dev` session and no server container. A linked
- * project goes to its link unless `route.direct` or a connection says otherwise.
+ * stack and no stack runs for it: no `supatype dev` session and no server container, or a stack
+ * whose `db` container was stopped on its own (issue 48). A linked project goes to its link unless
+ * `route.direct` or a connection says otherwise.
  */
 export function requireLocalStack(cwd: string, config: SupatypeProjectConfig, command: string, route: StackRoute = {}): void {
   const named = Boolean(route.connection?.trim())
   if (loadProjectLink(cwd) !== null && route.direct !== true && !named) return
   if (!reachesLocalStack(config, route.connection)) return
   if (runningStackMode(cwd, config.project.name) === undefined) throw new NoStackRunning(command)
+  requireStackDatabase(cwd, config, command)
+}
+
+/**
+ * Refuse ({@link NoStackRunning}) a running stack whose `db` container is not running, rather than
+ * start it: a compose `up -d db`, or a `compose run` of the engine, which starts `db` as its
+ * dependency. `adopt` and `doctor` did the latter and `pull` went on to the stopped database, while
+ * `diff` and `push` refused. An external database is not the stack's to check.
+ */
+export function requireStackDatabase(cwd: string, config: SupatypeProjectConfig, command?: string): void {
+  if (usesExternalDatabase(config)) return
+  const stack = { project: composeProjectName(config.project.name), composePath: selfHostComposePaths(cwd).composePath }
+  if (!composeServiceIsRunning(cwd, stack, "db")) throw new NoStackRunning(command)
 }
 
 /**
@@ -58,7 +74,7 @@ export function requireLocalStackApi(cwd: string, command: string): void {
 }
 
 /** The project's config, or undefined outside a project; a config that will not load still throws. */
-function projectConfigIfAny(cwd: string): SupatypeProjectConfig | undefined {
+export function projectConfigIfAny(cwd: string): SupatypeProjectConfig | undefined {
   try {
     return loadConfig(cwd)
   } catch (err) {

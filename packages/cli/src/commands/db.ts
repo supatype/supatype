@@ -5,13 +5,14 @@
  *   supatype db check: does this database meet what Supatype needs of it?
  */
 
-import { requireLocalStack } from "../local-stack-guard.js"
+import { projectConfigIfAny } from "../local-stack-guard.js"
 import type { Command } from "commander"
 import { errorMessage } from "../error-message.js"
 import { DatabaseConnectFailed, withDatabase } from "../db-rows.js"
 import type { Client } from "pg"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
-import { resolveHostDatabaseUrl } from "../host-database.js"
+import { NoStackRunning, resolveHostDatabaseUrl, type ResolvedDsn } from "../host-database.js"
+import type { SupatypeProjectConfig } from "../project-config.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
@@ -133,7 +134,10 @@ export function registerDb(program: Command): void {
   db
     .command("check")
     .description("Check whether a database meets Supatype's requirements (for external Postgres)")
-    .option("--connection <url>", "Postgres URL to check (else config `connection`, else DATABASE_URL)")
+    .option(
+      "--connection <url>",
+      "Postgres URL to check (else config `connection`, else DATABASE_URL from the environment or .env)",
+    )
     .option("--schema <name>", "Schema Supatype will manage (else config `schema.pg_schema`)")
     .option("--emit", "Print the remediation SQL instead of applying it")
     .option("--fix", "Apply the remediation in a single transaction")
@@ -148,38 +152,65 @@ export function registerDb(program: Command): void {
         return
       }
 
-      const cwd = process.cwd()
-      let url = opts.connection?.trim()
-      let schema = opts.schema?.trim()
-      if (!url || !schema) {
-        try {
-          const config = loadConfig(cwd)
-          if (url === undefined) requireLocalStack(cwd, config, "db check", { direct: true })
-          url = url ?? resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn
-          schema = schema ?? config.schema?.pg_schema ?? "public"
-        } catch (err) {
-          rethrowIfConfigBroken(err)
-          // Runnable outside a project, which is the point, an operator should be able to check a
-          // database before committing to any config at all.
-          url = url ?? process.env["DATABASE_URL"]
-          schema = schema ?? "public"
-        }
-      }
-      if (!url) {
-        error("No connection. Pass --connection, set DATABASE_URL, or set `connection` in supatype.config.ts.")
+      let target: CheckTarget
+      try {
+        target = checkTarget(process.cwd(), opts)
+      } catch (err) {
+        rethrowIfConfigBroken(err)
+        error(errorMessage(err))
         process.exitCode = 1
         return
       }
 
       try {
-        await withDatabase(url, (client) => checkDatabase(client, opts, schema!))
+        await withDatabase(target.url, (client) => checkDatabase(client, opts, target.schema), target.source)
       } catch (err) {
         // A failure must not read as a clean bill of health.
-        const what = err instanceof DatabaseConnectFailed ? "Could not connect" : "Preflight could not complete"
-        error(`${what}: ${errorMessage(err)}`)
+        error(err instanceof DatabaseConnectFailed ? `${err.message}.` : `Preflight could not complete: ${errorMessage(err)}`)
         process.exitCode = 1
       }
     })
+}
+
+/** The database `db check` connects to, where its URL came from, and the schema it checks. */
+interface CheckTarget {
+  url: string
+  source: string
+  schema: string
+}
+
+/**
+ * What `db check` checks. It is for a Postgres the project does not run, so a stopped local stack is
+ * no reason to refuse (issue 49): in a project the URL comes from the resolver every host-side
+ * command uses, `.env` included. Outside a project, which is the point (an operator checks a
+ * database before writing any config), `--connection` or DATABASE_URL.
+ */
+function checkTarget(cwd: string, opts: DbCheckOptions): CheckTarget {
+  const connection = opts.connection?.trim() || undefined
+  const named = opts.schema?.trim() || undefined
+  // Both given: nothing to read from a project, so a config that will not load does not matter.
+  const config = connection !== undefined && named !== undefined ? undefined : projectConfigIfAny(cwd)
+  const schema = named ?? config?.schema?.pg_schema ?? "public"
+  if (config !== undefined) {
+    const resolved = projectDatabaseUrl(cwd, config, connection)
+    return { url: resolved.dsn, source: resolved.source, schema }
+  }
+  const url = connection ?? (process.env["DATABASE_URL"]?.trim() || undefined)
+  if (url === undefined) throw new Error("No connection. Pass --connection or set DATABASE_URL.")
+  return { url, source: connection !== undefined ? "--connection" : "DATABASE_URL in the environment", schema }
+}
+
+/**
+ * The project's database URL. One derived from a Docker project's own stack needs the stack running;
+ * with it stopped, every source that was tried is named instead of the local-stack refusal.
+ */
+function projectDatabaseUrl(cwd: string, config: SupatypeProjectConfig, connection: string | undefined): ResolvedDsn {
+  try {
+    return resolveHostDatabaseUrl(cwd, config, { connection, allowDerived: true })
+  } catch (err) {
+    if (!(err instanceof NoStackRunning)) throw err
+    return resolveHostDatabaseUrl(cwd, config, { connection, allowDerived: false })
+  }
 }
 
 /** What `db check` was asked for. */

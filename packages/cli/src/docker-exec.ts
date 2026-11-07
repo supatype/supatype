@@ -14,9 +14,10 @@
  * {@link NO_DOCKER_LIMIT}: a slow image pull is not a hang, and killing the client mid-pull leaves
  * the daemon pulling anyway.
  */
-import { execFile, spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process"
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+import { execFileClosingStdin } from "./run-captured.js"
 
 /** What one `docker` call answered. */
 export interface DockerAnswer {
@@ -109,7 +110,8 @@ const runDocker: DockerRunner = (args, call) =>
   new Promise((resolve) => {
     const program = dockerProgram(call.shell, call.env)
     const options = { encoding: "utf8" as const, windowsHide: true, shell: program.shell, maxBuffer: 64 * 1024 * 1024, ...callPlace(call) }
-    const child = execFile(program.file, [...args], options, (err, stdout, stderr) => {
+    // Stdin is closed after any input: `compose run` hands it to the engine, which may read it.
+    const child = execFileClosingStdin(program.file, args, options, call.input, (err, stdout, stderr) => {
       if (timer !== undefined) clearTimeout(timer)
       const code = err !== null && "code" in err ? err.code : undefined
       resolve({
@@ -121,7 +123,6 @@ const runDocker: DockerRunner = (args, call) =>
         ...(err !== null && typeof code !== "number" && { error: err.message }),
       })
     })
-    if (call.input !== undefined) child.stdin?.end(call.input)
     const timer = call.timeoutMs === NO_DOCKER_LIMIT ? undefined : setTimeout(() => abandon(child), call.timeoutMs)
     timer?.unref()
   })

@@ -6,8 +6,8 @@
 
 * **push, diff, seed and every command that reaches the local stack:** these commands no longer
   start the local stack. On a Docker project with the stack stopped, `push`, `diff`, `adopt`,
-  `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull`, `admin`
-  and `db check` refuse before doing anything: "The local stack isn't running. Start it with
+  `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull` and
+  `admin` refuse before doing anything: "The local stack isn't running. Start it with
   `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push`
   again." (naming the command run). `seed` exits 2, the others 1. `push` used to start Postgres,
   apply, then start the rest of the stack, and `diff` started Postgres and stopped it again. A
@@ -187,6 +187,24 @@
 
 ### Bug Fixes
 
+* **pull:** `supatype pull` no longer hangs at "Introspecting database...". The engine reads its
+  input from stdin when it is not given an input file, `introspect` is given none, and the CLI left
+  the engine's stdin open with nothing written to it. Every program the CLI runs for its output,
+  the host engine and each `docker` call (so the engine run by `compose run`), now gets a closed
+  stdin after any input it is sent.
+* **adopt, doctor, pull and every command that reaches the local stack's database:** on a running
+  stack whose `db` container was stopped on its own, these refuse with the "local stack isn't
+  running" message, as `diff` and `push` do, and leave it stopped. `adopt` and `doctor` ran the
+  engine with `docker compose run`, which started `db` as its dependency, so `adopt` answered
+  "Nothing to adopt" with the database running again; `pull` went on to the stopped database and
+  printed nothing.
+* **db check:** `supatype db check` in a project reads DATABASE_URL from the project's `.env`, as
+  every other command does; with only `.env` naming the database it said "No connection". It is for
+  a Postgres the project does not run, so a stopped local stack is no reason to refuse it. A refused
+  connection names the address it tried, never the password, and says to check that the database
+  is running and that the source of the URL names the right host and port; it printed only
+  `connect ECONNREFUSED 127.0.0.1:54329`. The `push` check of a database Supatype does not run,
+  and `doctor`'s after-hooks check, say it the same way.
 * **dev:** on Windows, `supatype dev` no longer stops itself two seconds after starting in a shell
   whose own parent had already exited (a window opened by `Start-Process`, by `start` from a script,
   or by a terminal launcher that exits). It watches the shell's parent too, and counted one that was

@@ -73,6 +73,7 @@ import {
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
 import { composeServiceIsRunning } from "./compose-kong.js"
+import { requireStackDatabase } from "./local-stack-guard.js"
 import type { ComposeStack } from "./compose-db-psql.js"
 import type { ProcessManager } from "./process-manager.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
@@ -232,17 +233,6 @@ export function ensureDockerDbPublishedForHostEngine(
   // With no stack running the URL the engine is handed cannot be derived (M1b).
   requireRunningStack(cwd, config.project.name)
   requireStackDatabase(cwd, config, command)
-}
-
-/**
- * Refuse ({@link NoStackRunning}) a running stack whose `db` container is not running, rather than
- * start it: a compose `up -d db`, or a `compose run` of the engine, which starts `db` as its
- * dependency. An external database is not the stack's to check.
- */
-function requireStackDatabase(cwd: string, config: SupatypeProjectConfig, command?: string): void {
-  if (usesExternalDatabase(config)) return
-  const stack = { project: composeProjectName(config.project.name), composePath: selfHostComposePaths(cwd).composePath }
-  if (!composeServiceIsRunning(cwd, stack, "db")) throw new NoStackRunning(command)
 }
 
 /**
@@ -1419,7 +1409,6 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   }
   const running = runningStackMode(cwd, config.project.name)
   if (running === undefined && !usesExternalDatabase(config)) throw new NoStackRunning("diff")
-  if (running !== undefined) requireStackDatabase(cwd, config, "diff")
   // A diff of a standalone stack must not write dev values over the operator's .env (SH1). A dev
   // stack's is brought up to date as push does: compose interpolates the whole file.
   const mode = running ?? "standalone"
@@ -1506,8 +1495,6 @@ export async function pushSchemaDocker(
   const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
   const stack = { paths, project, gatewayPort: composeGatewayHostPort(config, mode, kongPort), brand: { intro: "Push schema" } }
 
-  // The database of a running stack is up already: checked, not started again (issue 46).
-  if (running !== undefined) requireStackDatabase(cwd, config, "push")
   if (!usesExternalDatabase(config)) await privatizeTableDefaults(paths, cwd, project)
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
