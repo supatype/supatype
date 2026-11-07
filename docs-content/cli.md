@@ -118,7 +118,7 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | --- | --- | --- |
 | `functions new <name>` | Scaffold a new edge function |  |
 | `functions serve` | Start a local Deno server that serves all functions with hot reload | `--port <port>` (default 18472), `--env-file <path>` (default `.env.local`) |
-| `functions invoke <name>` | Invoke a local or deployed function | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
+| `functions invoke <name>` | Invoke a local or deployed function; exits 1 when it answers 400 or above | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
 | `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
 | `functions delete <name>` **Cloud** | Remove a deployed function |  |
@@ -128,6 +128,21 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `hooks list` | Show the hooks the schema declares and whether each one can run |  |
 
 On an unlinked project with a self-hosted Compose stack, `functions deploy` uploads nothing: the worker serves `functions/` from disk, so it lists the functions and prints the command that restarts the worker. Otherwise it deploys to the linked project, or to Supatype Cloud. On a self-hosted stack, read function logs in Studio. See [Functions](/docs/functions.html).
+
+<h2 id="sso">Single sign-on</h2>
+
+| Command | Description | Useful flags |
+| --- | --- | --- |
+| `sso add <name>` | Register a SAML identity provider. &lt;name&gt; is how every other sso command refers to it | `--metadata-url <url>` or `--metadata-file <path>` (one is required), `--domains <list>`, `--attribute-mapping-file <path>`, `--name-id-format <format>` |
+| `sso list` | List the SAML identity providers |  |
+| `sso show <name>` | Show one SAML identity provider |  |
+| `sso update <name>` | Change a SAML identity provider in place. Only the flags given change; --domains replaces the list. New metadata must keep the provider's entity ID | The flags of `add`, all optional |
+| `sso remove <name>` | Remove a SAML identity provider. Users who signed in through it can no longer sign in that way | `-y, --yes` |
+| `sso info` | Print the service provider values to give an identity provider: entity ID, ACS URL, NameID, metadata, and the signing certificate (the next one too during a key rotation), read from the served metadata |  |
+| `sso verify-domain <name> <domain>` | Prove this project owns &lt;domain&gt;, one of provider &lt;name&gt;'s domains, with a DNS TXT record: prints the record to add and checks it. Exits 1 while the domain is not verified |  |
+| `sso rotate-key` | Rotate the SAML signing key: create SUPATYPE_SAML_NEXT_PRIVATE_KEY in .env, published beside the current key while identity providers take the new certificate; then --promote makes it the current key | `--promote`, `-y, --yes` |
+
+Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `sso` commands reach the linked self-hosted deployment, or else the local stack, which must be running; they do not work against Supatype Cloud yet. Each one warns while SAML is off. The server, not the CLI, fetches `--metadata-url`, and refuses one it cannot reach with `saml_metadata_fetch_failed`, naming the host and the reason. See [Single sign-on](/docs/sso.html).
 
 <h2 id="self-host">Self-host and deploy</h2>
 
@@ -153,7 +168,7 @@ Every `self-host compose` command renders `.supatype/self-host/docker-compose.ym
 
 A render keeps the stack in the mode it runs in. While `supatype dev` runs for the project, commands such as `push`, `update` and `self-host compose` render dev mode. Otherwise they use the mode of the running `server` container, so a push to a production stack leaves it standalone.
 
-Commands that reach the local stack's database or API need that stack running: `push`, `diff`, `adopt`, `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull`, `admin`, `db check`, `cache rest`, and `functions invoke` when no `functions serve` answers. With it stopped they start nothing and refuse with `The local stack isn't running. Start it with `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push` again.`, naming the command run. `seed` exits 2, the others 1. A linked project, `--connection`, `connection` in the config and an external database are reached as they are, and so is an API address named by `SUPATYPE_URL` or `SUPATYPE_API_URL` in `.env`.
+Commands that reach the local stack's database or API need that stack running: `push`, `diff`, `adopt`, `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull`, `admin`, `cache rest`, and `functions invoke` when no `functions serve` answers. With it stopped they start nothing and refuse with `The local stack isn't running. Start it with `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push` again.`, naming the command run. `seed` exits 2, the others 1. A linked project, `--connection`, `connection` in the config and an external database are reached as they are, and so is an API address named by `SUPATYPE_URL` or `SUPATYPE_API_URL` in `.env`.
 
 `build` takes each value from the first of: the environment (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` or any framework's name), the `/supatype-env.json` of the server the environment's URL names (for the anon key only, so CI can set just `SUPATYPE_URL`), the linked environment, and a `.env` that records a deployment (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass `--allow-local`, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself `supatype build` is refused rather than run again. `deploy` builds the app the same way. See [Deploy your frontend](/docs/deploying-your-frontend.html).
 

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A0C" />
+  <link rel="icon" type="image/svg+xml" href="/supatype-icon.svg" />
+  <link rel="apple-touch-icon" href="/supatype-icon.svg" />
+  <title>SAML single sign-on: identity providers, domains and keys | Supatype</title>
+  <meta name="description" content="Sign users in through their organisation's SAML identity provider: turn SAML on, register providers with supatype sso, verify domains, rotate the signing key, signInWithSSO and SSOForm, Studio and the admin API." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.supatype.com/docs/sso.html" />
+  <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
+  <link rel="alternate" type="application/atom+xml" title="Supatype changelog" href="https://www.supatype.com/changelog.xml" />
+  <meta property="og:site_name" content="Supatype" />
+  <meta property="og:title" content="SAML single sign-on: identity providers, domains and keys | Supatype" />
+  <meta property="og:description" content="Sign users in through their organisation's SAML identity provider: turn SAML on, register providers with supatype sso, verify domains, rotate the signing key, signInWithSSO and SSOForm, Studio and the admin API." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.supatype.com/docs/sso.html" />
+  <meta property="og:image" content="https://www.supatype.com/og/sso.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css?v=510ec93957" />
+</head>
+<body class="docs-page">
+
+<a href="#main" class="btn btn-primary btn-sm skip-link">Skip to content</a>
+
+<header class="site-header">
+  <nav class="nav" aria-label="Main">
+    <a href="/" class="nav-logo"><img src="/supatype.svg" alt="Supatype" width="141" height="26" /></a>
+    <div class="nav-links">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/docs/" aria-current="true">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
+      <a href="/deploy-vm-github-actions.html">Guides</a>
+    </div>
+    <div class="nav-end">
+      <a href="https://discord.gg/TzMtynufEH" class="nav-sec" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/supatype/supatype" class="nav-sec" target="_blank" rel="noopener">GitHub</a>
+      <a href="/docs/#local-dev" class="btn btn-primary btn-sm" data-event="get_started_clicked" data-where="nav">Get started</a>
+      <button type="button" class="icon-btn nav-menu" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="nav-drawer" id="nav-drawer" hidden>
+    <ul>
+      <li><a href="/#how-it-works">How it works</a></li>
+      <li><a href="/docs/" aria-current="true">Docs</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+      <li><a href="/deploy-vm-github-actions.html">Guides</a></li>
+      <li><a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a></li>
+      <li><a href="https://github.com/supatype/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</header>
+
+<div class="docs">
+
+  <button type="button" class="docs-menu" aria-expanded="false" aria-controls="docs-side">
+    <span>Build: Single sign-on</span>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+  </button>
+
+  <nav class="docs-side" id="docs-side" aria-label="Docs">
+    <div><span class="label">GET STARTED</span><ul>
+      <li><a href="/docs/#local-dev">Local development</a></li>
+      <li><a href="/docs/#self-host">Self-hosting</a></li>
+    </ul></div>
+    <div><span class="label">BUILD</span><ul>
+      <li><a href="/docs/schema.html">Schema</a></li>
+      <li><a href="/docs/client.html">Client</a></li>
+      <li><a href="/docs/frameworks.html">Frameworks</a></li>
+      <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/sso.html" aria-current="page">Single sign-on</a></li>
+      <li><a href="/docs/storage.html">Storage</a></li>
+      <li><a href="/docs/realtime.html">Realtime</a></li>
+      <li><a href="/docs/functions.html">Functions</a></li>
+      <li><a href="/docs/seeding.html">Seeding</a></li>
+      <li><a href="/docs/studio.html">Studio</a></li>
+      <li><a href="/docs/studio-roles.html">Studio roles</a></li>
+    </ul></div>
+    <div><span class="label">OPERATE</span><ul>
+      <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/deploying-your-frontend.html">Deploy your frontend</a></li>
+      <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
+      <li><a href="/docs/#production">Running in production</a></li>
+    </ul></div>
+    <div><span class="label">GUIDES</span><ul>
+      <li><a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
+      <li><a href="/from-supabase.html">Coming from Supabase</a></li>
+      <li><a href="/from-prisma.html">Coming from Prisma</a></li>
+    </ul></div>
+    <div><span class="label">POSTGRES</span><ul>
+      <li><a href="/postgres.html">The image</a></li>
+      <li><a href="/postgres/pg-keyspace.html">pg_keyspace</a></li>
+      <li><a href="/postgres/pg-topics.html">pg_topics</a></li>
+      <li><a href="/postgres/pg-guard.html">pg_guard</a></li>
+      <li><a href="/postgres/supatype-mask.html">supatype_mask</a></li>
+    </ul></div>
+    <div><span class="label">REFERENCE</span><ul>
+      <li><a href="/docs/cli.html">CLI</a></li>
+    </ul></div>
+    <div><span class="label">MORE</span><ul>
+      <li><a href="/licensing.html">Licensing</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/changelog.html">Changelog</a></li>
+      <li><a href="/llms.txt">llms.txt</a></li>
+    </ul></div>
+  </nav>
+
+  <main class="doc" id="main">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Single sign-on</nav>
+    <h1>Single sign-on</h1>
+    <p class="intro">SAML 2.0 single sign-on lets people sign in to your app through their organisation's identity provider, such as Okta, Microsoft Entra ID, Google Workspace or Keycloak. The provider is chosen by the domain of the user's email address.</p>
+    <p>The auth server is the SAML service provider. You turn SAML on once in <code>supatype.config.ts</code>. Identity providers are runtime data, usually one per customer, so you register them with <code>supatype sso</code>, in Studio, or through the admin API, never in the config. SAML works on <code>supatype dev</code> and on self-hosted stacks. It is not on Supatype Cloud yet.</p>
+
+    <h2 id="turn-on">Turn SAML on</h2>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>auth: {
+  sso: {
+    saml: { enabled: <span class="k">true</span> },
+  },
+},</pre></div>
+    <p>Restart the stack to apply it: stop and start <code>supatype dev</code>, or run <code>supatype self-host compose up -d</code> on a server. The section takes these fields:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Field</th><th scope="col">What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>enabled</code></td><td>Required. <code>true</code> turns SAML on, and the CLI generates the signing key the first time it sees it</td></tr>
+        <tr><td><code>allowEncryptedAssertions</code></td><td>Accept encrypted assertions, and publish the key for encryption in the service provider metadata</td></tr>
+        <tr><td><code>relayStateValidity</code></td><td>How long, in seconds, a sign-in your app starts may take at the identity provider. The server's default is 120</td></tr>
+        <tr><td><code>rateLimitAssertion</code></td><td>How many assertions the server accepts from one client every 5 minutes. The server's default is 15</td></tr>
+        <tr><td><code>externalUrl</code></td><td>The service provider's base URL, under which <code>/sso/saml/metadata</code> and <code>/sso/saml/acs</code> are served. The default is your API URL plus <code>/auth/v1</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>A <code>SUPATYPE_SAML_*</code> value in <code>.env</code> wins over the config's. While SAML is off, the sign-in routes and the metadata answer 404 with <code>SAML 2.0 is disabled</code>. The admin routes keep working, so you can register providers before you turn it on, and every <code>supatype sso</code> command warns that SAML is off.</p>
+
+    <h2 id="key">The signing key</h2>
+    <p>The service provider signs its requests with an RSA key, and its certificate is made from that key alone. The first <code>supatype dev</code> or <code>supatype self-host compose up</code> with SAML on writes a new key to the project's <code>.env</code> as <code>SUPATYPE_SAML_PRIVATE_KEY</code>. On a self-hosted server that is the <code>.env</code> in the server's project directory. The CLI never prints the key, and never replaces one that is there.</p>
+    <p>The key never goes in <code>supatype.config.ts</code>, which is committed: a <code>privateKey</code> field under <code>auth.sso.saml</code> is refused with the variable to use instead. The generated Compose file names the variable and refuses to start without it, but never holds the value.</p>
+    <div class="callout warn"><span class="callout-label">KEEP THE KEY</span><p>Every identity provider you set up trusts the certificate made from this key. Back <code>.env</code> up with your other secrets. A lost or changed key breaks every provider until each one is given the new metadata. To change it on purpose, <a href="#rotate">rotate it</a>.</p></div>
+
+    <h2 id="service-provider">What to give the identity provider</h2>
+    <p>An identity provider asks for the service provider's entity ID and its Assertion Consumer Service (ACS) URL, or for its metadata, which holds both and the certificate:</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Value</th><th scope="col">Where</th></tr></thead>
+      <tbody>
+        <tr><td>Entity ID and metadata URL (the same address)</td><td><code>&lt;API URL&gt;/auth/v1/sso/saml/metadata</code></td></tr>
+        <tr><td>Metadata as a file</td><td><code>&lt;API URL&gt;/auth/v1/sso/saml/metadata?download=true</code></td></tr>
+        <tr><td>ACS URL (HTTP-POST binding)</td><td><code>&lt;API URL&gt;/auth/v1/sso/saml/acs</code></td></tr>
+        <tr><td>NameID format</td><td>Persistent is requested; email address is accepted too</td></tr>
+      </tbody>
+    </table></div>
+    <p><code>supatype sso info</code> prints the entity ID, ACS URL and metadata URL for the local stack, or for the linked deployment. With SAML on, it also reads the served metadata and prints the signing certificate as PEM under <code>Signing certificate (SHA-256 &lt;fingerprint&gt;):</code>, for an identity provider that asks for the certificate rather than the metadata. During a <a href="#rotate">key rotation</a> it prints the next one too, under <code>Next signing certificate, published for the key rotation</code>. While SAML is off it warns once that SAML is off, and that these values are not served until it is on: the metadata URL answers 404. Have the identity provider send an email attribute (<code>email</code> or <code>mail</code>), or use the email address as the NameID, and sign the assertion or the whole response. A stable user ID in the <code>urn:oasis:names:tc:SAML:attribute:subject-id</code> attribute is used in preference to the NameID when it is sent.</p>
+
+    <h2 id="providers">Register an identity provider</h2>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype sso add acme --metadata-url https://idp.acme.com/metadata --domains acme.com
+<span class="pr">$</span> supatype sso list
+<span class="pr">$</span> supatype sso show acme</pre></div>
+    <p>The name you give <code>add</code> is how every other <code>sso</code> command refers to the provider. It may use letters, digits, <code>.</code>, <code>_</code> and <code>-</code>, starting with a letter or digit. The commands reach the linked self-hosted deployment when the project is linked, and the local stack otherwise, which must be running. They call the admin API with the service role key from <code>.env</code>, or the link's token.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Flag (<code>add</code> and <code>update</code>)</th><th scope="col">What it sets</th></tr></thead>
+      <tbody>
+        <tr><td><code>--metadata-url &lt;url&gt;</code></td><td>The identity provider's metadata URL. The server fetches it, and fetches it again when the copy it keeps goes stale</td></tr>
+        <tr><td><code>--metadata-file &lt;path&gt;</code></td><td>The metadata XML from a file, instead of a URL. Update it by hand when the identity provider changes its certificate</td></tr>
+        <tr><td><code>--domains &lt;list&gt;</code></td><td>Email domains that sign in through this provider, comma-separated. On <code>update</code> it replaces the list. A domain belongs to one provider only</td></tr>
+        <tr><td><code>--attribute-mapping-file &lt;path&gt;</code></td><td>JSON that maps assertion attributes to user metadata: <code>{ "keys": { "&lt;field&gt;": { "name": "&lt;attribute&gt;" } } }</code>, each entry with <code>name</code> or <code>names</code>, and optional <code>default</code> and <code>array</code></td></tr>
+        <tr><td><code>--name-id-format &lt;format&gt;</code></td><td>The NameID format to request: <code>persistent</code>, <code>emailAddress</code>, <code>transient</code> or <code>unspecified</code></td></tr>
+      </tbody>
+    </table></div>
+    <p><code>add</code> needs <code>--metadata-url</code> or <code>--metadata-file</code>, never both. <code>update &lt;name&gt;</code> changes only what its flags give, in place, and new metadata must keep the provider's entity ID. <code>remove &lt;name&gt;</code> asks first, or takes <code>-y</code>.</p>
+    <div class="callout warn"><span class="callout-label">CHANGE, DO NOT RE-ADD</span><p>A user who signed in through a provider is tied to that provider's ID. After <code>remove</code>, those users can no longer sign in that way, and adding a provider with the same name later makes a new one that their accounts are not linked to. Use <code>update</code> to change a provider.</p></div>
+    <h3>The server fetches the metadata URL</h3>
+    <p><code>--metadata-url</code> is fetched by the Supatype server, not by the CLI. Under Docker the server runs in a container, where <code>localhost</code> is the container itself, so the identity provider must be reachable from inside the server's container. When it is not, <code>add</code> or <code>update</code> fails with a 400 (<code>saml_metadata_fetch_failed</code>) that names the host and the reason:</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>The server could not fetch SAML metadata from localhost:8080: connection refused. The server fetches metadata_url itself, so the URL must be reachable from the server, not only from your machine</pre></div>
+    <p>The reason is one of <code>connection refused</code>, <code>the host name could not be resolved</code>, <code>its TLS certificate is not trusted</code>, <code>timed out after 10s</code>, <code>it answered with HTTP status &lt;N&gt;</code> and <code>the response is not SAML metadata XML</code>. Metadata given with <code>--metadata-file</code> that is not SAML metadata is refused with <code>metadata_xml is not SAML metadata XML</code>.</p>
+    <p>An identity provider such as Keycloak builds its entity ID and sign-in URLs from the host it was reached on. Fetch the metadata through the same name and port the browser uses, or the server keeps endpoints the browser cannot open and an entity ID the provider's responses do not carry. For an identity provider running on your machine, either attach its container to the stack's Docker network under a name the browser also resolves to it (a <code>*.localhost</code> name resolves to your machine in browsers), or download the metadata in the browser and register it with <code>--metadata-file</code>.</p>
+    <p>A metadata URL must be HTTPS. Plain <code>http://</code> is accepted only on a dev stack (<code>supatype dev</code>), for a local identity provider; a self-hosted stack refuses it with <code>metadata_url is not a HTTPS URL</code>.</p>
+
+    <h2 id="domains">Verify a domain</h2>
+    <p>A provider with domains may only sign in email addresses on those domains. Any other address is refused with <code>SAML Assertion email is not on a domain of this identity provider</code>. A domain routes sign-ins as soon as it is added, but it is not verified until you prove you own it, and only a verified domain links a sign-in to an account that already exists.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype sso verify-domain acme acme.com
+acme.com is not verified yet. Add this DNS record where the domain's DNS is managed:
+
+  _supatype-challenge.acme.com  TXT  supatype-domain-verification=...
+
+No TXT record was found at _supatype-challenge.acme.com.
+DNS changes can take a while to be seen. Check again with: supatype sso verify-domain acme acme.com</pre></div>
+    <p>The first run issues the domain's token and prints the TXT record to add at <code>_supatype-challenge.&lt;domain&gt;</code>. Each run checks DNS, and the command exits 1 until the record holds the token. Once seen, the domain stays verified, and the record may be removed. There is no periodic check after that. <code>sso list</code> and <code>sso show</code> mark each domain verified or not verified.</p>
+    <p>On a dev stack, a domain ending in <code>.supatype.test</code> counts as verified with no DNS lookup, so you can try linking locally. It still reads as not verified until <code>verify-domain</code> has run for it. A self-hosted stack always checks DNS.</p>
+    <h3>What verification changes</h3>
+    <p>The first time someone signs in through a provider, the server looks for an existing account with the same email: a password, magic link, phone or OAuth account, not another SSO user.</p>
+    <ul>
+      <li>No account: a new one is created, verified domain or not.</li>
+      <li>An account, and the email's domain is verified for this provider: the sign-in is linked to that account. It keeps its ID, its email and every way it already signed in, and gains an <code>sso:&lt;provider ID&gt;</code> identity.</li>
+      <li>An account, and the domain is not verified: the sign-in is refused with <code>This email already has an account. Ask your administrator to verify the domain so they can be linked.</code> No second account is ever made for the same address.</li>
+      <li>Several accounts whose email differs only in letter case: the one whose email is exactly the address the identity provider sent, letter for letter, is the one considered. When none matches exactly, the sign-in is refused with <code>More than one account has this email. Ask your administrator to merge them before signing in with SSO.</code></li>
+    </ul>
+
+    <h2 id="sign-in">Sign users in</h2>
+    <p>A sign-in your app starts asks the server for the identity provider's URL by the user's email domain, or by the provider's ID, and sends the browser there:</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { error } = <span class="k">await</span> supatype.auth.signInWithSSO({
+  domain: <span class="s">"acme.com"</span>,
+  options: { redirectTo: window.location.href },
+})
+<span class="k">if</span> (error) console.error(error.message)</pre></div>
+    <p>Pass <code>{ domain }</code> or <code>{ providerId }</code>, never both. <code>providerId</code> is the provider's UUID, the <code>ID</code> line of <code>sso show</code>, not its name. A domain with no provider is refused with <code>No SSO provider assigned for this domain</code>, and a disabled provider with <code>SSO Provider is currently disabled</code>; the page stays where it is. <code>options</code> also takes <code>captchaToken</code>, <code>skipBrowserRedirect</code> to get the URL back without navigating, and <code>flowType</code>. <code>useAuth()</code> from <code>@supatype/react</code> has <code>signInWithSSO</code> too.</p>
+    <p>The sign-in uses PKCE by default, unlike <code>signInWithOAuth</code>. The browser comes back to <code>redirectTo</code> with <code>?code=</code> in the address and no tokens, and the client exchanges the code when it starts, with the verifier it saved in this browser when the sign-in began. So <code>redirectTo</code> must be a page of the same app that creates the client, opened in the same browser: usually the page that started the sign-in. It is honoured on <code>SITE_URL</code>'s host, a loopback address, or an entry in <code>SUPATYPE_URI_ALLOW_LIST</code>; without it, or for any other address, the browser lands on <code>SITE_URL</code>. <code>initialize()</code> resolves once the exchange is done, as it does for <a href="/docs/auth.html#oauth">OAuth</a>.</p>
+    <h3>The pre-built form</h3>
+    <div class="cb"><div class="cb-bar"><span>src/SignInWithSSO.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { <span class="t">SupatypeProvider</span> } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import</span> { <span class="t">SSOForm</span> } <span class="k">from</span> <span class="s">"@supatype/react-auth"</span>
+<span class="k">import</span> { supatype } <span class="k">from</span> <span class="s">"./supatype"</span>
+
+<span class="k">export</span> <span class="k">function</span> <span class="t">SignInWithSSO</span>() {
+  <span class="k">return</span> (
+    &lt;<span class="t">SupatypeProvider</span> client={supatype}&gt;
+      &lt;<span class="t">SSOForm</span> redirectTo={window.location.href} onError={(error) =&gt; console.error(error.message)} /&gt;
+    &lt;/<span class="t">SupatypeProvider</span>&gt;
+  )
+}</pre></div>
+    <p><code>SSOForm</code> asks for a work email and starts the sign-in for its domain. It takes <code>redirectTo</code>, <code>onSuccess</code> (called with the identity provider's URL), <code>onError</code>, <code>className</code>, <code>classNames</code> and <code>labels</code>, like the other <a href="/docs/auth.html#ui">auth forms</a>. A refusal from the server, on the way out or the way back, shows above the field and goes to <code>onError</code>.</p>
+    <h3>Sign-ins the identity provider starts</h3>
+    <p>When a user opens your app from the identity provider's dashboard, there is no sign-in in your app to come back to. The server sends the browser to <code>SITE_URL</code>, or to a RelayState URL the provider sends when it is allowed, with the tokens in the fragment (<code>#access_token=...</code>), since no browser holds a PKCE verifier for it. The client accepts this whatever its <code>flowType</code>: it stores the session and clears the fragment. So the page at <code>SITE_URL</code> must create the client.</p>
+    <p>A sign-in the server refuses on the way back, from either side, lands on <code>SITE_URL</code> with <code>error</code>, <code>error_code</code> and <code>error_description</code> in the query, and <code>initialize()</code> resolves with that error.</p>
+
+    <h2 id="rotate">Rotate the signing key</h2>
+    <p>Rotation runs two keys side by side, so identity providers can take the new certificate before the old one stops working.</p>
+    <div class="step"><span class="step-num">1</span><h3>Create the next key</h3></div>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype sso rotate-key</pre></div>
+    <p>This writes <code>SUPATYPE_SAML_NEXT_PRIVATE_KEY</code> to <code>.env</code>, or keeps the one already there.</p>
+    <div class="step"><span class="step-num">2</span><h3>Restart the stack</h3></div>
+    <p>Restart <code>supatype dev</code>, or run <code>supatype self-host compose up -d</code>, so the server loads the next key. Until then nothing has changed. From the restart, the metadata lists two certificates, the current one and the next. Requests are still signed with the current key, and encrypted assertions are decrypted with either.</p>
+    <div class="step"><span class="step-num">3</span><h3>Give every identity provider the new metadata</h3></div>
+    <p>Have each provider fetch the metadata again, upload the new file, or take the next certificate that <code>supatype sso info</code> prints during the rotation. Providers that check request signatures must take the new certificate before the next step.</p>
+    <div class="step"><span class="step-num">4</span><h3>Promote the next key</h3></div>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype sso rotate-key --promote</pre></div>
+    <p>It asks first, or takes <code>-y</code>; with no terminal it needs <code>-y</code>. The next key replaces <code>SUPATYPE_SAML_PRIVATE_KEY</code>, and <code>SUPATYPE_SAML_NEXT_PRIVATE_KEY</code> is removed.</p>
+    <div class="step"><span class="step-num">5</span><h3>Restart again</h3></div>
+    <p>After this restart the server signs with the new key and the metadata lists one certificate. A provider that never took the new certificate now fails its signature check.</p>
+    <p>On a project linked to a self-hosted deployment, the key is in the server's environment, not your <code>.env</code>, so <code>rotate-key</code> prints these steps for you to run in the server's project directory instead.</p>
+
+    <h2 id="studio">In Studio</h2>
+    <p>Authentication &gt; SSO lists the providers with their entity IDs, domains and status, and, while SAML is on, the entity ID and ACS URL to give an identity provider. There you can add a provider from a metadata URL or XML, edit it, disable and enable it, remove it, and verify a domain: the Verify dialog shows the TXT record and checks it. The page says when SAML is off.</p>
+    <p>Only owners and admins can change providers and verify domains; on a self-hosted project that means admins. The server enforces it, not just the page. Developers and viewers see the page read-only, with <code>Only owners and admins can change SSO providers.</code> Editors have no SSO page. See <a href="/docs/studio-roles.html">Studio roles</a>. The Users list marks each user who signed in through SAML with <code>sso:</code> and their provider's name, for example <code>sso:acme</code>. A provider that has been removed, or was added without a name, shows the first block of its ID instead.</p>
+
+    <h2 id="admin-api">The admin API</h2>
+    <p>An app that lets its own customers set up SSO calls the auth server's admin API from its server, with the service role key. Never call it from the browser: the service role key passes every access rule.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> curl -X POST https://api.example.com/auth/v1/admin/sso/providers \
+    -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"type":"saml","resource_id":"acme","metadata_url":"https://idp.acme.com/metadata","domains":["acme.com"]}'</pre></div>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Route under <code>/auth/v1</code></th><th scope="col">What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /admin/sso/providers</code></td><td>Lists providers as <code>{ "items": [...] }</code>, without their metadata XML. Filter with <code>?resource_id=</code> or <code>?resource_id_prefix=</code></td></tr>
+        <tr><td><code>POST /admin/sso/providers</code></td><td>Creates one. <code>type: "saml"</code>, and <code>metadata_url</code> or <code>metadata_xml</code>; optional <code>domains</code>, <code>attribute_mapping</code>, <code>name_id_format</code>, <code>resource_id</code> and <code>disabled</code></td></tr>
+        <tr><td><code>GET /admin/sso/providers/{id}</code></td><td>One provider, with its domains and whether each is verified</td></tr>
+        <tr><td><code>PUT /admin/sso/providers/{id}</code></td><td>Changes the fields given. <code>domains</code> replaces the list, new metadata must keep the entity ID, and <code>disabled: true</code> turns the provider off</td></tr>
+        <tr><td><code>DELETE /admin/sso/providers/{id}</code></td><td>Removes the provider</td></tr>
+        <tr><td><code>POST /admin/sso/providers/{id}/domains/{domain}/verify</code></td><td>Issues the domain's token the first time, checks DNS, and answers <code>domain</code>, <code>verified</code>, <code>verified_at</code>, the <code>challenge</code> record (<code>name</code> and <code>value</code>) and what DNS returned in <code>found</code></td></tr>
+      </tbody>
+    </table></div>
+    <p><code>{id}</code> is the provider's UUID, or <code>resource_</code> followed by its <code>resource_id</code>: <code>resource_acme</code>. <code>resource_id</code> is the name <code>supatype sso</code> uses, so give each customer's provider a stable one and change the provider with <code>PUT</code> rather than deleting and creating it again. The admin routes work while SAML is off.</p>
+
+    <nav class="pn" aria-label="More pages">
+      <a href="/docs/auth.html"><small>PREVIOUS</small><span>Auth</span></a>
+      <a href="/docs/storage.html" class="next"><small>NEXT</small><span>Storage</span></a>
+    </nav>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <span class="label">ON THIS PAGE</span>
+    <a href="#turn-on">Turn SAML on</a>
+    <a href="#key">The signing key</a>
+    <a href="#service-provider">What to give the identity provider</a>
+    <a href="#providers">Register an identity provider</a>
+    <a href="#domains">Verify a domain</a>
+    <a href="#sign-in">Sign users in</a>
+    <a href="#rotate">Rotate the signing key</a>
+    <a href="#studio">In Studio</a>
+    <a href="#admin-api">The admin API</a>
+  </nav>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap footer-base footer-slim">
+    <span>© Supatype Ltd, a UK company · Zero drift.</span>
+    <span>SDKs and server MIT · CLI and services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a> · <a href="/privacy.html">Privacy</a> · <a href="/#contact">Book a call</a></span>
+  </div>
+</footer>
+
+<script src="/site.js?v=19dd554888"></script>
+</body>
+</html>

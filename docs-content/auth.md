@@ -39,6 +39,7 @@ Each method below is a call on `supatype.auth`. The [client page](/docs/client.h
 | OAuth | `signInWithOAuth({ provider })` | Off until a provider is configured |
 | Provider ID token (native Apple or Google sign-in) | `signInWithIdToken` | Off until the provider is configured |
 | Anonymous | `signInAnonymously` | Off |
+| SAML single sign-on, by email domain | `signInWithSSO({ domain })` or `signInWithSSO({ providerId })` | Off until `auth.sso.saml.enabled`. See [Single sign-on](/docs/sso.html) |
 
 Password reset is `resetPasswordForEmail`, and `updateUser` changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise `SUPATYPE_PASSWORD_MIN_LENGTH`.
 
@@ -203,7 +204,7 @@ Two packages give you ready-made sign-in screens. Both use `useAuth()` from `@su
 
 | Package | Components |
 | --- | --- |
-| `@supatype/react-auth` | `LoginForm`, `SignUpForm`, `OAuthButton` |
+| `@supatype/react-auth` | `LoginForm`, `SignUpForm`, `ForgotPasswordForm`, `UpdatePasswordForm`, `MagicLinkForm`, `OAuthButton`, `SSOForm` (see [Single sign-on](/docs/sso.html#sign-in)) |
 | `@supatype/react-native-auth` | `LoginForm`, `SignUpForm`, `MagicLinkForm`, `OAuthButton`, `ResetPassword`, `AuthGate`, `AuthThemeProvider` |
 
 ### Web

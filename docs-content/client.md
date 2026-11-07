@@ -184,7 +184,7 @@ Once signed in, every request carries the user's token, so access rules see them
 
 When the project asks new users to confirm their email, `signUp` returns `session: null` and does not sign the user in. They sign in once they have confirmed.
 
-`getUser()` fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on `supatype.auth` too.
+`getUser()` fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on `supatype.auth` too, and so is SAML single sign-on: `signInWithSSO({ domain })` or `signInWithSSO({ providerId })` sends the browser to the organisation's identity provider, with PKCE by default. See [Single sign-on](/docs/sso.html#sign-in).
 
 <h2 id="storage">Storage</h2>
 

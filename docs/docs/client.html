@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html" aria-current="page">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -252,7 +253,7 @@ subscription.unsubscribe()
 <span class="k">await</span> supatype.auth.signOut()</pre></div>
     <p>Once signed in, every request carries the user's token, so access rules see them. <code>onAuthStateChange</code> calls back at once with the current state, then on each change.</p>
     <p>When the project asks new users to confirm their email, <code>signUp</code> returns <code>session: null</code> and does not sign the user in. They sign in once they have confirmed.</p>
-    <p><code>getUser()</code> fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on <code>supatype.auth</code> too.</p>
+    <p><code>getUser()</code> fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on <code>supatype.auth</code> too, and so is SAML single sign-on: <code>signInWithSSO({ domain })</code> or <code>signInWithSSO({ providerId })</code> sends the browser to the organisation's identity provider, with PKCE by default. See <a href="/docs/sso.html#sign-in">Single sign-on</a>.</p>
 
     <h2 id="storage">Storage</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
