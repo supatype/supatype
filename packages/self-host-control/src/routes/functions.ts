@@ -23,7 +23,7 @@ import { answerWithWorkerCurrent, childDir, functionEnvPath, functionsRoot } fro
  * (`functionRouteName`, @supatype/shared), so `_shared`, dot directories, a directory with no
  * index.ts and a declaration file are not listed, and a function kept as `<name>.ts` is.
  */
-function servedFunctions(root: string): string[] {
+export function servedFunctions(root: string): string[] {
   if (!existsSync(root)) return []
   return readdirSync(root, { withFileTypes: true })
     .map((entry) => {
