@@ -260,7 +260,8 @@ LEFT="$(probe_columns)"
 [[ "$LEFT" == "0" ]] || fail "push --yes left $LEFT probe column(s) behind (see $PUSH_LOG)"
 echo "  ok   every probe column dropped"
 
-REMAINING="$(cd "$PROJECT_DIR" && node "$CLI_BIN" diff 2>&1 | tail -3)"
+# Match anywhere, not the last lines: diff prints each role's access after the plan.
+REMAINING="$(cd "$PROJECT_DIR" && node "$CLI_BIN" diff 2>&1)"
 case "$REMAINING" in
   *"No changes"*) echo "  ok   the push that dropped them is idempotent" ;;
   *) echo "  FAIL dropping left a pending diff: $REMAINING" >&2; exit 1 ;;
