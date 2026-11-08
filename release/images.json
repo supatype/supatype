@@ -6,8 +6,8 @@
   },
   "server": {
     "image": "supatype/server",
-    "tag": "v2.3.0",
-    "commit": "f8e3a519658447a7db341b8282923031110ed3e3"
+    "tag": "v2.4.0",
+    "commit": "dfb9ad608ee84f29b27ec9965f21f6eb83cd8a11"
   },
   "postgres": {
     "image": "supatype/postgres",
