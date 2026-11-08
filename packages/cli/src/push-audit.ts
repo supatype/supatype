@@ -46,8 +46,11 @@ export function authorSources(cwd: string): AuthorSources {
 }
 
 /**
- * Who is pushing or declaring a rename: `Name <email>` from git, else the OS user marked unverified.
+ * Who is pushing or declaring a rename: `Name <email>` from git, else the OS user, marked as such.
  * `SUPATYPE_PUSHED_BY` still wins, as it did for the manifest's `pushedBy`.
+ *
+ * Whether a name was verified is recorded beside it (`pushedByVerified`), and `migrations list`
+ * prints that; saying "unverified" here as well printed it twice (issue 65).
  */
 export function resolveAuthor(sources: AuthorSources): string {
   const explicit = process.env["SUPATYPE_PUSHED_BY"]?.trim()
@@ -58,7 +61,7 @@ export function resolveAuthor(sources: AuthorSources): string {
     return email === undefined ? name : `${name} <${email}>`
   }
   const user = sources.osUser()
-  return user === undefined ? "unknown (unverified)" : `${user} (OS user, unverified)`
+  return user === undefined ? "unknown" : `${user} (OS user)`
 }
 
 /** A CI system, how it names itself, and the variable that holds the run. */

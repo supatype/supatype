@@ -46,11 +46,27 @@ describe("dev's schema watch", () => {
     expect(push).toHaveBeenCalledWith("Change detected in index.ts")
   })
 
-  it("ignores files that are not TypeScript, such as an editor's temporary file", async () => {
+  // Issue 66: `sed -i` and some editors save by writing another file and renaming it over the
+  // schema, and the event can name only the other file. Those saves were ignored, so the database
+  // kept the old schema and nothing said so. Any event now leads to a check of the schema itself.
+  it("pushes a save made by renaming another file over the schema, when the schema changed", async () => {
     const push = vi.fn()
-    watchDevSchema({ dir: "schema", changedSinceLastPush: () => false, push }, fakeWatch)
+    let changed = false
+    watchDevSchema({ dir: "schema", changedSinceLastPush: () => changed, push }, fakeWatch)
+    await vi.advanceTimersByTimeAsync(0)
+    changed = true
     save("sedgRSlMR")
     save(null)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith("Change detected in the schema")
+  })
+
+  it("does not push for another file's event when the schema did not change", async () => {
+    const push = vi.fn()
+    watchDevSchema({ dir: "schema", changedSinceLastPush: () => false, push }, fakeWatch)
+    await vi.advanceTimersByTimeAsync(0)
+    save(".index.ts.swp")
     await vi.advanceTimersByTimeAsync(500)
     expect(push).not.toHaveBeenCalled()
   })

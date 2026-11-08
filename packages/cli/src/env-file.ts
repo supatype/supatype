@@ -83,6 +83,18 @@ export interface UpsertOptions {
   file?: string
 }
 
+/**
+ * The mode an env file is created with: its owner alone reads it. `.env` holds the database
+ * passwords, the JWT secret and the service-role key, and was created readable by every user on the
+ * machine (issue 64). A file that exists keeps the mode it has.
+ */
+export const PRIVATE_FILE_MODE = 0o600
+
+/** Write a file that holds secrets, created readable by its owner alone ({@link PRIVATE_FILE_MODE}). */
+export function writePrivateFile(path: string, text: string): void {
+  writeFileSync(path, text, { encoding: "utf8", mode: PRIVATE_FILE_MODE })
+}
+
 /** The older form of `upsertEnvFile`'s options: a list of keys, where options are an object. */
 function isKeyList(options: UpsertOptions | readonly string[]): options is readonly string[] {
   return Array.isArray(options)
@@ -117,7 +129,7 @@ export function upsertEnvFile(
   // Not written when nothing changed. `.env` is compose's input, and a command that only read the
   // stack (push or doctor with dev running) has no business touching it.
   if (next === existing.replace(/\r\n/g, "\n")) return
-  writeFileSync(envPath, next, "utf8")
+  writePrivateFile(envPath, next)
 }
 
 /** One upsert's updates and its {@link UpsertOptions} as sets, for {@link mergeLines}. */

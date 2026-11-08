@@ -3,15 +3,17 @@ import { render, type Instance } from "ink"
 import { isInteractive } from "../interactive.js"
 import { createClackApi, type ClackApi } from "../clack-api.js"
 import { FlowApp } from "../flows/FlowApp.js"
+import { FlowTranscript } from "./flow-transcript.js"
 import { prepareStdinForInk, restoreStdinAfterInk } from "./stdin-after-ink.js"
 
 interface RunClackFlowRootProps<T> {
   run: (api: ClackApi) => Promise<T>
+  transcript: FlowTranscript
   onComplete: (value: T) => void
   onError: (err: unknown) => void
 }
 
-function RunClackFlowRoot<T>({ run, onComplete, onError }: RunClackFlowRootProps<T>): React.ReactElement {
+function RunClackFlowRoot<T>({ run, transcript, onComplete, onError }: RunClackFlowRootProps<T>): React.ReactElement {
   const started = useRef(false)
 
   return (
@@ -19,7 +21,7 @@ function RunClackFlowRoot<T>({ run, onComplete, onError }: RunClackFlowRootProps
       bind={(controller) => {
         if (started.current) return
         started.current = true
-        void run(createClackApi(controller))
+        void run(createClackApi(transcript.record(controller)))
           .then(onComplete)
           .catch(onError)
       }}
@@ -34,16 +36,18 @@ export async function runClackFlow<T>(run: (api: ClackApi) => Promise<T>): Promi
   }
 
   prepareStdinForInk()
+  const transcript = new FlowTranscript()
   return new Promise<T>((resolve, reject) => {
     const instance = render(
       <RunClackFlowRoot
         run={run}
+        transcript={transcript}
         onComplete={(value) => {
-          teardownInk(instance)
+          teardownInk(instance, transcript.text())
           resolve(value)
         }}
         onError={(err) => {
-          teardownInk(instance)
+          teardownInk(instance, transcript.text())
           reject(err)
         }}
       />,
@@ -53,7 +57,8 @@ export async function runClackFlow<T>(run: (api: ClackApi) => Promise<T>): Promi
   })
 }
 
-function teardownInk(instance: Instance): void {
+/** Clear the chrome, then write what its log pane showed, which the clear took with it (issue 67). */
+function teardownInk(instance: Instance, shown: string): void {
   try {
     instance.clear()
   } catch {
@@ -62,6 +67,7 @@ function teardownInk(instance: Instance): void {
   instance.unmount()
   instance.cleanup()
   restoreStdinAfterInk()
+  if (shown !== "") process.stdout.write(shown)
 }
 
 export { CLACK_CANCEL } from "./cancel.js"

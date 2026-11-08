@@ -16,6 +16,7 @@ import {
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { adminEmailProblem, answerProblem, askText } from "../init-answers.js"
 import { assertEnvValues } from "../env-value.js"
+import { PRIVATE_FILE_MODE } from "../env-file.js"
 import { generateAndWriteKeys } from "./keys.js"
 import {
   BUNDLED_DB_USER,
@@ -718,10 +719,10 @@ export function scaffold(
 ): void {
   const opts =
     typeof optsOrName === "string" ? defaultScaffoldOptions(optsOrName) : optsOrName
-  const write = (rel: string, content: string) => {
+  const write = (rel: string, content: string, mode?: number) => {
     const full = join(dir, rel)
     mkdirSync(resolve(full, ".."), { recursive: true })
-    writeFileSync(full, content, "utf8")
+    writeFileSync(full, content, { encoding: "utf8", mode })
     file("created", rel)
   }
   // First, so a value .env cannot hold is refused before any file is written.
@@ -739,7 +740,7 @@ export function scaffold(
     write("supatype.local.config.ts", localConfigTemplate(opts.app))
   }
   write(opts.schemaPath, schemaTemplate())
-  write(".env", env)
+  write(".env", env, PRIVATE_FILE_MODE)
   scaffoldDevFrontendEnv(dir, opts)
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
@@ -902,14 +903,14 @@ function viteBuildOutDir(opts: ScaffoldOptions): string | undefined {
 
 function scaffoldHelloFunction(
   dir: string,
-  write: (rel: string, content: string) => void,
+  write: (rel: string, content: string, mode?: number) => void,
 ): void {
   write("functions/hello/index.ts", functionTemplateSource("hello"))
   if (!existsSync(join(dir, "functions/_shared/README.md"))) {
     write("functions/_shared/README.md", sharedFunctionsReadmeSource())
   }
   if (!existsSync(join(dir, "functions/.env.local"))) {
-    write("functions/.env.local", functionsEnvLocalTemplate())
+    write("functions/.env.local", functionsEnvLocalTemplate(), PRIVATE_FILE_MODE)
   }
   const denoTypes = ensureFunctionsDenoTypes(dir, join(dir, "functions"))
   if (denoTypes.wroteDenoDts) file("created", "functions/deno.d.ts")

@@ -33,7 +33,7 @@ export const RENAME_JOURNAL_VERSION = 1
 /** One recorded answer: `from` was renamed to `to`, said by `declared_by` at `declared_at`. */
 export interface RenameJournalEntry extends RenameCandidate {
   id: string
-  /** `Name <email>` from git, else the OS user marked unverified. */
+  /** `Name <email>` from git, else the OS user, marked `(OS user)`. */
   declared_by: string
   /** ISO 8601. */
   declared_at: string

@@ -14,6 +14,7 @@ import { fetchWithin } from "../fetch-within.js"
 import { targetRequest, targetStreamRequest, type TargetCall } from "../target-request.js"
 import { parseEnvText } from "../dotenv-parse.js"
 import { withEnvValue, withoutEnvValue } from "../env-lines.js"
+import { writePrivateFile } from "../env-file.js"
 import { STOP_SIGNALS } from "../stop-signals.js"
 import { sayTargetWarning } from "../target-warning.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
@@ -893,7 +894,7 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
 function setLocalEnv(functionsDir: string, key: string, value: string): void {
   const envPath = resolve(functionsDir, ENV_LOCAL)
   const content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-  writeFileSync(envPath, withEnvValue(content, key, value, relative(process.cwd(), envPath)), "utf8")
+  writePrivateFile(envPath, withEnvValue(content, key, value, relative(process.cwd(), envPath)))
   info(`Set ${key} in local env file.`)
 }
 

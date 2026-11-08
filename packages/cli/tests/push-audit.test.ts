@@ -25,12 +25,12 @@ describe("resolveAuthor()", () => {
     expect(resolveAuthor({ git, osUser: () => "ada" })).toBe("Ada Lovelace")
   })
 
-  it("falls back to the OS user, marked unverified", () => {
-    expect(resolveAuthor({ git: () => undefined, osUser: () => "ada" })).toBe("ada (OS user, unverified)")
+  it("falls back to the OS user, marked as such", () => {
+    expect(resolveAuthor({ git: () => undefined, osUser: () => "ada" })).toBe("ada (OS user)")
   })
 
   it("is 'unknown' when neither can be read", () => {
-    expect(resolveAuthor({ git: () => undefined, osUser: () => undefined })).toBe("unknown (unverified)")
+    expect(resolveAuthor({ git: () => undefined, osUser: () => undefined })).toBe("unknown")
   })
 })
 
