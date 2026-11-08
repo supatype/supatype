@@ -14,7 +14,7 @@ import { fetchWithin } from "../fetch-within.js"
 import { targetRequest, targetStreamRequest, type TargetCall } from "../target-request.js"
 import { parseEnvText } from "../dotenv-parse.js"
 import { withEnvValue, withoutEnvValue } from "../env-lines.js"
-import { writePrivateFile } from "../env-file.js"
+import { ensureFunctionsEnvLocal, FUNCTIONS_ENV_LOCAL } from "../functions-env-local.js"
 import { STOP_SIGNALS } from "../stop-signals.js"
 import { sayTargetWarning } from "../target-warning.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
@@ -54,7 +54,6 @@ import { DENO_ENV } from "../native-dev-env.js"
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const SHARED_DIR = "_shared"
-const ENV_LOCAL = ".env.local"
 const ENV_PRODUCTION = ".env.production"
 // The commands that exist: there is no `supatype cloud` group, login and link are top level.
 const NOT_LOGGED_IN = "Not logged in. Run: supatype login"
@@ -87,7 +86,7 @@ export function registerFunctions(program: Command): void {
     .description("Start a local Deno server that serves all functions with hot reload")
     .option("--port <port>", "Port to serve on", String(FUNCTIONS_SERVE_PORT))
     .option("--host <host>", "Address to listen on (0.0.0.0 to be reachable from other machines)", "127.0.0.1")
-    .option("--env-file <path>", "Path to env file", ENV_LOCAL)
+    .option("--env-file <path>", "Path to env file", FUNCTIONS_ENV_LOCAL)
     .action(async (opts: { port: string; host: string; envFile: string }) => {
       await serve(process.cwd(), opts)
     })
@@ -199,15 +198,7 @@ function scaffoldFunction(cwd: string, name: string): void {
     )
   }
 
-  // Ensure .env.local exists
-  const envLocalPath = resolve(functionsDir, ENV_LOCAL)
-  if (!existsSync(envLocalPath)) {
-    writeFileSync(
-      envLocalPath,
-      "# Local environment variables for edge functions\n# These are NOT committed to git\n# Set production env vars via: npx supatype functions env set KEY=value\n",
-      "utf8",
-    )
-  }
+  ensureFunctionsEnvLocal(functionsDir)
 
   const denoTypes = ensureFunctionsDenoTypes(cwd, functionsDir)
 
@@ -867,7 +858,7 @@ const isEnvListing = (value: unknown): value is string[] | Record<string, unknow
 
 /** The variables in the functions' local env file, for a project that is not linked. */
 function listLocalEnv(functionsDir: string): void {
-  const envPath = resolve(functionsDir, ENV_LOCAL)
+  const envPath = resolve(functionsDir, FUNCTIONS_ENV_LOCAL)
   if (!existsSync(envPath)) {
     info("No environment variables configured.")
     return
@@ -892,9 +883,8 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
 
 /** Sets `key` in the functions' local env file, replacing its line or adding one. */
 function setLocalEnv(functionsDir: string, key: string, value: string): void {
-  const envPath = resolve(functionsDir, ENV_LOCAL)
-  const content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-  writePrivateFile(envPath, withEnvValue(content, key, value, relative(process.cwd(), envPath)))
+  const envPath = ensureFunctionsEnvLocal(functionsDir).path
+  writeFileSync(envPath, withEnvValue(readFileSync(envPath, "utf8"), key, value, relative(process.cwd(), envPath)), "utf8")
   info(`Set ${key} in local env file.`)
 }
 
@@ -910,7 +900,7 @@ async function envUnset(cwd: string, key: string): Promise<void> {
 
 /** Removes `key` from the functions' local env file. */
 function unsetLocalEnv(functionsDir: string, key: string): void {
-  const envPath = resolve(functionsDir, ENV_LOCAL)
+  const envPath = resolve(functionsDir, FUNCTIONS_ENV_LOCAL)
   if (!existsSync(envPath)) {
     error("No local env file found.")
     process.exit(1)

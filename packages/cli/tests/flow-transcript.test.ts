@@ -3,10 +3,9 @@ import { FlowTranscript } from "../src/ui/runtime/flow-transcript.js"
 import type { FlowController } from "../src/ui/flows/types.js"
 
 /**
- * Issue 67: in a terminal, a one-shot command runs inside the Ink chrome, and the chrome is cleared
- * when the command ends. Everything the command logged went with it: `seed --status` showed nothing,
- * while piped output, which has no chrome, showed the line. The lines on screen at the end are now
- * written out again once the chrome is gone.
+ * Issue 77: a command that calls `process.exit` inside its Ink chrome goes before Ink writes the
+ * frame it holds, so `types check` showed the banner and not its reason. The lines the pane shows
+ * are kept here, and written out in the frame's place when that happens.
  */
 function controller(): FlowController {
   return {
@@ -14,6 +13,7 @@ function controller(): FlowController {
     appendPlain: () => {},
     setSpinner: () => {},
     waitForPrompt: async () => undefined,
+    finish: async () => undefined,
   }
 }
 

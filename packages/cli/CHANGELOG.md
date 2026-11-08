@@ -192,15 +192,42 @@
   three: the event named only the other file, which the watch ignored, so the database kept the old
   schema and nothing said so. Any event in the schema folder now leads to a check of the schema
   itself.
-* **init, functions env set, login:** `.env`, `functions/.env.local` and the saved Cloud session are
-  created readable by their owner alone (600). They hold the database passwords, the JWT secret, the
-  service-role key and session tokens, and were readable by every user on the machine. A file that
-  exists keeps its mode.
+* **init, self-host compose, dev:** every project gets its own object-store login, generated into
+  `.env` as `SUPATYPE_OBJECT_STORE_ACCESS_KEY` and `SUPATYPE_OBJECT_STORE_SECRET_KEY`, and the compose
+  file reads it from there. Every stack shared the published pair `supatype` / `supatype-secret`,
+  which opens every file in every bucket past the bucket rules to anything that can reach port 8333.
+  A project still on that pair gets a new one on its next `dev` or `self-host compose up`; stored
+  files are kept.
+* **self-host compose up and restart:** the mailer settings come from the committed config. `dev`
+  wrote them into `.env` from the config with `supatype.local.config.ts` over it, so production
+  started with dev's mail catcher as its SMTP host, and with dev's last autoconfirm after the config
+  turned email confirmations on. Values the CLI writes from the config are marked as its own and taken
+  out when the config stops giving them; a value written by hand is left.
+* **init:** choosing SMTP asks for the host and port. `dev` and `self-host compose up` warn when the
+  provider is SMTP and no host is set, which made the server drop every email without a word.
+* **functions new, functions env set:** `functions env set` in a project with no `functions/` folder
+  creates it, where it said "Setting FOO" and then failed with ENOENT. `init`, `functions new` and
+  `env set` create `functions/.env.local` the same way.
+* **status:** on the local stack, the stack's services are listed after its functions, and `_shared`
+  is no longer listed as a function.
+* **login:** the saved Cloud session is created readable by its owner alone (600). It holds the
+  session's tokens. A project's `.env` is not: the stack's containers read it as another user, and an
+  owner-only `.env` stopped the server starting on a Linux host.
 * **migrations list:** a push by an OS user with no git name says "(unverified)" once. The recorded
   author now reads `nic (OS user)`, and the list adds whether it was verified.
-* **every command in a terminal:** what a command logged stays on screen when it ends. The command's
-  chrome is cleared at the end, and a short report went with it: `seed --status` showed nothing in a
-  terminal, only when piped. The lines are written out again once the chrome is gone.
+* **every command in a terminal:** what a command logged stays on screen when it ends, once. The
+  command's chrome was cleared at the end and a short report went with it: `seed --status` showed
+  nothing in a terminal, only when piped. The last frame is now just the logged lines, and it is left
+  on screen.
+* **every command in a terminal:** a command that fails and exits shows why. `types check` in a
+  project with no `tsconfig.json` printed its banner and exited 1 with no message, because the
+  process ended before the message was drawn.
+* **every text prompt:** a pasted line that ends in a line break is submitted, where the break was
+  kept in the answer and drawn raw over the prompt's border. Backspaces sent in one burst erase.
+* **reset:** drops the managed tables, applies the schema to the empty tables and runs the seeds
+  again, which `--no-seed` skips. It printed "Reset complete." and changed nothing: it pushed the
+  schema the database already had. Sign-ins, stored files, Studio members and SSO providers are kept;
+  `dev --reset-db` still wipes the whole database.
 * **migrate, reset, rollback, migrations list, rename --prune, pull, deploy --local:** on the local
   stack's own database these run the project's engine image, as `push`, `diff` and `seed` do. They
   ran the engine binary cached on this machine, so with an engine image chosen, `migrate` wrote SQL

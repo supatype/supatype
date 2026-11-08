@@ -51,3 +51,24 @@ describe("functions env on a project with no link", () => {
     expect(readFileSync(envPath, "utf8")).toBe("# shared\nexport API_KEY=old\nOTHER=2\n")
   })
 })
+
+// Issue 70: in a project with no functions directory, `env set` said "Setting FOO" and then failed
+// with a raw ENOENT, because it wrote the file without creating its directory.
+describe("functions env set with no functions directory", () => {
+  it("creates the directory and the file with its header", async () => {
+    const bare = tempProject("functions-env-bare")
+    try {
+      writeFileSync(
+        join(bare.dir, "supatype.config.ts"),
+        `export default { project: { name: "acme" }, database: { provider: "docker" }, server: { mode: "dev" }, app: { mode: "none" } }\n`,
+      )
+      const run = await runCommand(registerFunctions, ["functions", "env", "set", "FOO=bar"], bare.dir)
+      expect(run.output).not.toContain("ENOENT")
+      const text = readFileSync(join(bare.dir, "functions", ".env.local"), "utf8")
+      expect(text.startsWith("# Local environment variables for edge functions\n")).toBe(true)
+      expect(text).toContain("FOO=bar\n")
+    } finally {
+      bare.remove()
+    }
+  })
+})

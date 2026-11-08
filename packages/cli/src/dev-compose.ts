@@ -94,7 +94,7 @@ import {
 } from "./engine-answers.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
-import { warnProjectAuthProviderSecrets } from "./auth-providers.js"
+import { warnMissingStackSettings } from "./stack-setting-warnings.js"
 import {
   devDatabaseIdentity,
   devDatabaseUrl,
@@ -149,8 +149,7 @@ import {
 import { spawnComposeEngine, spawnComposeEngineSync } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, runningStackMode, type ComposeRenderMode } from "./compose-render-mode.js"
-import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
-import { mailerProviderEnv } from "./mailer-env.js"
+import { configMailerEnv } from "./config-mailer-env.js"
 import { fetchWithin } from "./fetch-within.js"
 import { composeStackWatch, exitedServiceFailure, type StackWatch, type WatchedStack } from "./stack-exit-watch.js"
 import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
@@ -345,6 +344,7 @@ export function upsertDevComposeEnv(
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
   const imagePins = checkedImagePins(config)
+  const mailer = configMailerEnv(cwd, config)
   // `POSTGRES_PASSWORD` and `JWT_SECRET` are deliberately absent.
   //
   // They used to be pinned here to published constants on every `dev` run, against the same
@@ -370,12 +370,10 @@ export function upsertDevComposeEnv(
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
-    // From auth.email.enableConfirmations, unless the developer set their own in .env.
-    ...devMailerAutoconfirmUpdate(cwd, config),
-    // email.provider and its settings, which the compose file passes to the server. The compose
-    // path used to carry none of them, so a project that asked for smtp, Resend or SES got the auth
-    // service's noop client and no message at all.
-    ...mailerProviderEnv(config.email),
+    // auth.email.enableConfirmations (unless the developer set their own in .env), email.provider
+    // and its settings, which the compose file passes to the server. The compose path used to carry
+    // none of them, so a project that asked for smtp, Resend or SES got the noop mailer.
+    ...mailer.updates,
     ...imagePins,
   }
   // Never for an external database: this URL describes the `db` container, which that project does
@@ -408,8 +406,8 @@ export function upsertDevComposeEnv(
   applyForThisRun(runOnly)
   const { urlsKept, rest } = takeFrontendUrls(persist)
   upsertEnvFile(cwd, rest, {
-    removeManaged: removeImageKeys,
-    managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
+    removeManaged: [...removeImageKeys, ...mailer.removeManaged],
+    managed: [...managedImageKeys, ...mailer.managed],
     remove: [...retiredKeys, ...staleLocalServerImage(dotEnv["SUPATYPE_SERVER_IMAGE"], wantsLocalServer, imagePins)],
   })
   // The front end's copies go where a development build reads them, not .env, which a production
@@ -1709,7 +1707,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const localServerImage = await ensureLocalServerDockerImage(cwd, config, devBrand)
 
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
-  warnProjectAuthProviderSecrets(cwd, config)
+  warnMissingStackSettings(cwd, config)
 
   console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
   await showDevStep("Preparing the Docker stack")

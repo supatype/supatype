@@ -74,6 +74,18 @@ describe("init's wizard", () => {
     await wizard(false, { "Where will this run in production?": "cloud" })
     expect(asked.messages).toContain("Production storage?")
   })
+
+  // Issue 76: SMTP was chosen with no host, and the server then dropped every email without a word.
+  it("asks for the SMTP host and port when the provider is SMTP", async () => {
+    const result = await wizard(false, { "Email provider": "smtp", "SMTP host": "smtp.acme.test", "SMTP port": "2525" })
+    expect(result.smtp).toEqual({ host: "smtp.acme.test", port: 2525 })
+  })
+
+  it("does not ask for an SMTP host for another provider", async () => {
+    const result = await wizard(false)
+    expect(asked.messages).not.toContain("SMTP host")
+    expect(result.smtp).toBeUndefined()
+  })
 })
 
 /**

@@ -14,6 +14,8 @@ import type { ActiveFlowPrompt, FlowController, FlowLogLine } from "./types.js"
 
 interface FlowAppProps {
   bind: (controller: FlowController) => void
+  /** Called as a Ctrl+C ends the flow, before Ink unmounts and the process exits. */
+  onRelease?: () => void
 }
 
 /**
@@ -31,7 +33,7 @@ function useHeldRawMode(): void {
   }, [isRawModeSupported, setRawMode])
 }
 
-export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
+export function FlowApp({ bind, onRelease }: FlowAppProps): React.ReactElement {
   useHeldRawMode()
   // Raw mode turns Ctrl+C into a key; it is handed on as the command's own Ctrl+C. A command that is
   // not dev exits at once, so the terminal is given back first: raw mode off now, as an unmount's
@@ -42,6 +44,7 @@ export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
     if (!((key.ctrl && input === "c") || input === "\x03")) return
     interruptFromPrompt(() => {
       restoreStdinAfterInk({ isTTY: stdin.isTTY, isRaw: true, setRawMode: (mode) => stdin.setRawMode(mode), pause: () => stdin.pause() })
+      onRelease?.()
       exit()
     })
   })
@@ -49,6 +52,7 @@ export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
   const [spinner, setSpinner] = useState<string | null>(null)
   const [prompt, setPrompt] = useState<ActiveFlowPrompt | null>(null)
   const [promptResolver, setPromptResolver] = useState<((value: unknown) => void) | null>(null)
+  const [finished, setFinished] = useState<(() => void) | null>(null)
   const bound = useRef(false)
 
   useEffect(() => {
@@ -76,14 +80,25 @@ export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
           })
         })
       },
+      finish(): Promise<void> {
+        return new Promise<void>((resolve) => {
+          setSpinner(null)
+          setPrompt(null)
+          setFinished(() => resolve)
+        })
+      },
     }
     bind(controller)
   }, [bind])
 
+  // Called once the finished frame is committed, which is what `finish` waits for.
+  useEffect(() => finished?.(), [finished])
+
+  // Finished, the frame is the log lines alone: `finish` took the spinner and prompt away.
   return (
     <Box flexDirection="column" paddingX={1}>
-      <FlowLogoHeader />
-      {prompt ? null : <FlowLogPane lines={logLines} />}
+      {finished ? null : <FlowLogoHeader />}
+      {prompt ? null : <FlowLogPane lines={logLines} gapBelow={finished === null} />}
       {spinner ? <FlowSpinnerLine message={spinner} /> : null}
       {prompt && promptResolver ? (
         <PromptPanel>

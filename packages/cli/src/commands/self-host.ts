@@ -34,11 +34,12 @@ import {
   writeSelfHostCompose,
 } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
+import { syncConfigMailerEnv } from "../config-mailer-env.js"
 import { takenComposePorts, type ComposeContext, type PublishedPort } from "../compose-services.js"
 import { isPortInUse, portCheckCommand } from "../postgres-ctl.js"
 import { fatalError } from "../ui/fatal.js"
 import { warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
-import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
+import { warnMissingStackSettings } from "../stack-setting-warnings.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { confirm } from "../ui/confirm.js"
@@ -61,7 +62,7 @@ export function registerSelfHost(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd, { local: false })
       requireUrlSafeComposePasswords(cwd, config)
-      warnProjectAuthProviderSecrets(cwd, config)
+      warnMissingStackSettings(cwd, config)
       const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
       file("wrote", out.composePath)
       file("wrote", out.kongPath)
@@ -90,8 +91,10 @@ export function registerSelfHost(program: Command): void {
       if (filled.length > 0) {
         console.log(`[supatype] Minted ${filled.join(" and ")} in .env from JWT_SECRET.`)
       }
-      // Before the spinner, so the warning is not drawn over.
-      warnProjectAuthProviderSecrets(cwd, config)
+      // The committed config's mailer values, over any the last `dev` wrote from its local one.
+      syncConfigMailerEnv(cwd, config)
+      // Before the spinner, so the warnings are not drawn over.
+      warnMissingStackSettings(cwd, config)
       noteUnpinnedImages(cwd)
       const renderOptions = composeRenderOptions(cwd, config.project.name)
       // DATABASE_URL in .env is not moved to this stack's port. That line is dev's, and moving it
@@ -537,7 +540,10 @@ function runCompose(args: string[], use: ComposeFileUse): number {
   const cwd = process.cwd()
   // The committed config, not the developer's local override: this is the self-host stack (issue 24).
   const config = loadConfig(cwd, { local: false })
-  if (use === "start") requireUrlSafeComposePasswords(cwd, config)
+  if (use === "start") {
+    requireUrlSafeComposePasswords(cwd, config)
+    syncConfigMailerEnv(cwd, config)
+  }
   const composePath =
     use === "on-disk"
       ? selfHostComposePaths(cwd).composePath

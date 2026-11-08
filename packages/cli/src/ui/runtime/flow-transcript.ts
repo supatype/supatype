@@ -1,10 +1,10 @@
 /**
  * What a flow's log pane shows, kept so it outlives the pane.
  *
- * The Ink chrome is cleared when a command ends, and the log pane with it, so a command that logged
- * a short report and ended left nothing on screen: `seed --status` showed no line (issue 67). Piped
- * output has no chrome, which is why it showed. Once the chrome is gone, `runClackFlow` writes the
- * lines the pane showed last.
+ * For a command that calls `process.exit` inside its flow: the process goes before Ink can write
+ * the frame it holds, so `types check` left only the banner (issue 77). `runClackFlow` then takes
+ * Ink's frame off and writes these lines in its place. A flow that ends normally needs none of
+ * this: its last frame is the log lines, and stays on screen.
  */
 
 import type { FlowController, FlowLogLevel, FlowLogLine } from "../flows/types.js"

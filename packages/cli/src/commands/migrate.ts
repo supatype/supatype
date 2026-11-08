@@ -3,12 +3,12 @@ import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
+import { resetQuestion, resetSchema, reseed } from "../schema-reset.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { engineRequestIn, stackEngine } from "../stack-engine.js"
-import { isEnginePushResult, isMigrateAnswer } from "../engine-answers.js"
+import { isMigrateAnswer } from "../engine-answers.js"
 import { plannedChanges } from "../diff-output.js"
 import { loadProjectLink } from "../link.js"
 import {
@@ -215,36 +215,34 @@ export function registerMigrate(program: Command): void {
   program
     .command("reset")
     .description(
-      "Drop all managed tables and re-apply the schema from scratch (destructive)",
+      "Drop every managed table and its rows, apply the schema again, then run the seeds (destructive)",
     )
     .option("--yes", "Skip confirmation prompt")
+    .option("--no-seed", "Do not run the seeds afterwards")
     .option("--connection <url>", "Database connection URL (overrides config)")
-    .action(async (opts: { yes?: boolean; connection?: string }) => {
+    .action(async (opts: { yes?: boolean; seed: boolean; connection?: string }) => {
       if (!opts.yes) {
-        const confirmed = await confirm(
-          "This will DROP all managed tables and re-apply the schema. Proceed?",
-          { default: false },
-        )
+        const confirmed = await confirm(resetQuestion(opts.seed), { default: false })
         if (!confirmed) {
           plain("Aborted.")
           return
         }
       }
 
-      const config = loadConfig()
-      requireLocalStack(process.cwd(), config, "reset", { connection: opts.connection, direct: true })
-      const connection = resolveHostDatabaseUrl(process.cwd(), config, { connection: opts.connection, allowDerived: true }).dsn
       const cwd = process.cwd()
-
-      const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
-      const result = await engineRequestIn(
-        await stackEngine(cwd, config, opts.connection, connection),
-        "/push",
-        { ast, database_url: connection, schema: "public", force: true },
-        isEnginePushResult,
-      )
-      info(result.message ?? "Reset complete.")
-      printPushWarnings(result)
+      const config = loadConfig()
+      requireLocalStack(cwd, config, "reset", { connection: opts.connection, direct: true })
+      const dsn = resolveHostDatabaseUrl(cwd, config, { connection: opts.connection, allowDerived: true }).dsn
+      const target = {
+        cwd,
+        config,
+        dsn,
+        engine: await stackEngine(cwd, config, opts.connection, dsn),
+        connection: opts.connection,
+      }
+      await resetSchema(target, withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config))
+      const code = opts.seed ? await reseed(target) : 0
+      if (code !== 0) process.exit(code)
     })
 }
 

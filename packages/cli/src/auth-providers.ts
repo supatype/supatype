@@ -210,15 +210,6 @@ export function warnMissingAuthProviderSecrets(
   for (const line of missingAuthProviderSecrets(config, environment)) console.warn(`[supatype] ${line}`)
 }
 
-/**
- * {@link warnMissingAuthProviderSecrets} against what compose will interpolate: the project's `.env`
- * with the shell over it, as compose resolves the same names. One function for `dev` and
- * `self-host compose`, so both say the same thing.
- */
-export function warnProjectAuthProviderSecrets(cwd: string, config: SupatypeProjectConfig): void {
-  warnMissingAuthProviderSecrets(config, { ...readEnvFile(cwd), ...process.env })
-}
-
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------

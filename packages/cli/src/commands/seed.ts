@@ -182,7 +182,8 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
 
 // --- Discovery ---
 
-function seedPaths(file: string | undefined, cwd: string, config: SupatypeConfig): string[] {
+/** The seed files a run uses: `file` when given, else every `seeds/*.ts`, else `seed.ts`. */
+export function seedPaths(file: string | undefined, cwd: string, config: SupatypeConfig): string[] {
   if (file !== undefined && file.trim() !== "") return [resolve(cwd, file)]
   const root = projectRootFromConfig(config, cwd)
   const fromDir = discoverSeedsDir(cwd, join(root, "seeds"))

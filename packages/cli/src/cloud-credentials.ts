@@ -2,8 +2,7 @@
  * Cloud session credentials (access + refresh) for CLI ↔ control plane.
  * Self-host links keep using long-lived SERVICE_ROLE_KEY and ignore this store.
  */
-import { existsSync, mkdirSync, unlinkSync } from "node:fs"
-import { writePrivateFile } from "./env-file.js"
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
@@ -54,8 +53,9 @@ export function loadCloudCredentials(): CloudCredentials | null {
 export function saveCloudCredentials(creds: CloudCredentials): void {
   const dir = join(homedir(), ".supatype")
   mkdirSync(dir, { recursive: true })
-  // It holds the session's tokens, so its owner alone reads it.
-  writePrivateFile(credentialsPath(), `${JSON.stringify(creds, null, 2)}\n`)
+  // It holds the session's tokens, so it is created readable by its owner alone. Only the CLI reads
+  // it, unlike a project's `.env`, which the stack's containers read as another user.
+  writeFileSync(credentialsPath(), `${JSON.stringify(creds, null, 2)}\n`, { encoding: "utf8", mode: 0o600 })
 }
 
 export function clearCloudCredentials(): void {

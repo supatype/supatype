@@ -3,6 +3,7 @@
  * written. Manual test #37: a pasted email with carriage returns in it went into `.env` as it was,
  * and the server, reading each piece as a line, refused to start and logged the admin password.
  */
+import { portNumber } from "./env-file.js"
 import { hasControlCharacter } from "./env-value.js"
 import { p } from "./ui/clack.js"
 import type { ClackTextOptions } from "./ui/clack-api.js"
@@ -32,4 +33,24 @@ export async function askText(options: ClackTextOptions): Promise<string> {
   const { validate } = options
   const answer = await p.text({ ...options, validate: (value) => answerProblem(value) ?? validate?.(value) })
   return ensureNotCancelled(answer)
+}
+
+/** The SMTP server init writes into `.env` when the email provider is SMTP. */
+export interface SmtpServer {
+  host: string
+  port: number
+}
+
+/** Why `value` is not an SMTP host, or undefined when it is: one name, no spaces. */
+export function smtpHostProblem(value: string): string | undefined {
+  const host = value.trim()
+  if (host === "") return "A host is required: without one no email is sent."
+  return /\s/.test(host) ? "Enter one host name, like smtp.example.com." : undefined
+}
+
+/** Why `value` is not a port, or undefined when it is one or is empty (the default then applies). */
+export function smtpPortProblem(value: string): string | undefined {
+  const port = value.trim()
+  if (port === "") return undefined
+  return /^\d+$/.test(port) && portNumber(port) !== null ? undefined : "Enter a port from 1 to 65535."
 }

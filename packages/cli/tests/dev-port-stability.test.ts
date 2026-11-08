@@ -113,14 +113,15 @@ describe("upsertEnvFile", () => {
   })
 })
 
-// Issue 64: `.env` holds the database passwords, the JWT secret and the service-role key, and was
-// created readable by every user (644 under umask 0022). Windows has no such mode to read.
+// The stack's containers read `.env` from the project mount as another user. Created 600 (issue 64's
+// first fix), it stopped the server starting on a Linux host with "open .env: permission denied".
+// Windows has no such mode to read.
 describe.skipIf(process.platform === "win32")("upsertEnvFile on a new file", () => {
-  it("creates it readable by its owner alone, and leaves an existing file's mode", () => {
+  it("creates it readable by the stack's containers, and leaves an existing file's mode", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-env-mode-"))
     try {
       upsertEnvFile(dir, { JWT_SECRET: "secret" })
-      expect(statSync(join(dir, ".env")).mode & 0o777).toBe(0o600)
+      expect(statSync(join(dir, ".env")).mode & 0o044).toBe(0o044)
       chmodSync(join(dir, ".env"), 0o640)
       upsertEnvFile(dir, { JWT_SECRET: "rotated" })
       expect(statSync(join(dir, ".env")).mode & 0o777).toBe(0o640)

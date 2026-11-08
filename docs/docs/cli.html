@@ -172,7 +172,7 @@
         <tr><td><code>migrate</code></td><td>Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With <code>--record</code> the file also records the migration as a push does</td><td><code>-o, --output &lt;file&gt;</code>, <code>--record</code>, <code>--force</code></td></tr>
         <tr><td><code>migrations list</code></td><td>List applied migrations with schema snapshot metadata</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>rollback</code></td><td>Roll back the last applied migration</td><td><code>--sync-schema</code>, <code>--no-sync-schema</code></td></tr>
-        <tr><td><code>reset</code></td><td>Drop all managed tables and re-apply the schema from scratch (destructive)</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code></td></tr>
+        <tr><td><code>reset</code></td><td>Drop every managed table and its rows, apply the schema again, then run the seeds (destructive)</td><td><code>--yes</code>, <code>--no-seed</code>, <code>--connection &lt;url&gt;</code></td></tr>
         <tr><td><code>rename [from] [to]</code></td><td>Record a rename in supatype/renames.json, so every push applies it as a rename and keeps the data: <code>supatype rename member.name member.title</code>, or <code>supatype rename member members</code> for a table</td><td><code>--prune</code></td></tr>
         <tr><td><code>doctor</code></td><td>Report schema drift between schema/index.ts and the live database</td><td><code>--strict</code>, <code>--rebaseline</code>, <code>--accept-access-drift</code>, <code>--yes</code></td></tr>
         <tr><td><code>adopt</code></td><td>Hand Supatype the objects a push refuses because their names are taken; take objects back with <code>--release</code>, and hand them back with <code>--reclaim</code></td><td><code>--release &lt;object...&gt;</code>, <code>--reclaim &lt;object...&gt;</code>, <code>--key &lt;object...&gt;</code>, <code>--adopt-none</code>, <code>--yes</code></td></tr>
@@ -202,6 +202,7 @@
       </tbody>
     </table></div>
     <p><code>seed</code> refuses to run against a project linked to Supatype Cloud unless you pass <code>--force</code>. See <a href="/docs/seeding.html">Seeding</a>.</p>
+    <p><code>reset</code> drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a <code>runOnce</code> seed runs again, and runs the seeds unless you pass <code>--no-seed</code>. To start the whole database again, use <code>supatype dev --reset-db</code>.</p>
 
     <h2 id="functions">Functions and hooks</h2>
     <div class="tbl"><table>

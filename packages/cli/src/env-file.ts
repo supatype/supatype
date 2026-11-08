@@ -83,18 +83,6 @@ export interface UpsertOptions {
   file?: string
 }
 
-/**
- * The mode an env file is created with: its owner alone reads it. `.env` holds the database
- * passwords, the JWT secret and the service-role key, and was created readable by every user on the
- * machine (issue 64). A file that exists keeps the mode it has.
- */
-export const PRIVATE_FILE_MODE = 0o600
-
-/** Write a file that holds secrets, created readable by its owner alone ({@link PRIVATE_FILE_MODE}). */
-export function writePrivateFile(path: string, text: string): void {
-  writeFileSync(path, text, { encoding: "utf8", mode: PRIVATE_FILE_MODE })
-}
-
 /** The older form of `upsertEnvFile`'s options: a list of keys, where options are an object. */
 function isKeyList(options: UpsertOptions | readonly string[]): options is readonly string[] {
   return Array.isArray(options)
@@ -129,7 +117,9 @@ export function upsertEnvFile(
   // Not written when nothing changed. `.env` is compose's input, and a command that only read the
   // stack (push or doctor with dev running) has no business touching it.
   if (next === existing.replace(/\r\n/g, "\n")) return
-  writePrivateFile(envPath, next)
+  // Not created owner-only: the stack's containers read `.env` from the project mount as another
+  // user, and on a Linux host a 600 file stopped the server starting.
+  writeFileSync(envPath, next, "utf8")
 }
 
 /** One upsert's updates and its {@link UpsertOptions} as sets, for {@link mergeLines}. */
@@ -291,7 +281,8 @@ export function shellEnvInt(key: string, env: NodeJS.ProcessEnv = process.env): 
   return portNumber(env[key]?.trim() ?? "")
 }
 
-function portNumber(raw: string): number | null {
+/** `raw` as a TCP port, 1 to 65535, or null when it is not one. */
+export function portNumber(raw: string): number | null {
   if (!raw) return null
   const port = Number(raw)
   return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null

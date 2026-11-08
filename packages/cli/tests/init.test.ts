@@ -465,6 +465,13 @@ describe("scaffold()", () => {
     }
   })
 
+  it("writes the SMTP host and port the wizard was given", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), email: "smtp", smtp: { host: "smtp.acme.test", port: 2525 } })
+    const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(env).toMatch(/^SUPATYPE_SMTP_HOST=smtp\.acme\.test$/m)
+    expect(env).toMatch(/^SUPATYPE_SMTP_PORT=2525$/m)
+  })
+
   it("mixed local dev and s3 production writes both storage sections", () => {
     scaffold(tmpRoot, {
       ...defaultScaffoldOptions("my-app"),

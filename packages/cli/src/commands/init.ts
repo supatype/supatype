@@ -14,16 +14,19 @@ import {
   type TimedStep,
 } from "../init-setup-steps.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
-import { adminEmailProblem, answerProblem, askText } from "../init-answers.js"
+import { adminEmailProblem, answerProblem, askText, smtpHostProblem, smtpPortProblem, type SmtpServer } from "../init-answers.js"
 import { assertEnvValues } from "../env-value.js"
-import { PRIVATE_FILE_MODE } from "../env-file.js"
+import { ensureFunctionsEnvLocal, FUNCTIONS_ENV_LOCAL } from "../functions-env-local.js"
 import { generateAndWriteKeys } from "./keys.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
   generateControlPlaneSecret,
+  generateObjectStoreCredentials,
   givenJwtSecret,
   newJwtSecret,
+  OBJECT_STORE_ACCESS_KEY_ENV,
+  OBJECT_STORE_SECRET_KEY_ENV,
 } from "../local-secrets.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -97,6 +100,8 @@ export interface ScaffoldOptions {
   schemaPath: string
   app: ScaffoldAppOptions
   email: "console" | "smtp" | "resend" | "ses"
+  /** The SMTP server, asked for when `email` is smtp, written to `.env`. */
+  smtp?: SmtpServer
   /** Object storage while developing locally (`supatype dev`). */
   storageLocal: "local" | "s3"
   /** Object storage when deployed to production. */
@@ -413,6 +418,8 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
         ],
       }),
     )
+    // Without a host the server uses its noop mailer and drops every email (issue 76).
+    const smtp = email === "smtp" ? await promptSmtpServer() : undefined
 
     const storageLocal = ensureNotCancelled(
       await p.select<StorageProvider>({
@@ -441,6 +448,7 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       schemaPath,
       app,
       email,
+      ...(smtp !== undefined && { smtp }),
       storageLocal,
       storageProduction,
       helloFunction,
@@ -449,6 +457,16 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       generateKeys: true,
       ...admin,
     }
+}
+
+/** The submission port most SMTP servers take, offered as the answer. */
+const SMTP_PORT = "587"
+
+/** The SMTP server's host and port, both required to send anything. */
+async function promptSmtpServer(): Promise<SmtpServer> {
+  const host = (await askText({ message: "SMTP host", placeholder: "smtp.example.com", validate: smtpHostProblem })).trim()
+  const port = await askText({ message: "SMTP port", defaultValue: SMTP_PORT, placeholder: SMTP_PORT, validate: smtpPortProblem })
+  return { host, port: Number(port.trim() || SMTP_PORT) }
 }
 
 /** A self-hosted project's domain for ACME TLS, and the email for its certificates when it has one. */
@@ -719,10 +737,10 @@ export function scaffold(
 ): void {
   const opts =
     typeof optsOrName === "string" ? defaultScaffoldOptions(optsOrName) : optsOrName
-  const write = (rel: string, content: string, mode?: number) => {
+  const write = (rel: string, content: string) => {
     const full = join(dir, rel)
     mkdirSync(resolve(full, ".."), { recursive: true })
-    writeFileSync(full, content, { encoding: "utf8", mode })
+    writeFileSync(full, content, "utf8")
     file("created", rel)
   }
   // First, so a value .env cannot hold is refused before any file is written.
@@ -740,7 +758,7 @@ export function scaffold(
     write("supatype.local.config.ts", localConfigTemplate(opts.app))
   }
   write(opts.schemaPath, schemaTemplate())
-  write(".env", env, PRIVATE_FILE_MODE)
+  write(".env", env)
   scaffoldDevFrontendEnv(dir, opts)
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
@@ -903,15 +921,13 @@ function viteBuildOutDir(opts: ScaffoldOptions): string | undefined {
 
 function scaffoldHelloFunction(
   dir: string,
-  write: (rel: string, content: string, mode?: number) => void,
+  write: (rel: string, content: string) => void,
 ): void {
   write("functions/hello/index.ts", functionTemplateSource("hello"))
   if (!existsSync(join(dir, "functions/_shared/README.md"))) {
     write("functions/_shared/README.md", sharedFunctionsReadmeSource())
   }
-  if (!existsSync(join(dir, "functions/.env.local"))) {
-    write("functions/.env.local", functionsEnvLocalTemplate(), PRIVATE_FILE_MODE)
-  }
+  if (ensureFunctionsEnvLocal(join(dir, "functions")).created) file("created", `functions/${FUNCTIONS_ENV_LOCAL}`)
   const denoTypes = ensureFunctionsDenoTypes(dir, join(dir, "functions"))
   if (denoTypes.wroteDenoDts) file("created", "functions/deno.d.ts")
   if (denoTypes.wroteTsconfig) file("created", "functions/tsconfig.json")
@@ -1394,7 +1410,7 @@ API_EXTERNAL_URL=${initLocalApiUrl(opts)}`,
     )
   }
 
-  sections.push(emailEnvSection(opts.email, opts.projectName))
+  sections.push(emailEnvSection(opts))
   sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction))
 
   if (opts.adminEmail && opts.adminPassword) {
@@ -1428,7 +1444,7 @@ const SELF_HOST_PORTS_ENV_SECTION = `# Self-host stack ports (supatype self-host
  * written unprefixed (RESEND_API_KEY, SES_FROM, SMTP_HOST), which nothing reads, so a developer who
  * filled them in still got no email.
  */
-function emailEnvSection(email: ScaffoldOptions["email"], projectName: string): string {
+function emailEnvSection({ email, projectName, smtp }: ScaffoldOptions): string {
   switch (email) {
     case "resend":
       return `# Email (Resend)
@@ -1442,8 +1458,8 @@ AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=`
     case "smtp":
       return `# Email (SMTP)
-SUPATYPE_SMTP_HOST=
-SUPATYPE_SMTP_PORT=587
+SUPATYPE_SMTP_HOST=${smtp?.host ?? ""}
+SUPATYPE_SMTP_PORT=${smtp?.port ?? 587}
 SUPATYPE_SMTP_USER=
 SUPATYPE_SMTP_PASS=
 SUPATYPE_SMTP_SENDER_NAME=${projectName}`
@@ -1493,10 +1509,13 @@ S3_BUCKET=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=`
   }
+  const login = generateObjectStoreCredentials()
   return `# Storage (local development, SeaweedFS)
+# The object store's login, generated for this project. It opens every file in every bucket, so
+# keep it as private as the database password.
 S3_ENDPOINT=http://localhost:8333
-S3_ACCESS_KEY=supatype
-S3_SECRET_KEY=supatype-secret`
+${OBJECT_STORE_ACCESS_KEY_ENV}=${login.accessKey}
+${OBJECT_STORE_SECRET_KEY_ENV}=${login.secretKey}`
 }
 
 function productionStorageEnvSection(storage: StorageProvider): string {
@@ -1551,10 +1570,6 @@ export default async function seed(ctx: SeedContext) {
   //   starts_at: ctx.expr.startOf("day", { days: 30, hours: 9 })
 }
 `
-}
-
-function functionsEnvLocalTemplate(): string {
-  return "# Local environment variables for edge functions\n# These are NOT committed to git\n# Set production env vars via: npx supatype functions env set KEY=value\n"
 }
 
 function gitignoreTemplate(): string {

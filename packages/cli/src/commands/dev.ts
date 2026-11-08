@@ -120,6 +120,7 @@ import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
+import { warnSmtpWithoutHost } from "../config-mailer-env.js"
 import { nativeSamlEnv } from "../saml-config.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
 import {
@@ -529,6 +530,7 @@ export function registerDev(program: Command): void {
       // What an env("NAME") in auth.providers resolves against: the shell over .env, as for the config.
       const providerEnvironment = { ...dotEnv, ...process.env }
       warnMissingAuthProviderSecrets(config, providerEnvironment)
+      warnSmtpWithoutHost(config, providerEnvironment)
       // functions.serviceRole as the worker starts with it; the config watch below keeps it current.
       const serviceRole = { routesPath: devServiceRoleRoutesPath(cwd), initial: serviceRoleRoutes(config) }
       writeServiceRoleRoutesFile(serviceRole.routesPath, serviceRole.initial)

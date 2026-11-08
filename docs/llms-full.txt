@@ -4682,7 +4682,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 | `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
 | `migrations list` | List applied migrations with schema snapshot metadata | `--connection <url>`, `--env <name>` |
 | `rollback` | Roll back the last applied migration | `--sync-schema`, `--no-sync-schema` |
-| `reset` | Drop all managed tables and re-apply the schema from scratch (destructive) | `--yes`, `--connection <url>` |
+| `reset` | Drop every managed table and its rows, apply the schema again, then run the seeds (destructive) | `--yes`, `--no-seed`, `--connection <url>` |
 | `rename [from] [to]` | Record a rename in supatype/renames.json, so every push applies it as a rename and keeps the data: `supatype rename member.name member.title`, or `supatype rename member members` for a table | `--prune` |
 | `doctor` | Report schema drift between schema/index.ts and the live database | `--strict`, `--rebaseline`, `--accept-access-drift`, `--yes` |
 | `adopt` | Hand Supatype the objects a push refuses because their names are taken; take objects back with `--release`, and hand them back with `--reclaim` | `--release <object...>`, `--reclaim <object...>`, `--key <object...>`, `--adopt-none`, `--yes` |
@@ -4710,6 +4710,8 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `cache rest flush` | Flush REST cache entries | `--table <name>`, `--yes` |
 
 `seed` refuses to run against a project linked to Supatype Cloud unless you pass `--force`. See [Seeding](https://www.supatype.com/docs/seeding.html).
+
+`reset` drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a `runOnce` seed runs again, and runs the seeds unless you pass `--no-seed`. To start the whole database again, use `supatype dev --reset-db`.
 
 ### Functions and hooks
 

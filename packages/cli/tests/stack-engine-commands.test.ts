@@ -37,6 +37,11 @@ vi.mock("../src/engine-client.js", async (importOriginal) => ({
     engineCalls.push({ endpoint, engine })
     return ANSWERS[endpoint]
   },
+  // reset pushes through enginePush, whose own call to engineRequest the mock above cannot reach.
+  enginePush: async (_cwd: string, _body: unknown, _guard: unknown, engine?: ComposeEngine) => {
+    engineCalls.push({ endpoint: "/push", engine })
+    return ANSWERS["/push"]
+  },
 }))
 vi.mock("../src/engine-ownership-gate.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/engine-ownership-gate.js")>()),
@@ -59,6 +64,10 @@ vi.mock("../src/config.js", async (importOriginal) => ({
 vi.mock("../src/local-stack-guard.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/local-stack-guard.js")>()),
   requireLocalStack: () => {},
+}))
+vi.mock("../src/db-rows.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/db-rows.js")>()),
+  withDatabase: async () => undefined,
 }))
 vi.mock("../src/host-database.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/host-database.js")>()),
@@ -98,13 +107,14 @@ async function run(...args: string[]): Promise<void> {
 
 describe("commands that reach the stack's database run the engine push runs", () => {
   it.each([
-    ["migrate", ["migrate"], "/migrate"],
-    ["reset", ["reset", "--yes"], "/push"],
-    ["pull", ["pull", "--dry-run"], "/introspect"],
-    ["migrations list", ["migrations", "list"], "/migrations"],
-  ])("%s runs the project's engine image", async (_name, args, endpoint) => {
+    ["migrate", ["migrate"], ["/migrate"]],
+    // Twice: an empty schema to drop the managed tables, then the real one (issue 72).
+    ["reset", ["reset", "--yes", "--no-seed"], ["/push", "/push"]],
+    ["pull", ["pull", "--dry-run"], ["/introspect"]],
+    ["migrations list", ["migrations", "list"], ["/migrations"]],
+  ])("%s runs the project's engine image", async (_name, args, endpoints) => {
     await run(...args)
-    expect(engineCalls).toEqual([{ endpoint, engine: composeEngine }])
+    expect(engineCalls).toEqual(endpoints.map((endpoint) => ({ endpoint, engine: composeEngine })))
   })
 
   it("keeps the host binary for a --connection to another database", async () => {

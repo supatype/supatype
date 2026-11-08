@@ -27,7 +27,9 @@ export function registerStatus(program: Command): void {
           const target = resolveTarget(cwd, { env: opts.env })
           if (target.mode !== "direct") {
             await printLinkedStatus(target)
-            return
+            // The local stack's services follow its functions: only the functions were listed,
+            // where the help promised services (issue 79). A remote stack is not this machine's.
+            if (target.mode !== "local") return
           }
         } catch (err) {
           error(errorMessage(err))

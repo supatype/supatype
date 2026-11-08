@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 import { Box, Text, useInput } from "ink"
-import TextInput from "ink-text-input"
 import { FlowSpinner } from "../components/FlowSpinner.js"
+import { LineInput } from "../components/LineInput.js"
 import { LogoWordmark } from "../components/LogoWordmark.js"
 import { SelectField } from "../components/SelectField.js"
 import { theme } from "../theme.js"
@@ -21,9 +21,10 @@ export function FlowLogoHeader(): React.ReactElement {
   return <LogoWordmark />
 }
 
-export function FlowLogPane({ lines }: { lines: FlowLogLine[] }): React.ReactElement {
+/** The flow's log lines, with a blank line under them unless `gapBelow` is false. */
+export function FlowLogPane({ lines, gapBelow = true }: { lines: FlowLogLine[]; gapBelow?: boolean }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={gapBelow ? 1 : 0}>
       {lines.map((line, index) => (
         <Text key={`${index}-${line.text.slice(0, 24)}`} {...flowLogLineProps(line.level)}>
           {line.text}
@@ -144,9 +145,13 @@ export function TextPrompt({ spec, onSubmit, onCancel }: TextPromptProps): React
       </Text>
       <Box>
         <Text color={theme.brand}>› </Text>
-        <TextInput
+        <LineInput
           value={value}
-          onChange={setValue}
+          onChange={(next) => {
+            setValue(next)
+            // A message about what was there before is wrong once it changes (issue 78).
+            setError(undefined)
+          }}
           onSubmit={(submitted) => {
             const answer = textPromptAnswer(submitted, spec)
             const err = spec.validate?.(answer)
@@ -185,7 +190,7 @@ export function PasswordPrompt({ spec, onSubmit, onCancel }: PasswordPromptProps
       </Text>
       <Box>
         <Text color={theme.brand}>› </Text>
-        <TextInput mask="*" value={value} onChange={setValue} onSubmit={onSubmit} />
+        <LineInput mask="*" value={value} onChange={setValue} onSubmit={onSubmit} />
       </Box>
       <Text dimColor>enter submit · esc cancel</Text>
     </Box>

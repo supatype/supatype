@@ -40,7 +40,11 @@ import {
   ENV_FILE_OVER_SHELL,
   SQL_EDITOR_PASSWORD_ENV,
   ensureControlPlaneSecret,
+  ensureObjectStoreCredentials,
   envFileOverridesShell,
+  OBJECT_STORE_ACCESS_KEY_ENV,
+  OBJECT_STORE_SECRET_KEY_ENV,
+  type ObjectStoreCredentials,
 } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
@@ -87,9 +91,13 @@ const SEAWEEDFS_IMAGE =
  */
 const ACME_KEY_PREFIX = "kong_acme:"
 
-/** Credentials the object store is configured with and the storage service is handed. */
-const OBJECT_STORE_ACCESS_KEY = "supatype"
-const OBJECT_STORE_SECRET_KEY = "supatype-secret"
+/**
+ * The project's object store login as compose reads it from `.env` (issue 71: every stack used to
+ * share one pair, written into this file). Required, not defaulted: writeSelfHostCompose generates
+ * it before the file is written.
+ */
+const OBJECT_STORE_ACCESS_KEY = `\${${OBJECT_STORE_ACCESS_KEY_ENV}:?${OBJECT_STORE_ACCESS_KEY_ENV} is missing from .env}`
+const OBJECT_STORE_SECRET_KEY = `\${${OBJECT_STORE_SECRET_KEY_ENV}:?${OBJECT_STORE_SECRET_KEY_ENV} is missing from .env}`
 
 /**
  * The compose volume key Postgres keeps its data in. Docker names the volume
@@ -219,14 +227,12 @@ function supportedEngineImage(image: string, from: string): string {
  * world-readable and the per-bucket policy decorative, which is the opposite of what
  * `applyPublicPolicy` is for: a bucket is public because its policy says so.
  */
-export function renderSeaweedIdentities(): string {
+export function renderSeaweedIdentities(credentials: ObjectStoreCredentials): string {
   const identities = {
     identities: [
       {
         name: "supatype",
-        credentials: [
-          { accessKey: OBJECT_STORE_ACCESS_KEY, secretKey: OBJECT_STORE_SECRET_KEY },
-        ],
+        credentials: [{ accessKey: credentials.accessKey, secretKey: credentials.secretKey }],
         actions: ["Admin", "Read", "List", "Tagging", "Write"],
       },
     ],
@@ -678,6 +684,10 @@ ${studioService}
     # open. Written beside this file by the same generator, so the two cannot drift.
     image: \${SUPATYPE_SEAWEEDFS_IMAGE:-${SEAWEEDFS_IMAGE}}
     command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    environment:
+      # Read by nothing inside. The object store loads s3.json only when it starts, so the login is
+      # named here to make compose restart it whenever the login changes, as it does storage.
+      SUPATYPE_S3_LOGIN: "${OBJECT_STORE_ACCESS_KEY}:${OBJECT_STORE_SECRET_KEY}"
     volumes:
       - storage-data:/data
 ${mounts.seaweed}
@@ -1472,7 +1482,9 @@ export function writeSelfHostCompose(
   // that have no functions. `functions new` and `init` create it when there is one.
   ensureComposeManifest(cwd, config)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
-  writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(), "utf8")
+  // The object store's login, from the same `.env` values the compose file reads, generated first
+  // when the project has none.
+  writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(ensureObjectStoreCredentials(cwd)), "utf8")
   const studioHostDev = options?.devLocal === true && hasStudioOverride(config)
   const tlsEnabled = selfHostTlsEnabled(config, options?.devLocal === true)
   const domain = config.server.domain?.trim()
