@@ -10,7 +10,6 @@ import type { FlowController } from "../src/ui/flows/types.js"
 function controller(): FlowController {
   return {
     appendLog: () => {},
-    appendPlain: () => {},
     setSpinner: () => {},
     waitForPrompt: async () => undefined,
     finish: async () => undefined,
@@ -23,7 +22,7 @@ describe("FlowTranscript", () => {
     const recorded = transcript.record(controller())
     recorded.appendLog("info", "  seeds/01-tasks.ts  committed")
     recorded.appendLog("warn", "careful")
-    recorded.appendPlain("as it is")
+    recorded.appendLog("plain", "as it is")
     const text = transcript.text()
     expect(text).toContain("seeds/01-tasks.ts  committed")
     expect(text).toContain("⚠ careful")

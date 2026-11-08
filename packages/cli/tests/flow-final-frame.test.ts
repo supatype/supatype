@@ -33,8 +33,10 @@ describe("a flow's last frame", () => {
     const screen = terminalScreen(tty.drawn())
     expect(linesHolding(screen, "seeds/01-demo.ts   committed")).toBe(1)
     expect(linesHolding(screen, "seed.ts            committed")).toBe(1)
-    expect(linesHolding(screen, "Reading seeds")).toBe(0)
+    // Once, as the line above the work's: the spinner itself is gone.
+    expect(linesHolding(screen, "Reading seeds")).toBe(1)
     expect(screen.filter((line) => line.trim() !== "").map((line) => line.trim())).toEqual([
+      "Reading seeds",
       "seeds/01-demo.ts   committed",
       "seed.ts            committed",
       "Read",

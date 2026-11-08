@@ -1500,8 +1500,13 @@ S3_SECRET_KEY=`
   )
 }
 
+/** Whether init generates the object store's login: for the local SeaweedFS, not a bucket of your own. */
+function generatesObjectStoreLogin(storage: StorageProvider): boolean {
+  return storage !== "s3"
+}
+
 function localStorageEnvSection(storage: StorageProvider): string {
-  if (storage === "s3") {
+  if (!generatesObjectStoreLogin(storage)) {
     return `# Storage (local development, external bucket)
 S3_ENDPOINT=
 S3_REGION=us-east-1
@@ -1637,7 +1642,7 @@ function startInitQuestions(provider: ScaffoldOptions["provider"]): InitQuestion
 export interface InitStepsArgs {
   name: string | undefined
   result: Pick<WizardResult, "provider" | "kongPort" | "adminEmail" | "packageManager" | "helloFunction"> &
-    Partial<Pick<WizardResult, "productionTarget" | "domain" | "tlsEmail">>
+    Partial<Pick<WizardResult, "productionTarget" | "domain" | "tlsEmail" | "storageLocal">>
   installed: boolean
   keysGenerated: boolean
   binariesReady: boolean
@@ -1689,7 +1694,7 @@ function printNextSteps(args: InitStepsArgs): void {
 export function initStepBlocks(args: InitStepsArgs): InitStepBlock[] {
   const blocks: InitStepBlock[] = [
     { title: initSetupComplete(args) ? "Next steps:" : "Finish setup:", steps: initFirstSteps(args) },
-    { title: "Secrets: generated for this project, kept in .env:", steps: initSecretLines(), after: SECRETS_CLOSING },
+    { title: "Secrets: generated for this project, kept in .env:", steps: initSecretLines(args.result.storageLocal), after: SECRETS_CLOSING },
   ]
   const deploy = deployBlock(args.result)
   return deploy === undefined ? blocks : [...blocks, deploy]
@@ -1755,12 +1760,22 @@ const INIT_SECRETS: ReadonlyArray<readonly [name: string, description: string]> 
   ["JWT_SECRET", "signs ANON_KEY and SERVICE_ROLE_KEY; changing it invalidates every token"],
 ]
 
+/** The object store's login, when init generates one ({@link generatesObjectStoreLogin}). */
+const OBJECT_STORE_SECRETS: ReadonlyArray<readonly [name: string, description: string]> = [
+  [OBJECT_STORE_ACCESS_KEY_ENV, "the object store's login, which opens every file in every bucket"],
+  [OBJECT_STORE_SECRET_KEY_ENV, "its password"],
+]
+
 const SECRETS_CLOSING = "Keep .env out of version control, and use different values in production."
 
-/** One line per secret, each description two spaces past the longest name. */
-export function initSecretLines(): string[] {
-  const width = Math.max(...INIT_SECRETS.map(([name]) => name.length)) + 2
-  return INIT_SECRETS.map(([name, description]) => `${name.padEnd(width)}${description}`)
+/**
+ * One line per secret init wrote, each description two spaces past the longest name. With
+ * development storage in an S3 bucket of your own, init generates no object-store login.
+ */
+export function initSecretLines(storageLocal: StorageProvider = "local"): string[] {
+  const secrets = generatesObjectStoreLogin(storageLocal) ? [...INIT_SECRETS, ...OBJECT_STORE_SECRETS] : INIT_SECRETS
+  const width = Math.max(...secrets.map(([name]) => name.length)) + 2
+  return secrets.map(([name, description]) => `${name.padEnd(width)}${description}`)
 }
 
 /**

@@ -39,7 +39,6 @@ export interface FlowPromptHandle<T = unknown> {
 
 export interface FlowController {
   appendLog(level: FlowLogLevel, text: string): void
-  appendPlain(text: string): void
   setSpinner(message: string | null): void
   /** Resolves with what the prompt view submits, or CLACK_CANCEL; narrow it with promptAnswer. */
   waitForPrompt(spec: ActiveFlowPrompt): Promise<unknown>

@@ -30,6 +30,7 @@ import {
   exitComposeFailed,
   noteUnpinnedImages,
   runDockerCompose,
+  runDockerComposeQuietly,
   selfHostComposePaths,
   writeSelfHostCompose,
 } from "../self-host-compose.js"
@@ -102,8 +103,13 @@ export function registerSelfHost(program: Command): void {
       // admin reach the running stack's port past a URL the CLI wrote (host-database.ts).
       const out = writeSelfHostCompose(cwd, config, renderOptions)
       await requireComposePortsFree({ composePath: out.composePath, projectRoot: cwd, projectName: project })
+      // In a terminal, quietly and without blocking, as `dev` starts its stack: docker's progress
+      // stays out of the CLI's screen (runDockerCompose says why) and the spinner turns through
+      // the pulls. Its output is kept for a failure.
       const status = await withSpinner("Starting self-host Compose stack", async () =>
-        runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND }),
+        isInteractive()
+          ? runDockerComposeQuietly(out.composePath, args, cwd, project, SELF_HOST_BRAND)
+          : runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND }),
       )
       if (status !== 0) {
         exitComposeFailed(status, "Could not start the self-host Compose stack.", SELF_HOST_BRAND)

@@ -15,7 +15,7 @@
  */
 import { isJsonObject, parseJsonObject } from "@supatype/shared"
 import { existsSync } from "node:fs"
-import { loadConfig } from "./config.js"
+import { loadConfig, type SupatypeProjectConfig } from "./config.js"
 import { askDocker, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { spawnFailureText } from "./error-message.js"
 import { composeProjectName, selfHostComposePaths } from "./self-host-compose.js"
@@ -25,6 +25,8 @@ export interface ComposeContext {
   composePath: string
   projectRoot: string
   projectName: string
+  /** The config the context was found with, when it loaded: for a caller with more to read in it. */
+  config?: SupatypeProjectConfig
 }
 
 /** One service in the local stack. */
@@ -55,15 +57,15 @@ export function composeContext(cwd: string): ComposeContext | undefined {
   const paths = selfHostComposePaths(cwd)
   if (!existsSync(paths.composePath)) return undefined
 
-  let projectName = "supatype"
+  let config: SupatypeProjectConfig | undefined
   try {
-    const config = loadConfig(cwd)
-    if (config) projectName = composeProjectName(config.project.name)
+    config = loadConfig(cwd)
   } catch {
     // A project whose config will not load can still have a running stack, and
     // reporting on it is more useful than refusing to.
   }
-  return { composePath: paths.composePath, projectRoot: cwd, projectName }
+  const projectName = config ? composeProjectName(config.project.name) : "supatype"
+  return { composePath: paths.composePath, projectRoot: cwd, projectName, ...(config && { config }) }
 }
 
 /**

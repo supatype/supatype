@@ -29,10 +29,6 @@ export class FlowTranscript {
         this.lines.push({ level, text })
         controller.appendLog(level, text)
       },
-      appendPlain: (text) => {
-        this.lines.push({ level: "plain", text })
-        controller.appendPlain(text)
-      },
       waitForPrompt: (spec) => {
         this.lines = []
         return controller.waitForPrompt(spec)

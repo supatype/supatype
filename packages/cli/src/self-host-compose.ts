@@ -8,6 +8,8 @@ import { ENGINE_SERVICE } from "./compose-engine-service.js"
 import { requireDockerDaemon, requireDockerDaemonAsync, type DockerBrandOptions, type DockerReportOptions } from "./docker-runtime.js"
 import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer, type DockerLimit } from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
+import { plain } from "./ui/messages.js"
+import { getActiveFlowApi } from "./ui/runtime/flow-session.js"
 import {
   COMPOSE_DEV_KONG_PORT,
   defaultAppStaticDir,
@@ -1570,7 +1572,11 @@ export function runDockerCompose(
   options?: RunDockerComposeOptions,
 ): number {
   if (options?.skipDaemonProbe !== true) requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
-  const quiet = options?.quiet === true
+  // Inside a command's flow, docker's output is captured and its stdout logged there. Written
+  // straight to the terminal, it landed in the frame the flow redraws, and every line above it
+  // came out twice.
+  const inFlow = getActiveFlowApi() !== null
+  const quiet = options?.quiet === true || inFlow
   const runCompose = () =>
     askDockerSync(composeInvocation(composePath, args, projectRoot, composeProject, quiet), {
       stdio: quiet ? "pipe" : "inherit",
@@ -1585,6 +1591,8 @@ export function runDockerCompose(
       ? upKeepingKongCurrent(projectRoot, { project: composeProject, composePath }, runCompose)
       : runCompose()
   if (result.status !== 0) reportComposeFailure(args, quiet ? capturedComposeOutput(result) : null)
+  // The flow's log takes the text a line at a time, blank lines dropped.
+  else if (inFlow && options?.quiet !== true) plain(result.stdout.replace(/\r/g, "").trimEnd())
   return result.status ?? 1
 }
 

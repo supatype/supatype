@@ -133,7 +133,7 @@ export function configEnvironment(cwd: string, config: SupatypeProjectConfig): s
  * for a container and unresolvable from the host, which is how `supatype adopt` on a docker
  * project failed (supatype#85).
  */
-function hostDatabaseUrl(cwd: string, config: SupatypeProjectConfig, connection: string | undefined): string {
+export function hostDatabaseUrl(cwd: string, config: SupatypeProjectConfig, connection?: string): string {
   return resolveHostDatabaseUrl(cwd, config, { connection, allowDerived: true }).dsn
 }
 

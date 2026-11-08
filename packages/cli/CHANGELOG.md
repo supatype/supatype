@@ -209,7 +209,15 @@
   creates it, where it said "Setting FOO" and then failed with ENOENT. `init`, `functions new` and
   `env set` create `functions/.env.local` the same way.
 * **status:** on the local stack, the stack's services are listed after its functions, and `_shared`
-  is no longer listed as a function.
+  is no longer listed as a function. The database line is the address a program on this machine
+  connects to, with the password shown as `***`, as `seed --status` shows it.
+* **self-host compose up, every command in a terminal:** docker's output no longer goes straight to
+  the terminal while a command's screen is up. It landed in the screen being redrawn, and the notices
+  above it came out twice. It is kept and shown when docker fails, and what docker prints as its
+  answer, `ps`'s table say, goes into the command's log.
+* **push, every command in a terminal:** a spinner's line stays above the lines its work logs.
+  `push` printed "Schema pushed." above "Applying schema via Docker Compose".
+* **init:** the closing list of the secrets it generated names the object store's login.
 * **login:** the saved Cloud session is created readable by its owner alone (600). It holds the
   session's tokens. A project's `.env` is not: the stack's containers read it as another user, and an
   owner-only `.env` stopped the server starting on a Linux host.

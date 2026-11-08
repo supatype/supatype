@@ -62,9 +62,6 @@ export function FlowApp({ bind, onRelease }: FlowAppProps): React.ReactElement {
       appendLog(level, text) {
         setLogLines((lines) => [...lines, { level, text }])
       },
-      appendPlain(text) {
-        setLogLines((lines) => [...lines, { level: "plain", text }])
-      },
       setSpinner(message) {
         setSpinner(message)
       },

@@ -135,4 +135,14 @@ describe("init's secrets list", () => {
     expect(initSecretLines().some((line) => line.startsWith("Keep .env"))).toBe(false)
     expect(initStepBlocks(args()).find((b) => b.title.startsWith("Secrets"))!.after).toMatch(/^Keep \.env/)
   })
+
+  // Round 6: the object store's generated login was in .env but not in this list.
+  it("names the object store's login when init generated one", () => {
+    const names = (storageLocal: "local" | "s3") =>
+      initStepBlocks(args({ result: { ...args().result, storageLocal } }))
+        .find((b) => b.title.startsWith("Secrets"))!
+        .steps.map((line) => line.split(" ")[0])
+    expect(names("local")).toEqual(expect.arrayContaining(["SUPATYPE_OBJECT_STORE_ACCESS_KEY", "SUPATYPE_OBJECT_STORE_SECRET_KEY"]))
+    expect(names("s3")).not.toContain("SUPATYPE_OBJECT_STORE_ACCESS_KEY")
+  })
 })
