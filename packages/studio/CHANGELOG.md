@@ -22,6 +22,12 @@
 
 ### Bug Fixes
 
+* **globals:** an editor can save a global. Every save was an upsert, which needs the right to
+  insert, and a global gives an editor only read and update, so the save was refused with "You do not
+  have permission to make this change." A save now updates the row there is, and inserts only the
+  first time, when the global has no row. Before that first save the form no longer shows an empty,
+  required ID field, and opening it no longer logs a 406.
+
 * **auth:** the Users provider filter offers each SAML provider by name, `sso:acme`, and lists the
   users who signed in through it. It offered only the providers switched on in the config, so a
   user with an `sso:acme` badge could not be filtered to. A provider is offered for as long as it

@@ -7,6 +7,7 @@ import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { LocaleContext } from "../src/hooks/useLocale.js"
 import { GlobalEditView } from "../src/views/GlobalEditView.js"
+import { isJsonObject } from "../src/lib/json.js"
 import { elementOf, testClient, testConfig, testField } from "./support.js"
 
 /**
@@ -33,6 +34,8 @@ const LOCALE = { currentLocale: "en", setLocale: () => {}, locales: [{ code: "en
 let root: Root | null = null
 let container: HTMLElement
 let writes: unknown[] = []
+/** Each write's method and query, in order. */
+let calls: string[] = []
 
 beforeAll(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -45,17 +48,25 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** The row on read; `refusal` as the answer to a write, with its status. */
-function stubFetch(refusal: { status: number; body: Record<string, unknown> }): void {
+/**
+ * The row on read (none when `row` is null); `answer` to a write, with its status. A write that
+ * succeeds answers with the row it wrote.
+ */
+function stubFetch(answer: { status: number; body: Record<string, unknown> }, row: Record<string, unknown> | null = ROW): void {
   writes = []
+  calls = []
   vi.stubGlobal("fetch", async (raw: string, init?: RequestInit) => {
     const url = new URL(raw)
     if (!url.pathname.endsWith("/rest/v1/_global_site_settings")) return Response.json([])
-    if (init?.method === "POST") {
-      writes.push(JSON.parse(String(init.body)))
-      return Response.json(refusal.body, { status: refusal.status })
+    if (init?.method === "POST" || init?.method === "PATCH") {
+      const parsed: unknown = JSON.parse(String(init.body))
+      const body = isJsonObject(parsed) ? parsed : {}
+      writes.push(body)
+      calls.push(`${init.method} ${url.search}`)
+      if (answer.status >= 400) return Response.json(answer.body, { status: answer.status })
+      return Response.json([{ ...ROW, ...body }], { status: answer.status })
     }
-    return Response.json(ROW)
+    return Response.json(row === null ? [] : [row])
   })
 }
 
@@ -150,6 +161,27 @@ describe("saving Site settings", () => {
     expect(banner()).toBe("You do not have permission to make this change.")
     expect(details()).toContain("permission denied for table _global_site_settings")
     expect(fieldError("venue")).toBeNull()
+  })
+
+  // Issue 73: every save was an upsert, which needs INSERT, and a global grants an editor only SELECT
+  // and UPDATE, so an editor's save was refused with "permission denied".
+  it("updates the row there is, which an editor may, rather than upserting it", async () => {
+    stubFetch({ status: 200, body: {} })
+    await open()
+    await type("#field-title", "Renamed")
+    await save()
+    expect(calls).toEqual(["PATCH ?id=eq.s1&select=*"])
+    expect(writes).toEqual([{ title: "Renamed", venue: ROW.venue }])
+  })
+
+  it("inserts the row on the first save, with no key to fill in, then updates it", async () => {
+    stubFetch({ status: 201, body: {} }, null)
+    await open()
+    expect(container.querySelector("#field-id")).toBeNull()
+    await type("#field-title", "First")
+    await save()
+    await save()
+    expect(calls.map((call) => call.split(" ")[0])).toEqual(["POST", "PATCH"])
   })
 
   it("never shows raw SQL for a refusal it has no words for", async () => {
