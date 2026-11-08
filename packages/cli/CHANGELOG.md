@@ -187,6 +187,20 @@
 
 ### Bug Fixes
 
+* **dev:** a save made by writing another file and renaming it over the schema is pushed. `sed -i`
+  saves were always missed on Linux, and an editor's safe write or a script's `mv` about one time in
+  three: the event named only the other file, which the watch ignored, so the database kept the old
+  schema and nothing said so. Any event in the schema folder now leads to a check of the schema
+  itself.
+* **init, functions env set, login:** `.env`, `functions/.env.local` and the saved Cloud session are
+  created readable by their owner alone (600). They hold the database passwords, the JWT secret, the
+  service-role key and session tokens, and were readable by every user on the machine. A file that
+  exists keeps its mode.
+* **migrations list:** a push by an OS user with no git name says "(unverified)" once. The recorded
+  author now reads `nic (OS user)`, and the list adds whether it was verified.
+* **every command in a terminal:** what a command logged stays on screen when it ends. The command's
+  chrome is cleared at the end, and a short report went with it: `seed --status` showed nothing in a
+  terminal, only when piped. The lines are written out again once the chrome is gone.
 * **migrate, reset, rollback, migrations list, rename --prune, pull, deploy --local:** on the local
   stack's own database these run the project's engine image, as `push`, `diff` and `seed` do. They
   ran the engine binary cached on this machine, so with an engine image chosen, `migrate` wrote SQL
