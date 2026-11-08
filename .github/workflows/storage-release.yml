@@ -78,7 +78,7 @@ jobs:
             runner: macos-15-intel
             output: supatype-storage-darwin-amd64.tar.gz
           - platform: darwin-arm64
-            runner: macos-14
+            runner: macos-15
             output: supatype-storage-darwin-arm64.tar.gz
           - platform: windows-amd64
             runner: windows-latest

@@ -79,7 +79,7 @@ jobs:
             pkg_target: node22-macos-x64
             output: supatype-realtime-darwin-amd64
           - platform: darwin-arm64
-            runner: macos-14
+            runner: macos-15
             pkg_target: node22-macos-arm64
             output: supatype-realtime-darwin-arm64
           - platform: windows-amd64
