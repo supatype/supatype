@@ -10,7 +10,6 @@ import { RealtimeClient, type RealtimePayload } from "../src/realtime.js"
 import {
   createMockWebSocketClass,
   simulateServerMessage,
-  type MockWebSocketInstance,
 } from "./helpers/mock-websocket.js"
 
 

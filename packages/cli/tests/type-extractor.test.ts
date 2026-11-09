@@ -750,6 +750,35 @@ export type Post = Model<WithTimestamps<{
     expect(post?.options.singleton).toBeUndefined()
   })
 
+  // 0.9.2: `WithPublishable<T>` is `T & Publishable` in `@supatype/types`, but the wrapper was
+  // unwrapped to `T` alone, so the `published_at` it adds never reached the table, while the
+  // intersection spelling of the same type did add it.
+  it("gives WithPublishable the same published_at column as the & Publishable spelling", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-publishable-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, Publishable, Timestamp, UUID, WithPublishable } from "@supatype/types"
+
+export type Wrapped = Model<WithPublishable<{ id: UUID; title: string }>, { tableName: "wrapped" }>
+export type Joined = Model<{ id: UUID; title: string } & Publishable, { tableName: "joined" }>
+export type Own = Model<WithPublishable<{ id: UUID; published_at: Timestamp }>, { tableName: "own" }>
+`,
+      "utf8",
+    )
+
+    const models = extractSchemaAstFromTypes(schemaPath, dir)?.models ?? []
+    const fieldsOf = (name: string) => models.find((m) => m.name === name)?.fields
+    expect(Object.keys(fieldsOf("Wrapped") ?? {})).toEqual(["id", "title", "published_at"])
+    expect(fieldsOf("Wrapped")).toEqual(fieldsOf("Joined"))
+    expect(fieldsOf("Wrapped")?.["published_at"]?.["required"]).not.toBe(true)
+    // A model that declares the column itself keeps its own declaration, here a required one.
+    expect(Object.keys(fieldsOf("Own") ?? {})).toEqual(["id", "published_at"])
+    expect(fieldsOf("Own")?.["published_at"]?.["required"]).toBe(true)
+  })
+
   it("extracts models that use intersection `} & Timestamps` with relational fields", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-intersection-timestamps-"))
     dirs.push(dir)

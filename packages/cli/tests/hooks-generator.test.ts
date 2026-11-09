@@ -121,6 +121,23 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
     // Every column is optional on a patch.
     expect(module).toMatch(/Update: \{[\s\S]*title\?: string/)
   })
+
+  // 0.9.1 release test (FF3): a hook's row is the row the database holds, and that includes the
+  // columns `timestamps: true` adds, which the client's types also left out.
+  it("carries the columns a model's options add into the hook's row", () => {
+    const module = generateHooksModule(astFor(`
+import type { Model, UUID } from "@supatype/types"
+
+export type Note = Model<{ id: UUID; body: string }, {
+  tableName: "notes"
+  timestamps: true
+  hooks: { beforeChange: "check-note" }
+}>
+`)) ?? ""
+    const row = module.slice(module.indexOf("Row: {"), module.indexOf("Insert: {"))
+    expect(row).toContain("updated_at: string")
+    expect(module).toMatch(/Insert: \{[^}]*updated_at\?: string/)
+  })
 })
 
 describe("the generated module compiles", () => {

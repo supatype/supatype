@@ -489,3 +489,55 @@ describe("models that keep drafts", () => {
     expect(block("tag")).not.toContain("Drafts")
   })
 })
+
+/**
+ * 0.9.1 release test (FF3): the columns the engine adds beside the declared fields. It writes them
+ * into the table and into `database.ts` (`types.rs`, `emit_timestamps` and its neighbours), so the
+ * client's types must name them too, with the same shapes.
+ */
+describe("columns the engine adds", () => {
+  const model = (name: string, fields: Record<string, unknown>, options: Record<string, unknown> = {}) => ({
+    name,
+    fields: { id: { kind: "uuid", required: true, primaryKey: true }, ...fields },
+    options,
+    annotations: { db: { tableName: name.toLowerCase(), indexes: [] } },
+  })
+  const out = generateClientAugmentation({
+    models: [
+      model("Note", { body: { kind: "text", required: true } }, { timestamps: true, softDelete: true }),
+      model("Page", { timestamps: { kind: "timestamps" }, publishable: { kind: "publishable" }, gone: { kind: "softDelete" } }),
+      model("Own", { created_at: { kind: "datetime", required: true }, deleted_at: { kind: "datetime" } }, {
+        timestamps: true,
+        softDelete: true,
+      }),
+    ],
+  })
+  const part = (table: string, shape: "Row" | "Insert" | "Update"): string => {
+    const start = out.indexOf(`${shape}: {`, out.indexOf(`${table}: {`))
+    return out.slice(start, out.indexOf("}", start))
+  }
+
+  it("adds what timestamps and softDelete options add, filled by the database", () => {
+    expect(part("note", "Row")).toMatch(/created_at: string\n\s*updated_at: string\n\s*deleted_at: string \| null/)
+    expect(part("note", "Insert")).toMatch(/created_at\?: string\n\s*updated_at\?: string\n\s*deleted_at\?: string \| null/)
+    expect(part("note", "Update")).toMatch(/created_at\?: string\n\s*updated_at\?: string\n\s*deleted_at\?: string \| null/)
+  })
+
+  it("expands a composite field into its columns where it is declared", () => {
+    const row = part("page", "Row")
+    expect(row).toMatch(/id: string\n\s*created_at: string\n\s*updated_at: string\n\s*status: /)
+    expect(row).toContain('status: "draft" | "published" | "scheduled" | "archived"')
+    expect(row).toContain("published_at: string | null")
+    expect(row).toContain("scheduled_at: string | null")
+    expect(row).toContain("deleted_at: string | null")
+    expect(row).not.toMatch(/timestamps|publishable|gone/)
+    expect(part("page", "Insert")).toContain('status?: "draft" | "published" | "scheduled" | "archived"')
+  })
+
+  it("adds no second copy of a column the model already declares", () => {
+    const row = part("own", "Row")
+    expect(row.match(/created_at/g)).toHaveLength(1)
+    expect(row.match(/deleted_at/g)).toHaveLength(1)
+    expect(row).toContain("updated_at: string")
+  })
+})

@@ -18,7 +18,6 @@ import {
   createMockWebSocketClass,
   subscribedChannels,
   tokenOf,
-  type MockWebSocketInstance,
 } from "./helpers/mock-websocket.js"
 import { createClient } from "../src/index.js"
 import type { Session } from "../src/types.js"

@@ -620,7 +620,8 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
 
   async single(this: MutationBuilder<TRow, TTables, TName, TRow[]>): Promise<QueryResult<TRow>> {
     if (!this.returning) return rowNotSelected()
-    const { data, error, count, meta } = await this._execute({
+    // No `count` from the response: a success here is exactly one row, so it reports 1.
+    const { data, error, meta } = await this._execute({
       Accept: "application/vnd.pgrst.object+json",
     })
     if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }

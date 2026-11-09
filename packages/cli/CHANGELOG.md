@@ -214,6 +214,14 @@
 
 ### Bug Fixes
 
+* **generate:** the client's types now include the columns the engine adds for `timestamps: true` and
+  `softDelete: true` (`created_at`, `updated_at`, `deleted_at`), filled by the database and so
+  optional on insert, so selecting `updated_at` no longer fails `tsc`. Hook row types include them too.
+* **schema:** `WithPublishable<{ ... }>` now adds the nullable `published_at` column, as
+  `{ ... } & Publishable` already did. The wrapper used to drop it, so the two spellings of one type
+  built different tables. A `published_at` the model declares itself keeps its own shape.
+* **client:** `single()` on a write no longer declares a `count` it never reads, so the client source
+  compiles under `noUnusedLocals`. The package now checks that flag itself.
 * **client:** `.range()` now sends `offset` and `limit` like supabase-js, so `.limit(n).range(a, b)` and
   `useQuery(..., { limit, offset })` no longer fail with 416, and a cached read of one page is no longer
   served for another page. Whichever of `limit()` and `range()` is called last sets the page size.

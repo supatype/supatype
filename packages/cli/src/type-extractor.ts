@@ -361,6 +361,20 @@ function synthesizeTypeLiteralMembers(source: string): ts.TypeElement[] {
   return [...decl.type.members]
 }
 
+/**
+ * `fields` with a known mixin's fields appended, leaving out any the model already declares: a
+ * column the model states itself keeps the shape it stated.
+ */
+function withMixinFields(fields: ts.TypeLiteralNode, mixin: string): ts.TypeLiteralNode {
+  const declared = new Set(
+    fields.members.flatMap((member) => (member.name ? [getPropertyName(member.name)] : [])),
+  )
+  const added = synthesizeTypeLiteralMembers(KNOWN_MIXIN_SOURCES[mixin] ?? "{}").filter(
+    (member) => !member.name || !declared.has(getPropertyName(member.name)),
+  )
+  return ts.factory.createTypeLiteralNode([...fields.members, ...added])
+}
+
 function mergeIntersectionParts(
   parts: readonly ts.TypeNode[],
   sourceFile: ts.SourceFile,
@@ -421,7 +435,12 @@ function unwrapModelFields(
   ) {
     const inner = typeNode.typeArguments?.[0]
     if (!inner) return null
-    return unwrapModelFields(inner, sourceFile, resolveCtx, depth + 1)
+    const fields = unwrapModelFields(inner, sourceFile, resolveCtx, depth + 1)
+    // `WithTimestamps` and `WithSoftDelete` become model options, which the engine turns into
+    // columns. Publishing has no such option, so `WithPublishable` adds its column as a field, the
+    // same one `{ ... } & Publishable` adds. Unwrapping it to the inner fields alone dropped
+    // `published_at`, so the two spellings of one type built different tables.
+    return typeName === "WithPublishable" && fields ? withMixinFields(fields, "Publishable") : fields
   }
 
   const expanded = tryResolveTypeReference(typeNode, sourceFile, resolveCtx)
