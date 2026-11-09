@@ -187,6 +187,10 @@
 
 ### Bug Fixes
 
+* **react:** `useQuery`'s `refetch`, `useAuth`'s sign-in and sign-out methods, and
+  `usePasswordRecovery`'s `finish` now keep the same identity across renders, so an effect can list
+  them as dependencies. A new function on every render made `useEffect(() => refetch(), [refetch])`
+  loop, sending thousands of requests a second and ending in "Maximum update depth exceeded".
 * **init, dev:** `supatype dev` no longer starts itself as the app. In 0.9.1, `init` with "Local dev
   server" and the script prompt left at its default wrote `app.start: "dev"`, and in a new folder
   `dev` is init's own `supatype dev`, so dev ran a second copy in its app pane that failed and was

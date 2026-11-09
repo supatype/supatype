@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import type {
+  AuthClient,
   Session,
   SignInWithSSOCredentials,
   SignInWithSSOResult,
@@ -101,16 +102,24 @@ export function useAuth(): UseAuthReturn {
     }
   }, [client])
 
-  return {
-    user: session?.user ?? null,
-    session,
-    loading,
-    error,
-    signUp: (creds) => client.auth.signUp(creds),
-    signIn: (creds) => client.auth.signInWithPassword(creds),
-    signInWithOAuth: (opts) => client.auth.signInWithOAuth(opts),
-    signInWithSSO: (params) => client.auth.signInWithSSO(params),
-    signInWithOtp: (opts) => client.auth.signInWithOtp(opts),
-    signOut: () => client.auth.signOut(),
-  }
+  const methods = useAuthMethods(client.auth)
+  return { user: session?.user ?? null, session, loading, error, ...methods }
+}
+
+type AuthMethods = Omit<UseAuthReturn, "user" | "session" | "loading" | "error">
+
+/**
+ * The sign-in and sign-out calls, made once per auth client so each keeps its identity across
+ * renders and can be an effect dependency (0.9.1 release test, RB10: `useQuery`'s `refetch` was
+ * rebuilt every render and looped an effect that listed it).
+ */
+function useAuthMethods(auth: AuthClient): AuthMethods {
+  return useMemo<AuthMethods>(() => ({
+    signUp: (creds) => auth.signUp(creds),
+    signIn: (creds) => auth.signInWithPassword(creds),
+    signInWithOAuth: (opts) => auth.signInWithOAuth(opts),
+    signInWithSSO: (params) => auth.signInWithSSO(params),
+    signInWithOtp: (opts) => auth.signInWithOtp(opts),
+    signOut: () => auth.signOut(),
+  }), [auth])
 }

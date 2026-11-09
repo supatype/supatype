@@ -94,7 +94,11 @@ export function useQuery<
   useRunAndRefetch(execute, options?.refetchInterval)
   useRerunOnIdentityChange(client.auth, execute)
 
-  return { ...state, refetch: () => void execute() }
+  // Changes only when the query does, so an app can list it as an effect dependency. 0.9.1 release
+  // test (RB10): a new function each render made `useEffect(() => refetch(), [refetch])` loop.
+  const refetch = useCallback(() => void execute(), [execute])
+
+  return { ...state, refetch }
 }
 
 /** What the hook shows: the latest request's answer, and whether one is in flight. */

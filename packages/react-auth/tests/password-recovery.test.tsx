@@ -49,6 +49,14 @@ describe("usePasswordRecovery", () => {
     expect(latest().active).toBe(false)
   })
 
+  it("hands out the same finish on every render, so an effect can depend on it", async () => {
+    const { client, latest } = mount()
+    const before = latest().finish
+    await act(async () => { await client.auth.verifyOtp({ type: "recovery", token: "", tokenHash: "hash" }) })
+    expect(latest().active).toBe(true)
+    expect(latest().finish).toBe(before)
+  })
+
   it("stays off for an ordinary sign-in and ends on sign-out", async () => {
     const { client, latest } = mount()
     await act(async () => { await client.auth.signInWithPassword({ email: "ada@example.com", password: "x" }) })
