@@ -24,6 +24,25 @@ export const SLOT_READ_QUERY =
   "SELECT data FROM pg_logical_slot_get_changes($1, NULL, NULL, " +
   "'include-timestamp', 'on', 'include-pk', 'on', 'numeric-data-types-as-string', '1')"
 
+/**
+ * Whether the slot is behind the WAL, asked before every read of it: 0.9.1 release test RB8.
+ *
+ * Each `pg_logical_slot_get_changes` makes Postgres log `starting logical decoding for slot` and
+ * `logical decoding found consistent point`, each with a DETAIL and a STATEMENT line, whether or
+ * not there is anything to decode. At one read every 100 ms an idle stack wrote about 0.8 GB of log
+ * a day. This query logs nothing, and when it says the slot has confirmed everything flushed there
+ * is nothing a read could return, so the read is skipped and subscribers wait no longer.
+ *
+ * Flushed rather than written, because the read decodes up to the flush position and no further.
+ * A standby cannot report a flush position and is always read. `log_min_messages` was not an
+ * option: Postgres ranks LOG above ERROR in the server log, so only `fatal` drops these lines, and
+ * that would drop this connection's errors with them.
+ */
+export const SLOT_BEHIND_QUERY =
+  "SELECT CASE WHEN pg_is_in_recovery() THEN true " +
+  "ELSE confirmed_flush_lsn < pg_current_wal_flush_lsn() END AS behind " +
+  "FROM pg_replication_slots WHERE slot_name = $1"
+
 export interface ReplicationConfig {
   databaseUrl: string
   slotName: string
@@ -127,8 +146,8 @@ export class ReplicationListener {
     try {
       // The slot, and deliberately not a publication.
       //
-      // This used to run `CREATE PUBLICATION … FOR ALL TABLES` first, which **requires superuser**
-      //- the strictest privilege anywhere in this service, and one managed Postgres (RDS, Cloud SQL)
+      // This used to run `CREATE PUBLICATION … FOR ALL TABLES` first, which **requires superuser**:
+      // the strictest privilege anywhere in this service, and one managed Postgres (RDS, Cloud SQL)
       // does not grant. It was the single biggest reason realtime could not run against a database
       // Supatype does not own. And it did nothing: `wal2json` decodes from the *slot*, publications
       // are a `pgoutput` concept, and nothing here consulted `pg_publication` after creating it.
@@ -225,6 +244,17 @@ export class ReplicationListener {
     }
   }
 
+  /**
+   * Whether the WAL holds anything the slot has not confirmed, so reading it can return changes.
+   *
+   * Unknown is answered yes (no such slot, a position Postgres did not give), so the read runs and
+   * reports whatever is wrong with the slot, as it did before this check existed.
+   */
+  private async slotIsBehind(client: pg.Client): Promise<boolean> {
+    const result = await client.query<{ behind: boolean | null }>(SLOT_BEHIND_QUERY, [this.config.slotName])
+    return result.rows[0]?.behind !== false
+  }
+
   private async poll(): Promise<void> {
     if (!this.running || !this.client || !this.onChangeCallback) return
     if (this.pollInFlight) return
@@ -242,6 +272,8 @@ export class ReplicationListener {
         this.sawSchemaPush = false
         this.onSchemaChangeCallback?.()
       }
+
+      if (!(await this.slotIsBehind(this.client))) return
 
       const result = await this.client.query<{ data: string }>(SLOT_READ_QUERY, [this.config.slotName])
 

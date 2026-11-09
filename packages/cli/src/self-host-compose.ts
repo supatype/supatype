@@ -565,6 +565,28 @@ function networksBlock(functionsDb: boolean): string {
   return `networks:\n  ${FUNCTIONS_NETWORK}: {}\n${functionsDb ? `  ${FUNCTIONS_DB_NETWORK}: {}\n` : ""}`
 }
 
+/**
+ * Every container's log, rotated: 0.9.1 release test RB8.
+ *
+ * With no `logging:` a container writes to the daemon's default driver, and on a Linux server that
+ * is `json-file` with no size limit at all. An idle stack's Postgres wrote about 0.8 GB a day there,
+ * so the disk of the server the deploy guide describes filled in weeks and the database stopped.
+ * Docker Desktop's `local` default rotates, which is why nobody saw it on a laptop.
+ *
+ * `json-file` rather than `local` because it is what `docker logs` and every log shipper read
+ * without configuration. The sizes come from `.env`, as every other knob in this file does: the file
+ * is regenerated on every write, so an edit to it would not last.
+ */
+const LOGGING_ANCHOR = `x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "\${SUPATYPE_LOG_MAX_SIZE:-10m}"
+    max-file: "\${SUPATYPE_LOG_MAX_FILE:-5}"
+`
+
+/** A service's `logging:` line, pointing at {@link LOGGING_ANCHOR}. */
+const LOGGING = "    logging: *default-logging"
+
 /** Whether `url` (functions' direct database URL) names the stack's own `db` service. */
 export function namesComposeDatabase(url: string): boolean {
   try {
@@ -633,6 +655,7 @@ export function renderSelfHostCompose(
     : `
   studio:
 ${studioService}
+${LOGGING}
     environment:
       SUPATYPE_CLOUD_JSON: '${studioRuntimeJson(config, publicApiUrl)}'
     expose:
@@ -685,6 +708,7 @@ ${studioService}
     # deliberately absent: a bucket is public because of its policy, never because the server is
     # open. Written beside this file by the same generator, so the two cannot drift.
     image: \${SUPATYPE_SEAWEEDFS_IMAGE:-${SEAWEEDFS_IMAGE}}
+${LOGGING}
     command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
     environment:
       # Read by nothing inside. The object store loads s3.json only when it starts, so the login is
@@ -725,6 +749,7 @@ ${seaweedPorts}`
     : `
   valkey:
     image: \${SUPATYPE_VALKEY_IMAGE:-valkey/valkey:8-alpine}
+${LOGGING}
     command: ["valkey-server", "--appendonly", "yes"]
     expose:
       - "6379"
@@ -782,6 +807,7 @@ ${dbDependencyClause}      seaweedfs:
   const realtimeBlock = realtime
     ? `  realtime:
     image: ${inRepoImage("realtime")}
+${LOGGING}
     expose:
       - "4000"
       - "4001"
@@ -903,6 +929,7 @@ ${dbDependency}`
 `
     : `  db:
     image: \${SUPATYPE_POSTGRES_IMAGE:-${runningPostgresImage(config)}}
+${LOGGING}
 ${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    environment:
       POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}
@@ -935,9 +962,10 @@ ${keyspaceDbEnv}${dbPorts}${keyspaceExpose}    volumes:
 # Named, so a compose command run by hand reaches this stack instead of starting a second one
 # under the folder's name. \`supatype self-host compose restart <service>\` saves running one.
 name: ${composeProject}
-services:
+${LOGGING_ANCHOR}services:
 ${dbServiceBlock}  postgrest:
     image: ${POSTGREST_IMAGE}
+${LOGGING}
     expose:
       - "3000"
     environment:
@@ -962,6 +990,7 @@ ${dbServiceBlock}  postgrest:
 ${hookActorLines(config)}${dbDependency}
   storage:
     image: ${inRepoImage("storage")}
+${LOGGING}
     expose:
       - "5000"
     environment:
@@ -982,6 +1011,7 @@ ${hookActorLines(config)}${dbDependency}
 ${storageDependency}
   functions-worker:
     image: ${inRepoImage("functions-worker")}
+${LOGGING}
     # An init as PID 1 passes the stop signal on: without one the worker ignored SIGTERM, and every
     # restart a deploy made waited out the whole stop timeout.
     init: true
@@ -1051,6 +1081,7 @@ ${dbDependency}
 ${realtimeBlock}
   control-plane:
     image: ${inRepoImage("control-plane")}
+${LOGGING}
     expose:
       - "8080"
     volumes:
@@ -1076,6 +1107,7 @@ ${mounts.projectWritable}
 ${realtimeControlPlaneEnv}${dbDependency}
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-${RELEASE_IMAGES.server}}}
+${LOGGING}
     # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
     # mapped, so a project proxying the site or Studio to something on the host worked on macOS
     # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own
@@ -1180,6 +1212,7 @@ ${realtimeDependency}      control-plane:
 ${objectStoreBlock}
   schema-engine:
     image: \${${ENGINE_SERVICE.imageVariable}:-${ENGINE_SERVICE.defaultImage}}
+${LOGGING}
     profiles: ["tools"]
     entrypoint: ["${ENGINE_SERVICE.entrypoint}"]
     volumes:
@@ -1187,6 +1220,7 @@ ${mounts.engineProject}
     working_dir: ${ENGINE_SERVICE.projectDir}
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
+${LOGGING}
 ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
     # mapped, so a project proxying the site or Studio to something on the host worked on macOS
     # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own

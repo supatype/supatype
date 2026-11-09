@@ -187,6 +187,12 @@
 
 ### Bug Fixes
 
+* **realtime:** realtime no longer makes Postgres log six lines every 100 ms while nothing is
+  changing. It reads the replication slot only once the WAL has moved past it, so an idle stack
+  stopped writing about 0.8 GB of database log a day.
+* **self-host:** every container in the self-host and Docker dev compose file now rotates its log
+  (json-file, 10 MB x 5 files), so a Linux server's disk no longer fills with container logs. Set
+  `SUPATYPE_LOG_MAX_SIZE` and `SUPATYPE_LOG_MAX_FILE` in `.env` to change the sizes.
 * **gateway:** Docker dev and self-host now answer 400 to an API or Studio request whose path has an
   empty, `.` or `..` part (`%2E` too), as native does. Kong used to resolve these first, so `x/../a`
   wrote the storage object `a` and `/studio/../auth/v1/...` reached auth. Your app's own paths are
