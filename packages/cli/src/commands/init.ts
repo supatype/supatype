@@ -59,7 +59,7 @@ import {
   resolveInitDependencyVersions,
   type InitDependencyVersions,
 } from "../init-dependency-versions.js"
-import { detectProjectSetup, type DetectedProjectSetup } from "../init-project-detect.js"
+import { detectProjectSetup, withFreeVitePort, type DetectedProjectSetup } from "../init-project-detect.js"
 import { SUPATYPE_GITIGNORE_PATHS } from "../gitignore.js"
 import { DEV_FRONTEND_ENV_FILE, writeFrontendEnv } from "../frontend-env.js"
 import { DEFAULT_CLIENT_PATH, DEFAULT_TYPES_PATH } from "../type-generation.js"
@@ -326,7 +326,7 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
 
   await runClackFlow(async () => {
     p.intro("Create a new Supatype project")
-    const detected = detectProjectSetup(dir)
+    const detected = await withFreeVitePort(detectProjectSetup(dir))
     if (detected.hasExistingFiles && detected.summaryLines.length > 0) {
       p.note(
         ["Existing project detected:", ...detected.summaryLines.map((line) => `  • ${line}`)].join(

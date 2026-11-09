@@ -19,8 +19,8 @@
  * and dev stopped itself two seconds after every start.
  */
 
-import { execFile } from "node:child_process"
 import { errorCode } from "./error-message.js"
+import { windowsProcessFields } from "./windows-processes.js"
 
 export interface ProcessProbe {
   ppid(): number
@@ -87,16 +87,7 @@ export function watchParent(onGone: () => void, opts: WatchParentOptions = {}): 
 }
 
 /** The parent of `pid` on Windows, or undefined when it cannot be read. */
-export function windowsParentOf(pid: number): Promise<number | undefined> {
-  return new Promise((resolve) => {
-    execFile(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").ParentProcessId`],
-      { timeout: 15_000, windowsHide: true },
-      (err, stdout) => {
-        const parent = Number(stdout.trim())
-        resolve(err || !Number.isInteger(parent) || parent <= 0 ? undefined : parent)
-      },
-    )
-  })
+export async function windowsParentOf(pid: number): Promise<number | undefined> {
+  const parent = Number((await windowsProcessFields([pid], "ParentProcessId")).get(pid))
+  return Number.isInteger(parent) && parent > 0 ? parent : undefined
 }

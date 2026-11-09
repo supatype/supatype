@@ -2,12 +2,15 @@
  * Spawn the frontend dev server during `supatype dev` when app.mode is proxy.
  */
 
-import { execFile } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { detectPackageManager } from "./framework.js"
 import { nodeExecutable } from "../node-executable.js"
+import { viteScriptArgs, viteUpstreamFlags } from "./vite-dev-args.js"
+import { appOwnership, type AppIdentity } from "./port-holder.js"
 import { parsePackageJson } from "../package-json.js"
+import { pidAlive } from "../parent-watch.js"
+import { runCaptured, type CapturedRun } from "../run-captured.js"
 import { appendDevTaskLog } from "../dev-session.js"
 import { DEV_APP_ENV, SELF_START_EXIT_CODE, runsSupatypeDev, selfStartProblem } from "../dev-self-start.js"
 import { ProcessManager, readPid } from "../process-manager.js"
@@ -37,23 +40,12 @@ export function portFromUpstream(config: SupatypeProjectConfig): number | null {
   }
 }
 
-/** Runs a command without a shell or a console window, and resolves with its stdout. */
-function runCommand(bin: string, args: readonly string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(bin, args, { encoding: "utf8", windowsHide: true }, (err, stdout) => {
-      if (err) reject(err)
-      else resolve(stdout)
-    })
-  })
-}
-
 async function killPidTree(pid: number): Promise<void> {
   if (!Number.isInteger(pid) || pid <= 0) return
   const [bin, args] =
     process.platform === "win32" ? ["taskkill", ["/pid", String(pid), "/T", "/F"]] : ["kill", ["-9", String(pid)]]
-  await runCommand(bin, args).catch(() => {
-    /* already gone */
-  })
+  // A failed kill is a process that has already ended.
+  await runCaptured(bin, args)
 }
 
 /**
@@ -73,23 +65,55 @@ export function netstatListeners(out: string, port: number): number[] {
 
 /** The PIDs listening on `port`. `lsof` exits 1 when nothing is, which is not a failure. */
 async function listenerPids(port: number): Promise<number[]> {
-  if (process.platform === "win32") return netstatListeners(await runCommand("netstat", ["-ano"]), port)
-  const out = await runCommand("lsof", ["-ti", `:${port}`, "-sTCP:LISTEN"]).catch((err: unknown) => {
-    if (typeof err === "object" && err !== null && "code" in err && err.code === 1) return ""
-    throw err
-  })
-  return out.split(/\s+/).filter((pid) => pid !== "").map(Number)
+  if (process.platform === "win32") return netstatListeners(scanOutput(port, await runCaptured("netstat", ["-ano"])), port)
+  const scan = await runCaptured("lsof", ["-ti", `:${port}`, "-sTCP:LISTEN"])
+  if (scan.status === 1) return []
+  return scanOutput(port, scan)
+    .split(/\s+/)
+    .filter((pid) => pid !== "")
+    .map(Number)
+}
+
+/** What a port scan printed; throws when it failed. */
+function scanOutput(port: number, scan: CapturedRun): string {
+  if (scan.status === 0) return scan.stdout
+  throw new Error(`could not list what listens on port ${port}: ${scan.error ?? scan.stderr.trim()}`)
+}
+
+/** The PID file's app PID while that process still runs: one that has ended has nothing to end. */
+function runningStalePid(pidDir: string): number | null {
+  const pid = readPid(pidDir, "app")
+  return pid !== null && pidAlive(pid) ? pid : null
 }
 
 /**
- * Free the upstream port and any stale app PID before spawning the app. Asynchronous: run
+ * Free the upstream port and any stale app PID before spawning the app, ending only processes that
+ * belong to this app (see port-holder.ts). Resolves with the PID of another program holding the
+ * port, which is left running, or null when the port is free for the app. Asynchronous: run
  * synchronously, the port scan took ten seconds on Windows and froze the dashboard while it did.
+ * Every candidate is looked up in one call, since each lookup starts PowerShell on Windows.
  * Rejects when the port could not be scanned.
  */
-export async function freeProxyDevPort(pidDir: string, port: number): Promise<void> {
-  const stalePid = readPid(pidDir, "app")
-  if (stalePid) await killPidTree(stalePid)
-  await Promise.all((await listenerPids(port)).map(killPidTree))
+export async function freeProxyDevPort(pidDir: string, port: number, app: AppIdentity): Promise<number | null> {
+  const stalePid = runningStalePid(pidDir)
+  const listeners = [...new Set(await listenerPids(port))]
+  const owned = await appOwnership(stalePid === null ? listeners : [stalePid, ...listeners], app)
+  if (stalePid !== null && owned.get(stalePid) === true) await killPidTree(stalePid)
+  const foreign = listeners.find((pid) => owned.get(pid) !== true)
+  if (foreign !== undefined) return foreign
+  await Promise.all(listeners.filter((pid) => pid !== stalePid).map(killPidTree))
+  return null
+}
+
+/**
+ * Frees the app's port before a start. When another program holds it, says so and stops the app
+ * instead: starting anyway would fail on the port or, before 0.9.2, end the other program.
+ */
+async function claimAppPort(pidDir: string, port: number, app: AppIdentity, stopApp: () => void): Promise<void> {
+  const foreign = await freeProxyDevPort(pidDir, port, app)
+  if (foreign === null) return
+  appendDevTaskLog("app", "app", `port ${port} is used by another program (pid ${foreign})`, "error")
+  stopApp()
 }
 
 /**
@@ -97,26 +121,24 @@ export async function freeProxyDevPort(pidDir: string, port: number): Promise<vo
  * Avoids Windows shell shims (pnpm → bash → vite) that orphan the real server
  * and break PID-based cleanup / auto-restart. Throws when the compiled binary
  * finds no Node to run vite.js with (see node-executable.ts).
+ *
+ * The script's own arguments are passed on (they were dropped, so `vite --port 3000` ran on 5173),
+ * then the flags that bind Vite to `upstream` (see vite-dev-args.ts).
  */
 export function resolveViteDirectSpawn(
   appDir: string,
   script: string,
   scripts: Record<string, string> | undefined,
+  upstream?: string,
 ): { bin: string; args: string[]; shell: boolean } | null {
-  const body = scripts?.[script]?.trim() ?? ""
-  if (!body) return null
-
-  const runsVite =
-    body === "vite" ||
-    /^vite\s/.test(body) ||
-    body.includes("vite/bin/vite")
-
-  if (!runsVite) return null
+  const scriptArgs = viteScriptArgs(scripts?.[script]?.trim() ?? "")
+  if (!scriptArgs) return null
 
   const viteJs = join(appDir, "node_modules", "vite", "bin", "vite.js")
   if (!existsSync(viteJs)) return null
 
-  return { bin: nodeExecutable(viteJs), args: [viteJs], shell: false }
+  const args = [viteJs, ...scriptArgs, ...viteUpstreamFlags(scriptArgs, upstream)]
+  return { bin: nodeExecutable(viteJs), args, shell: false }
 }
 
 /**
@@ -153,7 +175,7 @@ export function startProxyDevApp(
   }
 
   const upstreamPort = portFromUpstream(config)
-  const directVite = resolveViteDirectSpawn(appDir, script, pkg.scripts)
+  const directVite = resolveViteDirectSpawn(appDir, script, pkg.scripts, config.app?.upstream)
   const pm = detectPackageManager(appDir)
   const bin = directVite?.bin ?? pm
   const args = directVite?.args ?? (pm === "yarn" ? [script] : ["run", script])
@@ -161,8 +183,12 @@ export function startProxyDevApp(
 
   appendDevTaskLog("app", "app", `Proxy mode: running ${bin} ${args.join(" ")} (${appDir})`)
 
-  // Run by the manager before each spawn, so the scan never holds up the dashboard.
-  const freePort = upstreamPort ? () => freeProxyDevPort(pidDir, upstreamPort) : undefined
+  // Run by the manager before each spawn, so the scan never holds up the dashboard. Stopping the
+  // manager from inside the hook is what keeps the spawn that follows it from happening.
+  const app = { dir: appDir, command: `${bin} ${args.join(" ")}` }
+  const freePort = upstreamPort
+    ? () => claimAppPort(pidDir, upstreamPort, app, () => void manager.stop())
+    : undefined
   const manager = new ProcessManager(bin, args, {
     label: "app",
     pidDir,

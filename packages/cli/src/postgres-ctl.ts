@@ -623,6 +623,16 @@ export async function isPortInUse(port: number): Promise<boolean> {
   return bindFails(port, "127.0.0.1")
 }
 
+/**
+ * True when the port is taken on either loopback. A dev server on Node's default `localhost` can
+ * listen on [::1] alone (Windows resolves it there first), which {@link isPortInUse} cannot see:
+ * a bind on 127.0.0.1 succeeds beside it. 0.9.1 release test (FF21): init proposed Vite's 5173
+ * while another project's app held it.
+ */
+export async function isLoopbackPortInUse(port: number): Promise<boolean> {
+  return (await isPortInUse(port)) || (await connectSucceeds(port, 400, "::1"))
+}
+
 /** The command that shows what holds `port`, for this platform. */
 export function portCheckCommand(port: number): string {
   return process.platform === "win32" ? `netstat -ano | findstr :${port}` : `lsof -i :${port}`

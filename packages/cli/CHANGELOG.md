@@ -214,6 +214,14 @@
 
 ### Bug Fixes
 
+* **dev:** a Vite app started by `supatype dev` now listens on the address and port the app proxy forwards
+  to (`--host 127.0.0.1 --port <upstream port> --strictPort`), and keeps its script's own flags. On Windows,
+  Vite listened on [::1] while the proxy dialled 127.0.0.1, so the App URL answered 502 or showed another
+  project's app. `init` now checks the Vite port is free on both loopbacks and offers the next free one.
+* **dev:** before starting your app, `dev` now ends only a leftover process of this project's own. Another
+  program on the app's port is left running, and dev says `port 5173 is used by another program (pid X)`
+  instead of starting the app. Two projects on one port used to end each other's dev server every few
+  seconds, which showed as the app exiting with code 1 and no error.
 * **dev and every command that checks Docker:** a Docker that is running but slow to answer is now
   waited for, up to 60 seconds, with a "Waiting for Docker to answer" line, instead of being reported
   as not running after 10 seconds. `SUPATYPE_DOCKER_TIMEOUT` changes the wait. A Docker that refuses

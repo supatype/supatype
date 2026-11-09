@@ -156,15 +156,37 @@ export function parseHostPortInput(raw: string): number | null {
 
 const NO_PORTS: ReadonlySet<number> = new Set()
 
-/** True when `port` is bound on this machine now, or `reserved` holds it for a stack that is not. */
-async function portTaken(port: number, reserved: ReadonlySet<number>): Promise<boolean> {
-  return reserved.has(port) || (await isPortInUse(port))
+/** Whether a port is in use on this machine; {@link isPortInUse} unless a caller asks wider. */
+export type PortInUse = (port: number) => Promise<boolean>
+
+/** True when `inUse` says `port` is bound now, or `reserved` holds it for a stack that is not. */
+async function portTaken(port: number, reserved: ReadonlySet<number>, inUse: PortInUse = isPortInUse): Promise<boolean> {
+  return reserved.has(port) || (await inUse(port))
 }
 
-/** Next free TCP port on 127.0.0.1 starting at `start`, skipping any in `reserved`. */
-export async function findNextFreePort(start: number, reserved: ReadonlySet<number> = NO_PORTS): Promise<number> {
+/**
+ * Whether this project may use `port`: nothing listens on it and no other stack is configured with
+ * it (`reserved`), or this directory's own compose stack (`composeProject`) publishes it. Our own
+ * stack holding the port is the normal state while it runs, not a conflict, so every picker asks
+ * here. Docker is asked, synchronously, only when something listens on the port: a port nothing
+ * listens on is published by no stack.
+ */
+async function portIsOurs(port: number, composeProject: string | undefined, reserved: ReadonlySet<number> = NO_PORTS): Promise<boolean> {
+  if (!(await isPortInUse(port))) return !reserved.has(port)
+  return composeProject !== undefined && portHeldByComposeProject(port, composeProject)
+}
+
+/**
+ * Next free TCP port starting at `start`, skipping any in `reserved`. Free means `inUse` says so:
+ * 127.0.0.1 by default.
+ */
+export async function findNextFreePort(
+  start: number,
+  reserved: ReadonlySet<number> = NO_PORTS,
+  inUse: PortInUse = isPortInUse,
+): Promise<number> {
   let port = Math.max(MIN_PORT, start)
-  while (port <= MAX_PORT && (await portTaken(port, reserved))) port++
+  while (port <= MAX_PORT && (await portTaken(port, reserved, inUse))) port++
   if (port > MAX_PORT) {
     throw new Error(`No free local port found in range ${start}–${MAX_PORT}.`)
   }
@@ -246,14 +268,10 @@ export async function ensureKongPort(
   const persisted = readPersistedKongPort(cwd, env)
 
   if (persisted !== null) {
-    if (!(await isPortInUse(persisted))) return persisted
-
     // Occupied by this project's own stack is not a conflict, it is the normal state after
     // `supatype self-host compose up -d`. Refusing here made a hand-run `up -d` followed by
     // `push` impossible, and it stopped the validation soak, which does exactly that.
-    if (opts.composeProject !== undefined && portHeldByComposeProject(persisted, opts.composeProject)) {
-      return persisted
-    }
+    if (await portIsOurs(persisted, opts.composeProject)) return persisted
 
     // A port from the shell is not ours to move. Compose binds the shell's value ahead of `.env`,
     // so a new port written to `.env` would be ignored and `dev` would wait on one port while Kong
@@ -297,8 +315,7 @@ async function firstRunKongPort(
 ): Promise<number> {
   const { prompt, reserved, composeProject } = pick
   const preferred = COMPOSE_DEV_KONG_PORT
-  if (!(await portTaken(preferred, reserved))) return preferred
-  if (composeProject !== undefined && portHeldByComposeProject(preferred, composeProject)) return preferred
+  if (await portIsOurs(preferred, composeProject, reserved)) return preferred
   return prompt ? promptPortConflict(cwd, preferred, "init", reserved) : findNextFreePort(preferred, reserved)
 }
 
@@ -455,13 +472,12 @@ export interface EnsureDevDbPortOptions {
 export async function ensureDevDbPort(cwd: string, opts: EnsureDevDbPortOptions = {}): Promise<number> {
   const persisted = readComposeEnvInt(cwd, "SUPATYPE_DEV_DB_PORT")
   if (persisted === null) {
-    const free = (await isPortInUse(COMPOSE_DEV_DB_PORT)) ? await findNextFreePort(COMPOSE_DEV_DB_PORT + 1) : COMPOSE_DEV_DB_PORT
-    return persistDevDbPort(cwd, free)
+    // With no port in .env compose publishes the database on the default, so the project's own
+    // running database there keeps it, as a port .env names does.
+    const ours = await portIsOurs(COMPOSE_DEV_DB_PORT, opts.composeProject)
+    return persistDevDbPort(cwd, ours ? COMPOSE_DEV_DB_PORT : await findNextFreePort(COMPOSE_DEV_DB_PORT + 1))
   }
-  if (!(await isPortInUse(persisted))) return persisted
-  if (opts.composeProject !== undefined && portHeldByComposeProject(persisted, opts.composeProject)) {
-    return persisted
-  }
+  if (await portIsOurs(persisted, opts.composeProject)) return persisted
   // A port from the shell is not ours to move, for the reason `ensureKongPort` gives: compose binds
   // the shell's value ahead of `.env`, so a new port written there would be ignored (DR9).
   if ((process.env["SUPATYPE_DEV_DB_PORT"]?.trim() ?? "") !== "") {

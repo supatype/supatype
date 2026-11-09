@@ -1,5 +1,5 @@
 import type * as ChildProcessModule from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -10,11 +10,13 @@ import { afterEach, describe, expect, it, vi } from "vitest"
  * restart. Here the port scan takes a second, whichever way it is run, and a timer due at 50 ms
  * has to fire while it does. The app is still only spawned once the scan and the kill are done.
  */
-const { SCAN_MS, STALE_PID, PORT, events } = vi.hoisted(() => ({
+const { SCAN_MS, STALE_PID, PORT, events, holder } = vi.hoisted(() => ({
   SCAN_MS: 1_000,
   STALE_PID: 4242,
   PORT: "5299",
   events: [] as string[],
+  /** The command line the listener on the port reports: set per test to this project's or another's. */
+  holder: { commandLine: "" },
 }))
 
 /** What the scan prints: a stale listener on the app's port, and one on a port that only starts the same. */
@@ -24,8 +26,22 @@ function scanOutput(port: string): string {
     : `${STALE_PID}\n`
 }
 
-/** Which faked command a command line is, if any: the port scan or a kill. */
-function faked(command: string): "scan" | "kill" | null {
+/**
+ * What faked processes report about themselves, one line per PID the lookup names: the listener
+ * answers with `holder`; any other PID is the app run this dev started (its PID file), whose command
+ * is the package manager running `start`.
+ */
+function describeOutput(command: string): string {
+  if (command.includes("-d cwd")) return ""
+  events.push("describe")
+  const pids = [...command.matchAll(/(?:ProcessId=|-p )(\d+)/g)].map((match) => Number(match[1]))
+  const separator = process.platform === "win32" ? "\t" : " "
+  return pids.map((pid) => `${pid}${separator}${pid === STALE_PID ? holder.commandLine : "npm run start"}`).join("\n")
+}
+
+/** Which faked command a command line is, if any: the port scan, a kill, or a process lookup. */
+function faked(command: string): "scan" | "kill" | "describe" | null {
+  if (command.includes(".CommandLine") || /^ps\b/.test(command) || command.includes("-d cwd")) return "describe"
   if (/^(netstat|lsof)\b/.test(command)) return "scan"
   if (/^(taskkill|kill)\b/.test(command)) return "kill"
   return null
@@ -52,24 +68,31 @@ vi.mock("node:child_process", async (importOriginal) => {
     }
     throw new Error(`not faked: ${command}`)
   }
-  const execFileFake = (bin: string, args: readonly string[], ...rest: unknown[]): void => {
+  // The faked run has no stdin for the CLI to close.
+  const fakeChild = { stdin: null }
+  const execFileFake = (bin: string, args: readonly string[], ...rest: unknown[]): typeof fakeChild => {
     const callback = rest.find((r): r is ExecFileCallback => typeof r === "function")
     const kind = faked(`${bin} ${args.join(" ")}`)
     // Anything else fails as a command would: dev's parent watch asks PowerShell for its parent.
     if (kind === null || callback === undefined) {
       setImmediate(() => callback?.(new Error(`not faked: ${bin}`), "", ""))
-      return
+      return fakeChild
     }
     if (kind === "kill") {
       events.push(`kill ${args.find((a) => /^\d+$/.test(a)) ?? "?"}`)
       setImmediate(() => callback(null, "", ""))
-      return
+      return fakeChild
+    }
+    if (kind === "describe") {
+      setImmediate(() => callback(null, describeOutput(`${bin} ${args.join(" ")}`), ""))
+      return fakeChild
     }
     events.push("scan")
     setTimeout(() => {
       events.push("scanned")
       callback(null, scanOutput(PORT), "")
     }, SCAN_MS)
+    return fakeChild
   }
   const spawnFake = (...args: Parameters<typeof real.spawn>): ReturnType<typeof real.spawn> => {
     events.push("spawn")
@@ -82,10 +105,12 @@ vi.mock("ink", () => ({
   render: vi.fn(() => ({ unmount: vi.fn() })),
 }))
 
-import { netstatListeners, startProxyDevApp } from "../src/app/proxy-dev-app.js"
+import { freeProxyDevPort, netstatListeners, startProxyDevApp } from "../src/app/proxy-dev-app.js"
 import { beginDevSession, endDevSession } from "../src/dev-session.js"
 import type { ProcessManager } from "../src/process-manager.js"
 import { projectConfig } from "./support/project-config.js"
+
+const { spawn: realSpawn } = await vi.importActual<typeof ChildProcessModule>("node:child_process")
 
 let dir = ""
 let manager: ProcessManager | null = null
@@ -108,8 +133,10 @@ function removeDir(): boolean {
   }
 }
 
-function startApp(source: string): void {
+function startApp(source: string, listener: "ours" | "foreign" = "ours"): void {
   dir = mkdtempSync(join(tmpdir(), "supatype-proxy-port-"))
+  holder.commandLine =
+    listener === "ours" ? `node ${join(dir, "node_modules", "vite", "bin", "vite.js")}` : "node /other-project/server.js"
   writeFileSync(join(dir, "fake-app.cjs"), source)
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fake", scripts: { start: "node fake-app.cjs" } }))
   const config = projectConfig({
@@ -128,7 +155,7 @@ describe("startProxyDevApp() freeing the app's port", () => {
     // Ends on its own: a package manager shim can leave it running after the stop kills the shim.
     startApp("setTimeout(() => {}, 1500)")
     await vi.waitUntil(() => events.includes("spawn"), UNTIL)
-    expect(events).toEqual(["scan", "timer", "scanned", `kill ${STALE_PID}`, "spawn"])
+    expect(events).toEqual(["scan", "timer", "scanned", "describe", `kill ${STALE_PID}`, "spawn"])
   }, 20_000)
 
   it("frees the port again before each restart without blocking", async () => {
@@ -142,14 +169,51 @@ describe("startProxyDevApp() freeing the app's port", () => {
     const restart = events.slice(events.indexOf("spawn") + 1, events.lastIndexOf("spawn") + 1)
     const scanning = restart.slice(restart.indexOf("scan"), restart.indexOf("scanned"))
     expect(scanning).toContain("tick")
-    // The crashed run's own PID, from its PID file, is killed first in case it left children behind.
-    expect(restart.filter((e) => e !== "tick")).toEqual([
-      expect.stringMatching(/^kill \d+$/),
-      "scan",
-      "scanned",
-      `kill ${STALE_PID}`,
-      "spawn",
-    ])
+    // The crashed run's own PID, from its PID file, has ended: it is neither looked up nor killed.
+    expect(restart.filter((e) => e !== "tick")).toEqual(["scan", "scanned", "describe", `kill ${STALE_PID}`, "spawn"])
+  }, 20_000)
+})
+
+describe("freeProxyDevPort() and the app's PID file", () => {
+  it("looks a running PID-file process up with the listeners in one call, and kills it first", async () => {
+    dir = mkdtempSync(join(tmpdir(), "supatype-proxy-port-"))
+    holder.commandLine = `node ${join(dir, "server.js")}`
+    const stale = realSpawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" })
+    try {
+      mkdirSync(join(dir, ".pids"))
+      writeFileSync(join(dir, ".pids", "app.pid"), String(stale.pid))
+      const app = { dir, command: "npm run start" }
+      await expect(freeProxyDevPort(join(dir, ".pids"), Number(PORT), app)).resolves.toBeNull()
+      expect(events).toEqual(["scan", "scanned", "describe", `kill ${stale.pid}`, `kill ${STALE_PID}`])
+    } finally {
+      stale.kill()
+    }
+  }, 20_000)
+
+  it("skips a PID-file process that has ended", async () => {
+    dir = mkdtempSync(join(tmpdir(), "supatype-proxy-port-"))
+    holder.commandLine = `node ${join(dir, "server.js")}`
+    const ended = realSpawn(process.execPath, ["-e", ""], { stdio: "ignore" })
+    await new Promise((resolve) => ended.once("exit", resolve))
+    mkdirSync(join(dir, ".pids"))
+    writeFileSync(join(dir, ".pids", "app.pid"), String(ended.pid))
+    await expect(freeProxyDevPort(join(dir, ".pids"), Number(PORT), { dir, command: "npm run start" })).resolves.toBeNull()
+    expect(events).toEqual(["scan", "scanned", "describe", `kill ${STALE_PID}`])
+  }, 20_000)
+})
+
+// 0.9.1 release test (FF22): two dev sessions proxying the same port each killed whatever held it
+// before every start, so each one's app was ended by the other (exit 1, no error) every few seconds.
+describe("startProxyDevApp() and a port another program holds", () => {
+  it("does not kill it, does not start the app, and names the port and pid", async () => {
+    const session = beginDevSession("tui")
+    startApp("setTimeout(() => {}, 1500)", "foreign")
+    const pane = (): readonly string[] => session.bus.getTask("app")?.lines ?? []
+    await vi.waitUntil(() => events.includes("scanned"), UNTIL)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(events).not.toContain(`kill ${STALE_PID}`)
+    expect(events).not.toContain("spawn")
+    expect(pane()).toContain(`✗ port ${PORT} is used by another program (pid ${STALE_PID})`)
   }, 20_000)
 })
 

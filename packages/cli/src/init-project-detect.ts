@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { parsePackageJson, type PackageJson } from "./package-json.js"
+import { findNextFreePort, type PortInUse } from "./dev-ports.js"
+import { isLoopbackPortInUse } from "./postgres-ctl.js"
 
 const VITE_CONFIG_NAMES = [
   "vite.config.ts",
@@ -97,5 +99,28 @@ export function detectProjectSetup(cwd: string): DetectedProjectSetup {
     staticDir,
     packageScripts: pkg?.scripts ?? {},
     summaryLines,
+  }
+}
+
+/**
+ * `detected` with a Vite port that is free now: the detected one, or the next free after it, with
+ * a summary line saying why it moved. 0.9.1 release test (FF21): init proposed 5173 while another
+ * project's app held it, and dev's App URL then served that app. Either loopback counts, because
+ * Vite on Node's default `localhost` listens on [::1] alone on Windows. Checked with or without Vite
+ * in the project: init offers Vite, and scaffolds its config with this port, either way.
+ */
+export async function withFreeVitePort(
+  detected: DetectedProjectSetup,
+  inUse: PortInUse = isLoopbackPortInUse,
+): Promise<DetectedProjectSetup> {
+  const url = new URL(detected.viteDevUrl)
+  const port = Number(url.port)
+  const free = await findNextFreePort(port, undefined, inUse)
+  if (free === port) return detected
+  url.port = String(free)
+  return {
+    ...detected,
+    viteDevUrl: url.origin,
+    summaryLines: [...detected.summaryLines, `Port ${port} is in use, so Vite is offered ${free}`],
   }
 }

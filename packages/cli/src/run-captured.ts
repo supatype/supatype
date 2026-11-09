@@ -10,10 +10,12 @@ export interface CapturedRun {
   error?: string
 }
 
-/** Where a run happens. */
+/** Where a run happens, and how long it may take. */
 export interface CapturedRunPlace {
   cwd?: string
   env?: NodeJS.ProcessEnv
+  /** Milliseconds before the run is killed; it then ends with a null status. */
+  timeout?: number
 }
 
 /** The most output a run may give: the engine's admin config and generated types run to megabytes. */
