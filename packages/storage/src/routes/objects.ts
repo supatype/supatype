@@ -359,9 +359,8 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
     return
   }
 
-  // Verify object exists
-  const obj = await db.getObject(bucketId, objectPath)
-  if (!obj) {
+  // Reached by a caller who may read the object, so whether it exists is theirs to know.
+  if (!(await db.objectExists(bucketId, objectPath))) {
     sendJson(ctx.res, 404, { error: "Object not found" })
     return
   }

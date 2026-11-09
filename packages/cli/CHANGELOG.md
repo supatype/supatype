@@ -187,6 +187,10 @@
 
 ### Bug Fixes
 
+* **storage:** a private bucket no longer tells a caller its read rule refuses which file names
+  exist: download, authenticated download and signing answer 403 for a missing name exactly as for
+  one that exists, where they used to answer 404 "Object not found" for a missing name. A caller the
+  rule lets read the name still gets 404 for one that is not there.
 * **init, generate:** the Next.js `/supatype-env.js` route works on a new create-next-app. Next 16
   turns on `cacheComponents`, which refuses the route's `export const dynamic` with a 500; the route
   is now only `export { GET } from "@supatype/ssr/next"`, and `GET` reads the request, which keeps it
