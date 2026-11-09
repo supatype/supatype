@@ -214,6 +214,13 @@
 
 ### Bug Fixes
 
+* **push:** a push to the Docker stack whose step after the schema fails (starting the stack, waiting
+  for the gateway, creating a bucket) now says the schema was applied but the push did not finish,
+  prints no success line, and exits 1, as native and linked pushes do. It printed "Schema pushed."
+  and exited 0, so pipelines passed with buckets missing (#301).
+* **push:** a push with no `SUPATYPE_KONG_PORT` in `.env` no longer waits 120 seconds on the wrong
+  port. It took the project's own running gateway on 18473 for another program's, moved to 18481
+  where nothing listened, and silently skipped creating buckets.
 * **schema:** a bucket's `s3BucketPolicy` that is not a JSON object is refused when the schema is
   read, naming the bucket. A push writes the bucket through the engine, so the storage service's own
   check never saw it and the bad policy was stored without being applied.

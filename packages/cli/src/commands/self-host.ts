@@ -9,8 +9,8 @@ import { Command } from "commander"
 import { errorMessage } from "../error-message.js"
 import { existsSync } from "node:fs"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { COMPOSE_DEV_KONG_PORT, schemaPathFromProject, type SupatypeProjectConfig } from "../project-config.js"
-import { readComposeEnvInt } from "../env-file.js"
+import { schemaPathFromProject, type SupatypeProjectConfig } from "../project-config.js"
+import { composeKongHostPort } from "../local-gateway.js"
 import { withPublishing } from "../model-versioning.js"
 import { devApiKeys } from "../dev-api-keys.js"
 import { fillMissingKeys } from "./keys.js"
@@ -25,6 +25,7 @@ import {
   writeSelfHostCompose,
 } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
+import { warnBucketsLeft } from "../storage-provision.js"
 import { syncConfigMailerEnv } from "../config-mailer-env.js"
 import { takenComposePorts, type ComposeContext, type PublishedPort } from "../compose-services.js"
 import { isPortInUse, portCheckCommand } from "../postgres-ctl.js"
@@ -162,11 +163,10 @@ const SELF_HOST_BRAND = { intro: "Self-host deployment" }
 async function provisionAfterUp(cwd: string, config: SupatypeProjectConfig, project: string, devLocal: boolean): Promise<void> {
   const { composeGatewayHostPort, provisionStartedStack, StackNotServing } = await import("../dev-compose.js")
   try {
-    const kongPort = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
-    const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", kongPort)
+    const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", composeKongHostPort(cwd))
     const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
     const stack = { composePath: selfHostComposePaths(cwd).composePath, project, gatewayPort }
-    await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey)
+    warnBucketsLeft(await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey))
   } catch (err) {
     if (!(err instanceof StackNotServing)) {
       warn(`The stack is up, but its storage buckets or first admin user could not be created: ${errorMessage(err)}`)

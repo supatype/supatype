@@ -62,8 +62,16 @@ describe("projectStackUrl", () => {
     expect(projectStackUrl(dir, docker, OWN)).toBeUndefined()
   })
 
-  it("is nothing when no gateway port was ever recorded", () => {
+  // 0.9.1 release test FF1: a self-host `.env` written from the VM guide names no Kong port, and
+  // compose publishes the default. A push to that stack provisioned no buckets and gave no Studio link.
+  it("is the default gateway port when none is recorded and the project's own stack publishes it", () => {
     writeFileSync(join(dir, ".env"), "SUPATYPE_DEV_DB_PORT=54880\nPOSTGRES_DB=demo\n")
+    expect(projectStackUrl(dir, docker, OWN)).toBe("http://localhost:18473")
+  })
+
+  it("is nothing when no gateway port is recorded and another project publishes the default", () => {
+    writeFileSync(join(dir, ".env"), "SUPATYPE_DEV_DB_PORT=54880\nPOSTGRES_DB=demo\n")
+    dockerPs.owner = "supatype-someone-else\n"
     expect(projectStackUrl(dir, docker, OWN)).toBeUndefined()
   })
 })

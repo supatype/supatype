@@ -89,6 +89,14 @@ export function unprovisionedBuckets({ total, failed }: BucketProvisioning): str
 }
 
 /**
+ * Buckets a stack did not take, said in one line with what it means: only uploads to them fail.
+ * They were dropped without a word past each bucket's own warning. Native and Docker dev say the same.
+ */
+export function warnBucketsLeft(left: string | null): void {
+  if (left !== null) console.warn(`[supatype] ⚠  ${left}; uploads to them fail until a later push takes them.`)
+}
+
+/**
  * Ensure all declared buckets exist in the storage server.
  *
  * @param storageApiUrl  Base URL of the storage API, e.g. "http://localhost:18473/storage/v1"

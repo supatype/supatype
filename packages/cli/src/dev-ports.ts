@@ -281,17 +281,24 @@ export async function ensureKongPort(
   }
 
   const reserved = await reservedComposePorts(opts.portReader, opts.composeProject)
-  return firstRunKongPort(cwd, interactive && context === "init", reserved)
+  return firstRunKongPort(cwd, { prompt: interactive && context === "init", reserved, composeProject: opts.composeProject })
 }
 
 /**
  * The Kong port for a project with none set: the default unless the OS has it bound or another
  * Supatype stack is configured with it (M2b), then the next port that is neither, or the init
- * prompt's choice.
+ * prompt's choice. The project's own stack on the default keeps it: with no port in `.env`, compose
+ * publishes Kong there (0.9.1 release test FF1). A self-host `.env` written from the VM guide names
+ * none, and push took its own gateway for a stranger's and waited 120 s on the next free port.
  */
-async function firstRunKongPort(cwd: string, prompt: boolean, reserved: ReadonlySet<number>): Promise<number> {
+async function firstRunKongPort(
+  cwd: string,
+  pick: { prompt: boolean; reserved: ReadonlySet<number>; composeProject: string | undefined },
+): Promise<number> {
+  const { prompt, reserved, composeProject } = pick
   const preferred = COMPOSE_DEV_KONG_PORT
   if (!(await portTaken(preferred, reserved))) return preferred
+  if (composeProject !== undefined && portHeldByComposeProject(preferred, composeProject)) return preferred
   return prompt ? promptPortConflict(cwd, preferred, "init", reserved) : findNextFreePort(preferred, reserved)
 }
 

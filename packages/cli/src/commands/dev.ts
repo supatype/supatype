@@ -33,6 +33,7 @@ import {
   nativeBucketRow,
   provisionBuckets,
   unprovisionedBuckets,
+  warnBucketsLeft,
   withPublicFromMode,
   type ParsedStorageBucket,
 } from "../storage-provision.js"
@@ -1082,8 +1083,7 @@ export async function provisionNativeBuckets(
     ? await provisionBuckets(paths.storageApi.url, paths.storageApi.serviceRoleKey, bucketSpecsFromAst({ storageBuckets: buckets }))
     : []
   if (added === null) {
-    const left = unprovisionedBuckets({ total: buckets.length, failed })
-    if (left !== null) console.warn(`[supatype] ⚠  ${left}`)
+    warnBucketsLeft(unprovisionedBuckets({ total: buckets.length, failed }))
     return
   }
   const ready = added.filter((id) => !failed.includes(id)).length

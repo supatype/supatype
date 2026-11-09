@@ -12,9 +12,16 @@ import { COMPOSE_DEV_KONG_PORT, resolveRuntimeProvider, type SupatypeProjectConf
 export function localPublicApiUrl(cwd: string): string {
   const external = readEnvValue(cwd, "API_EXTERNAL_URL", "").replace(/\/+$/, "")
   if (external !== "") return external
-  // The port compose binds when SUPATYPE_KONG_PORT is unset: one definition with every other caller.
-  const port = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
-  return `http://localhost:${port}`
+  return `http://localhost:${composeKongHostPort(cwd)}`
+}
+
+/**
+ * The host port the compose file publishes Kong on: SUPATYPE_KONG_PORT from the shell or `.env`,
+ * else the default the compose file falls back to when it is unset. One definition for every
+ * caller that needs the running stack's gateway rather than a port to give a new one.
+ */
+export function composeKongHostPort(cwd: string): number {
+  return readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
 }
 
 /** What `link`'s field is called: the server's URL for native dev, which has no gateway (local test 3b). */

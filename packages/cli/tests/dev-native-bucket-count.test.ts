@@ -34,6 +34,14 @@ describe("native dev's bucket provisioning", () => {
     expect(printed().filter((line) => line.includes("provisioned"))).toEqual([])
   })
 
+  it("says what a bucket the service did not take means, in the words Docker dev uses", async () => {
+    const storageApi = { url: `http://127.0.0.1:${await freePort()}`, serviceRoleKey: "key" }
+    await provisionNativeBuckets(BUCKETS, { storageApi })
+    expect(vi.mocked(console.warn).mock.calls.map((call) => String(call[0]))).toContain(
+      "[supatype] ⚠  1 of 1 bucket(s) were not provisioned: avatars; uploads to them fail until a later push takes them.",
+    )
+  })
+
   it("counts a bucket written to buckets.json while no service runs, as the service imports it when it starts", async () => {
     await provisionNativeBuckets(BUCKETS, { storagePath })
     expect(printed()).toContain("[supatype] Storage: provisioned 1 bucket(s).")

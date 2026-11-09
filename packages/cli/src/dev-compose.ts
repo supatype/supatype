@@ -6,7 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
 import { printRoleAccess } from "./diff-access.js"
-import { warn } from "./ui/messages.js"
+import { postApplyFailed } from "./post-apply.js"
 import { FRONTEND_URL_KEYS, frontendEnv, writeFrontendEnv } from "./frontend-env.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -111,7 +111,7 @@ import {
 } from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
-import { provisionBucketsFromAst, unprovisionedBuckets } from "./storage-provision.js"
+import { provisionBucketsFromAst, unprovisionedBuckets, warnBucketsLeft } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { demoDataHint, publishDevReady } from "./dev-ready-panel.js"
@@ -679,17 +679,16 @@ async function waitStorageApiReady(
 }
 
 /**
- * The schema's buckets on the dev stack. One the service did not take is said in one line, with what
- * it means: dev carries on, and only uploads to that bucket fail. They were dropped without a word
- * past each bucket's own warning.
+ * The schema's buckets on the stack: the line naming those the service did not take, or null when it
+ * took them all. Each caller decides what that means: dev and `compose up` carry on and warn
+ * ({@link warnBucketsLeft}), a push ends non-zero (0.9.1 release test FF2).
  */
 async function provisionDockerStorageBuckets(
   ast: ExtractedSchemaAstV2,
   kongPort: number,
   serviceRoleKey: string,
-): Promise<void> {
-  const left = unprovisionedBuckets(await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey))
-  if (left !== null) console.warn(`[supatype] ⚠  ${left}; uploads to them fail until a later push takes them.`)
+): Promise<string | null> {
+  return unprovisionedBuckets(await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey))
 }
 
 let _lastPushedAst: string | null = null
@@ -1482,7 +1481,7 @@ export async function pushSchemaDocker(
   cwd: string,
   config: SupatypeProjectConfig,
   opts: ComposePushOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("pushSchemaDocker requires provider: docker")
   }
@@ -1502,9 +1501,9 @@ export async function pushSchemaDocker(
   await followRecordedTier(cwd, config, { recreate: false })
   if (running === undefined) {
     console.log("[supatype] Schema pushed. The local stack isn't running, so nothing else was started.")
-    return
+    return false
   }
-  await bringUpAfterApply(() => bringPushedStackUp(cwd, config, stack, ast, devApiKeys(cwd)))
+  return bringUpAfterApply(() => bringPushedStackUp(cwd, config, stack, ast, devApiKeys(cwd)))
 }
 
 /**
@@ -1521,16 +1520,20 @@ function pushStackMode(cwd: string, config: SupatypeProjectConfig): ComposeRende
 
 /**
  * What a push does on a running stack after it applied: `up -d` for what the schema changed, then
- * the buckets, the first admin and the REST wait. The schema is in by then, so a step that fails
- * does not fail the push (issue 41): it is warned about, and the push exits 0.
+ * the buckets, the first admin and the REST wait. `bringUp` answers with the buckets the stack did
+ * not take, or null. The schema is in by then and stays in (issue 41), but a step that failed ends
+ * the push non-zero with no success line, as a push to a linked server does: it was warned about
+ * and exited 0, so a pipeline passed with buckets missing (0.9.1 release test FF2, issue 301).
+ * True when a step failed.
  */
-async function bringUpAfterApply(bringUp: () => Promise<void>): Promise<void> {
-  try {
-    await bringUp()
+async function bringUpAfterApply(bringUp: () => Promise<string | null>): Promise<boolean> {
+  const failure = await bringUp().catch((err: unknown) => `a step after it failed: ${errorMessage(err)}`)
+  if (failure === null) {
     console.log("[supatype] Schema pushed.")
-  } catch (err) {
-    warn(`The schema was applied, but a step after it failed: ${errorMessage(err)}`)
+    return false
   }
+  postApplyFailed(failure)
+  return true
 }
 
 /**
@@ -1555,7 +1558,8 @@ export class StackNotServing extends Error {
  * What a started stack needs once it answers: the gateway and storage waited for, then the schema's
  * declared buckets and the first admin user. A push to a running stack runs it after its `up -d`,
  * and `self-host compose up` after its own, so no command depends on a push to start the stack and
- * create them (issue 41).
+ * create them (issue 41). Answers with the buckets the stack did not take, or null, for the caller
+ * to warn about or fail on.
  */
 export async function provisionStartedStack(
   cwd: string,
@@ -1563,7 +1567,7 @@ export async function provisionStartedStack(
   stack: { composePath: string; project: string; gatewayPort: number },
   ast: ExtractedSchemaAstV2,
   serviceRoleKey: string,
-): Promise<void> {
+): Promise<string | null> {
   const { composePath, project, gatewayPort } = stack
   try {
     await waitKongReady(gatewayPort, 120, { composePath, cwd, project })
@@ -1571,13 +1575,15 @@ export async function provisionStartedStack(
     throw new StackNotServing(errorMessage(err), { cause: err })
   }
   await waitStorageApiReady(gatewayPort, serviceRoleKey, 90)
-  await provisionDockerStorageBuckets(ast, gatewayPort, serviceRoleKey)
+  const left = await provisionDockerStorageBuckets(ast, gatewayPort, serviceRoleKey)
   await ensureFirstAdminUserForProject(cwd, config, { compose: { project, composePath } })
+  return left
 }
 
 /**
  * After a compose push: the rest of the stack up, then what the schema asks of it once it answers
- * (buckets, the first admin), then REST, which is the last to catch up with the new schema.
+ * (buckets, the first admin), then REST, which is the last to catch up with the new schema. Answers
+ * with the buckets the stack did not take, or null.
  */
 async function bringPushedStackUp(
   cwd: string,
@@ -1585,16 +1591,17 @@ async function bringPushedStackUp(
   stack: { paths: SelfHostComposePaths; project: string; gatewayPort: number; brand: DockerBrandOptions },
   ast: ExtractedSchemaAstV2,
   keys: { anonKey: string; serviceRoleKey: string },
-): Promise<void> {
+): Promise<string | null> {
   const { paths, project, gatewayPort, brand } = stack
   const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true, brand })
   // Thrown, not exited: the schema is applied by now (bringUpAfterApply).
   if (upGateway !== 0) throw new Error(`docker compose up exited with status ${upGateway}`)
-  await provisionStartedStack(cwd, config, { composePath: paths.composePath, project, gatewayPort }, ast, keys.serviceRoleKey)
+  const left = await provisionStartedStack(cwd, config, { composePath: paths.composePath, project, gatewayPort }, ast, keys.serviceRoleKey)
 
   // Last, so the admin user and the buckets are not held up by it. `supatype dev` never comes
   // through here: it pushes before PostgREST starts, so PostgREST finds the schemas on its first try.
   await waitForRestReady(loopbackBase(gatewayPort), keys.anonKey)
+  return left
 }
 
 /**
@@ -1869,7 +1876,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // buckets belong to fields that do not exist yet. The save that applies it provisions them.
   if (schemaApplied) {
     const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
-    await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
+    warnBucketsLeft(await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey))
   }
 
   const pidDir = join(homedir(), ".supatype", "projects", config.project.name, "pid")
@@ -1937,7 +1944,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
           console.log(`\n[supatype] ${why}, pushing schema...`)
           try {
             await runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project, pushOptions)
-            await provisionDockerStorageBuckets(loadSchemaAst(schemaPath, cwd), kongPort, serviceRoleKey)
+            warnBucketsLeft(await provisionDockerStorageBuckets(loadSchemaAst(schemaPath, cwd), kongPort, serviceRoleKey))
           } catch (err) {
             reportDevPushFailure(err)
           }
