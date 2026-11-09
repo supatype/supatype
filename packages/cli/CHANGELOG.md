@@ -16,36 +16,6 @@
   the anon key could read a private bucket. The systemd units `install-service` wrote started no
   storage service either. Docker Compose (`supatype self-host compose`) is the self-host path; back
   up a Compose stack with `pg_dump` against `DATABASE_URL`.
-* **push, diff, seed and every command that reaches the local stack:** these commands no longer
-  start the local stack. On a Docker project with the stack stopped, `push`, `diff`, `adopt`,
-  `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull` and
-  `admin` refuse before doing anything: "The local stack isn't running. Start it with
-  `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push`
-  again." (naming the command run). `seed` exits 2, the others 1. `push` used to start Postgres,
-  apply, then start the rest of the stack, and `diff` started Postgres and stopped it again. A
-  linked project, `--connection`, `connection` in the config and an external database are reached
-  as before, and a running stack behaves as before.
-* **cache, functions:** `cache rest list`, `get`, `delete` and `flush`, and a local `functions invoke`
-  that no `functions serve` answers, refuse on a Docker project whose local stack is not running,
-  with the same message as `push` and the other commands that need the stack, naming the command
-  run, and exit 1. They reached the stopped stack's API and failed with `Cannot reach` or a
-  missing `SERVICE_ROLE_KEY`. An API address named by `SUPATYPE_URL` or `SUPATYPE_API_URL` in
-  `.env`, a linked project's `functions invoke`, and a native project are unaffected.
-* **schema:** a `?` on a model field (`due?: string`) is refused, naming `Model.field` and saying to
-  write `Optional<>`. It read as nullable but compiled to a `NOT NULL` column.
-* **generate:** `supatype generate --connection` is refused as an unknown option. Generate writes the
-  types from the schema file and never opened a database, so the option was accepted and ignored.
-* **seed:** a seed file's `export const config = { transaction: ... }` is refused, and `transaction`
-  is gone from `SeedConfig`. It was validated and never sent: every seed file runs in a transaction
-  of its own (all of them in one with `--atomic`), and the engine cannot run one outside it. Any
-  other key `config` does not have (a misspelt `runonce`, say) is refused too, rather than ignored.
-* **realtime:** the service's process entry is `dist/main.js`; `dist/index.js` only exports and no
-  longer starts a server, so an `overrides.realtime` naming `packages/realtime/dist/index.js` exits
-  at once. Point it at `packages/realtime/dist/main.js`.
-* **hooks:** `AfterDeleteContext` has no `filter`. After-hooks are fed from the database's change log,
-  which records the rows a write changed rather than the request that changed them, so there is no
-  filter to give. `ctx.old` replaces it: the deleted rows themselves, as they were. A handler reading
-  `ctx.filter` in an `afterDelete` no longer compiles; read `ctx.old` instead.
 
 ### Features
 
@@ -64,153 +34,10 @@
   sign-in off (with magic links and password recovery) on native dev, Docker dev and self-host; a
   `SUPATYPE_EXTERNAL_EMAIL_ENABLED` in `.env` wins. Studio's auth Configuration page names the key
   for it and for email confirmation.
-* **auth:** SAML single sign-on can be turned on from the config: `auth: { sso: { saml: { enabled: true } } }`,
-  with optional `allowEncryptedAssertions`, `relayStateValidity` (seconds), `rateLimitAssertion`
-  (assertions per 5 minutes) and `externalUrl`. `dev`, native `dev` and `self-host compose` pass the
-  `SUPATYPE_SAML_*` settings to the auth server, a `.env` value winning over each, and nothing while
-  SAML is off. The service provider's signing key is generated into `.env` as
-  `SUPATYPE_SAML_PRIVATE_KEY` (RSA 2048) the first time SAML is on and never replaced, since a new
-  key breaks every identity provider that trusts the old certificate. The compose file requires it
-  from `.env` and never holds it. A key written into the config is refused.
-* **sso:** `supatype sso add <name>`, `list`, `show`, `update` and `remove` register SAML identity
-  providers (metadata URL or file, email domains, attribute mapping, NameID format) through the auth
-  server's admin API, on the local stack or a linked self-hosted deployment. A provider is addressed
-  by its name, stored as `resource_id`, and `update` changes it in place: deleting and adding a
-  provider again would leave every user who signed in through it without a way back in. `update`
-  keeps the NameID format unless told to change it. `add` warns when SAML is off.
-* **sso:** `supatype sso info` prints the values an identity provider asks for: entity ID and
-  metadata URL, ACS URL, NameID formats, the `subject-id` attribute preferred to the NameID, and a
-  link to download the metadata XML.
-* **sso:** `supatype sso rotate-key` writes `SUPATYPE_SAML_NEXT_PRIVATE_KEY` into `.env`, which the
-  server publishes beside the current key while identity providers take the new certificate;
-  `supatype sso rotate-key --promote` then makes it the current key, after saying what stops working
-  for an identity provider that has not updated. For a linked deployment it prints the steps to take
-  on the server.
-* **sso:** `supatype sso verify-domain <name> <domain>` proves the project owns one of a provider's
-  domains: it prints the DNS TXT record to add (`_supatype-challenge.<domain>` and its token), asks
-  the auth server to check it, and says whether the domain is verified or what DNS answered instead,
-  exiting 1 until it is. Running it again checks again. `sso show` and `sso list` mark each domain
-  verified or not. On a dev stack a domain ending in `.supatype.test` counts as verified with no DNS
-  lookup.
-* **self-host:** `supatype self-host compose up -d` creates the storage buckets the schema declares
-  and the first admin user once the stack answers, as `supatype dev` and a push to a running stack
-  do. A push no longer starts a stopped stack, so nothing else would have made them. A failure there
-  is a warning: the stack is up.
-* **init:** a static app's `index.html` (and the page Vite builds it from) loads
-  `<script src="/supatype-env.js" vite-ignore></script>` in its head, so the built site takes the address and
-  anon key of whichever deployment serves it. Only where the committed config serves the app's
-  files; a proxied app's page is left as it was.
-* **init:** in a Next.js App Router app, init writes `app/supatype-env.js/route.ts` (or under
-  `src/app`, and `route.js` without a `tsconfig.json`), which serves `/supatype-env.js` from
-  `@supatype/ssr/next` with the running server's `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, adds
-  `@supatype/ssr` to the app's dependencies, and loads the script first in the root layout's
-  `<body>` with `next/script`'s `beforeInteractive`. One `next build` then runs against any
-  deployment. A route or layout that already has it is left alone; a layout init cannot edit
-  safely (no single `<body>`, or a `Script` that is not `next/script`) is left as it is, and the two
-  lines to add are printed. A Pages Router app gets nothing written and the steps printed. A static
-  export (`output: "export"` in `next.config`, read as text) gets neither the route nor the script,
-  since `next build` cannot export a dynamic route; init says to build it with
-  `supatype build -- next build`, or to let Supatype hosting serve it.
-* **dev, init, keys:** a local stack's values in `.env.development.local` now include
-  `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` beside the frontend copies, so a Next.js app's
-  `/supatype-env.js` route and its server client find them in `next dev` instead of refusing with 503.
-  A deployment's values in `.env` still get only the frontend names. The CLI never loads
-  `.env.development.local` into its own environment, so `supatype build` does not take these as
-  values the host set.
-* **client:** the generated client takes `url` and `anonKey` as `string | undefined` and, for one
-  missing, reads the page's `window.__SUPATYPE_ENV__` at its first request; with neither, that
-  request throws naming the variables to set, `supatype build` and the Next.js route, instead of
-  sending requests the gateway refuses. Creating the client never throws, so `next build` can
-  prerender a page that creates one at module scope.
-* **diff:** every `supatype diff` ends with what `anon` (signed out) and `authenticated` (signed
-  in) may do on each model's table once the push applies, one line per table (`question   read`,
-  `profile    none`). A line the push changes shows what it is now as well
-  (`question   none -> read`). The engine grants `anon` a privilege only where it can prove the rule
-  needs no login, so a rule meant to be public that leaves signed-out callers with `401 42501` is
-  seen before the push (issue 16). Printed also when there are no changes; an engine older than the
-  summary prints no block. Many-to-many junction tables are listed too, as `post_tags (link)`, and
-  a link whose end reads it through its own read rule says what it denies and why
-  (`none   (read denied: an end's read rule reads this link table)`).
 
-* **push:** prints the same access block before it applies or asks to confirm, in a terminal and
-  with `--yes` alike.
 
-* **dev:** after a push applies, prints the access lines it changed (`question   none -> read`),
-  and nothing when no line changed.
 
-* **push:** `--run-hooks` fires after-hooks for the rows a push's own data migrations rewrite (column
-  conversions, block moves, kind changes). Without it they are skipped, as seeds are. Against an
-  engine whose capabilities do not list `run_hooks`, the push stops before anything is sent.
 
-* **init:** `supatype init <dir> --example <name>` starts from `examples/<name>` of the release
-  matching the CLI (`v<version>` on GitHub), with every `workspace:` dependency pinned to
-  `^<version>`. An unknown name is refused with the list of examples in that release, and so is an
-  example holding a file named with `..`, a backslash, a NUL, a leading drive (`C:`) or an absolute
-  path, or one that resolves outside the directory; nothing is written then. A colon anywhere in a
-  name is refused too, since on Windows `docs/a:b.md` writes a hidden stream of a file `docs/a`.
-  Such a name elsewhere in the repository does not stop an example. Schema snapshots are restored
-  with the same checks, and `push` refuses a schema file named in a way restore would refuse.
-  `supatype dev` warns instead and pushes without a snapshot, so it does not stop on every save.
-* **seed:** `authUser: { connect: { id } }` on a relation to the auth user (`RelatedTo<SupatypeAuthUser>`)
-  writes the relation's key column. It failed with "`supatype:user` is not a model in this schema".
-  The generated `...Create` type still offers the key column (`auth_user_id`) rather than `authUser`;
-  that comes from the engine.
-* **schema:** `Geo<"polygon">` and `Geo<"linestring">` compile to `GEOGRAPHY(POLYGON, 4326)` and
-  `GEOGRAPHY(LINESTRING, 4326)`. Every `Geo` field was a point whatever it said; a bare `Geo` still is.
-* **keys:** `supatype keys` writes into `.env` when there is one, filling only the blank keys, as
-  `--write` did. `--print` only prints. `--write` still works, so scripts and docs written for 0.7.0
-  keep running. With no `.env` the keys are printed, with a line saying how to have them written.
-  `--print` with no secret anywhere exits 1 rather than printing keys signed with one it made up and
-  kept nowhere. `--print` checks the secret as writing does, since printed keys end up in a `.env`
-  all the same: at least 32 characters, and for a given one, no whitespace, `#` or quotes.
-* **keys, self-host, init, dev:** one rule for the `JWT_SECRET` keys are signed with. `.env`'s always
-  wins. A shell `JWT_SECRET` is used only when `.env` has none, and is then written into `.env`; one
-  that differs from `.env`'s gets a single warning line saying `.env`'s is used, and is never
-  refused. Only a `keys --secret` that differs from `.env`'s is refused. Docker Compose reads the
-  shell ahead of `.env`, so every compose command now runs without the shell's `JWT_SECRET`,
-  `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines that name, and without a shell key the stack
-  would not accept under `.env`'s `JWT_SECRET` (another secret, another role, or expired):
-  `supatype dev` on docker with a different shell `JWT_SECRET` started services that refused every
-  key with 401. A shell key the stack accepts still fills a blank one. `push`, `status` and the
-  other commands calling the local stack follow the same rule, and send `.env`'s `SERVICE_ROLE_KEY`,
-  the name the stack is started with, and never a `SUPATYPE_SERVICE_ROLE_KEY` there. When a
-  `JWT_SECRET` is newly written into `.env` (given or generated), `keys` and `self-host compose up`
-  sign both keys again and say so, since keys already there cannot verify against it. A secret is
-  checked before anything is written: at least 32 characters, and for one written into `.env`, no
-  whitespace, `#` or quotes. `compose up` used to write keys signed with a short secret and then
-  refuse it, leaving keys that were never re-signed once the secret was fixed. `init` warns and
-  generates a secret when the shell's is unusable, and never exits mid-wizard over the keys.
-* **keys, dev:** `NEXT_PUBLIC_SUPATYPE_ANON_KEY` is written beside the `VITE_`, `PUBLIC_` and
-  `EXPO_PUBLIC_` copies, and `NEXT_PUBLIC_SUPATYPE_URL` wherever the other URL copies are.
-* **build:** `supatype build [--env <name>] [--allow-local] [-- <command...>]` runs the app's
-  production build (the package.json `build` script through the project's package manager, or the
-  command after `--`) with the deployment's API URL and anon key under every front-end name
-  (`VITE_`, `PUBLIC_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_`). Each value comes from the first of: the
-  environment (any of those names, or `SUPATYPE_URL` / `SUPATYPE_ANON_KEY`), so a host's own
-  settings win; for the anon key alone, the `/supatype-env.json` of the server the environment's
-  URL names, for CI that sets only the URL; the linked environment (Supatype Cloud's keys route, or
-  a self-hosted server's `/supatype-env.json`); a `.env` recording a deployment
-  (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). A server's address is fetched over
-  HTTPS only, unless it is local. A 404 there is reported as the address switched off
-  (`server.public_env: false`), and a 503 as a server not set up to publish its anon key, quoting
-  its reason on one line with anything shaped like a JWT withheld. An anon key from the link, a server or `.env` goes into the build
-  only when it is for the same deployment as the URL (compared by scheme, host and port, ignoring a
-  trailing slash and `/auth/v1`); otherwise the refusal says whose it is. The build does not start when either is missing, or when the address is local
-  unless `--allow-local` is passed, and the refusal lists every source it tried. Nothing is written
-  to a file, the service role key is never given to the build, and the exit code is the build's
-  own. A bare `supatype build` run from inside one (a package.json `"build": "supatype build"`) is
-  refused rather than running the build script again without end; a command after `--` still runs.
-* **keys:** `supatype keys --print frontend [--env <name>] [--allow-local]` prints those same
-  front-end names and values as `NAME=value` lines, and nothing else on stdout, for a host's
-  settings or `$GITHUB_ENV`. Bare `--print` still prints the key pair. An unknown target is refused,
-  listing the valid ones, and `--env` or `--allow-local` without `--print frontend` is refused.
-  `keys --help` states the `--exp-years` default once.
-* **config:** `server.public_env: false` renders `SUPATYPE_PUBLIC_ENV=false` into the server (self-host
-  and dev compose, and native dev), turning off its `/supatype-env.json` and `/supatype-env.js` for
-  an API-only project. Absent, the server's default (on) applies. A value that is not a boolean is
-  refused.
-* **init:** the "When you're ready to deploy" steps build the app with `supatype build --env
-  production` once the deployment is linked, for Supatype Cloud and self-host.
 
 ### Bug Fixes
 
@@ -335,6 +162,171 @@
   already was after a clean exit. A run that lasts longer starts the count over, and the wait
   before the next restart goes back to 1 second instead of staying at the longest it reached.
 
+## 0.9.1 (2026-11-09)
+
+### Breaking Changes
+
+* **push, diff, seed and every command that reaches the local stack:** these commands no longer
+  start the local stack. On a Docker project with the stack stopped, `push`, `diff`, `adopt`,
+  `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull` and
+  `admin` refuse before doing anything: "The local stack isn't running. Start it with
+  `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push`
+  again." (naming the command run). `seed` exits 2, the others 1. `push` used to start Postgres,
+  apply, then start the rest of the stack, and `diff` started Postgres and stopped it again. A
+  linked project, `--connection`, `connection` in the config and an external database are reached
+  as before, and a running stack behaves as before.
+* **cache, functions:** `cache rest list`, `get`, `delete` and `flush`, and a local `functions invoke`
+  that no `functions serve` answers, refuse on a Docker project whose local stack is not running,
+  with the same message as `push` and the other commands that need the stack, naming the command
+  run, and exit 1. They reached the stopped stack's API and failed with `Cannot reach` or a
+  missing `SERVICE_ROLE_KEY`. An API address named by `SUPATYPE_URL` or `SUPATYPE_API_URL` in
+  `.env`, a linked project's `functions invoke`, and a native project are unaffected.
+* **client:** `SupatypeError` is a class, and the one error type every `{ data, error }` result
+  carries, so `error instanceof Error` holds and `String(error)` reads the message instead of
+  `[object Object]`. The class the SDK throws, which was called `SupatypeError`, is now
+  `SupatypeCodedError` (still with a required `code` and a `helpUrl`), and its `statusCode` is
+  `status`. `PostgrestError`'s `details` and `hint` are absent rather than `null` when the server
+  gave none. The full entry is in the `@supatype/client` changelog.
+
+**How to move from 0.9.0.** Two changes need action.
+
+The error class (`@supatype/client`). Code that catches the SDK's thrown errors by class, builds
+one, or reads `statusCode`, renames the class and the field. Code that only reads a result's
+`error.message`, `code`, `status`, `field`, `hint` or `details` needs no change. A test comparing a
+result's error with `toEqual` against a plain object compares `{ ...error }` instead, and a check
+for `details === null` or `hint === null` checks for `undefined`.
+
+```ts
+// 0.9.0
+import { SupatypeError } from "@supatype/client"
+
+function report(e: unknown): void {
+  if (e instanceof SupatypeError) console.error(e.code, e.statusCode, e.helpUrl)
+}
+
+// 0.9.1
+import { SupatypeCodedError } from "@supatype/client"
+
+function report(e: unknown): void {
+  if (e instanceof SupatypeCodedError) console.error(e.code, e.status, e.helpUrl)
+}
+```
+
+`instanceof SupatypeError` now holds for every error the SDK throws and every result's error, so
+use `SupatypeCodedError` when the code relies on `code` always being there or on `helpUrl`.
+
+The local stack. `push`, `diff`, `seed` and the other commands above no longer start a stopped
+stack. Start it first: `supatype dev` on a development machine (in another terminal, or before the
+command), or `supatype self-host compose up -d` on a server. A CI job that ran `supatype push`,
+`diff` or `seed` against a fresh runner brings the stack up as its own step before them, and checks
+`seed`'s exit code 2 as well as 1. A job that reaches a linked project, passes `--connection`, or
+sets `connection` in the config is unaffected.
+
+### Features
+
+* **auth:** SAML single sign-on can be turned on from the config: `auth: { sso: { saml: { enabled: true } } }`,
+  with optional `allowEncryptedAssertions`, `relayStateValidity` (seconds), `rateLimitAssertion`
+  (assertions per 5 minutes) and `externalUrl`. `dev`, native `dev` and `self-host compose` pass the
+  `SUPATYPE_SAML_*` settings to the auth server, a `.env` value winning over each, and nothing while
+  SAML is off. The service provider's signing key is generated into `.env` as
+  `SUPATYPE_SAML_PRIVATE_KEY` (RSA 2048) the first time SAML is on and never replaced, since a new
+  key breaks every identity provider that trusts the old certificate. The compose file requires it
+  from `.env` and never holds it. A key written into the config is refused.
+* **sso:** `supatype sso add <name>`, `list`, `show`, `update` and `remove` register SAML identity
+  providers (metadata URL or file, email domains, attribute mapping, NameID format) through the auth
+  server's admin API, on the local stack or a linked self-hosted deployment. A provider is addressed
+  by its name, stored as `resource_id`, and `update` changes it in place: deleting and adding a
+  provider again would leave every user who signed in through it without a way back in. `update`
+  keeps the NameID format unless told to change it. `add` warns when SAML is off.
+* **sso:** `supatype sso info` prints the values an identity provider asks for: entity ID and
+  metadata URL, ACS URL, NameID formats, the `subject-id` attribute preferred to the NameID, and a
+  link to download the metadata XML.
+* **sso:** `supatype sso rotate-key` writes `SUPATYPE_SAML_NEXT_PRIVATE_KEY` into `.env`, which the
+  server publishes beside the current key while identity providers take the new certificate;
+  `supatype sso rotate-key --promote` then makes it the current key, after saying what stops working
+  for an identity provider that has not updated. For a linked deployment it prints the steps to take
+  on the server.
+* **sso:** `supatype sso verify-domain <name> <domain>` proves the project owns one of a provider's
+  domains: it prints the DNS TXT record to add (`_supatype-challenge.<domain>` and its token), asks
+  the auth server to check it, and says whether the domain is verified or what DNS answered instead,
+  exiting 1 until it is. Running it again checks again. `sso show` and `sso list` mark each domain
+  verified or not. On a dev stack a domain ending in `.supatype.test` counts as verified with no DNS
+  lookup.
+* **self-host:** `supatype self-host compose up -d` creates the storage buckets the schema declares
+  and the first admin user once the stack answers, as `supatype dev` and a push to a running stack
+  do. A push no longer starts a stopped stack, so nothing else would have made them. A failure there
+  is a warning: the stack is up.
+* **init:** a static app's `index.html` (and the page Vite builds it from) loads
+  `<script src="/supatype-env.js" vite-ignore></script>` in its head, so the built site takes the address and
+  anon key of whichever deployment serves it. Only where the committed config serves the app's
+  files; a proxied app's page is left as it was.
+* **init:** in a Next.js App Router app, init writes `app/supatype-env.js/route.ts` (or under
+  `src/app`, and `route.js` without a `tsconfig.json`), which serves `/supatype-env.js` from
+  `@supatype/ssr/next` with the running server's `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, adds
+  `@supatype/ssr` to the app's dependencies, and loads the script first in the root layout's
+  `<body>` with `next/script`'s `beforeInteractive`. One `next build` then runs against any
+  deployment. A route or layout that already has it is left alone; a layout init cannot edit
+  safely (no single `<body>`, or a `Script` that is not `next/script`) is left as it is, and the two
+  lines to add are printed. A Pages Router app gets nothing written and the steps printed. A static
+  export (`output: "export"` in `next.config`, read as text) gets neither the route nor the script,
+  since `next build` cannot export a dynamic route; init says to build it with
+  `supatype build -- next build`, or to let Supatype hosting serve it.
+* **dev, init, keys:** a local stack's values in `.env.development.local` now include
+  `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` beside the frontend copies, so a Next.js app's
+  `/supatype-env.js` route and its server client find them in `next dev` instead of refusing with 503.
+  A deployment's values in `.env` still get only the frontend names. The CLI never loads
+  `.env.development.local` into its own environment, so `supatype build` does not take these as
+  values the host set.
+* **client:** the generated client takes `url` and `anonKey` as `string | undefined` and, for one
+  missing, reads the page's `window.__SUPATYPE_ENV__` at its first request; with neither, that
+  request throws naming the variables to set, `supatype build` and the Next.js route, instead of
+  sending requests the gateway refuses. Creating the client never throws, so `next build` can
+  prerender a page that creates one at module scope.
+* **diff:** every `supatype diff` ends with what `anon` (signed out) and `authenticated` (signed
+  in) may do on each model's table once the push applies, one line per table (`question   read`,
+  `profile    none`). A line the push changes shows what it is now as well
+  (`question   none -> read`). The engine grants `anon` a privilege only where it can prove the rule
+  needs no login, so a rule meant to be public that leaves signed-out callers with `401 42501` is
+  seen before the push (issue 16). Printed also when there are no changes; an engine older than the
+  summary prints no block. Many-to-many junction tables are listed too, as `post_tags (link)`, and
+  a link whose end reads it through its own read rule says what it denies and why
+  (`none   (read denied: an end's read rule reads this link table)`).
+* **push:** prints the same access block before it applies or asks to confirm, in a terminal and
+  with `--yes` alike.
+* **dev:** after a push applies, prints the access lines it changed (`question   none -> read`),
+  and nothing when no line changed.
+* **build:** `supatype build [--env <name>] [--allow-local] [-- <command...>]` runs the app's
+  production build (the package.json `build` script through the project's package manager, or the
+  command after `--`) with the deployment's API URL and anon key under every front-end name
+  (`VITE_`, `PUBLIC_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_`). Each value comes from the first of: the
+  environment (any of those names, or `SUPATYPE_URL` / `SUPATYPE_ANON_KEY`), so a host's own
+  settings win; for the anon key alone, the `/supatype-env.json` of the server the environment's
+  URL names, for CI that sets only the URL; the linked environment (Supatype Cloud's keys route, or
+  a self-hosted server's `/supatype-env.json`); a `.env` recording a deployment
+  (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). A server's address is fetched over
+  HTTPS only, unless it is local. A 404 there is reported as the address switched off
+  (`server.public_env: false`), and a 503 as a server not set up to publish its anon key, quoting
+  its reason on one line with anything shaped like a JWT withheld. An anon key from the link, a server or `.env` goes into the build
+  only when it is for the same deployment as the URL (compared by scheme, host and port, ignoring a
+  trailing slash and `/auth/v1`); otherwise the refusal says whose it is. The build does not start when either is missing, or when the address is local
+  unless `--allow-local` is passed, and the refusal lists every source it tried. Nothing is written
+  to a file, the service role key is never given to the build, and the exit code is the build's
+  own. A bare `supatype build` run from inside one (a package.json `"build": "supatype build"`) is
+  refused rather than running the build script again without end; a command after `--` still runs.
+* **keys:** `supatype keys --print frontend [--env <name>] [--allow-local]` prints those same
+  front-end names and values as `NAME=value` lines, and nothing else on stdout, for a host's
+  settings or `$GITHUB_ENV`. Bare `--print` still prints the key pair. An unknown target is refused,
+  listing the valid ones, and `--env` or `--allow-local` without `--print frontend` is refused.
+  `keys --help` states the `--exp-years` default once.
+* **config:** `server.public_env: false` renders `SUPATYPE_PUBLIC_ENV=false` into the server (self-host
+  and dev compose, and native dev), turning off its `/supatype-env.json` and `/supatype-env.js` for
+  an API-only project. Absent, the server's default (on) applies. A value that is not a boolean is
+  refused.
+* **init:** the "When you're ready to deploy" steps build the app with `supatype build --env
+  production` once the deployment is linked, for Supatype Cloud and self-host.
+
+### Bug Fixes
+
 * **dev:** a save made by writing another file and renaming it over the schema is pushed. `sed -i`
   saves were always missed on Linux, and an editor's safe write or a script's `mv` about one time in
   three: the event named only the other file, which the watch ignored, so the database kept the old
@@ -444,7 +436,6 @@
   generated files written. It stayed at "Services running." through every save: the renderer took
   the console over once the dashboard was drawn, and the pane's filter dropped the access lines
   besides.
-
 * **dev, push:** a stack service that exits while the CLI waits for the API gateway stops the wait.
   With the server container exited on a fatal config error, `supatype dev` sat at `Waiting for API
   gateway...` for 120 s, failed naming the gateway's health, and then removed the containers, so
@@ -546,7 +537,6 @@
   anon key now stops before building, listing what it tried (`--allow-local` takes a local
   address). The install and build steps run through cmd.exe on Windows, where `npm` and `pnpm` could
   not be started without it.
-
 * **init, dev:** Windows no longer asks to let `supatype` through its firewall. Checking whether a
   port was free bound it on every address (`0.0.0.0`), which Windows treats as a program wanting
   network access, and it remembers the answer per program file, so it asked again after every CLI
@@ -565,6 +555,34 @@
   pushing. Native dev also pushes one save at a time, as docker dev already did: a save made during
   a push is pushed once that push is done. Every command that runs the engine runs it the same
   way, with the same results and errors.
+* **push:** a Docker push that applied the schema exits 0 when a step after it fails on the running
+  stack (its `up -d`, the gateway wait, the buckets or the first admin), warning `The schema was
+  applied, but a step after it failed` with the reason. A start that failed on a port another
+  program held made push exit 1 with the schema in.
+* **push, diff, adopt, pull:** on a running stack these no longer run `docker compose up -d db`
+  before they reach its database. Every layout already publishes Postgres on the port the host
+  engine connects to, so the call had nothing to start, and could recreate the database container
+  when its definition had changed; with `overrides.engine` on a dev stack it could also move the dev
+  database port under a running database first. A running stack whose `db`
+  container has stopped is now refused with the "local stack isn't running" message rather than
+  having its database started.
+
+## 0.9.0 (2026-11-04)
+
+### Breaking Changes
+
+* **hooks:** `AfterDeleteContext` has no `filter`. After-hooks are fed from the database's change log,
+  which records the rows a write changed rather than the request that changed them, so there is no
+  filter to give. `ctx.old` replaces it: the deleted rows themselves, as they were. A handler reading
+  `ctx.filter` in an `afterDelete` no longer compiles; read `ctx.old` instead.
+
+### Features
+
+* **push:** `--run-hooks` fires after-hooks for the rows a push's own data migrations rewrite (column
+  conversions, block moves, kind changes). Without it they are skipped, as seeds are. Against an
+  engine whose capabilities do not list `run_hooks`, the push stops before anything is sent.
+
+### Bug Fixes
 
 * **npm:** the CLI works in an app that installs React 19. npm hoisted the CLI's `ink` into the
   app's `node_modules`, where it loaded the app's React rather than the CLI's own React 18, and
@@ -613,6 +631,68 @@
 * **init:** in an existing package.json, `@supatype/cli` and `@supatype/types` go in
   `devDependencies` as they do for a new project, and the `seed` script runs `supatype seed`. It ran
   `tsx seed.ts`, which loads the seed module without calling it.
+
+## 0.8.0 (2026-11-02)
+
+### Breaking Changes
+
+* **schema:** a `?` on a model field (`due?: string`) is refused, naming `Model.field` and saying to
+  write `Optional<>`. It read as nullable but compiled to a `NOT NULL` column.
+* **generate:** `supatype generate --connection` is refused as an unknown option. Generate writes the
+  types from the schema file and never opened a database, so the option was accepted and ignored.
+* **seed:** a seed file's `export const config = { transaction: ... }` is refused, and `transaction`
+  is gone from `SeedConfig`. It was validated and never sent: every seed file runs in a transaction
+  of its own (all of them in one with `--atomic`), and the engine cannot run one outside it. Any
+  other key `config` does not have (a misspelt `runonce`, say) is refused too, rather than ignored.
+* **realtime:** the service's process entry is `dist/main.js`; `dist/index.js` only exports and no
+  longer starts a server, so an `overrides.realtime` naming `packages/realtime/dist/index.js` exits
+  at once. Point it at `packages/realtime/dist/main.js`.
+
+### Features
+
+* **init:** `supatype init <dir> --example <name>` starts from `examples/<name>` of the release
+  matching the CLI (`v<version>` on GitHub), with every `workspace:` dependency pinned to
+  `^<version>`. An unknown name is refused with the list of examples in that release, and so is an
+  example holding a file named with `..`, a backslash, a NUL, a leading drive (`C:`) or an absolute
+  path, or one that resolves outside the directory; nothing is written then. A colon anywhere in a
+  name is refused too, since on Windows `docs/a:b.md` writes a hidden stream of a file `docs/a`.
+  Such a name elsewhere in the repository does not stop an example. Schema snapshots are restored
+  with the same checks, and `push` refuses a schema file named in a way restore would refuse.
+  `supatype dev` warns instead and pushes without a snapshot, so it does not stop on every save.
+* **seed:** `authUser: { connect: { id } }` on a relation to the auth user (`RelatedTo<SupatypeAuthUser>`)
+  writes the relation's key column. It failed with "`supatype:user` is not a model in this schema".
+  The generated `...Create` type still offers the key column (`auth_user_id`) rather than `authUser`;
+  that comes from the engine.
+* **schema:** `Geo<"polygon">` and `Geo<"linestring">` compile to `GEOGRAPHY(POLYGON, 4326)` and
+  `GEOGRAPHY(LINESTRING, 4326)`. Every `Geo` field was a point whatever it said; a bare `Geo` still is.
+* **keys:** `supatype keys` writes into `.env` when there is one, filling only the blank keys, as
+  `--write` did. `--print` only prints. `--write` still works, so scripts and docs written for 0.7.0
+  keep running. With no `.env` the keys are printed, with a line saying how to have them written.
+  `--print` with no secret anywhere exits 1 rather than printing keys signed with one it made up and
+  kept nowhere. `--print` checks the secret as writing does, since printed keys end up in a `.env`
+  all the same: at least 32 characters, and for a given one, no whitespace, `#` or quotes.
+* **keys, self-host, init, dev:** one rule for the `JWT_SECRET` keys are signed with. `.env`'s always
+  wins. A shell `JWT_SECRET` is used only when `.env` has none, and is then written into `.env`; one
+  that differs from `.env`'s gets a single warning line saying `.env`'s is used, and is never
+  refused. Only a `keys --secret` that differs from `.env`'s is refused. Docker Compose reads the
+  shell ahead of `.env`, so every compose command now runs without the shell's `JWT_SECRET`,
+  `ANON_KEY` and `SERVICE_ROLE_KEY` when `.env` defines that name, and without a shell key the stack
+  would not accept under `.env`'s `JWT_SECRET` (another secret, another role, or expired):
+  `supatype dev` on docker with a different shell `JWT_SECRET` started services that refused every
+  key with 401. A shell key the stack accepts still fills a blank one. `push`, `status` and the
+  other commands calling the local stack follow the same rule, and send `.env`'s `SERVICE_ROLE_KEY`,
+  the name the stack is started with, and never a `SUPATYPE_SERVICE_ROLE_KEY` there. When a
+  `JWT_SECRET` is newly written into `.env` (given or generated), `keys` and `self-host compose up`
+  sign both keys again and say so, since keys already there cannot verify against it. A secret is
+  checked before anything is written: at least 32 characters, and for one written into `.env`, no
+  whitespace, `#` or quotes. `compose up` used to write keys signed with a short secret and then
+  refuse it, leaving keys that were never re-signed once the secret was fixed. `init` warns and
+  generates a secret when the shell's is unusable, and never exits mid-wizard over the keys.
+* **keys, dev:** `NEXT_PUBLIC_SUPATYPE_ANON_KEY` is written beside the `VITE_`, `PUBLIC_` and
+  `EXPO_PUBLIC_` copies, and `NEXT_PUBLIC_SUPATYPE_URL` wherever the other URL copies are.
+
+### Bug Fixes
+
 * **functions serve:** a project with `functions/.env.local` serves again. The file was handed to
   Deno as `--env-file <path>`, two arguments, and Deno takes the value only after `=`, so it ran
   `.env.local` as the script and served nothing. `functions new` creates that file, so every project
@@ -633,27 +713,22 @@
   sets. `init` scaffolds `SUPATYPE_SMTP_HOST=`, `SUPATYPE_RESEND_API_KEY=` and the rest blank, and
   native `dev` applied `.env` over the config, so a project with its SMTP host or Resend key in the
   config got the noop mailer and sent nothing. A value in `.env` still wins over the config.
-
 * **app, status, functions serve:** the local gateway address follows `.env`. `app add` printed the
   app URL, `status` the API URL, and `functions serve` gave functions `SUPATYPE_URL`, all on the
   default port 18473 whatever `SUPATYPE_KONG_PORT` said, so after `dev` moved Kong to another port
   they pointed at whichever stack held 18473. They now use `.env`'s `API_EXTERNAL_URL`, else
   `SUPATYPE_KONG_PORT`, as `ctx.publicUrl` already did.
-
 * **pull:** a uuid `id` column is drafted as `UUID`. Every one was drafted as `SupatypeAuthUserId`,
   which declares the key to be an auth user's id; telling the two apart needs the schema of a foreign
   key's table, which the engine does not report yet. A drafted model also names its table
   (`tableName`) when its model name would not map back to it, as `HTTPLog` or `Orders` do, so a push
   of the draft does not create a second, empty table.
-
 * **plugins:** `plugins add` and `plugins list` no longer claim a plugin is in use. `add` said
   "installed and registered" and `list` showed every compatible plugin as "active", but nothing in
   Supatype loads plugins yet. Both now say the plugin is installed and that it is not loaded.
-
 * **functions:** the scaffolded `functions/_shared/context.ts` says where `ctx.env` comes from: the
   functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then `.env.<function>.local`,
   which wins. It said `.env`, which is never read for it.
-
 * **dev, functions serve:** the local functions router loads and guards handlers as the deployed
   worker does. It accepted only `export default`, so a function exporting a named `handler`, which the
   worker serves, failed to load locally; a module with neither answers its own route with an error
@@ -666,7 +741,6 @@
   the key until `dev` restarts. The router reads it from a file in `.supatype/`, readable by its owner
   only, rather than from the environment it takes the key out of. The file is removed when `dev` or
   `functions serve` stops, Ctrl+C included, and each `functions serve` has a file of its own.
-
 * **dev, functions serve:** native `dev` and `functions serve` run the functions worker the deployed
   image runs (packages/functions-worker), not a router the CLI generated to copy its rules, so the
   two can no longer drift: the copy had already differed on which exports it took, who got the
@@ -674,11 +748,9 @@
   `~/.supatype/cache/functions-worker/`. Native `dev` now also serves model hooks from `hooks/`, as
   the compose stack does, including in a project with hooks and no functions, and picks up a hook
   added while it runs; `functions serve` picks up a function added while it runs.
-
 * **functions:** `ctx.env` reads `.env.local` and `.env.<function>.local` with the CLI's own dotenv
   parser, so `KEY="value"` is `value`, an inline ` # comment` is dropped and `export KEY=` is read,
   as the CLI and compose read a `.env`. The worker kept the quotes and the comment.
-
 * **dev (native):** runs the storage service (packages/storage) on this machine instead of the
   server's built-in object store, so bucket rules, `maxSize`, `accept`, `access_mode`, caller rules
   and image transforms are the ones a deployment enforces. Its objects live under
@@ -691,14 +763,12 @@
   from a per-platform archive on the CDN (`storage/v<version>/`, signed like every component), or
   `overrides.storage`; its port is `SUPATYPE_STORAGE_PORT` (default 8002). When it cannot start, dev
   says so and the server's store answers as before.
-
 * **self-host:** the compose stack serves functions from `functions.path`. The functions worker, the
   server and the control plane were all told `/project/functions` whatever the config said, so a
   project keeping its functions elsewhere had every one answer 404; hooks were likewise fixed at
   `/project/hooks` rather than following `supatype.root`. A `functions.path` or `supatype.root`
   outside the project directory is refused with a message saying why, since the stack mounts only
   the project. `functions deploy` names the real directory instead of a fixed `functions/`.
-
 * **dev, self-host, init:** Resend and SES settings reach the auth server. Native `dev` sent them as
   `RESEND_API_KEY`, `RESEND_FROM` and `SES_FROM`, which the server does not read, docker `dev` sent
   none of them, and the self-host compose file had no way to pass them, so `email.provider: "resend"`
@@ -707,12 +777,10 @@
   passes them through from `.env`. `init` scaffolds the email settings under those names too, and
   SMTP's as `SUPATYPE_SMTP_*`; the unprefixed `SMTP_HOST` and the rest it used to write were never
   read either. Rename any of these already in a project's `.env`.
-
 * **dev:** magic-link, confirmation, invite and recovery links in native `dev` open the auth
   server's verify endpoint. They pointed at `http://localhost:<port>/verify` and 404'd: the external
   URL ends in `/auth/v1`, and the server's default `/verify` replaced that path rather than adding to
   it. Native `dev` now sets the same `/auth/v1/verify` paths the compose file does.
-
 * **migrate:** restoring a migration's schema sources refuses a file that lands beside the project
   under a path starting with the project's own (`/srv/app2/x.ts` for `/srv/app`). The check compared
   string prefixes, so it took that file for one inside the project. The snapshot is now read by the
@@ -721,7 +789,6 @@
   root itself (`./`) is refused rather than failing on write, and a name that only starts with two
   dots (`..notes/x.ts`) is restored rather than refused. The backup taken before a restore copies
   the files the snapshot overwrites, not the paths its manifest lists, which were never checked.
-
 * **schema:** an `id: SupatypeAuthUserId` primary key under `create: Owner<"id">` (also inside `Any`
   or `All`) no longer gets a `gen_random_uuid()` default. A random id names no user, and the default
   kept the engine from defaulting the column to the caller, so an insert leaving `id` out was
@@ -809,20 +876,8 @@
 * **init:** `supatype init` uses an exported `SUPATYPE_KONG_PORT` as the project's gateway port, in
   `.env` and in what it prints, and the wizard does not ask for one. It chose its own port, so `.env`
   and the "API on" line named a port the stack, which binds the shell's, never listened on.
-* **push:** a Docker push that applied the schema exits 0 when a step after it fails on the running
-  stack (its `up -d`, the gateway wait, the buckets or the first admin), warning `The schema was
-  applied, but a step after it failed` with the reason. A start that failed on a port another
-  program held made push exit 1 with the schema in.
-* **push, diff, adopt, pull:** on a running stack these no longer run `docker compose up -d db`
-  before they reach its database. Every layout already publishes Postgres on the port the host
-  engine connects to, so the call had nothing to start, and could recreate the database container
-  when its definition had changed; with `overrides.engine` on a dev stack it could also move the dev
-  database port under a running database first. A running stack whose `db`
-  container has stopped is now refused with the "local stack isn't running" message rather than
-  having its database started.
 
-
-## 0.7.0
+## 0.7.0 (2026-10-27)
 
 Highlights: `adopt` takes what a push refuses, with `--key`, `--release` and `--reclaim`, and
 declares adopted columns in the schema; push asks before restoring access changed outside Supatype,
