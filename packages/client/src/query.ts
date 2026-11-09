@@ -1,16 +1,17 @@
 import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.js"
 import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
-import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError, TableDef } from "./types.js"
+import type { MaskedField, QueryResult, SelectQueryOptions, TableDef } from "./types.js"
 import { DRAFT_SCHEMA, PUBLISHING_SCHEMA } from "./types.js"
 import { createCall, createdKeys, inCreatedOrder, readBackColumns } from "./draft-create.js"
 import type { SelectRow } from "./select-types.js"
 import { parseRowsExactly, tableFromPath } from "./exact-response.js"
 import { stringifyWithBigInts } from "./exact-values.js"
 import { FilterBuilder } from "./filters.js"
-import { PostgrestErrorCodes, transportFailure } from "./errors.js"
+import { PostgrestErrorCodes, SupatypeError, transportFailure } from "./errors.js"
 import { plainFetch, type FetchOptions, type RequestTransport } from "./fetch-with-retry.js"
 import { isJsonObject, isOneOf, readJsonObject, refusalText } from "./json.js"
 import { bearerRole } from "./jwt.js"
+import { settle, type Deferred } from "./runtime-env.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -35,7 +36,7 @@ function callerRows<TRow>(value: unknown): TRow[] | null {
 
 /** The body was JSON but not rows: PostgREST does not answer a table request that way. */
 function notRows(status: number): SupatypeError {
-  return { message: `Unexpected response body: expected rows (HTTP ${status})`, status }
+  return new SupatypeError({ message: `Unexpected response body: expected rows (HTTP ${status})`, status })
 }
 
 /**
@@ -64,7 +65,7 @@ export function parseMaskedFields(header: string | null): MaskedField[] | undefi
  * the same error whether PostgREST refused the request or the client found the rows wrong.
  */
 function notOneRow(): SupatypeError {
-  return { message: "Cannot coerce the result to a single JSON object", code: PostgrestErrorCodes.NOT_FOUND }
+  return new SupatypeError({ message: "Cannot coerce the result to a single JSON object", code: PostgrestErrorCodes.NOT_FOUND })
 }
 
 /**
@@ -74,7 +75,7 @@ function notOneRow(): SupatypeError {
  * validator only ever runs on a write, so the column it named never reached the caller.
  */
 function refusal(err: Record<string, unknown>, status: number): SupatypeError {
-  return {
+  return new SupatypeError({
     message: refusalText(err) ?? String(err["hint"] ?? "Request failed"),
     status,
     ...(err["code"] !== undefined && { code: String(err["code"]) }),
@@ -83,7 +84,7 @@ function refusal(err: Record<string, unknown>, status: number): SupatypeError {
     ...(typeof err["field"] === "string" && { field: err["field"] }),
     ...(typeof err["hint"] === "string" && err["hint"] !== "" && { hint: err["hint"] }),
     ...(typeof err["details"] === "string" && err["details"] !== "" && { details: err["details"] }),
-  }
+  })
 }
 
 /** The refusal a failed request answered with, logged with `context` when auth debugging is on. */
@@ -112,7 +113,7 @@ async function readRefusal(
  */
 function readRows<TRow>(body: string, path: string, status: number, count: number | null): QueryResult<TRow[]> {
   const parsed = parseRowsExactly(body, tableFromPath(path))
-  if (!parsed.ok) return { data: null, error: { message: parsed.message, status }, count: null }
+  if (!parsed.ok) return { data: null, error: new SupatypeError({ message: parsed.message, status }), count: null }
   const rows = callerRows<TRow>(parsed.value)
   if (rows === null) return { data: null, error: notRows(status), count: null }
   return { data: rows, error: null, count }
@@ -232,7 +233,7 @@ export function parseContentRangeTotal(header: string | null): number | null {
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 
 export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<QueryResult<TRow[]>> {
-  private readonly baseUrl: string
+  private readonly base: Deferred<string>
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: UnauthorizedHandler | undefined
@@ -244,7 +245,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
   private readonly head: boolean
 
   constructor(
-    baseUrl: string,
+    baseUrl: Deferred<string>,
     path: string,
     headers: Record<string, string> | HeadersProvider,
     columns?: string | undefined,
@@ -254,7 +255,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     transport: RequestTransport = plainFetch,
   ) {
     super()
-    this.baseUrl = baseUrl
+    this.base = baseUrl
     this.path = path
     this.getHeaders = asHeadersProvider(headers)
     this.onUnauthorized = onUnauthorized
@@ -352,6 +353,11 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null | undefined,
   ): PromiseLike<R1 | R2> {
     return this._fetch({}).then(onfulfilled, onrejected)
+  }
+
+/** The address, read now: a deferred one is only known when the request is sent. */
+  private get baseUrl(): string {
+    return settle(this.base)
   }
 
   private buildRequestUrl(): string {
@@ -524,7 +530,7 @@ function isWriteResult<TResult>(value: unknown): value is TResult {
 /** `single()` or `maybeSingle()` on a write that asked for no rows, refused before anything is sent. */
 function rowNotSelected(): { data: null; error: SupatypeError; count: null } {
   const message = "A write returns no rows until select() asks for them: call select() before single() or maybeSingle()"
-  return { data: null, error: { message }, count: null }
+  return { data: null, error: new SupatypeError({ message }), count: null }
 }
 
 /**
@@ -538,7 +544,7 @@ function rowNotSelected(): { data: null; error: SupatypeError; count: null } {
 export class MutationBuilder<TRow, TTables = unknown, TName extends string = string, TResult = null>
   extends FilterBuilder
   implements PromiseLike<QueryResult<TResult>> {
-  private readonly baseUrl: string
+  private readonly base: Deferred<string>
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: UnauthorizedHandler | undefined
@@ -553,7 +559,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   private returning = false
 
   constructor(
-    baseUrl: string,
+    baseUrl: Deferred<string>,
     path: string,
     headers: Record<string, string> | HeadersProvider,
     method: HttpMethod,
@@ -563,7 +569,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     transport: RequestTransport = plainFetch,
   ) {
     super()
-    this.baseUrl = baseUrl
+    this.base = baseUrl
     this.path = path
     this.getHeaders = asHeadersProvider(headers)
     this.onUnauthorized = onUnauthorized
@@ -653,6 +659,11 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
       // writing it back would fail now that the generated types declare one.
       ...(this.body !== undefined && { body: stringifyWithBigInts(this.body) }),
     }
+  }
+
+/** The address, read now: a deferred one is only known when the request is sent. */
+  private get baseUrl(): string {
+    return settle(this.base)
   }
 
   private async _execute(fetchHeaders: Record<string, string> = {}): Promise<QueryResult<TRow[]>> {
@@ -748,7 +759,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     if (!this.returning) return this.nothingReturned()
     const select = readBackColumns(this.params.get("select"), target.primaryKey, keys.length)
     const result = await new QueryBuilder<Record<string, unknown>>(
-      this.baseUrl,
+      this.base,
       this.path,
       this.getHeaders,
       select,
@@ -779,7 +790,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     const table = body["model_table"]
     if (!res.ok) return readRefusal(res, `[supatype:mutation] ${fn} failed`, async () => ({ url, table }))
     const answer: unknown = await res.json().catch(() => null)
-    return createdKeys(answer) ?? { message: `${fn} answered without the record ids`, status: res.status }
+    return createdKeys(answer) ?? new SupatypeError({ message: `${fn} answered without the record ids`, status: res.status })
   }
 }
 

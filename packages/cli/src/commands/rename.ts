@@ -87,7 +87,7 @@ export function registerRename(program: Command): void {
     .action(async (from: string | undefined, to: string | undefined, opts: MigrationsTargetOptions & { prune?: boolean }) => {
       const cwd = process.cwd()
       if (opts.prune === true) {
-        await pruneRenames(cwd, () => targetListMigrations(migrationsTarget(cwd, opts)))
+        await pruneRenames(cwd, async () => targetListMigrations(await migrationsTarget(cwd, opts, "rename --prune")))
         return
       }
       if (from === undefined || to === undefined) throw new Error(`Name the rename. ${USAGE}`)

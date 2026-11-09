@@ -1,8 +1,17 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import type { Session, User, AuthChangeEvent, AuthRedirectError, SupatypeError } from "@supatype/client"
+import type {
+  Session,
+  SignInWithSSOCredentials,
+  SignInWithSSOResult,
+  User,
+  AuthChangeEvent,
+  AuthRedirectError,
+  SupatypeError,
+} from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { reportThrown } from "@supatype/client/bindings"
 
 export interface UseAuthReturn {
   /** The currently authenticated user, or null if not signed in. */
@@ -32,6 +41,11 @@ export interface UseAuthReturn {
     provider: string
     options?: { redirectTo?: string } | undefined
   }): Promise<{ data: { url: string; provider: string }; error: SupatypeError | null }>
+  /**
+   * Sign in with SAML single sign-on, by email domain or provider ID: sends the browser to the
+   * identity provider unless `skipBrowserRedirect`, and returns its URL.
+   */
+  signInWithSSO(params: SignInWithSSOCredentials): Promise<SignInWithSSOResult>
   /** Sign in with a magic link (OTP) sent to the email. */
   signInWithOtp(opts: {
     email: string
@@ -68,6 +82,12 @@ export function useAuth(): UseAuthReturn {
       setSession(data.session)
       setError(redirectError)
       setLoading(false)
+    }).catch((e: unknown) => {
+      // Starting threw (a client with no API address, say): there is no session to wait for.
+      const thrown = reportThrown("useAuth", e)
+      if (!active) return
+      setError(thrown)
+      setLoading(false)
     })
 
     // Subscribe to future changes
@@ -89,6 +109,7 @@ export function useAuth(): UseAuthReturn {
     signUp: (creds) => client.auth.signUp(creds),
     signIn: (creds) => client.auth.signInWithPassword(creds),
     signInWithOAuth: (opts) => client.auth.signInWithOAuth(opts),
+    signInWithSSO: (params) => client.auth.signInWithSSO(params),
     signInWithOtp: (opts) => client.auth.signInWithOtp(opts),
     signOut: () => client.auth.signOut(),
   }

@@ -103,6 +103,8 @@ const STREAMING_COMMAND_PATHS = new Set([
   // A self-host link tails it until Ctrl+C, which the chrome's raw-mode stdin read as a key press.
   "functions logs",
   "self-host compose logs",
+  // The app's own build writes to this terminal, and its exit code is the command's.
+  "build",
 ])
 
 type CommandWithAction = Command & {

@@ -21,6 +21,8 @@ const BINDING_EXPORTS = [
   "isRowsOf",
   "isCallerValue",
   "runMutation",
+  "reportThrown",
+  "latestRowsReader",
   "livePreviewMessage",
   "previewMessageOf",
   "originOf",
@@ -38,5 +40,12 @@ describe("entry points", () => {
   it("maps ./bindings in package.json to the built entry and its types", () => {
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
     expect(pkg).toHaveProperty(["exports", "./bindings"], { types: "./dist/bindings.d.ts", import: "./dist/bindings.js" })
+  })
+})
+
+describe("the missing-values error on the main entry", () => {
+  it("exports MissingClientValuesError, which an app may catch, and not the internal rethrow helper", () => {
+    expect(main).toHaveProperty("MissingClientValuesError")
+    expect(main).not.toHaveProperty("rethrowSetupFault")
   })
 })

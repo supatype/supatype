@@ -4,6 +4,7 @@
  * line is kept as it is, its line ending included.
  */
 import { splitAssignment } from "./dotenv-parse.js"
+import { assertEnvValues } from "./env-value.js"
 
 /** Whether `line` assigns `key`. */
 const assigns = (line: string, key: string): boolean => splitAssignment(line)?.key === key
@@ -13,9 +14,11 @@ const endingOf = (line: string): string => (line.endsWith("\r") ? "\r" : "")
 
 /**
  * `text` with `key` set to `value`: its first assignment replaced and any later one dropped, so the
- * file says it once, or a line added at the end when there is none.
+ * file says it once, or a line added at the end when there is none. A value that cannot go on one
+ * line of `file` is refused, naming `key` and `file` ({@link assertEnvValues}).
  */
-export function withEnvValue(text: string, key: string, value: string): string {
+export function withEnvValue(text: string, key: string, value: string, file: string): string {
+  assertEnvValues({ [key]: value }, file)
   let found = false
   const lines = text.split("\n").flatMap((line) => {
     if (!assigns(line, key)) return [line]

@@ -19,8 +19,9 @@
  *
  * It reads the pin rather than asking a binary for its version, because the pin is what both paths
  * resolve from: the native provider downloads that version, and the docker provider tags the
- * compose image with it. An unpinned project resolves to latest, which is at or above the floor by
- * definition, so there is nothing to check.
+ * compose image with it. An unpinned project runs the engine this CLI release pins
+ * (release/images.json), which release-images.test.ts holds at or above every floor here, so there
+ * is nothing to check.
  */
 import type { ExtractedSchemaAstV2, ModelAstV2 } from "./schema-ast-v2.js"
 
@@ -284,8 +285,8 @@ const ENGINE_REQUIREMENTS: EngineRequirement[] = [
 /**
  * Whether a pin can be compared at all.
  *
- * Unpinned resolves to latest, and `local` points at a build whose version the config does not
- * know. Neither can be compared, and neither is the case that breaks.
+ * Unpinned runs the CLI release's own engine pin, and `local` points at a build whose version the
+ * config does not know. Neither can be compared, and neither is the case that breaks.
  */
 function comparable(pin: string | undefined): pin is string {
   return pin !== undefined && pin !== "local"

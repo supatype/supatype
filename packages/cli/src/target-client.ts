@@ -1,7 +1,7 @@
 import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
 import { readAuthAnswer } from "./auth-answer.js"
 import { fetchWithin } from "./fetch-within.js"
-import { bodyReason, httpFailureText } from "./error-message.js"
+import { bodyReason, httpFailureText, isConnectionRefused, redact } from "./error-message.js"
 
 export interface TargetFetchOptions {
   method: string
@@ -17,6 +17,11 @@ export interface TargetFetchOptions {
    * whose session is renewed share it; the renewal has its own limit.
    */
   timeoutMs?: number
+  /**
+   * What to do when nothing is listening at the URL, added to the "could not connect" error: for a
+   * local stack, that it has to be running. The URL is named either way.
+   */
+  unreachableHint?: string
   /**
    * Cloud-only: renew short-lived access JWT via control-plane `/auth/refresh`.
    * Self-host SERVICE_ROLE_KEY links omit this.
@@ -122,7 +127,20 @@ function send(url: string, opts: TargetFetchOptions, token: string | undefined, 
     headers,
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
     ...(signal !== undefined ? { signal } : {}),
+  }).catch((err: unknown) => {
+    if (!isConnectionRefused(err)) throw err
+    throw new Error(unreachableText(url, opts), { cause: err })
   })
+}
+
+/**
+ * Why a request found nothing listening: the URL it was for, then what to do when the caller
+ * knows. Bun's own words for it name neither ("Unable to connect. Is the computer able to access
+ * the url?"), and Node's say only "fetch failed".
+ */
+function unreachableText(url: string, opts: TargetFetchOptions): string {
+  const said = `Could not connect to ${redact(url)}: connection refused.`
+  return opts.unreachableHint === undefined ? said : `${said} ${opts.unreachableHint}`
 }
 
 /** Whether `err` is the abort of a request that ran out of time. */
@@ -182,23 +200,29 @@ function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): Ta
 }
 
 /**
+ * Where under the target's base URL a request goes: the control plane's API, or `/auth/v1`, the auth
+ * server behind the same gateway, for its admin API (`supatype sso`).
+ */
+export type TargetApiPrefix = "/api/v1" | "/platform/v1" | "/auth/v1"
+
+/**
  * A request to the control plane or a project's API. The answer is the body's `data` when it has
  * one, else the body. Without a guard it is `unknown`; with one, an answer the guard refuses throws.
  */
 export async function targetFetch(
   baseUrl: string,
-  apiPrefix: "/api/v1" | "/platform/v1",
+  apiPrefix: TargetApiPrefix,
   opts: TargetFetchOptions,
 ): Promise<unknown>
 export async function targetFetch<T>(
   baseUrl: string,
-  apiPrefix: "/api/v1" | "/platform/v1",
+  apiPrefix: TargetApiPrefix,
   opts: TargetFetchOptions,
   guard: Guard<T>,
 ): Promise<T>
 export async function targetFetch(
   baseUrl: string,
-  apiPrefix: "/api/v1" | "/platform/v1",
+  apiPrefix: TargetApiPrefix,
   opts: TargetFetchOptions,
   guard: Guard<unknown> = isUnknown,
 ): Promise<unknown> {

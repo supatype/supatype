@@ -1,7 +1,6 @@
 import type {
   AuthChangeEvent,
   AuthFlowType,
-  AuthRedirectError,
   AuthMFAChallengeResponse,
   AuthMFAEnrollResponse,
   AuthMFAListFactorsResponse,
@@ -9,7 +8,9 @@ import type {
   Factor,
   OtpType,
   Session,
-  SupatypeError,
+  SignInWithSSOCredentials,
+  SignInWithSSOOptions,
+  SignInWithSSOResult,
   User,
   UserIdentity,
 } from "./types.js"
@@ -38,6 +39,9 @@ import {
   type Guard,
 } from "./json.js"
 import { decodeJwtPayload } from "./jwt.js"
+import { rethrowSetupFault } from "./setup-fault.js"
+import { settle, type Deferred } from "./runtime-env.js"
+import { AuthRedirectError, SupatypeError } from "./errors.js"
 
 export type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
@@ -63,6 +67,11 @@ const DEFAULT_COOKIE_PREFIX = "st"
 /** Storage key suffixes for the state an OAuth redirect has to survive. */
 const VERIFIER_SUFFIX = "-code-verifier"
 const PROVIDER_SUFFIX = "-oauth-provider"
+/**
+ * What a SAML sign-in is remembered as: the `provider` of an `AuthRedirectError` the auth server
+ * sent back in the URL for a sign-in `signInWithSSO` started.
+ */
+export const SSO_PROVIDER = "sso"
 const DEBUG_AUTH = typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1"
 
 /**
@@ -82,7 +91,7 @@ function authErrorFromBody(body: Record<string, unknown>, status: number): Supat
   const message =
     text("msg") ?? text("message") ?? text("error_description") ?? text("error") ??
     `Auth request failed (HTTP ${status})`
-  return { message, status, ...(code !== undefined && { code }) }
+  return new SupatypeError({ message, status, ...(code !== undefined && { code }) })
 }
 
 /** The assurance levels the client reports; the server's unused `aal3` reads as unknown. */
@@ -135,8 +144,8 @@ function snakeCaseUser(user: Record<string, unknown>): Record<string, unknown> {
 }
 
 export class AuthClient {
-  private readonly url: string
-  private readonly baseHeaders: Record<string, string>
+  private readonly urlSource: Deferred<string>
+  private readonly baseHeadersSource: Deferred<Record<string, string>>
   private currentSession: Session | null = null
   private readonly listeners = new Map<string, AuthListener>()
   private listenerIdCounter = 0
@@ -163,9 +172,13 @@ export class AuthClient {
   /** In-memory PKCE code_verifier for the in-flight OAuth / OTP redirect. */
   private codeVerifier: string | null = null
 
-  constructor(url: string, baseHeaders: Record<string, string>, opts: AuthClientOptions = {}) {
-    this.url = url
-    this.baseHeaders = baseHeaders
+  /**
+   * `url` and `baseHeaders` may be functions, read for each request. `createClient` passes
+   * functions, so a client made before the page has said where the API is fails only at a request.
+   */
+  constructor(url: Deferred<string>, baseHeaders: Deferred<Record<string, string>>, opts: AuthClientOptions = {}) {
+    this.urlSource = url
+    this.baseHeadersSource = baseHeaders
     this.persistSession = opts.persistSession ?? true
     this.autoRefreshToken = opts.autoRefreshToken ?? true
     this.refreshExpiredToken = opts.refreshExpiredToken ?? true
@@ -187,6 +200,16 @@ export class AuthClient {
     if (this.autoRefreshToken && this.currentSession !== null && this.isAccessTokenExpired(this.currentSession)) {
       void this.ensureValidSession()
     }
+  }
+
+  /** The auth address, read now. */
+  private get url(): string {
+    return settle(this.urlSource)
+  }
+
+  /** The anon headers every auth request starts from, read now. */
+  private get baseHeaders(): Record<string, string> {
+    return settle(this.baseHeadersSource)
   }
 
   /** The session the client starts with: the one passed in, else the persisted one. */
@@ -242,12 +265,12 @@ export class AuthClient {
     const provider = await this.takeFlowItem(PROVIDER_SUFFIX)
     this.currentSession = null
     const { error } = await this.getSessionFromUrl(href).catch((err: unknown) => ({
-      error: { message: err instanceof Error ? err.message : "Could not finish the sign-in" },
+      error: new SupatypeError({ message: err instanceof Error ? err.message : "Could not finish the sign-in" }, { cause: err }),
     }))
     cleanBrowserUrl(href)
     if (error === null) return { error: null }
     this._setSession(null)
-    return { error: { ...error, ...(provider !== null && { provider }) } }
+    return { error: new AuthRedirectError({ ...error.toJSON(), ...(provider !== null && { provider }) }, { cause: error }) }
   }
 
   /** A URL with tokens or a refusal, or with a `code` for a PKCE flow this client started. */
@@ -474,7 +497,7 @@ export class AuthClient {
     // navigating there shows as raw text; asking first lets the caller show a message instead.
     if (await this.providerDisabled(opts.provider)) {
       const message = `Sign-in with ${opts.provider} is not enabled for this project.`
-      return { data: { url: "", provider: opts.provider }, error: { message, status: 400, code: "provider_disabled" } }
+      return { data: { url: "", provider: opts.provider }, error: new SupatypeError({ message, status: 400, code: "provider_disabled" }) }
     }
     await this.writeFlowItem(PROVIDER_SUFFIX, opts.provider)
     const url = this.endpoint("/authorize", opts.options?.redirectTo)
@@ -487,11 +510,51 @@ export class AuthClient {
     }
     const flowType = opts.options?.flowType ?? "implicit"
     if (flowType === "pkce") {
-      await this.beginPkce()
-      url.searchParams.set("code_challenge", createCodeChallengeS256(this.codeVerifier!))
-      url.searchParams.set("code_challenge_method", PKCE_METHOD_S256)
+      for (const [key, value] of Object.entries(await this.beginPkce())) url.searchParams.set(key, value)
     }
     return { data: { url: url.toString(), provider: opts.provider }, error: null }
+  }
+
+  /**
+   * Sign in with SAML single sign-on, through the identity provider registered for the user's email
+   * domain, or one named by its ID.
+   *
+   * Asks `POST /sso` for the identity provider's URL and sends the browser there, unless
+   * `skipBrowserRedirect` is set or there is no browser. The identity provider returns the user to
+   * the auth server, which sends them on to `redirectTo`; the client finishes the sign-in on start,
+   * as it does for OAuth. A refusal (no provider for the domain, a disabled one) is returned and the
+   * page stays put.
+   *
+   * PKCE by default (`flowType`), unlike `signInWithOAuth`: the sign-in comes back as a `?code=`
+   * this browser exchanges with its stored verifier.
+   */
+  async signInWithSSO(params: SignInWithSSOCredentials): Promise<SignInWithSSOResult> {
+    const res = await this.send(`${this.url}/sso`, {
+      method: "POST",
+      headers: this.baseHeaders,
+      body: JSON.stringify(await this.ssoRequestBody(params)),
+    })
+    if (!res.ok) return { data: { url: "" }, error: await this._parseError(res) }
+    const url = (await readJsonObject(res))["url"]
+    if (typeof url !== "string" || url === "") {
+      const message = "The auth server answered /sso without a sign-in URL"
+      return { data: { url: "" }, error: new SupatypeError({ message, status: res.status }) }
+    }
+    await this.writeFlowItem(PROVIDER_SUFFIX, SSO_PROVIDER)
+    if (params.options?.skipBrowserRedirect !== true && typeof window !== "undefined") window.location.assign(url)
+    return { data: { url }, error: null }
+  }
+
+  /** The `/sso` body: the domain or the provider's ID, the caller's options, and any PKCE challenge. */
+  private async ssoRequestBody(params: SignInWithSSOCredentials): Promise<Record<string, unknown>> {
+    const opts: SignInWithSSOOptions = params.options ?? {}
+    const body: Record<string, unknown> = params.domain !== undefined ? { domain: params.domain } : { provider_id: params.providerId }
+    // A fetch cannot follow the server's 303 to another origin, so ask for the URL as JSON.
+    body["skip_http_redirect"] = true
+    if (opts.redirectTo !== undefined) body["redirect_to"] = opts.redirectTo
+    if (opts.captchaToken !== undefined) body["supatype_meta_security"] = { captcha_token: opts.captchaToken }
+    const flowType = opts.flowType ?? "pkce"
+    return flowType === "pkce" ? { ...body, ...(await this.beginPkce()) } : body
   }
 
   /**
@@ -552,8 +615,8 @@ export class AuthClient {
 
   /**
    * Exchange a PKCE auth code for a session (`POST /token?grant_type=pkce`).
-   * Requires a prior `signInWithOAuth({ options: { flowType: "pkce" } })` (or OTP with PKCE)
-   * so the matching `code_verifier` is available in memory / storage.
+   * Requires a prior PKCE sign-in in this browser (`signInWithSSO`, or `signInWithOAuth` or OTP with
+   * `flowType: "pkce"`), so the matching `code_verifier` is available in memory / storage.
    */
   async exchangeCodeForSession(authCode: string): Promise<{
     data: { session: Session | null; user: User | null }
@@ -563,10 +626,10 @@ export class AuthClient {
     if (verifier === null) {
       return {
         data: { session: null, user: null },
-        error: {
-          message: "Missing PKCE code_verifier. Start OAuth with flowType: \"pkce\" first.",
+        error: new SupatypeError({
+          message: "Missing PKCE code_verifier. Start the sign-in (SSO, or OAuth with flowType: \"pkce\") in this browser first.",
           status: 400,
-        },
+        }),
       }
     }
     const res = await this.send(`${this.url}/token?grant_type=pkce`, {
@@ -593,7 +656,7 @@ export class AuthClient {
     if (params === null) {
       return {
         data: { session: null, user: null },
-        error: { message: `Invalid redirect URL: ${url}`, status: 400 },
+        error: new SupatypeError({ message: `Invalid redirect URL: ${url}`, status: 400 }),
       }
     }
     const { query, fragment: hashParams } = params
@@ -633,10 +696,10 @@ export class AuthClient {
 
     return {
       data: { session: null, user: null },
-      error: {
+      error: new SupatypeError({
         message: "No auth code or tokens found in redirect URL",
         status: 400,
-      },
+      }),
     }
   }
 
@@ -741,11 +804,11 @@ export class AuthClient {
     error: SupatypeError | null
   }> {
     if (this.currentSession === null) {
-      return { data: { session: null }, error: { message: "No active session" } }
+      return { data: { session: null }, error: new SupatypeError({ message: "No active session" }) }
     }
     if (!this.currentSession.refreshToken?.trim()) {
       this._setSession(null)
-      return { data: { session: null }, error: { message: "No refresh token" } }
+      return { data: { session: null }, error: new SupatypeError({ message: "No refresh token" }) }
     }
     try {
       const res = await this.send(`${this.url}/token?grant_type=refresh_token`, {
@@ -760,9 +823,11 @@ export class AuthClient {
       }
       return await this._parseAuthResponse(res)
     } catch (err) {
+      // Not a refused refresh: nothing was sent, and the session may be perfectly good.
+      rethrowSetupFault(err)
       const message = err instanceof Error ? err.message : "Refresh failed"
       this._setSession(null)
-      return { data: { session: null }, error: { message } }
+      return { data: { session: null }, error: new SupatypeError({ message }, { cause: err }) }
     }
   }
 
@@ -785,7 +850,7 @@ export class AuthClient {
     data?: Record<string, unknown> | undefined
   }): Promise<{ data: { user: User | null }; error: SupatypeError | null }> {
     if (this.currentSession === null) {
-      return { data: { user: null }, error: { message: "Not authenticated" } }
+      return { data: { user: null }, error: new SupatypeError({ message: "Not authenticated" }) }
     }
     const res = await this.send(`${this.url}/user`, {
       method: "PUT",
@@ -926,7 +991,7 @@ export class AuthClient {
         error: SupatypeError | null
       }> => {
         if (this.currentSession === null) {
-          return { data: null, error: { message: "Not authenticated" } }
+          return { data: null, error: new SupatypeError({ message: "Not authenticated" }) }
         }
         const body: Record<string, unknown> = {
           factor_type: params.factorType,
@@ -975,7 +1040,7 @@ export class AuthClient {
         error: SupatypeError | null
       }> => {
         if (this.currentSession === null) {
-          return { data: null, error: { message: "Not authenticated" } }
+          return { data: null, error: new SupatypeError({ message: "Not authenticated" }) }
         }
         const body: Record<string, unknown> = {}
         if (params.channel !== undefined) body["channel"] = params.channel
@@ -1019,7 +1084,7 @@ export class AuthClient {
         if (this.currentSession === null) {
           return {
             data: { session: null, user: null },
-            error: { message: "Not authenticated" },
+            error: new SupatypeError({ message: "Not authenticated" }),
           }
         }
         const res = await this.send(
@@ -1079,7 +1144,7 @@ export class AuthClient {
         error: SupatypeError | null
       }> => {
         if (this.currentSession === null) {
-          return { data: null, error: { message: "Not authenticated" } }
+          return { data: null, error: new SupatypeError({ message: "Not authenticated" }) }
         }
         const res = await this.send(
           `${this.url}/factors/${params.factorId}`,
@@ -1107,7 +1172,7 @@ export class AuthClient {
       }> => {
         const userResult = await this.getUser()
         if (userResult.error !== null || userResult.data.user === null) {
-          return { data: null, error: userResult.error ?? { message: "Could not get user" } }
+          return { data: null, error: userResult.error ?? new SupatypeError({ message: "Could not get user" }) }
         }
         const allFactors: Factor[] = userResult.data.user.factors ?? []
         const verifiedFactors = allFactors.filter((f) => f.status === "verified")
@@ -1134,16 +1199,16 @@ export class AuthClient {
         error: SupatypeError | null
       }> => {
         if (this.currentSession === null) {
-          return { data: null, error: { message: "Not authenticated" } }
+          return { data: null, error: new SupatypeError({ message: "Not authenticated" }) }
         }
         // Decode the JWT payload to read the aal and amr claims
         const parts = this.currentSession.accessToken.split(".")
         if (parts.length !== 3) {
-          return { data: null, error: { message: "Invalid access token format" } }
+          return { data: null, error: new SupatypeError({ message: "Invalid access token format" }) }
         }
         const payload = decodeJwtPayload(parts[1]!)
         if (payload === null) {
-          return { data: null, error: { message: "Failed to decode access token" } }
+          return { data: null, error: new SupatypeError({ message: "Failed to decode access token" }) }
         }
         const { currentLevel, methods } = assuranceClaims(payload)
         try {
@@ -1154,7 +1219,7 @@ export class AuthClient {
           const nextLevel = hasVerifiedFactors ? "aal2" : "aal1"
           return { data: { currentLevel, nextLevel, currentAuthenticationMethods: methods }, error: null }
         } catch {
-          return { data: null, error: { message: "Failed to decode access token" } }
+          return { data: null, error: new SupatypeError({ message: "Failed to decode access token" }) }
         }
       },
     }
@@ -1234,10 +1299,15 @@ export class AuthClient {
     return value
   }
 
-  private async beginPkce(): Promise<void> {
+  /**
+   * Start a PKCE flow: a fresh verifier, kept for the redirect, and the challenge parameters the
+   * auth server takes with it (as `/authorize` query parameters or `/sso` body fields).
+   */
+  private async beginPkce(): Promise<{ code_challenge: string; code_challenge_method: string }> {
     const verifier = generateCodeVerifier()
     this.codeVerifier = verifier
     await this.writeFlowItem(VERIFIER_SUFFIX, verifier)
+    return { code_challenge: createCodeChallengeS256(verifier), code_challenge_method: PKCE_METHOD_S256 }
   }
 
   private async readCodeVerifier(): Promise<string | null> {

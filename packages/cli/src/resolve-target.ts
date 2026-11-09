@@ -3,7 +3,8 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
 import type { AdoptOutcome, ComposeEngine, DiffResult } from "./engine-client.js"
-import { asTheEngineRefused, ensureEngine, enginePush, engineRequest } from "./engine-client.js"
+import { asTheEngineRefused, ensureEngine, enginePush } from "./engine-client.js"
+import { engineRequestIn } from "./stack-engine.js"
 import {
   isAdoptOutcome,
   isDatabaseStateJson,
@@ -49,6 +50,7 @@ import {
   resolveCloudRefreshToken,
 } from "./cloud-credentials.js"
 import { TargetApiError, targetFetch, type TargetFetchOptions } from "./target-client.js"
+import { requireLocalStack } from "./local-stack-guard.js"
 import { CAPABILITIES_TTL_MS, capabilitiesCache, rememberCapabilities, type CapabilitiesCache } from "@supatype/shared"
 import {
   adoptNeeds,
@@ -108,10 +110,11 @@ export function loadBranchContext(cwd: string): BranchContext | null {
 
 /**
  * The environment `config` names for this checkout: its default, else the one its branch defaults
- * give the current git branch. From the config the caller already read: reading it runs it in a
- * child process, and a second read made every linked command half a second slower.
+ * give the current git branch. It comes ahead of `supatype envs use`'s choice. From the config the
+ * caller already read: reading it runs it in a child process, and a second read made every linked
+ * command half a second slower.
  */
-function resolveBranchDefaults(cwd: string, config: SupatypeProjectConfig): string | undefined {
+export function configEnvironment(cwd: string, config: SupatypeProjectConfig): string | undefined {
   if (config.environments?.default) return config.environments.default
   const branchDefaults = config.environments?.branchDefaults
   if (!branchDefaults) return undefined
@@ -130,7 +133,7 @@ function resolveBranchDefaults(cwd: string, config: SupatypeProjectConfig): stri
  * for a container and unresolvable from the host, which is how `supatype adopt` on a docker
  * project failed (supatype#85).
  */
-function hostDatabaseUrl(cwd: string, config: SupatypeProjectConfig, connection: string | undefined): string {
+export function hostDatabaseUrl(cwd: string, config: SupatypeProjectConfig, connection?: string): string {
   return resolveHostDatabaseUrl(cwd, config, { connection, allowDerived: true }).dsn
 }
 
@@ -190,14 +193,14 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     }
   }
 
-  const envName = resolveEnvironmentName(
-    link,
-    flags.env ?? resolveBranchDefaults(cwd, config),
-  )
+  const fromConfig = flags.env === undefined ? configEnvironment(cwd, config) : undefined
+  const envName = resolveEnvironmentName(link, flags.env ?? fromConfig)
   const envTarget = getEnvironmentTarget(link, envName)
   if (!envTarget) {
+    // Named by the config, not by --env or `envs use` (issue 58): say so, or the fix is not findable.
+    const why = fromConfig === undefined ? "" : ` supatype.config.ts's environments names it, ahead of supatype envs use.`
     throw new Error(
-      `Environment "${envName}" not linked. Run: supatype link --env ${envName} ... or supatype envs list`,
+      `Environment "${envName}" not linked.${why} Run: supatype link --env ${envName} ... or supatype envs list`,
     )
   }
 
@@ -279,8 +282,12 @@ export function apiFetchOpts(
     ...(target.orgId !== undefined ? { orgId: target.orgId } : {}),
     ...(target.mode === "cloud" ? { environment: target.environment } : {}),
     ...(authRefresh !== undefined ? { authRefresh } : {}),
+    ...(target.mode === "local" ? { unreachableHint: LOCAL_STACK_DOWN_HINT } : {}),
   }
 }
+
+/** What to do when a local target's gateway refuses the connection: its stack is not running. */
+const LOCAL_STACK_DOWN_HINT = "The local stack is not running: start it with `supatype dev`, then run this again."
 
 function projectPath(target: DeployTarget, subpath: string): string {
   return `/projects/${target.projectRef}${subpath}`
@@ -362,8 +369,7 @@ async function engineHere<T>(
   body: Record<string, unknown>,
   guard: Guard<T>,
 ): Promise<T> {
-  if (target.compose === undefined) await ensureEngine()
-  return engineRequest(endpoint, body, guard, target.compose)
+  return engineRequestIn(target.compose, endpoint, body, guard)
 }
 
 /** Whether `target` runs the engine binary here rather than asking a control plane. */
@@ -623,7 +629,10 @@ export async function schemaCommandTarget(
   cwd: string,
   config: SupatypeProjectConfig,
   opts: { connection?: string; env?: string; direct?: boolean },
+  command: string,
 ): Promise<DeployTarget> {
+  // Before anything starts: a stopped local stack is refused, not started (issue 41).
+  requireLocalStack(cwd, config, command, opts)
   if (opts.direct || opts.connection) {
     return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
   }

@@ -6,6 +6,7 @@ import { useLocale } from "../hooks/useLocale.js"
 import type { GlobalConfig } from "../config.js"
 import { readOnlyUnless, splitEditFields } from "../lib/edit-field-layout.js"
 import { isJsonObject } from "../lib/json.js"
+import { serializeRecordForApi } from "../lib/recordValues.js"
 import { clearRefusal, passesChecks, reportRefusal } from "../lib/write-error.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
@@ -16,7 +17,7 @@ interface GlobalEditViewProps {
   global: GlobalConfig
 }
 
-/** The global's one row. No row yet (406 from `.single()`) is an empty form, not an error. */
+/** The global's one row, or an empty form when it has none yet. */
 function useGlobalRow(
   globalConfig: GlobalConfig,
   setError: (message: string | null) => void,
@@ -29,13 +30,10 @@ function useGlobalRow(
     void (async () => {
       setLoading(true)
       try {
-        const result = await client.from(globalConfig.tableName).select().limit(1).single()
-        if (result.error) {
-          if (result.error.status === 406) setValues({})
-          else setError(result.error.message)
-        } else if (isJsonObject(result.data)) {
-          setValues(result.data)
-        }
+        // maybeSingle: no row is an answer, not the 406 a single-object read gets for it.
+        const result = await client.from(globalConfig.tableName).select().limit(1).maybeSingle()
+        if (result.error) setError(result.error.message)
+        else setValues(isJsonObject(result.data) ? result.data : {})
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load")
       } finally {
@@ -47,13 +45,22 @@ function useGlobalRow(
   return { values, setValues, loading }
 }
 
+/** The row's key, or undefined before its first save. */
+function rowKey(values: Record<string, unknown>): string | undefined {
+  const key = values[PRIMARY_KEY]
+  return typeof key === "string" && key !== "" ? key : undefined
+}
+
 /**
- * Saving the row. A refusal goes under the input it is about where the server's answer allows,
- * the same as the record editor, rather than as the server's raw text in the banner.
+ * Saving the row: an update of the row there is, and an insert only for the first save. It used to
+ * be an upsert every time, which needs INSERT, and a global grants an editor only SELECT and UPDATE,
+ * so an editor could not save one (issue 73). A refusal goes under the input it is about where the
+ * server's answer allows, the same as the record editor, rather than as the server's raw text.
  */
 function useGlobalSave(
   globalConfig: GlobalConfig,
   values: Record<string, unknown>,
+  setValues: (row: Record<string, unknown>) => void,
   problems: Refusal,
 ): { saving: boolean; save: () => Promise<void> } {
   const client = useAdminClient()
@@ -64,8 +71,16 @@ function useGlobalSave(
     setSaving(true)
     clearRefusal(problems)
     try {
-      const result = await client.from(globalConfig.tableName).upsert(values)
+      const table = client.from(globalConfig.tableName)
+      const key = rowKey(values)
+      // As the record editor sends a row: blanks as null, slugs filled, relations as their keys.
+      const { [PRIMARY_KEY]: _key, ...changes } = serializeRecordForApi(globalConfig, values)
+      const result = key === undefined
+        ? await table.insert(changes).select().maybeSingle()
+        : await table.update(changes).eq(PRIMARY_KEY, key).select().maybeSingle()
       if (result.error) reportRefusal(problems, result.error, globalConfig.fields, values)
+      // The created row's key, so the next save updates it rather than inserting a second.
+      else if (isJsonObject(result.data)) setValues(result.data)
     } catch (err) {
       problems.setError(err instanceof Error ? err.message : "Failed to save")
     } finally {
@@ -83,13 +98,15 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
   const { currentLocale, defaultLocale } = useLocale()
   const problems = useRefusal()
   const { values, setValues, loading } = useGlobalRow(globalConfig, problems.setError)
-  const { saving, save } = useGlobalSave(globalConfig, values, problems)
+  const { saving, save } = useGlobalSave(globalConfig, values, setValues, problems)
   const handleChange = useCallback((fieldName: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [fieldName]: value }))
   }, [setValues])
   // A viewer reads the global: every input is read only and no Save is offered.
   const canWrite = useContentWriteOffered()
-  const split = splitEditFields(globalConfig.fields, { primaryKey: PRIMARY_KEY, isCreate: false, timestamps: hasTimestamps(globalConfig) })
+  // Before the first save there is no row: its key is not a field to fill in.
+  const isCreate = rowKey(values) === undefined
+  const split = splitEditFields(globalConfig.fields, { primaryKey: PRIMARY_KEY, isCreate, timestamps: hasTimestamps(globalConfig) })
 
   if (loading) return <div className="st-global-edit st-edit-loading">Loading...</div>
 
@@ -109,7 +126,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
         slugFollowSource={false}
         saving={saving}
         {...(canWrite && { onSave: () => { void save() } })}
-        isCreate={false}
+        isCreate={isCreate}
         fieldErrors={problems.fieldErrors}
       />
     </div>

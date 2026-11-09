@@ -1,4 +1,5 @@
 import type { TableRelationship } from "./select-types.js"
+import type { SupatypeError } from "./errors.js"
 
 // ─── Auth types ───────────────────────────────────────────────────────────────
 
@@ -64,6 +65,50 @@ export type AuthChangeEvent =
  */
 export type AuthFlowType = "pkce" | "implicit"
 
+// ─── SAML single sign-on ────────────────────────────────────────────────────
+
+/** How `signInWithSSO` starts and ends. */
+export interface SignInWithSSOOptions {
+  /** Where the browser lands once signed in; honoured on the site URL's host or the redirect allow list. */
+  redirectTo?: string | undefined
+  /** The CAPTCHA token, when the project requires one. */
+  captchaToken?: string | undefined
+  /** Return the identity provider's URL and leave the browser where it is. */
+  skipBrowserRedirect?: boolean | undefined
+  /**
+   * Default: `pkce`, so the session comes back as a `?code=` only this browser can exchange, never
+   * as tokens in the URL. `implicit` returns tokens in the fragment. (`signInWithOAuth` defaults to
+   * `implicit`.) A sign-in the identity provider starts always comes back implicit, and the client
+   * accepts it either way.
+   */
+  flowType?: AuthFlowType | undefined
+}
+
+/** Sign in through the SAML identity provider registered for the user's email domain. */
+export interface SignInWithSSODomain {
+  /** The domain of the user's email address: `acme.com`. */
+  domain: string
+  providerId?: never
+  options?: SignInWithSSOOptions | undefined
+}
+
+/** Sign in through one SAML identity provider, named by its ID. */
+export interface SignInWithSSOProvider {
+  /** The provider's UUID, as the admin API reports it. */
+  providerId: string
+  domain?: never
+  options?: SignInWithSSOOptions | undefined
+}
+
+/** What `signInWithSSO` takes: an email domain or a provider's ID, never both. */
+export type SignInWithSSOCredentials = SignInWithSSODomain | SignInWithSSOProvider
+
+/** What `signInWithSSO` answers: the identity provider's URL, or why there is none. */
+export interface SignInWithSSOResult {
+  data: { url: string }
+  error: SupatypeError | null
+}
+
 // ─── MFA types ──────────────────────────────────────────────────────────────
 
 export interface AuthMFAEnrollResponse {
@@ -126,7 +171,11 @@ export type OtpType =
 
 // ─── Error type ───────────────────────────────────────────────────────────────
 
-export interface SupatypeError {
+/** The class every result error is; its fields are `SupatypeErrorFields`. */
+export type { SupatypeError }
+
+/** The fields a `SupatypeError` carries, as given to its constructor and as its JSON. */
+export interface SupatypeErrorFields {
   message: string
   status?: number | undefined
   code?: string | undefined
@@ -153,15 +202,8 @@ export interface SupatypeError {
   details?: string | undefined
 }
 
-/**
- * A sign-in the auth server refused and reported back in the redirect URL.
- *
- * `provider` names the OAuth provider this browser started the sign-in with, when the client
- * remembers one, so an app showing one button per provider can put the message by the right one.
- */
-export interface AuthRedirectError extends SupatypeError {
-  provider?: string | undefined
-}
+/** A sign-in refused in the redirect URL: the class, with the provider it was started with. */
+export type { AuthRedirectError } from "./errors.js"
 
 // ─── Query result ─────────────────────────────────────────────────────────────
 
@@ -414,10 +456,19 @@ export interface SelectQueryOptions {
 }
 
 export interface SupatypeClientConfig {
-  /** Base URL of the Supatype gateway (e.g. http://localhost:18473) */
-  url: string
-  /** Anon JWT key */
-  anonKey: string
+  /**
+   * Base URL of the Supatype gateway (e.g. http://localhost:18473). Left out, or empty as a bundler
+   * leaves an unset name, it is read from `window.__SUPATYPE_ENV__` (set by
+   * `<script src="/supatype-env.js">`) when the first request is made. It is never guessed from the
+   * page's own address: with neither, that request throws `MissingClientValuesError`.
+   */
+  url?: string | undefined
+  /**
+   * Anon JWT key. Left out, or empty, it is read from `window.__SUPATYPE_ENV__` when the first
+   * request is made; with neither, that request throws `MissingClientValuesError` naming the
+   * variables to set. `createClient` itself never throws for either.
+   */
+  anonKey?: string | undefined
   /**
    * Service role key: bypasses row-level security.
    * Only set this in trusted server-side or developer-tool contexts.

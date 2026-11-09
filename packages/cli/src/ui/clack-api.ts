@@ -1,4 +1,4 @@
-import type { FlowController } from "./flows/types.js"
+import type { FlowController, FlowLogLevel } from "./flows/types.js"
 import type { DevSelectOption } from "./runtime/dev-prompt-queue.js"
 import { isBoolean, isString, type Guard } from "@supatype/shared"
 import { CLACK_CANCEL, promptAnswer } from "./runtime/cancel.js"
@@ -53,21 +53,57 @@ export interface ClackApi {
   }
 }
 
+/**
+ * `controller`'s log, with a turning spinner's message kept above the first line logged under it.
+ * The spinner's line used to be logged only when it stopped, after everything the work it covers
+ * had logged, so `push` printed "Schema pushed." above "Applying schema via Docker Compose".
+ */
+class SpinnerLog {
+  private spinning: { message: string; shown: boolean } | null = null
+
+  constructor(private readonly controller: FlowController) {}
+
+  append(level: FlowLogLevel, text: string): void {
+    this.showSpinnerLine()
+    this.controller.appendLog(level, text)
+  }
+
+  start(message: string): void {
+    this.spinning = { message, shown: false }
+    this.controller.setSpinner(message)
+  }
+
+  /** The done line, unless it is the spinner's own line, already shown above the work's. */
+  stop(message: string): void {
+    const shown = this.spinning?.shown === true && this.spinning.message === message
+    this.spinning = null
+    this.controller.setSpinner(null)
+    if (!shown) this.controller.appendLog("success", message)
+  }
+
+  private showSpinnerLine(): void {
+    if (this.spinning === null || this.spinning.shown) return
+    this.spinning.shown = true
+    this.controller.appendLog("info", this.spinning.message)
+  }
+}
+
 export function createClackApi(controller: FlowController): ClackApi {
+  const log = new SpinnerLog(controller)
   return {
     intro(message) {
-      controller.appendLog("plain", message)
+      log.append("plain", message)
     },
     outro(message) {
-      controller.appendLog("success", message)
+      log.append("success", message)
     },
     note(message) {
       for (const line of message.split("\n")) {
-        if (line.trim()) controller.appendPlain(line)
+        if (line.trim()) log.append("plain", line)
       }
     },
     cancel(message): never {
-      controller.appendLog("warn", message)
+      log.append("warn", message)
       process.exit(0)
     },
     async text(options) {
@@ -103,28 +139,15 @@ export function createClackApi(controller: FlowController): ClackApi {
     },
     spinner() {
       return {
-        start(message: string) {
-          controller.setSpinner(message)
-        },
-        stop(message: string) {
-          controller.setSpinner(null)
-          controller.appendLog("success", message)
-        },
+        start: (message: string) => log.start(message),
+        stop: (message: string) => log.stop(message),
       }
     },
     log: {
-      info(message) {
-        controller.appendLog("info", message)
-      },
-      warn(message) {
-        controller.appendLog("warn", message)
-      },
-      error(message) {
-        controller.appendLog("error", message)
-      },
-      success(message) {
-        controller.appendLog("success", message)
-      },
+      info: (message) => log.append("info", message),
+      warn: (message) => log.append("warn", message),
+      error: (message) => log.append("error", message),
+      success: (message) => log.append("success", message),
     },
   }
 }

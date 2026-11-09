@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -84,6 +85,7 @@
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/deploying-your-frontend.html">Deploy your frontend</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
       <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
@@ -269,7 +271,7 @@
       <thead><tr><th scope="col">Screen</th><th scope="col">For</th></tr></thead>
       <tbody>
         <tr><td>Dashboard</td><td>Totals and recent activity for users, records, storage and the database</td></tr>
-        <tr><td>Authentication</td><td>Users (including their Studio access), access policies, providers, configuration and email templates. Configuration is read-only: change those settings in <code>.env</code> and restart the stack. A template saved under Email Templates is kept in the database until <strong>Reset to default</strong> removes it. See <a href="/docs/auth.html">Auth</a></td></tr>
+        <tr><td>Authentication</td><td>Users (including their Studio access), access policies, providers, SAML single sign-on (see <a href="/docs/sso.html#studio">Single sign-on</a>), configuration and email templates. Configuration is read-only: change those settings in <code>.env</code> and restart the stack. A template saved under Email Templates is kept in the database until <strong>Reset to default</strong> removes it. See <a href="/docs/auth.html">Auth</a></td></tr>
         <tr><td>Settings</td><td>API keys, CORS origins and database settings</td></tr>
         <tr><td>Realtime</td><td>Channels, clients, a live stream and a broadcast tester, where the deployment's control plane supports the inspector</td></tr>
       </tbody>

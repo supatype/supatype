@@ -1,5 +1,5 @@
 import React, { useState, type FormEvent, type InputHTMLAttributes } from "react"
-import { transportFailure, type SupatypeError } from "@supatype/client"
+import { MissingClientValuesError, transportFailure, type SupatypeError } from "@supatype/client"
 import { errorProps, type AuthFormClassNames } from "./classNames.js"
 
 /** The auth service's refusal, shown above the fields; nothing while there is none. */
@@ -97,13 +97,24 @@ export interface AuthSubmitHandlers<T> {
 
 type Settled<T> = { data: T; error: null } | { error: SupatypeError }
 
+/**
+ * What a request that threw is shown as. A client with no address or anon key throws rather than
+ * answering, so that an app reading only `data` cannot miss it, and `transportFailure` rethrows it
+ * for the same reason; a form has somewhere to show it, so it becomes the form's error here.
+ */
+function thrownError(err: unknown): SupatypeError {
+  // Already one of the family, so the form shows it as it is.
+  if (err instanceof MissingClientValuesError) return err
+  return transportFailure(err)
+}
+
 /** The request's answer, with a request that threw (the network, not the server) as its refusal. */
 async function settle<T>(send: () => Promise<{ data: T; error: SupatypeError | null }>): Promise<Settled<T>> {
   try {
     const { data, error } = await send()
     return error === null ? { data, error } : { error }
   } catch (err) {
-    return { error: transportFailure(err) }
+    return { error: thrownError(err) }
   }
 }
 

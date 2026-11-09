@@ -108,7 +108,9 @@ function syncComposeDownFallback(): void {
       ["down"],
       composeFallback.cwd,
       composeFallback.composeProject,
-      { quiet: true },
+      // As the shutdown's own `down`: a slow daemon probe here said Docker was down and called
+      // process.exit from inside the exit hook.
+      { quiet: true, skipDaemonProbe: true },
     )
   } catch {
     // best-effort: process is exiting

@@ -3,7 +3,7 @@
  */
 
 import { dirname } from "node:path"
-import { askDockerSync, DOCKER_EXEC_TIMEOUT_MS, type DockerAnswer } from "./docker-exec.js"
+import { askDocker, DOCKER_EXEC_TIMEOUT_MS, type DockerAnswer } from "./docker-exec.js"
 import { spawnFailureText } from "./error-message.js"
 import {
   SQL_EDITOR_PASSWORD_ENV,
@@ -54,10 +54,11 @@ function runOwnerPsql(
   composeProject: string,
   sql: string,
   env: Record<string, string> = {},
-): DockerAnswer {
+): Promise<DockerAnswer> {
   const { user, password, database } = devDatabaseIdentity(cwd)
   const secrets = dockerEnv({ PGPASSWORD: password, ...env })
-  return askDockerSync(
+  // Asynchronous: the auth.users grant follows every docker dev push, while the dashboard runs.
+  return askDocker(
     [
       "compose", "-p", composeProject, "-f", paths.composePath,
       "exec", "-T", ...secrets.args,
@@ -85,12 +86,12 @@ function failureDetail(result: DockerAnswer): string {
  * birthday. It is idempotent, and it runs before the schema push so the API is already reachable by
  * the time the stack reports ready.
  */
-export function reconcileAuthenticatorPassword(
+export async function reconcileAuthenticatorPassword(
   paths: ComposeTarget,
   cwd: string,
   composeProject: string,
-): void {
-  const result = runOwnerPsql(paths, cwd, composeProject, RECONCILE_AUTHENTICATOR_SQL, {
+): Promise<void> {
+  const result = await runOwnerPsql(paths, cwd, composeProject, RECONCILE_AUTHENTICATOR_SQL, {
     SUPATYPE_AUTHENTICATOR_PASSWORD: devAuthenticatorPassword(cwd),
   })
   if (result.status !== 0) {
@@ -108,12 +109,12 @@ export function reconcileAuthenticatorPassword(
  * {@link reconcileAuthenticatorPassword} applies: a `.env` that moved after the volume was made
  * leaves Studio's SQL editor unable to log in. Skipped when the role does not exist yet.
  */
-export function reconcileSqlEditorPassword(
+export async function reconcileSqlEditorPassword(
   paths: ComposeTarget,
   cwd: string,
   composeProject: string,
-): void {
-  const result = runOwnerPsql(paths, cwd, composeProject, RECONCILE_SQL_EDITOR_SQL, {
+): Promise<void> {
+  const result = await runOwnerPsql(paths, cwd, composeProject, RECONCILE_SQL_EDITOR_SQL, {
     [SQL_EDITOR_PASSWORD_ENV]: devSqlEditorPassword(cwd),
   })
   if (result.status !== 0) {
@@ -128,12 +129,12 @@ export function reconcileSqlEditorPassword(
  * Let `service_role` read `auth.users`, which Studio's relation preview resolves a user relation
  * through.
  */
-export function grantAuthSchemaAccess(
+export async function grantAuthSchemaAccess(
   paths: ComposeTarget,
   cwd: string,
   composeProject: string,
-): void {
-  const result = runOwnerPsql(paths, cwd, composeProject, GRANT_AUTH_SCHEMA_SQL)
+): Promise<void> {
+  const result = await runOwnerPsql(paths, cwd, composeProject, GRANT_AUTH_SCHEMA_SQL)
   if (result.status !== 0) {
     degraded(
       "Could not grant service_role access to auth.users, so Studio's relation preview cannot read users",
@@ -148,8 +149,8 @@ export function grantAuthSchemaAccess(
  * open to anyone holding the anon key; a model table's grants come from the engine instead.
  * Idempotent, and run on every start, so a database created before this changes too.
  */
-export function privatizeTableDefaults(paths: ComposeTarget, cwd: string, composeProject: string): void {
-  const result = runOwnerPsql(paths, cwd, composeProject, PRIVATE_TABLE_DEFAULTS_SQL)
+export async function privatizeTableDefaults(paths: ComposeTarget, cwd: string, composeProject: string): Promise<void> {
+  const result = await runOwnerPsql(paths, cwd, composeProject, PRIVATE_TABLE_DEFAULTS_SQL)
   if (result.status !== 0) {
     degraded(
       "Could not take anon and authenticated out of the default table privileges, so a table made by hand is readable with the anon key",

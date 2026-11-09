@@ -56,6 +56,54 @@ export function ensureControlPlaneSecret(cwd: string): void {
   upsertEnvFile(cwd, { [CONTROL_PLANE_SECRET_ENV]: generateControlPlaneSecret() })
 }
 
+/** The `.env` keys holding the login the stack's object store accepts, and the storage service uses. */
+export const OBJECT_STORE_ACCESS_KEY_ENV = "SUPATYPE_OBJECT_STORE_ACCESS_KEY"
+export const OBJECT_STORE_SECRET_KEY_ENV = "SUPATYPE_OBJECT_STORE_SECRET_KEY"
+
+/** The pair every stack shared before each project had its own (issue 71), as `init` wrote it. */
+const SHARED_OBJECT_STORE_LOGIN: Readonly<Record<string, string>> = {
+  S3_ACCESS_KEY: "supatype",
+  S3_SECRET_KEY: "supatype-secret",
+}
+
+export interface ObjectStoreCredentials {
+  accessKey: string
+  secretKey: string
+}
+
+/** A new object store login: 12 random bytes for the key (hex, 24 characters), 32 for the secret. */
+export function generateObjectStoreCredentials(): ObjectStoreCredentials {
+  return { accessKey: randomBytes(12).toString("hex"), secretKey: randomBytes(32).toString("base64url") }
+}
+
+/**
+ * The project's object store login, generated into `.env` when it has none.
+ *
+ * Every stack used to share one published pair, and that pair reads and writes every file in
+ * every bucket around the rules the storage service enforces. Generated like the control plane
+ * secret: changing it loses nothing, since the object store keeps its files in its volume and the
+ * login only decides who may reach them. The compose file restarts the object store when it changes.
+ *
+ * The shared pair an older `init` wrote under `S3_ACCESS_KEY` and `S3_SECRET_KEY` is taken out of
+ * `.env` at the same time, since it no longer opens anything. Other values under those names are
+ * an external bucket's own keys, and are left alone.
+ */
+export function ensureObjectStoreCredentials(cwd: string): ObjectStoreCredentials {
+  const env = readEnvFile(cwd)
+  const accessKey = env[OBJECT_STORE_ACCESS_KEY_ENV]?.trim()
+  const secretKey = env[OBJECT_STORE_SECRET_KEY_ENV]?.trim()
+  const sharedLeft = Object.entries(SHARED_OBJECT_STORE_LOGIN).every(([key, value]) => env[key] === value)
+  const existing = accessKey && secretKey ? { accessKey, secretKey } : undefined
+  if (existing !== undefined && !sharedLeft) return existing
+  const credentials = existing ?? generateObjectStoreCredentials()
+  upsertEnvFile(
+    cwd,
+    { [OBJECT_STORE_ACCESS_KEY_ENV]: credentials.accessKey, [OBJECT_STORE_SECRET_KEY_ENV]: credentials.secretKey },
+    { remove: sharedLeft ? Object.keys(SHARED_OBJECT_STORE_LOGIN) : [] },
+  )
+  return credentials
+}
+
 /** A new JWT signing secret: 48 random bytes, base64url, so 64 characters. */
 export function generateJwtSecret(): string {
   return randomBytes(48).toString("base64url")

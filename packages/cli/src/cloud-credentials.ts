@@ -53,7 +53,9 @@ export function loadCloudCredentials(): CloudCredentials | null {
 export function saveCloudCredentials(creds: CloudCredentials): void {
   const dir = join(homedir(), ".supatype")
   mkdirSync(dir, { recursive: true })
-  writeFileSync(credentialsPath(), `${JSON.stringify(creds, null, 2)}\n`, "utf8")
+  // It holds the session's tokens, so it is created readable by its owner alone. Only the CLI reads
+  // it, unlike a project's `.env`, which the stack's containers read as another user.
+  writeFileSync(credentialsPath(), `${JSON.stringify(creds, null, 2)}\n`, { encoding: "utf8", mode: 0o600 })
 }
 
 export function clearCloudCredentials(): void {

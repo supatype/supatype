@@ -39,6 +39,7 @@ Each method below is a call on `supatype.auth`. The [client page](/docs/client.h
 | OAuth | `signInWithOAuth({ provider })` | Off until a provider is configured |
 | Provider ID token (native Apple or Google sign-in) | `signInWithIdToken` | Off until the provider is configured |
 | Anonymous | `signInAnonymously` | Off |
+| SAML single sign-on, by email domain | `signInWithSSO({ domain })` or `signInWithSSO({ providerId })` | Off until `auth.sso.saml.enabled`. See [Single sign-on](/docs/sso.html) |
 
 Password reset is `resetPasswordForEmail`, and `updateUser` changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise `SUPATYPE_PASSWORD_MIN_LENGTH`.
 
@@ -63,6 +64,22 @@ Auth calls put the auth server's code in `error.code`, beside `message` and `sta
 An anonymous sign-in creates a real user with a user id and a session. Turn it on with `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true`. Because the user has an id, an anonymous user passes `LoggedIn` and can own rows. The token carries `is_anonymous: true`.
 
 `signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`.
+
+### Keep anonymous users out
+
+To let only registered users do something, test the claim as well as the sign-in:
+
+```ts
+import type { All, Claim, Eq, Literal, LoggedIn } from "@supatype/types"
+
+type Registered = All<[LoggedIn, Eq<Claim<"is_anonymous">, Literal<"false">>]>
+```
+
+Use it like any rule, for example `access: { read: LoggedIn, create: Registered }`, so a guest can read but only a registered user can create. The auth server puts `is_anonymous` in every access token it issues, `true` for a guest and `false` for a real account, so the rule admits exactly the users who signed up or added an email or phone. A token without the claim, such as one minted by your own code, is denied.
+
+Write the literal as the string `"false"`: a claim is read as text, and that form works on every engine version. `Literal<false>` means the same thing on engines after 0.9.0, which read the claim as a JSON boolean when it is compared with a boolean. Engine 0.9.0 and earlier refuse it at push with `operator does not exist: text = boolean`.
+
+Anonymous users do not last forever. When the auth server's database cleanup is on (`SUPATYPE_DB_CLEANUP_ENABLED=true`, off by default), it deletes every anonymous user 30 days after the account was created, even one still in use. Rows whose user field declares `onDelete: "cascade"` are deleted with it, a `"setNull"` field is cleared, and a field without `onDelete` keeps an id that no longer matches a user. Prompt guests to add an email or phone before then: once they do, `is_anonymous` is `false` and the cleanup leaves them alone.
 
 <h2 id="oauth">OAuth providers</h2>
 
@@ -187,7 +204,7 @@ Two packages give you ready-made sign-in screens. Both use `useAuth()` from `@su
 
 | Package | Components |
 | --- | --- |
-| `@supatype/react-auth` | `LoginForm`, `SignUpForm`, `OAuthButton` |
+| `@supatype/react-auth` | `LoginForm`, `SignUpForm`, `ForgotPasswordForm`, `UpdatePasswordForm`, `MagicLinkForm`, `OAuthButton`, `SSOForm` (see [Single sign-on](/docs/sso.html#sign-in)) |
 | `@supatype/react-native-auth` | `LoginForm`, `SignUpForm`, `MagicLinkForm`, `OAuthButton`, `ResetPassword`, `AuthGate`, `AuthThemeProvider` |
 
 ### Web

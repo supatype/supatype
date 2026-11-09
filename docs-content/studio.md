@@ -214,7 +214,7 @@ Under Observability, API request logs are not recorded yet. Auth, storage, realt
 | Screen | For |
 | --- | --- |
 | Dashboard | Totals and recent activity for users, records, storage and the database |
-| Authentication | Users (including their Studio access), access policies, providers, configuration and email templates. Configuration is read-only: change those settings in `.env` and restart the stack. A template saved under Email Templates is kept in the database until **Reset to default** removes it. See [Auth](/docs/auth.html) |
+| Authentication | Users (including their Studio access), access policies, providers, SAML single sign-on (see [Single sign-on](/docs/sso.html#studio)), configuration and email templates. Configuration is read-only: change those settings in `.env` and restart the stack. A template saved under Email Templates is kept in the database until **Reset to default** removes it. See [Auth](/docs/auth.html) |
 | Settings | API keys, CORS origins and database settings |
 | Realtime | Channels, clients, a live stream and a broadcast tester, where the deployment's control plane supports the inspector |
 

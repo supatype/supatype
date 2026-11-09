@@ -1,5 +1,5 @@
 import type { ChannelStatus, RealtimeClient, RealtimeEvent, RealtimePayload } from "./realtime.js"
-import type { SupatypeError } from "./types.js"
+import { SupatypeError } from "./errors.js"
 import { isJsonObject } from "./json.js"
 
 /**
@@ -101,9 +101,9 @@ export function subscriptionViewOf(status: ChannelStatus): SubscriptionView {
     case "CLOSED":
       return { status: "disconnected", error: null }
     case "CHANNEL_ERROR":
-      return { status: "error", error: { message: "Subscription error" } }
+      return { status: "error", error: new SupatypeError({ message: "Subscription error" }) }
     case "TIMED_OUT":
-      return { status: "error", error: { message: "Realtime connection timed out" } }
+      return { status: "error", error: new SupatypeError({ message: "Realtime connection timed out" }) }
   }
 }
 

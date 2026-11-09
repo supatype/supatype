@@ -1,57 +1,158 @@
-import type { SupatypeError as SupatypeErrorShape } from "./types.js"
+import type { SupatypeErrorFields } from "./types.js"
 
 /**
- * Typed error hierarchy for the Supatype SDK.
- * Every error has a machine-readable `code` field and optional `helpUrl`.
+ * The Supatype SDK's one error family.
+ *
+ * `SupatypeError` is every error a `{ data, error }` result carries, and the root of the errors the
+ * SDK throws, so `error instanceof SupatypeError` holds for all of them. `SupatypeCodedError` is the
+ * thrown kind: the same fields with a required machine-readable `code` and a `helpUrl`.
  */
 
 const DOCS_BASE = "https://docs.supatype.com/errors"
 
-/**
- * Base error class for all Supatype SDK errors.
- */
-export class SupatypeError extends Error {
-  readonly code: string
-  readonly helpUrl: string
-  readonly statusCode?: number | undefined
+/** The fields an error carries beside its message, each kept only when it has a value. */
+const ERROR_FIELDS = ["code", "status", "field", "hint", "details"] as const
 
-  constructor(message: string, code: string, statusCode?: number) {
-    super(message)
-    this.name = "SupatypeError"
-    this.code = code
-    this.statusCode = statusCode
-    this.helpUrl = `${DOCS_BASE}#${code.toLowerCase()}`
+/**
+ * Set `key` as `error`'s own field, enumerable as a plain object's, so JSON and spread keep it. A
+ * function rather than a method: a protected member would make two copies of the class (source and
+ * build) refuse each other's errors.
+ */
+function keep(error: Error, key: string, value: unknown): void {
+  Object.defineProperty(error, key, { value, enumerable: true, writable: true, configurable: true })
+}
+
+/** Give `cls` the `name` its errors print, on the prototype so it is not a key of each error. */
+function nameErrors(cls: { prototype: Error }, name: string): void {
+  Object.defineProperty(cls.prototype, "name", { value: name, writable: true, configurable: true })
+}
+
+/**
+ * An error a Supatype result carries, and the base of every error the SDK throws.
+ *
+ * An `Error`, so `instanceof Error` holds, a stack is kept, and `String(error)` reads
+ * `SupatypeError: <message>`. Its own fields are exactly the result's (`message`, then whichever of
+ * `code`, `status`, `field`, `hint` and `details` it has), so reading them, spreading the error, or
+ * turning it into JSON gives those fields. A failure in transit keeps what was thrown as `cause`.
+ */
+export class SupatypeError extends Error implements SupatypeErrorFields {
+  declare readonly code?: string | undefined
+  declare readonly status?: number | undefined
+  declare readonly field?: string | undefined
+  declare readonly hint?: string | undefined
+  declare readonly details?: string | undefined
+
+  constructor(fields: SupatypeErrorFields, options?: { cause?: unknown }) {
+    super(fields.message, options)
+    keep(this, "message", fields.message)
+    for (const key of ERROR_FIELDS) {
+      if (fields[key] !== undefined) keep(this, key, fields[key])
+    }
+  }
+
+  /** The error's fields as a plain object, which is what JSON gets, and nothing else. */
+  toJSON(): SupatypeErrorFields {
+    const fields: SupatypeErrorFields = { message: this.message }
+    for (const key of ERROR_FIELDS) {
+      if (this[key] !== undefined) Object.assign(fields, { [key]: this[key] })
+    }
+    return fields
   }
 }
+nameErrors(SupatypeError, "SupatypeError")
+
+/**
+ * A sign-in the auth server refused and reported back in the redirect URL.
+ *
+ * `provider` names the OAuth provider this browser started the sign-in with, when the client
+ * remembers one, so an app showing one button per provider can put the message by the right one.
+ * It is one more own field, so JSON and spread carry it too.
+ */
+export class AuthRedirectError extends SupatypeError {
+  declare readonly provider?: string | undefined
+
+  constructor(fields: SupatypeErrorFields & { provider?: string | undefined }, options?: { cause?: unknown }) {
+    super(fields, options)
+    if (fields.provider !== undefined) keep(this, "provider", fields.provider)
+  }
+
+  override toJSON(): SupatypeErrorFields & { provider?: string } {
+    return { ...super.toJSON(), ...(this.provider !== undefined && { provider: this.provider }) }
+  }
+}
+nameErrors(AuthRedirectError, "AuthRedirectError")
+
+/**
+ * An error the SDK throws: a `SupatypeError` whose `code` is always there, with a `helpUrl` to the
+ * page that explains it. Its HTTP status, when it has one, is `status`, as on every result.
+ */
+export class SupatypeCodedError extends SupatypeError {
+  declare readonly code: string
+
+  constructor(message: string, code: string, status?: number, options?: { cause?: unknown }) {
+    super({ message, code, ...(status !== undefined && { status }) }, options)
+  }
+
+  /** The documentation for this error's code. */
+  get helpUrl(): string {
+    return `${DOCS_BASE}#${this.code.toLowerCase()}`
+  }
+}
+nameErrors(SupatypeCodedError, "SupatypeCodedError")
+
+/** The two values a client cannot send a request without. */
+export type ClientValue = "url" | "anonKey"
+
+/**
+ * A request made by a client that has no API address or no anon key.
+ *
+ * Thrown by the request, never by `createClient`: a client created at module scope runs while a
+ * framework prerenders a page, which sends nothing and needs neither. It is a setup fault rather
+ * than an answer from the server, so no request turns it into `{ data: null, error }`
+ * (transportFailure rethrows it): an app that only reads `data` would show an empty page instead.
+ */
+export class MissingClientValuesError extends SupatypeCodedError {
+  /** Which of the two values were still missing when the request was made. */
+  readonly missing: readonly ClientValue[]
+
+  constructor(message: string, missing: readonly ClientValue[]) {
+    super(message, "MISSING_CLIENT_VALUES")
+    this.missing = missing
+  }
+}
+nameErrors(MissingClientValuesError, "MissingClientValuesError")
 
 /**
  * Authentication errors (login failures, token issues, MFA).
  */
-export class AuthError extends SupatypeError {
-  constructor(message: string, code: string = "AUTH_ERROR", statusCode?: number) {
-    super(message, code, statusCode)
-    this.name = "AuthError"
+export class AuthError extends SupatypeCodedError {
+  constructor(message: string, code: string = "AUTH_ERROR", status?: number) {
+    super(message, code, status)
   }
+}
+nameErrors(AuthError, "AuthError")
+
+/** A PostgREST hint or detail line worth keeping: given and not blank. */
+function given(text: string | null | undefined): string | undefined {
+  return text === null || text === undefined || text === "" ? undefined : text
 }
 
 /**
- * PostgREST API errors with structured details.
+ * PostgREST API errors with structured details. `details` and `hint` are absent when the server
+ * gave none, as on every other error.
  */
-export class PostgrestError extends SupatypeError {
-  readonly details: string | null
-  readonly hint: string | null
-
+export class PostgrestError extends SupatypeCodedError {
   constructor(
     message: string,
     code: string = "PGRST000",
-    statusCode?: number,
+    status?: number,
     details?: string | null,
     hint?: string | null,
   ) {
-    super(message, code, statusCode)
-    this.name = "PostgrestError"
-    this.details = details ?? null
-    this.hint = hint ?? null
+    super(message, code, status)
+    const kept = { details: given(details), hint: given(hint) }
+    if (kept.details !== undefined) keep(this, "details", kept.details)
+    if (kept.hint !== undefined) keep(this, "hint", kept.hint)
   }
 
   /**
@@ -62,63 +163,60 @@ export class PostgrestError extends SupatypeError {
     code?: string | undefined
     details?: string | undefined
     hint?: string | undefined
-  }, statusCode: number): PostgrestError {
+  }, status: number): PostgrestError {
     return new PostgrestError(
       body.message || "PostgREST error",
-      body.code || `PGRST${statusCode}`,
-      statusCode,
+      body.code || `PGRST${status}`,
+      status,
       body.details,
       body.hint,
     )
   }
 }
+nameErrors(PostgrestError, "PostgrestError")
 
 /**
  * Storage service errors (upload/download failures).
  */
-export class StorageError extends SupatypeError {
-  constructor(message: string, code: string = "STORAGE_ERROR", statusCode?: number) {
-    super(message, code, statusCode)
-    this.name = "StorageError"
+export class StorageError extends SupatypeCodedError {
+  constructor(message: string, code: string = "STORAGE_ERROR", status?: number) {
+    super(message, code, status)
   }
 }
+nameErrors(StorageError, "StorageError")
 
 /**
  * Realtime/WebSocket errors.
  */
-export class RealtimeError extends SupatypeError {
+export class RealtimeError extends SupatypeCodedError {
   constructor(message: string, code: string = "REALTIME_ERROR") {
     super(message, code)
-    this.name = "RealtimeError"
   }
 }
+nameErrors(RealtimeError, "RealtimeError")
 
 /**
  * Network errors (connection failures, timeouts, DNS).
  */
-export class NetworkError extends SupatypeError {
+export class NetworkError extends SupatypeCodedError {
   constructor(message: string, code: string = "NETWORK_ERROR") {
     super(message, code)
-    this.name = "NetworkError"
   }
 }
+nameErrors(NetworkError, "NetworkError")
 
 /**
  * Rate limit errors with retry information.
  */
-export class RateLimitError extends SupatypeError {
+export class RateLimitError extends SupatypeCodedError {
   readonly retryAfterSeconds: number
 
   constructor(retryAfterSeconds: number) {
-    super(
-      `Rate limited. Retry after ${retryAfterSeconds} seconds.`,
-      "RATE_LIMITED",
-      429,
-    )
-    this.name = "RateLimitError"
+    super(`Rate limited. Retry after ${retryAfterSeconds} seconds.`, "RATE_LIMITED", 429)
     this.retryAfterSeconds = retryAfterSeconds
   }
 }
+nameErrors(RateLimitError, "RateLimitError")
 
 // ── Common error codes ────────────────────────────────────────────
 
@@ -231,15 +329,15 @@ export const ErrorCodes = {
  * A request that never got an answer, as a result rather than a throw.
  *
  * The client's fetch throws typed errors (a timeout, a rate limit after the last retry), and their
- * code and status are what lets a caller tell "try again later" from "the server is gone".
+ * code and status are what lets a caller tell "try again later" from "the server is gone", so one
+ * of the family is the result as it is, and `instanceof NetworkError` still names it. Anything else
+ * thrown is held as the `cause` of a `SupatypeError` carrying its message.
+ *
+ * A client with no address or anon key is rethrown instead: that request was never sent, and the
+ * fix is in the app's setup, which a result an app may never read would hide.
  */
-export function transportFailure(e: unknown): SupatypeErrorShape {
-  if (e instanceof SupatypeError) {
-    return {
-      message: e.message,
-      code: e.code,
-      ...(e.statusCode !== undefined && { status: e.statusCode }),
-    }
-  }
-  return { message: e instanceof Error ? e.message : "Network error" }
+export function transportFailure(e: unknown): SupatypeError {
+  if (e instanceof MissingClientValuesError) throw e
+  if (e instanceof SupatypeError) return e
+  return new SupatypeError({ message: e instanceof Error ? e.message : "Network error" }, { cause: e })
 }

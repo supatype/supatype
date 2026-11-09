@@ -6,6 +6,18 @@ export type { ButtonProps } from "./Button.js"
 export { Input } from "./Input.js"
 export type { InputProps } from "./Input.js"
 
+export { Select } from "./Select.js"
+export type { SelectProps } from "./Select.js"
+
+export { Textarea } from "./Textarea.js"
+export type { TextareaProps } from "./Textarea.js"
+
+export { Checkbox } from "./Checkbox.js"
+export type { CheckboxProps } from "./Checkbox.js"
+
+export { Table, THead, TBody, Tr, Th, Td } from "./Table.js"
+export type { TableProps, TableSectionProps, TrProps, ThProps, TdProps } from "./Table.js"
+
 export { Card } from "./Card.js"
 export type { CardProps } from "./Card.js"
 

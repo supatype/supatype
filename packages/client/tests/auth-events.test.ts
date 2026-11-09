@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { AuthClient } from "../src/auth.js"
 import type { AuthChangeEvent } from "../src/types.js"
 import { fetchReturning } from "./support/fetch-mock.js"
+import { liveAccessToken } from "./support/jwt.js"
 
 const AUTH_URL = "http://localhost:9999"
 const HEADERS = { apikey: "test-anon-key", "Content-Type": "application/json" }
@@ -22,11 +23,6 @@ const TOKEN_RESPONSE = {
   token_type: "bearer",
   expires_in: 3600,
   user: RAW_USER,
-}
-
-function accessTokenWithExp(): string {
-  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")
-  return `eyJhbGciOiJub25lIn0.${payload}.sig`
 }
 
 /** Every event a listener sees after registration, without the registration emission itself. */
@@ -94,7 +90,7 @@ describe("PASSWORD_RECOVERY", () => {
     vi.stubGlobal("fetch", fetchReturning(RAW_USER))
 
     const { error } = await client.getSessionFromUrl(
-      `https://app.example/reset#access_token=${accessTokenWithExp()}&refresh_token=rt-1&expires_in=3600&token_type=bearer&type=recovery`,
+      `https://app.example/reset#access_token=${liveAccessToken()}&refresh_token=rt-1&expires_in=3600&token_type=bearer&type=recovery`,
     )
 
     expect(error).toBeNull()
@@ -107,7 +103,7 @@ describe("PASSWORD_RECOVERY", () => {
     vi.stubGlobal("fetch", fetchReturning(RAW_USER))
 
     await client.getSessionFromUrl(
-      `https://app.example/#access_token=${accessTokenWithExp()}&refresh_token=rt-1&type=magiclink`,
+      `https://app.example/#access_token=${liveAccessToken()}&refresh_token=rt-1&type=magiclink`,
     )
 
     expect(events).toEqual(["SIGNED_IN"])

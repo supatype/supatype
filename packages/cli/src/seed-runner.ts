@@ -1,11 +1,9 @@
 /**
  * Run one seed module and take the document it described.
  *
- * In a child process, through tsx, which is how this CLI already evaluates a project's
- * TypeScript. Two reasons beyond consistency: a seed is the user's code and should not share
- * a process with the tool running it, and the same route works for the standalone binary,
- * which interprets TypeScript itself rather than resolving tsx from a `node_modules` it does
- * not have.
+ * In a child process, which is how this CLI already evaluates a project's TypeScript: a seed is
+ * the user's code and should not share a process with the tool running it. Under Node the child
+ * runs through tsx. The standalone binary interprets TypeScript itself, so it runs itself.
  *
  * The document comes back through a file rather than stdout, because a seed is allowed to
  * print. Mixing its output into the channel carrying the document would mean a `log()` call
@@ -15,8 +13,9 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
-import { cliModuleUrl, evalTsSnippet } from "./tsx-runner.js"
+import { cliModuleUrl, evalTsSnippet, runSelf, type RunResult } from "./tsx-runner.js"
+import { isCompiledBinary } from "./cli-install-method.js"
+import type { SeedJob } from "./seed-child.js"
 import type { SeedConfig, SeedIr } from "./seed.js"
 import { isArrayOf, isBoolean, isJsonObject, isShape, isString, optional } from "@supatype/shared"
 
@@ -104,7 +103,13 @@ export function collectSeed(file: string, options: CollectOptions): { result: Co
   const outPath = join(scratch, "ir.json")
 
   try {
-    const run = evalTsSnippet(snippet(file, outPath, options), { cwd: options.cwd })
+    const job: SeedJob = {
+      file,
+      outPath,
+      builderPath: options.builderPath,
+      ...(options.environment !== undefined && { environment: options.environment }),
+    }
+    const run = runSeedChild(job, options.cwd)
     if (run.exitCode !== 0 || !existsSync(outPath)) {
       throw new SeedCollectionFailed(file, [run.stdout, run.stderr].filter(Boolean).join("\n").trim())
     }
@@ -118,40 +123,13 @@ export function collectSeed(file: string, options: CollectOptions): { result: Co
 }
 
 /**
- * The program that runs in the child.
+ * Run `collectSeedHere` for `job` in a child process.
  *
- * Every path is interpolated as a JSON string rather than pasted in, because a Windows path
- * is full of backslashes and a project directory is allowed to contain a quote.
+ * Under Node, a snippet run through tsx imports it by its path. The standalone binary runs
+ * `_collect-seed` on itself, because its own modules are not importable from a snippet.
  */
-function snippet(file: string, outPath: string, options: CollectOptions): string {
-  const url = (path: string): string => JSON.stringify(pathToFileURL(path).href)
-  return `
-import { writeFileSync } from "node:fs"
-import { SeedCollector } from ${JSON.stringify(cliModuleUrl("seed-ir.js"))}
-import { expr } from ${JSON.stringify(cliModuleUrl("seed.js"))}
-
-const builder = await import(${url(options.builderPath)})
-const module = await import(${url(file)})
-
-if (typeof module.default !== "function") {
-  // Importing it is what ran it, which is the old contract working exactly as it did.
-  writeFileSync(${JSON.stringify(outPath)}, JSON.stringify({ shape: "legacy" }))
-} else {
-  const collector = new SeedCollector(builder.schemaFingerprint, builder.seedModels)
-  await module.default({
-    db: collector.db(),
-    expr,
-    log: (message) => { console.log(message) },
-    environment: ${options.environment === undefined ? "undefined" : JSON.stringify(options.environment)},
-  })
-  writeFileSync(
-    ${JSON.stringify(outPath)},
-    JSON.stringify({
-      shape: "collected",
-      ir: collector.finish().ir,
-      config: module.config ?? {},
-    }),
-  )
-}
-`
+function runSeedChild(job: SeedJob, cwd: string): RunResult {
+  if (isCompiledBinary()) return runSelf(["_collect-seed", JSON.stringify(job)], { cwd })
+  const child = JSON.stringify(cliModuleUrl("seed-child.js"))
+  return evalTsSnippet(`import { collectSeedHere } from ${child}\nawait collectSeedHere(${JSON.stringify(job)})\n`, { cwd })
 }

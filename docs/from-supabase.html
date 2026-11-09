@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -84,6 +85,7 @@
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/deploying-your-frontend.html">Deploy your frontend</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
       <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
@@ -205,7 +207,7 @@
 <ul>
   <li>Session fields are camel case: <code>session.accessToken</code>, <code>session.refreshToken</code>, <code>session.expiresAt</code>.</li>
   <li>Row changes are subscribed from the table: <code>supatype.from("comment").subscribe(cb, { event: "INSERT" })</code>. Each change reaches only subscribers allowed to read that row.</li>
-  <li><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>. An insert an access rule refuses returns <code>42501</code>. See <a href="/docs/client.html#errors">Errors</a>.</li>
+  <li><code>error</code> is a <code>SupatypeError</code> (an <code>Error</code>) with <code>message</code> and, when known, <code>code</code> and <code>status</code>. An insert an access rule refuses returns <code>42501</code>. See <a href="/docs/client.html#errors">Errors</a>.</li>
   <li>A function is a Deno module with a default export, <code>handler(req, ctx)</code>. The project URL and keys come from <code>ctx</code>, not the environment. <code>supatype functions new hello</code> writes one to start from.</li>
 </ul>
 

@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html" aria-current="page">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -84,6 +85,7 @@
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/deploying-your-frontend.html">Deploy your frontend</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
       <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
@@ -136,6 +138,7 @@
         <tr><td>OAuth</td><td><code>signInWithOAuth({ provider })</code></td><td>Off until a provider is configured</td></tr>
         <tr><td>Provider ID token (native Apple or Google sign-in)</td><td><code>signInWithIdToken</code></td><td>Off until the provider is configured</td></tr>
         <tr><td>Anonymous</td><td><code>signInAnonymously</code></td><td>Off</td></tr>
+        <tr><td>SAML single sign-on, by email domain</td><td><code>signInWithSSO({ domain })</code> or <code>signInWithSSO({ providerId })</code></td><td>Off until <code>auth.sso.saml.enabled</code>. See <a href="/docs/sso.html">Single sign-on</a></td></tr>
       </tbody>
     </table></div>
     <p>Password reset is <code>resetPasswordForEmail</code>, and <code>updateUser</code> changes the email, password or user metadata of the signed-in user. Passwords must be at least 6 characters unless you raise <code>SUPATYPE_PASSWORD_MIN_LENGTH</code>.</p>
@@ -150,6 +153,15 @@
     <h3>Anonymous users</h3>
     <p>An anonymous sign-in creates a real user with a user id and a session. Turn it on with <code>SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true</code>. Because the user has an id, an anonymous user passes <code>LoggedIn</code> and can own rows. The token carries <code>is_anonymous: true</code>.</p>
     <p><code>signInAnonymously({ options: { data, captchaToken } })</code> takes optional metadata and a captcha token, and the user comes back with <code>isAnonymous: true</code>.</p>
+    <h3>Keep anonymous users out</h3>
+    <p>To let only registered users do something, test the claim as well as the sign-in:</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> { <span class="t">All</span>, <span class="t">Claim</span>, <span class="t">Eq</span>, <span class="t">Literal</span>, <span class="t">LoggedIn</span> } <span class="k">from</span> <span class="s">"@supatype/types"</span>
+
+<span class="k">type</span> <span class="t">Registered</span> = <span class="t">All</span>&lt;[<span class="t">LoggedIn</span>, <span class="t">Eq</span>&lt;<span class="t">Claim</span>&lt;<span class="s">"is_anonymous"</span>&gt;, <span class="t">Literal</span>&lt;<span class="s">"false"</span>&gt;&gt;]&gt;</pre></div>
+    <p>Use it like any rule, for example <code>access: { read: LoggedIn, create: Registered }</code>, so a guest can read but only a registered user can create. The auth server puts <code>is_anonymous</code> in every access token it issues, <code>true</code> for a guest and <code>false</code> for a real account, so the rule admits exactly the users who signed up or added an email or phone. A token without the claim, such as one minted by your own code, is denied.</p>
+    <p>Write the literal as the string <code>"false"</code>: a claim is read as text, and that form works on every engine version. <code>Literal&lt;false&gt;</code> means the same thing on engines after 0.9.0, which read the claim as a JSON boolean when it is compared with a boolean. Engine 0.9.0 and earlier refuse it at push with <code>operator does not exist: text = boolean</code>.</p>
+    <p>Anonymous users do not last forever. When the auth server's database cleanup is on (<code>SUPATYPE_DB_CLEANUP_ENABLED=true</code>, off by default), it deletes every anonymous user 30 days after the account was created, even one still in use. Rows whose user field declares <code>onDelete: "cascade"</code> are deleted with it, a <code>"setNull"</code> field is cleared, and a field without <code>onDelete</code> keeps an id that no longer matches a user. Prompt guests to add an email or phone before then: once they do, <code>is_anonymous</code> is <code>false</code> and the cleanup leaves them alone.</p>
 
     <h2 id="oauth">OAuth providers</h2>
     <p>Each provider is switched on with environment variables named after it. For GitHub:</p>
@@ -255,7 +267,7 @@ window.location.assign(data.url)
     <div class="tbl"><table>
       <thead><tr><th scope="col">Package</th><th scope="col">Components</th></tr></thead>
       <tbody>
-        <tr><td><code>@supatype/react-auth</code></td><td><code>LoginForm</code>, <code>SignUpForm</code>, <code>OAuthButton</code></td></tr>
+        <tr><td><code>@supatype/react-auth</code></td><td><code>LoginForm</code>, <code>SignUpForm</code>, <code>ForgotPasswordForm</code>, <code>UpdatePasswordForm</code>, <code>MagicLinkForm</code>, <code>OAuthButton</code>, <code>SSOForm</code> (see <a href="/docs/sso.html#sign-in">Single sign-on</a>)</td></tr>
         <tr><td><code>@supatype/react-native-auth</code></td><td><code>LoginForm</code>, <code>SignUpForm</code>, <code>MagicLinkForm</code>, <code>OAuthButton</code>, <code>ResetPassword</code>, <code>AuthGate</code>, <code>AuthThemeProvider</code></td></tr>
       </tbody>
     </table></div>
@@ -334,7 +346,7 @@ window.location.assign(data.url)
 
     <nav class="pn" aria-label="More pages">
       <a href="/docs/frameworks.html"><small>PREVIOUS</small><span>Frameworks</span></a>
-      <a href="/docs/storage.html" class="next"><small>NEXT</small><span>Storage</span></a>
+      <a href="/docs/sso.html" class="next"><small>NEXT</small><span>Single sign-on</span></a>
     </nav>
   </main>
 

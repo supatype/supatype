@@ -94,6 +94,22 @@ describe("functions routes", () => {
     assert.ok(existsSync(join(projectDir, "keep.txt")))
   })
 
+  // Issue 79: status listed every directory under functions/, `_shared` among them.
+  test("status lists the functions the worker serves, as the list route does", async () => {
+    const root = join(projectDir, "functions")
+    mkdirSync(join(root, "_shared"), { recursive: true })
+    writeFileSync(join(root, "_shared", "README.md"), "helpers", "utf8")
+    mkdirSync(join(root, "status-fn"), { recursive: true })
+    writeFileSync(join(root, "status-fn", "index.ts"), "export default 1", "utf8")
+    try {
+      const status = await request(baseUrl, "GET", `/projects/${PROJECT}/status`)
+      assert.deepEqual(dataOf(status.json)["functions"], ["status-fn"])
+    } finally {
+      rmSync(join(root, "_shared"), { recursive: true, force: true })
+      rmSync(join(root, "status-fn"), { recursive: true, force: true })
+    }
+  })
+
   // Review r8 C13: every env call hashed the worker's code, which took the env commands seconds on a
   // large project. An env change never needs a restart, so the env routes only check the worker runs.
   test("env set does not look at the code, even code changed on disk; the next deploy does", async () => {

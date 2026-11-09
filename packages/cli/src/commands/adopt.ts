@@ -124,7 +124,7 @@ async function adoptRun(opts: AdoptOptions, cwd: string): Promise<AdoptRun> {
   )
   // Only the objects named change: no conflict is adopted unless --key names it, or nothing is named.
   const named = adoptableKeys(opts)
-  const target = await schemaCommandTarget(cwd, config, opts)
+  const target = await schemaCommandTarget(cwd, config, opts, "adopt")
   // Before the preview: the server or engine that adopts must take every flag given.
   await requireTargetFeatures(target, adoptNeeds({ release: opts.release, reclaim: opts.reclaim, keys: named }))
   const run = (yes: boolean, keys?: string[]): Promise<AdoptOutcome> =>

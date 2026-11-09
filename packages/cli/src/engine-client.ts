@@ -8,7 +8,6 @@
  * writes a response JSON to stdout.
  */
 
-import { spawnSync, type SpawnSyncReturns } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
@@ -21,6 +20,7 @@ import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary
 import { ensureBinary } from "./ensure-binary.js"
 import { findJsonLine } from "./engine-json-line.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
+import { runCaptured, type CapturedRun } from "./run-captured.js"
 import { ENGINE_BUSY, ENGINE_BUSY_WORDING, engineBusySentence, isUnknown, toPosixPath, type Guard } from "@supatype/shared"
 
 // ---------------------------------------------------------------------------
@@ -121,6 +121,24 @@ export interface DiffResult {
   warnings?: string[]
   /** Drops and adds a person may have meant as renames. Absent from engines that guessed them. */
   renameCandidates?: RenameCandidate[]
+  /** What each API role may do on each model's table, now and after the push. Absent from older engines. */
+  access?: RoleAccess[]
+}
+
+/**
+ * One API role's access to one model's table (schema-engine `access_summary::RoleAccess`), as rule
+ * verbs (`read`, `create`, `update`, `delete`): what the database grants now, and what the push leaves.
+ */
+export interface RoleAccess {
+  model: string
+  table: string
+  role: string
+  before: string[]
+  after: string[]
+  /** A many-to-many junction table: a link between two models. */
+  link?: boolean
+  /** What a link denies every API role because the engine could not derive it, and why. */
+  denied?: { verbs: string[]; reason: string }
 }
 
 /**
@@ -231,9 +249,9 @@ export async function engineVersionCheck(): Promise<EngineVersionCheck> {
   } catch (err) {
     return { ok: false, bin: undefined, reason: errorMessage(err) }
   }
-  const result = spawnSync(bin, ["--version"], { encoding: "utf8" })
+  const result = await runCaptured(bin, ["--version"])
   if (result.status === 0) return { ok: true, bin, version: result.stdout.trim() }
-  const reason = spawnFailureText({ status: result.status, stderr: result.stderr, error: result.error?.message })
+  const reason = spawnFailureText({ status: result.status, stderr: result.stderr, error: result.error })
   return { ok: false, bin, reason }
 }
 
@@ -271,19 +289,20 @@ export async function engineRequest(
     const { assertSupported, binaryCapabilities, identityColumnsNeed } = await import("./engine-ownership-gate.js")
     assertSupported(binaryCapabilities(bin), identityColumnsNeed(body["ast"]))
   }
-  return readEngineResult(endpoint, spawnEngineHere(bin, endpoint, body), guard)
+  return readEngineResult(endpoint, await spawnEngineHere(bin, endpoint, body), guard)
 }
 
 /**
  * Run the binary for one request, in a directory of the request's own, removed with everything in
  * it whatever fails: a write, building the arguments, or the spawn itself.
  */
-function spawnEngineHere(bin: string, endpoint: string, body: Record<string, unknown>): SpawnSyncReturns<string> {
+async function spawnEngineHere(bin: string, endpoint: string, body: Record<string, unknown>): Promise<CapturedRun> {
   const tmpDir = engineTempDir()
   try {
     const files = writeRequestFiles(tmpDir, body)
     const args = endpointToArgs(endpoint, body, files)
-    return spawnSync(bin, args, { encoding: "utf8", cwd: process.cwd(), env: engineEnv(body) })
+    // Awaited here, so the request's files outlive the run that reads them.
+    return await runCaptured(bin, args, { cwd: process.cwd(), env: engineEnv(body) })
   } finally {
     try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
@@ -330,12 +349,12 @@ const DATABASE_FREE_ENDPOINTS = new Set(["/generate", "/admin", "/parse"])
  * under `.supatype`, which the engine service mounts at `/project`, and are removed afterwards; like
  * the host path, they never hold the database URL.
  */
-function composeEngineRequest<T>(
+async function composeEngineRequest<T>(
   endpoint: string,
   body: Record<string, unknown>,
   guard: Guard<T>,
   compose: ComposeEngine,
-): T {
+): Promise<T> {
   const { cwd } = compose.target
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
@@ -343,7 +362,7 @@ function composeEngineRequest<T>(
   let result: EngineRunResult
   try {
     const files = inContainer(writeRequestFiles(hostDir, body), cwd)
-    result = spawnComposeEngine(compose.target, endpointToArgs(endpoint, body, files), {
+    result = await spawnComposeEngine(compose.target, endpointToArgs(endpoint, body, files), {
       runFlags: DATABASE_FREE_ENDPOINTS.has(endpoint) ? ["-T", "--no-deps"] : ["-T"],
       secrets: { DATABASE_URL: compose.databaseUrl },
     })
@@ -377,7 +396,7 @@ function engineEnv(body: Record<string, unknown>): NodeJS.ProcessEnv {
 
 /** Turn the engine's exit status and stdout into the request's answer, or throw its error. */
 /** What an engine run answered, from the binary here or from a compose container. */
-type EngineRunResult = Pick<SpawnSyncReturns<string>, "status" | "stdout" | "stderr">
+type EngineRunResult = Pick<CapturedRun, "status" | "stdout" | "stderr">
 
 function readEngineResult<T>(endpoint: string, result: EngineRunResult, guard: Guard<T>): T {
   throwEngineFailure(endpoint, result)

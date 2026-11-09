@@ -210,15 +210,6 @@ export function warnMissingAuthProviderSecrets(
   for (const line of missingAuthProviderSecrets(config, environment)) console.warn(`[supatype] ${line}`)
 }
 
-/**
- * {@link warnMissingAuthProviderSecrets} against what compose will interpolate: the project's `.env`
- * with the shell over it, as compose resolves the same names. One function for `dev` and
- * `self-host compose`, so both say the same thing.
- */
-export function warnProjectAuthProviderSecrets(cwd: string, config: SupatypeProjectConfig): void {
-  warnMissingAuthProviderSecrets(config, { ...readEnvFile(cwd), ...process.env })
-}
-
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -231,7 +222,7 @@ const KNOWN_FIELDS = new Set<string>([...STRING_FIELDS, ...FLAG_FIELDS, "secret"
  * Characters a literal may not carry: each value is written inside `"${KEY:-...}"` in the compose
  * file, where `$`, braces, a quote or a backslash would end the expression or the YAML string early.
  */
-const UNSAFE_LITERAL = /[$"{}\\\u0000-\u001f\u007f]/
+export const UNSAFE_LITERAL = /[$"{}\\\u0000-\u001f\u007f]/
 
 /** `auth.providers`: known provider names, known fields, and values that render safely. */
 export function validateAuthProviders(cfg: Record<string, unknown>, filename: string): void {
@@ -308,7 +299,7 @@ function validateEnvReference(value: string, path: string, filename: string): vo
   )
 }
 
-function validateHttpUrl(value: string, path: string, filename: string): void {
+export function validateHttpUrl(value: string, path: string, filename: string): void {
   let protocol: string
   try {
     protocol = new URL(value.trim()).protocol
@@ -320,6 +311,6 @@ function validateHttpUrl(value: string, path: string, filename: string): void {
   }
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }

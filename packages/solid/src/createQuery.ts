@@ -3,7 +3,7 @@ import type { Accessor } from "solid-js"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isRowsOf } from "@supatype/client/bindings"
+import { latestRowsReader } from "@supatype/client/bindings"
 
 export interface QueryOptions {
   columns?: string | undefined
@@ -30,55 +30,13 @@ export function createQuery<
   options?: QueryOptions | undefined,
 ): QueryResult<TRow> {
   const client = useSupatype<TDatabase>()
-  const [data, setData] = createSignal<TRow[] | null>(null)
-  const [error, setError] = createSignal<SupatypeError | null>(null)
-  const [loading, setLoading] = createSignal(false)
-
+  const { data, error, loading, read } = latestRows<TRow>(client as AnyClient, table)
   const fetchData = async () => {
-    if (options?.enabled === false) return
-
-    setLoading(true)
-    setError(null)
-
-    try {
-      // Through the untyped client: the generated row types do not survive a table name known
-      // only at run time, so the rows are typed as `TRow` once they arrive.
-      let query = (client as AnyClient).from(table).select(options?.columns)
-
-      if (options?.filter) {
-        for (const [col, val] of Object.entries(options.filter)) {
-          query = query.eq(col, val)
-        }
-      }
-
-      if (options?.order) {
-        query = query.order(options.order.column, {
-          ascending: options.order.ascending ?? true,
-        })
-      }
-
-      if (options?.limit !== undefined) {
-        query = query.limit(options.limit)
-      }
-
-      if (options?.offset !== undefined) {
-        query = query.range(options.offset, options.offset + (options.limit ?? 100) - 1)
-      }
-
-      const result = await query
-      setData(() => (isRowsOf<TRow>(result.data) ? result.data : null))
-      if (result.error) {
-        setError(result.error)
-      }
-    } catch (e) {
-      setError({ message: e instanceof Error ? e.message : "Unknown error" })
-    } finally {
-      setLoading(false)
-    }
+    if (options?.enabled !== false) await read(options)
   }
 
   onMount(() => {
-    fetchData()
+    void fetchData()
   })
 
   // Re-run when the signed-in identity changes. See `onIdentityChange` for which changes count,
@@ -86,4 +44,23 @@ export function createQuery<
   onCleanup(onIdentityChange(client.auth, () => void fetchData()))
 
   return { data, error, loading, refetch: fetchData }
+}
+
+/** The signals a query shows, fed by reads of which only the newest may change them. */
+function latestRows<TRow>(client: AnyClient, table: string) {
+  const [data, setData] = createSignal<TRow[] | null>(null)
+  const [error, setError] = createSignal<SupatypeError | null>(null)
+  const [loading, setLoading] = createSignal(false)
+  const read = latestRowsReader<TRow>(client, table, `createQuery("${table}")`, {
+    started: () => {
+      setLoading(true)
+      setError(null)
+    },
+    settled: (rows, refusal) => {
+      setData(() => rows)
+      setError(() => refusal)
+      setLoading(false)
+    },
+  })
+  return { data, error, loading, read }
 }

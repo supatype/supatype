@@ -22,15 +22,15 @@ Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, a
 | `@supatype/svelte` | `setSupatypeClient`, `getSupatypeClient`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription` |
 | `@supatype/solid` | `SupatypeContext`, `useSupatype`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription` |
 | `@supatype/react-native` | `createNativeClient`, `secureStoreAdapter`, `asyncStorageAdapter`, `openOAuth`, `createAuthUrlListener` |
-| `@supatype/ssr` | `createServerClient` |
+| `@supatype/ssr` | `createServerClient`, and `GET` from `@supatype/ssr/next` |
 
-Every example below imports the client from `src/supatype.ts`, created once as shown in [Client: Create the client](/docs/client.html#setup). With Vite, read the values `supatype keys` writes to `.env`:
+Every example below imports the client from `src/supatype.ts`, created once as shown in [Client: Create the client](/docs/client.html#setup). With Vite, read the names `supatype dev` writes for development and `supatype build` sets for a production build:
 
 ```ts title="src/supatype.ts"
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -268,18 +268,56 @@ Wrap the app in `SupatypeProvider` from `@supatype/react` and use the same hooks
 
 `openOAuth(client, { provider, redirectTo, webBrowser })` runs an OAuth sign-in in `expo-web-browser` with PKCE and returns the session, or `cancelled: true` when the user closes the browser. The ready-made native screens are on [Auth: Pre-built UI](/docs/auth.html#ui).
 
-<h2 id="nextjs">Next.js server code</h2>
+<h2 id="nextjs">Next.js</h2>
 
-In the browser the client copies the session into a cookie named `st-auth-token` (path `/`, `SameSite=Lax`, `Secure` on HTTPS). `createServerClient` from `@supatype/ssr` reads that cookie on the server and builds a client signed in as the same user. Use it in Server Components, Route Handlers and middleware.
+`next build` prerenders pages before any deployment's values exist, so a Next.js app takes them when it runs instead. One route serves the browser client its address and anon key on each page load, from `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` in the server's environment, and the server client reads the same two variables. The same build then runs against whichever deployment it is started for. `supatype init` writes both pieces into an App Router app:
+
+```ts title="app/supatype-env.js/route.ts"
+export { GET } from "@supatype/ssr/next"
+export const dynamic = "force-dynamic"
+```
+
+```tsx title="app/layout.tsx"
+import Script from "next/script"
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <Script src="/supatype-env.js" strategy="beforeInteractive" />
+        {children}
+      </body>
+    </html>
+  )
+}
+```
+
+Keep the `dynamic` line in the route file itself: Next reads a route's segment config from its own source and ignores a re-exported one. The route answers `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` with `Cache-Control: no-cache`, as the Supatype server's own `/supatype-env.js` does. It answers 404 only when `SUPATYPE_PUBLIC_ENV` is `false`, and, when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset or `SUPATYPE_ANON_KEY` holds a service role key, 200, not cached, with a script that sets only `error` to a reason naming every variable to fix, which the browser client throws on its first request. The browser client, created with `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY` left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in [Deploy your frontend: Next.js](/docs/deploying-your-frontend.html#nextjs).
+
+In a Pages Router app, `init` writes nothing and prints the steps instead: create the same route file under `app/supatype-env.js/`, beside `pages/`; in `pages/_document.tsx`, import `Script` from `next/script` and put the same `<Script>` tag inside `<Head>`; then add `@supatype/ssr` to the app's dependencies. For a static export (`output: "export"` in `next.config`), which cannot serve a route, `init` writes neither piece and prints `supatype build -- next build`, or Supatype hosting, whose server answers `/supatype-env.js` itself.
+
+<h3 id="nextjs-server">Server components, route handlers and middleware</h3>
+
+In the browser the client copies the session into a cookie named `st-auth-token` (path `/`, `SameSite=Lax`, `Secure` on HTTPS). `createServerClient` from `@supatype/ssr` reads that cookie on the server and builds a client signed in as the same user. Given only its options, it takes the address and anon key from `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, read on each call, and where one is unset, from `NEXT_PUBLIC_SUPATYPE_URL` or `NEXT_PUBLIC_SUPATYPE_ANON_KEY`. With neither, its first request throws an error saying it is running on a server and naming `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`. Pass them first, as `createServerClient(url, anonKey, options)`, to use others.
 
 ```ts title="src/supatype-server.ts"
 import { cookies } from "next/headers"
 import { createServerClient } from "@supatype/ssr"
 
+// Server Components: no setAll, so the client never refreshes the session.
 export async function serverClient() {
   const store = await cookies()
-  return createServerClient(process.env.PUBLIC_SUPATYPE_URL!, process.env.PUBLIC_SUPATYPE_ANON_KEY!, {
-    cookies: { getAll: () => store.getAll(), setAll: () => {} },
+  return createServerClient({ cookies: { getAll: () => store.getAll() } })
+}
+
+// Route Handlers and Server Actions: a refreshed session goes back to the browser.
+export async function writableServerClient() {
+  const store = await cookies()
+  return createServerClient({
+    cookies: {
+      getAll: () => store.getAll(),
+      setAll: (cookiesToSet) => cookiesToSet.forEach(({ name, value, options }) => store.set(name, value, options ?? {})),
+    },
   })
 }
 ```
@@ -295,19 +333,23 @@ export default async function Page() {
 }
 ```
 
-A Route Handler uses `serverClient()` the same way. In middleware, read the cookies from the request and check the user with the auth server:
+A Route Handler uses `writableServerClient()` the same way. Middleware can write cookies, so refresh the session there, before the page renders, and check the user with the auth server:
 
 ```ts title="middleware.ts"
 import { NextResponse, type NextRequest } from "next/server"
 import { createServerClient } from "@supatype/ssr"
 
 export async function middleware(request: NextRequest) {
-  const supatype = createServerClient(process.env.PUBLIC_SUPATYPE_URL!, process.env.PUBLIC_SUPATYPE_ANON_KEY!, {
-    cookies: { getAll: () => request.cookies.getAll(), setAll: () => {} },
+  const response = NextResponse.next()
+  const supatype = createServerClient({
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll: (cookiesToSet) => cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options ?? {})),
+    },
   })
   const { data } = await supatype.auth.getUser()
   if (!data.user) return NextResponse.redirect(new URL("/sign-in", request.url))
-  return NextResponse.next()
+  return response
 }
 
 export const config = { matcher: ["/account/:path*"] }
@@ -315,11 +357,12 @@ export const config = { matcher: ["/account/:path*"] }
 
 What the cookie handling does and does not do:
 
-- It only reads. The `cookies` option needs both `getAll` and `setAll`, but `createServerClient` never calls `setAll`, so a no-op is fine. The browser client keeps the cookie fresh.
-- A cookie whose access token has expired is ignored, and the server client runs as an anonymous caller. A page rendered after a long idle shows the signed-out view until the browser refreshes the session.
+- Without `setAll`, as in a Server Component, the client never refreshes the session: an expired access token is sent as it is, and the API refuses it. A refresh there would spend the browser's refresh token and keep the new one to itself, so the browser's own next refresh would be refused. Do not pass a `setAll` that does nothing to get round this.
+- With `setAll`, the client refreshes an expired access token when a request it makes finds it expired, and writes every change to the session (a refresh, a sign-in, a sign-out) back through `setAll`.
+- A cookie whose access token has expired is kept only when it has a refresh token. Otherwise the server client runs as an anonymous caller.
 - The cookie is decoded, not verified. Queries made with it are checked by the API, so access rules hold. But do not trust `auth.getSession()` on the server to decide who someone is: call `auth.getUser()`, which asks the auth server, as the middleware above does.
-- Decoding the cookie uses Node's `Buffer`. Where `Buffer` is missing, every cookie reads as expired, so run middleware on the Node.js runtime.
+- Decoding uses `atob` and `TextDecoder`, not Node's `Buffer`, so it works on the edge runtime too.
 - Set `cookiePrefix` on both sides if you change the client's `auth.cookiePrefix`. The default is `st`.
 - The server client is built from `@supatype/client`, not your generated client file, so `update(..., { publish: true })` is not accepted on it.
 
-The browser half of a Next.js app needs the URL and anon key in `NEXT_PUBLIC_` variables. `supatype keys` writes `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY`: a local stack's to `.env.development.local`, which Next.js reads in development only, and a deployment's to `.env`. Server code can read `PUBLIC_SUPATYPE_URL` and `PUBLIC_SUPATYPE_ANON_KEY` the same way.
+In development, `supatype dev`, `init` and `keys --write` write a local stack's `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, with the `NEXT_PUBLIC_` copies, to `.env.development.local`, which Next.js reads in development only, so the route answers in `next dev`. A value fixed into the build that way always wins over the route's.

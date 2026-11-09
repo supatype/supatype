@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react"
 import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { runMutation, type MutationOperation, type MutationOutcome, type MutationRequest } from "@supatype/client/bindings"
+import { reportThrown, runMutation, type MutationOperation, type MutationOutcome, type MutationRequest } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 
@@ -61,6 +61,10 @@ export function useMutation<
         const result = await runMutation<TRow>(client as AnyClient, table, operation, data, options)
         if (result.error !== null) setError(result.error)
         return result
+      } catch (e) {
+        const thrown = reportThrown(`useMutation("${table}", "${operation}")`, e)
+        setError(thrown)
+        return { data: null, error: thrown, count: null }
       } finally {
         setLoading(false)
       }

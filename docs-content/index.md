@@ -113,7 +113,7 @@ Install the client first with `npm install @supatype/client`: the generated file
 import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
@@ -168,7 +168,7 @@ $ supatype self-host compose up -d
 $ supatype push
 ```
 
-`compose up` writes the compose file itself, so there is no separate render step. The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYPE_KONG_PORT` in `.env` (18473 when it is unset), with Studio at `/studio/`. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.
+`compose up` writes the compose file itself, so there is no separate render step. Once the stack answers, it creates the storage buckets the schema declares and the first admin user, as `supatype dev` does. The gateway listens on `http://<your-host>:<gateway-port>`, the port in `SUPATYPE_KONG_PORT` in `.env` (18473 when it is unset), with Studio at `/studio/`. For HTTPS on your own domain, see step 5: the gateway serves it itself, with no reverse proxy.
 
 :::note[Rest before the first push]
 Until the first `supatype push`, every REST request answers `503` with `PGRST002`: PostgREST will not serve until the schemas it exposes exist, and the push creates them. After a push PostgREST can take up to about 30 seconds to notice, so `push` waits (at most 40 seconds) until REST answers, printing one line while it does.
@@ -197,6 +197,8 @@ $ supatype app add --static ./public
 ```
 
 This writes `app.mode: "static"` to `supatype.config.ts`. Commit it. It is a one-time step, not something to repeat on the server.
+
+On the server, build the app with `supatype build` rather than `npm run build`. It runs the same build script with the API URL and anon key from `.env`, and stops before building when either is missing. [Deploy your frontend](/docs/deploying-your-frontend.html) covers building on other hosts.
 
 ### 5. Turn on HTTPS
 
@@ -235,7 +237,7 @@ Local and self-hosted environments read the same committed config. What differs 
 | Change | Local | Self-hosted |
 | --- | --- | --- |
 | Schema | `supatype push` | `supatype push` |
-| Frontend | Nothing with the dev proxy. Otherwise `npm run build` | `npm run build`, then `compose up -d` |
+| Frontend | Nothing with the dev proxy. Otherwise `npm run build` | `supatype build`, then `compose up -d` |
 | `supatype.config.ts` | Restart `supatype dev` | `compose up -d` |
 | `.env` | Restart `supatype dev` | `compose up -d`, or `compose restart <service>` for one service |
 
@@ -250,7 +252,7 @@ $ cd my-app
 $ git pull
 $ npm install           # if package.json changed
 $ supatype push         # schema migrations
-$ npm run build         # static files into public/ or dist/
+$ supatype build        # the build script, with .env's API URL and anon key
 $ supatype self-host compose up -d
 ```
 

@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html" aria-current="page">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -84,6 +85,7 @@
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/deploying-your-frontend.html">Deploy your frontend</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
       <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
@@ -122,10 +124,11 @@
 <pre><span class="k">import</span> { createClient } <span class="k">from</span> <span class="s">"../supatype/generated/client"</span>
 
 <span class="k">export</span> <span class="k">const</span> supatype = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? window.location.origin,
+  url: import.meta.env.VITE_SUPATYPE_URL,
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })</pre></div>
-    <p>Every page in these docs imports the client from this one file. <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys</code> write <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code>, <code>NEXT_PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks. A local stack's values go to <code>.env.development.local</code>, which Vite, Next.js and Expo read in development only, so a production build has none of them and the client uses the address the page was served from, which is the API's when Supatype serves your app. A deployment's values (<code>supatype keys</code> on a server whose <code>API_EXTERNAL_URL</code> is its real address) go to <code>.env</code>, which a production build reads. Read these rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
+    <p>Every page in these docs imports the client from this one file. In development, <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys</code> write the local stack's <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code>, <code>NEXT_PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks, to <code>.env.development.local</code>. Vite, Next.js and Expo read that file in development only, so a production build never ships them. Read these rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
+    <p>A production build gets your deployment's values from <code>supatype build</code>, which runs your build command with them, or from the host's settings. When Supatype serves the app, the page can read them from the server instead, with <code>&lt;script src="/supatype-env.js" vite-ignore&gt;&lt;/script&gt;</code> in <code>index.html</code> (<code>vite-ignore</code> keeps <code>vite build</code> from warning that it cannot bundle it); a Next.js app serves the same script from a route (<a href="/docs/frameworks.html#nextjs">Frameworks: Next.js</a>). For each value the build did not carry, the client reads the one that script set, at its first request. It never guesses the address from the page. <code>createClient</code> itself never throws, so a page that creates the client at module scope still prerenders. The first request made with no address or no anon key throws a <code>MissingClientValuesError</code> naming what is missing and the variables to set, rather than returning it as <code>{ data: null, error }</code>. <a href="/docs/deploying-your-frontend.html">Deploy your frontend</a> covers each host.</p>
     <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
     <p><code>createClient</code> takes these options as well as <code>url</code> and <code>anonKey</code>:</p>
     <div class="tbl"><table>
@@ -250,7 +253,7 @@ subscription.unsubscribe()
 <span class="k">await</span> supatype.auth.signOut()</pre></div>
     <p>Once signed in, every request carries the user's token, so access rules see them. <code>onAuthStateChange</code> calls back at once with the current state, then on each change.</p>
     <p>When the project asks new users to confirm their email, <code>signUp</code> returns <code>session: null</code> and does not sign the user in. They sign in once they have confirmed.</p>
-    <p><code>getUser()</code> fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on <code>supatype.auth</code> too.</p>
+    <p><code>getUser()</code> fetches the user from the server. Magic links, OAuth, one-time codes and MFA are on <code>supatype.auth</code> too, and so is SAML single sign-on: <code>signInWithSSO({ domain })</code> or <code>signInWithSSO({ providerId })</code> sends the browser to the organisation's identity provider, with PKCE by default. See <a href="/docs/sso.html#sign-in">Single sign-on</a>.</p>
 
     <h2 id="storage">Storage</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -320,7 +323,7 @@ console.log(first?.author.name, first?.body.root.children?.[0])</pre></div>
 
     <h2 id="errors">Errors</h2>
     <p>Queries, <code>rpc</code>, <code>functions.invoke</code>, auth and most storage calls return <code>{ data, error }</code>. Check <code>error</code> before using <code>data</code>.</p>
-    <p><code>error</code> is a plain object with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>. Do not test it with <code>instanceof</code>. When a field validator refused the write, <code>field</code> names the column, so you can mark that input.</p>
+    <p><code>error</code> is a <code>SupatypeError</code>, an <code>Error</code> with <code>message</code> and, when known, <code>code</code>, <code>status</code>, <code>details</code> and <code>hint</code>, so <code>error instanceof SupatypeError</code> holds and <code>String(error)</code> reads <code>SupatypeError: &lt;message&gt;</code>. Its own fields are only those, so spreading it or turning it into JSON gives exactly them. A failure in transit is the SDK error the client threw, such as a <code>NetworkError</code> (<code>error instanceof NetworkError</code>); those are <code>SupatypeCodedError</code>s, which always carry a <code>code</code> and a <code>helpUrl</code>. When a field validator refused the write, <code>field</code> names the column, so you can mark that input.</p>
     <p>An insert an access rule refuses returns code <code>42501</code>. An update or delete that the rules hide matches no rows and returns no error. <code>single()</code> with no row returns <code>PGRST116</code>.</p>
     <p>When the server refuses a request with 401, the client sends it again only if the token expired or was invalid (<code>PGRST301</code>, <code>PGRST303</code> or "JWT expired"), the caller is signed in, and refreshing the session gave a new token. Any other 401 is returned as <code>error</code> after one try, including an anon write that an access rule refuses.</p>
     <div class="callout warn">

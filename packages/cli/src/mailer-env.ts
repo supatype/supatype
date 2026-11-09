@@ -32,6 +32,19 @@ export function mailerUrlPathsEnv(): Record<string, string> {
 /** Server environment names the compose file passes through from `.env` for Resend and SES. */
 export const MAILER_PASSTHROUGH_ENV = ["SUPATYPE_RESEND_API_KEY", "SUPATYPE_RESEND_FROM", "SUPATYPE_SES_FROM"] as const
 
+/** Every SUPATYPE_SMTP_* name {@link mailerProviderEnv} can give, from `email.smtp`. */
+export const SMTP_ENV = [
+  "SUPATYPE_SMTP_HOST",
+  "SUPATYPE_SMTP_PORT",
+  "SUPATYPE_SMTP_USER",
+  "SUPATYPE_SMTP_PASS",
+  "SUPATYPE_SMTP_ADMIN_EMAIL",
+  "SUPATYPE_SMTP_SENDER_NAME",
+] as const
+
+/** The name the server picks its mailer by, which {@link mailerProviderEnv} always gives. */
+export const MAILER_PROVIDER_ENV = "SUPATYPE_MAILER_MAILER_PROVIDER"
+
 /** A trimmed value, or undefined when there is nothing left. */
 function present(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
@@ -79,7 +92,7 @@ export function mailerProviderEnv(email: EmailConfig): Record<string, string> {
   const provider = email?.provider ?? "console"
   return {
     // Mailer.MailerProvider, so the doubled word is the real name.
-    SUPATYPE_MAILER_MAILER_PROVIDER: provider,
+    [MAILER_PROVIDER_ENV]: provider,
     ...(email !== undefined && provider === "smtp" ? smtpEnv(email.smtp) : {}),
     ...(email !== undefined ? apiProviderEnv(email) : {}),
   }

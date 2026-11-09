@@ -82,6 +82,7 @@ export default localConfig
 | `server.port` | supatype-server port (native dev) |
 | `server.domain` | Custom domain for self-host HTTPS (e.g. `"demo.example.com"`) |
 | `server.tls` | `{ email, provider }`: Let's Encrypt contact email; `provider: "kong"` (default, Kong ACME) or `"none"` (stay HTTP). Set via `supatype add domain` |
+| `server.public_env` | `false` turns off the server's `GET /supatype-env.json` and `GET /supatype-env.js` (both answer 404), rendered as `SUPATYPE_PUBLIC_ENV=false` for self-host compose, dev compose and native dev. Unset (the default) leaves them on: they publish the API URL and anon key for `supatype build` and a page's `<script src="/supatype-env.js">`. For an API-only project. The anon key is public either way, so this does not make it a secret. Anything but a boolean is refused |
 | `app.mode` | `"none"`, `"static"`, or `"proxy"` |
 | `app.static_dir` | Built static assets directory |
 | `app.vite_dev_url` | Vite dev server URL for HMR (`/_vite/*`) when using **static** mode locally, e.g. `http://127.0.0.1:5173`. Sets `SUPATYPE_VITE_DEV_URL` during `supatype dev` |
@@ -92,6 +93,7 @@ export default localConfig
 | `versions.*` | Optional pin for engine, server, postgres, deno. **Omit to run the CLI release's own images** |
 | `connection` | Override database URL (else `DATABASE_URL` env) |
 | `auth.providers` | OAuth providers (`github`, `google`, ...): `clientId`, `secret: env("NAME")`, optional `redirectUri`, `url`. See [OAuth providers](#oauth-providers) |
+| `auth.sso.saml` | SAML single sign-on: `enabled` (required), optional `allowEncryptedAssertions`, `relayStateValidity` (seconds), `rateLimitAssertion`, `externalUrl`. Turning it on makes the next `dev` or `self-host compose up` write `SUPATYPE_SAML_PRIVATE_KEY` to `.env` once; a `privateKey` field here is refused. Identity providers are not config: register them with `supatype sso add` (see [cli.md](cli.md#single-sign-on-saml) and https://www.supatype.com/docs/sso.html) |
 | `studio.auth.providers` | The OAuth providers Studio's sign-in offers, e.g. `["keycloak"]`. Unset offers every enabled provider. A Studio role is still required. See [Studio sign-in](#studio-sign-in-with-the-projects-providers) |
 | `auth.email.enableConfirmations` | `true` makes a new email sign-up confirm its address before it can sign in. Off when unset: dev auto-confirms. Written as `SUPATYPE_MAILER_AUTOCONFIRM` for docker dev, native dev and the self-host compose file; a value you put in `.env` yourself wins. See [Email confirmation](#email-confirmation) |
 | `api.corsOrigins` | Browser origins allowed to call the API besides `SITE_URL`, e.g. `["https://admin.example.com"]`. `"*"` allows every origin and is never a default. `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` adds to it; a list saved in Studio (Settings, CORS tab) replaces both until reset (the site URL is always allowed). Dev mode allows every origin |
@@ -123,8 +125,8 @@ API_EXTERNAL_URL=http://localhost:18473
 The front end's copies (`VITE_SUPATYPE_URL`, `VITE_SUPATYPE_ANON_KEY` and their `PUBLIC_`,
 `NEXT_PUBLIC_`, `EXPO_PUBLIC_` twins) are not in `.env` for a local stack: they go to
 `.env.development.local`, read in development only, so a production build never ships localhost or
-the dev anon key. A deployment's real values go to `.env`. See
-[frontend.md](frontend.md#frontend-env-files).
+the dev anon key. A production build gets a deployment's values from `supatype build` (see
+[frontend.md](frontend.md#production-builds)).
 
 `supatype dev` **does not** rewrite `POSTGRES_PASSWORD` or `JWT_SECRET`. It reads them, so a
 generated secret reaches production intact. It does rewrite the keys derived from them

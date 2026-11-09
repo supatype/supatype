@@ -30,7 +30,7 @@ vi.mock("../src/compose-render-mode.js", async (importOriginal) => ({
   composeRenderMode: () => stack.mode,
 }))
 
-import { seedEngine } from "../src/commands/seed.js"
+import { stackEngine } from "../src/stack-engine.js"
 
 const config = projectConfig({ provider: "docker" })
 let dir: string
@@ -50,26 +50,26 @@ afterEach(() => {
 
 describe("the engine a seed runs", () => {
   it("is the project's compose engine when seeding a dev stack's database at its port", async () => {
-    expect(await seedEngine(dir, config, undefined, "postgresql://u:p@127.0.0.1:54777/app")).toBe(composeEngine)
+    expect(await stackEngine(dir, config, undefined, "postgresql://u:p@127.0.0.1:54777/app")).toBe(composeEngine)
   })
 
   it("is the compose engine for a self-host stack's database at its port", async () => {
     stack.mode = "standalone"
-    expect(await seedEngine(dir, config, undefined, "postgresql://u:p@localhost:54390/app")).toBe(composeEngine)
+    expect(await stackEngine(dir, config, undefined, "postgresql://u:p@localhost:54390/app")).toBe(composeEngine)
   })
 
   it("is the host binary for a local database at a port the stack does not publish", async () => {
-    expect(await seedEngine(dir, config, undefined, "postgresql://u:p@127.0.0.1:5432/app")).toBeUndefined()
+    expect(await stackEngine(dir, config, undefined, "postgresql://u:p@127.0.0.1:5432/app")).toBeUndefined()
     stack.mode = "standalone"
-    expect(await seedEngine(dir, config, undefined, "postgresql://u:p@127.0.0.1:54777/app")).toBeUndefined()
+    expect(await stackEngine(dir, config, undefined, "postgresql://u:p@127.0.0.1:54777/app")).toBeUndefined()
   })
 
   it("is the host binary for a database named with --connection", async () => {
     const url = "postgresql://u:p@127.0.0.1:54777/x"
-    expect(await seedEngine(dir, config, url, url)).toBeUndefined()
+    expect(await stackEngine(dir, config, url, url)).toBeUndefined()
   })
 
   it("is the host binary for a database on another machine", async () => {
-    expect(await seedEngine(dir, config, undefined, "postgresql://u:p@db.example.com:54777/app")).toBeUndefined()
+    expect(await stackEngine(dir, config, undefined, "postgresql://u:p@db.example.com:54777/app")).toBeUndefined()
   })
 })

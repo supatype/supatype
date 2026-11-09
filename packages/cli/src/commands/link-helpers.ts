@@ -6,6 +6,7 @@ import {
   createCloudLink,
   createSelfHostLink,
   loadProjectLink,
+  resolveEnvironmentName,
   saveProjectLink,
   type ProjectLink,
 } from "../link.js"
@@ -14,7 +15,9 @@ import { targetFetch } from "../target-client.js"
 import { localLinkLabel } from "../local-gateway.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { isArrayOf, isShape, isString } from "@supatype/shared"
-import { error, info, plain } from "../ui/messages.js"
+import { error, info, plain, warn } from "../ui/messages.js"
+import { projectConfigIfAny } from "../local-stack-guard.js"
+import { configEnvironment } from "../resolve-target.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { isInteractive } from "../ui/interactive.js"
 import { ensureNotCancelled, p, runClackFlow } from "../ui/prompts.js"
@@ -65,6 +68,12 @@ async function probeSelfHostLink(apiUrl: string, projectRef: string, token: stri
 /** The environments `POST /projects/:slug/environments` accepts. */
 const CREATABLE_CLOUD_ENVIRONMENTS = ["staging", "preview"] as const
 
+/** The environment the project's config names for this checkout, which wins over `envs use`. */
+function configDefaultEnvironment(cwd: string): string | undefined {
+  const config = projectConfigIfAny(cwd)
+  return config === undefined ? undefined : configEnvironment(cwd, config)
+}
+
 export function registerEnvs(program: Command): void {
   const envs = program.command("envs").description("Manage linked deployment environments")
 
@@ -78,10 +87,18 @@ export function registerEnvs(program: Command): void {
         info("Not linked. Run: supatype link")
         return
       }
+      const fromConfig = configDefaultEnvironment(cwd)
+      // Worked out as resolveTarget does, so the default named is the one commands use.
+      const current = resolveEnvironmentName(link, fromConfig)
       plain(`\nProject: ${link.projectRef} (${link.kind})`)
-      plain(`Default: ${link.defaultEnvironment}\n`)
+      // A default that is not linked has no row to star, so the line itself says what to do.
+      const notes = [
+        ...(fromConfig === undefined ? [] : ["from supatype.config.ts environments"]),
+        ...(link.environments[current] ? [] : [`not linked: run supatype link --env ${current}`]),
+      ]
+      plain(`Default: ${current}${notes.length === 0 ? "" : ` (${notes.join(", ")})`}\n`)
       for (const [name, env] of Object.entries(link.environments)) {
-        const mark = name === link.defaultEnvironment ? " *" : "  "
+        const mark = name === current ? " *" : "  "
         plain(`${mark} ${name.padEnd(14)} ${env.apiUrl}`)
       }
       plain()
@@ -99,7 +116,16 @@ export function registerEnvs(program: Command): void {
       }
       link.defaultEnvironment = name
       saveProjectLink(cwd, link)
-      info(`Default environment set to "${name}".`)
+      const fromConfig = configDefaultEnvironment(cwd)
+      if (fromConfig === undefined || fromConfig === name) {
+        info(`Default environment set to "${name}".`)
+        return
+      }
+      // The config's choice wins, so saying "set" alone named a default no command used (issue 58).
+      warn(
+        `Saved "${name}" as this checkout's default, but supatype.config.ts's environments names "${fromConfig}", ` +
+          `and commands use that first. Remove environments.default there, or set it to "${name}".`,
+      )
     })
 
   envs

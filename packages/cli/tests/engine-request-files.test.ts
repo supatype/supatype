@@ -12,6 +12,7 @@ import {
 } from "node:fs"
 import { dirname, join, sep } from "node:path"
 import type { SpawnSyncReturns } from "node:child_process"
+import type { FakeRun } from "./support/fake-exec-file.js"
 
 /**
  * The files `engineRequest` hands the engine live under the shared system temp directory, and a
@@ -42,22 +43,32 @@ interface SeenFile {
   content: string
 }
 let seen: SeenFile[] = []
-const spawnSync = vi.fn<(cmd: string, args: readonly string[]) => Partial<SpawnSyncReturns<string>>>()
-vi.mock("node:child_process", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:child_process")>()),
-  spawnSync: (cmd: string, args: readonly string[]) => {
-    seen = args
-      .filter((a) => a.startsWith(root))
-      .map((path) => ({
-        path,
-        mode: statSync(path).mode & 0o777,
-        dirMode: statSync(dirname(path)).mode & 0o777,
-        dirIsLink: lstatSync(dirname(path)).isSymbolicLink(),
-        content: readFileSync(path, "utf8"),
-      }))
-    return spawnSync(cmd, args)
-  },
-}))
+// Every run: the questions asked of a binary through `spawnSync`, the engine run through `execFile`.
+const ran = vi.fn<(cmd: string, args: readonly string[]) => Partial<SpawnSyncReturns<string>>>()
+
+/** Records the files named on a run's command line as they are when it starts, then answers it. */
+function observe(cmd: string, args: readonly string[]): Partial<SpawnSyncReturns<string>> {
+  seen = args
+    .filter((a) => a.startsWith(root))
+    .map((path) => ({
+      path,
+      mode: statSync(path).mode & 0o777,
+      dirMode: statSync(dirname(path)).mode & 0o777,
+      dirIsLink: lstatSync(dirname(path)).isSymbolicLink(),
+      content: readFileSync(path, "utf8"),
+    }))
+  return ran(cmd, args)
+}
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:child_process")>()
+  const { fakeExecFile } = await import("./support/fake-exec-file.js")
+  const answer = (cmd: string, args: readonly string[]): FakeRun => {
+    const run = observe(cmd, args)
+    return { status: run.status ?? null, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }
+  }
+  return { ...real, spawnSync: observe, execFile: fakeExecFile(answer, () => new real.ChildProcess()) }
+})
 
 const { engineRequest } = await import("../src/engine-client.js")
 
@@ -68,8 +79,8 @@ const oldDir = join(root, uid === undefined ? "supatype-engine" : `supatype-engi
 
 beforeEach(() => {
   seen = []
-  spawnSync.mockReset()
-  spawnSync.mockReturnValue({ status: 0, stdout: "{}", stderr: "" })
+  ran.mockReset()
+  ran.mockReturnValue({ status: 0, stdout: "{}", stderr: "" })
   for (const name of readdirSync(root)) rmSync(join(root, name), { recursive: true, force: true })
 })
 
@@ -149,7 +160,7 @@ describe("engine request files", () => {
     await engineRequest("/validate", { ast: {} })
     expect(leftovers()).toEqual([])
 
-    spawnSync.mockReturnValue({ status: 2, stdout: "", stderr: "boom" })
+    ran.mockReturnValue({ status: 2, stdout: "", stderr: "boom" })
     await expect(engineRequest("/validate", { ast: {} })).rejects.toThrow(/boom/)
     expect(leftovers()).toEqual([])
   })
@@ -161,7 +172,7 @@ describe("engine request files", () => {
       engineRequest("/seed", { ast: { models: [] }, ir_documents: [{ big: 1n }] }),
     ).rejects.toThrow(/BigInt/)
 
-    expect(spawnSync).not.toHaveBeenCalled()
+    expect(ran).not.toHaveBeenCalled()
     expect(leftovers()).toEqual([])
     expect(existsSync(oldDir)).toBe(false)
   })

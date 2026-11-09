@@ -2,8 +2,44 @@
 
 ## Unreleased
 
+### Features
+
+* **auth:** an SSO page for the project's SAML identity providers, replacing "SSO is coming soon".
+  It lists each provider by name with its entity ID, domains and whether it is enabled; adds one
+  from a metadata URL or an uploaded or pasted metadata XML, with its domains, NameID format and an
+  optional attribute mapping; edits one in place, keeping its NameID format; disables and enables
+  one; and removes one after saying that users who signed in through it can no longer sign in that
+  way. It shows the entity ID and ACS URL to give an identity provider, read from the server's own
+  SP metadata, and says when SAML is off, while still letting providers be set up first. Changes are
+  offered to owners and admins, the roles the auth server lets change them; developers see the page
+  read-only.
+* **auth:** the SSO page shows whether each of a provider's domains is verified, and a Verify action
+  beside an unverified one. Verify asks the auth server to check the domain and shows the DNS TXT
+  record to add (`_supatype-challenge.<domain>` and its value), what DNS holds there now, and Check
+  again. The page explains that until a domain is verified, a SAML login whose email already has an
+  account is refused, and once it is verified such logins link to that account. Its SAML-off notice
+  names `auth.sso.saml.enabled` in supatype.config.ts, then a restart of `supatype dev`.
+
 ### Bug Fixes
 
+* **globals:** an editor can save a global. Every save was an upsert, which needs the right to
+  insert, and a global gives an editor only read and update, so the save was refused with "You do not
+  have permission to make this change." A save now updates the row there is, and inserts only the
+  first time, when the global has no row. Before that first save the form no longer shows an empty,
+  required ID field, and opening it no longer logs a 406.
+
+* **auth:** the Users provider filter offers each SAML provider by name, `sso:acme`, and lists the
+  users who signed in through it. It offered only the providers switched on in the config, so a
+  user with an `sso:acme` badge could not be filtered to. A provider is offered for as long as it
+  is set up, whether SAML is on or not, so its users can still be found.
+* **auth:** the Users list and a user's linked identities name a SAML user's identity provider,
+  `sso:acme`, where they showed `sso:` and the provider's full ID. A provider that has been removed,
+  or was added without a name, is shown by the first block of its ID.
+* **auth:** a viewer can open the SSO page, read-only, as a developer can. It refused them with
+  "can't manage the project's users". Editors still have no SSO page.
+* **auth:** the Configuration page says SAML SSO is set by `auth.sso.saml.enabled` in
+  supatype.config.ts or `SUPATYPE_SAML_ENABLED` in `.env`. It said the variable could only be set in
+  the auth server's environment, which was true while the compose file did not pass it.
 * **logs:** the API logs page says request logging is coming soon, as the other unbuilt log pages
   do. It mounted a log table with search and filters over a list that never filled, which read as a
   project nobody had called.

@@ -14,13 +14,19 @@ import {
   type TimedStep,
 } from "../init-setup-steps.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
+import { adminEmailProblem, answerProblem, askText, smtpHostProblem, smtpPortProblem, type SmtpServer } from "../init-answers.js"
+import { assertEnvValues } from "../env-value.js"
+import { ensureFunctionsEnvLocal, FUNCTIONS_ENV_LOCAL } from "../functions-env-local.js"
 import { generateAndWriteKeys } from "./keys.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
   generateControlPlaneSecret,
+  generateObjectStoreCredentials,
   givenJwtSecret,
   newJwtSecret,
+  OBJECT_STORE_ACCESS_KEY_ENV,
+  OBJECT_STORE_SECRET_KEY_ENV,
 } from "../local-secrets.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -63,6 +69,7 @@ import {
   VITE_BUILD_DIR,
 } from "../project-config.js"
 import { cliDatabaseUrlLines } from "../database-url-owner.js"
+import { scaffoldNextRuntimeEnv } from "../init-next-runtime-env.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -93,6 +100,8 @@ export interface ScaffoldOptions {
   schemaPath: string
   app: ScaffoldAppOptions
   email: "console" | "smtp" | "resend" | "ses"
+  /** The SMTP server, asked for when `email` is smtp, written to `.env`. */
+  smtp?: SmtpServer
   /** Object storage while developing locally (`supatype dev`). */
   storageLocal: "local" | "s3"
   /** Object storage when deployed to production. */
@@ -284,9 +293,19 @@ function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
     delete result.adminEmail
     delete result.adminPassword
   } else if (opts.adminEmail && opts.adminPassword) {
-    result.adminEmail = opts.adminEmail
+    refuseAdminFlags(opts.adminEmail, opts.adminPassword)
+    result.adminEmail = opts.adminEmail.trim()
     result.adminPassword = opts.adminPassword
   }
+}
+
+/** Exits before anything is written when the admin flags hold what the prompts would refuse. */
+function refuseAdminFlags(email: string, password: string): void {
+  const emailProblem = adminEmailProblem(email)
+  const passwordProblem = answerProblem(password)
+  if (emailProblem !== undefined) error(`--admin-email: ${emailProblem}`)
+  if (passwordProblem !== undefined) error(`--admin-password: ${passwordProblem}`)
+  if (emailProblem !== undefined || passwordProblem !== undefined) process.exit(1)
 }
 
 interface InteractiveInitArgs {
@@ -364,27 +383,7 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       }),
     )
 
-    let domain: string | undefined
-    let tlsEmail: string | undefined
-    if (productionTarget === "self-host") {
-      domain = ensureNotCancelled(
-        await p.text({
-          message: "Production domain for ACME TLS (optional, can set later)",
-          placeholder: "api.example.com",
-          defaultValue: "",
-        }),
-      ).trim()
-      if (domain) {
-        tlsEmail =
-          ensureNotCancelled(
-            await p.text({
-              message: "Email for Let's Encrypt (HTTPS) certificates",
-              placeholder: "you@example.com",
-              defaultValue: "",
-            }),
-          ).trim() || undefined
-      }
-    }
+    const tls = productionTarget === "self-host" ? await promptSelfHostTls() : {}
 
     const provider = ensureNotCancelled(
       await p.select<ScaffoldOptions["provider"]>({
@@ -419,6 +418,8 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
         ],
       }),
     )
+    // Without a host the server uses its noop mailer and drops every email (issue 76).
+    const smtp = email === "smtp" ? await promptSmtpServer() : undefined
 
     const storageLocal = ensureNotCancelled(
       await p.select<StorageProvider>({
@@ -443,11 +444,11 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       provider,
       ...(kongPort !== undefined ? { kongPort } : {}),
       productionTarget,
-      ...(domain !== undefined ? { domain } : {}),
-      ...(tlsEmail !== undefined ? { tlsEmail } : {}),
+      ...tls,
       schemaPath,
       app,
       email,
+      ...(smtp !== undefined && { smtp }),
       storageLocal,
       storageProduction,
       helloFunction,
@@ -458,13 +459,35 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
     }
 }
 
+/** The submission port most SMTP servers take, offered as the answer. */
+const SMTP_PORT = "587"
+
+/** The SMTP server's host and port, both required to send anything. */
+async function promptSmtpServer(): Promise<SmtpServer> {
+  const host = (await askText({ message: "SMTP host", placeholder: "smtp.example.com", validate: smtpHostProblem })).trim()
+  const port = await askText({ message: "SMTP port", defaultValue: SMTP_PORT, placeholder: SMTP_PORT, validate: smtpPortProblem })
+  return { host, port: Number(port.trim() || SMTP_PORT) }
+}
+
+/** A self-hosted project's domain for ACME TLS, and the email for its certificates when it has one. */
+async function promptSelfHostTls(): Promise<Pick<WizardResult, "domain" | "tlsEmail">> {
+  const domain = (
+    await askText({ message: "Production domain for ACME TLS (optional, can set later)", placeholder: "api.example.com", defaultValue: "" })
+  ).trim()
+  if (!domain) return { domain }
+  const tlsEmail = (
+    await askText({ message: "Email for Let's Encrypt (HTTPS) certificates", placeholder: "you@example.com", defaultValue: "" })
+  ).trim()
+  return { domain, ...(tlsEmail !== "" && { tlsEmail }) }
+}
+
 async function promptProjectName(defaultName: string): Promise<string> {
   return askWithDefault("Project name", defaultName)
 }
 
 /** A text answer, trimmed, or `defaultValue` when it was left empty. */
 async function askWithDefault(message: string, defaultValue: string): Promise<string> {
-  return ensureNotCancelled(await p.text({ message, defaultValue })).trim() || defaultValue
+  return (await askText({ message, defaultValue })).trim() || defaultValue
 }
 
 async function promptProductionStorage(): Promise<StorageProvider> {
@@ -488,12 +511,8 @@ async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?:
 
   p.note("First sign-in to Studio at /studio/, created automatically on supatype dev or push.")
 
-  const adminEmail = ensureNotCancelled(
-    await p.text({
-      message: "Admin email",
-      placeholder: "you@example.com",
-      validate: (value) => (value.trim() ? undefined : "Email is required"),
-    }),
+  const adminEmail = (
+    await askText({ message: "Admin email", placeholder: "you@example.com", validate: adminEmailProblem })
   ).trim()
 
   return { adminEmail, adminPassword: await promptAdminPassword() }
@@ -506,8 +525,9 @@ async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?:
 async function promptAdminPassword(): Promise<string> {
   while (true) {
     const password = ensureNotCancelled(await p.password({ message: "Admin password (min 8 characters)" })).trim()
-    if (password.length < 8) {
-      p.log.warn("Password must be at least 8 characters.")
+    const problem = answerProblem(password) ?? (password.length < 8 ? "Password must be at least 8 characters." : undefined)
+    if (problem !== undefined) {
+      p.log.warn(problem)
       continue
     }
     const confirmed = ensureNotCancelled(await p.password({ message: "Confirm admin password" })).trim()
@@ -723,6 +743,8 @@ export function scaffold(
     writeFileSync(full, content, "utf8")
     file("created", rel)
   }
+  // First, so a value .env cannot hold is refused before any file is written.
+  const env = envTemplate(opts)
 
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) {
@@ -736,11 +758,14 @@ export function scaffold(
     write("supatype.local.config.ts", localConfigTemplate(opts.app))
   }
   write(opts.schemaPath, schemaTemplate())
-  write(".env", envTemplate(opts))
+  write(".env", env)
   scaffoldDevFrontendEnv(dir, opts)
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
   scaffoldAppAssets(dir, opts, write)
+  // The Next.js counterpart of the static page's script tag: the client and @supatype/ssr ship
+  // together, so the route's package is added at the client's range.
+  scaffoldNextRuntimeEnv(dir, write, `^${deps.client}`)
 
   if (opts.helloFunction) scaffoldHelloFunction(dir, write)
   scaffoldGitignore(dir, write)
@@ -819,6 +844,15 @@ function staticDirRelative(staticDir: string): string {
   return staticDir.trim().replace(/^\.\//, "").replace(/\/+$/, "") || "public"
 }
 
+/**
+ * Whether the committed config has Supatype serve the app's files: a static app, and a proxied one
+ * with a production target, whose committed config serves its build (appConfigLines). Only such a
+ * server answers `/supatype-env.js`; a proxied app is served by its own.
+ */
+function servedStatically(opts: Pick<ScaffoldOptions, "productionTarget" | "app">): boolean {
+  return opts.app.mode === "static" || (opts.app.mode === "proxy" && opts.productionTarget !== "later")
+}
+
 function scaffoldAppAssets(
   dir: string,
   opts: ScaffoldOptions,
@@ -833,7 +867,7 @@ function scaffoldAppAssets(
     write(rel, content)
   }
 
-  const holding = holdingPageTemplate(opts.projectName, initLocalApiUrl(opts))
+  const holding = holdingPageTemplate(opts.projectName, initLocalApiUrl(opts), servedStatically(opts))
   const hasVite = Boolean(opts.app.viteDevUrl)
 
   if (opts.app.mode === "static") {
@@ -842,7 +876,7 @@ function scaffoldAppAssets(
     return
   }
 
-  if (opts.app.mode === "proxy" && opts.productionTarget !== "later") {
+  if (servedStatically(opts)) {
     writeUnlessExists("dist/index.html", holding)
     if (hasVite) scaffoldVite(dir, opts, writeUnlessExists, holding)
     return
@@ -893,9 +927,7 @@ function scaffoldHelloFunction(
   if (!existsSync(join(dir, "functions/_shared/README.md"))) {
     write("functions/_shared/README.md", sharedFunctionsReadmeSource())
   }
-  if (!existsSync(join(dir, "functions/.env.local"))) {
-    write("functions/.env.local", functionsEnvLocalTemplate())
-  }
+  if (ensureFunctionsEnvLocal(join(dir, "functions")).created) file("created", `functions/${FUNCTIONS_ENV_LOCAL}`)
   const denoTypes = ensureFunctionsDenoTypes(dir, join(dir, "functions"))
   if (denoTypes.wroteDenoDts) file("created", "functions/deno.d.ts")
   if (denoTypes.wroteTsconfig) file("created", "functions/tsconfig.json")
@@ -1035,7 +1067,7 @@ function appConfigLines(app: ScaffoldAppOptions, productionTarget: ProductionTar
     return [`  app: {`, `    mode: "static",`, `    static_dir: "${staticDirOf(app)}",${built}`, `  },`]
   }
   if (app.mode === "proxy") {
-    if (productionTarget !== "later") {
+    if (servedStatically({ app, productionTarget })) {
       return [
         `  app: {`,
         `    mode: "static",`,
@@ -1096,7 +1128,22 @@ function initSiteUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort" | "app"
   return opts.app.mode === "none" ? "http://localhost:3000" : initLocalApiUrl(opts)
 }
 
-function holdingPageTemplate(projectName: string, apiUrl: string): string {
+/**
+ * The deployment's address and anon key, from the server that serves the page, for a build that
+ * carried none. A classic script in the head runs before any module script, wherever the app puts
+ * its own. Where no Supatype server answers it (Vite's dev server, opened directly, sends its
+ * index.html back) the script fails with one console error and the page runs on: only that script
+ * is lost, and the dev build has its values from `.env.development.local` anyway. `vite-ignore`
+ * tells Vite to leave the tag as it is: without it, every `vite build` warned that it could not
+ * bundle a script the project does not have. Vite drops the attribute from the page it builds, and
+ * a browser ignores it in a page nothing builds.
+ */
+const RUNTIME_ENV_SCRIPT = `
+    <!-- The deployment's API address and anon key, from the server that serves this page.
+         vite-ignore tells Vite to leave it out of the bundle, so the build does not warn. -->
+    <script src="/supatype-env.js" vite-ignore></script>`
+
+function holdingPageTemplate(projectName: string, apiUrl: string, runtimeEnv: boolean): string {
   const name = escapeHtml(projectName)
   return `<!doctype html>
 <html lang="en">
@@ -1104,7 +1151,7 @@ function holdingPageTemplate(projectName: string, apiUrl: string): string {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${name}: Supatype</title>
-    <meta name="description" content="A Supatype project. Define your types, we generate your platform." />
+    <meta name="description" content="A Supatype project. Define your types, we generate your platform." />${runtimeEnv ? RUNTIME_ENV_SCRIPT : ""}
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -1295,7 +1342,20 @@ export type SiteSettings = Model<{
 `
 }
 
+/**
+ * The values `.env` takes from what init was told, rather than generates, under the key each is
+ * written as. The project name is the database's name and, for SMTP, the sender's.
+ */
+function envAnswers(opts: ScaffoldOptions): Record<string, string> {
+  return {
+    POSTGRES_DB: opts.projectName,
+    ...(opts.adminEmail !== undefined && { SUPATYPE_ADMIN_EMAIL: opts.adminEmail }),
+    ...(opts.adminPassword !== undefined && { SUPATYPE_ADMIN_PASSWORD: opts.adminPassword }),
+  }
+}
+
 function envTemplate(opts: ScaffoldOptions): string {
+  assertEnvValues(envAnswers(opts), ".env")
   const sections: string[] = []
   // Generated, not constant. These reach a server: the previous defaults meant a self-host
   // deployment ran with a password of `postgres` and a JWT secret published in this repo,
@@ -1350,7 +1410,7 @@ API_EXTERNAL_URL=${initLocalApiUrl(opts)}`,
     )
   }
 
-  sections.push(emailEnvSection(opts.email, opts.projectName))
+  sections.push(emailEnvSection(opts))
   sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction))
 
   if (opts.adminEmail && opts.adminPassword) {
@@ -1384,7 +1444,7 @@ const SELF_HOST_PORTS_ENV_SECTION = `# Self-host stack ports (supatype self-host
  * written unprefixed (RESEND_API_KEY, SES_FROM, SMTP_HOST), which nothing reads, so a developer who
  * filled them in still got no email.
  */
-function emailEnvSection(email: ScaffoldOptions["email"], projectName: string): string {
+function emailEnvSection({ email, projectName, smtp }: ScaffoldOptions): string {
   switch (email) {
     case "resend":
       return `# Email (Resend)
@@ -1398,8 +1458,8 @@ AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=`
     case "smtp":
       return `# Email (SMTP)
-SUPATYPE_SMTP_HOST=
-SUPATYPE_SMTP_PORT=587
+SUPATYPE_SMTP_HOST=${smtp?.host ?? ""}
+SUPATYPE_SMTP_PORT=${smtp?.port ?? 587}
 SUPATYPE_SMTP_USER=
 SUPATYPE_SMTP_PASS=
 SUPATYPE_SMTP_SENDER_NAME=${projectName}`
@@ -1440,8 +1500,13 @@ S3_SECRET_KEY=`
   )
 }
 
+/** Whether init generates the object store's login: for the local SeaweedFS, not a bucket of your own. */
+function generatesObjectStoreLogin(storage: StorageProvider): boolean {
+  return storage !== "s3"
+}
+
 function localStorageEnvSection(storage: StorageProvider): string {
-  if (storage === "s3") {
+  if (!generatesObjectStoreLogin(storage)) {
     return `# Storage (local development, external bucket)
 S3_ENDPOINT=
 S3_REGION=us-east-1
@@ -1449,10 +1514,13 @@ S3_BUCKET=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=`
   }
+  const login = generateObjectStoreCredentials()
   return `# Storage (local development, SeaweedFS)
+# The object store's login, generated for this project. It opens every file in every bucket, so
+# keep it as private as the database password.
 S3_ENDPOINT=http://localhost:8333
-S3_ACCESS_KEY=supatype
-S3_SECRET_KEY=supatype-secret`
+${OBJECT_STORE_ACCESS_KEY_ENV}=${login.accessKey}
+${OBJECT_STORE_SECRET_KEY_ENV}=${login.secretKey}`
 }
 
 function productionStorageEnvSection(storage: StorageProvider): string {
@@ -1509,10 +1577,6 @@ export default async function seed(ctx: SeedContext) {
 `
 }
 
-function functionsEnvLocalTemplate(): string {
-  return "# Local environment variables for edge functions\n# These are NOT committed to git\n# Set production env vars via: npx supatype functions env set KEY=value\n"
-}
-
 function gitignoreTemplate(): string {
   // Supatype's own paths come from `SUPATYPE_GITIGNORE_PATHS` rather than being written out again
   // here. This template and that list were two copies of the same thing and had already diverged;
@@ -1520,9 +1584,6 @@ function gitignoreTemplate(): string {
   return `${SUPATYPE_GITIGNORE_PATHS.join("\n")}
 node_modules/
 dist/
-# Generated by supatype push (legacy paths, prefer output.types in config)
-src/types/supatype.d.ts
-src/lib/supatype.ts
 `
 }
 
@@ -1581,7 +1642,7 @@ function startInitQuestions(provider: ScaffoldOptions["provider"]): InitQuestion
 export interface InitStepsArgs {
   name: string | undefined
   result: Pick<WizardResult, "provider" | "kongPort" | "adminEmail" | "packageManager" | "helloFunction"> &
-    Partial<Pick<WizardResult, "productionTarget" | "domain" | "tlsEmail">>
+    Partial<Pick<WizardResult, "productionTarget" | "domain" | "tlsEmail" | "storageLocal">>
   installed: boolean
   keysGenerated: boolean
   binariesReady: boolean
@@ -1633,7 +1694,7 @@ function printNextSteps(args: InitStepsArgs): void {
 export function initStepBlocks(args: InitStepsArgs): InitStepBlock[] {
   const blocks: InitStepBlock[] = [
     { title: initSetupComplete(args) ? "Next steps:" : "Finish setup:", steps: initFirstSteps(args) },
-    { title: "Secrets: generated for this project, kept in .env:", steps: initSecretLines(), after: SECRETS_CLOSING },
+    { title: "Secrets: generated for this project, kept in .env:", steps: initSecretLines(args.result.storageLocal), after: SECRETS_CLOSING },
   ]
   const deploy = deployBlock(args.result)
   return deploy === undefined ? blocks : [...blocks, deploy]
@@ -1699,20 +1760,36 @@ const INIT_SECRETS: ReadonlyArray<readonly [name: string, description: string]> 
   ["JWT_SECRET", "signs ANON_KEY and SERVICE_ROLE_KEY; changing it invalidates every token"],
 ]
 
+/** The object store's login, when init generates one ({@link generatesObjectStoreLogin}). */
+const OBJECT_STORE_SECRETS: ReadonlyArray<readonly [name: string, description: string]> = [
+  [OBJECT_STORE_ACCESS_KEY_ENV, "the object store's login, which opens every file in every bucket"],
+  [OBJECT_STORE_SECRET_KEY_ENV, "its password"],
+]
+
 const SECRETS_CLOSING = "Keep .env out of version control, and use different values in production."
 
-/** One line per secret, each description two spaces past the longest name. */
-export function initSecretLines(): string[] {
-  const width = Math.max(...INIT_SECRETS.map(([name]) => name.length)) + 2
-  return INIT_SECRETS.map(([name, description]) => `${name.padEnd(width)}${description}`)
+/**
+ * One line per secret init wrote, each description two spaces past the longest name. With
+ * development storage in an S3 bucket of your own, init generates no object-store login.
+ */
+export function initSecretLines(storageLocal: StorageProvider = "local"): string[] {
+  const secrets = generatesObjectStoreLogin(storageLocal) ? [...INIT_SECRETS, ...OBJECT_STORE_SECRETS] : INIT_SECRETS
+  const width = Math.max(...secrets.map(([name]) => name.length)) + 2
+  return secrets.map(([name, description]) => `${name.padEnd(width)}${description}`)
 }
+
+/**
+ * The app's production build, given the linked deployment's API URL and anon key. Without it a
+ * production build read neither, and the deployed app rendered a blank page (issue 29).
+ */
+const BUILD_STEP = "supatype build --env production   # your app's production build, with the deployment's URL and anon key"
 
 /** Taking the project to production, for a target that has one. No frontend block: `supatype app add` covers that. */
 function deployBlock(result: InitStepsArgs["result"]): InitStepBlock | undefined {
   if (result.productionTarget === "cloud") {
     return {
       title: "When you're ready to deploy (Supatype Cloud):",
-      steps: ["supatype login", "supatype link --env production --project <ref>", "supatype push --env production"],
+      steps: ["supatype login", "supatype link --env production --project <ref>", "supatype push --env production", BUILD_STEP],
     }
   }
   if (result.productionTarget === "self-host") {
@@ -1732,6 +1809,7 @@ export function selfHostDeploySteps(result: Partial<Pick<WizardResult, "domain" 
     return [
       "supatype self-host compose up -d   # on your server: the Docker stack",
       link,
+      BUILD_STEP,
       "Later, optionally: set server.domain and server.tls.email in supatype.config.ts for automatic HTTPS",
     ]
   }
@@ -1741,6 +1819,7 @@ export function selfHostDeploySteps(result: Partial<Pick<WizardResult, "domain" 
     ...(result.tlsEmail ? [] : ["3. Set server.tls.email in supatype.config.ts (required for HTTPS)"]),
     "supatype self-host compose up -d   # Kong provisions HTTPS automatically",
     link,
+    BUILD_STEP,
     `Your Supatype platform goes live at https://${domain}`,
     "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certificates outlive restarts)",
   ]

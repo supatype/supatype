@@ -21,6 +21,7 @@ import { composeDbPublish } from "./db-port.js"
 import { readComposeEnvInt } from "./env-file.js"
 import { devDatabaseUrl, devPostgresPassword } from "./local-secrets.js"
 import { databaseUrlState } from "./database-url-owner.js"
+import { redact } from "./error-message.js"
 import {
   externalDatabaseUrl,
   localDSN,
@@ -30,6 +31,8 @@ import {
 } from "./project-config.js"
 
 export { COMPOSE_DEV_DB_PORT } from "./db-port.js"
+// Kept here for its callers; it lives beside the other failure text so the HTTP client can use it.
+export { redact } from "./error-message.js"
 
 /**
  * The host port a docker project's Postgres is published on in the stack's layout: the variable
@@ -53,12 +56,20 @@ export function hostComposeDbUrl(cwd: string, port: number | string): string {
   return devDatabaseUrl(cwd, `127.0.0.1:${port}`)
 }
 
-/** No stack runs for the project, so there is no stack database to derive. */
+/**
+ * What a command is told when it needs the project's local stack and the stack is not running.
+ * One sentence for every such command (issue 41): none of them starts Postgres or the stack itself
+ * any more, so each names the two ways to start it. `command` names the command run, when known.
+ */
+export function localStackNotRunningMessage(command?: string): string {
+  const again = command === undefined ? "run this again" : `run \`supatype ${command}\` again`
+  return `The local stack isn't running. Start it with \`supatype dev\`, or \`supatype self-host compose up -d\` on a server, then ${again}.`
+}
+
+/** The project's local stack is not running, so there is no stack database or API to reach. */
 export class NoStackRunning extends Error {
-  constructor(readonly projectName: string) {
-    super(
-      `No stack is running for ${projectName}. Start it with \`supatype dev\` or \`supatype self-host compose up -d\`.`,
-    )
+  constructor(readonly command?: string) {
+    super(localStackNotRunningMessage(command))
     this.name = "NoStackRunning"
   }
 }
@@ -70,7 +81,7 @@ export class NoStackRunning extends Error {
  */
 export function requireRunningStack(cwd: string, projectName: string): ComposeRenderMode {
   const mode = runningStackMode(cwd, projectName)
-  if (mode === undefined) throw new NoStackRunning(projectName)
+  if (mode === undefined) throw new NoStackRunning()
   return mode
 }
 
@@ -245,16 +256,6 @@ function runningDatabaseUrl(root: string, config: SupatypeProjectConfig): string
   if (resolveRuntimeProvider(config) !== "docker") return derivedDsn(root, config)
   const mode = runningStackMode(root, config.project.name)
   return mode === undefined ? undefined : hostComposeDbUrl(root, composeDbHostPort(root, mode))
-}
-
-/**
- * A connection string with its password removed.
- *
- * Every one of these reaches a terminal, and often a CI log. Printing a DSN to explain where
- * it came from should not be how a password ends up somewhere it is kept.
- */
-export function redact(dsn: string): string {
-  return dsn.replace(/(:\/\/[^:/@]+:)[^@]*(@)/, "$1***$2")
 }
 
 /**

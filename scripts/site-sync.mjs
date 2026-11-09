@@ -25,10 +25,10 @@ const sidebar = [
   ["GET STARTED", "Docs", [["Local development", "/docs/#local-dev"], ["Self-hosting", "/docs/#self-host"]]],
   ["BUILD", "Docs", [
     ["Schema", "/docs/schema.html"], ["Client", "/docs/client.html"], ["Frameworks", "/docs/frameworks.html"], ["Auth", "/docs/auth.html"],
-    ["Storage", "/docs/storage.html"], ["Realtime", "/docs/realtime.html"], ["Functions", "/docs/functions.html"],
+    ["Single sign-on", "/docs/sso.html"], ["Storage", "/docs/storage.html"], ["Realtime", "/docs/realtime.html"], ["Functions", "/docs/functions.html"],
     ["Seeding", "/docs/seeding.html"], ["Studio", "/docs/studio.html"], ["Studio roles", "/docs/studio-roles.html"],
   ]],
-  ["OPERATE", "Docs", [["Deploy changes", "/docs/#deploy-changes"], ["Upgrading Supatype", "/docs/#upgrading"], ["Running in production", "/docs/#production"]]],
+  ["OPERATE", "Docs", [["Deploy changes", "/docs/#deploy-changes"], ["Deploy your frontend", "/docs/deploying-your-frontend.html"], ["Upgrading Supatype", "/docs/#upgrading"], ["Running in production", "/docs/#production"]]],
   ["GUIDES", "Guides", [
     ["VM + GitHub Actions", "/deploy-vm-github-actions.html"],
     ["Coming from Supabase", "/from-supabase.html"], ["Coming from Prisma", "/from-prisma.html"],

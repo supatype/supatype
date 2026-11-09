@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { SpawnSyncReturns } from "node:child_process"
+import type { FakeRun } from "./support/fake-exec-file.js"
 
 /**
  * A secret the CLI hands to `docker` or to the engine goes in the child's environment, never on its
@@ -13,13 +14,24 @@ import type { SpawnSyncReturns } from "node:child_process"
 
 const SECRET = "s3cret-value-xyz"
 
-interface SpawnOptions { env?: NodeJS.ProcessEnv }
+interface SpawnOptions { env?: NodeJS.ProcessEnv | undefined }
 type Spawned = Partial<SpawnSyncReturns<string>>
-const spawnSync = vi.fn<(cmd: string, args: readonly string[], opts?: SpawnOptions) => Spawned>()
-vi.mock("node:child_process", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:child_process")>()),
-  spawnSync: (cmd: string, args: readonly string[], opts?: SpawnOptions) => spawnSync(cmd, args, opts),
-}))
+// Every run, whichever way it is started: docker setup through `spawnSync`, the engine and its
+// compose run through `execFile`.
+const ran = vi.fn<(cmd: string, args: readonly string[], opts?: SpawnOptions) => Spawned>()
+vi.mock("node:child_process", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:child_process")>()
+  const { fakeExecFile } = await import("./support/fake-exec-file.js")
+  const answer = (cmd: string, args: readonly string[], opts?: SpawnOptions): FakeRun => {
+    const run = ran(cmd, args, opts)
+    return { status: run.status ?? null, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }
+  }
+  return {
+    ...real,
+    spawnSync: (cmd: string, args: readonly string[], opts?: SpawnOptions) => ran(cmd, args, opts),
+    execFile: fakeExecFile(answer, () => new real.ChildProcess()),
+  }
+})
 vi.mock("../src/config.js", () => ({ hasProjectConfig: () => true, loadConfig: () => ({}) }))
 vi.mock("../src/ensure-binary.js", () => ({ ensureBinary: async () => "/fake/supatype-engine" }))
 
@@ -32,8 +44,8 @@ const { AUTHENTICATOR_PASSWORD_ENV, nativeRolesSql } = await import("../src/nati
 
 /** The one spawn made, with the secret nowhere on its command line. */
 function onlyCall(): { args: readonly string[]; env: NodeJS.ProcessEnv } {
-  expect(spawnSync).toHaveBeenCalledTimes(1)
-  const [, args, opts] = spawnSync.mock.calls[0]!
+  expect(ran).toHaveBeenCalledTimes(1)
+  const [, args, opts] = ran.mock.calls[0]!
   expect(args.join(" ")).not.toContain(SECRET)
   return { args, env: opts?.env ?? {} }
 }
@@ -43,7 +55,7 @@ function onlyCall(): { args: readonly string[]; env: NodeJS.ProcessEnv } {
  * (`capabilities`, `--version`: the engine floor and the identity-column gate).
  */
 function onlyEngineRun(): { args: readonly string[]; env: NodeJS.ProcessEnv } {
-  const runs = spawnSync.mock.calls.filter(([, args]) => args[0] !== "capabilities" && args[0] !== "--version")
+  const runs = ran.mock.calls.filter(([, args]) => args[0] !== "capabilities" && args[0] !== "--version")
   expect(runs).toHaveLength(1)
   const [, args, opts] = runs[0]!
   expect(args.join(" ")).not.toContain(SECRET)
@@ -56,8 +68,8 @@ function bareEnvFlags(args: readonly string[]): string[] {
 }
 
 beforeEach(() => {
-  spawnSync.mockReset()
-  spawnSync.mockReturnValue({ status: 0, stdout: "", stderr: "" })
+  ran.mockReset()
+  ran.mockReturnValue({ status: 0, stdout: "", stderr: "" })
 })
 
 describe("dockerEnv", () => {
@@ -77,7 +89,7 @@ describe("docker run for the dev Postgres", () => {
   it("passes POSTGRES_PASSWORD through the environment", () => {
     dockerPgStart({ image: "supatype/postgres:test", projectName: "p", port: 5555, password: SECRET })
     // The first call removes any old container; the second is the run.
-    const [, args, opts] = spawnSync.mock.calls[1]!
+    const [, args, opts] = ran.mock.calls[1]!
 
     expect(args.join(" ")).not.toContain(SECRET)
     expect(bareEnvFlags(args)).toContain("POSTGRES_PASSWORD")
@@ -100,7 +112,7 @@ describe("the engine", () => {
   it.each(["/diff", "/push", "/seed", "/introspect", "/doctor", "/adopt", "/rollback", "/migrations"])(
     "%s gets the database URL from DATABASE_URL, not --database-url",
     async (endpoint) => {
-      spawnSync.mockReturnValue({ status: 0, stdout: "{}", stderr: "" })
+      ran.mockReturnValue({ status: 0, stdout: "{}", stderr: "" })
       const url = `postgresql://supatype_admin:${SECRET}@127.0.0.1:54329/app`
 
       await engineRequest(endpoint, { ast: { models: [] }, database_url: url })
@@ -111,11 +123,11 @@ describe("the engine", () => {
     },
   )
 
-  it("in the compose tools profile gets the database URL through a bare -e DATABASE_URL", () => {
+  it("in the compose tools profile gets the database URL through a bare -e DATABASE_URL", async () => {
     const url = `postgresql://supatype_admin:${SECRET}@db:5432/app`
     const target = { cwd: ".", project: "p", composePath: "compose.yml", engineImage: "supatype/engine:test" }
 
-    spawnComposeEngine(target, ["diff", "--schema", "public"], { secrets: { DATABASE_URL: url } })
+    await spawnComposeEngine(target, ["diff", "--schema", "public"], { secrets: { DATABASE_URL: url } })
     const { args, env } = onlyCall()
 
     expect(bareEnvFlags(args)).toEqual(["DATABASE_URL"])

@@ -96,6 +96,24 @@ describe("init's next steps for a self-host project", () => {
     expect(steps).toEqual(["cd acme", "pnpm install", "pnpm dev", "Open http://localhost:18480"])
   })
 
+  /**
+   * Issue 29: a production build read no anon key, so a deployed app rendered a blank page. The
+   * deploy steps build the app with `supatype build` once the deployment is linked, so the build is
+   * given that deployment's address and key.
+   */
+  it.each(["", "api.example.com"])("builds the app with supatype build after linking (domain %o)", (domain) => {
+    const steps = commands(selfHostDeploySteps({ domain }))
+    const link = steps.findIndex((step) => step.startsWith("supatype link"))
+    expect(link).toBeGreaterThanOrEqual(0)
+    expect(steps.indexOf("supatype build --env production")).toBeGreaterThan(link)
+  })
+
+  it("builds the app with supatype build after pushing to Supatype Cloud", () => {
+    const blocks = initStepBlocks(args({ result: { ...args().result, productionTarget: "cloud" } }))
+    const steps = commands(blocks.at(-1)!.steps)
+    expect(steps.indexOf("supatype build --env production")).toBeGreaterThan(steps.indexOf("supatype push --env production"))
+  })
+
   it("prints no deploy block when production is decided later", () => {
     const titles = initStepBlocks(args({ result: { ...args().result, productionTarget: "later" } })).map((b) => b.title)
     expect(titles.some((title) => /deploy/i.test(title))).toBe(false)
@@ -116,5 +134,15 @@ describe("init's secrets list", () => {
   it("keeps the closing sentence out of the list", () => {
     expect(initSecretLines().some((line) => line.startsWith("Keep .env"))).toBe(false)
     expect(initStepBlocks(args()).find((b) => b.title.startsWith("Secrets"))!.after).toMatch(/^Keep \.env/)
+  })
+
+  // Round 6: the object store's generated login was in .env but not in this list.
+  it("names the object store's login when init generated one", () => {
+    const names = (storageLocal: "local" | "s3") =>
+      initStepBlocks(args({ result: { ...args().result, storageLocal } }))
+        .find((b) => b.title.startsWith("Secrets"))!
+        .steps.map((line) => line.split(" ")[0])
+    expect(names("local")).toEqual(expect.arrayContaining(["SUPATYPE_OBJECT_STORE_ACCESS_KEY", "SUPATYPE_OBJECT_STORE_SECRET_KEY"]))
+    expect(names("s3")).not.toContain("SUPATYPE_OBJECT_STORE_ACCESS_KEY")
   })
 })

@@ -100,3 +100,36 @@ describe("a real deployment's front-end values", () => {
     expect(existsSync(join(dir, DEV_FRONTEND_ENV_FILE))).toBe(false)
   })
 })
+
+/**
+ * A Next.js app's `/supatype-env.js` route and its server client read `SUPATYPE_URL` and
+ * `SUPATYPE_ANON_KEY` from the server's environment. `next dev` loads `.env.development.local`, so
+ * a local stack's pair goes there too, and the route answers in development rather than refusing with a
+ * console error on every page. Never to `.env`: a production server sets its own.
+ */
+describe("the server's names for a local stack", () => {
+  it("go to .env.development.local beside the front-end names", () => {
+    writeFrontendEnv(dir, { apiUrl: URL, anonKey: ANON })
+    expect(devFile()).toMatchObject({ SUPATYPE_URL: URL, SUPATYPE_ANON_KEY: ANON })
+  })
+
+  it("are written for each value on its own, as the front-end names are", () => {
+    writeFrontendEnv(dir, { apiUrl: URL })
+    expect(devFile()["SUPATYPE_URL"]).toBe(URL)
+    expect(devFile()["SUPATYPE_ANON_KEY"]).toBeUndefined()
+    writeFrontendEnv(dir, { anonKey: ANON }, { local: true })
+    expect(devFile()["SUPATYPE_ANON_KEY"]).toBe(ANON)
+  })
+
+  it("keep a value already there unless told to replace it", () => {
+    writeFileSync(join(dir, DEV_FRONTEND_ENV_FILE), "SUPATYPE_URL=http://127.0.0.1:9000\n")
+    writeFrontendEnv(dir, { apiUrl: URL }, { replace: false })
+    expect(devFile()["SUPATYPE_URL"]).toBe("http://127.0.0.1:9000")
+  })
+
+  it("are not written to .env for a real deployment", () => {
+    writeFrontendEnv(dir, { apiUrl: "https://api.example.com", anonKey: "prod.anon.key" })
+    expect(readEnvFile(dir)["SUPATYPE_URL"]).toBeUndefined()
+    expect(readEnvFile(dir)["SUPATYPE_ANON_KEY"]).toBeUndefined()
+  })
+})

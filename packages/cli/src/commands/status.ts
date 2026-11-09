@@ -2,15 +2,16 @@
  * supatype status: show linked target or local stack state.
  */
 import type { Command } from "commander"
-import { errorMessage } from "../error-message.js"
+import { errorMessage, redact } from "../error-message.js"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { composeContext, composeServices } from "../compose-services.js"
 import { localPublicApiUrl } from "../local-gateway.js"
 import { loadLocalEnvironment, loadProjectLink } from "../link.js"
-import { resolveTarget, targetStatus } from "../resolve-target.js"
+import { hostDatabaseUrl, resolveTarget, targetStatus } from "../resolve-target.js"
 import { error, info, plain, warn } from "../ui/messages.js"
 import { isJsonObject } from "@supatype/shared"
+import type { SupatypeProjectConfig } from "../config.js"
 
 export function registerStatus(program: Command): void {
   program
@@ -27,7 +28,9 @@ export function registerStatus(program: Command): void {
           const target = resolveTarget(cwd, { env: opts.env })
           if (target.mode !== "direct") {
             await printLinkedStatus(target)
-            return
+            // The local stack's services follow its functions: only the functions were listed,
+            // where the help promised services (issue 79). A remote stack is not this machine's.
+            if (target.mode !== "local") return
           }
         } catch (err) {
           error(errorMessage(err))
@@ -107,15 +110,28 @@ async function printLocalStackStatus(cwd: string): Promise<void> {
   plain(`\n${running.length}/${services.length} services running`)
 
   if (running.length > 0) {
-    const localEnv = loadLocalEnvironment(cwd)
-    plain(`\nAPI URL:    ${localEnv?.apiUrl ?? localPublicApiUrl(cwd)}`)
-    if (localEnv?.databaseUrl) {
-      plain(`Database:   ${localEnv.databaseUrl}`)
-    }
+    plain(`\nAPI URL:    ${loadLocalEnvironment(cwd)?.apiUrl ?? localPublicApiUrl(cwd)}`)
+    const database = ctx.config && hostDatabase(cwd, ctx.config)
+    if (database !== undefined) plain(`Database:   ${database}`)
   }
 
   if (existsSync(resolve(cwd, ".supatype/environment.json"))) {
     plain("\nLocal environment file: .supatype/environment.json")
     info("Link remote ops: supatype link --url <api> --token $SERVICE_ROLE_KEY")
+  }
+}
+
+/**
+ * The database as a program on this machine connects to it, without its password, or undefined
+ * when none can be named. Not environment.json's URL: that one is the db container's name inside the
+ * stack, and it was printed with the superuser's password in it (issue 80), in the output people
+ * paste into an issue.
+ */
+function hostDatabase(cwd: string, config: SupatypeProjectConfig): string | undefined {
+  try {
+    return redact(hostDatabaseUrl(cwd, config))
+  } catch {
+    // DsnNotFound: no database can be named, so the line is left out.
+    return undefined
   }
 }

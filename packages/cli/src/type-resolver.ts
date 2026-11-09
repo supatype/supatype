@@ -1,5 +1,6 @@
-import { resolve } from "node:path"
+import { basename, dirname, resolve } from "node:path"
 import ts from "typescript"
+import { TYPESCRIPT_LIB_FILES, TYPESCRIPT_ROOT_LIB } from "./generated/typescript-libs.js"
 
 export type AliasEntry = {
   typeParams: string[]
@@ -386,6 +387,24 @@ function createCheckerStubFile(): ts.SourceFile {
   )
 }
 
+/** Where the running compiler looks for its lib files, which in the compiled CLI do not exist. */
+const TYPESCRIPT_LIB_DIR = resolve(dirname(ts.getDefaultLibFilePath({})))
+
+/**
+ * A TypeScript lib file, from the copy the CLI carries.
+ *
+ * The compiled CLI has the compiler's JavaScript but none of its .d.ts files, and the directory it
+ * would read them from is the build machine's. Without them `Array` and `Record` are unknown names,
+ * so `JSON<string[]>` was written out as `{}` and `JSON<Record<string, number>>` as `Json`. Every
+ * file in the lib directory is answered from the carried copy, so the checker reads one set of
+ * libs whether the CLI runs compiled or as JavaScript.
+ */
+function carriedLibFile(fileName: string): string | undefined {
+  if (resolve(dirname(fileName)) !== TYPESCRIPT_LIB_DIR) return undefined
+  const name = basename(fileName)
+  return Object.hasOwn(TYPESCRIPT_LIB_FILES, name) ? TYPESCRIPT_LIB_FILES[name] : undefined
+}
+
 function createCheckerContext(sourceFiles: ts.SourceFile[]): CheckerContext {
   const stubFile = createCheckerStubFile()
   const fileMap = new Map<string, ts.SourceFile>([
@@ -399,22 +418,26 @@ function createCheckerContext(sourceFiles: ts.SourceFile[]): CheckerContext {
     // written out as `{ a: string }`.
     strictNullChecks: true,
     // ES only: a schema has no use for the DOM, and loading it is most of the program's cost.
-    lib: ["lib.es2022.d.ts"],
+    lib: [TYPESCRIPT_ROOT_LIB],
     baseUrl: process.cwd(),
     paths: {
       "@supatype/types": ["__supatype_checker_stubs__.ts"],
     },
   }
+  const program = ts.createProgram([...fileMap.keys()], options, checkerHost(fileMap, options))
+  return { program, checker: program.getTypeChecker() }
+}
 
-  const host: ts.CompilerHost = {
+/** Schema files from `fileMap`, lib files from the carried copy, anything else from disk. */
+function checkerHost(fileMap: Map<string, ts.SourceFile>, options: ts.CompilerOptions): ts.CompilerHost {
+  const readFile = (fileName: string): string | undefined =>
+    fileMap.get(resolve(fileName))?.getFullText() ?? carriedLibFile(fileName) ?? ts.sys.readFile(fileName)
+  return {
     getSourceFile: (fileName, languageVersion) => {
       const existing = fileMap.get(resolve(fileName))
       if (existing) return existing
-      const libContent = ts.sys.readFile(fileName)
-      if (libContent) {
-        return ts.createSourceFile(fileName, libContent, languageVersion, true)
-      }
-      return undefined
+      const text = readFile(fileName)
+      return text === undefined ? undefined : ts.createSourceFile(fileName, text, languageVersion, true)
     },
     // The full path: a bare file name resolves nowhere, the program then has no lib at all, and
     // `Array` is an unknown name, so `Item[]` reads as `{}`.
@@ -424,12 +447,10 @@ function createCheckerContext(sourceFiles: ts.SourceFile[]): CheckerContext {
     getCanonicalFileName: (f) => f,
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => ts.sys.newLine,
-    fileExists: (fileName) => fileMap.has(resolve(fileName)) || ts.sys.fileExists(fileName),
-    readFile: (fileName) => fileMap.get(resolve(fileName))?.getFullText() ?? ts.sys.readFile(fileName),
+    fileExists: (fileName) =>
+      fileMap.has(resolve(fileName)) || carriedLibFile(fileName) !== undefined || ts.sys.fileExists(fileName),
+    readFile,
   }
-
-  const program = ts.createProgram([...fileMap.keys()], options, host)
-  return { program, checker: program.getTypeChecker() }
 }
 
 function findNodeAtPosition(root: ts.Node, pos: number, end: number): ts.Node | undefined {

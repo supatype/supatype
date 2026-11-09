@@ -14,6 +14,7 @@ import type { SupatypeError } from "@supatype/client"
 import { useAuth } from "@supatype/react"
 import { useAuthTheme } from "./theme.js"
 import { fieldStyles } from "./styles.js"
+import { settleAuthRequest } from "./authRequest.js"
 
 export interface MagicLinkFormLabels {
   title?: string | undefined
@@ -60,20 +61,17 @@ export function MagicLinkForm({
   async function handleSubmit(): Promise<void> {
     setErrorMessage(null)
     setLoading(true)
-    try {
-      const { error } = await signInWithOtp({
-        email,
-        ...(redirectTo !== undefined && { options: { emailRedirectTo: redirectTo } }),
-      })
-      if (error !== null) {
-        setErrorMessage(error.message)
-        onError?.(error)
-      } else {
-        setSent(true)
-        onSent?.()
-      }
-    } finally {
-      setLoading(false)
+    const result = await settleAuthRequest("MagicLinkForm", () => signInWithOtp({
+      email,
+      ...(redirectTo !== undefined && { options: { emailRedirectTo: redirectTo } }),
+    }))
+    setLoading(false)
+    if (result.error !== null) {
+      setErrorMessage(result.error.message)
+      onError?.(result.error)
+    } else {
+      setSent(true)
+      onSent?.()
     }
   }
 

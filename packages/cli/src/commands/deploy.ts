@@ -18,16 +18,28 @@ import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
-import { deploySchemaToLinkedProject, loadCloudConfig, pushSchemaToLinkedProject } from "./cloud.js"
+import { deploySchemaToLinkedProject, pushSchemaToLinkedProject } from "./cloud.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
 import { isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
-import { ensureEngine, enginePush, engineRequest, type DiffResult } from "../engine-client.js"
+import { enginePush, type DiffResult } from "../engine-client.js"
+import { engineRequestIn, requireEngineFeaturesIn, stackEngine } from "../stack-engine.js"
 import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
 import { formatSecurityDrift, plannedChanges, securityDrift } from "../diff-output.js"
-import { OVERWRITE_DRIFT_NEED, requireEngineFeatures } from "../engine-ownership-gate.js"
-import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
+import { OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js"
+import {
+  resolveAppConfig,
+  validateStaticMode,
+  validateBuildOutput,
+  detectPackageManager,
+  type ResolvedAppConfig,
+} from "../app/framework.js"
+import { commandSpawn } from "../build-spawn.js"
+import { installCommand, type InstallCommand } from "../init-setup-steps.js"
+import { fatalError } from "../ui/fatal.js"
+import { frontendEnv } from "../frontend-env.js"
+import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
@@ -56,6 +68,67 @@ export function deploySecurityDriftRefusal(
   ].join("\n")
 }
 
+/**
+ * The environment `deploy` builds the app in: this process's, the app's own `build.env`, and the
+ * deployment's API URL and anon key under every front-end name, through the resolver `supatype
+ * build` uses (frontend-values.ts), which reads `build.env` first. Never the service role key.
+ * Throws {@link FrontendValuesRefused} when either value is missing.
+ *
+ * It used to set the URL copies only, from the control plane's address rather than the project's,
+ * and no anon key, so a deployed app rendered a blank page.
+ */
+export async function deployBuildEnv(
+  cwd: string,
+  opts: { env: string; appEnv: Record<string, string>; allowLocal?: boolean },
+): Promise<NodeJS.ProcessEnv> {
+  const buildEnv: NodeJS.ProcessEnv = { ...process.env, ...opts.appEnv }
+  const values = await resolveFrontendValues({
+    cwd,
+    env: opts.env,
+    allowLocal: opts.allowLocal === true,
+    processEnv: buildEnv,
+    command: "supatype deploy",
+  })
+  info(`Building with the ${describeFrontendSources(values)}`)
+  return { ...buildEnv, ...frontendEnv(values) }
+}
+
+/**
+ * Run `program` in `dir` with `env`, and stop the deploy saying `outcome.failure` when it does not
+ * succeed. Both callers go through cmd.exe on Windows, where `npm` and `pnpm` are `.cmd` files Node
+ * will not start without a shell.
+ */
+function runDeployStep(
+  dir: string,
+  program: InstallCommand,
+  env: NodeJS.ProcessEnv,
+  outcome: { timeoutMs: number; failure: string },
+): void {
+  const result = spawnSync(program.file, program.args, { cwd: dir, stdio: "inherit", env, shell: program.shell, timeout: outcome.timeoutMs })
+  if (result.status !== 0) fatalError(outcome.failure)
+}
+
+/** Install the app's dependencies and build it with the deployment's front-end values ({@link deployBuildEnv}). */
+async function installAndBuild(
+  cwd: string,
+  appConfig: ResolvedAppConfig,
+  opts: { env: string; allowLocal: boolean },
+): Promise<void> {
+  let buildEnv: NodeJS.ProcessEnv
+  try {
+    buildEnv = await deployBuildEnv(cwd, { ...opts, appEnv: appConfig.env })
+  } catch (err) {
+    if (!(err instanceof FrontendValuesRefused)) throw err
+    fatalError(err.message)
+  }
+  const pm = detectPackageManager(appConfig.directory)
+  info(`Installing dependencies (${pm})...`)
+  runDeployStep(appConfig.directory, installCommand(pm), buildEnv, { timeoutMs: 5 * 60 * 1000, failure: "Dependency installation failed." })
+  plain("\nBuilding...")
+  const argv = appConfig.buildCommand.split(" ").filter((part) => part !== "")
+  runDeployStep(appConfig.directory, commandSpawn(argv), buildEnv, { timeoutMs: 10 * 60 * 1000, failure: "Build failed." })
+}
+
 export function registerDeploy(program: Command): void {
   const deploy = program
     .command("deploy")
@@ -74,6 +147,7 @@ export function registerDeploy(program: Command): void {
       "--overwrite-drift",
       "Put back policies, grants, labels and RLS changed outside Supatype; without it the deploy refuses",
     )
+    .option("--allow-local", "Build the app against a local stack's address, which a deploy otherwise refuses")
     .action(async (opts: {
       local?: boolean
       environment?: string
@@ -84,11 +158,11 @@ export function registerDeploy(program: Command): void {
       preview?: boolean
       yes?: boolean
       overwriteDrift?: boolean
+      allowLocal?: boolean
     }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd, { local: false })
       const link = loadProjectLink(cwd)
-      const cloudCfg = loadCloudConfig(cwd)
       const envName = opts.env ?? opts.environment ?? "production"
       // A linked deploy is checked against the server it pushes to (`targetSchemaPush`), a local one
       // against the engine binary, before either sends the flag.
@@ -115,16 +189,14 @@ export function registerDeploy(program: Command): void {
 
         if (opts.local) {
           step("Schema Push (local)")
-          await ensureEngine()
-          if (overwriteDrift) await requireEngineFeatures([OVERWRITE_DRIFT_NEED])
+          const databaseUrl = resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn
+          const engine = await stackEngine(cwd, config, undefined, databaseUrl)
+          if (overwriteDrift) await requireEngineFeaturesIn(engine, [OVERWRITE_DRIFT_NEED])
 
-          const diff = await engineRequest(
+          const diff = await engineRequestIn(
+            engine,
             "/diff",
-            {
-              ast,
-              database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
-              schema: pgSchema(config),
-            },
+            { ast, database_url: databaseUrl, schema: pgSchema(config) },
             isDiffResult,
           )
 
@@ -142,12 +214,13 @@ export function registerDeploy(program: Command): void {
                 cwd,
                 {
                   ast,
-                  database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
+                  database_url: databaseUrl,
                   schema: pgSchema(config),
                   force: true,
                   ...(overwriteDrift && { overwrite_drift: true }),
                 },
                 isEnginePushResult,
+                engine,
               ),
             )
             info("Schema changes applied.")
@@ -197,47 +270,7 @@ export function registerDeploy(program: Command): void {
           info(`Output directory: ${appConfig.outputDirectory}`)
           plain()
 
-          // Inject environment variables
-          const buildEnv: NodeJS.ProcessEnv = {
-            ...process.env,
-            ...appConfig.env,
-          }
-
-          // Inject Supatype URLs if project is linked
-          if (cloudCfg?.projectSlug) {
-            buildEnv["NEXT_PUBLIC_SUPATYPE_URL"] = cloudCfg.apiUrl || `https://${cloudCfg.projectSlug}.supatype.dev`
-            buildEnv["VITE_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]!
-            buildEnv["PUBLIC_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]!
-            // NEVER inject service_role key, only anon key is safe for client-side
-          }
-
-          // Install dependencies
-          const pm = detectPackageManager(appConfig.directory)
-          info(`Installing dependencies (${pm})...`)
-          const installResult = spawnSync(pm, ["install"], {
-            cwd: appConfig.directory,
-            stdio: "inherit",
-            env: buildEnv,
-            timeout: 5 * 60 * 1000, // 5 minute timeout
-          })
-          if (installResult.status !== 0) {
-            error("Dependency installation failed.")
-            process.exit(1)
-          }
-
-          // Run build
-          plain("\nBuilding...")
-          const [buildCmd, ...buildArgs] = appConfig.buildCommand.split(" ")
-          const buildResult = spawnSync(buildCmd!, buildArgs, {
-            cwd: appConfig.directory,
-            stdio: "inherit",
-            env: buildEnv,
-            timeout: 10 * 60 * 1000, // 10 minute timeout
-          })
-          if (buildResult.status !== 0) {
-            error("Build failed.")
-            process.exit(1)
-          }
+          await installAndBuild(cwd, appConfig, { env: envName, allowLocal: opts.allowLocal === true })
         }
 
         // Validate build output

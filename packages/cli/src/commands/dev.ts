@@ -18,6 +18,8 @@ import type { DestructiveConsentDeps } from "../destructive-consent.js"
 import { reportDevPushFailure } from "../push-refusal.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
+import { runCaptured } from "../run-captured.js"
+import { serialRuns } from "../serial-runs.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 import { hasEnvValue, readDotEnvFiles } from "../env-file.js"
@@ -47,6 +49,7 @@ import {
   nativeStateRoot,
   nativeServerPort,
   REALTIME_PORT_ENV,
+  publicEnvServerEnv,
   resolveRuntimeProvider,
   schemaPathFromProject,
   serviceRoleRoutes,
@@ -93,7 +96,7 @@ import {
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
 import { postgrestHookActorEnv } from "../hook-actor.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { beginDevSession, endDevSession, resolveDevUiMode, showDevStep, startDevSession } from "../dev-session.js"
+import { beginDevSession, endDevSession, resolveDevUiMode, showDevStep, startDevSession, withSavePushOutput } from "../dev-session.js"
 import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
@@ -117,6 +120,8 @@ import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
+import { warnSmtpWithoutHost } from "../config-mailer-env.js"
+import { nativeSamlEnv } from "../saml-config.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
 import {
   nativeAuthMailerEnv,
@@ -139,6 +144,7 @@ import {
   stop as pgStop,
   waitReady as pgWaitReady,
   isPortInUse,
+  portCheckCommand,
 } from "../postgres-ctl.js"
 import {
   isPasswordRejected,
@@ -147,11 +153,6 @@ import {
   requireSuperuserPassword,
   superuserPasswordMissingMessage,
 } from "../native-pg-auth.js"
-function portCheckCommand(port: number): string {
-  return process.platform === "win32"
-    ? `netstat -ano | findstr :${port}`
-    : `lsof -i :${port}`
-}
 
 /** The ports native dev binds, each with what usually holds it and how to move it. */
 interface NativeDevPorts {
@@ -529,6 +530,7 @@ export function registerDev(program: Command): void {
       // What an env("NAME") in auth.providers resolves against: the shell over .env, as for the config.
       const providerEnvironment = { ...dotEnv, ...process.env }
       warnMissingAuthProviderSecrets(config, providerEnvironment)
+      warnSmtpWithoutHost(config, providerEnvironment)
       // functions.serviceRole as the worker starts with it; the config watch below keeps it current.
       const serviceRole = { routesPath: devServiceRoleRoutesPath(cwd), initial: serviceRoleRoutes(config) }
       writeServiceRoleRoutesFile(serviceRole.routesPath, serviceRole.initial)
@@ -559,6 +561,7 @@ export function registerDev(program: Command): void {
         SUPATYPE_PUBLIC_URL: `http://localhost:${serverPort}`,
         SUPATYPE_REALTIME_URL: realtimeUrl,
         SUPATYPE_ANON_KEY: anonKey,
+        ...publicEnvServerEnv(config),
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
         PORT: serverPort,
         SUPATYPE_APP_MODE: config.app.mode ?? "none",
@@ -591,6 +594,8 @@ export function registerDev(program: Command): void {
         ...serverStorageEnv(nativeStorage, config, stateRoot),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
+        // auth.sso.saml, with the signing key from .env (generated there the first time SAML is on).
+        ...nativeSamlEnv(cwd, config),
         ...nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }),
       }
 
@@ -740,14 +745,22 @@ export function registerDev(program: Command): void {
           reload: functionsWatch.reload,
         })
         const { watchDevSchema } = await import("../dev-schema-watch.js")
+        // One push at a time: a save during a push is pushed once it is done, as docker dev queues it.
+        // A hook the push declares is served once the worker's routes name it.
+        const pushSaved = serialRuns(
+          () => runSchemaPush(schemaPush).then(() => functionsWatch.refresh()),
+          reportUnlessStopping(reportDevPushFailure),
+        )
         watchDevSchema({
           dir: schemaDir,
           changedSinceLastPush: async () =>
             JSON.stringify((await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast) !== _lastReadAst,
+          // pushSaved reports its own failure, inside the scope, so its hints reach the dashboard.
           push: (why) => {
-            console.log(`\n[supatype] ${why}, checking schema...`)
-            // A hook the push declares is served once the worker's routes name it.
-            runSchemaPush(schemaPush).then(() => functionsWatch.refresh()).catch(reportUnlessStopping(reportDevPushFailure))
+            void withSavePushOutput(async () => {
+              console.log(`\n[supatype] ${why}, checking schema...`)
+              await pushSaved()
+            })
           },
         })
       }
@@ -993,8 +1006,8 @@ async function writeNativeSchemaArtifacts(
 }
 
 /** The storage buckets the schema declares, as the engine resolves them; none when it cannot say. */
-function declaredBuckets(engineBin: string, cwd: string, astPath: string): ParsedStorageBucket[] {
-  const parseResult = spawnSync(engineBin, ["parse", "-i", astPath], { cwd, stdio: "pipe", encoding: "utf8" })
+async function declaredBuckets(engineBin: string, cwd: string, astPath: string): Promise<ParsedStorageBucket[]> {
+  const parseResult = await runCaptured(engineBin, ["parse", "-i", astPath], { cwd })
   if (parseResult.status !== 0 || !parseResult.stdout) return []
   try {
     const resolvedAst: unknown = JSON.parse(parseResult.stdout)
@@ -1014,7 +1027,7 @@ async function provisionDeclaredBuckets(
   astPath: string,
   paths: { storagePath?: string | undefined; storageApi?: StorageApi | undefined },
 ): Promise<void> {
-  const buckets = declaredBuckets(engineBin, cwd, astPath)
+  const buckets = await declaredBuckets(engineBin, cwd, astPath)
   if (buckets.length === 0 || paths.storagePath === undefined) return
   await provisionNativeBuckets(buckets, { storagePath: paths.storagePath, storageApi: paths.storageApi })
 }
@@ -1042,11 +1055,7 @@ async function writeNativeAdminConfig(
   ast: ExtractedSchemaAstV2,
   config: import("../project-config.js").SupatypeProjectConfig | undefined,
 ): Promise<void> {
-  const adminResult = spawnSync(paths.engineBin, ["admin", "-i", paths.astPath], {
-    cwd: paths.cwd,
-    stdio: "pipe",
-    encoding: "utf8",
-  })
+  const adminResult = await runCaptured(paths.engineBin, ["admin", "-i", paths.astPath], { cwd: paths.cwd })
   if (adminResult.status !== 0 || !adminResult.stdout) return
   const { withAdminRoles } = await import("../studio-admin-roles.js")
   let admin: unknown

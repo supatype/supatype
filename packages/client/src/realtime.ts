@@ -1,4 +1,5 @@
 import { asHeadersProvider, bearerToken, type HeadersProvider } from "./query.js"
+import { settle, type Deferred } from "./runtime-env.js"
 import { coerceRecordKinds, type ExactFields } from "./exact-values.js"
 import { isArrayOf, isJsonObject, isOneOf, isRecordOf, isShape, isString, nullable, optional, type Guard } from "./json.js"
 
@@ -191,7 +192,7 @@ const SUBSCRIBED_TO = "subscribed to "
 // ─── Realtime client ─────────────────────────────────────────────────────────
 
 export class RealtimeClient {
-  private readonly url: string
+  private readonly base: Deferred<string>
   private readonly getHeaders: HeadersProvider
   private ws: WebSocket | null = null
   private channels = new Map<string, ChannelState>()
@@ -223,10 +224,14 @@ export class RealtimeClient {
    * for the life of the page: on a table that is not anon-readable it reported SUBSCRIBED and then
    * delivered nothing, which is indistinguishable from a quiet table.
    */
-  constructor(url: string, auth: Record<string, string> | HeadersProvider) {
-    // Convert http(s) URL to ws(s) URL
-    this.url = url.replace(/^http/, "ws")
+  constructor(url: Deferred<string>, auth: Record<string, string> | HeadersProvider) {
+    this.base = url
     this.getHeaders = asHeadersProvider(auth)
+  }
+
+  /** The socket's address, as ws(s) for an http(s) one. Read when connecting, not before. */
+  private get url(): string {
+    return settle(this.base).replace(/^http/, "ws")
   }
 
   /** The token this socket should authenticate with, or undefined when there is none. */
@@ -482,6 +487,9 @@ export class RealtimeClient {
     // One connect at a time: resolving the token is asynchronous, so two subscribes in the same
     // tick would otherwise each open a socket and the second would orphan the first.
     if (this.isLive() || this.attempt !== null) return
+    // Read here, synchronously, so a client with no address or anon key throws from the subscribe
+    // that asked for the socket rather than from a background attempt nobody is waiting on.
+    const url = this.url
 
     let attempt: Promise<void>
     const isCurrent = (): boolean => this.attempt === attempt
@@ -489,7 +497,7 @@ export class RealtimeClient {
     // is still the current one. Called directly, the path that already has a token reaches that
     // question with no await in front of it, compares against a handle nobody had stored yet, and
     // abandons itself.
-    attempt = Promise.resolve().then(() => this.openSocket(isCurrent, token))
+    attempt = Promise.resolve().then(() => this.openSocket(url, isCurrent, token))
     this.attempt = attempt
     void attempt.finally(() => {
       // Only if it is still ours. An attempt abandoned mid-flight must not clear the handle of the
@@ -506,6 +514,7 @@ export class RealtimeClient {
    * meantime, by disconnect() or by reauthenticate(), does not install itself afterwards.
    */
   private async openSocket(
+    url: string,
     isCurrent: () => boolean,
     known?: string | undefined,
   ): Promise<void> {
@@ -526,7 +535,7 @@ export class RealtimeClient {
     if (!isCurrent()) return
 
     this.currentToken = token
-    const wsUrl = token ? `${this.url}?token=${encodeURIComponent(token)}` : this.url
+    const wsUrl = token ? `${url}?token=${encodeURIComponent(token)}` : url
     const ws = new WebSocket(wsUrl)
     this.ws = ws
 

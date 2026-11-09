@@ -12,6 +12,11 @@
  * Git Bash adds one wrinkle: a script's `(cd dir && exec node ...)` leaves a bash stub between the
  * script and node, and the stub outlives a killed script. On Windows the grandparent is therefore
  * watched too (watchAlso), resolved once at start.
+ *
+ * An ancestor counts only for a change: one that was alive when it was added and has exited since.
+ * Windows keeps a process's parent PID after that parent exits, so a shell opened by a launcher
+ * that then exited (Start-Process, `start` from a script) names a grandparent gone from the start,
+ * and dev stopped itself two seconds after every start.
  */
 
 import { execFile } from "node:child_process"
@@ -38,7 +43,7 @@ export const liveProbe: ProcessProbe = {
 }
 
 export interface ParentWatch {
-  /** Watch one more ancestor; its death counts as the parent's. */
+  /** Watch one more ancestor; its death counts as the parent's. One already gone is ignored. */
   watchAlso(pid: number): void
   stop(): void
 }
@@ -50,8 +55,8 @@ export interface WatchParentOptions {
 
 /**
  * Calls `onGone` once, within `intervalMs`, after the parent (or an ancestor added with
- * `watchAlso`) exits. Started without a parent to lose (PID 0 or 1: already orphaned, or the
- * container's init), it watches nothing. The timer does not keep the process alive.
+ * `watchAlso` while it was alive) exits. Started without a parent to lose (PID 0 or 1: already
+ * orphaned, or the container's init), it watches nothing. The timer does not keep the process alive.
  */
 export function watchParent(onGone: () => void, opts: WatchParentOptions = {}): ParentWatch {
   const probe = opts.probe ?? liveProbe
@@ -75,7 +80,7 @@ export function watchParent(onGone: () => void, opts: WatchParentOptions = {}): 
   }
   return {
     watchAlso: (pid) => {
-      if (timer !== undefined && pid > 1) watched.add(pid)
+      if (timer !== undefined && pid > 1 && probe.alive(pid)) watched.add(pid)
     },
     stop,
   }

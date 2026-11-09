@@ -5,6 +5,7 @@ import { readComposeEnvInt, readDotEnvFiles, shellEnvInt } from "./env-file.js"
 import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
+import { validateAuthSso, type AuthSsoConfig } from "./saml-config.js"
 import { validateAuthEmail } from "./mailer-autoconfirm.js"
 import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
@@ -106,6 +107,13 @@ export interface SupatypeProjectConfig {
      * or in `.env`, wins over it.
      */
     realtimePort?: number
+    /**
+     * Whether the server publishes the API URL and anon key at `/supatype-env.json` and
+     * `/supatype-env.js`, which `supatype build` and a page's script tag read. Default: true. False
+     * for an API-only project; rendered to the server as `SUPATYPE_PUBLIC_ENV=false`. The anon key
+     * is public either way: every browser that loads the app holds it.
+     */
+    public_env?: boolean
     /** Domain for ACME TLS certificate (mode=standalone). */
     domain?: string
     /**
@@ -291,6 +299,19 @@ export interface SupatypeProjectConfig {
      * register that URL with the provider. A `SUPATYPE_EXTERNAL_*` value in `.env` wins over this.
      */
     providers?: AuthProvidersConfig
+    /**
+     * Single sign-on with enterprise identity providers. SAML is switched on here, once for every
+     * identity provider; the providers themselves are registered at runtime with `supatype sso add`:
+     *
+     * ```ts
+     * auth: { sso: { saml: { enabled: true } } }
+     * ```
+     *
+     * Rendered as the `SUPATYPE_SAML_*` variables the server reads, for `dev` and for the self-host
+     * compose file. The signing key is generated into `.env` as `SUPATYPE_SAML_PRIVATE_KEY` the first
+     * time SAML is on, and is never in this file. A `SUPATYPE_SAML_*` value in `.env` wins over this.
+     */
+    sso?: AuthSsoConfig
   }
   storage?: {
     /**
@@ -625,12 +646,30 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateCache(cfg, filename)
   validateSchemaNames(cfg, filename)
   validateAuthProviders(cfg, filename)
+  validateAuthSso(cfg, filename)
   validateAuthEmail(cfg, filename)
   validateCorsOrigins(cfg, filename)
   validateStudioAuth(cfg, filename)
+  validatePublicEnv(cfg, filename)
 
   if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)
   return cfg
+}
+
+/**
+ * What the server is told about `server.public_env`: `SUPATYPE_PUBLIC_ENV=false` when it is turned
+ * off, nothing otherwise, so the server's own default (on) applies. Compose and native dev both
+ * render it from here.
+ */
+export function publicEnvServerEnv(cfg: SupatypeProjectConfig): Record<string, string> {
+  return cfg.server.public_env === false ? { SUPATYPE_PUBLIC_ENV: "false" } : {}
+}
+
+/** `server.public_env`, when set, is a boolean: a string "false" would read as on. */
+function validatePublicEnv(cfg: Readonly<Record<string, unknown>>, filename: string): void {
+  const value = objectAt(cfg, "server")?.["public_env"]
+  if (value === undefined || typeof value === "boolean") return
+  throw new Error(`${filename}: server.public_env must be true or false, got ${JSON.stringify(value)}`)
 }
 
 /**

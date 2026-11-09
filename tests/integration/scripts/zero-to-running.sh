@@ -19,7 +19,7 @@
 #   SUPATYPE_*_IMAGE       Optional Docker Hub pins (default :latest)
 #
 # CI (integration.yml):
-#   - workspace matrix: ubuntu-22.04 + macos-14 (Colima for Docker on macOS)
+#   - workspace matrix: ubuntu-22.04 + macos-15-intel (Colima for Docker on macOS)
 #   - CDN job: ubuntu-22.04 on schedule / main push / workflow_dispatch
 
 set -euo pipefail

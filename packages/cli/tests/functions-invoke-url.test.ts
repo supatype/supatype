@@ -2,6 +2,13 @@ import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { runCommand, tempProject } from "./support/command-run.js"
+
+// The project's stack runs: one that does not is refused before any address is chosen (issue 45).
+vi.mock("../src/compose-render-mode.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/compose-render-mode.js")>()),
+  runningStackMode: () => "dev",
+}))
+
 import { registerFunctions } from "../src/commands/functions.js"
 
 /**
@@ -74,5 +81,41 @@ describe("functions invoke", () => {
     writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
     await runCommand(registerFunctions, ["functions", "invoke", "hello", "--local", "--port", "19124"], project.dir)
     expect(called).toEqual(["http://localhost:18700/functions/v1/hello"])
+  })
+
+  // Issue 31's sibling: the compiled CLI's fetch (Bun) rejects a refused connection with a plain
+  // Error, not Node's TypeError, so "Cannot reach" was never said and Bun's words were printed.
+  it("says which address it could not reach when the compiled CLI's fetch is refused", async () => {
+    writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
+    const bunRefused = Object.assign(new Error("Unable to connect. Is the computer able to access the url?"), {
+      code: "ConnectionRefused",
+    })
+    vi.stubGlobal("fetch", () => Promise.reject(bunRefused))
+    const run = await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
+    expect(run.output).toContain("Cannot reach http://localhost:18700/functions/v1/hello")
+    expect(run.exitCode).toBe(1)
+  })
+})
+
+// Issue 55: a 404 printed its status and exited 0, so a script could not tell the call failed.
+describe("functions invoke's exit code", () => {
+  afterEach(() => {
+    process.exitCode = undefined
+  })
+
+  it("is 1 when the function answers 400 or above, with the status and body still printed", async () => {
+    writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response('{"error":"not_found"}', { status: 404 })))
+    const run = await runCommand(registerFunctions, ["functions", "invoke", "nope"], project.dir)
+    expect(run.output).toContain("Status: 404")
+    expect(run.output).toContain('"error": "not_found"')
+    expect(process.exitCode).toBe(1)
+  })
+
+  it("is left at 0 when the function answers below 400", async () => {
+    writeFileSync(join(project.dir, ".env"), "SUPATYPE_KONG_PORT=18700\n")
+    const run = await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
+    expect(run.output).toContain("Status: 200")
+    expect(process.exitCode ?? 0).toBe(0)
   })
 })

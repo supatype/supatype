@@ -2,7 +2,9 @@
  * Parse and format schema-engine push output (compose subprocess or HTTP).
  */
 
+import { printRoleAccess } from "./diff-access.js"
 import { printDiffWarnings } from "./diff-output.js"
+import type { RoleAccess } from "./engine-client.js"
 import { findJsonLine } from "./engine-json-line.js"
 import { isEnginePushResult } from "./engine-answers.js"
 import type { Guard } from "@supatype/shared"
@@ -26,10 +28,15 @@ export function printPushWarnings(
  * Say that a push applied: one line with the operation count when the engine gave one, then what
  * it warned about. Every engine dev applies through (the compose container, `overrides.engine` and
  * native dev's binary) reports here, so none of them drops the count the others print.
+ *
+ * Then, unless `access` is `quiet`, the lines of each role's access the push changed: `supatype dev`
+ * says so when a save leaves `anon` able to read a table, or no longer able to. `supatype push`
+ * printed the whole block before it applied, and passes `quiet`.
  */
-export function reportAppliedPush(result: EnginePushResult): void {
+export function reportAppliedPush(result: EnginePushResult, access: "changes" | "quiet" = "changes"): void {
   console.log(`[supatype] ${formatEnginePushMessage(result)}`)
   printPushWarnings(result)
+  if (access === "changes") printRoleAccess(result, { changedOnly: true })
 }
 
 export interface EnginePushResult {
@@ -47,6 +54,8 @@ export interface EnginePushResult {
    * as "nothing to say" rather than as an empty declaration.
    */
   cache?: { tables?: string[]; honoured?: boolean }
+  /** Each API role's access before and after the push applied. Absent from older engines. */
+  access?: RoleAccess[]
 }
 
 /**

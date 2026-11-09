@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react"
+import React, { createContext, useState, useCallback, useContext, useEffect, useRef } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery, type ApiQueryResult } from "../hooks/useApiQuery.js"
@@ -17,6 +17,8 @@ import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { userAdministrationOffered, adminAccountChangeOffered, accountRemovalOffered, ADMIN_ACCOUNT_LOCKED } from "../lib/capability-offers.js"
 import { authRefusalText } from "../lib/auth-refusal.js"
 import { useAuthSettings } from "../hooks/useAuthSettings.js"
+import { useSsoProviderList } from "../hooks/useSsoProviders.js"
+import { identityProviderLabel, ssoIdentityProvider, ssoProviderLabel, type SsoProvider } from "../lib/sso-providers.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import {
@@ -356,7 +358,7 @@ function UserDetail({
             <tbody>
               {user.providers.map((p) => (
                 <tr key={p.provider} className="border-b border-border">
-                  <Td><Badge variant="blue">{p.provider}</Badge></Td>
+                  <Td><ProviderBadge provider={p.provider} /></Td>
                   <Td className="text-xs font-mono">{p.provider_id}</Td>
                   <Td className="text-xs text-muted-foreground">{new Date(p.linked_at).toLocaleDateString()}</Td>
                 </tr>
@@ -623,6 +625,15 @@ function providersOf(raw: AuthUserResponse): AuthIdentity[] {
   return [{ provider: "email", provider_id: raw.id, linked_at: raw.created_at ?? "" }]
 }
 
+/** The SAML providers a {@link ProviderBadge} names a user's identity provider from. */
+const SsoProviderNames = createContext<readonly SsoProvider[] | null>(null)
+
+/** How a user signs in, as a badge: a SAML provider by its name (`sso:acme`), see `identityProviderLabel`. */
+function ProviderBadge({ provider, className }: { provider: string; className?: string }): React.ReactElement {
+  const label = identityProviderLabel(provider, useContext(SsoProviderNames))
+  return <Badge variant="blue" {...(className !== undefined && { className })}>{label}</Badge>
+}
+
 export function mapAuthUser(raw: AuthUserResponse): AuthUser {
   return {
     id: raw.id,
@@ -693,7 +704,7 @@ function UserRow({ user, access, actions }: { user: AuthUser; access: StudioAcce
       <Td className={WIDE_ONLY}>{studio}</Td>
       <Td className={WIDE_ONLY}>
         <div className="flex gap-1">
-          {user.providers.map((p) => <Badge key={p.provider} variant="blue" className="text-[0.6rem]">{p.provider}</Badge>)}
+          {user.providers.map((p) => <ProviderBadge key={p.provider} provider={p.provider} className="text-[0.6rem]" />)}
         </div>
       </Td>
       <Td className={WIDE_ONLY}>{user.confirmed ? "Yes" : <span className="text-yellow-400">Pending</span>}</Td>
@@ -814,10 +825,18 @@ function userRangeText(page: UserPage): string {
   return `Users ${first}-${first + page.users.length - 1} of ${page.total}`
 }
 
-/** The providers to filter by: those the project has switched on, or the common ones until it says. */
-function providerChoices(external: Record<string, boolean> | undefined): string[] {
+/**
+ * The providers to filter by: those the project has switched on, or the common ones until it says,
+ * then each SAML provider, by the identity provider its users carry and labelled as their badge is.
+ */
+function providerChoices(
+  external: Record<string, boolean> | undefined,
+  ssoProviders: readonly SsoProvider[] | null,
+): Array<{ value: string; label: string }> {
   const enabled = Object.entries(external ?? {}).filter(([name, on]) => on && name !== "anonymous_users").map(([name]) => name)
-  return enabled.length > 0 ? enabled : providerFilters.slice(1)
+  const named = (enabled.length > 0 ? enabled : providerFilters.slice(1)).map((name) => ({ value: name, label: name }))
+  const sso = (ssoProviders ?? []).map((p) => ({ value: ssoIdentityProvider(p), label: ssoProviderLabel(p) }))
+  return [...named, ...sso]
 }
 
 export function AuthManagement(): React.ReactElement {
@@ -898,6 +917,9 @@ export function AuthManagement(): React.ReactElement {
     [authAdminFetch, selectedUserId],
   )
   const sessions = sessionsData ?? []
+  // Read whether SAML is on or not: a provider set up while it is off still has users to find and
+  // name, and the filter offers it for as long as it is set up.
+  const ssoProviders = useSsoProviderList().state.providers
   const [editingUser, setEditingUser] = useState<AuthUser | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [showInviteForm, setShowInviteForm] = useState(false)
@@ -1076,121 +1098,121 @@ export function AuthManagement(): React.ReactElement {
   }
 
   return (
-    <>
-      {/* Toolbar */}
-      <div className="flex gap-2 mb-4 flex-wrap">
-        <Input
-          className="flex-1 min-w-[200px]"
-          placeholder="Search by email, name, or ID..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <Select className="w-[140px]" value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value })}>
-          <option value="all">All roles</option>
-          {availableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
-        </Select>
-        <Select className="w-[140px]" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
-          <option value="all">All status</option>
-          {statusFilters.slice(1).map((s) => <option key={s} value={s}>{s}</option>)}
-        </Select>
-        <Select className="w-[140px]" value={filters.provider} onChange={(e) => setFilters({ ...filters, provider: e.target.value })}>
-          <option value="all">All providers</option>
-          {providerChoices(authSettings?.external).map((p) => <option key={p} value={p}>{p}</option>)}
-        </Select>
-        <Button onClick={() => setShowInviteForm(true)}>Invite User</Button>
-        <Button variant="primary" onClick={() => setShowCreateForm(true)}>+ Create User</Button>
-      </div>
-
-      {panelOpen ? null : actionBanner}
-
-      {/* User list */}
-      <Card className={loading ? "overflow-auto opacity-60 transition-opacity" : "overflow-auto"} aria-busy={loading}>
-        <Table>
-          <UserTableHead />
-          <tbody>
-            {filtered.map((u) => (
-              <UserRow
-                key={u.id}
-                user={u}
-                access={{ members: studioMembers, currentUserId: studioAccess.userId, canManage: studioAccess.canManageMembers }}
-                actions={{
-                  open: () => openUser(u),
-                  toggle: removalOffered(u.id) ? () => runAction(() => handleToggleDisable(u.id)) : null,
-                }}
-              />
-            ))}
-            {filtered.length === 0 ? (
-              <tr>
-                <Td colSpan={10} className="text-center py-8 text-muted-foreground">
-                  No users found
-                </Td>
-              </tr>
-            ) : null}
-          </tbody>
-        </Table>
-      </Card>
-
-      {userPage ? (
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground mt-2">{userRangeText(userPage)}</span>
-          {/* The page of the rows on screen, not the one being asked for: they differ while it loads. */}
-          <Pager
-            at={{ page: userPage.page, pageSize: USERS_PAGE_SIZE, total: userPage.total }}
-            onPage={setPage}
-            busy={loading}
+    <SsoProviderNames.Provider value={ssoProviders}>
+        {/* Toolbar */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          <Input
+            className="flex-1 min-w-[200px]"
+            placeholder="Search by email, name, or ID..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
+          <Select className="w-[140px]" value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value })}>
+            <option value="all">All roles</option>
+            {availableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
+          </Select>
+          <Select className="w-[140px]" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+            <option value="all">All status</option>
+            {statusFilters.slice(1).map((s) => <option key={s} value={s}>{s}</option>)}
+          </Select>
+          <Select className="w-[140px]" value={filters.provider} onChange={(e) => setFilters({ ...filters, provider: e.target.value })}>
+            <option value="all">All providers</option>
+            {providerChoices(authSettings?.external, ssoProviders).map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </Select>
+          <Button onClick={() => setShowInviteForm(true)}>Invite User</Button>
+          <Button variant="primary" onClick={() => setShowCreateForm(true)}>+ Create User</Button>
         </div>
-      ) : null}
 
-      <SlidePanel
-        open={panelOpen}
-        onClose={closePanel}
-        title={panelTitle}
-        subtitle={panelSubtitle}
-        width="max-w-[560px]"
-      >
-        {showingDetail ? null : actionBanner}
-        {selectedUser && showingDetail && (
-          <UserDetail
-            user={selectedUser}
-            sessions={sessions}
-            actions={{
-              account: accountOffered(selectedUser.id) ? {
-                onToggleDisable: removalOffered(selectedUser.id) ? () => runAction(() => handleToggleDisable(selectedUser.id)) : null,
-                onEdit: () => setEditingUser(selectedUser),
-                onDelete: removalOffered(selectedUser.id) ? () => runAction(() => handleDeleteUser(selectedUser.id)) : null,
-                onRevokeSession: (id) => runAction(() => handleRevokeSession(id)),
-              } : null,
-              // Both hosts gate the whole auth admin API on `manageUsers`.
-              onConfirmEmail: userAdministrationOffered(studioAccess)
-                ? () => runAction(() => handleConfirmEmail(selectedUser.id))
-                : undefined,
-              refusal: actionError,
-            }}
-          />
-        )}
-        {editingUser && (
-          <UserForm
-            user={editingUser}
-            onSave={(data) => runAction(() => handleEditUser(data))}
-            onCancel={() => setEditingUser(null)}
-          />
-        )}
-        {showCreateForm && (
-          <UserForm
-            user={null}
-            create={createOptions}
-            onSave={(data) => runAction(() => handleCreateUser(data))}
-            onCancel={() => setShowCreateForm(false)}
-          />
-        )}
-        {showInviteForm && (
-          <InviteUserForm
-            onInvite={(email) => runAction(() => handleInviteUser(email))}
-            onCancel={() => setShowInviteForm(false)}
-          />
-        )}
-      </SlidePanel>
-    </>
+        {panelOpen ? null : actionBanner}
+
+        {/* User list */}
+        <Card className={loading ? "overflow-auto opacity-60 transition-opacity" : "overflow-auto"} aria-busy={loading}>
+          <Table>
+            <UserTableHead />
+            <tbody>
+              {filtered.map((u) => (
+                <UserRow
+                  key={u.id}
+                  user={u}
+                  access={{ members: studioMembers, currentUserId: studioAccess.userId, canManage: studioAccess.canManageMembers }}
+                  actions={{
+                    open: () => openUser(u),
+                    toggle: removalOffered(u.id) ? () => runAction(() => handleToggleDisable(u.id)) : null,
+                  }}
+                />
+              ))}
+              {filtered.length === 0 ? (
+                <tr>
+                  <Td colSpan={10} className="text-center py-8 text-muted-foreground">
+                    No users found
+                  </Td>
+                </tr>
+              ) : null}
+            </tbody>
+          </Table>
+        </Card>
+
+        {userPage ? (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground mt-2">{userRangeText(userPage)}</span>
+            {/* The page of the rows on screen, not the one being asked for: they differ while it loads. */}
+            <Pager
+              at={{ page: userPage.page, pageSize: USERS_PAGE_SIZE, total: userPage.total }}
+              onPage={setPage}
+              busy={loading}
+            />
+          </div>
+        ) : null}
+
+        <SlidePanel
+          open={panelOpen}
+          onClose={closePanel}
+          title={panelTitle}
+          subtitle={panelSubtitle}
+          width="max-w-[560px]"
+        >
+          {showingDetail ? null : actionBanner}
+          {selectedUser && showingDetail && (
+            <UserDetail
+              user={selectedUser}
+              sessions={sessions}
+              actions={{
+                account: accountOffered(selectedUser.id) ? {
+                  onToggleDisable: removalOffered(selectedUser.id) ? () => runAction(() => handleToggleDisable(selectedUser.id)) : null,
+                  onEdit: () => setEditingUser(selectedUser),
+                  onDelete: removalOffered(selectedUser.id) ? () => runAction(() => handleDeleteUser(selectedUser.id)) : null,
+                  onRevokeSession: (id) => runAction(() => handleRevokeSession(id)),
+                } : null,
+                // Both hosts gate the whole auth admin API on `manageUsers`.
+                onConfirmEmail: userAdministrationOffered(studioAccess)
+                  ? () => runAction(() => handleConfirmEmail(selectedUser.id))
+                  : undefined,
+                refusal: actionError,
+              }}
+            />
+          )}
+          {editingUser && (
+            <UserForm
+              user={editingUser}
+              onSave={(data) => runAction(() => handleEditUser(data))}
+              onCancel={() => setEditingUser(null)}
+            />
+          )}
+          {showCreateForm && (
+            <UserForm
+              user={null}
+              create={createOptions}
+              onSave={(data) => runAction(() => handleCreateUser(data))}
+              onCancel={() => setShowCreateForm(false)}
+            />
+          )}
+          {showInviteForm && (
+            <InviteUserForm
+              onInvite={(email) => runAction(() => handleInviteUser(email))}
+              onCancel={() => setShowInviteForm(false)}
+            />
+          )}
+        </SlidePanel>
+    </SsoProviderNames.Provider>
   )
 }

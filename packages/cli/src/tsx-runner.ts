@@ -26,6 +26,9 @@ const CLI_SRC_DIR = dirname(fileURLToPath(import.meta.url))
  * own imports resolve from its own location as they always did.
  */
 export function cliModuleUrl(name: string): string {
+  // The binary's modules live in its embedded filesystem, which a snippet cannot import from
+  // (issue 61). Code that needs one there runs a hidden command on the binary instead.
+  if (isCompiledBinary()) throw new Error(`cliModuleUrl("${name}") cannot reach the standalone binary's own modules`)
   return pathToFileURL(resolve(CLI_SRC_DIR, name)).href
 }
 
@@ -57,13 +60,11 @@ export interface RunResult {
   exitCode: number
 }
 
-/** Run a TypeScript file with tsx and capture output. */
-export function runTsFile(
-  filePath: string,
-  opts: SpawnSyncOptions = {},
-): RunResult {
-  // Same split as importModuleAsJson: the binary interprets TypeScript itself, Node uses tsx.
-  const argv = isCompiledBinary() ? ["_run-ts", filePath] : [TSX_BIN, filePath]
+/**
+ * Run this program's own executable with `argv` and capture output: the standalone binary with
+ * one of its hidden commands, or Node with a script.
+ */
+export function runSelf(argv: string[], opts: SpawnSyncOptions = {}): RunResult {
   const result = spawnSync(process.execPath, argv, {
     encoding: "utf8",
     maxBuffer: 50 * 1024 * 1024,
@@ -74,6 +75,15 @@ export function runTsFile(
     stderr: String(result.stderr ?? ""),
     exitCode: result.status ?? 1,
   }
+}
+
+/** Run a TypeScript file with tsx and capture output. */
+export function runTsFile(
+  filePath: string,
+  opts: SpawnSyncOptions = {},
+): RunResult {
+  // Same split as importModuleAsJson: the binary interprets TypeScript itself, Node uses tsx.
+  return runSelf(isCompiledBinary() ? ["_run-ts", filePath] : [TSX_BIN, filePath], opts)
 }
 
 /**
@@ -124,18 +134,7 @@ export function importModuleAsJson(
   target: string,
   opts: SpawnSyncOptions = {},
 ): RunResult {
-  if (isCompiledBinary()) {
-    const result = spawnSync(process.execPath, ["_print-module", target], {
-      encoding: "utf8",
-      maxBuffer: 50 * 1024 * 1024,
-      ...opts,
-    })
-    return {
-      stdout: String(result.stdout ?? ""),
-      stderr: String(result.stderr ?? ""),
-      exitCode: result.status ?? 1,
-    }
-  }
+  if (isCompiledBinary()) return runSelf(["_print-module", target], opts)
 
   const snippet = `
 const mod = await import(${JSON.stringify(target)})

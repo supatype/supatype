@@ -75,6 +75,7 @@
       <li><a href="/docs/client.html">Client</a></li>
       <li><a href="/docs/frameworks.html">Frameworks</a></li>
       <li><a href="/docs/auth.html">Auth</a></li>
+      <li><a href="/docs/sso.html">Single sign-on</a></li>
       <li><a href="/docs/storage.html">Storage</a></li>
       <li><a href="/docs/realtime.html">Realtime</a></li>
       <li><a href="/docs/functions.html">Functions</a></li>
@@ -84,6 +85,7 @@
     </ul></div>
     <div><span class="label">OPERATE</span><ul>
       <li><a href="/docs/#deploy-changes">Deploy changes</a></li>
+      <li><a href="/docs/deploying-your-frontend.html">Deploy your frontend</a></li>
       <li><a href="/docs/#upgrading">Upgrading Supatype</a></li>
       <li><a href="/docs/#production">Running in production</a></li>
     </ul></div>
@@ -199,7 +201,7 @@ SITE_URL=https://example.com</pre></div>
 <span class="pr">$</span> npm install
 <span class="pr">$</span> supatype self-host compose up -d
 <span class="pr">$</span> supatype push
-<span class="pr">$</span> npm run build
+<span class="pr">$</span> supatype build
 <span class="pr">$</span> supatype self-host compose up -d</pre></div>
     <p><code>compose up</code> writes the compose file itself, so there is no separate render step.</p>
     <p>Before this, point an A record for <code>example.com</code> at the VM and open ports 80 and 443 in its firewall. Then open <code>https://example.com</code>, with Studio at <code>/studio/</code>. Without a domain in <code>supatype.config.ts</code>, the gateway is on <code>http://YOUR_VM_IP:18473</code> instead. Backups, logs and rollbacks are covered in <a href="/docs/#production">Running in production</a>.</p>
@@ -248,7 +250,7 @@ jobs:
             git reset --hard origin/main
             npm ci
             supatype push
-            npm run build
+            supatype build
             supatype self-host compose up -d</pre></div>
     <p>On every push to <code>main</code> the VM pulls the latest code, applies schema migrations, rebuilds <code>public/</code> and refreshes Compose.</p>
     <div class="callout">
@@ -274,14 +276,15 @@ jobs:
       <tbody>
         <tr><td>SSH fails</td><td>The firewall allows port 22, and <code>VM_SSH_KEY</code> matches the VM's <code>authorized_keys</code>.</td></tr>
         <tr><td><code>supatype push</code> fails</td><td>Compose is up, and <code>DATABASE_URL</code> points at <code>localhost:5432</code>. If it refused a change that needs your consent, see <a href="#workflow">The workflow</a>.</td></tr>
-        <tr><td>Site unchanged</td><td><code>npm run build</code> writes to the directory in <code>app.static_dir</code>, then re-run <code>supatype self-host compose up -d</code>.</td></tr>
+        <tr><td>Site unchanged</td><td><code>supatype build</code> writes to the directory in <code>app.static_dir</code>, then re-run <code>supatype self-host compose up -d</code>.</td></tr>
+        <tr><td><code>supatype build</code> fails</td><td>It lists each source it tried for the API URL and anon key. On the VM both come from <code>.env</code>: <code>API_EXTERNAL_URL</code> must be the public address, not <code>localhost</code>, and <code>ANON_KEY</code> must be set. See <a href="/docs/deploying-your-frontend.html#missing">Deploy your frontend</a>.</td></tr>
       </tbody>
     </table></div>
 
     <div class="callout"><span class="callout-label">RATHER NOT RUN IT YOURSELF?</span><p>Supatype Cloud runs the same stack for you, and it is coming soon. <a href="/#cloud">Join the waiting list</a>, or <a href="/#contact">book a call</a> about self-hosting with support.</p></div>
 
     <nav class="pn" aria-label="More pages">
-      <a href="/docs/studio-roles.html"><small>PREVIOUS</small><span>Studio roles</span></a>
+      <a href="/docs/deploying-your-frontend.html"><small>PREVIOUS</small><span>Deploy your frontend</span></a>
       <a href="/from-supabase.html" class="next"><small>NEXT</small><span>Coming from Supabase</span></a>
     </nav>
   </main>

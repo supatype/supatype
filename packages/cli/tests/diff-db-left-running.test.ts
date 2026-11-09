@@ -6,23 +6,24 @@ import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 /**
  * Fresh-user test: `supatype diff` is a dry run, and it started the project's compose Postgres to
- * read the live schema and left it running. The database is stopped again after the diff, but only
- * when the diff was what started it: one a `supatype dev` session was already using is left alone.
+ * read the live schema and left it running; it was then made to stop a database it had started. As
+ * Nic decided issue 41, diff starts nothing: with no stack running it refuses, and on a running
+ * stack it stops nothing.
  *
  * Both engines diff reaches the database through: the schema-engine container, and the host binary
  * (`overrides.engine`), whose database is published to the host first.
  */
 
-/** Whether compose reports the `db` service running, and every compose command run. */
-const docker = vi.hoisted(() => ({ dbRunning: false, healthFails: false, compose: [] as string[][] }))
+/** Whether the project's server and `db` run, and every compose command run. */
+const docker = vi.hoisted(() => ({ dbRunning: false, serverRunning: false, compose: [] as string[][] }))
 
 const ANSWER = { status: 0, stdout: "", stderr: "" }
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>()
   const fake = (command: string, args: readonly string[] = []) => {
     if (command !== "docker") return actual.spawnSync(command, [...args], { encoding: "utf8" })
-    // The project's server container, which `requireRunningStack` asks after, runs in dev mode.
-    if (args[0] === "ps") return { ...ANSWER, stdout: "c0ffee\n" }
+    // The project's server container, which `runningStackMode` asks after, runs in dev mode.
+    if (args[0] === "ps") return { ...ANSWER, stdout: docker.serverRunning ? "c0ffee\n" : "" }
     if (args[0] === "inspect") return { ...ANSWER, stdout: "SUPATYPE_MODE=dev\n" }
     return ANSWER
   }
@@ -30,11 +31,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 })
 vi.mock("../src/docker-exec.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/docker-exec.js")>()),
-  askDocker: async () => {
-    // The health wait after `up -d db`: a start that fails once the container exists.
-    if (docker.healthFails) throw new Error("docker exec failed")
-    return { ...ANSWER, timedOut: false, missing: false }
-  },
+  askDocker: async () => ({ ...ANSWER, timedOut: false, missing: false }),
 }))
 vi.mock("../src/compose-kong.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-kong.js")>()),
@@ -87,6 +84,13 @@ vi.mock("../src/engine-client.js", async (importOriginal) => ({
 const DIFF = vi.hoisted(() => ({ operations: [], warnings: [] }))
 
 const { diffSchemaDocker } = await import("../src/dev-compose.js")
+const { requireLocalStack } = await import("../src/local-stack-guard.js")
+
+/** `supatype diff` as the command runs it: the local-stack guard, then the diff. */
+async function diffAsTheCommandDoes(cwd: string, config: SupatypeProjectConfig): Promise<unknown> {
+  requireLocalStack(cwd, config, "diff")
+  return diffSchemaDocker(cwd, config)
+}
 
 const base: SupatypeProjectConfig = {
   project: { name: "acme" },
@@ -108,7 +112,7 @@ beforeEach(() => {
   mkdirSync(join(cwd, ".supatype"), { recursive: true })
   docker.compose.length = 0
   docker.dbRunning = false
-  docker.healthFails = false
+  docker.serverRunning = false
   engine.fail = false
   vi.spyOn(console, "log").mockImplementation(() => undefined)
 })
@@ -118,35 +122,47 @@ afterEach(() => {
   rmSync(cwd, { recursive: true, force: true })
 })
 
+/** A running dev stack: its server and its database. */
+function stackRunning(): void {
+  docker.serverRunning = true
+  docker.dbRunning = true
+}
+
 const stops = () => docker.compose.filter((args) => args[0] === "stop")
 
 describe.each(engines)("supatype diff through %s", (_label, config) => {
-  it("stops the database it started", async () => {
-    await diffSchemaDocker(cwd, config)
-    expect(docker.compose).toContainEqual(["up", "-d", "db"])
-    expect(stops()).toEqual([["stop", "db"]])
+  it("refuses with no stack running, and starts nothing", async () => {
+    await expect(diffSchemaDocker(cwd, config)).rejects.toThrow("The local stack isn't running")
+    expect(docker.compose).toEqual([])
   })
 
-  it("leaves running a database that was already running", async () => {
-    docker.dbRunning = true
+  it("on a running stack, stops nothing", async () => {
+    stackRunning()
     await diffSchemaDocker(cwd, config)
     expect(stops()).toEqual([])
   })
 })
 
-describe("supatype diff when starting the database fails partway", () => {
-  it("still stops the database it brought up", async () => {
-    docker.healthFails = true
-    await expect(diffSchemaDocker(cwd, engines[0]![1])).rejects.toThrow("docker exec failed")
-    expect(docker.compose).toContainEqual(["up", "-d", "db"])
-    expect(stops()).toEqual([["stop", "db"]])
+// Issue 46: the host engine's diff ran `up -d db` on a stack whose database was already up.
+describe.each(engines)("supatype diff through %s on a running stack", (_label, config) => {
+  it("starts nothing", async () => {
+    stackRunning()
+    await diffSchemaDocker(cwd, config)
+    expect(docker.compose.filter((args) => args[0] === "up")).toEqual([])
+  })
+
+  it("refuses a stack whose database container is not running, rather than start it", async () => {
+    docker.serverRunning = true
+    await expect(diffAsTheCommandDoes(cwd, config)).rejects.toThrow("The local stack isn't running")
+    expect(docker.compose).toEqual([])
   })
 })
 
 describe("supatype diff when the diff fails", () => {
-  it("still stops the database it started", async () => {
+  it("stops nothing", async () => {
+    stackRunning()
     engine.fail = true
     await expect(diffSchemaDocker(cwd, engines[1]![1])).rejects.toThrow("engine refused")
-    expect(stops()).toEqual([["stop", "db"]])
+    expect(stops()).toEqual([])
   })
 })

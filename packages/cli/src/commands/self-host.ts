@@ -12,8 +12,11 @@ import { join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { spawnSync } from "node:child_process"
 import { gzipSync } from "node:zlib"
-import { loadConfig } from "../config.js"
-import { connectionString, nativeServerPort } from "../project-config.js"
+import { loadConfig, loadSchemaAst } from "../config.js"
+import { COMPOSE_DEV_KONG_PORT, connectionString, nativeServerPort, schemaPathFromProject, type SupatypeProjectConfig } from "../project-config.js"
+import { readComposeEnvInt } from "../env-file.js"
+import { withPublishing } from "../model-versioning.js"
+import { devApiKeys } from "../dev-api-keys.js"
 import { devPostgresPassword } from "../local-secrets.js"
 import { splitPassword } from "../host-database.js"
 import { fillMissingKeys } from "./keys.js"
@@ -27,12 +30,17 @@ import {
   exitComposeFailed,
   noteUnpinnedImages,
   runDockerCompose,
+  runDockerComposeQuietly,
   selfHostComposePaths,
   writeSelfHostCompose,
 } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
+import { syncConfigMailerEnv } from "../config-mailer-env.js"
+import { takenComposePorts, type ComposeContext, type PublishedPort } from "../compose-services.js"
+import { isPortInUse, portCheckCommand } from "../postgres-ctl.js"
+import { fatalError } from "../ui/fatal.js"
 import { warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
-import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
+import { warnMissingStackSettings } from "../stack-setting-warnings.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { confirm } from "../ui/confirm.js"
@@ -55,7 +63,7 @@ export function registerSelfHost(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd, { local: false })
       requireUrlSafeComposePasswords(cwd, config)
-      warnProjectAuthProviderSecrets(cwd, config)
+      warnMissingStackSettings(cwd, config)
       const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
       file("wrote", out.composePath)
       file("wrote", out.kongPath)
@@ -84,20 +92,30 @@ export function registerSelfHost(program: Command): void {
       if (filled.length > 0) {
         console.log(`[supatype] Minted ${filled.join(" and ")} in .env from JWT_SECRET.`)
       }
-      // Before the spinner, so the warning is not drawn over.
-      warnProjectAuthProviderSecrets(cwd, config)
+      // The committed config's mailer values, over any the last `dev` wrote from its local one.
+      syncConfigMailerEnv(cwd, config)
+      // Before the spinner, so the warnings are not drawn over.
+      warnMissingStackSettings(cwd, config)
       noteUnpinnedImages(cwd)
       const renderOptions = composeRenderOptions(cwd, config.project.name)
       // DATABASE_URL in .env is not moved to this stack's port. That line is dev's, and moving it
       // here had dev and self-host rewriting it in turn (issue 26). Host commands such as seed and
       // admin reach the running stack's port past a URL the CLI wrote (host-database.ts).
-      const status = await withSpinner("Starting self-host Compose stack", async () => {
-        const out = writeSelfHostCompose(cwd, config, renderOptions)
-        return runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND })
-      })
+      const out = writeSelfHostCompose(cwd, config, renderOptions)
+      await requireComposePortsFree({ composePath: out.composePath, projectRoot: cwd, projectName: project })
+      // In a terminal, quietly and without blocking, as `dev` starts its stack: docker's progress
+      // stays out of the CLI's screen (runDockerCompose says why) and the spinner turns through
+      // the pulls. Its output is kept for a failure.
+      const status = await withSpinner("Starting self-host Compose stack", async () =>
+        isInteractive()
+          ? runDockerComposeQuietly(out.composePath, args, cwd, project, SELF_HOST_BRAND)
+          : runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND }),
+      )
       if (status !== 0) {
         exitComposeFailed(status, "Could not start the self-host Compose stack.", SELF_HOST_BRAND)
       }
+      // Attached, `up` returns only once the stack has stopped, so there is nothing to provision.
+      if (opts.detach === true) await provisionAfterUp(cwd, config, project, renderOptions.devLocal)
       await warnIfHandWrittenUrlSilent(cwd)
     })
 
@@ -418,6 +436,54 @@ export function registerSelfHost(program: Command): void {
 const SELF_HOST_BRAND = { intro: "Self-host deployment" }
 
 /**
+ * The schema's declared buckets and the first admin user, on the stack `up` has just started, once
+ * it answers (issue 41): as `dev` and a push to a running stack do, so nothing waits on a push to
+ * start the stack and make them. A failure to make them is warned about. A stack that never answers
+ * through its gateway is not up, and says so with exit 1 (issue 57).
+ */
+async function provisionAfterUp(cwd: string, config: SupatypeProjectConfig, project: string, devLocal: boolean): Promise<void> {
+  const { composeGatewayHostPort, provisionStartedStack, StackNotServing } = await import("../dev-compose.js")
+  try {
+    const kongPort = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
+    const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", kongPort)
+    const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
+    const stack = { composePath: selfHostComposePaths(cwd).composePath, project, gatewayPort }
+    await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey)
+  } catch (err) {
+    if (!(err instanceof StackNotServing)) {
+      warn(`The stack is up, but its storage buckets or first admin user could not be created: ${errorMessage(err)}`)
+      return
+    }
+    // Containers that started but never answered are not a stack that is up (issue 57).
+    error(`The stack started but is not serving: ${errorMessage(err)}`)
+    plain("Check: supatype self-host compose logs. A container left with no network by a failed start")
+    plain("comes back with: supatype self-host compose restart <service>")
+    process.exitCode = 1
+  }
+}
+
+/**
+ * Refuse `up` before it starts anything when a port the stack publishes is held by something else.
+ * Docker otherwise starts some containers, fails on the port, and leaves them for the next `up`,
+ * which the run behind issue 57 found with no network at all.
+ */
+async function requireComposePortsFree(ctx: ComposeContext): Promise<void> {
+  // A check that cannot read the compose file stops nothing: `up` itself says what is wrong with it.
+  const taken = await takenComposePorts(ctx, isPortInUse).catch((): PublishedPort[] => [])
+  const first = taken[0]
+  if (first === undefined) return
+  fatalError(
+    `Port ${first.port} is already in use, and the stack's ${first.service} service publishes it.`,
+    [
+      ...taken.slice(1).map((t) => `Port ${t.port} (${t.service}) is in use too.`),
+      `Check: ${portCheckCommand(first.port)}`,
+      "Stop what holds it (another Supatype stack's `supatype dev` or compose stack, say), then run this again.",
+    ],
+    { brand: SELF_HOST_BRAND },
+  )
+}
+
+/**
  * `self-host compose down`. The volumes hold the database and every stored file, so removing them
  * is asked for by name and confirmed; a plain `down` says they were kept, since starting over used
  * to mean finding them with `docker volume ls`.
@@ -480,7 +546,10 @@ function runCompose(args: string[], use: ComposeFileUse): number {
   const cwd = process.cwd()
   // The committed config, not the developer's local override: this is the self-host stack (issue 24).
   const config = loadConfig(cwd, { local: false })
-  if (use === "start") requireUrlSafeComposePasswords(cwd, config)
+  if (use === "start") {
+    requireUrlSafeComposePasswords(cwd, config)
+    syncConfigMailerEnv(cwd, config)
+  }
   const composePath =
     use === "on-disk"
       ? selfHostComposePaths(cwd).composePath

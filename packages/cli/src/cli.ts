@@ -23,10 +23,12 @@ import { registerLogin } from "./commands/login.js"
 import { registerEngine } from "./commands/engine.js"
 import { registerDb } from "./commands/db.js"
 import { registerDeploy } from "./commands/deploy.js"
+import { registerBuild } from "./commands/build.js"
 import { registerStatus } from "./commands/status.js"
 import { registerLogs } from "./commands/logs.js"
 import { registerAdmin } from "./commands/admin.js"
 import { registerFunctions } from "./commands/functions.js"
+import { registerSso } from "./commands/sso.js"
 import { registerHooks } from "./commands/hooks.js"
 import { registerPlugins } from "./commands/plugins.js"
 import { registerTypes } from "./commands/types.js"
@@ -71,10 +73,12 @@ export async function run(): Promise<void> {
   registerEngine(program)
   registerDb(program)
   registerDeploy(program)
+  registerBuild(program)
   registerStatus(program)
   registerLogs(program)
   registerAdmin(program)
   registerFunctions(program)
+  registerSso(program)
   registerHooks(program)
   registerPlugins(program)
   registerTypes(program)

@@ -19,4 +19,7 @@ export type { PasswordRecovery } from "./usePasswordRecovery.js"
 export { OAuthButton } from "./OAuthButton.js"
 export type { OAuthButtonProps } from "./OAuthButton.js"
 
+export { SSOForm } from "./SSOForm.js"
+export type { SSOFormProps, SSOFormLabels } from "./SSOForm.js"
+
 export type { AuthFormClassNames } from "./classNames.js"

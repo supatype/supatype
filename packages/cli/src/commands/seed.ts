@@ -16,9 +16,8 @@ import { existsSync, readdirSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
-import { engineRequest, ensureEngine, type ComposeEngine } from "../engine-client.js"
-import { databaseUrlHostPort, isLocalDatabaseUrl } from "../db-port.js"
-import { composeRenderMode } from "../compose-render-mode.js"
+import type { ComposeEngine } from "../engine-client.js"
+import { engineRequestIn, stackEngine } from "../stack-engine.js"
 import {
   isArrayOf,
   isBoolean,
@@ -33,7 +32,8 @@ import {
 } from "@supatype/shared"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
-import { composeDbHostPort, redact, resolveHostDatabaseUrl } from "../host-database.js"
+import { redact, resolveHostDatabaseUrl } from "../host-database.js"
+import { requireLocalStack } from "../local-stack-guard.js"
 import { collectSeed } from "../seed-runner.js"
 import { errorMessage } from "../error-message.js"
 import { connectAuthUsersByKey } from "../seed-auth-connect.js"
@@ -115,6 +115,8 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
 
   let dsn: string
   try {
+    // A stack that is not running is the environment not set up, so 2 as for any other.
+    requireLocalStack(cwd, config, "seed", { connection: opts.connection, direct: true })
     dsn = resolveHostDatabaseUrl(cwd, config, {
       connection: opts.connection,
       allowDerived: true,
@@ -125,8 +127,7 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
     return 2
   }
 
-  const engine = await seedEngine(cwd, config, opts.connection, dsn)
-  if (engine === undefined) await ensureEngine()
+  const engine = await stackEngine(cwd, config, opts.connection, dsn)
   if (opts.status) return await reportStatus(dsn, engine)
 
   const paths = seedPaths(file, cwd, config)
@@ -179,40 +180,10 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
   return await apply(prepared, { cwd, config, dsn, opts, engine })
 }
 
-/**
- * The engine a seed runs: the project's compose engine image when it seeds the project's own stack
- * database, as push does, otherwise the host binary (undefined). Seed used to run the host binary
- * always, so a stale cached one refused a schema the compose engine had just pushed.
- *
- * Only for the stack's own database: the compose engine reaches it inside the stack network, so a
- * `--connection` or a database on another machine stays with the host binary, which connects to
- * the URL it was given.
- */
-export async function seedEngine(
-  cwd: string,
-  config: SupatypeConfig,
-  connection: string | undefined,
-  dsn: string,
-): Promise<ComposeEngine | undefined> {
-  if (connection !== undefined && connection.trim() !== "") return undefined
-  if (!isStackDatabaseUrl(cwd, config, dsn)) return undefined
-  const { projectComposeEngine } = await import("../dev-compose.js")
-  return projectComposeEngine(cwd, config)
-}
-
-/**
- * True when `dsn` is the stack's own database as the host reaches it: on this machine, at the port
- * the stack's layout publishes Postgres on. A local URL at any other port is another Postgres, which
- * the compose engine, connecting inside the stack network, would not be seeding.
- */
-function isStackDatabaseUrl(cwd: string, config: SupatypeConfig, dsn: string): boolean {
-  if (!isLocalDatabaseUrl(dsn)) return false
-  return databaseUrlHostPort(dsn)?.port === composeDbHostPort(cwd, composeRenderMode(cwd, config.project.name))
-}
-
 // --- Discovery ---
 
-function seedPaths(file: string | undefined, cwd: string, config: SupatypeConfig): string[] {
+/** The seed files a run uses: `file` when given, else every `seeds/*.ts`, else `seed.ts`. */
+export function seedPaths(file: string | undefined, cwd: string, config: SupatypeConfig): string[] {
   if (file !== undefined && file.trim() !== "") return [resolve(cwd, file)]
   const root = projectRootFromConfig(config, cwd)
   const fromDir = discoverSeedsDir(cwd, join(root, "seeds"))
@@ -245,7 +216,7 @@ interface ApplyOptions {
   config: SupatypeConfig
   dsn: string
   opts: SeedFlags
-  /** The compose engine to run in, or undefined for the host binary ({@link seedEngine}). */
+  /** The compose engine to run in, or undefined for the host binary ({@link stackEngine}). */
   engine: ComposeEngine | undefined
 }
 
@@ -260,7 +231,7 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
     return 1
   }
 
-  const result = await engineRequest("/seed", {
+  const result = await engineRequestIn(engine, "/seed", {
     ast,
     ir_documents: documents,
     database_url: dsn,
@@ -268,7 +239,7 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
     atomic: opts.atomic,
     run_once: runOnceForAll(prepared),
     ...(opts.environment !== undefined ? { environment: opts.environment } : {}),
-  }, isSeedResult, engine)
+  }, isSeedResult)
 
   return report(result, prepared.length, dsn)
 }
@@ -411,7 +382,7 @@ export function seedFailureText(failure: SeedFailure): string {
 }
 
 async function reportStatus(dsn: string, engine: ComposeEngine | undefined): Promise<number> {
-  return reportSeedStatus(await engineRequest("/seed", { database_url: dsn, status: true }, isSeedStatus, engine), dsn)
+  return reportSeedStatus(await engineRequestIn(engine, "/seed", { database_url: dsn, status: true }, isSeedStatus), dsn)
 }
 
 /**

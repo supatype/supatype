@@ -233,6 +233,8 @@ $ supatype seed --environment staging
 
 `--status` lists each applied file with its status, when it ran, how long it took, and whether the file has changed since. `--environment` names the environment for an `{ environment }` condition.
 
+A Docker project's local stack has to be running: with it stopped, `supatype seed` starts nothing and exits 2, saying to start it with `supatype dev`, or `supatype self-host compose up -d` on a server. `--connection` seeds the database it names either way.
+
 A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass `--force` only when you mean to seed the linked project.
 
 Each file is one transaction. Without `--atomic`, a failure in the third file leaves the first two applied, and the report says so.

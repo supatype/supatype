@@ -57,6 +57,7 @@ describe("CLI binary (requires built dist/)", () => {
       "login",
       "logout",
       "whoami",
+      "sso",
     ]
     for (const cmd of commands) {
       expect(stdout, `Expected '${cmd}' in --help output`).toContain(cmd)
@@ -67,6 +68,13 @@ describe("CLI binary (requires built dist/)", () => {
     const { stdout, exitCode } = runCli(["--version"])
     expect(exitCode).toBe(0)
     expect(stdout.trim()).toBe(PACKAGE_VERSION)
+  })
+
+  it("build --help describes the build wrapper and its options", () => {
+    const { stdout, exitCode } = runCli(["build", "--help"])
+    expect(exitCode).toBe(0)
+    expect(stdout).toMatch(/production build/)
+    for (const option of ["--env <name>", "--allow-local"]) expect(stdout).toContain(option)
   })
 
   it("self-update --help describes the command", () => {

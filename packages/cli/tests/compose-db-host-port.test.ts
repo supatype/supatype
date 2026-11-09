@@ -43,6 +43,11 @@ vi.mock("../src/docker-exec.js", async (importOriginal) => ({
   askDocker: async (args: readonly string[]) => ({ ...docker.answer(args), timedOut: false, missing: false }),
 }))
 
+// The running stack's `db` runs with it.
+vi.mock("../src/compose-kong.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/compose-kong.js")>()),
+  composeServiceIsRunning: (_cwd: string, _stack: unknown, service: string) => service === "db" && docker.running,
+}))
 vi.mock("../src/dev-ports.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/dev-ports.js")>()),
   ensureKongPort: async () => 55560,
@@ -200,7 +205,7 @@ describe("what a docker push prints", () => {
  */
 describe("host-side commands with no stack running", () => {
   const NO_STACK =
-    "No stack is running for acme. Start it with `supatype dev` or `supatype self-host compose up -d`."
+    "The local stack isn't running. Start it with `supatype dev`, or `supatype self-host compose up -d` on a server"
 
   beforeEach(() => {
     docker.running = false

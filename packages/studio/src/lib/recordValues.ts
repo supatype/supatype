@@ -36,6 +36,9 @@ function sourceText(value: unknown): string {
   return Object.values(value).find((v): v is string => typeof v === "string" && v.trim() !== "") ?? ""
 }
 
+/** What these helpers read of a model: its fields, which a global has too. */
+type FieldsOf = Pick<ModelConfig, "fields">
+
 /**
  * A blank slug in the write, made from its source field the way the engine's trigger would.
  *
@@ -43,7 +46,7 @@ function sourceText(value: unknown): string {
  * into the live row with an UPDATE, leaves it NULL, and the column is NOT NULL. So a slug cleared in
  * the editor failed the save with raw SQL. A write that does not carry the slug is left without one.
  */
-function fillBlankSlugs(model: ModelConfig, out: Record<string, unknown>): void {
+function fillBlankSlugs(model: FieldsOf, out: Record<string, unknown>): void {
   for (const field of model.fields) {
     if (field.widget !== "slug" || !(field.name in out) || out[field.name] !== null) continue
     const from = field.options?.["from"]
@@ -60,7 +63,7 @@ export function foreignKeyColumn(field: FieldConfig): string | undefined {
 }
 
 /** Move each belongs-to relation's value to the foreign-key column PostgREST writes. */
-function relationsToForeignKeys(model: ModelConfig, out: Record<string, unknown>): void {
+function relationsToForeignKeys(model: FieldsOf, out: Record<string, unknown>): void {
   for (const field of model.fields) {
     const fk = foreignKeyColumn(field)
     if (fk === undefined || field.name === fk || !(field.name in out)) continue
@@ -71,7 +74,7 @@ function relationsToForeignKeys(model: ModelConfig, out: Record<string, unknown>
 
 /** Map Studio relation field names to PostgREST FK column names before insert/update. */
 export function serializeRecordForApi(
-  model: ModelConfig,
+  model: FieldsOf,
   values: Record<string, unknown>,
 ): Record<string, unknown> {
   const byName = new Map(model.fields.map((f) => [f.name, f]))

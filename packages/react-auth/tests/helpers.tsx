@@ -4,6 +4,7 @@
 
 import React from "react"
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer"
+import { vi, type Mock } from "vitest"
 import { createClient, type Session } from "@supatype/client"
 import { SupatypeProvider } from "@supatype/react"
 import { fire, stringProp } from "./props.js"
@@ -33,6 +34,45 @@ export async function submit(renderer: ReactTestRenderer): Promise<void> {
 /** The text inside a node, its children's included. */
 export function textOf(node: ReactTestInstance): string {
   return node.children.map((child) => (typeof child === "string" ? child : textOf(child))).join("")
+}
+
+export interface SentRequest {
+  url: URL
+  method: string
+  body: unknown
+  authorization: string | null
+}
+
+/** Stub `fetch` with one answer and record every request the client sends. */
+export function stubFetch(status: number, body: unknown): SentRequest[] {
+  const sent: SentRequest[] = []
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers)
+    sent.push({
+      url: new URL(input),
+      method: init?.method ?? "GET",
+      body: typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null,
+      authorization: headers.get("Authorization"),
+    })
+    return new Response(JSON.stringify(body), { status })
+  }))
+  return sent
+}
+
+/** A browser at `href` whose navigations are recorded, with a localStorage holding `stored`. */
+export function stubBrowser(href = "https://app.example/login", stored: Record<string, string> = {}): { assign: Mock<(url: string) => void> } {
+  const store = new Map(Object.entries(stored))
+  const assign = vi.fn<(url: string) => void>()
+  vi.stubGlobal("window", {
+    location: { href, protocol: "https:", assign },
+    history: { state: null, replaceState: vi.fn() },
+    localStorage: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v) },
+      removeItem: (k: string) => { store.delete(k) },
+    },
+  })
+  return { assign }
 }
 
 /** The class on each element of this type, in order. */

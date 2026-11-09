@@ -99,7 +99,8 @@ function currentPath(): string {
   return join(deploymentsDir(), "current")
 }
 
-function currentLiveId(): string | null {
+/** The live deployment's id, or null when none is live. */
+export function currentLiveId(): string | null {
   if (!existsSync(currentPath())) return null
   return readFileSync(currentPath(), "utf8").trim() || null
 }

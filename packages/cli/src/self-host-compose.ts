@@ -8,6 +8,8 @@ import { ENGINE_SERVICE } from "./compose-engine-service.js"
 import { requireDockerDaemon, requireDockerDaemonAsync, type DockerBrandOptions, type DockerReportOptions } from "./docker-runtime.js"
 import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer, type DockerLimit } from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
+import { plain } from "./ui/messages.js"
+import { getActiveFlowApi } from "./ui/runtime/flow-session.js"
 import {
   COMPOSE_DEV_KONG_PORT,
   defaultAppStaticDir,
@@ -16,6 +18,7 @@ import {
   hooksPathFromProject,
   preferredFunctionsPathFromProject,
   realtimeEnabled,
+  publicEnvServerEnv,
   serviceRoleRoutes,
   selfHostTlsEnabled,
   usesExternalDatabase,
@@ -32,13 +35,18 @@ import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.
 import { upKeepingKongCurrent, upKeepingKongCurrentAsync } from "./compose-kong.js"
 import { addressPoolExhaustionHint } from "./docker-address-pool.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
+import { composeSamlEnv, ensureSamlPrivateKey } from "./saml-config.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
   ENV_FILE_OVER_SHELL,
   SQL_EDITOR_PASSWORD_ENV,
   ensureControlPlaneSecret,
+  ensureObjectStoreCredentials,
   envFileOverridesShell,
+  OBJECT_STORE_ACCESS_KEY_ENV,
+  OBJECT_STORE_SECRET_KEY_ENV,
+  type ObjectStoreCredentials,
 } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
@@ -85,9 +93,13 @@ const SEAWEEDFS_IMAGE =
  */
 const ACME_KEY_PREFIX = "kong_acme:"
 
-/** Credentials the object store is configured with and the storage service is handed. */
-const OBJECT_STORE_ACCESS_KEY = "supatype"
-const OBJECT_STORE_SECRET_KEY = "supatype-secret"
+/**
+ * The project's object store login as compose reads it from `.env` (issue 71: every stack used to
+ * share one pair, written into this file). Required, not defaulted: writeSelfHostCompose generates
+ * it before the file is written.
+ */
+const OBJECT_STORE_ACCESS_KEY = `\${${OBJECT_STORE_ACCESS_KEY_ENV}:?${OBJECT_STORE_ACCESS_KEY_ENV} is missing from .env}`
+const OBJECT_STORE_SECRET_KEY = `\${${OBJECT_STORE_SECRET_KEY_ENV}:?${OBJECT_STORE_SECRET_KEY_ENV} is missing from .env}`
 
 /**
  * The compose volume key Postgres keeps its data in. Docker names the volume
@@ -217,14 +229,12 @@ function supportedEngineImage(image: string, from: string): string {
  * world-readable and the per-bucket policy decorative, which is the opposite of what
  * `applyPublicPolicy` is for: a bucket is public because its policy says so.
  */
-export function renderSeaweedIdentities(): string {
+export function renderSeaweedIdentities(credentials: ObjectStoreCredentials): string {
   const identities = {
     identities: [
       {
         name: "supatype",
-        credentials: [
-          { accessKey: OBJECT_STORE_ACCESS_KEY, secretKey: OBJECT_STORE_SECRET_KEY },
-        ],
+        credentials: [{ accessKey: credentials.accessKey, secretKey: credentials.secretKey }],
         actions: ["Admin", "Read", "List", "Tagging", "Write"],
       },
     ],
@@ -478,6 +488,16 @@ function corsOriginsEnv(config: SupatypeProjectConfig): string {
   return configured.length > 0 ? `${configured.join(",")},${fromEnv}` : fromEnv
 }
 
+/**
+ * The server's `SUPATYPE_PUBLIC_ENV` line, ending in a newline, for `server.public_env: false`;
+ * empty otherwise, leaving the server's default.
+ */
+function publicEnvForCompose(config: SupatypeProjectConfig): string {
+  const value = publicEnvServerEnv(config)["SUPATYPE_PUBLIC_ENV"]
+  if (value === undefined) return ""
+  return `      # server.public_env: no /supatype-env.json or /supatype-env.js.\n      SUPATYPE_PUBLIC_ENV: "${value}"\n`
+}
+
 function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean): string {
   const mode = config.app.mode ?? "none"
   const lines = [`      SUPATYPE_APP_MODE: ${mode}`]
@@ -592,6 +612,8 @@ export function renderSelfHostCompose(
   const publicApiUrl = `\${API_EXTERNAL_URL:-${externalUrlFallback}}`
   // OAuth providers hang their default callback off the same public URL the server is told it has.
   const authProviderEnv = composeAuthProviderEnv(config, publicApiUrl)
+  // SAML's service provider sits under the same public URL, at /auth/v1 like the OAuth callback.
+  const samlEnv = composeSamlEnv(config, publicApiUrl)
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
   const staticDir = appStaticDir(config)
@@ -664,6 +686,10 @@ ${studioService}
     # open. Written beside this file by the same generator, so the two cannot drift.
     image: \${SUPATYPE_SEAWEEDFS_IMAGE:-${SEAWEEDFS_IMAGE}}
     command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    environment:
+      # Read by nothing inside. The object store loads s3.json only when it starts, so the login is
+      # named here to make compose restart it whenever the login changes, as it does storage.
+      SUPATYPE_S3_LOGIN: "${OBJECT_STORE_ACCESS_KEY}:${OBJECT_STORE_SECRET_KEY}"
     volumes:
       - storage-data:/data
 ${mounts.seaweed}
@@ -1087,7 +1113,7 @@ ${mounts.projectState}
       SUPATYPE_STORAGE_URL: http://storage:5000
       SUPATYPE_URL: ${publicApiUrl}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
-      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
+${publicEnvForCompose(config)}      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SQL_DATABASE_URL: "${ownerUrl}"
       # The SQL editor's own login, not a superuser. The owner URL above stays: the server falls
       # back to it and uses it for role membership.
@@ -1140,7 +1166,7 @@ ${composeEnvLines(mailerUrlPathsEnv())}
       # to get them and a resend or ses provider fell back to the noop mailer.
 ${composeEnvLines(Object.fromEntries(MAILER_PASSTHROUGH_ENV.map((name) => [name, `\${${name}:-}`])))}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
-${authProviderEnv}
+${authProviderEnv}${samlEnv}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started
@@ -1451,12 +1477,16 @@ export function writeSelfHostCompose(
   mkdirSync(paths.dir, { recursive: true })
   // Before the file that requires it is written, so no stack is ever rendered without one.
   ensureControlPlaneSecret(cwd)
+  // The SAML signing key too, once SAML is on: the file requires it, and it must never change.
+  ensureSamlPrivateKey(cwd, config)
   // No functions/ or hooks/ here: the worker mounts the whole project and treats a missing root as
   // nothing to serve, while an empty functions/ made `dev` scaffold function types into projects
   // that have no functions. `functions new` and `init` create it when there is one.
   ensureComposeManifest(cwd, config)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
-  writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(), "utf8")
+  // The object store's login, from the same `.env` values the compose file reads, generated first
+  // when the project has none.
+  writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(ensureObjectStoreCredentials(cwd)), "utf8")
   const studioHostDev = options?.devLocal === true && hasStudioOverride(config)
   const tlsEnabled = selfHostTlsEnabled(config, options?.devLocal === true)
   const domain = config.server.domain?.trim()
@@ -1493,6 +1523,13 @@ export interface RunDockerComposeOptions {
   quiet?: boolean
   /** Logo + Clack intro when Docker preflight fails (TTY). */
   brand?: DockerBrandOptions
+  /**
+   * Run compose without first asking whether the daemon is up. For stopping a stack that was just
+   * running, where the answer is already known: a Docker busy enough to be slow with `docker info`
+   * made the question say the daemon was down and exit before `down` ran (issue 33). Compose still
+   * reports its own failure if Docker really is gone.
+   */
+  skipDaemonProbe?: boolean
 }
 
 /** Exit with a friendly compose failure message. */
@@ -1534,8 +1571,12 @@ export function runDockerCompose(
   composeProject?: string,
   options?: RunDockerComposeOptions,
 ): number {
-  requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
-  const quiet = options?.quiet === true
+  if (options?.skipDaemonProbe !== true) requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
+  // Inside a command's flow, docker's output is captured and its stdout logged there. Written
+  // straight to the terminal, it landed in the frame the flow redraws, and every line above it
+  // came out twice.
+  const inFlow = getActiveFlowApi() !== null
+  const quiet = options?.quiet === true || inFlow
   const runCompose = () =>
     askDockerSync(composeInvocation(composePath, args, projectRoot, composeProject, quiet), {
       stdio: quiet ? "pipe" : "inherit",
@@ -1550,6 +1591,8 @@ export function runDockerCompose(
       ? upKeepingKongCurrent(projectRoot, { project: composeProject, composePath }, runCompose)
       : runCompose()
   if (result.status !== 0) reportComposeFailure(args, quiet ? capturedComposeOutput(result) : null)
+  // The flow's log takes the text a line at a time, blank lines dropped.
+  else if (inFlow && options?.quiet !== true) plain(result.stdout.replace(/\r/g, "").trimEnd())
   return result.status ?? 1
 }
 

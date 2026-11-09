@@ -26,6 +26,15 @@ export function userAdministrationOffered(capability: OfferedCapability): boolea
   return offers(capability, "manageUsers")
 }
 
+/**
+ * Adding, changing, verifying and removing the project's SAML identity providers: owners and admins,
+ * the roles that manage Studio's members, since a provider decides who can sign in at all. The auth
+ * server refuses these writes to every other role; developers read.
+ */
+export function ssoProviderChangesOffered(capability: OfferedCapability): boolean {
+  return offers(capability, "manageMembers")
+}
+
 /** Changing content (rows and files): every role but the viewer, who reads. */
 export function contentWriteOffered(capability: OfferedCapability): boolean {
   return offers(capability, "write")

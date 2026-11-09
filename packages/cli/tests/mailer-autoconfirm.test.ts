@@ -69,7 +69,10 @@ describe("supatype dev (docker)", () => {
     dev(cwd, config(true))
     dev(cwd, config(false))
     expect(value(cwd)).toBe("true")
-    expect(readFileSync(join(cwd, ".env"), "utf8").split(MANAGED_MARKER)).toHaveLength(2)
+    // One line under one marker. Other mailer values the config gives carry their own marker.
+    const text = readFileSync(join(cwd, ".env"), "utf8")
+    expect(text.split(`${MANAGED_MARKER}\n${KEY}=`)).toHaveLength(2)
+    expect(text.split(`${KEY}=`)).toHaveLength(2)
   })
 
   it("leaves a value the developer wrote into .env themselves", () => {

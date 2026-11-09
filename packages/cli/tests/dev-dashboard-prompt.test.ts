@@ -17,11 +17,10 @@ const LEFTOVER_STACK_QUESTION =
 /** Render the dashboard on a fake terminal and return the last frame, without escape codes. */
 async function lastFrame(columns: number, rows: number): Promise<string> {
   const { stdin, stdout, chunks } = fakeTty(columns, rows)
-  const instance = renderDevDashboard(new DevLogBus(), { stdin, stdout, patchConsole: false })
+  const instance = renderDevDashboard(new DevLogBus(), { stdin, stdout })
   await tick(100)
   instance.unmount()
   const frames = chunks().filter((chunk) => chunk.includes("╭"))
-  // eslint-disable-next-line no-control-regex
   return (frames[frames.length - 1] ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
 }
 
