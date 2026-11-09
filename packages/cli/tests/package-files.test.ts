@@ -38,6 +38,7 @@ describe("the published CLI package", () => {
     for (const path of [
       "package.json",
       "bin/supatype.js",
+      "bin/node-version.js",
       "dist/cli-launcher.js",
       "dist/cli.js",
       "dist/index.js",

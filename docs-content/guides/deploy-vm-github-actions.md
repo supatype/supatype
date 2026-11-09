@@ -27,7 +27,7 @@ This guide covers self-hosting only. Supatype Cloud is a separate product.
 
 <h2 id="local">Create the project locally</h2>
 
-On your machine, with Node.js 22 or later.
+On your machine, with Node.js 20.19 or later: the CLI needs 18, and the Vite 8 app it sets up needs 20.19.
 
 ### 1. Scaffold
 
@@ -82,7 +82,7 @@ A one-time setup on Ubuntu 22.04 or similar, with SSH access.
 
 ```sh title="vm"
 # Docker: https://docs.docker.com/engine/install/ubuntu/
-# Node.js 22 or later (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
+# Node.js 20.19 or later, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
 $ sudo apt update && sudo apt install -y git
 $ sudo npm install -g @supatype/cli
 

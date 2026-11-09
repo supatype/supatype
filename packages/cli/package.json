@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "description": "Supatype CLI: schema push, introspect, generate",
   "engines": {
-    "node": ">=22"
+    "node": ">=18"
   },
   "type": "module",
   "bin": {
@@ -14,6 +14,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "bin/supatype.js",
+    "bin/node-version.js",
     "dist",
     "!dist/**/supatype-eval-*",
     "!dist/**/*.tsbuildinfo",

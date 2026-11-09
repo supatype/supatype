@@ -23,7 +23,7 @@ $ supatype --help
 $ supatype push --help
 ```
 
-The npm package needs Node.js 22 or later. It is the install to use on Windows.
+The npm package needs Node.js 18 or later. It is the install to use on Windows.
 
 The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
 

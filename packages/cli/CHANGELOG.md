@@ -191,6 +191,9 @@
 
 ### Bug Fixes
 
+* **cli:** the npm package now installs on Node.js 18 and later, not only 22, and an older Node is
+  told which version to install. 0.8.0 to 0.9.1 asked for Node 22, which the package never needed,
+  so npm on Node 18 or 20 quietly installed 0.7.0 instead of the latest release.
 * **self-host:** a self-hosted stack now sends a confirmation link with every new email sign-up
   unless `auth.email.enableConfirmations` is `false`; it used to confirm every sign-up at once, so
   anyone could sign up with an address they do not own. Local dev still confirms at once.
