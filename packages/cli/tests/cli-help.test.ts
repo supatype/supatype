@@ -150,7 +150,7 @@ describe("CLI binary (requires built dist/)", () => {
     expect(stdout).toContain("--port")
   })
 
-  it("self-host --help shows compose only (legacy commands hidden)", () => {
+  it("self-host --help shows compose only", () => {
     const { stdout, exitCode } = runCli(["self-host", "--help"])
     expect(exitCode).toBe(0)
     const commandsSection = stdout.split("Commands:")[1] ?? ""

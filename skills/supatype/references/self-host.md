@@ -137,13 +137,13 @@ process ID) is removed and does not count.
 
 ### Local overrides stay local
 
-`supatype.local.config.ts` is for development. Every `self-host` command (`compose up`, `down`,
-`restart`, `status`, `logs`, `render`, and the native `serve`, `reload`, `backup` and the rest),
-`supatype deploy`, and a `supatype push` to a production stack (a linked self-host server, or the
-project's own stack while it runs standalone) load `supatype.config.ts` alone. When an override
-exists they print `Using supatype.config.ts without supatype.local.config.ts: that override is for
-local development.` So a `server: { mode: "dev" }` override no longer reaches production even when
-the file is present on the server.
+`supatype.local.config.ts` is for development. Every `self-host compose` command (`up`, `down`,
+`restart`, `status`, `logs`, `render`), `supatype deploy`, and a `supatype push` to a production
+stack (a linked self-host server, or the project's own stack while it runs standalone) load
+`supatype.config.ts` alone. When an override exists they print
+`Using supatype.config.ts without supatype.local.config.ts: that override is for local development.`
+So a `server: { mode: "dev" }` override no longer reaches production even when the file is present
+on the server.
 
 **`DATABASE_URL` in `.env` stays dev's.** `self-host compose up` no longer rewrites it to the
 self-host stack's port; that had dev and self-host rewriting the same line in turn. Host commands

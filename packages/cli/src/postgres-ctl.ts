@@ -361,11 +361,8 @@ export function pgServerOptions(opts: PgOptions): string {
   return `-p ${opts.port} ${pgServerSettings(opts)}`
 }
 
-/**
- * {@link pgServerOptions} without the port: every setting a native Postgres starts with, for a
- * start that names its port elsewhere (the systemd unit's postgresql.conf).
- */
-export function pgServerSettings(opts: PgSettingsOptions): string {
+/** {@link pgServerOptions} without the port: every setting a native Postgres starts with. */
+function pgServerSettings(opts: PgSettingsOptions): string {
   return pgServerSettingPairs(opts).map(([name, value]) => `-c ${name}=${value}`).join(" ")
 }
 

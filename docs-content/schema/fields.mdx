@@ -199,8 +199,8 @@ Extension `postgis` is installed in `public`, where the API serves its functions
 ```
 
 Moving it means dropping and re-adding every `geography` and `geometry` column, so do it in a
-maintenance window with writes stopped, after a backup (`supatype self-host backup`, or
-`pg_dump`). Run the SQL as the database's admin role (`supatype_admin` on `supatype/postgres`):
+maintenance window with writes stopped, after a backup (with `pg_dump`, for example). Run the SQL
+as the database's admin role (`supatype_admin` on `supatype/postgres`):
 
 1. List the columns to keep:
 

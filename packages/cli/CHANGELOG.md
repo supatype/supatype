@@ -4,6 +4,12 @@
 
 ### Breaking Changes
 
+* **self-host:** the hidden `supatype self-host native` commands (`install-service`, `serve`,
+  `reload`, `status`, `logs`, `backup`) are removed. They were undocumented and untested, and
+  `serve` ran the server's built-in object store, which applies no storage read rules: anyone with
+  the anon key could read a private bucket. The systemd units `install-service` wrote started no
+  storage service either. Docker Compose (`supatype self-host compose`) is the self-host path; back
+  up a Compose stack with `pg_dump` against `DATABASE_URL`.
 * **push, diff, seed and every command that reaches the local stack:** these commands no longer
   start the local stack. On a Docker project with the stack stopped, `push`, `diff`, `adopt`,
   `doctor`, `seed`, `migrate`, `migrations list`, `rollback`, `reset`, `introspect`, `pull` and
