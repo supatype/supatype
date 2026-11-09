@@ -40,7 +40,7 @@ type RealtimeState =
 const READY_TIMEOUT_MS = 15_000
 const READY_POLL_MS = 250
 
-function spawnRealtime(launch: ComponentLaunchSpec, opts: NativeRealtimeOptions, onExit: () => void): ProcessManager {
+function spawnRealtime(launch: ComponentLaunchSpec, opts: NativeRealtimeOptions, onStopped: () => void): ProcessManager {
   const proc = new ProcessManager(launch.bin, launch.args, {
     label: "realtime",
     pidDir: opts.pidDir,
@@ -54,8 +54,8 @@ function spawnRealtime(launch: ComponentLaunchSpec, opts: NativeRealtimeOptions,
       SLOT_NAME: "supatype_realtime",
       PUBLICATION_NAME: "supatype_realtime",
     },
-    // A clean exit only: ProcessManager restarts realtime after any other.
-    onExit,
+    // A clean exit, or crashing as it starts too often: ProcessManager restarts realtime after any other.
+    onStopped,
   })
   proc.start()
   // Recorded the moment it is spawned, so a Ctrl+C while dev is still starting stops it too.
@@ -83,7 +83,7 @@ export async function startNativeRealtime(
   const watch = watchExit(opts.manifestPath)
   let proc: ProcessManager
   try {
-    proc = spawnRealtime(await resolveLaunch(opts.config, opts.cwd), opts, watch.onExit)
+    proc = spawnRealtime(await resolveLaunch(opts.config, opts.cwd), opts, watch.onStopped)
   } catch (err) {
     return realtimeNotRunning(opts, errorMessage(err))
   }
@@ -106,21 +106,22 @@ export async function startNativeRealtime(
 interface ExitWatch {
   /** Aborted by an exit before the announcement, which ends the wait for an answer. */
   gone: AbortSignal
-  onExit: () => void
+  onStopped: () => void
   announced: () => void
 }
 
 /**
- * A clean exit before realtime is announced ends the wait for it; one after means it has gone, and
- * the gateway stops routing subscriptions to its port. Watching goes on for the life of the
- * process, so a realtime announced while still connecting is still switched off if it then exits.
+ * Realtime stopping for good (a clean exit, or crashing as it starts too often) before it is
+ * announced ends the wait for it; after, it has gone, and the gateway stops routing subscriptions
+ * to its port. Watching goes on for the life of the process, so a realtime announced while still
+ * connecting is still switched off if it then stops.
  */
 function watchExit(manifestPath: string): ExitWatch {
   const gone = new AbortController()
   let announced = false
   return {
     gone: gone.signal,
-    onExit: () => (announced ? disableRealtime(manifestPath, "Realtime exited.") : gone.abort()),
+    onStopped: () => (announced ? disableRealtime(manifestPath, "Realtime exited.") : gone.abort()),
     announced: () => {
       announced = true
     },

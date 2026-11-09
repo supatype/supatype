@@ -196,6 +196,14 @@
   set `app.start`, so a project 0.9.1 made needs only that one edit. A `supatype dev` reached some
   other way (`npm run supatype:dev`, `concurrently`) stops at once with the same advice, and the app
   pane leaves it stopped.
+* **dev:** a service that keeps crashing as it starts is no longer restarted every 30 seconds for
+  ever. After 5 crashes in a row, each within 5 seconds of its start, dev says so once and retries
+  less often, the wait doubling past 30 seconds, so a fix to what it needs is still picked up. Once
+  the wait would reach 5 minutes, about 8 minutes in, dev leaves it stopped and says to fix the
+  error and restart `supatype dev`. This covers the app, Studio, and on a native project the server,
+  PostgREST, realtime and storage. Realtime stopped this way is switched off at the gateway, as it
+  already was after a clean exit. A run that lasts longer starts the count over, and the wait
+  before the next restart goes back to 1 second instead of staying at the longest it reached.
 
 * **dev:** a save made by writing another file and renaming it over the schema is pushed. `sed -i`
   saves were always missed on Linux, and an editor's safe write or a script's `mv` about one time in

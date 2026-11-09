@@ -25,8 +25,15 @@ export interface ProcessOptions {
   initialBackoffMs?: number
   /** Maximum restart backoff cap in ms. */
   maxBackoffMs?: number
-  /** Called when the process exits cleanly (code 0). */
-  onExit?: () => void
+  /** A crash this soon after the start counts toward {@link FAST_CRASH_LIMIT}. Default 5s. */
+  fastCrashMs?: number
+  /** A crash-looping process is left stopped once the wait before its next restart reaches this. Default 5 minutes. */
+  giveUpWaitMs?: number
+  /**
+   * Called when the process stops for good: a clean exit (code 0), `finalExitCode`, or crashing as
+   * it starts too often. It is not restarted after any of them.
+   */
+  onStopped?: () => void
   /** A non-zero exit code that means restarting cannot help, so the process is left stopped. */
   finalExitCode?: number
   /** Use shell to spawn (required for pnpm/npm/yarn .cmd shims on Windows). */
@@ -48,6 +55,12 @@ export interface ProcessOptions {
 }
 
 const RESET = "\x1b[0m"
+
+/**
+ * Crashes in a row, each soon after its start, after which a process is crash-looping: it is said
+ * so once, and its wait keeps doubling past `maxBackoffMs` until it reaches `giveUpWaitMs`.
+ */
+export const FAST_CRASH_LIMIT = 5
 
 type OutputStream = "stdout" | "stderr"
 
@@ -110,13 +123,17 @@ export class ProcessManager {
   private child: ChildProcess | null = null
   private stopped = false
   private backoffMs: number
+  /** Crashes in a row, each within `fastCrashMs` of its start. */
+  private fastCrashes = 0
   private opts: ProcessOptions & {
     colour: string
     cwd: string
     env: Record<string, string>
     initialBackoffMs: number
     maxBackoffMs: number
-    onExit: () => void
+    fastCrashMs: number
+    giveUpWaitMs: number
+    onStopped: () => void
     shell: boolean
   }
   private readonly prefix: string
@@ -133,7 +150,9 @@ export class ProcessManager {
       env: {},
       initialBackoffMs: 1_000,
       maxBackoffMs: 30_000,
-      onExit: () => {},
+      fastCrashMs: 5_000,
+      giveUpWaitMs: 300_000,
+      onStopped: () => {},
       shell: false,
       ...merged,
     }
@@ -206,27 +225,57 @@ export class ProcessManager {
     this.child = child
     if (child.pid) this.writePid(child.pid)
     this.pipeOutput(child)
+    const startedAt = Date.now()
 
     child.once("error", (err) => {
       if (this.stopped) return
-      this.report(`failed to start: ${err.message}`)
-      this.scheduleRestart()
+      this.restartUnlessLooping(`failed to start: ${err.message}`, startedAt)
     })
 
     child.once("exit", (code, signal) => {
       if (this.stopped) return
       if (code === 0) {
-        this.opts.onExit()
+        this.opts.onStopped()
         return
       }
-      const reason = signal ? `signal ${signal}` : `code ${code}`
-      if (code === this.opts.finalExitCode) {
-        this.report(`process exited (${reason}), not restarting it`)
-        return
-      }
-      this.report(`process exited (${reason}), restarting in ${this.backoffMs}ms`)
-      this.scheduleRestart()
+      const what = `process exited (${signal ? `signal ${signal}` : `code ${code}`})`
+      if (code === this.opts.finalExitCode) this.leaveStopped(what)
+      else this.restartUnlessLooping(what, startedAt)
     })
+  }
+
+  /**
+   * Restarts after a crash. From the {@link FAST_CRASH_LIMIT}th in a row within `fastCrashMs` of its
+   * start, the wait doubles past `maxBackoffMs`, so a fix to what it needs is still picked up, and
+   * once the wait reaches `giveUpWaitMs` it is left stopped. A run that lasted resets both.
+   */
+  private restartUnlessLooping(what: string, startedAt: number): void {
+    if (Date.now() - startedAt < this.opts.fastCrashMs) {
+      this.fastCrashes++
+    } else {
+      this.fastCrashes = 0
+      this.backoffMs = this.opts.initialBackoffMs
+    }
+    if (this.crashLooping() && this.backoffMs >= this.opts.giveUpWaitMs) {
+      this.leaveStopped(`${what}, still crashing as it starts`, "Fix the error above, then restart supatype dev.")
+      return
+    }
+    if (this.fastCrashes === FAST_CRASH_LIMIT) {
+      const seconds = this.opts.fastCrashMs / 1_000
+      this.report(`it has exited ${this.fastCrashes} times in a row within ${seconds}s of starting, so it is retried less often`)
+    }
+    this.report(`${what}, restarting in ${this.backoffMs}ms`)
+    this.scheduleRestart()
+  }
+
+  private crashLooping(): boolean {
+    return this.fastCrashes >= FAST_CRASH_LIMIT
+  }
+
+  /** Says the process is not restarted, and why, and tells the caller it has stopped for good. */
+  private leaveStopped(what: string, advice?: string): void {
+    this.report(`${what}, not restarting it.${advice !== undefined ? ` ${advice}` : ""}`)
+    this.opts.onStopped()
   }
 
   /**
@@ -270,7 +319,7 @@ export class ProcessManager {
 
   private scheduleRestart(): void {
     setTimeout(() => {
-      this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
+      this.backoffMs = this.crashLooping() ? this.backoffMs * 2 : Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
       void this.spawnAfter(this.opts.beforeRestart)
     }, this.backoffMs)
   }
