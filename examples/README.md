@@ -36,9 +36,9 @@ pnpm build   # the CLI and the libraries run from their dist/
 and skip the repo build. Steps in the example's README that say "from the repo root" run in the
 example's folder instead.
 
-Then follow the example's own README. A static front end built with Vite has the anon key baked
-in at build time, so mint the keys before you build it. A build made before the keys exist has no
-key. Rebuild after you mint new keys.
+Then follow the example's own README. A static front end that Supatype serves carries no anon key
+in its build: its `index.html` loads `/supatype-env.js` from the server, and the client reads the
+key from there, so a plain `vite build` works in any order and never ships a local stack's key.
 
 ## Which of these are asserted
 

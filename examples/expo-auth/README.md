@@ -30,7 +30,7 @@ pnpm --filter @supatype/cli build
 
 cd examples/expo-auth
 cp .env.example .env
-pnpm exec supatype keys          # mints JWTs + EXPO_PUBLIC_* in .env
+pnpm exec supatype keys          # mints JWTs into .env, EXPO_PUBLIC_* into .env.development.local
 pnpm exec supatype dev           # terminal 1, Compose stack, Kong :18473; pushes the schema
 pnpm start                       # terminal 2, Expo
 ```
@@ -40,8 +40,10 @@ starts and on every save, and on its first start it writes the database password
 database port into `.env`. `supatype push` works once `dev` has run; before that `.env` has no
 `AUTHENTICATOR_PASSWORD` or `SUPATYPE_SQL_EDITOR_PASSWORD` and the push refuses.
 
-Open in Expo Go. On a physical device, set `EXPO_PUBLIC_SUPATYPE_URL` to your LAN IP
-(e.g. `http://10.x.x.x:18473`) after `supatype dev` (or edit `.env` and restart Metro).
+Open in Expo Go. `expo start` reads `EXPO_PUBLIC_SUPATYPE_URL` and `EXPO_PUBLIC_SUPATYPE_ANON_KEY`
+from `.env.development.local`, which `supatype keys` and `supatype dev` write. On a physical device,
+set `EXPO_PUBLIC_SUPATYPE_URL` there to your LAN IP (e.g. `http://10.x.x.x:18473`) after
+`supatype dev` has started, since it writes that file when it starts, then restart Metro.
 
 Allowlist the redirect URI on the auth server (printed on the auth screen), e.g.
 `supatype-expo-auth://auth/callback`.
@@ -55,8 +57,9 @@ Automated (from this directory, against the **Supatype** gateway):
 pnpm smoke
 ```
 
-Defaults to `EXPO_PUBLIC_SUPATYPE_URL` / `EXPO_PUBLIC_SUPATYPE_ANON_KEY` from `.env`,
-or `http://localhost:18473` + `ANON_KEY`. Override with `SUPATYPE_URL` / `SUPATYPE_ANON_KEY`.
+Defaults to `EXPO_PUBLIC_SUPATYPE_URL` / `EXPO_PUBLIC_SUPATYPE_ANON_KEY` from
+`.env.development.local`, then `.env`, or `http://localhost:18473` + `ANON_KEY`. A blank value
+counts as unset. Override with `SUPATYPE_URL` / `SUPATYPE_ANON_KEY`.
 
 Manual UI:
 
@@ -68,6 +71,19 @@ Manual UI:
 6. Open **Chat** tab: send a message; open a second device/simulator to see realtime delivery.
 
 Bundle check: `pnpm exec expo export --platform web --output-dir dist-smoke`
+
+`expo export` runs in production mode and never reads `.env.development.local`, so the web export
+carries no API address or anon key, and never the local stack's. Its page (`public/index.html`,
+Expo's web template with one line added) loads `/supatype-env.js` from the server that serves it,
+and the client reads both from there. To run the export against the stack, have Supatype serve it:
+
+```bash
+pnpm exec expo export --platform web --output-dir dist
+pnpm exec supatype app add --static ./dist   # then restart `supatype dev` and open the gateway
+```
+
+`pnpm exec supatype app remove` goes back to no app. A native build has no page, so it is built
+with `EXPO_PUBLIC_SUPATYPE_URL` and `EXPO_PUBLIC_SUPATYPE_ANON_KEY` set to the deployment's values.
 
 The screens are automated too: `bash tests/integration/scripts/expo-auth-e2e.sh` (from the monorepo
 root) runs the web build in a browser through sign-up, sign-in, magic link, password reset and

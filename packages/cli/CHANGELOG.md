@@ -187,6 +187,12 @@
 
 ### Bug Fixes
 
+* **examples:** kitchen-sink, supabucks, framework-parity and expo-auth's web export run from a
+  plain `vite build` / `expo export` again: the page loads `/supatype-env.js` and the client reads
+  the anon key from it, so a build no longer shows a blank page after `dev` or `keys`, and never
+  ships the local stack's key. Each example's `.gitignore` now ignores `.env.*.local`.
+* **keys:** an anon key written with no API URL in `.env` goes to `.env.development.local`, not
+  `.env`, so a plain production build no longer bakes the local stack's key.
 * **realtime:** realtime no longer makes Postgres log six lines every 100 ms while nothing is
   changing. It reads the replication slot only once the WAL has moved past it, so an idle stack
   stopped writing about 0.8 GB of database log a day.

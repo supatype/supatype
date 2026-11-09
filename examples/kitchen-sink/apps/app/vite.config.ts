@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url"
 // Built to ./dist, which `app.mode: "static"` in the project config serves. The app and the API
 // therefore share one origin: no CORS, no hardcoded host, one command to run the whole thing.
 //
-// `envDir` is the project root because that is where `supatype keys` writes
-// VITE_SUPATYPE_ANON_KEY. Vite's default is its own root, so without this the build reads no .env
-// at all and ships `anonKey: undefined`: a bundle that looks fine and is rejected by the gateway
-// on every request.
+// The production build carries no anon key: index.html loads `/supatype-env.js` from the server
+// that serves the page, and the client reads it from there. `envDir` is the project root because
+// that is where `supatype keys` and `dev` write the local stack's values (`.env.development.local`),
+// which a dev build reads; Vite's default is its own root.
 export default defineConfig({
   plugins: [react()],
   envDir: fileURLToPath(new URL("../..", import.meta.url)),

@@ -34,7 +34,7 @@ cp functions/.env.local.example functions/.env.local
 pnpm keys
 ```
 
-Ensure `.env` has `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` (keys / dev write these). Open the **gateway** (`http://localhost:18473`), not Vite’s `:5173` alone, unless Vite’s proxy to Kong is active.
+`pnpm keys` and `pnpm dev` write `VITE_SUPATYPE_URL` and `VITE_SUPATYPE_ANON_KEY` to `.env.development.local`, which the Vite dev server reads. Open the **gateway** (`http://localhost:18473`), not Vite’s `:5173` alone, unless Vite’s proxy to Kong is active.
 
 ## Run
 

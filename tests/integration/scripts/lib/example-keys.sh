@@ -8,8 +8,10 @@
 # that reads them from there fails with a 401 that names nothing. This mints them with the CLI, from
 # the example's own JWT_SECRET, and fails loudly instead.
 #
-# Call it BEFORE starting the stack: a front end that bakes its key in at build time (Vite,
-# Next) needs the value to exist before its build runs, not after.
+# Call it BEFORE starting the stack, which hands its services the pair in .env. A front end that
+# bakes its key in at build time (Next, a native Expo build) also needs the value before its build.
+# The Vite examples do not: their builds carry no key, and the page reads it from the server's
+# /supatype-env.js, which expect_env_script checks.
 #
 # The secret lives in the example's .env, which is where `supatype dev` reads it from, so the keys
 # minted here verify against the stack that starts later. Set EXAMPLE_JWT_SECRET to choose it;
@@ -48,4 +50,21 @@ mint_keys() {
   rm -f "$backup"
 
   export ANON_KEY SERVICE_ROLE_KEY
+}
+
+# expect_env_script <page-origin> - fails unless <page-origin>/supatype-env.js answers with a
+# script setting window.__SUPATYPE_ENV__ to the stack's anon key ($ANON_KEY, from mint_keys).
+# 0.9.1 release test (RB9): the examples' READMEs build with a plain `vite build`, which carries no
+# key, so this script is the only way the page gets one.
+expect_env_script() {
+  local url="${1%/}/supatype-env.js" body
+  body="$(curl -sS --connect-timeout 3 --max-time 10 "$url")" || {
+    echo "  FAIL $url did not answer" >&2
+    return 1
+  }
+  if [[ "$body" != *"window.__SUPATYPE_ENV__"* || "$body" != *"\"anonKey\":\"$ANON_KEY\""* ]]; then
+    echo "  FAIL $url did not set window.__SUPATYPE_ENV__ with the stack's anon key: ${body:0:200}" >&2
+    return 1
+  fi
+  echo "  ok   $url hands the page the stack's anon key"
 }

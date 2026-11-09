@@ -193,7 +193,7 @@ ANON_KEY=
 SERVICE_ROLE_KEY=
 API_EXTERNAL_URL=https://example.com
 SITE_URL=https://example.com</pre></div>
-    <p>Then run <code>supatype keys --write</code> in <code>/opt/my-blog</code>. It signs <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> from this <code>JWT_SECRET</code> and adds the <code>VITE_SUPATYPE_URL</code> (<code>https://example.com</code>, from <code>API_EXTERNAL_URL</code>) and <code>VITE_SUPATYPE_ANON_KEY</code> copies your frontend build reads to <code>.env</code>. Keys from your laptop will not work here, because they were signed with a different secret.</p>
+    <p>Then run <code>supatype keys --write</code> in <code>/opt/my-blog</code>. It signs <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> from this <code>JWT_SECRET</code> and adds the <code>VITE_SUPATYPE_URL</code> (<code>https://example.com</code>, from <code>API_EXTERNAL_URL</code>) and <code>VITE_SUPATYPE_ANON_KEY</code> copies your frontend build reads to <code>.env</code>. With a <code>localhost</code> or <code>127.0.0.1</code> <code>API_EXTERNAL_URL</code>, as on a test machine, it treats the stack as a local one and writes those copies to <code>.env.development.local</code> instead, which a production build never reads. Keys from your laptop will not work here, because they were signed with a different secret.</p>
 
     <div class="step"><span class="step-num">6</span><h3>First boot</h3></div>
     <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>

@@ -102,12 +102,15 @@ stop_stack() {
 }
 
 echo "==> Minting keys"
-# Before the SPA build: Vite bakes VITE_SUPATYPE_ANON_KEY in at build time, so a key minted after it
-# ships an empty string to every caller.
 mint_keys "$EXAMPLE_DIR" "$CLI_BIN"
 
-echo "==> Building the SPA"
-(cd "$ROOT_DIR" && VITE_SUPATYPE_ANON_KEY="$ANON_KEY" pnpm --filter @supatype/example-kitchen-sink-app build)
+echo "==> Building the SPA, as the README does"
+# A plain `vite build`, with no key given: the page reads it from the server's /supatype-env.js
+# (checked once the stack is up). 0.9.1 release test (RB9): passing the key here hid that the
+# README's own build had none, and the app the README describes was a blank page. Unset in case
+# the caller's environment carries one.
+(cd "$ROOT_DIR" && env -u VITE_SUPATYPE_ANON_KEY -u VITE_SUPATYPE_URL \
+  pnpm --filter @supatype/example-kitchen-sink-app build)
 [[ -f "$EXAMPLE_DIR/apps/app/dist/index.html" ]] || fail "the SPA build produced no dist/index.html"
 
 echo ""
@@ -144,6 +147,10 @@ if [[ -z "$PG_PASSWORD" || -z "$PG_DB" ]]; then
 fi
 export SUPATYPE_FUNCTIONS_DB_URL="postgresql://supatype_admin:${PG_PASSWORD}@db:5432/${PG_DB}"
 start_stack
+
+echo ""
+echo "==> The page gets its anon key from the stack that serves it"
+expect_env_script "$BASE_URL" || fail "the SPA has no way to get its anon key"
 
 echo ""
 echo "==> Seeding"

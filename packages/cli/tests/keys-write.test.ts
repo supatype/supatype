@@ -54,16 +54,28 @@ describe("writeKeysToEnv", () => {
     writeKeysToEnv(dir, PAIR, false)
 
     expect(envValue(dir, "ANON_KEY")).toBe(PAIR.anonKey)
-    expect(envValue(dir, "VITE_SUPATYPE_ANON_KEY")).toBe(PAIR.anonKey)
+    expect(readEnvFile(dir, ".env.development.local")["VITE_SUPATYPE_ANON_KEY"]).toBe(PAIR.anonKey)
+  })
+
+  // 0.9.1 release test (S27): with no URL in `.env` to say whose key this is, the front end's copy
+  // went to `.env`, and a plain `vite build` baked the local stack's anon key. A key written with no
+  // deployment address beside it is treated as a local stack's.
+  it("puts the front end's copy of a key with no URL beside it in .env.development.local, not .env", () => {
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=s\nANON_KEY=\nSERVICE_ROLE_KEY=\n")
+    const result = writeKeysToEnv(dir, PAIR, false)
+
+    expect(envValue(dir, "VITE_SUPATYPE_ANON_KEY")).toBeUndefined()
+    expect(readEnvFile(dir, ".env.development.local")["VITE_SUPATYPE_ANON_KEY"]).toBe(PAIR.anonKey)
+    expect(result.written).toContain("VITE_SUPATYPE_ANON_KEY (.env.development.local)")
   })
 
   it("treats a declared-but-blank line as a blank to fill", () => {
     // The templates ship `ANON_KEY=` with nothing after it, which is exactly the line to write.
-    writeFileSync(join(dir, ".env"), "JWT_SECRET=s\nVITE_SUPATYPE_ANON_KEY=\n")
+    writeFileSync(join(dir, ".env"), "JWT_SECRET=s\nANON_KEY=\n")
     const result = writeKeysToEnv(dir, PAIR, false)
 
-    expect(result.written).toContain("VITE_SUPATYPE_ANON_KEY")
-    expect(envValue(dir, "VITE_SUPATYPE_ANON_KEY")).toBe(PAIR.anonKey)
+    expect(result.written).toContain("ANON_KEY")
+    expect(envValue(dir, "ANON_KEY")).toBe(PAIR.anonKey)
   })
 
   it("leaves a key that already holds a value, and says which", () => {
@@ -86,7 +98,8 @@ describe("writeKeysToEnv", () => {
     expect(result.kept).toEqual([])
     expect(envValue(dir, "ANON_KEY")).toBe(PAIR.anonKey)
     expect(envValue(dir, "SERVICE_ROLE_KEY")).toBe(PAIR.serviceKey)
-    expect(envValue(dir, "VITE_SUPATYPE_ANON_KEY")).toBe(PAIR.anonKey)
+    // No URL says whose the key is, so the front end's copy is a local stack's (S27).
+    expect(readEnvFile(dir, ".env.development.local")["VITE_SUPATYPE_ANON_KEY"]).toBe(PAIR.anonKey)
   })
 
   it("does not rewrite the file, even under --force", () => {

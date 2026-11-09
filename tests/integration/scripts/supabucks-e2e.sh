@@ -64,12 +64,14 @@ fi
 fail() { echo "  FAIL $*" >&2; exit 1; }
 
 echo "==> Minting keys"
-# Before the build, not after: Vite reads VITE_SUPATYPE_ANON_KEY at build time and bakes the value
-# into the bundle. Mint it later and the bundle ships an empty key.
 mint_keys "$EXAMPLE_DIR" "$CLI_BIN"
 
-echo "==> Building the SPA"
-(cd "$EXAMPLE_DIR" && VITE_SUPATYPE_ANON_KEY="$ANON_KEY" npx vite build)
+echo "==> Building the SPA, as the README does"
+# A plain `vite build`, with no key given: the page reads it from the server's /supatype-env.js
+# (checked below). 0.9.1 release test (RB9): passing the key here hid that the README's own build
+# had none, and the app the README describes was a blank page. Unset in case the caller's
+# environment carries one.
+(cd "$EXAMPLE_DIR" && env -u VITE_SUPATYPE_ANON_KEY -u VITE_SUPATYPE_URL npx vite build)
 
 INDEX_BUILT="$EXAMPLE_DIR/dist/index.html"
 [[ -f "$INDEX_BUILT" ]] || fail "vite build produced no dist/index.html, so static mode has nothing to serve"
@@ -105,9 +107,10 @@ echo "  ok   /rewards falls back to the shell"
 echo ""
 echo "==> The bundle the shell references is served, as JavaScript"
 # Read the path out of the built index rather than guessing the hash, so a wrong base path fails
-# here instead of showing up as a blank page nobody's test noticed.
-asset="$(sed -n 's/.*<script[^>]*src="\([^"]*\.js\)".*/\1/p' "$INDEX_BUILT" | head -1)"
-[[ -n "$asset" ]] || fail "no <script src> in the built index.html"
+# here instead of showing up as a blank page nobody's test noticed. The module script: the page's
+# first script is /supatype-env.js, which the server answers, not the build.
+asset="$(sed -n 's/.*<script type="module"[^>]*src="\([^"]*\.js\)".*/\1/p' "$INDEX_BUILT" | head -1)"
+[[ -n "$asset" ]] || fail "no <script type=\"module\" src> in the built index.html"
 status="$(http_status "$BASE_URL${asset}")"
 [[ "$status" == "200" ]] || fail "GET $asset returned $status, expected 200"
 ctype="$(http_header content-type "$BASE_URL${asset}")"
@@ -115,15 +118,20 @@ grep -qi 'javascript' <<<"$ctype" || fail "$asset served as '${ctype:-no content
 echo "  ok   $asset served as $ctype"
 
 echo ""
-echo "==> The anon key reached the bundle"
-# A key that never made it into the build is the failure that looks exactly like a working app until
-# the first request: the page renders, and every call is a 401.
-grep -rqE 'eyJ[A-Za-z0-9_-]{6,}\.' "$EXAMPLE_DIR/dist/assets" \
-  || fail "no JWT in the built assets: VITE_SUPATYPE_ANON_KEY was not injected at build time"
-echo "  ok   a signed key is baked into the bundle"
+echo "==> The page gets its anon key from the stack that serves it"
+# A page with no key is the failure that looks like a working build until it loads: before RB9 the
+# app threw at start and the page was blank. The build carries none, so the page must load the
+# server's script, and the server must answer it with the stack's key.
+grep -q '<script src="/supatype-env.js"' "$INDEX_BUILT" \
+  || fail "the built index.html does not load /supatype-env.js, so the page has no anon key"
+expect_env_script "$BASE_URL" || fail "the SPA has no way to get its anon key"
+if grep -rqE 'eyJ[A-Za-z0-9_-]{6,}\.' "$EXAMPLE_DIR/dist/assets"; then
+  fail "a JWT is baked into the built assets: a production build must not ship the local stack's key"
+fi
+echo "  ok   the bundle carries no key of its own"
 
 echo ""
-echo "==> That key is accepted by the API this build is served from"
+echo "==> The key the page is handed is accepted by the API this build is served from"
 # Asserted on the error code, not the status, because both outcomes here are 401.
 #
 # This used to expect 200 with an empty array, on the assumption that anon holds SELECT and RLS
@@ -140,7 +148,7 @@ echo "==> That key is accepted by the API this build is served from"
 body="$(curl -sS -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" \
   "$BASE_URL/rest/v1/customer?select=id&limit=1")"
 case "$body" in
-  *PGRST301*|*JWSError*) fail "the built key was rejected by the API: $body" ;;
+  *PGRST301*|*JWSError*) fail "the key /supatype-env.js hands the page was rejected by the API: $body" ;;
   *42501*|"[]"|"[]"*)    echo "  ok   anon REST read accepted (key verified, table correctly denied)" ;;
   *)                     fail "unexpected anon REST response: $body" ;;
 esac

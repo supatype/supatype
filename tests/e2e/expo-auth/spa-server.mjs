@@ -32,7 +32,15 @@ function fileFor(pathname) {
 }
 
 createServer((req, res) => {
-  const file = fileFor(new URL(req.url ?? "/", "http://localhost").pathname)
+  const pathname = new URL(req.url ?? "/", "http://localhost").pathname
+  const file = fileFor(pathname)
+  // A missing script is a 404, not the page: the export's index.html loads /supatype-env.js, which
+  // only a Supatype server answers. Sent the page instead, the browser threw a syntax error. This
+  // suite builds the values in, so the script is not needed here.
+  if (extname(pathname) === ".js" && extname(file) !== ".js") {
+    res.writeHead(404).end()
+    return
+  }
   res.writeHead(200, { "Content-Type": TYPES[extname(file)] ?? "application/octet-stream" })
   createReadStream(file).pipe(res)
 }).listen(Number(portArg), "127.0.0.1", () => console.log(`serving ${dist} on :${portArg}`))

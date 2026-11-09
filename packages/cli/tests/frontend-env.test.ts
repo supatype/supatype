@@ -92,6 +92,18 @@ describe("a local stack's front-end values", () => {
   })
 })
 
+// 0.9.1 release test (S27): `keys` on a `.env` with no URL wrote the anon key to `.env`, and a plain
+// `vite build` baked it. Nothing says which deployment a key alone is for, so it is kept out of
+// production builds.
+describe("an anon key written with no URL beside it", () => {
+  it("counts as a local stack's and goes to .env.development.local", () => {
+    const { file } = writeFrontendEnv(dir, { anonKey: ANON })
+    expect(file).toBe(DEV_FRONTEND_ENV_FILE)
+    for (const name of ANON_NAMES) expect(devFile()[name]).toBe(ANON)
+    expect(existsSync(join(dir, ".env"))).toBe(false)
+  })
+})
+
 describe("a real deployment's front-end values", () => {
   it("go to .env, which a production build reads", () => {
     writeFrontendEnv(dir, { apiUrl: "https://api.example.com", anonKey: "prod.anon.key" })
