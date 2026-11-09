@@ -187,6 +187,11 @@
 
 ### Bug Fixes
 
+* **realtime:** `channel(name).on("postgres_changes", { table })` and `useSubscription` now watch
+  the `public` schema when no `schema` is given, as the docs say. A channel name with a colon, such
+  as `post:42`, was read as `schema:table` even when the listener named its table, so the
+  subscription reported SUBSCRIBED and delivered nothing. The realtime server reads a subscribe
+  message the same way. The name is still read as `schema:table` when no table is given.
 * **react:** `useQuery`'s `refetch`, `useAuth`'s sign-in and sign-out methods, and
   `usePasswordRecovery`'s `finish` now keep the same identity across renders, so an effect can list
   them as dependencies. A new function on every render made `useEffect(() => refetch(), [refetch])`

@@ -102,6 +102,31 @@ describe("the subscribe frame", () => {
     // always carries a schema, that default overrode the "app" the server would have read.
     expect(subscribeFrames()[0]!["schema"]).toBe("app")
   })
+
+  it("joins public when a table is named and the channel name has a colon", async () => {
+    // 0.9.1 release test (RB4): the documented `.channel("post:42")` with `table: "comment"`
+    // took "post" from the channel name as the schema, joined `post.comment`, reported SUBSCRIBED
+    // and delivered nothing. The name is read as `schema:table` only when no table is given.
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    client
+      .channel("post:42")
+      .on("postgres_changes", { event: "INSERT", table: "comment", filter: "post_id=eq.42" }, () => {})
+      .subscribe()
+    await settle()
+
+    expect(subscribeFrames()[0]).toMatchObject({ channel: "post:42", schema: "public", table: "comment" })
+  })
+
+  it("keeps a schema the listener states, whatever the channel is called", async () => {
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    client
+      .channel("post:42")
+      .on("postgres_changes", { event: "*", schema: "app", table: "comment" }, () => {})
+      .subscribe()
+    await settle()
+
+    expect(subscribeFrames()[0]).toMatchObject({ schema: "app", table: "comment" })
+  })
 })
 
 describe("joining again after disconnect()", () => {

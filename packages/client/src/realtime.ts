@@ -103,6 +103,26 @@ function parseChannelName(name: string): { schema: string; table: string } {
   return { schema: "public", table: name }
 }
 
+/**
+ * The schema and table a listener on channel `name` is for.
+ *
+ * The name is read as `schema:table` only when it supplies the table as well. A listener that
+ * names its table and no schema means `public`, as the docs say. 0.9.1 release test (RB4): the
+ * schema was taken from the name whatever the listener said, so the documented
+ * `channel("post:42").on(..., { table: "comment" })` joined `post.comment`, reported SUBSCRIBED
+ * and delivered nothing. The server's `resolveTarget` reads a frame the same way.
+ */
+function listenerTarget(
+  name: string,
+  opts: { schema?: string | undefined; table?: string | undefined },
+): { schema: string; table: string } {
+  if (opts.table === undefined) {
+    const named = parseChannelName(name)
+    return { schema: opts.schema ?? named.schema, table: named.table }
+  }
+  return { schema: opts.schema ?? "public", table: opts.table }
+}
+
 // ─── Server message types (subset matching @supatype/realtime) ───────────────
 
 interface ServerChangeMessage {
@@ -355,14 +375,11 @@ export class RealtimeClient {
 
     const sub: ChannelSubscription<TRow> = {
       on(_event, opts, callback) {
-        // Defaults read the channel name the way the server's fallback does. The schema used to
-        // default to "public" regardless, and since the frame always carries a schema, a channel
-        // named `app:orders` was registered against `public.orders`.
-        const named = parseChannelName(name)
+        // A channel named `app:orders` with no table on the listener is `app.orders`, the way the
+        // server's fallback reads it; a listener naming its table defaults to `public`.
         handle.pgListeners.push({
           event: opts.event,
-          schema: opts.schema ?? named.schema,
-          table: opts.table ?? named.table,
+          ...listenerTarget(name, opts),
           filter: opts.filter,
           callback: forCallerRows(callback),
         })
