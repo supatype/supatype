@@ -2241,10 +2241,10 @@ File metadata is a row in the `storage` schema of your project's Postgres. The b
 | Where you run | Where the bytes go |
 | --- | --- |
 | `supatype dev` (Docker, the default for new projects) | A SeaweedFS container, in the `storage-data` Docker volume. Its port is not published to your machine. `supatype dev --reset-db` keeps it. |
-| `supatype dev` with `provider: "native"` | Plain files under `~/.supatype/projects/<name>/storage`, served by `supatype-server` |
+| `supatype dev` with `provider: "native"` | Files under `~/.supatype/projects/<name>/storage-service`, written by the storage service, which dev runs on your machine |
 | `supatype self-host compose up` | A SeaweedFS service in the stack, in the `storage-data` volume. Its S3 port, 8333, is published (`SUPATYPE_SEAWEEDFS_PORT` changes it) and needs the stack's credentials. There is no anonymous access. |
 
-> **WARNING:** The native dev store is a stand-in. It checks that a bucket is public before serving a public URL, and that a request carries a token, but it does not apply bucket access rules, `maxSize` or `accept`, and it ignores transforms. Use the Docker provider to test storage rules before you deploy.
+> **WARNING:** With the Native provider, the storage service is the same code a deployment runs, so bucket rules, `maxSize`, `accept` and transforms apply as they will once deployed. If it cannot start, storage is off: `supatype dev` prints why, `/storage/v1` answers 503 "storage service is not running", and storage comes back once you fix the cause and restart dev. There is no fallback store, because one that skipped your rules would let any caller read a private bucket.
 
 Back up the `storage-data` volume along with the database. A database dump holds the file records but not the bytes.
 

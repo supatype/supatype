@@ -33,7 +33,7 @@ describe("native dev's bucket provisioning", () => {
     expect(printed().filter((line) => line.includes("provisioned"))).toEqual([])
   })
 
-  it("counts a bucket written to buckets.json while no service runs, as the server's store serves it", async () => {
+  it("counts a bucket written to buckets.json while no service runs, as the service imports it when it starts", async () => {
     await provisionNativeBuckets(BUCKETS, { storagePath })
     expect(printed()).toContain("[supatype] Storage: provisioned 1 bucket(s).")
   })

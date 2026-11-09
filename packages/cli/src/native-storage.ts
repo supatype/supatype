@@ -4,15 +4,16 @@
  * image transforms come from one codebase rather than from the server's own object store.
  *
  * The server proxies /storage/v1 to the URL in the route manifest once the service answers. When
- * it cannot be started, the server's built-in object store answers instead, and dev says plainly
- * what that does not enforce.
+ * it cannot be started, storage is off: /storage/v1 answers 503, and dev says why and how to fix
+ * it. The server's built-in object store is never mounted, since it applies no read rules (0.9.1
+ * release test: any token, the anon key included, could read or sign any object in a private bucket).
  */
 import { join } from "node:path"
 import { isJsonObject } from "@supatype/shared"
 import { EMBEDDED_CLI_VERSION } from "./cli-version-embedded.js"
 import { pushStartUndo } from "./dev-shutdown.js"
 import { errorMessage } from "./error-message.js"
-import { keepsObjectsLocally, localStorageEnv, serverStoreRoot } from "./local-storage.js"
+import { keepsObjectsLocally, serverStoreRoot } from "./local-storage.js"
 import { importLegacyNativeStorage } from "./native-storage-import.js"
 import { ProcessManager } from "./process-manager.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
@@ -41,20 +42,29 @@ export interface NativeStorage {
 type ResolveLaunch = (config: SupatypeProjectConfig, cwd: string) => Promise<ComponentLaunchSpec>
 
 /**
- * How the server answers /storage/v1: by proxy to the storage service when it runs, else from its
- * own object store under `stateRoot` for a project whose objects stay on this machine. A project
- * on S3 sets neither.
+ * How the server answers /storage/v1 for a project whose objects stay on this machine: by proxy to
+ * the storage service when it runs, else not at all. A project on S3 is left to the server's own
+ * settings.
+ *
+ * When the service is not running, SUPATYPE_STORAGE_DISABLED has a 0.9.2 server answer 503
+ * "storage service is not running". An older server ignores it, so the URL is blanked as well
+ * rather than left out: unset, the server proxies to its default of http://localhost:5000,
+ * whatever answers there, while blank it answers 502 "storage not configured".
+ *
+ * Every other storage variable is blanked, since the shell's reach the server too (ProcessManager
+ * passes process.env on): a STORAGE_PROVIDER=local there would mount the built-in store.
  */
-export function serverStorageEnv(
-  storage: NativeStorage | null,
-  config: SupatypeProjectConfig,
-  stateRoot: string,
-): Record<string, string> {
-  if (storage !== null) return { SUPATYPE_STORAGE_URL: storage.url }
-  return keepsObjectsLocally(config) ? localStorageEnv(stateRoot) : {}
+export function serverStorageEnv(storage: NativeStorage | null, config: SupatypeProjectConfig): Record<string, string> {
+  if (!keepsObjectsLocally(config)) return {}
+  return {
+    SUPATYPE_STORAGE_URL: storage?.url ?? "",
+    SUPATYPE_STORAGE_DISABLED: storage === null ? "true" : "",
+    STORAGE_PROVIDER: "",
+    STORAGE_PATH: "",
+  }
 }
 
-/** How long the service has to answer /health before dev falls back to the server's store. */
+/** How long the service has to answer /health before dev turns storage off. */
 const READY_TIMEOUT_MS = 60_000
 
 /** Where the service keeps object bytes, apart from the server's object store under `storage/`. */
@@ -147,7 +157,7 @@ async function startAndWait(launch: ComponentLaunchSpec, opts: NativeStorageOpti
 /**
  * Start the storage service for native dev, import what the server's object store holds and the
  * service does not, and record the service in the route manifest. Null when it could not be
- * started, with the manifest left pointing nowhere, so the caller falls back to the server's store.
+ * started, with the manifest left pointing nowhere, so storage is off until the next start.
  */
 export async function startNativeStorage(
   opts: NativeStorageOptions,
@@ -156,8 +166,8 @@ export async function startNativeStorage(
   const url = `http://127.0.0.1:${opts.port}`
   try {
     const proc = await startAndWait(await resolveLaunch(opts.config, opts.cwd), opts, url)
-    // Until everything the server's store held is in the service, the server's store keeps
-    // answering, so nothing a developer stored there goes missing while an import fails.
+    // Until everything the server's store held is in the service, storage stays off rather than
+    // answer without it; the old files stay on disk and the next start imports them again.
     await importLegacyNativeStorage({ legacyRoot: serverStoreRoot(opts.stateRoot), url, jwtSecret: opts.jwtSecret, cliVersion: EMBEDDED_CLI_VERSION })
       .catch(async (err: unknown) => {
         await proc.stop()
@@ -169,9 +179,10 @@ export async function startNativeStorage(
   } catch (err) {
     patchRouteManifest(opts.manifestPath, { storage_url: undefined })
     console.warn(
-      "[supatype] ⚠  Storage service unavailable, so the server's built-in object store answers /storage/v1. " +
-        "It does not apply image transforms or the storage rules a deployment enforces.\n" +
-        `  ${errorMessage(err)}`,
+      "[supatype] ⚠  Storage is off: the storage service did not start, so /storage/v1 answers 503 " +
+        "\"storage service is not running\".\n" +
+        `  ${errorMessage(err)}\n` +
+        "  Fix the cause above and restart `supatype dev`. Your stored files are kept and come back then.",
     )
     return null
   }

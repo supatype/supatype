@@ -197,6 +197,11 @@
 
 ### Bug Fixes
 
+* **dev:** native dev no longer falls back to the server's built-in object store when the storage
+  service does not start. That store applied no storage read rules, so any token, the anon key
+  included, could read or sign any object in a private bucket. Storage is now off instead:
+  `/storage/v1` answers 503 "storage service is not running", dev says why and how to fix it, and
+  the stored files come back on the next start.
 * **cli:** the npm package now installs on Node.js 18 and later, not only 22, and an older Node is
   told which version to install. 0.8.0 to 0.9.1 asked for Node 22, which the package never needed,
   so npm on Node 18 or 20 quietly installed 0.7.0 instead of the latest release.

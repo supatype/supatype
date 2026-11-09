@@ -597,7 +597,7 @@ export function registerDev(program: Command): void {
         ...nativeAuthMailerEnv(config.email, serverPort),
         SUPATYPE_LOG_LEVEL: "info",
         SUPATYPE_DISABLE_SIGNUP: "false",
-        ...serverStorageEnv(nativeStorage, config, stateRoot),
+        ...serverStorageEnv(nativeStorage, config),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
         // auth.sso.saml, with the signing key from .env (generated there the first time SAML is on).
@@ -707,11 +707,14 @@ export function registerDev(program: Command): void {
       const appProc = startProxyDevApp(cwd, config, pidDir)
       if (appProc) pushStartUndo(() => appProc.stop())
 
+      // No built-in store stands in for a service that did not start (native-storage.ts), so the
+      // panel lists no storage URL and repeats that storage is off, in case the warning scrolled by.
+      const storageOff = nativeStorage === null && keepsObjectsLocally(config)
       const links = [
         { label: "API", url: `http://localhost:${serverPort}` },
         { label: "REST", url: `http://localhost:${serverPort}/rest/v1/` },
         { label: "Auth", url: `http://localhost:${serverPort}/auth/v1/` },
-        { label: "Storage", url: `http://localhost:${serverPort}/storage/v1/` },
+        ...(storageOff ? [] : [{ label: "Storage", url: `http://localhost:${serverPort}/storage/v1/` }]),
       ]
       if (realtimeProc) {
         links.push({ label: "Realtime", url: `ws://localhost:${serverPort}/realtime/v1/` })
@@ -725,7 +728,11 @@ export function registerDev(program: Command): void {
         links,
         anonKey,
         serviceRoleKey,
-        hints: [`Postgres ${dbURL}`, `JWT secret: #${secretFingerprint(LOCAL_JWT_SECRET)} (in .env)`],
+        hints: [
+          `Postgres ${dbURL}`,
+          `JWT secret: #${secretFingerprint(LOCAL_JWT_SECRET)} (in .env)`,
+          ...(storageOff ? ["Storage is off: the storage service did not start (the reason is above)"] : []),
+        ],
       })
 
       // ── Shutdown handler ──────────────────────────────────────────────────
@@ -1024,8 +1031,8 @@ async function declaredBuckets(engineBin: string, cwd: string, astPath: string):
 }
 
 /**
- * Create the storage buckets the schema declares: in buckets.json, which the server's store reads
- * and the storage service imports when it starts, and in the service itself once it runs.
+ * Create the storage buckets the schema declares: in buckets.json, which the storage service
+ * imports when it starts, and in the service itself once it runs.
  */
 async function provisionDeclaredBuckets(
   engineBin: string,

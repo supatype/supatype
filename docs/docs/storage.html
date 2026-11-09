@@ -280,11 +280,11 @@
       <thead><tr><th scope="col">Where you run</th><th scope="col">Where the bytes go</th></tr></thead>
       <tbody>
         <tr><td><code>supatype dev</code> (Docker, the default for new projects)</td><td>A SeaweedFS container, in the <code>storage-data</code> Docker volume. Its port is not published to your machine. <code>supatype dev --reset-db</code> keeps it.</td></tr>
-        <tr><td><code>supatype dev</code> with <code>provider: "native"</code></td><td>Plain files under <code>~/.supatype/projects/&lt;name&gt;/storage</code>, served by <code>supatype-server</code></td></tr>
+        <tr><td><code>supatype dev</code> with <code>provider: "native"</code></td><td>Files under <code>~/.supatype/projects/&lt;name&gt;/storage-service</code>, written by the storage service, which dev runs on your machine</td></tr>
         <tr><td><code>supatype self-host compose up</code></td><td>A SeaweedFS service in the stack, in the <code>storage-data</code> volume. Its S3 port, 8333, is published (<code>SUPATYPE_SEAWEEDFS_PORT</code> changes it) and needs the stack's credentials. There is no anonymous access.</td></tr>
       </tbody>
     </table></div>
-    <div class="callout warn"><span class="callout-label">WARNING</span><p>The native dev store is a stand-in. It checks that a bucket is public before serving a public URL, and that a request carries a token, but it does not apply bucket access rules, <code>maxSize</code> or <code>accept</code>, and it ignores transforms. Use the Docker provider to test storage rules before you deploy.</p></div>
+    <div class="callout warn"><span class="callout-label">WARNING</span><p>With the Native provider, the storage service is the same code a deployment runs, so bucket rules, <code>maxSize</code>, <code>accept</code> and transforms apply as they will once deployed. If it cannot start, storage is off: <code>supatype dev</code> prints why, <code>/storage/v1</code> answers 503 "storage service is not running", and storage comes back once you fix the cause and restart dev. There is no fallback store, because one that skipped your rules would let any caller read a private bucket.</p></div>
     <p>Back up the <code>storage-data</code> volume along with the database. A database dump holds the file records but not the bytes.</p>
     <p>Removing a bucket from the schema drops its policies on the next push. The bucket and its files stay where they are.</p>
 

@@ -29,7 +29,7 @@ vi.mock("../src/json-file.js", async (importOriginal) => {
  * Native dev runs the storage service (packages/storage) instead of the server's built-in object
  * store, so bucket rules and image transforms come from the code a deployment runs. The server is
  * pointed at the service only once it answers, and what the server's store held is imported first:
- * until that import has gone through, the server's store keeps answering, so nothing goes missing.
+ * until that import has gone through, storage is off and the old files stay where they are.
  */
 let dir = ""
 const servers: Server[] = []
@@ -500,13 +500,22 @@ describe("startNativeStorage", () => {
     expect(Date.now() - started).toBeLessThan(15_000)
   }, 20_000)
 
-  it("leaves the server's own store answering when the service cannot be found", async () => {
+  // 0.9.1 release test: the fallback to the server's built-in object store let any token, the anon
+  // key included, read or sign any object in a private bucket. Dev turns storage off instead.
+  it("turns storage off and says why and how to fix it when the service cannot be found", async () => {
     writeFileSync(join(dir, "routes.json"), JSON.stringify({ storage_url: "http://127.0.0.1:1" }))
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const missing = async (): Promise<never> => {
       throw new Error("storage archive not available")
     }
     expect(await startNativeStorage(options(await freePort()), missing)).toBeNull()
     expect(manifest()).toEqual({})
+    const said = warn.mock.calls.flat().join("\n")
+    expect(said).not.toMatch(/built-in object store answers/)
+    expect(said).toMatch(/Storage is off/)
+    expect(said).toMatch(/503 "storage service is not running"/)
+    expect(said).toMatch(/storage archive not available/)
+    expect(said).toMatch(/restart `supatype dev`/)
   })
 })
 
@@ -537,14 +546,33 @@ describe("the wait for the storage service to be ready", () => {
 describe("the server's storage environment", () => {
   const config = projectConfig()
 
-  it("proxies to the service when it runs", () => {
+  // A STORAGE_PROVIDER=local or SUPATYPE_STORAGE_DISABLED=true in the shell reaches the server too
+  // (ProcessManager passes process.env on), and would put the built-in store in front of the
+  // service or turn it off, so each is blanked.
+  it("proxies to the service when it runs, and never mounts the built-in store", () => {
     const proc = new ProcessManager(process.execPath, [], { label: "storage", pidDir: dir })
-    expect(serverStorageEnv({ proc, url: "http://127.0.0.1:8002" }, config, "/state")).toEqual({
+    expect(serverStorageEnv({ proc, url: "http://127.0.0.1:8002" }, config)).toEqual({
       SUPATYPE_STORAGE_URL: "http://127.0.0.1:8002",
+      SUPATYPE_STORAGE_DISABLED: "",
+      STORAGE_PROVIDER: "",
+      STORAGE_PATH: "",
     })
   })
 
-  it("falls back to the server's own store under the state directory when it does not", () => {
-    expect(serverStorageEnv(null, config, "/state")).toMatchObject({ STORAGE_PROVIDER: "local" })
+  // 0.9.1 release test: the built-in store applies no read rules, so with the service down the
+  // server gets no storage at all. SUPATYPE_STORAGE_DISABLED has a 0.9.2 server answer 503
+  // "storage service is not running". An older server ignores it, so the URL is blank too, not
+  // unset: unset, the server proxies to its default of http://localhost:5000, whatever answers there.
+  it("gives the server no storage when the service is not running", () => {
+    expect(serverStorageEnv(null, config)).toEqual({
+      SUPATYPE_STORAGE_URL: "",
+      SUPATYPE_STORAGE_DISABLED: "true",
+      STORAGE_PROVIDER: "",
+      STORAGE_PATH: "",
+    })
+  })
+
+  it("leaves a project on S3 to the server's own settings", () => {
+    expect(serverStorageEnv(null, projectConfig({ storage: { provider: "s3" } }))).toEqual({})
   })
 })
