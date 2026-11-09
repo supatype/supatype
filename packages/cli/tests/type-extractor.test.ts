@@ -440,6 +440,26 @@ export type X = Model<{
     expect(b?.s3BucketPolicy).toBe('{"Version":"2012-10-17"}')
   })
 
+  // The engine writes the bucket's row itself on a push, so the storage service's own check that
+  // the policy is a JSON object never saw it: the service answered 409 and the bad policy stayed.
+  it("refuses an s3BucketPolicy that is not a JSON object, naming the bucket", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-bucket-policy-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    const schema = (policy: string): string =>
+      [
+        `import type { Model, UUID, ImageAsset, Bucket } from "@supatype/types"`,
+        `export type assets = Bucket<"legacy", { accessMode: "custom"; s3BucketPolicy: '${policy}' }>`,
+        "export type X = Model<{ id: UUID; f: ImageAsset<assets> }>",
+      ].join("\n")
+    for (const policy of ['{"Version":', '[1, 2]', '"text"']) {
+      writeFileSync(schemaPath, schema(policy), "utf8")
+      expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+        /Bucket "legacy": s3BucketPolicy is not a JSON object\. Write the policy as a JSON object in a string/,
+      )
+    }
+  })
+
   it("extracts slug source field from Slug<\"name\">", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
     dirs.push(dir)

@@ -63,3 +63,16 @@ export async function applyBucketPolicyFromConfig(
 ): Promise<void> {
   if (diskStore() === undefined) await s3.applyBucketPolicyFromConfig(name, opts)
 }
+
+/**
+ * Whether a bucket's own S3 policy is refused: in the one S3 bucket `S3_BUCKET` names, where it
+ * would be every bucket's policy at once. Disk keeps taking one and ignoring it, as it always has.
+ */
+export function refusesBucketPolicy(): boolean {
+  return diskStore() === undefined && s3.singleBucketMode()
+}
+
+/** Why bucket `id` cannot have its own S3 bucket, or null when it can, or when the bytes are on disk. */
+export function bucketStorageProblem(id: string): string | null {
+  return diskStore() === undefined ? s3.s3BucketNameProblem(id) : null
+}

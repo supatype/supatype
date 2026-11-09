@@ -1329,18 +1329,10 @@ function storageConfigLines(
   storageLocal: StorageProvider,
   storageProduction: StorageProvider,
 ): string[] {
-  const lines: string[] = []
-  if (storageLocal === "s3") {
-    lines.push(`  storage: { provider: "s3" },  // dev, configure S3_* in .env`)
-  } else {
-    lines.push(`  storage: { provider: "local", local_path: ".supatype/storage" },`)
-  }
-  if (storageProduction === "s3" && storageLocal !== "s3") {
-    lines.push(`  // Production storage: external S3 bucket, set production S3_* in .env`)
-  } else if (storageProduction === "local" && storageLocal === "s3") {
-    lines.push(`  // Production storage: SeaweedFS on your server (included in self-host compose)`)
-  }
-  return lines
+  // provider is dev's, production the self-host stack's; S3_* in .env name the bucket for either.
+  const dev = storageLocal === "s3" ? `provider: "s3"` : `provider: "local", local_path: ".supatype/storage"`
+  const production = storageLocal === "local" && storageProduction === "local" ? "" : `, production: "${storageProduction}"`
+  return [`  storage: { ${dev}${production} },`]
 }
 
 function schemaTemplate(): string {
@@ -1514,23 +1506,36 @@ function storageEnvSections(
 ): string {
   if (storageLocal === storageProduction) {
     if (storageLocal === "s3") {
-      return `# Storage (local development and production, external bucket)
-# Use separate buckets for dev and production in your provider.
-S3_ENDPOINT=
-S3_REGION=us-east-1
-S3_BUCKET=
-S3_ACCESS_KEY=
-S3_SECRET_KEY=`
+      return s3EnvSection("local development and production", "Use a separate bucket for dev and production.")
     }
-    return `${localStorageEnvSection("local")}
+    return `${localStorageEnvSection("local", "local")}
 
 # Production storage (SeaweedFS on your server)
 # Included in the self-host compose stack, no extra configuration needed.`
   }
 
-  return [localStorageEnvSection(storageLocal), productionStorageEnvSection(storageProduction)].join(
+  return [localStorageEnvSection(storageLocal, storageProduction), productionStorageEnvSection(storageProduction)].join(
     "\n\n",
   )
+}
+
+/**
+ * The settings for a bucket of your own (storage.provider "s3"), described as the storage service
+ * uses them: one S3 bucket, every Supatype bucket a key prefix in it, as Supabase Storage keeps them.
+ */
+function s3EnvSection(use: string, note?: string): string {
+  return `# Storage (${use}, your own S3 bucket)
+# Every Supatype bucket is a folder (key prefix) in S3_BUCKET, and the storage service serves every
+# file, public ones included, so the bucket itself stays private. The keys need only read, write,
+# list and delete on that one bucket.${note === undefined ? "" : ` ${note}`}
+# AWS: set S3_REGION and leave S3_ENDPOINT blank. Another S3-compatible store (Cloudflare R2,
+# SeaweedFS, and the like): set S3_ENDPOINT too. On AWS, leave both keys blank to use the AWS SDK's
+# own credentials (an instance or task role, AWS_PROFILE).
+S3_ENDPOINT=
+S3_REGION=us-east-1
+S3_BUCKET=
+S3_ACCESS_KEY=
+S3_SECRET_KEY=`
 }
 
 /** Whether init generates the object store's login: for the local SeaweedFS, not a bucket of your own. */
@@ -1538,33 +1543,23 @@ function generatesObjectStoreLogin(storage: StorageProvider): boolean {
   return storage !== "s3"
 }
 
-function localStorageEnvSection(storage: StorageProvider): string {
-  if (!generatesObjectStoreLogin(storage)) {
-    return `# Storage (local development, external bucket)
-S3_ENDPOINT=
-S3_REGION=us-east-1
-S3_BUCKET=
-S3_ACCESS_KEY=
-S3_SECRET_KEY=`
-  }
+/**
+ * Dev's storage settings. With production on S3, the S3_* names are production's alone: local
+ * SeaweedFS's S3_ENDPOINT came first and a blank production one after it (0.9.2).
+ */
+function localStorageEnvSection(storage: StorageProvider, production: StorageProvider): string {
+  if (!generatesObjectStoreLogin(storage)) return s3EnvSection("local development")
   const login = generateObjectStoreCredentials()
+  const endpoint = production === "s3" ? "" : "S3_ENDPOINT=http://localhost:8333\n"
   return `# Storage (local development, SeaweedFS)
 # The object store's login, generated for this project. It opens every file in every bucket, so
 # keep it as private as the database password.
-S3_ENDPOINT=http://localhost:8333
-${OBJECT_STORE_ACCESS_KEY_ENV}=${login.accessKey}
+${endpoint}${OBJECT_STORE_ACCESS_KEY_ENV}=${login.accessKey}
 ${OBJECT_STORE_SECRET_KEY_ENV}=${login.secretKey}`
 }
 
 function productionStorageEnvSection(storage: StorageProvider): string {
-  if (storage === "s3") {
-    return `# Storage (production, external bucket)
-S3_ENDPOINT=
-S3_REGION=us-east-1
-S3_BUCKET=
-S3_ACCESS_KEY=
-S3_SECRET_KEY=`
-  }
+  if (storage === "s3") return s3EnvSection("production")
   return `# Storage (production, SeaweedFS on your server)
 # Included in the self-host compose stack, no extra configuration needed.`
 }

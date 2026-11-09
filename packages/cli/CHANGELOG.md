@@ -4,6 +4,12 @@
 
 ### Breaking Changes
 
+* **storage:** the storage service's S3 settings have no defaults that point somewhere. With
+  `STORAGE_BACKEND=s3` it used to fall back to `http://localhost:8333` and the SeaweedFS login
+  published in this repository for any setting left out. It now needs `S3_REGION` for AWS or
+  `S3_ENDPOINT` for another store, takes both keys or neither (neither uses the AWS SDK's own
+  credentials), and refuses to start otherwise, saying which setting is missing. The self-host
+  compose stack sets every one of them, so it is unaffected.
 * **self-host:** the hidden `supatype self-host native` commands (`install-service`, `serve`,
   `reload`, `status`, `logs`, `backup`) are removed. They were undocumented and untested, and
   `serve` ran the server's built-in object store, which applies no storage read rules: anyone with
@@ -43,6 +49,17 @@
 
 ### Features
 
+* **storage:** single-bucket S3 mode, as Supabase Storage does with `GLOBAL_S3_BUCKET`. Set
+  `S3_BUCKET` and every Supatype bucket is a key prefix inside that one S3 bucket. The service never
+  creates an S3 bucket or puts a bucket policy, the S3 bucket stays private, and the keys need only
+  read, write, list and delete on it. Without `S3_BUCKET`, each Supatype bucket still gets an S3
+  bucket of its own, now named `S3_BUCKET_PREFIX` then the bucket's id. A bucket's `s3BucketPolicy`
+  is never applied in single-bucket mode, since it would cover every bucket at once. The storage
+  service refuses it with 400 on a bucket made or changed through its API.
+* **self-host, dev, init:** `storage: { production: "s3" }` in supatype.config.ts (init writes it
+  from its "Production storage?" answer) makes `self-host compose` run the storage service against
+  your own S3 bucket, with no SeaweedFS in the stack. Native `dev` with `storage: { provider: "s3" }`
+  runs the storage service against the bucket in `.env`, so access rules apply there too.
 * **auth:** `auth.email.enabled: false` in supatype.config.ts turns email-and-password sign-up and
   sign-in off (with magic links and password recovery) on native dev, Docker dev and self-host; a
   `SUPATYPE_EXTERNAL_EMAIL_ENABLED` in `.env` wins. Studio's auth Configuration page names the key
@@ -197,6 +214,9 @@
 
 ### Bug Fixes
 
+* **schema:** a bucket's `s3BucketPolicy` that is not a JSON object is refused when the schema is
+  read, naming the bucket. A push writes the bucket through the engine, so the storage service's own
+  check never saw it and the bad policy was stored without being applied.
 * **dev:** native dev no longer falls back to the server's built-in object store when the storage
   service does not start. That store applied no storage read rules, so any token, the anon key
   included, could read or sign any object in a private bucket. Storage is now off instead:

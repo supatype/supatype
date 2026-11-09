@@ -31,6 +31,7 @@ import { keyspaceInPostgres } from "./cache-provider.js"
 import { postgresImageFor, runningPostgresImage } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
+import { OWN_BUCKET_S3_SETTINGS } from "./local-storage.js"
 import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.js"
 import { upKeepingKongCurrent, upKeepingKongCurrentAsync } from "./compose-kong.js"
 import { addressPoolExhaustionHint } from "./docker-address-pool.js"
@@ -100,6 +101,38 @@ const ACME_KEY_PREFIX = "kong_acme:"
  */
 const OBJECT_STORE_ACCESS_KEY = `\${${OBJECT_STORE_ACCESS_KEY_ENV}:?${OBJECT_STORE_ACCESS_KEY_ENV} is missing from .env}`
 const OBJECT_STORE_SECRET_KEY = `\${${OBJECT_STORE_SECRET_KEY_ENV}:?${OBJECT_STORE_SECRET_KEY_ENV} is missing from .env}`
+
+/**
+ * Whether the stack keeps files in the project's own S3 bucket rather than a SeaweedFS of its own:
+ * production storage is "s3" (`storage.production`, init's "Production storage?" answer). Never the
+ * Docker dev stack, which this generator also writes and which follows the dev setting (0.9.2).
+ */
+function keepsFilesInOwnBucket(config: SupatypeProjectConfig, devLocal: boolean): boolean {
+  return !devLocal && config.storage?.production === "s3"
+}
+
+/** The project's S3 settings compose hands the storage service from `.env`, blank when unset. */
+const OPTIONAL_OWN_BUCKET_SETTINGS = OWN_BUCKET_S3_SETTINGS.filter((name) => name !== "S3_BUCKET")
+
+/**
+ * The storage service's S3 settings: the stack's SeaweedFS, every one passed so the service needs
+ * no defaults, or the project's own bucket in single-bucket mode, which only S3_BUCKET is required for.
+ */
+function storageS3Env(ownBucket: boolean): string {
+  if (!ownBucket) {
+    return `      S3_ENDPOINT: http://seaweedfs:8333
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      S3_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      S3_FORCE_PATH_STYLE: "true"
+`
+  }
+  return `      # storage.production is "s3": every bucket is a key prefix in the project's own S3 bucket, and
+      # the stack runs no SeaweedFS. A blank setting is read as unset (see the storage docs).
+      S3_BUCKET: "\${S3_BUCKET:?S3_BUCKET is missing from .env, and storage.production is s3 in supatype.config.ts}"
+${OPTIONAL_OWN_BUCKET_SETTINGS.map((name) => `      ${name}: "\${${name}:-}"`).join("\n")}
+`
+}
 
 /**
  * The compose volume key Postgres keeps its data in. Docker names the volume
@@ -619,6 +652,7 @@ export function renderSelfHostCompose(
   const postgrestUrl = postgrestDatabaseUrl(config)
   const sqlEditorUrl = sqlEditorDatabaseUrl(config)
   const devLocal = options?.devLocal === true
+  const ownBucket = keepsFilesInOwnBucket(config, devLocal)
   // An external database is not on any network of this stack.
   const functionsDb = options?.functionsDatabase === true && !external
   const gatewayNetworks = networksClause(["default", FUNCTIONS_NETWORK])
@@ -703,7 +737,7 @@ ${LOGGING}
 `
   // One source for the credentials: the server is configured with them and the storage service is
   // handed them, and a mismatch does not fail at start, it fails at the first upload.
-  const objectStoreBlock = `  seaweedfs:
+  const objectStoreBlock = ownBucket ? "" : `  seaweedfs:
     # Identities come from a config file rather than env vars, and the anonymous identity is
     # deliberately absent: a bucket is public because of its policy, never because the server is
     # open. Written beside this file by the same generator, so the two cannot drift.
@@ -766,9 +800,8 @@ ${LOGGING}
   # then re-run \`supatype self-host compose up -d\`. Kong publishes :80/:443 and provisions certs automatically.
 `
   // An external database is not ours to declare a volume for.
-  const volumesBlock = `volumes:
-${external ? "" : `  ${DB_VOLUME_KEY}:\n`}  storage-data:
-${keyspaceInPg ? "" : "  valkey-data:\n"}`
+  const volumes = `${external ? "" : `  ${DB_VOLUME_KEY}:\n`}${ownBucket ? "" : "  storage-data:\n"}${keyspaceInPg ? "" : "  valkey-data:\n"}`
+  const volumesBlock = volumes === "" ? "" : `volumes:\n${volumes}`
 
   // `depends_on` for the services that talk to Postgres. With an external database there is no
   // container to wait on, so the clause disappears entirely and each service retries on connect
@@ -791,7 +824,7 @@ ${keyspaceInPg ? "" : "  valkey-data:\n"}`
   //
   // A later push succeeds, which is exactly what made it read as an intermittent mystery. It
   // lands on the first push after a stack comes up, which is the first push a new user ever runs.
-  const storageDependency = `    depends_on:
+  const storageDependency = ownBucket ? dbDependency : `    depends_on:
 ${dbDependencyClause}      seaweedfs:
         condition: service_healthy
 `
@@ -997,12 +1030,7 @@ ${LOGGING}
       PORT: 5000
       DATABASE_URL: "${ownerUrl}"
       JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
-      S3_ENDPOINT: http://seaweedfs:8333
-      S3_REGION: us-east-1
-      S3_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
-      S3_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
-      S3_FORCE_PATH_STYLE: "true"
-      # Bytes, -1 for unlimited. A self-hosted project has no plan, so it has no limits until .env
+${storageS3Env(ownBucket)}      # Bytes, -1 for unlimited. A self-hosted project has no plan, so it has no limits until .env
       # sets one; the service on its own defaults to the free tier's 1 GiB quota and 50 MB files.
       PROJECT_TIER: \${PROJECT_TIER:-enterprise}
       STORAGE_QUOTA: \${STORAGE_QUOTA:--1}
@@ -1522,7 +1550,10 @@ export function writeSelfHostCompose(
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
   // The object store's login, from the same `.env` values the compose file reads, generated first
   // when the project has none.
-  writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(ensureObjectStoreCredentials(cwd)), "utf8")
+  // Not for a stack on the project's own bucket, which runs no object store.
+  if (!keepsFilesInOwnBucket(config, options?.devLocal === true)) {
+    writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(ensureObjectStoreCredentials(cwd)), "utf8")
+  }
   const studioHostDev = options?.devLocal === true && hasStudioOverride(config)
   const tlsEnabled = selfHostTlsEnabled(config, options?.devLocal === true)
   const domain = config.server.domain?.trim()

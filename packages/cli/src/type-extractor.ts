@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { dirname, isAbsolute, relative, resolve } from "node:path"
 import ts from "typescript"
-import { isJsonObject, isOneOf } from "@supatype/shared"
+import { isJsonObject, isOneOf, parseJsonObject } from "@supatype/shared"
 import type { AuthUserOnDelete } from "@supatype/types"
 import { isIdentityDependent } from "./cache-identity-scope.js"
 import { HOOK_EVENTS, isAfterHookEvent } from "./hook-events.js"
@@ -1437,7 +1437,7 @@ function parseBucketTypeLiteral(
     }
     if (key === "s3BucketPolicy") {
       const pol = parseJsonStringLiteral(member.type, sourceFile)
-      if (pol !== undefined) out.s3BucketPolicy = pol
+      if (pol !== undefined) out.s3BucketPolicy = bucketPolicy(bucketId, pol)
       continue
     }
   }
@@ -1467,6 +1467,16 @@ function parseJsonStringLiteral(typeNode: ts.TypeNode, sourceFile: ts.SourceFile
  * provisioning stops the schema here instead.
  */
 export const BUCKET_MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$/i
+
+/**
+ * A bucket's S3 policy, refused unless it is a JSON object. A push writes the bucket's row through
+ * the engine, so the storage service, which refuses such a policy itself, answered 409 and never
+ * saw it: the bad policy was stored and never applied.
+ */
+function bucketPolicy(bucketId: string, policy: string): string {
+  if (policy.trim() === "" || parseJsonObject(policy).ok) return policy
+  throw new Error(`Bucket "${bucketId}": s3BucketPolicy is not a JSON object. Write the policy as a JSON object in a string.`)
+}
 
 /** `types`, when each is a MIME type a bucket can accept; throws naming the first that is not. */
 function acceptedMimeTypes(bucketId: string, types: string[]): string[] {

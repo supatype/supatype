@@ -325,13 +325,24 @@ export interface SupatypeProjectConfig {
   }
   storage?: {
     /**
-     * Storage backend.
-     * "local" = files on disk (LocalStoragePath required)
-     * "s3"    = AWS S3 or compatible (ambient credentials)
+     * Where native `supatype dev` keeps uploaded files. The Docker dev stack runs SeaweedFS either way,
+     * and the self-host stack follows `production` below.
+     * "local" = on this machine's disk.
+     * "s3"    = your own S3 bucket (AWS or any S3-compatible store), named by S3_BUCKET in .env. Every
+     *           Supatype bucket is a key prefix in it and the storage service serves every file. Set
+     *           S3_REGION for AWS or S3_ENDPOINT for another store; with S3_ACCESS_KEY and
+     *           S3_SECRET_KEY blank the AWS SDK finds credentials itself (an instance role, a profile).
      */
     provider: "local" | "s3"
     /** Local directory to store objects in (provider=local). */
     local_path?: string
+    /**
+     * Where the self-host stack keeps uploaded files, which init writes from its "Production
+     * storage?" answer. Unset or "local": a SeaweedFS service in the stack. "s3": your own S3 bucket,
+     * S3_BUCKET in the server's .env, with the storage service in single-bucket mode and no SeaweedFS;
+     * `self-host compose up` stops when S3_BUCKET is blank. The Docker dev stack keeps SeaweedFS either way.
+     */
+    production?: "local" | "s3"
   }
   schema?: {
     /** Path (or glob) to the schema entry point. Defaults to "schema/index.ts". */

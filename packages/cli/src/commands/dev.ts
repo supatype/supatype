@@ -32,6 +32,7 @@ import {
   isParsedBuckets,
   nativeBucketRow,
   provisionBuckets,
+  unprovisionedBuckets,
   withPublicFromMode,
   type ParsedStorageBucket,
 } from "../storage-provision.js"
@@ -117,7 +118,7 @@ import { refuseInsideDevApp } from "../dev-self-start.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { extractArchive } from "../archive-extract.js"
-import { serverStorageEnv, startNativeStorage } from "../native-storage.js"
+import { nativeS3StorageEnv, serverStorageEnv, startNativeS3Storage, startNativeStorage } from "../native-storage.js"
 import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
@@ -286,6 +287,9 @@ export function registerDev(program: Command): void {
       const realtimePort = String(nativeRealtimePort(config, cwd))
       const denoPort = nativeDenoPort(cwd)
       const storagePort = nativeStoragePort(cwd)
+      // A native project on S3: the storage service on the project's own bucket, unless .env names a
+      // service of its own. Read before anything starts, so a blank S3_BUCKET is the first thing said.
+      const s3StorageEnv = provider !== "docker" && !keepsObjectsLocally(config) ? s3StorageEnvOrExit(cwd) : null
 
       if (provider !== "docker") {
         // The functions worker runs on every native dev (native-worker.ts), so Deno's port is checked too.
@@ -295,7 +299,7 @@ export function registerDev(program: Command): void {
           postgrest: Number(postgrestPort),
           realtime: Number(realtimePort),
           deno: denoPort,
-          ...(keepsObjectsLocally(config) && { storage: storagePort }),
+          ...((keepsObjectsLocally(config) || s3StorageEnv !== null) && { storage: storagePort }),
         })
         // Before anything is generated: a missing password would otherwise be replaced in .env
         // with a new one the existing cluster has never heard of.
@@ -519,13 +523,19 @@ export function registerDev(program: Command): void {
         config, cwd, manifestPath, pidDir, url: realtimeUrl, port: realtimePort,
         databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
       })
+      const storageOptions = {
+        config, cwd, manifestPath, pidDir, stateRoot, port: storagePort, databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
+      }
       const nativeStorage = keepsObjectsLocally(config)
-        ? await startNativeStorage({
-          config, cwd, manifestPath, pidDir, stateRoot, port: storagePort, databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
-        })
-        : null
+        ? await startNativeStorage(storageOptions)
+        : s3StorageEnv === null ? null : await startNativeS3Storage(storageOptions, s3StorageEnv)
       // Later pushes create the buckets a schema declares in the service as well as in buckets.json.
       if (nativeStorage !== null) schemaPush.storageApi = { url: nativeStorage.url, serviceRoleKey }
+      // A project on S3 has no buckets.json for the service to import, so the buckets the first push
+      // declared, before the service ran, are created in it now.
+      if (s3StorageEnv !== null && schemaPush.storageApi !== undefined) {
+        await provisionDeclaredBuckets(engineBin, cwd, join(supatypeDir, "schema.ast.json"), { storageApi: schemaPush.storageApi })
+      }
       const valkeySidecar = await valkeyStart
 
       // Before .env is read: a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote there would otherwise
@@ -1012,10 +1022,22 @@ async function writeNativeSchemaArtifacts(
   config: import("../project-config.js").SupatypeProjectConfig | undefined,
 ): Promise<void> {
   const { cwd, engineBin, astPath } = paths
-  if (paths.storagePath) await provisionDeclaredBuckets(engineBin, cwd, astPath, paths)
+  if (paths.storagePath || paths.storageApi) await provisionDeclaredBuckets(engineBin, cwd, astPath, paths)
   if (paths.adminConfigPath) await writeNativeAdminConfig(paths, paths.adminConfigPath, ast, config)
   if (config) writeNativeAppliedAst(cwd, config, ast)
   await writeNativeTypes(cwd, ast, config)
+}
+
+/**
+ * {@link nativeS3StorageEnv} from the shell over .env, as compose reads them. A blank S3_BUCKET ends
+ * dev here, before anything has started, saying what to set.
+ */
+function s3StorageEnvOrExit(cwd: string): Record<string, string> | null {
+  try {
+    return nativeS3StorageEnv({ ...readDotEnvFiles(cwd), ...process.env })
+  } catch (err) {
+    fatalError(errorMessage(err))
+  }
 }
 
 /** The storage buckets the schema declares, as the engine resolves them; none when it cannot say. */
@@ -1032,7 +1054,8 @@ async function declaredBuckets(engineBin: string, cwd: string, astPath: string):
 
 /**
  * Create the storage buckets the schema declares: in buckets.json, which the storage service
- * imports when it starts, and in the service itself once it runs.
+ * imports when it starts, and in the service itself once it runs. A project on S3 has the service
+ * alone.
  */
 async function provisionDeclaredBuckets(
   engineBin: string,
@@ -1041,22 +1064,28 @@ async function provisionDeclaredBuckets(
   paths: { storagePath?: string | undefined; storageApi?: StorageApi | undefined },
 ): Promise<void> {
   const buckets = await declaredBuckets(engineBin, cwd, astPath)
-  if (buckets.length === 0 || paths.storagePath === undefined) return
-  await provisionNativeBuckets(buckets, { storagePath: paths.storagePath, storageApi: paths.storageApi })
+  if (buckets.length === 0) return
+  await provisionNativeBuckets(buckets, paths)
 }
 
 /**
  * `buckets` in buckets.json, and in the storage service while it runs, saying how many new ones
- * are ready: a bucket the service did not take is not, though buckets.json has it. Exported for tests.
+ * are ready: a bucket the service did not take is not, though buckets.json has it. A project on S3
+ * has no buckets.json, only the service, and is told which buckets it did not take. Exported for tests.
  */
 export async function provisionNativeBuckets(
   buckets: ParsedStorageBucket[],
-  paths: { storagePath: string; storageApi?: StorageApi | undefined },
+  paths: { storagePath?: string | undefined; storageApi?: StorageApi | undefined },
 ): Promise<void> {
-  const added = provisionStorageBuckets(buckets, paths.storagePath)
+  const added = paths.storagePath === undefined ? null : provisionStorageBuckets(buckets, paths.storagePath)
   const failed = paths.storageApi
     ? await provisionBuckets(paths.storageApi.url, paths.storageApi.serviceRoleKey, bucketSpecsFromAst({ storageBuckets: buckets }))
     : []
+  if (added === null) {
+    const left = unprovisionedBuckets({ total: buckets.length, failed })
+    if (left !== null) console.warn(`[supatype] ⚠  ${left}`)
+    return
+  }
   const ready = added.filter((id) => !failed.includes(id)).length
   if (ready > 0) console.log(`[supatype] Storage: provisioned ${ready} bucket(s).`)
 }

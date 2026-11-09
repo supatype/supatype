@@ -120,7 +120,8 @@ supatype self-host compose status
 ```
 
 The stack runs `db`, `postgrest`, `server` (the API gateway service, including auth), `storage`,
-`seaweedfs` (the object store behind storage), `functions-worker`, `control-plane`, `studio` and
+`seaweedfs` (the object store behind storage, left out when `storage.production` is `"s3"`, see
+[Configuration](/docs/self-hosting/configuration.html#storage)), `functions-worker`, `control-plane`, `studio` and
 `kong`, plus `realtime` unless realtime is turned off, and `valkey` if you chose
 `cache: { provider: "valkey" }` or use an
 [external database](/docs/self-hosting/external-database.html). The file also declares

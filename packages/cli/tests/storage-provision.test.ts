@@ -88,6 +88,20 @@ describe("provisionBuckets", () => {
     expect(failed).toEqual(["photos"])
   })
 
+  // 0.9.2, Nic's decision: single-bucket mode refuses a bucket policy and says what to do instead,
+  // and push and dev print that whole, so the way out reaches whoever declared the policy.
+  it("prints the service's whole reason for refusing a bucket policy in single-bucket mode", async () => {
+    const reason =
+      "s3BucketPolicy needs one S3 bucket per Supatype bucket, which single-bucket mode (S3_BUCKET) does not give. " +
+      "Remove S3_BUCKET to use one S3 bucket per Supatype bucket (set S3_BUCKET_PREFIX to keep names unique), or drop s3BucketPolicy."
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: reason }), { status: 400, statusText: "Bad Request" })))
+
+    await provisionBuckets("http://localhost:18473/storage/v1", "key", [{ id: "docs", s3_bucket_policy: "{}" }])
+
+    expect(warn).toHaveBeenCalledWith(`[storage] Failed to provision bucket "docs": HTTP 400 Bad Request: ${reason}`)
+  })
+
   // Local test round 3, N3: a 502 with an empty body printed `Failed to provision bucket "big": `.
   it("names the HTTP status when a refusal has an empty body", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)

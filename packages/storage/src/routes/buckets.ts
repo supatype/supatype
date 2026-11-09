@@ -8,6 +8,8 @@ import {
   deleteObjects as deleteS3Objects,
   applyBucketPolicyFromConfig,
   objectKey,
+  refusesBucketPolicy,
+  bucketStorageProblem,
 } from "../object-store.js"
 
 import type { BucketAccessMode } from "../db.js"
@@ -41,6 +43,21 @@ function refused(ctx: RequestContext, problem: string | null): boolean {
 }
 
 /**
+ * Why `body`'s S3 policy cannot be applied, or null when it names none or it can. With every
+ * bucket in the one S3 bucket `S3_BUCKET` names, a policy would be that bucket's, so it would
+ * cover every Supatype bucket at once; storing it unapplied would claim access it never gave. Said
+ * in the schema's own word, `s3BucketPolicy`, since push and dev print it as the bucket's reason.
+ */
+function policyProblem(body: BucketBody): string | null {
+  const policy = body.s3_bucket_policy
+  if (policy === undefined || policy === null || policy.trim() === "" || !refusesBucketPolicy()) return null
+  return (
+    "s3BucketPolicy needs one S3 bucket per Supatype bucket, which single-bucket mode (S3_BUCKET) does not give. " +
+    "Remove S3_BUCKET to use one S3 bucket per Supatype bucket (set S3_BUCKET_PREFIX to keep names unique), or drop s3BucketPolicy."
+  )
+}
+
+/**
  * The bucket's row, then its S3 policy. Only once the row exists: a name already taken answers 409
  * before the policy of the bucket holding it is touched. Public on S3 exactly when the mode says
  * so, since a custom bucket's rules decide who reads it, and a new private bucket has no policy.
@@ -65,7 +82,7 @@ export async function create(ctx: RequestContext): Promise<void> {
   }
 
   const id = body.id ?? body.name
-  if (refused(ctx, bucketIdProblem(id) ?? bucketSettingsProblem(body))) return
+  if (refused(ctx, bucketIdProblem(id) ?? bucketStorageProblem(id) ?? bucketSettingsProblem(body) ?? policyProblem(body))) return
   try {
     const bucket = await createBucketAndPolicy(id, { ...body, name: body.name })
     sendJson(ctx.res, 200, { name: bucket.name })
@@ -95,7 +112,7 @@ export async function get(ctx: RequestContext): Promise<void> {
 
 export async function update(ctx: RequestContext): Promise<void> {
   const body = await readShapedJson(ctx.req, BUCKET_BODY)
-  if (refused(ctx, bucketFieldsProblem(body) ?? bucketSettingsProblem(body))) return
+  if (refused(ctx, bucketFieldsProblem(body) ?? bucketSettingsProblem(body) ?? policyProblem(body))) return
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)
   if (existing && refused(ctx, renameProblem(existing, body))) return

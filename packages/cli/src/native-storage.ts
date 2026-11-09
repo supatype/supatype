@@ -13,7 +13,7 @@ import { isJsonObject } from "@supatype/shared"
 import { EMBEDDED_CLI_VERSION } from "./cli-version-embedded.js"
 import { pushStartUndo } from "./dev-shutdown.js"
 import { errorMessage } from "./error-message.js"
-import { keepsObjectsLocally, serverStoreRoot } from "./local-storage.js"
+import { keepsObjectsLocally, OWN_BUCKET_S3_SETTINGS, serverStoreRoot } from "./local-storage.js"
 import { importLegacyNativeStorage } from "./native-storage-import.js"
 import { ProcessManager } from "./process-manager.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
@@ -42,9 +42,9 @@ export interface NativeStorage {
 type ResolveLaunch = (config: SupatypeProjectConfig, cwd: string) => Promise<ComponentLaunchSpec>
 
 /**
- * How the server answers /storage/v1 for a project whose objects stay on this machine: by proxy to
- * the storage service when it runs, else not at all. A project on S3 is left to the server's own
- * settings.
+ * How the server answers /storage/v1: by proxy to the storage service when it runs, on S3 or not.
+ * With the service down, a project whose objects stay on this machine gets no storage at all, and a
+ * project on S3 is left to the server's own settings (a SUPATYPE_STORAGE_URL in .env, say).
  *
  * When the service is not running, SUPATYPE_STORAGE_DISABLED has a 0.9.2 server answer 503
  * "storage service is not running". An older server ignores it, so the URL is blanked as well
@@ -55,7 +55,7 @@ type ResolveLaunch = (config: SupatypeProjectConfig, cwd: string) => Promise<Com
  * passes process.env on): a STORAGE_PROVIDER=local there would mount the built-in store.
  */
 export function serverStorageEnv(storage: NativeStorage | null, config: SupatypeProjectConfig): Record<string, string> {
-  if (!keepsObjectsLocally(config)) return {}
+  if (storage === null && !keepsObjectsLocally(config)) return {}
   return {
     SUPATYPE_STORAGE_URL: storage?.url ?? "",
     SUPATYPE_STORAGE_DISABLED: storage === null ? "true" : "",
@@ -72,15 +72,19 @@ function nativeStorageServiceRoot(stateRoot: string): string {
   return join(stateRoot, "storage-service")
 }
 
+/** The file backend under the state directory, for a project whose objects stay on this machine. */
+function fileBackendEnv(stateRoot: string): Record<string, string> {
+  return { STORAGE_BACKEND: "file", STORAGE_FILE_PATH: nativeStorageServiceRoot(stateRoot) }
+}
+
 /** The environment compose gives the storage image, for a single developer on one machine. */
-function storageEnv(opts: NativeStorageOptions): Record<string, string> {
+function storageEnv(opts: NativeStorageOptions, backend: Record<string, string>): Record<string, string> {
   return {
     DATABASE_URL: opts.databaseUrl,
     JWT_SECRET: opts.jwtSecret,
     PORT: String(opts.port),
     HOST: "127.0.0.1",
-    STORAGE_BACKEND: "file",
-    STORAGE_FILE_PATH: nativeStorageServiceRoot(opts.stateRoot),
+    ...backend,
     // A local project has no plan, so no limits beyond each bucket's own, as self-host compose.
     PROJECT_TIER: "enterprise",
     STORAGE_QUOTA: "-1",
@@ -128,13 +132,18 @@ const READY_STEP_MAX_MS = 2_000 + READY_POLL_MS
  * recorded as an undo of dev's start the moment it is spawned, so a Ctrl+C while it is still
  * starting stops it too, and ends the wait.
  */
-async function startAndWait(launch: ComponentLaunchSpec, opts: NativeStorageOptions, url: string): Promise<ProcessManager> {
+async function startAndWait(
+  launch: ComponentLaunchSpec,
+  opts: NativeStorageOptions,
+  url: string,
+  backend: Record<string, string> = fileBackendEnv(opts.stateRoot),
+): Promise<ProcessManager> {
   let exited = false
   const proc = new ProcessManager(launch.bin, launch.args, {
     label: "storage",
     pidDir: opts.pidDir,
     colour: "\x1b[34m",
-    env: storageEnv(opts),
+    env: storageEnv(opts, backend),
     // Called when it exits with an error, before each restart.
     beforeRestart: () => {
       exited = true
@@ -185,5 +194,47 @@ export async function startNativeStorage(
         "  Fix the cause above and restart `supatype dev`. Your stored files are kept and come back then.",
     )
     return null
+  }
+}
+
+/**
+ * The storage service's backend for a project on S3 (`storage.provider: "s3"`): the project's own
+ * bucket, every Supatype bucket a prefix in it, from `env` (the shell over .env). Null when
+ * SUPATYPE_STORAGE_URL names a storage service of the developer's own, which the server then proxies
+ * to as .env says. Throws on a blank S3_BUCKET: the service's other defaults point at a SeaweedFS
+ * native dev does not run, so starting without one would only move the failure to the first upload.
+ */
+export function nativeS3StorageEnv(env: Readonly<Record<string, string | undefined>>): Record<string, string> | null {
+  if ((env["SUPATYPE_STORAGE_URL"] ?? "").trim() !== "") return null
+  if ((env["S3_BUCKET"] ?? "").trim() === "") {
+    throw new Error(
+      'storage.provider is "s3", but S3_BUCKET is blank in .env. Set S3_BUCKET to the bucket this ' +
+        "project keeps its files in (with S3_REGION for AWS, or S3_ENDPOINT for MinIO, R2 and the like), " +
+        'or set storage.provider to "local" to keep them on this machine.',
+    )
+  }
+  // Blank stays blank: the service reads a blank setting as unset, and it overrides any value
+  // the service would otherwise inherit from dev's own environment.
+  return { STORAGE_BACKEND: "s3", ...Object.fromEntries(OWN_BUCKET_S3_SETTINGS.map((key) => [key, env[key] ?? ""])) }
+}
+
+/**
+ * Starts the storage service on the project's S3 bucket and records it in the route manifest.
+ * Throws when it does not start: there is no store on this machine to fall back to.
+ */
+export async function startNativeS3Storage(
+  opts: NativeStorageOptions,
+  s3Env: Record<string, string>,
+  resolveLaunch: ResolveLaunch = resolveStorageLaunch,
+): Promise<NativeStorage> {
+  const url = `http://127.0.0.1:${opts.port}`
+  const bucket = s3Env["S3_BUCKET"] ?? ""
+  try {
+    const proc = await startAndWait(await resolveLaunch(opts.config, opts.cwd), opts, url, s3Env)
+    patchRouteManifest(opts.manifestPath, { storage_url: url })
+    console.log(`[supatype] Storage service: ${url} (objects in S3 bucket ${bucket})`)
+    return { proc, url }
+  } catch (err) {
+    throw new Error(`the storage service for S3 bucket ${bucket} did not start: ${errorMessage(err)}`)
   }
 }

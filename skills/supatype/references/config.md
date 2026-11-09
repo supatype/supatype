@@ -89,6 +89,8 @@ export default localConfig
 | `app.upstream` | Proxy target for SSR/dev servers (proxy mode) |
 | `app.start` | package.json script name to run in proxy mode (e.g. `"vite"`) |
 | `output.types` | Generated TypeScript types path |
+| `storage.provider` | Where native `supatype dev` keeps files. `"local"`: this machine's disk. `"s3"`: your own S3 bucket, `S3_BUCKET` in `.env`; every Supatype bucket is a key prefix in it (as Supabase's `GLOBAL_S3_BUCKET`), the storage service serves every file including public ones, and the keys need only object read, write, list and delete on that bucket. AWS: `S3_REGION`, no `S3_ENDPOINT`, keys optional (blank uses the AWS SDK's credential chain). R2 and other S3-compatible stores: `S3_ENDPOINT` plus keys. A blank `S3_BUCKET` stops dev with a message; a `SUPATYPE_STORAGE_URL` in `.env` wins. Docker dev runs its own SeaweedFS either way |
+| `storage.production` | Where the self-host stack keeps files; init writes it from "Production storage?". Unset or `"local"`: a SeaweedFS service in the stack. `"s3"`: the project's own bucket, `S3_BUCKET` (required, `compose up` stops while blank) plus the other `S3_*` from the server's `.env`, single-bucket mode, no SeaweedFS. `s3BucketPolicy` is never applied in single-bucket mode (the storage API refuses it with 400; a pushed bucket stores it unapplied); a project needing per-bucket policies runs the storage service with `S3_BUCKET` unset and `S3_BUCKET_PREFIX` set |
 | `build` | Framework build integration for `supatype deploy` (`framework`, `buildCommand`, `outputDirectory`, `env`) |
 | `versions.*` | Optional pin for engine, server, postgres, deno. **Omit to run the CLI release's own images** |
 | `connection` | Override database URL (else `DATABASE_URL` env) |

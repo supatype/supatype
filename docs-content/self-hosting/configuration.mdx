@@ -69,7 +69,7 @@ place.
 | `SITE_URL` | `http://localhost:3000`, or `https://<server.domain>` with TLS on | Your application's URL, for auth redirects. Its origin is always allowed by CORS |
 | `SUPATYPE_KONG_PORT` | `18473` | Host port of the gateway. With TLS on, the gateway publishes ports 80 and 443 instead |
 | `SUPATYPE_SERVER_PORT` | `9999` | Host port of the API server itself, behind the gateway |
-| `SUPATYPE_SEAWEEDFS_PORT` | `8333` | Host port of the object store behind storage |
+| `SUPATYPE_SEAWEEDFS_PORT` | `8333` | Host port of the object store behind storage. Unused with `storage.production: "s3"`, which runs none ([Storage](#storage)) |
 | `SUPATYPE_PUBLISH_ADDRESS` | `127.0.0.1` | Address the database, the API server and the object store are published on. Loopback keeps them off the network; the gateway is the way in |
 
 TLS is on when `supatype.config.ts` sets `server.mode: "standalone"`, a `server.domain` and
@@ -171,6 +171,37 @@ seconds, and replaces the default until someone presses **Reset to default**. Vi
 
 Before this, a standalone server with no `SUPATYPE_CORS_ALLOW_ORIGINS` allowed every origin. If a
 production web app on another origin calls your API, add its origin before upgrading.
+
+## Storage
+
+By default the stack runs a SeaweedFS service for uploaded files, in the `storage-data` volume, and
+the storage service gives each bucket an S3 bucket of its own there. The compose file passes the
+storage service every S3 setting for it, so there is nothing to set.
+
+To keep production files in an S3 bucket of your own instead, set `storage.production` in
+`supatype.config.ts` (`supatype init` writes it when you answer "Production storage?" with S3):
+
+```ts
+storage: { provider: "local", local_path: ".supatype/storage", production: "s3" },
+```
+
+The stack then leaves SeaweedFS and its volume out, and runs the storage service in single-bucket
+mode: every bucket is a key prefix inside `S3_BUCKET`, and public files are served by the storage
+service, so the S3 bucket stays private. `storage.provider` is unaffected: it is where
+`supatype dev` keeps files, and the Docker dev stack keeps its SeaweedFS either way.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `S3_BUCKET` | None, required | The bucket. `self-host compose up` stops with a message while it is blank |
+| `S3_REGION` | None | The bucket's region. Required on AWS, where `S3_ENDPOINT` stays blank |
+| `S3_ENDPOINT` | None | The store's URL, for an S3-compatible store such as Cloudflare R2 |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | None | Keys that can read, write, list and delete objects in the bucket. Leave both blank on AWS to use the instance's or task's role |
+| `S3_FORCE_PATH_STYLE` | `true` with an endpoint, `false` without | Whether the bucket goes in the URL path rather than the host name |
+
+Set these in the server's `.env`, and use a different bucket from the one `supatype dev` uses.
+Switching an existing stack to `production: "s3"` does not move its files out of SeaweedFS. See
+[Storage](/docs/storage.html#own-bucket) for the bucket's layout, and for `S3_BUCKET_PREFIX` when
+you run the storage service yourself with one S3 bucket per bucket.
 
 ## Functions
 

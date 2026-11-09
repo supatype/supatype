@@ -572,7 +572,19 @@ describe("the server's storage environment", () => {
     })
   })
 
-  it("leaves a project on S3 to the server's own settings", () => {
+  // A project on S3 runs the storage service too (against its own bucket), so the server proxies
+  // to it exactly as for a project whose objects stay on this machine.
+  it("proxies a project on S3 to the service when it runs", () => {
+    const proc = new ProcessManager(process.execPath, [], { label: "storage", pidDir: dir })
+    expect(serverStorageEnv({ proc, url: "http://127.0.0.1:8002" }, projectConfig({ storage: { provider: "s3" } }))).toEqual({
+      SUPATYPE_STORAGE_URL: "http://127.0.0.1:8002",
+      SUPATYPE_STORAGE_DISABLED: "",
+      STORAGE_PROVIDER: "",
+      STORAGE_PATH: "",
+    })
+  })
+
+  it("leaves a project on S3 whose service is not running to the server's own settings", () => {
     expect(serverStorageEnv(null, projectConfig({ storage: { provider: "s3" } }))).toEqual({})
   })
 })
