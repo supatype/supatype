@@ -22,14 +22,24 @@ export function enabled(on: boolean): string {
   return on ? "Enabled" : "Disabled"
 }
 
+/**
+ * The supatype.config.ts key behind a sign-in method, when there is one: each OAuth provider, and
+ * email, which `auth.email.enabled` turns on and off. Phone and anonymous sign-in have none.
+ */
+function providerConfigKey(name: string): string | undefined {
+  if (name === "email") return "auth.email.enabled"
+  return NOT_OAUTH.has(name) ? undefined : `auth.providers.${name}`
+}
+
 function providerRow(name: string, on: boolean): SettingRow {
+  const configKey = providerConfigKey(name)
   return {
     label: name,
     value: enabled(on),
     on,
     envVar: `SUPATYPE_EXTERNAL_${name.toUpperCase()}_ENABLED`,
     fromDotEnv: false,
-    ...(!NOT_OAUTH.has(name) && { configKey: `auth.providers.${name}` }),
+    ...(configKey !== undefined && { configKey }),
   }
 }
 
@@ -43,7 +53,7 @@ export function providerRows(s: AuthSettings): SettingRow[] {
 /** The OAuth providers alone, enabled ones first. */
 export function oauthProviderRows(s: AuthSettings): SettingRow[] {
   return providerRows(s)
-    .filter((row) => row.configKey !== undefined)
+    .filter((row) => !NOT_OAUTH.has(row.label))
     .sort((a, b) => Number(b.on) - Number(a.on))
 }
 

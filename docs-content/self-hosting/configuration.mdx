@@ -80,7 +80,15 @@ TLS is on when `supatype.config.ts` sets `server.mode: "standalone"`, a `server.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISABLE_SIGNUP` | `false` | Refuse new sign-ups |
-| `SUPATYPE_MAILER_AUTOCONFIRM` | `true`, or `false` when `auth.email.enableConfirmations` is `true` | Confirm new email addresses without sending a confirmation email |
+| `SUPATYPE_EXTERNAL_EMAIL_ENABLED` | `true`, or `false` when `auth.email.enabled` is `false` | Email-and-password sign-up and sign-in, with magic links and password recovery |
+| `SUPATYPE_MAILER_AUTOCONFIRM` | `false`, or `true` when `auth.email.enableConfirmations` is `false` | Confirm new email addresses without sending a confirmation email |
+
+The defaults come from `auth.email` in `supatype.config.ts`, and either variable set in `.env` wins
+over the config (restart the stack after changing it). The CLI never writes them into `.env`; a
+`SUPATYPE_MAILER_AUTOCONFIRM` line an earlier CLI wrote there is taken out on the next start, with a
+message saying so. A self-hosted stack sends a confirmation link with every new email sign-up
+unless one of them says otherwise, so configure email delivery (below) before you open sign-up.
+Local dev confirms sign-ups at once unless the config says otherwise.
 
 ### Email
 

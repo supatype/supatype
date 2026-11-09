@@ -100,6 +100,16 @@ JWT_SECRET=abc
     expect(readEnvFile(dir)["JWT_SECRET"]).toBe("keep")
   })
 
+  it("puts a note where a key's first line was, whether the line stays or goes with its marker", () => {
+    write(`A=1\n${MANAGED_MARKER}\nGONE=1\nGONE=2\nB=2\n`)
+    upsertEnvFile(dir, {}, { remove: ["GONE"], noteAt: { key: "GONE", text: "# GONE: see the config" } })
+    expect(read()).toBe("A=1\n# GONE: see the config\nB=2\n")
+
+    write(`A=1\n${MANAGED_MARKER}\nKEPT=1\n`)
+    upsertEnvFile(dir, {}, { noteAt: { key: "KEPT", text: "# KEPT: see the config" } })
+    expect(read()).toBe(`A=1\n# KEPT: see the config\n${MANAGED_MARKER}\nKEPT=1\n`)
+  })
+
   it("still accepts the old array argument as an unconditional removal", () => {
     write("GONE=1\nSTAYS=2\n")
     upsertEnvFile(dir, {}, ["GONE"])

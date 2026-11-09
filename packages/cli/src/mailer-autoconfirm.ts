@@ -1,42 +1,49 @@
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
-import { envValueOwner, readEnvFile } from "./env-file.js"
+import type { ComposeRenderMode } from "./compose-render-mode.js"
+import { readEnvSnapshot, upsertEnvFile } from "./env-file.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { isJsonObject } from "@supatype/shared"
 
 /**
  * Whether the auth server confirms a new email sign-up by itself, from `auth.email.enableConfirmations`.
  *
- * `supatype dev` used to write `SUPATYPE_MAILER_AUTOCONFIRM=true` on every start with nothing to
- * say otherwise, so a dev stack could not be made to send a confirmation email. Dev (docker and
- * native) and the self-host compose file now all take it from here.
+ * The compose file's `${SUPATYPE_MAILER_AUTOCONFIRM:-<config>}` and native dev's environment carry
+ * the config's value, and a line in `.env` is the developer's and wins. The CLI used to write the
+ * value into `.env` under the managed marker and rewrite it on every start, so the auth docs'
+ * instruction to edit `.env` and restart was undone by the restart (FF7, 0.9.1 release test).
  */
 export const MAILER_AUTOCONFIRM_ENV = "SUPATYPE_MAILER_AUTOCONFIRM"
 
-/** `"false"` when the config enables confirmations, `"true"` (today's default) otherwise. */
-export function configMailerAutoconfirm(config: SupatypeProjectConfig): "true" | "false" {
-  return config.auth?.email?.enableConfirmations === true ? "false" : "true"
-}
+/**
+ * The auth server's switch for email-and-password sign-up and sign-in (its
+ * `External.Email.Enabled`), from `auth.email.enabled`. Off also turns off magic links and password
+ * recovery, which the server refuses with the same "Email logins are disabled".
+ */
+export const EMAIL_ENABLED_ENV = "SUPATYPE_EXTERNAL_EMAIL_ENABLED"
 
 /**
- * The `SUPATYPE_MAILER_AUTOCONFIRM` the developer wrote into `.env` themselves, or null.
- *
- * A value the CLI wrote carries the managed marker. An unmarked `true` is what every CLI before
- * `auth.email.enableConfirmations` wrote on each `dev`, so it is not taken as anyone's choice:
- * otherwise turning confirmations on in the config would do nothing in every existing project.
+ * Left in `.env` where {@link retireCliMailerAutoconfirm} took the CLI's line out, so it does that
+ * once: a `SUPATYPE_MAILER_AUTOCONFIRM` written after it is the developer's, `true` included.
  */
-export function ownMailerAutoconfirm(cwd: string): string | null {
-  if (envValueOwner(cwd, MAILER_AUTOCONFIRM_ENV) !== "operator") return null
-  const value = readEnvFile(cwd)[MAILER_AUTOCONFIRM_ENV]
-  return value === undefined || value === "" || value === "true" ? null : value
+export const MAILER_AUTOCONFIRM_NOTE =
+  "# SUPATYPE_MAILER_AUTOCONFIRM: auth.email.enableConfirmations in supatype.config.ts decides it; a line here wins."
+
+/**
+ * `"false"` when the config enables confirmations, `"true"` when it turns them off, and when it does
+ * not say, the stack's default: a dev stack confirms a sign-up at once, a standalone (self-hosted)
+ * one sends a confirmation link. Self-host used to auto-confirm as well, so anyone could sign up
+ * there with an address they do not own (0.9.1 release test, D6).
+ */
+export function configMailerAutoconfirm(config: SupatypeProjectConfig, mode: ComposeRenderMode): "true" | "false" {
+  const confirmations = config.auth?.email?.enableConfirmations ?? mode === "standalone"
+  return confirmations ? "false" : "true"
 }
 
-/** What a dev server runs with: the developer's own `.env` value, else the config's. */
-export function devMailerAutoconfirm(cwd: string, config: SupatypeProjectConfig): string {
-  return ownMailerAutoconfirm(cwd) ?? configMailerAutoconfirm(config)
+/** `"false"` when the config turns email sign-in off, `"true"` (the server's own default) otherwise. */
+export function configEmailEnabled(config: SupatypeProjectConfig): "true" | "false" {
+  return config.auth?.email?.enabled === false ? "false" : "true"
 }
 
-/** `auth.email`, when present, is an object whose `enableConfirmations` is a boolean. */
+/** `auth.email`, when present, is an object whose `enabled` and `enableConfirmations` are booleans. */
 export function validateAuthEmail(cfg: Record<string, unknown>, filename: string): void {
   const auth = cfg["auth"]
   if (!isJsonObject(auth)) return
@@ -45,29 +52,33 @@ export function validateAuthEmail(cfg: Record<string, unknown>, filename: string
   if (!isJsonObject(email)) {
     throw new Error(`${filename}: auth.email must be an object`)
   }
-  const flag = email["enableConfirmations"]
-  if (flag !== undefined && typeof flag !== "boolean") {
-    throw new Error(`${filename}: auth.email.enableConfirmations must be true or false`)
+  for (const key of ["enabled", "enableConfirmations"]) {
+    const flag = email[key]
+    if (flag !== undefined && typeof flag !== "boolean") {
+      throw new Error(`${filename}: auth.email.${key} must be true or false`)
+    }
   }
 }
 
 /**
- * The `.env` update a dev stack's start makes: the config's value, written with the managed marker
- * so the next start may change it, or nothing when the developer set their own.
+ * Take the `SUPATYPE_MAILER_AUTOCONFIRM` an earlier CLI wrote out of `.env`, once, saying so in one
+ * line: the line under the managed marker, or the unmarked `true` every CLI before the marker wrote.
+ * Whether a marked line was edited by hand cannot be told, so it goes too, and the line says how to
+ * set it now. Any other value is the developer's and stays. Either way the note goes in where the
+ * first line was, so a line written after this is never taken for the CLI's.
  */
-export function devMailerAutoconfirmUpdate(cwd: string, config: SupatypeProjectConfig): Record<string, string> {
-  return ownMailerAutoconfirm(cwd) === null ? { [MAILER_AUTOCONFIRM_ENV]: configMailerAutoconfirm(config) } : {}
-}
-
-/**
- * The native dev server's value, applied over what it reads from `.env` and `.env.local`.
- *
- * Nothing when `.env.local` sets it: the CLI never writes that file, so a value there is the
- * developer's and already wins. Otherwise the developer's own `.env` value, else the config's, so
- * an unmarked `true` an earlier docker `dev` left in `.env` does not outvote the config.
- */
-export function nativeMailerAutoconfirmEnv(cwd: string, config: SupatypeProjectConfig): Record<string, string> {
-  const local = join(cwd, ".env.local")
-  const inLocal = existsSync(local) && new RegExp(`^\s*${MAILER_AUTOCONFIRM_ENV}=`, "m").test(readFileSync(local, "utf8"))
-  return inLocal ? {} : { [MAILER_AUTOCONFIRM_ENV]: devMailerAutoconfirm(cwd, config) }
+export function retireCliMailerAutoconfirm(cwd: string): void {
+  const { values, managed, comments } = readEnvSnapshot(cwd)
+  if (comments.has(MAILER_AUTOCONFIRM_NOTE) || !(MAILER_AUTOCONFIRM_ENV in values)) return
+  const cliWrote = managed.has(MAILER_AUTOCONFIRM_ENV) || values[MAILER_AUTOCONFIRM_ENV] === "true"
+  upsertEnvFile(
+    cwd,
+    {},
+    { remove: cliWrote ? [MAILER_AUTOCONFIRM_ENV] : [], noteAt: { key: MAILER_AUTOCONFIRM_ENV, text: MAILER_AUTOCONFIRM_NOTE } },
+  )
+  if (!cliWrote) return
+  console.log(
+    `[supatype] Took ${MAILER_AUTOCONFIRM_ENV} out of .env, where an earlier CLI wrote it: set ` +
+      "auth.email.enableConfirmations in supatype.config.ts, or a line of your own in .env, to change it.",
+  )
 }

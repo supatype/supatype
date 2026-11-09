@@ -87,9 +87,11 @@ describe("auth.providers in the compose stack", () => {
     expect(vars.has("SUPATYPE_EXTERNAL_LINKEDIN_OIDC_CLIENT_ID")).toBe(true)
   })
 
-  it("renders nothing for a project without providers, so .env alone still configures them", () => {
-    const compose = renderSelfHostCompose(config())
-    expect(compose).not.toContain("SUPATYPE_EXTERNAL_")
+  // The email switch is not a provider: auth.email.enabled renders it for every project, and a
+  // SUPATYPE_EXTERNAL_EMAIL_ENABLED in .env still wins over it.
+  it("renders no provider for a project without providers, so .env alone still configures them", () => {
+    const external = [...serverEnv(renderSelfHostCompose(config())).keys()].filter((name) => name.startsWith("SUPATYPE_EXTERNAL_"))
+    expect(external).toEqual(["SUPATYPE_EXTERNAL_EMAIL_ENABLED"])
   })
 
   it("uses the https domain for the default redirect when TLS is on", () => {

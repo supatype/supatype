@@ -87,7 +87,7 @@ const { data, error } = await supatype.auth.updateUser({
 })
 ```
 
-When the auth server auto-confirms emails (the generated stack's default), the email is attached
+When the auth server auto-confirms emails (local dev's default), the email is attached
 straight away. Otherwise a confirmation email is sent, and the email is attached when the user
 follows the link. From then on `user.isAnonymous` is `false`. A password on its own is refused: an
 anonymous user needs an email or phone in the same update. See [Email & Password](/docs/auth/email-password.html) for confirmation and password flows.

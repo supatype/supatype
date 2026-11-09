@@ -73,6 +73,7 @@ import {
 } from "../project-config.js"
 import { cliDatabaseUrlLines } from "../database-url-owner.js"
 import { scaffoldNextRuntimeEnv } from "../init-next-runtime-env.js"
+import { MAILER_AUTOCONFIRM_NOTE } from "../mailer-autoconfirm.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -1441,6 +1442,9 @@ API_EXTERNAL_URL=${initLocalApiUrl(opts)}`,
   }
 
   sections.push(emailEnvSection(opts))
+  // Where the CLI would leave it after taking out a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote.
+  // Written here, a new project never has that done to a line of the developer's own (FF7).
+  sections.push(MAILER_AUTOCONFIRM_NOTE)
   sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction))
 
   if (opts.adminEmail && opts.adminPassword) {
@@ -1496,7 +1500,6 @@ SUPATYPE_SMTP_SENDER_NAME=${projectName}`
     case "console":
     default:
       return `# SMTP: unused while email.provider is console, which logs each email instead of sending it.
-# Email confirmation is auth.email.enableConfirmations in supatype.config.ts.
 # SUPATYPE_SMTP_HOST=
 # SUPATYPE_SMTP_PORT=587
 # SUPATYPE_SMTP_USER=

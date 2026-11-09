@@ -23,6 +23,7 @@ import { serialRuns } from "../serial-runs.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 import { hasEnvValue, readDotEnvFiles } from "../env-file.js"
+import { retireCliMailerAutoconfirm } from "../mailer-autoconfirm.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig, PROJECT_CONFIG_FILES } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
@@ -527,6 +528,9 @@ export function registerDev(program: Command): void {
       if (nativeStorage !== null) schemaPush.storageApi = { url: nativeStorage.url, serviceRoleKey }
       const valkeySidecar = await valkeyStart
 
+      // Before .env is read: a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote there would otherwise
+      // win over the config as if the developer had set it (FF7).
+      retireCliMailerAutoconfirm(cwd)
       // `.env` and `.env.local`, read once for everything the server's environment takes from them.
       const dotEnv = readDotEnvFiles(cwd)
       // What an env("NAME") in auth.providers resolves against: the shell over .env, as for the config.
@@ -598,7 +602,7 @@ export function registerDev(program: Command): void {
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
         // auth.sso.saml, with the signing key from .env (generated there the first time SAML is on).
         ...nativeSamlEnv(cwd, config),
-        ...nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }),
+        ...nativeServerDotEnvLayer({ dotEnv, config, denoPort }),
       }
 
       await haltIfStopping()

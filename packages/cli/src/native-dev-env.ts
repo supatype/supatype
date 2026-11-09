@@ -10,7 +10,7 @@
 import { devApiKeys, type DevApiKeys } from "./dev-api-keys.js"
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
-import { nativeMailerAutoconfirmEnv } from "./mailer-autoconfirm.js"
+import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 import { mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides } from "./mailer-env.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
@@ -117,18 +117,20 @@ export interface NativeDotEnvLayerInput {
   /** `.env` then `.env.local`, the later file winning. */
   dotEnv: Record<string, string>
   config: SupatypeProjectConfig
-  cwd: string
   /** The Deno port dev checked was free. */
   denoPort: number
 }
 
 /** The last layer of supatype-server's environment on the native path: `.env` and what follows it. */
-export function nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }: NativeDotEnvLayerInput): Record<string, string> {
+export function nativeServerDotEnvLayer({ dotEnv, config, denoPort }: NativeDotEnvLayerInput): Record<string, string> {
   return {
     // A blank mailer value init scaffolded into .env does not erase the config's.
     ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email)),
-    // After .env: auth.email.enableConfirmations, unless the developer set their own value.
-    ...nativeMailerAutoconfirmEnv(cwd, config),
+    // auth.email.enableConfirmations and auth.email.enabled unless .env or .env.local sets them,
+    // blank counting as unset as `${NAME:-...}` does in the compose file, so native and docker dev
+    // agree. A dev stack confirms sign-ups at once when the config does not say.
+    [MAILER_AUTOCONFIRM_ENV]: dotEnv[MAILER_AUTOCONFIRM_ENV]?.trim() || configMailerAutoconfirm(config, "dev"),
+    [EMAIL_ENABLED_ENV]: dotEnv[EMAIL_ENABLED_ENV]?.trim() || configEmailEnabled(config),
     // Last, so the port dev checked is the port Deno gets: a value in .env or .env.local, blank
     // included, would otherwise replace it.
     [DENO_PORT_ENV]: String(denoPort),

@@ -91,6 +91,16 @@ describe("the auth Configuration page", () => {
     expect(text).not.toContain("auth server env SUPATYPE_SAML_ENABLED")
   })
 
+  // 0.9.2 (D5, D6): email sign-in and email confirmation are both supatype.config.ts keys, which the
+  // compose file passes with a .env override, and the page named only the variable or the server env.
+  it("names the config key for email sign-in and for email confirmation", async () => {
+    await render(SELF_HOST, () => Response.json(SETTINGS))
+    const text = container.textContent ?? ""
+    expect(text).toContain("supatype.config.ts auth.email.enabled, or SUPATYPE_EXTERNAL_EMAIL_ENABLED")
+    expect(text).toContain("supatype.config.ts auth.email.enableConfirmations, or SUPATYPE_MAILER_AUTOCONFIRM")
+    expect(text).not.toContain("auth server env SUPATYPE_EXTERNAL_EMAIL_ENABLED")
+  })
+
   it("says Cloud manages them on Cloud, and names no .env", async () => {
     await render(CLOUD, () => Response.json(SETTINGS))
     expect(container.textContent).toContain("Managed by Supatype Cloud")

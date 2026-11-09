@@ -1514,7 +1514,7 @@ The auth service is part of `supatype-server`, the same process that serves REST
 - `supatype dev` with `database.provider: "native"`: the server runs as a local process on `server.port`, `18471` by default.
 - Self-host: `supatype self-host compose up` runs the same server image. It needs `JWT_SECRET` in `.env` and fills in a blank `ANON_KEY` or `SERVICE_ROLE_KEY` from it. See [Self-hosting](https://www.supatype.com/docs/#self-host).
 
-In local dev, sign-ups are confirmed automatically, so a new user gets a session straight away with no email round trip.
+In local dev, sign-ups are confirmed automatically, so a new user gets a session straight away with no email round trip. A self-hosted stack sends a confirmation link instead. See [Email sign-in and confirmation](https://www.supatype.com/docs/auth.html#email-settings).
 
 > **NOTE:** Who may open Studio, and what they may do there, is decided by Studio roles. See [Studio roles](https://www.supatype.com/docs/studio-roles.html).
 
@@ -1778,6 +1778,23 @@ email: {
 
 For Resend, set `SUPATYPE_RESEND_API_KEY` and `SUPATYPE_RESEND_FROM` in `.env`. For SES, set `SUPATYPE_SES_FROM`; credentials come from the environment's AWS configuration.
 
+#### Email sign-in and confirmation
+
+Two keys under `auth.email` in `supatype.config.ts` decide what email-and-password sign-in does:
+
+`supatype.config.ts`:
+
+```ts
+auth: {
+  email: { enabled: true, enableConfirmations: true },
+},
+```
+
+- `enabled`, default `true`. `false` turns email-and-password sign-up and sign-in off at the auth server, and magic links and password recovery with them, for a project that signs in only with OAuth or SAML.
+- `enableConfirmations`: whether a new sign-up has to click a link in an email before it can sign in. Unset, a self-hosted stack (`supatype self-host compose`) sends the link and local dev, Docker or native, confirms the sign-up at once. `true` or `false` sets it for every stack.
+
+`supatype dev` and `supatype self-host compose` pass both to the auth server on every start, as `SUPATYPE_EXTERNAL_EMAIL_ENABLED` and `SUPATYPE_MAILER_AUTOCONFIRM`. Either variable set in the project's `.env` wins over the config for that stack; the CLI never writes them there. Studio shows each under **Authentication > Configuration**, with the key that sets it.
+
 #### Environment variables
 
 The server reads the project's `.env` when it starts, so `SUPATYPE_*` auth variables placed there take effect after a restart. In the Docker stacks, a few values are set by the generated Compose file and are read from the plain names shown.
@@ -1789,14 +1806,15 @@ The server reads the project's `.env` when it starts, so `SUPATYPE_*` auth varia
 | `SITE_URL` | Self-host: your app's URL, the default place users land after confirming or signing in |
 | `SUPATYPE_URI_ALLOW_LIST` | Other URLs `redirectTo` may point at, comma-separated |
 | `DISABLE_SIGNUP` (self-host), `SUPATYPE_DISABLE_SIGNUP` (native dev) | `true` stops new sign-ups |
-| `SUPATYPE_MAILER_AUTOCONFIRM` | `true` skips email confirmation. On in dev, and on by default in self-host until you set it to `false` |
+| `SUPATYPE_EXTERNAL_EMAIL_ENABLED` | `false` turns email-and-password sign-in off. Set from `auth.email.enabled`; a value in `.env` wins |
+| `SUPATYPE_MAILER_AUTOCONFIRM` | `true` skips email confirmation. Set from `auth.email.enableConfirmations`: when that is unset, off in self-host and on in dev. A value in `.env` wins: set it there and restart the stack |
 | `SUPATYPE_EXTERNAL_<PROVIDER>_*` | OAuth providers, see [above](https://www.supatype.com/docs/auth.html#oauth) |
 | `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED` | Allow anonymous sign-in |
 | `SUPATYPE_EXTERNAL_EMAIL_MAGIC_LINK_ENABLED` | `false` turns magic links off |
 | `SUPATYPE_PASSWORD_MIN_LENGTH` | Minimum password length, at least 6 |
 | `SUPATYPE_EXTERNAL_PHONE_ENABLED`, `SUPATYPE_SMS_PROVIDER` | Phone sign-in. The provider is `twilio`, `twilio_verify`, `messagebird`, `textlocal` or `vonage` |
 
-> **SELF-HOST:** Self-host turns auto-confirm on unless you set `SUPATYPE_MAILER_AUTOCONFIRM=false`. Set it, and configure email delivery, before you open sign-up to the public.
+> **SELF-HOST:** Self-host sends a confirmation link with every new email sign-up. Configure email delivery before you open sign-up to the public: with the `console` provider no link reaches anyone, so a new user has no way to confirm their address.
 
 To create users from a seed file, see [Seeding users](https://www.supatype.com/docs/seeding.html#users).
 

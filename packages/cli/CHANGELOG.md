@@ -37,6 +37,10 @@
 
 ### Features
 
+* **auth:** `auth.email.enabled: false` in supatype.config.ts turns email-and-password sign-up and
+  sign-in off (with magic links and password recovery) on native dev, Docker dev and self-host; a
+  `SUPATYPE_EXTERNAL_EMAIL_ENABLED` in `.env` wins. Studio's auth Configuration page names the key
+  for it and for email confirmation.
 * **auth:** SAML single sign-on can be turned on from the config: `auth: { sso: { saml: { enabled: true } } }`,
   with optional `allowEncryptedAssertions`, `relayStateValidity` (seconds), `rateLimitAssertion`
   (assertions per 5 minutes) and `externalUrl`. `dev`, native `dev` and `self-host compose` pass the
@@ -187,6 +191,13 @@
 
 ### Bug Fixes
 
+* **self-host:** a self-hosted stack now sends a confirmation link with every new email sign-up
+  unless `auth.email.enableConfirmations` is `false`; it used to confirm every sign-up at once, so
+  anyone could sign up with an address they do not own. Local dev still confirms at once.
+* **auth:** the CLI no longer writes `SUPATYPE_MAILER_AUTOCONFIRM` into `.env`, so a value you set
+  there and restart with is kept, as the auth docs say; before, every start rewrote it from the
+  config. The line an earlier CLI wrote is taken out once, with a message saying so, and `init`
+  marks new projects so their own line is never taken out.
 * **examples:** kitchen-sink, supabucks, framework-parity and expo-auth's web export run from a
   plain `vite build` / `expo export` again: the page loads `/supatype-env.js` and the client reads
   the anon key from it, so a build no longer shows a blank page after `dev` or `keys`, and never

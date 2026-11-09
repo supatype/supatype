@@ -95,7 +95,8 @@ export default localConfig
 | `auth.providers` | OAuth providers (`github`, `google`, ...): `clientId`, `secret: env("NAME")`, optional `redirectUri`, `url`. See [OAuth providers](#oauth-providers) |
 | `auth.sso.saml` | SAML single sign-on: `enabled` (required), optional `allowEncryptedAssertions`, `relayStateValidity` (seconds), `rateLimitAssertion`, `externalUrl`. Turning it on makes the next `dev` or `self-host compose up` write `SUPATYPE_SAML_PRIVATE_KEY` to `.env` once; a `privateKey` field here is refused. Identity providers are not config: register them with `supatype sso add` (see [cli.md](cli.md#single-sign-on-saml) and https://www.supatype.com/docs/sso.html) |
 | `studio.auth.providers` | The OAuth providers Studio's sign-in offers, e.g. `["keycloak"]`. Unset offers every enabled provider. A Studio role is still required. See [Studio sign-in](#studio-sign-in-with-the-projects-providers) |
-| `auth.email.enableConfirmations` | `true` makes a new email sign-up confirm its address before it can sign in. Off when unset: dev auto-confirms. Written as `SUPATYPE_MAILER_AUTOCONFIRM` for docker dev, native dev and the self-host compose file; a value you put in `.env` yourself wins. See [Email confirmation](#email-confirmation) |
+| `auth.email.enabled` | Email-and-password sign-up and sign-in. Default `true`; `false` turns them off at the auth server, with magic links and password recovery (refused with `email_provider_disabled`), for an OAuth- or SAML-only project. Rendered as `SUPATYPE_EXTERNAL_EMAIL_ENABLED` for docker dev, native dev and the self-host compose file; a value in `.env` wins. See [Email confirmation](#email-confirmation) |
+| `auth.email.enableConfirmations` | Whether a new email sign-up must confirm its address before it can sign in. Unset: self-host (`self-host compose`) sends a confirmation link, local dev (docker and native) confirms at once. `true` or `false` sets it for every stack. Rendered as `SUPATYPE_MAILER_AUTOCONFIRM` for docker dev, native dev and the self-host compose file; a value in `.env` wins. See [Email confirmation](#email-confirmation) |
 | `api.corsOrigins` | Browser origins allowed to call the API besides `SITE_URL`, e.g. `["https://admin.example.com"]`. `"*"` allows every origin and is never a default. `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` adds to it; a list saved in Studio (Settings, CORS tab) replaces both until reset (the site URL is always allowed). Dev mode allows every origin |
 
 ## .env essentials
@@ -270,9 +271,12 @@ provider.
 
 ## Email confirmation
 
-A dev stack confirms every email sign-up by itself, so `signUp` returns a session straight away.
-To test the confirmation email instead, turn confirmations on (the same switch as Supabase's
-`[auth.email] enable_confirmations`):
+With `auth.email.enableConfirmations` unset, a dev stack (docker or native) confirms every email
+sign-up by itself, so `signUp` returns a session straight away, and a self-hosted stack
+(`supatype self-host compose`) sends a confirmation link. To test the confirmation email in dev,
+turn confirmations on for every stack (the same switch as Supabase's
+`[auth.email] enable_confirmations`); `false` instead confirms at once on every stack, self-host
+included:
 
 ```typescript
 // docs:no-check (a fragment: the rest of your config stays as it is)
@@ -285,13 +289,22 @@ export default defineConfig({
 
 - `signUp` then returns the user with `session: null`, stores nothing and emits no `SIGNED_IN`;
   `SignUpForm` shows "Check your email to confirm your account."
-- Docker `supatype dev` writes `SUPATYPE_MAILER_AUTOCONFIRM` into `.env` under a
-  `# supatype:managed` marker and updates it on every start; native dev passes it to the server;
-  `supatype self-host compose` uses it as the fallback for `${SUPATYPE_MAILER_AUTOCONFIRM:-...}`.
-- **Your own `.env` value wins.** A `SUPATYPE_MAILER_AUTOCONFIRM` without the marker is left alone,
-  except `true` with no marker, which is what earlier CLIs wrote on every start and is replaced.
-  A value in `.env.local` always wins in native dev.
-- The emails go wherever `email.provider` sends them: `console` (the default) logs them.
+- The compose file (docker dev and self-host) uses the config's value as the fallback of
+  `${SUPATYPE_MAILER_AUTOCONFIRM:-...}`, each stack with its own default; native dev passes it to
+  the server. The CLI never writes it into `.env`.
+- **A `SUPATYPE_MAILER_AUTOCONFIRM` in `.env` (or `.env.local` for native dev) wins**, `true` or
+  `false`: set it and restart the stack. The line earlier CLIs wrote there (under
+  `# supatype:managed`, or an unmarked `true` from before the marker) is taken out once on the next
+  start, with a one-line message, and a comment is left in its place so a line written after it is
+  kept.
+- The emails go wherever `email.provider` sends them: `console` (the default) logs them. Configure
+  a real provider before a self-hosted stack opens sign-up, or nobody can confirm.
+
+To turn email-and-password sign-in off (an OAuth- or SAML-only project), set
+`auth: { email: { enabled: false } }`. The CLI renders it as `SUPATYPE_EXTERNAL_EMAIL_ENABLED` for
+every stack, with a value in `.env` winning; sign-up, sign-in, magic links and password recovery
+by email are then refused with `email_provider_disabled`. Studio's Authentication > Configuration
+page shows both settings read-only with the key that sets each.
 
 ## Switching to native dev
 

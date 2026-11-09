@@ -279,8 +279,18 @@ export interface SupatypeProjectConfig {
   auth?: {
     email?: {
       /**
+       * Email-and-password sign-up and sign-in. Default true. `false` turns them off at the auth
+       * server, with magic links and password recovery, for a project that signs in only with
+       * OAuth or SAML.
+       *
+       * Rendered as `SUPATYPE_EXTERNAL_EMAIL_ENABLED` for `dev`, native `dev` and the self-host
+       * compose file. A `SUPATYPE_EXTERNAL_EMAIL_ENABLED` in `.env` wins over this.
+       */
+      enabled?: boolean
+      /**
        * Make a new email sign-up confirm the address before it can sign in, as Supabase's
-       * `[auth.email] enable_confirmations`. Off when unset: a dev stack auto-confirms.
+       * `[auth.email] enable_confirmations`. When unset, a self-hosted (standalone) stack sends a
+       * confirmation link and a dev stack, docker or native, confirms the sign-up at once.
        *
        * Rendered as `SUPATYPE_MAILER_AUTOCONFIRM` for `dev`, native `dev` and the self-host compose
        * file. A `SUPATYPE_MAILER_AUTOCONFIRM` you write into `.env` yourself wins over this.

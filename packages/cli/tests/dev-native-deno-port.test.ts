@@ -40,7 +40,7 @@ let cwd: string
 /** The Deno port native dev checks, and the one its server environment ends up carrying. */
 function checkedAndServed(): { checked: number; served: string | undefined } {
   const checked = nativeDenoPort(cwd)
-  const layer = nativeServerDotEnvLayer({ dotEnv: readDotEnvFiles(cwd), config: CONFIG, cwd, denoPort: checked })
+  const layer = nativeServerDotEnvLayer({ dotEnv: readDotEnvFiles(cwd), config: CONFIG, denoPort: checked })
   return { checked, served: layer[DENO_PORT_ENV] }
 }
 

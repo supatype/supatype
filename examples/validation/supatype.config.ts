@@ -15,6 +15,10 @@ export default defineConfig({
   // before a write, and Studio is the form.
   app: { mode: "none" },
   email: { provider: "console" },
+  // Sign-ups confirmed at once on every stack. tests/integration/scripts/validation-e2e.sh runs this
+  // project as a self-hosted (standalone) stack, which otherwise sends a confirmation link, and
+  // signs up and straight in.
+  auth: { email: { enableConfirmations: false } },
   schema: { path: "schema/index.ts", pg_schema: "public" },
   output: {
     types: "supatype/generated/database.ts",

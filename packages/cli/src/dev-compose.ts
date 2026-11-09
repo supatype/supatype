@@ -150,6 +150,7 @@ import { spawnComposeEngine, spawnComposeEngineSync } from "./compose-engine-run
 import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, runningStackMode, type ComposeRenderMode } from "./compose-render-mode.js"
 import { configMailerEnv } from "./config-mailer-env.js"
+import { retireCliMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { fetchWithin } from "./fetch-within.js"
 import { composeStackWatch, exitedServiceFailure, type StackWatch, type WatchedStack } from "./stack-exit-watch.js"
 import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
@@ -344,7 +345,7 @@ export function upsertDevComposeEnv(
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
   const imagePins = checkedImagePins(config)
-  const mailer = configMailerEnv(cwd, config)
+  const mailer = configMailerEnv(config)
   // `POSTGRES_PASSWORD` and `JWT_SECRET` are deliberately absent.
   //
   // They used to be pinned here to published constants on every `dev` run, against the same
@@ -370,9 +371,9 @@ export function upsertDevComposeEnv(
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
-    // auth.email.enableConfirmations (unless the developer set their own in .env), email.provider
-    // and its settings, which the compose file passes to the server. The compose path used to carry
-    // none of them, so a project that asked for smtp, Resend or SES got the noop mailer.
+    // email.provider and its settings, which the compose file passes to the server. The compose path
+    // used to carry none of them, so a project that asked for smtp, Resend or SES got the noop
+    // mailer. Email confirmation is not written here: the compose file falls back to the config.
     ...mailer.updates,
     ...imagePins,
   }
@@ -1701,6 +1702,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // Only dev moves the port off something else that holds it.
   const devDbPort = await devStackDbPort(cwd, config, project)
 
+  // Before .env is written and handed to compose: a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote
+  // there would otherwise win over the config as if the developer had set it (FF7).
+  retireCliMailerAutoconfirm(cwd)
   const { anonKey, serviceRoleKey } = devApiKeys(cwd)
 
   const devBrand = { intro: "Local development" }

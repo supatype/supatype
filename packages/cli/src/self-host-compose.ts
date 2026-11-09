@@ -54,7 +54,7 @@ import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
 import { postgrestHookActorEnv } from "./hook-actor.js"
 import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage } from "./release-images.js"
-import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
+import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
 import { patchRouteManifest } from "./route-manifest.js"
@@ -1172,8 +1172,10 @@ ${appEnv}
       SUPATYPE_JWT_AUD: authenticated
       SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
       SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
-      # auth.email.enableConfirmations decides the fallback; a value in .env wins.
-      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-${configMailerAutoconfirm(config)}}
+      # auth.email.enabled and auth.email.enableConfirmations decide the fallbacks; a value in .env
+      # wins. Unset, a standalone stack sends confirmation links and a dev one confirms at once.
+      ${EMAIL_ENABLED_ENV}: \${${EMAIL_ENABLED_ENV}:-${configEmailEnabled(config)}}
+      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-${configMailerAutoconfirm(config, devLocal ? "dev" : "standalone")}}
       # Emailed links are SUPATYPE_API_EXTERNAL_URL plus these paths. The external URL is the
       # gateway's root, where / belongs to the app, so the server's default of /verify sent every
       # confirmation, magic-link and recovery link to a 404. The auth routes are under /auth/v1/.

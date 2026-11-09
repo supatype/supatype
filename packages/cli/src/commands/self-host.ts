@@ -38,6 +38,7 @@ import { composeRenderOptions } from "../compose-render-mode.js"
 import { syncConfigMailerEnv } from "../config-mailer-env.js"
 import { takenComposePorts, type ComposeContext, type PublishedPort } from "../compose-services.js"
 import { isPortInUse, portCheckCommand } from "../postgres-ctl.js"
+import { retireCliMailerAutoconfirm } from "../mailer-autoconfirm.js"
 import { fatalError } from "../ui/fatal.js"
 import { warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
 import { warnMissingStackSettings } from "../stack-setting-warnings.js"
@@ -92,7 +93,9 @@ export function registerSelfHost(program: Command): void {
       if (filled.length > 0) {
         console.log(`[supatype] Minted ${filled.join(" and ")} in .env from JWT_SECRET.`)
       }
-      // The committed config's mailer values, over any the last `dev` wrote from its local one.
+      // The committed config's mailer values, over any the last `dev` wrote from its local one, once the
+      // SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote is out of the way (FF7).
+      retireCliMailerAutoconfirm(cwd)
       syncConfigMailerEnv(cwd, config)
       // Before the spinner, so the warnings are not drawn over.
       warnMissingStackSettings(cwd, config)
@@ -548,6 +551,7 @@ function runCompose(args: string[], use: ComposeFileUse): number {
   const config = loadConfig(cwd, { local: false })
   if (use === "start") {
     requireUrlSafeComposePasswords(cwd, config)
+    retireCliMailerAutoconfirm(cwd)
     syncConfigMailerEnv(cwd, config)
   }
   const composePath =
