@@ -43,10 +43,13 @@ import {
 import { functionTemplateSource } from "../functions-template.js"
 import {
   mergeSupatypePackageJson,
+  mergeSupatypeScripts,
   PREPARE_COMMAND,
   scaffoldPackageJson,
   supatypeDevScript,
 } from "../init-package-json.js"
+import { runsSupatypeDev } from "../dev-self-start.js"
+import { DEFAULT_PROXY_DEV_SCRIPT } from "../app/proxy-dev-app.js"
 import { downloadRelease, initFromExample } from "../init-example.js"
 import { errorMessage } from "../error-message.js"
 import { isJsonObject, parseJsonObject } from "@supatype/shared"
@@ -564,17 +567,46 @@ async function promptApp(
     return { mode, staticDir: await promptStaticDir(detected, viteDevUrl !== undefined), ...(viteDevUrl ? { viteDevUrl } : {}) }
   }
 
-  if (mode === "proxy") {
-    const upstream = await askWithDefault(
-      "URL of your running dev server",
-      detected.hasVite ? detected.viteDevUrl : "http://localhost:3000",
-    )
-    const start = await askWithDefault("package.json script that starts your dev server", detected.hasVite ? "vite" : "dev")
-    const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
-    return { mode, upstream, start, ...(viteDevUrl ? { viteDevUrl } : {}) }
-  }
+  if (mode === "proxy") return promptDevServer(detected, productionTarget)
 
   return { mode: "none" }
+}
+
+/**
+ * The dev server "Local dev server" forwards to, with Vite asked first. The script was asked before
+ * Vite and offered `dev`, which in a new folder is init's own `supatype dev`, so dev ran itself as
+ * the app. A Vite app runs the `vite` script init adds, at Vite's URL. Any other app runs a script
+ * of the project's own: its `dev` or `start` is offered, but never one that runs `supatype dev`.
+ */
+async function promptDevServer(detected: DetectedProjectSetup, productionTarget: ProductionTarget): Promise<ScaffoldAppOptions> {
+  const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
+  if (viteDevUrl !== undefined) return { mode: "proxy", upstream: viteDevUrl, start: "vite", viteDevUrl }
+
+  const upstream = await askWithDefault("URL of your running dev server", "http://localhost:3000")
+  const scripts = mergeSupatypeScripts(detected.packageScripts, { app: { mode: "proxy" }, helloFunction: false })
+  const offered = ["dev", DEFAULT_PROXY_DEV_SCRIPT].find((name) => {
+    const body = scripts[name]
+    return body !== undefined && !runsSupatypeDev(body)
+  })
+  const chosen = (answer: string): string | undefined => answer.trim() || offered
+  const start = chosen(
+    await askText({
+      message: "package.json script that starts your dev server",
+      ...(offered !== undefined && { defaultValue: offered, placeholder: offered }),
+      validate: (answer) => devServerScriptProblem(chosen(answer), scripts),
+    }),
+  )
+  return { mode: "proxy", upstream, ...(start !== undefined && { start }) }
+}
+
+/** Why `script` cannot start the app's dev server, or undefined when it can. */
+function devServerScriptProblem(script: string | undefined, scripts: Record<string, string>): string | undefined {
+  if (script === undefined) return `Enter the package.json script that starts your dev server, like ${DEFAULT_PROXY_DEV_SCRIPT}.`
+  const body = scripts[script]
+  if (body !== undefined && runsSupatypeDev(body)) {
+    return `"${script}" runs supatype dev, so dev would start itself. Enter the script that starts your frontend's dev server.`
+  }
+  return undefined
 }
 
 /**
@@ -1035,18 +1067,24 @@ function localConfigTemplate(app: ScaffoldAppOptions): string {
   return lines.join("\n")
 }
 
+/**
+ * The app block for a dev server. A missing `start` is left out, and dev then runs `start`: it was
+ * written as `dev`, which in a new project is init's own `supatype dev`.
+ */
+function proxyAppLines(app: ScaffoldAppOptions): string[] {
+  return [
+    `  app: {`,
+    `    mode: "proxy",`,
+    `    upstream: "${app.upstream ?? "http://localhost:3000"}",`,
+    ...(app.start ? [`    start: "${app.start}",`] : []),
+    ...(app.viteDevUrl ? [`    vite_dev_url: "${app.viteDevUrl}",`] : []),
+    `  },`,
+  ]
+}
+
 /** App block for supatype.local.config.ts (proxy + Vite during local dev). */
 function localDevAppConfigLines(app: ScaffoldAppOptions): string[] {
-  if (app.mode === "proxy") {
-    return [
-      `  app: {`,
-      `    mode: "proxy",`,
-      `    upstream: "${app.upstream ?? "http://localhost:3000"}",`,
-      `    start: "${app.start ?? "dev"}",`,
-      ...(app.viteDevUrl ? [`    vite_dev_url: "${app.viteDevUrl}",`] : []),
-      `  },`,
-    ]
-  }
+  if (app.mode === "proxy") return proxyAppLines(app)
   if (app.viteDevUrl) {
     return [
       `  app: {`,
@@ -1075,15 +1113,7 @@ function appConfigLines(app: ScaffoldAppOptions, productionTarget: ProductionTar
         `  },`,
       ]
     }
-    const out = [
-      `  app: {`,
-      `    mode: "proxy",`,
-      `    upstream: "${app.upstream ?? "http://localhost:3000"}",`,
-      `    start: "${app.start ?? "dev"}",`,
-    ]
-    if (app.viteDevUrl) out.push(`    vite_dev_url: "${app.viteDevUrl}",`)
-    out.push(`  },`)
-    return out
+    return proxyAppLines(app)
   }
   return [
     `  app: {`,

@@ -112,6 +112,7 @@ import {
 import { startNativeRealtime } from "../native-realtime.js"
 import { nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
 import { configSnapshot } from "../config-snapshot.js"
+import { refuseInsideDevApp } from "../dev-self-start.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { extractArchive } from "../archive-extract.js"
@@ -252,6 +253,7 @@ export function registerDev(program: Command): void {
       yes?: boolean
       overwriteDrift?: boolean
     }) => {
+      refuseInsideDevApp()
       const cwd = process.cwd()
 
       // ── 1. Load project config (before TUI, fatal errors must hit real stderr) ──

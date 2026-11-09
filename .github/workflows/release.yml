@@ -656,12 +656,13 @@ jobs:
           set -euo pipefail
           # A version is not always installable the moment `npm publish` returns. The scaffold
           # needs the client too: its `prepare` is the client's `supatype-prepare`, and init picks
-          # no client older than itself.
+          # no client older than itself. Up to 10 minutes each: 0.9.1's CLI took about 3 minutes to
+          # show up, and the 100 seconds this once waited failed the release on every OS.
           for pkg in cli client; do
-            for attempt in 1 2 3 4 5 6; do
+            for attempt in $(seq 1 30); do
               npm view "@supatype/${pkg}@${VERSION}" version >/dev/null 2>&1 && break
-              if [ "$attempt" = 6 ]; then
-                echo "::error::@supatype/${pkg}@${VERSION} is not on npm"
+              if [ "$attempt" = 30 ]; then
+                echo "::error::@supatype/${pkg}@${VERSION} is not on npm after 10 minutes"
                 exit 1
               fi
               sleep 20

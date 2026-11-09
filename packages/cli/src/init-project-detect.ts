@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-import { parsePackageJson } from "./package-json.js"
+import { parsePackageJson, type PackageJson } from "./package-json.js"
 
 const VITE_CONFIG_NAMES = [
   "vite.config.ts",
@@ -23,18 +23,20 @@ export interface DetectedProjectSetup {
   hasViteConfig: boolean
   viteDevUrl: string
   staticDir: string
+  /** The scripts the project's package.json already has, before init adds its own. */
+  packageScripts: Record<string, string>
   /** Human-readable bullets for the init wizard. */
   summaryLines: string[]
 }
 
-function hasPackageVite(cwd: string): boolean {
+/** The project's package.json, or undefined when it has none or it is not JSON. */
+function readPackageJson(cwd: string): PackageJson | undefined {
   const pkgPath = join(cwd, "package.json")
-  if (!existsSync(pkgPath)) return false
+  if (!existsSync(pkgPath)) return undefined
   try {
-    const pkg = parsePackageJson(readFileSync(pkgPath, "utf8"))
-    return Boolean(pkg.devDependencies["vite"] ?? pkg.dependencies["vite"])
+    return parsePackageJson(readFileSync(pkgPath, "utf8"))
   } catch {
-    return false
+    return undefined
   }
 }
 
@@ -70,8 +72,9 @@ export function detectProjectSetup(cwd: string): DetectedProjectSetup {
   }
 
   const hasExistingFiles = entries.length > 0
+  const pkg = readPackageJson(cwd)
   const hasViteConfig = VITE_CONFIG_NAMES.some((name) => existsSync(join(cwd, name)))
-  const hasVite = hasViteConfig || hasPackageVite(cwd)
+  const hasVite = hasViteConfig || Boolean(pkg?.devDependencies["vite"] ?? pkg?.dependencies["vite"])
   const viteDevUrl = `http://127.0.0.1:${readVitePort(cwd)}`
   const staticDir = detectStaticDir(cwd)
   const hasSupatypeConfig = SUPATYPE_CONFIG_NAMES.some((name) => existsSync(join(cwd, name)))
@@ -92,6 +95,7 @@ export function detectProjectSetup(cwd: string): DetectedProjectSetup {
     hasViteConfig,
     viteDevUrl,
     staticDir,
+    packageScripts: pkg?.scripts ?? {},
     summaryLines,
   }
 }

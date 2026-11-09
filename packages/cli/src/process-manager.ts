@@ -27,6 +27,8 @@ export interface ProcessOptions {
   maxBackoffMs?: number
   /** Called when the process exits cleanly (code 0). */
   onExit?: () => void
+  /** A non-zero exit code that means restarting cannot help, so the process is left stopped. */
+  finalExitCode?: number
   /** Use shell to spawn (required for pnpm/npm/yarn .cmd shims on Windows). */
   shell?: boolean
   /**
@@ -218,6 +220,10 @@ export class ProcessManager {
         return
       }
       const reason = signal ? `signal ${signal}` : `code ${code}`
+      if (code === this.opts.finalExitCode) {
+        this.report(`process exited (${reason}), not restarting it`)
+        return
+      }
       this.report(`process exited (${reason}), restarting in ${this.backoffMs}ms`)
       this.scheduleRestart()
     })

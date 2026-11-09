@@ -9,10 +9,12 @@ import { detectPackageManager } from "./framework.js"
 import { nodeExecutable } from "../node-executable.js"
 import { parsePackageJson } from "../package-json.js"
 import { appendDevTaskLog } from "../dev-session.js"
+import { DEV_APP_ENV, SELF_START_EXIT_CODE, runsSupatypeDev, selfStartProblem } from "../dev-self-start.js"
 import { ProcessManager, readPid } from "../process-manager.js"
 import { projectRootFromConfig, type SupatypeProjectConfig } from "../project-config.js"
 
-const DEFAULT_PROXY_DEV_SCRIPT = "start"
+/** The script dev runs as the app when `app.start` names none. */
+export const DEFAULT_PROXY_DEV_SCRIPT = "start"
 
 /** package.json script name to run (only when app.mode is proxy). */
 export function resolveProxyDevScript(config: SupatypeProjectConfig): string | null {
@@ -137,11 +139,16 @@ export function startProxyDevApp(
   }
 
   const pkg = parsePackageJson(readFileSync(pkgPath, "utf8"))
-  if (!pkg.scripts[script]) {
+  const body = pkg.scripts[script]
+  if (!body) {
     console.warn(
       `[supatype] app.mode=proxy: package.json has no "${script}" script.\n` +
         `  Add "scripts.${script}" or set app.start in supatype.config.ts`,
     )
+    return null
+  }
+  if (runsSupatypeDev(body)) {
+    console.warn(`[supatype] ${selfStartProblem(script)}`)
     return null
   }
 
@@ -162,6 +169,8 @@ export function startProxyDevApp(
     cwd: appDir,
     colour: "\x1b[33m",
     shell: useShell,
+    env: { [DEV_APP_ENV]: "1" },
+    finalExitCode: SELF_START_EXIT_CODE,
     ...(freePort && { beforeStart: freePort, beforeRestart: freePort }),
   })
   manager.start()

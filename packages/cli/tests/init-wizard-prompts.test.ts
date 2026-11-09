@@ -12,11 +12,21 @@ const asked = vi.hoisted(() => ({
   /** Answers given in turn, for a prompt asked more than once. */
   queued: new Map<string, unknown[]>(),
   warnings: [] as string[],
+  /** Each prompt's options as last asked, so a test can read its default or run its validation. */
+  options: new Map<string, PromptOptions>(),
 }))
 
+interface PromptOptions {
+  message: string
+  initialValue?: unknown
+  defaultValue?: unknown
+  validate?: (value: string) => string | undefined
+}
+
 vi.mock("../src/ui/clack.js", () => {
-  const answer = (options: { message: string; initialValue?: unknown; defaultValue?: unknown }): Promise<unknown> => {
+  const answer = (options: PromptOptions): Promise<unknown> => {
     asked.messages.push(options.message)
+    asked.options.set(options.message, options)
     const turn = asked.queued.get(options.message)?.shift()
     if (turn !== undefined) return Promise.resolve(turn)
     const scripted = asked.answers.get(options.message)
@@ -37,6 +47,7 @@ const detected: DetectedProjectSetup = {
   hasViteConfig: false,
   viteDevUrl: "http://localhost:5173",
   staticDir: "./dist",
+  packageScripts: {},
   summaryLines: [],
 }
 
@@ -178,5 +189,66 @@ describe("init's static site directory", () => {
   it("does not warn about ./public for a site with no build", async () => {
     await wizard(false, staticSite(false, { [DIRECTORY]: "./public" }))
     expect(asked.warnings).toEqual([])
+  })
+})
+
+/**
+ * 0.9.1 release test: "Local dev server" asked for the dev server's script before the Vite question,
+ * and offered `dev`. In a new folder `dev` is init's own `supatype dev`, so dev then ran itself as
+ * the app. Vite is asked first: a Vite app runs init's `vite` script at Vite's URL. Without Vite the
+ * script is the project's own, and a script that runs `supatype dev` is refused.
+ */
+describe("init's local dev server", () => {
+  const VITE = "Develop locally with Vite (live reload)?"
+  const URL = "URL of your running dev server"
+  const SCRIPT = "package.json script that starts your dev server"
+  const devServer = (vite: boolean, extra: Record<string, unknown> = {}) => ({
+    "Host a frontend app at /?": "proxy",
+    [VITE]: vite,
+    ...extra,
+  })
+  const problem = (answer: string) => asked.options.get(SCRIPT)?.validate?.(answer)
+
+  beforeEach(() => {
+    asked.options.clear()
+  })
+
+  it("runs Vite's own script at Vite's URL, with no script or URL to ask", async () => {
+    const result = await wizard(false, devServer(true))
+    expect(result.app).toMatchObject({ mode: "proxy", start: "vite", upstream: "http://localhost:5173" })
+    expect(asked.messages).not.toContain(SCRIPT)
+    expect(asked.messages).not.toContain(URL)
+  })
+
+  it("offers no script in a new folder, where dev is supatype dev", async () => {
+    await wizard(false, devServer(false, { [SCRIPT]: "start" }))
+    expect(asked.options.get(SCRIPT)?.defaultValue).toBeUndefined()
+  })
+
+  it("refuses a script that runs supatype dev, and an empty answer", async () => {
+    await wizard(false, devServer(false, { [SCRIPT]: "start" }))
+    expect(problem("dev")).toMatch(/supatype dev/)
+    expect(problem("")).toBeDefined()
+    expect(problem("start")).toBeUndefined()
+  })
+
+  it("offers the project's own dev script", async () => {
+    const found = { ...detected, packageScripts: { dev: "next dev" } }
+    const result = await wizard(false, devServer(false), found)
+    expect(asked.options.get(SCRIPT)?.defaultValue).toBe("dev")
+    expect(result.app.start).toBe("dev")
+    expect(problem("dev")).toBeUndefined()
+    // init keeps the project's dev and adds supatype dev beside it.
+    expect(problem("supatype:dev")).toMatch(/supatype dev/)
+  })
+})
+
+describe("init's local dev server in a project with only a start script", () => {
+  it("offers start, since its dev will be init's own supatype dev", async () => {
+    const SCRIPT = "package.json script that starts your dev server"
+    const found = { ...detected, packageScripts: { start: "react-scripts start" } }
+    const result = await wizard(false, { "Host a frontend app at /?": "proxy", "Develop locally with Vite (live reload)?": false }, found)
+    expect(asked.options.get(SCRIPT)?.defaultValue).toBe("start")
+    expect(result.app.start).toBe("start")
   })
 })

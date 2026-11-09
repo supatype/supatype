@@ -187,6 +187,16 @@
 
 ### Bug Fixes
 
+* **init, dev:** `supatype dev` no longer starts itself as the app. In 0.9.1, `init` with "Local dev
+  server" and the script prompt left at its default wrote `app.start: "dev"`, and in a new folder
+  `dev` is init's own `supatype dev`, so dev ran a second copy in its app pane that failed and was
+  restarted for ever. `init` now asks about Vite first: a Vite app runs the `vite` script at Vite's
+  URL, with nothing more to ask. Without Vite it offers the project's own `dev` or `start`, never one
+  that runs `supatype dev`, and refuses any script that runs it. `dev` refuses such a script too, saying to
+  set `app.start`, so a project 0.9.1 made needs only that one edit. A `supatype dev` reached some
+  other way (`npm run supatype:dev`, `concurrently`) stops at once with the same advice, and the app
+  pane leaves it stopped.
+
 * **dev:** a save made by writing another file and renaming it over the schema is pushed. `sed -i`
   saves were always missed on Linux, and an editor's safe write or a script's `mv` about one time in
   three: the event named only the other file, which the watch ignored, so the database kept the old

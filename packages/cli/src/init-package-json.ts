@@ -1,6 +1,7 @@
 import semver from "semver"
 import { isJsonObject } from "@supatype/shared"
 import type { InitDependencyVersions } from "./init-dependency-versions.js"
+import { runsSupatypeDev } from "./dev-self-start.js"
 
 export interface MergePackageJsonOptions {
   projectName: string
@@ -73,7 +74,10 @@ function toolDependencies(deps: InitDependencyVersions, opts: MergePackageJsonOp
   }
 }
 
-function projectScripts(opts: MergePackageJsonOptions): Record<string, string> {
+/** What decides which scripts a project gets. */
+type ScriptOptions = Pick<MergePackageJsonOptions, "app" | "helloFunction">
+
+function projectScripts(opts: ScriptOptions): Record<string, string> {
   return {
     ...CORE_SCRIPTS,
     ...(opts.app.viteDevUrl ? VITE_SCRIPTS : {}),
@@ -131,8 +135,11 @@ function withPrepare(scripts: Record<string, string> | undefined): Record<string
  * a dev script of the project's own, else `dev`.
  */
 export function supatypeDevScript(scripts: unknown): string {
-  const named = (key: string) => isJsonObject(scripts) && scripts[key] === CORE_SCRIPTS.dev
-  return !named("dev") && named("supatype:dev") ? "supatype:dev" : "dev"
+  const runs = (key: string) => {
+    const body = isJsonObject(scripts) ? scripts[key] : undefined
+    return typeof body === "string" && runsSupatypeDev(body)
+  }
+  return !runs("dev") && runs("supatype:dev") ? "supatype:dev" : "dev"
 }
 
 /**
@@ -166,16 +173,25 @@ function withClient(pkg: PackageJson, floor: string): Required<Pick<PackageJson,
   return { dependencies: { ...pkg.dependencies, [CLIENT]: range }, devDependencies }
 }
 
+/**
+ * The scripts a project has once `init` adds its own to `existing`: the project's own are kept, and
+ * `supatype dev` goes in as `supatype:dev` when the project's `dev` is something else.
+ */
+export function mergeSupatypeScripts(existing: Section, opts: ScriptOptions): Record<string, string> {
+  const scripts = { ...withPrepare(existing), ...absentFrom(projectScripts(opts), existing) }
+  if (scripts.dev !== CORE_SCRIPTS.dev && scripts["supatype:dev"] === undefined) {
+    scripts["supatype:dev"] = CORE_SCRIPTS.dev
+  }
+  return scripts
+}
+
 /** Merge Supatype deps/scripts into an existing package.json object, keeping what it already has. */
 export function mergeSupatypePackageJson(
   pkg: PackageJson,
   opts: MergePackageJsonOptions,
   deps: InitDependencyVersions,
 ): PackageJson {
-  const scripts = { ...withPrepare(pkg.scripts), ...absentFrom(projectScripts(opts), pkg.scripts) }
-  if (scripts.dev !== CORE_SCRIPTS.dev && scripts["supatype:dev"] === undefined) {
-    scripts["supatype:dev"] = CORE_SCRIPTS.dev
-  }
+  const scripts = mergeSupatypeScripts(pkg.scripts, opts)
   const { dependencies, devDependencies } = withClient(pkg, deps.client)
   return {
     ...pkg,

@@ -369,6 +369,15 @@ describe("scaffold()", () => {
     expect(existsSync(join(tmpRoot, "supatype.local.config.ts"))).toBe(false)
   })
 
+  // 0.9.1 release test: a missing start was written as "dev", which in a new project is
+  // init's own "supatype dev", so dev ran itself as the app.
+  it("proxy app mode with no start writes none, not init's own dev script", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), app: { mode: "proxy", upstream: "http://localhost:4000" } })
+    const content = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(content).toContain('mode: "proxy"')
+    expect(content).not.toMatch(/^\s*start:/m)
+  })
+
   it("proxy app mode with self-host splits static production config and local proxy override", () => {
     scaffold(tmpRoot, {
       ...defaultScaffoldOptions("my-app", "self-host"),
