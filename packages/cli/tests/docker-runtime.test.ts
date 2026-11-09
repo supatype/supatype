@@ -116,8 +116,11 @@ describe("probeDockerDaemon", () => {
       spawnResult({ status: null, error: Object.assign(new Error("spawnSync docker ETIMEDOUT"), { code: "ETIMEDOUT" }) }),
     )
 
-    expect(probeDockerDaemon()).toEqual({ ok: false, reason: "daemon_unresponsive", detail: "Docker did not answer within 15s" })
-    expect(spawnSyncMock.mock.calls[0]?.[2]).toMatchObject({ timeout: 15_000 })
+    let now = 0
+    const probe = probeDockerDaemon({ now: () => (now += 20_000) })
+    expect(probe).toEqual({ ok: false, reason: "daemon_unresponsive", detail: "Docker did not answer within 60s" })
+    expect(spawnSyncMock.mock.calls[0]?.[2]).toMatchObject({ timeout: 5_000 })
+    expect(spawnSyncMock.mock.calls[1]?.[2]).toMatchObject({ timeout: 15_000 })
   })
 })
 

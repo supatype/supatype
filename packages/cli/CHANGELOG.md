@@ -214,6 +214,10 @@
 
 ### Bug Fixes
 
+* **dev and every command that checks Docker:** a Docker that is running but slow to answer is now
+  waited for, up to 60 seconds, with a "Waiting for Docker to answer" line, instead of being reported
+  as not running after 10 seconds. `SUPATYPE_DOCKER_TIMEOUT` changes the wait. A Docker that refuses
+  the connection or is paused still fails at once.
 * **dev:** the "Services running" panel no longer prints the Postgres password or the full
   service_role key, so neither lands in CI logs. The database URL is masked as `status` masks it,
   and the key is shown as a fingerprint pointing at `SERVICE_ROLE_KEY` in `.env`. Native dev now

@@ -133,6 +133,7 @@
     <p>Run commands from the project directory, where <code>supatype.config.ts</code> is. Every command also takes <code>--project-name &lt;name&gt;</code>, which names the project for this run over <code>supatype.config.ts</code>. <code>supatype --version</code> prints the CLI version.</p>
     <p><code>--project-name</code> is the same as setting <code>SUPATYPE_PROJECT_NAME</code>, and it writes no file. The Compose project, the native database and the state directory under <code>~/.supatype/projects/</code> all follow it. Use it to run two stacks of one project side by side, each with its own <code>SUPATYPE_KONG_PORT</code>. The name may use lower case letters, digits, <code>-</code> and <code>_</code>, and must start with a letter or digit.</p>
     <p>Many commands that reach a database take <code>--connection &lt;url&gt;</code> to override the config, and <code>--env &lt;name&gt;</code> to pick an environment when the project is linked.</p>
+    <p>Commands that use Docker first check that it answers. A Docker that says it cannot be reached fails the command at once. A Docker that is running but slow to answer, as on a machine carrying many containers, is waited for, with a line saying so, for up to 60 seconds in all; set <code>SUPATYPE_DOCKER_TIMEOUT</code> to a whole number of seconds to wait longer or shorter.</p>
     <div class="callout">
       <span class="callout-label">CLOUD</span>
       <p>Commands marked <strong>Cloud</strong> need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.</p>
