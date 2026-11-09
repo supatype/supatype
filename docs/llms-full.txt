@@ -1394,7 +1394,6 @@ Wrap the app in `SupatypeProvider` from `@supatype/react` and use the same hooks
 
 ```ts
 export { GET } from "@supatype/ssr/next"
-export const dynamic = "force-dynamic"
 ```
 
 `app/layout.tsx`:
@@ -1414,7 +1413,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 ```
 
-Keep the `dynamic` line in the route file itself: Next reads a route's segment config from its own source and ignores a re-exported one. The route answers `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` with `Cache-Control: no-cache`, as the Supatype server's own `/supatype-env.js` does. It answers 404 only when `SUPATYPE_PUBLIC_ENV` is `false`, and, when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset or `SUPATYPE_ANON_KEY` holds a service role key, 200, not cached, with a script that sets only `error` to a reason naming every variable to fix, which the browser client throws on its first request. The browser client, created with `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY` left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in [Deploy your frontend: Next.js](https://www.supatype.com/docs/deploying-your-frontend.html#nextjs).
+The route needs no segment config, and must not export `dynamic`: Next 16 with `cacheComponents` on, as a new create-next-app has it, refuses that with a 500. `GET` reads the request, which is what makes Next 14 and Next 16 with `cacheComponents` render it per request instead of prerendering it with the build machine's values; Next 15, and Next 16 without `cacheComponents`, render every `GET` per request anyway. A route written by `init` 0.9.1 has the line `export const dynamic = "force-dynamic"`. `supatype generate`, which the project's `prepare` script runs on every `npm install`, replaces that route with the current one while it is still as `init` wrote it, and prints `updated`; a route changed since is left alone, with a warning to delete the line. Upgrade `@supatype/ssr` with the CLI: the route needs 0.9.2 or later. The route answers `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` with `Cache-Control: no-cache`, as the Supatype server's own `/supatype-env.js` does. It answers 404 only when `SUPATYPE_PUBLIC_ENV` is `false`, and, when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset or `SUPATYPE_ANON_KEY` holds a service role key, 200, not cached, with a script that sets only `error` to a reason naming every variable to fix, which the browser client throws on its first request. The browser client, created with `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY` left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in [Deploy your frontend: Next.js](https://www.supatype.com/docs/deploying-your-frontend.html#nextjs).
 
 In a Pages Router app, `init` writes nothing and prints the steps instead: create the same route file under `app/supatype-env.js/`, beside `pages/`; in `pages/_document.tsx`, import `Script` from `next/script` and put the same `<Script>` tag inside `<Head>`; then add `@supatype/ssr` to the app's dependencies. For a static export (`output: "export"` in `next.config`), which cannot serve a route, `init` writes neither piece and prints `supatype build -- next build`, or Supatype hosting, whose server answers `/supatype-env.js` itself.
 
@@ -1422,15 +1421,20 @@ In a Pages Router app, `init` writes nothing and prints the steps instead: creat
 
 In the browser the client copies the session into a cookie named `st-auth-token` (path `/`, `SameSite=Lax`, `Secure` on HTTPS). `createServerClient` from `@supatype/ssr` reads that cookie on the server and builds a client signed in as the same user. Given only its options, it takes the address and anon key from `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, read on each call, and where one is unset, from `NEXT_PUBLIC_SUPATYPE_URL` or `NEXT_PUBLIC_SUPATYPE_ANON_KEY`. With neither, its first request throws an error saying it is running on a server and naming `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`. Pass them first, as `createServerClient(url, anonKey, options)`, to use others.
 
-`src/supatype-server.ts`:
+Put the helper in the folder that holds `app/`: `supatype-server.ts` at the project root for a create-next-app made without `src/`, or `src/supatype-server.ts` when the app is in `src/app/`. create-next-app points the `@/*` import alias at that folder, so `@/supatype-server` finds it in both layouts.
+
+`supatype-server.ts`:
 
 ```ts
 import { cookies } from "next/headers"
+import { connection } from "next/server"
 import { createServerClient } from "@supatype/ssr"
 
 // Server Components: no setAll, so the client never refreshes the session.
 export async function serverClient() {
   const store = await cookies()
+  // Render at request time: the client reads the clock to check the session's expiry.
+  await connection()
   return createServerClient({ cookies: { getAll: () => store.getAll() } })
 }
 
@@ -1488,6 +1492,7 @@ What the cookie handling does and does not do:
 - Without `setAll`, as in a Server Component, the client never refreshes the session: an expired access token is sent as it is, and the API refuses it. A refresh there would spend the browser's refresh token and keep the new one to itself, so the browser's own next refresh would be refused. Do not pass a `setAll` that does nothing to get round this.
 - With `setAll`, the client refreshes an expired access token when a request it makes finds it expired, and writes every change to the session (a refresh, a sign-in, a sign-out) back through `setAll`.
 - A cookie whose access token has expired is kept only when it has a refresh token. Otherwise the server client runs as an anonymous caller.
+- Telling whether it has expired reads the clock, so `serverClient()` awaits `connection()` from `next/server` first, which renders the component at request time. Without it, Next 16 with `cacheComponents` logs `Next.js encountered the unstable value Date.now() while prerendering` for every page that uses it. `connection()` is in Next 15 and later; on Next 14 leave that line out.
 - The cookie is decoded, not verified. Queries made with it are checked by the API, so access rules hold. But do not trust `auth.getSession()` on the server to decide who someone is: call `auth.getUser()`, which asks the auth server, as the middleware above does.
 - Decoding uses `atob` and `TextDecoder`, not Node's `Buffer`, so it works on the edge runtime too.
 - Set `cookiePrefix` on both sides if you change the client's `auth.cookiePrefix`. The default is `st`.
@@ -4691,7 +4696,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 | `db check` | Check whether a database meets Supatype's requirements (for external Postgres) | `--connection <url>`, `--schema <name>`, `--emit`, `--fix`, `--authenticator-password <password>` |
 | `types check` | Validate generated client augmentation wiring |  |
 
-`--direct` skips the control plane of a linked project and runs the schema engine on this machine. `generate` reads only the schema, so it needs no database. `pull` prints its draft unless you pass `--out`. `migrations list` shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.
+`--direct` skips the control plane of a linked project and runs the schema engine on this machine. `generate` reads only the schema, so it needs no database. In a Next.js app it also replaces the `app/supatype-env.js` route `init` 0.9.1 wrote, whose `export const dynamic` line Next refuses under `cacheComponents`, while that route is still as `init` wrote it, and warns about one changed since ([Next.js](https://www.supatype.com/docs/frameworks.html#nextjs)). `pull` prints its draft unless you pass `--out`. `migrations list` shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.
 
 A push never guesses a rename. A column that disappears while a new one appears is a drop and an add, and the drop loses data. In a terminal the push asks whether you meant a rename and records a yes in `supatype/renames.json`. Anywhere else it refuses and prints the `supatype rename` command that records it.
 

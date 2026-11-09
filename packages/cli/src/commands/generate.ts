@@ -6,12 +6,15 @@ import { ENGINE_FALLBACK, generatedFilesEngine } from "../generated-files-engine
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { error, info } from "../ui/messages.js"
 import { errorMessage } from "../error-message.js"
+import { upgradeNextRuntimeEnvRoute } from "../init-next-runtime-env.js"
 
 export function registerGenerate(program: Command): void {
   program
     .command("generate")
     .description("Regenerate TypeScript types without running a migration")
     .action(async () => {
+      // Before the schema, so a schema that fails to load does not keep a broken route (RB6).
+      upgradeNextRuntimeEnvRoute(process.cwd())
       info("Loading schema...")
       try {
         for (const message of await regenerateTypes(process.cwd())) info(message)

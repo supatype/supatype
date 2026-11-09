@@ -90,7 +90,7 @@ Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything 
 | `db check` | Check whether a database meets Supatype's requirements (for external Postgres) | `--connection <url>`, `--schema <name>`, `--emit`, `--fix`, `--authenticator-password <password>` |
 | `types check` | Validate generated client augmentation wiring |  |
 
-`--direct` skips the control plane of a linked project and runs the schema engine on this machine. `generate` reads only the schema, so it needs no database. `pull` prints its draft unless you pass `--out`. `migrations list` shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.
+`--direct` skips the control plane of a linked project and runs the schema engine on this machine. `generate` reads only the schema, so it needs no database. In a Next.js app it also replaces the `app/supatype-env.js` route `init` 0.9.1 wrote, whose `export const dynamic` line Next refuses under `cacheComponents`, while that route is still as `init` wrote it, and warns about one changed since ([Next.js](/docs/frameworks.html#nextjs)). `pull` prints its draft unless you pass `--out`. `migrations list` shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.
 
 A push never guesses a rename. A column that disappears while a new one appears is a drop and an add, and the drop loses data. In a terminal the push asks whether you meant a rename and records a yes in `supatype/renames.json`. Anywhere else it refuses and prints the `supatype rename` command that records it.
 

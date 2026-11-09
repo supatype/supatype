@@ -187,6 +187,14 @@
 
 ### Bug Fixes
 
+* **init, generate:** the Next.js `/supatype-env.js` route works on a new create-next-app. Next 16
+  turns on `cacheComponents`, which refuses the route's `export const dynamic` with a 500; the route
+  is now only `export { GET } from "@supatype/ssr/next"`, and `GET` reads the request, which keeps it
+  rendered per request (not prerendered with the build machine's values) on Next 14, 15 and 16.
+  `supatype generate`, which `prepare` runs on install, replaces a route 0.9.1 wrote while it is
+  unchanged, warns about a changed one that still has the line, and warns when the installed
+  `@supatype/ssr` is older than 0.9.2. The docs' server helper awaits `connection()`, so Next 16 no
+  longer logs a `Date.now()` prerender error, and says where to put it with or without `src/`.
 * **realtime:** `channel(name).on("postgres_changes", { table })` and `useSubscription` now watch
   the `public` schema when no `schema` is given, as the docs say. A channel name with a colon, such
   as `post:42`, was read as `schema:table` even when the listener named its table, so the
