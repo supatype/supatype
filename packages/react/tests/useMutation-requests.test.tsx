@@ -156,11 +156,20 @@ describe("useQuery requests", () => {
     })
     expect(sent).toHaveLength(1)
     expect(sent[0]!.method).toBe("GET")
+    // 0.9.1 release test (FF15): the page went out as `?limit=10` plus a `Range: 20-29` header,
+    // which PostgREST refuses with 416. It is one pair of query parameters now.
     expect(sent[0]!.path).toBe(
-      "/rest/v1/posts?select=id,title&status=eq.published&order=created_at.desc.nullslast&limit=10",
+      "/rest/v1/posts?select=id,title&status=eq.published&order=created_at.desc.nullslast&limit=10&offset=20",
     )
     expect(sent[0]!.profile).toBeNull()
-    expect(sent[0]!.range).toBe("20-29")
+    expect(sent[0]!.range).toBeNull()
+  })
+
+  // An offset with no limit was dropped here, while the Vue, Svelte and Solid queries read a page
+  // of 100 from it. They share one default now.
+  it("reads a page of 100 from an offset with no limit", async () => {
+    const sent = await queryOnce({ offset: 20 })
+    expect(sent[0]!.path).toBe("/rest/v1/posts?select=*&offset=20&limit=100")
   })
 
   it("reads the draft schema when asked", async () => {

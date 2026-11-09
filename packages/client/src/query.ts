@@ -314,9 +314,16 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     return this
   }
 
+  /**
+   * Rows `from` to `to`, both inclusive and counted from 0. Sent as `offset` and `limit`, the
+   * same parameters `limit()` writes, so whichever of the two is called last sets the page size,
+   * as in supabase-js. 0.9.1 release test (FF15): it was a `Range` header, which PostgREST
+   * refuses with 416 PGRST103 beside a `limit` parameter, and which the read cache's key (the
+   * URL) did not include, so a cached second page answered with the first.
+   */
   range(from: number, to: number): this {
-    this.extraHeaders["Range"] = `${from}-${to}`
-    this.extraHeaders["Range-Unit"] = "items"
+    this.params.set("offset", String(from))
+    this.params.set("limit", String(to - from + 1))
     return this
   }
 

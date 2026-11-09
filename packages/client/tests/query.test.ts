@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { QueryBuilder, MutationBuilder, defaultQueryCache } from "../src/query.js"
+import { QueryCache } from "../src/query-cache.js"
 import { fetchCall, fetchReturning, header, type FetchMock } from "./support/fetch-mock.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -136,11 +137,47 @@ describe("QueryBuilder: URL construction", () => {
     expect(url()).toContain("limit=20")
   })
 
-  it(".range() sets Range header", async () => {
+  // 0.9.1 release test (FF15): `range` sent a `Range` header while `limit` sent `?limit=`, and
+  // PostgREST refuses the pair with 416 PGRST103. Both now live in the query string, as in
+  // supabase-js: `range` sets `offset` and `limit`, and whichever of the two is called last
+  // decides the page size.
+  it(".range() sets offset and limit params and no Range header", async () => {
     const fetch = mockFetch([])
     vi.stubGlobal("fetch", fetch)
     await new QueryBuilder<Post>(BASE, PATH, HEADERS).range(10, 19)
-    expect(header(fetchCall(fetch).init, "Range")).toBe("10-19")
+    const params = new URL(fetchCall(fetch).url).searchParams
+    expect(params.get("offset")).toBe("10")
+    expect(params.get("limit")).toBe("10")
+    expect(header(fetchCall(fetch).init, "Range")).toBeNull()
+  })
+
+  it(".limit() then .range() sends one limit, the range's", async () => {
+    const { url } = captureUrl()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS).limit(2).range(2, 3)
+    const params = new URL(url()).searchParams
+    expect(params.getAll("limit")).toEqual(["2"])
+    expect(params.get("offset")).toBe("2")
+  })
+
+  it(".range() then .limit() keeps the offset and takes the later limit", async () => {
+    const { url } = captureUrl()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS).range(20, 29).limit(5)
+    const params = new URL(url()).searchParams
+    expect(params.getAll("limit")).toEqual(["5"])
+    expect(params.get("offset")).toBe("20")
+  })
+
+  // The cache key is the URL and the caller's identity. A page carried in a header was not part
+  // of it, so a cached second page answered with the first.
+  it("a cached read of one page is not served for another", async () => {
+    const fetch = mockFetch([])
+    vi.stubGlobal("fetch", fetch)
+    const cache = new QueryCache()
+    const page = (from: number) =>
+      new QueryBuilder<Post>(BASE, PATH, HEADERS, undefined, cache).cache({ ttl: 60_000 }).range(from, from + 9)
+    await page(0)
+    await page(10)
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it("multiple chained filters all appear in URL", async () => {

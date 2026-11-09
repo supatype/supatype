@@ -1,4 +1,4 @@
-import { ref, shallowRef, onMounted, onUnmounted, watch, type Ref } from "vue"
+import { ref, shallowRef, onMounted, onUnmounted, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
@@ -28,12 +28,17 @@ export interface UseQueryReturn<TRow> {
  * <script setup>
  * import { useQuery } from '@supatype/vue'
  *
- * const { data: posts, loading, error, refetch } = useQuery('posts', {
+ * const page = ref(0)
+ * const { data: posts, loading, error, refetch } = useQuery('posts', () => ({
  *   order: { column: 'created_at', ascending: false },
  *   limit: 10,
- * })
+ *   offset: page.value * 10,
+ * }))
  * </script>
  * ```
+ *
+ * `options` may be a plain object, a ref or a getter. The query runs again whenever what a ref or
+ * getter holds changes, including a ref nested inside it such as `enabled`.
  */
 export function useQuery<
   TDatabase extends AnyDatabase = AugmentedDatabase,
@@ -41,12 +46,13 @@ export function useQuery<
   TRow = TDatabase["public"]["Tables"][TTable]["Row"],
 >(
   table: TTable,
-  options?: UseQueryOptions | undefined,
+  options?: MaybeRefOrGetter<UseQueryOptions | undefined>,
 ): UseQueryReturn<TRow> {
   const client = useSupatype<TDatabase>()
   const { data, error, loading, read } = latestRows<TRow>(client as AnyClient, table)
   const fetchData = async () => {
-    if (isEnabled(options?.enabled)) await read(options)
+    const current = toValue(options)
+    if (isEnabled(current?.enabled)) await read(current)
   }
 
   onMounted(fetchData)
@@ -55,12 +61,10 @@ export function useQuery<
   // and why the fetch above is not enough on its own.
   onUnmounted(onIdentityChange(client.auth, () => void fetchData()))
 
-  // Re-fetch when enabled changes
-  if (options?.enabled && typeof options.enabled !== "boolean") {
-    watch(options.enabled, (newVal) => {
-      if (newVal) fetchData()
-    })
-  }
+  // 0.9.1 release test (FF25): the options were read once, so a sort, page or filter held in
+  // component state changed nothing. Deep, so a ref inside the options (`enabled`) and a change
+  // inside a reactive object both count; `fetchData` skips the read while disabled.
+  watch(() => toValue(options), () => void fetchData(), { deep: true })
 
   return { data, error, loading, refetch: fetchData }
 }

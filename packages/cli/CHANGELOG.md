@@ -214,6 +214,13 @@
 
 ### Bug Fixes
 
+* **client:** `.range()` now sends `offset` and `limit` like supabase-js, so `.limit(n).range(a, b)` and
+  `useQuery(..., { limit, offset })` no longer fail with 416, and a cached read of one page is no longer
+  served for another page. Whichever of `limit()` and `range()` is called last sets the page size.
+* **vue, svelte, solid:** query options can be a ref or getter (Vue), a store (Svelte) or an accessor
+  (Solid), and the query runs again when they change. Before, sort, page and filter were read once.
+* **react:** `useQuery` with an `offset` and no `limit` reads a page of 100 rows, as the Vue, Svelte
+  and Solid queries do, instead of ignoring the offset.
 * **push:** a push to the Docker stack whose step after the schema fails (starting the stack, waiting
   for the gateway, creating a bucket) now says the schema was applied but the push did not finish,
   prints no success line, and exits 1, as native and linked pushes do. It printed "Schema pushed."

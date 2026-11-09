@@ -161,7 +161,7 @@ Nulls sort last unless you pass `{ nullsFirst: true }`.
 .range(10, 19)  // Rows 10-19 (second page)
 ```
 
-`range(from, to)` is inclusive on both ends and is sent as a `Range` header.
+`range(from, to)` is inclusive on both ends and is sent as the `offset` and `limit` parameters. It sets the same `limit` that `limit()` does, so when you call both, the one called last decides the page size: `.limit(2).range(2, 3)` reads rows 2 and 3.
 
 ### Cursor-based pagination
 

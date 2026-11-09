@@ -83,7 +83,7 @@ export function App() {
 | `select` | The select expression. Default `*`. |
 | `filter` | Equality filters, one per column. |
 | `order` | `{ column, ascending }`. Ascending by default. |
-| `limit`, `offset` | Paging. `offset` only applies when `limit` is set. |
+| `limit`, `offset` | Paging. An `offset` with no `limit` reads 100 rows, in every binding. |
 | `enabled` | `false` skips the query. |
 | `refetchInterval` | Runs the query again every so many milliseconds. |
 | `cache` | The same cache options as the client's `.cache()`. |
@@ -176,7 +176,7 @@ async function remove(id: string) {
 </template>
 ```
 
-Results are refs. The query runs when the component mounts. `enabled` may be a ref; the query runs again when it turns `true`. `useFunction(name)` returns `invoke(body)`, `data`, `error` and `loading`.
+Results are refs. The query runs when the component mounts. To sort, page or filter from component state, pass the options as a ref or a getter, such as `useQuery("post", () => ({ limit: 20, offset: page.value * 20 }))`; the query runs again whenever they change. `enabled` may be a ref; the query runs again when it turns `true`. `useFunction(name)` returns `invoke(body)`, `data`, `error` and `loading`.
 
 <h2 id="svelte">Svelte</h2>
 
@@ -208,7 +208,7 @@ Set the client once in a parent component. The `create*` functions read it from 
 {/if}
 ```
 
-`createQuery` fetches as soon as it is created and returns readable stores plus `refetch`. `createMutation` and `createFunction` work like the Vue versions.
+`createQuery` fetches as soon as it is created and returns readable stores plus `refetch`. To sort, page or filter from component state, pass the options as a store; the query runs again whenever it changes. From `$state`, `toStore(() => ({ limit: 20, offset: page * 20 }))` from `svelte/store` makes one. `createMutation` and `createFunction` work like the Vue versions.
 
 <h2 id="solid">Solid</h2>
 
@@ -233,7 +233,7 @@ export function App() {
 }
 ```
 
-The query runs on mount. `createMutation` and `createFunction` work like the Vue versions.
+The query runs on mount. To sort, page or filter from a signal, pass the options as a function, such as `createQuery("post", () => ({ limit: 20, offset: page() * 20 }))`; the query runs again whenever the signals it reads change. `createMutation` and `createFunction` work like the Vue versions.
 
 ### How Vue, Svelte and Solid differ from React
 

@@ -178,7 +178,7 @@
 <tr><td><code>select</code></td><td>The select expression. Default <code>*</code>.</td></tr>
 <tr><td><code>filter</code></td><td>Equality filters, one per column.</td></tr>
 <tr><td><code>order</code></td><td><code>{ column, ascending }</code>. Ascending by default.</td></tr>
-<tr><td><code>limit</code>, <code>offset</code></td><td>Paging. <code>offset</code> only applies when <code>limit</code> is set.</td></tr>
+<tr><td><code>limit</code>, <code>offset</code></td><td>Paging. An <code>offset</code> with no <code>limit</code> reads 100 rows, in every binding.</td></tr>
 <tr><td><code>enabled</code></td><td><code>false</code> skips the query.</td></tr>
 <tr><td><code>refetchInterval</code></td><td>Runs the query again every so many milliseconds.</td></tr>
 <tr><td><code>cache</code></td><td>The same cache options as the client's <code>.cache()</code>.</td></tr>
@@ -251,7 +251,7 @@ createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span 
     &lt;/li&gt;
   &lt;/ul&gt;
 &lt;/template&gt;</pre></div>
-<p>Results are refs. The query runs when the component mounts. <code>enabled</code> may be a ref; the query runs again when it turns <code>true</code>. <code>useFunction(name)</code> returns <code>invoke(body)</code>, <code>data</code>, <code>error</code> and <code>loading</code>.</p>
+<p>Results are refs. The query runs when the component mounts. To sort, page or filter from component state, pass the options as a ref or a getter, such as <code>useQuery("post", () =&gt; ({ limit: 20, offset: page.value * 20 }))</code>; the query runs again whenever they change. <code>enabled</code> may be a ref; the query runs again when it turns <code>true</code>. <code>useFunction(name)</code> returns <code>invoke(body)</code>, <code>data</code>, <code>error</code> and <code>loading</code>.</p>
 
 <h2 id="svelte">Svelte</h2>
 <p>Set the client once in a parent component. The <code>create*</code> functions read it from context, so call them during component setup, then read the stores with <code>$</code>.</p>
@@ -277,7 +277,7 @@ createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span 
 {:else}
   &lt;ul&gt;{#each $posts ?? [] <span class="k">as</span> post (post.id)}&lt;li&gt;{post.title}&lt;/li&gt;{/each}&lt;/ul&gt;
 {/if}</pre></div>
-<p><code>createQuery</code> fetches as soon as it is created and returns readable stores plus <code>refetch</code>. <code>createMutation</code> and <code>createFunction</code> work like the Vue versions.</p>
+<p><code>createQuery</code> fetches as soon as it is created and returns readable stores plus <code>refetch</code>. To sort, page or filter from component state, pass the options as a store; the query runs again whenever it changes. From <code>$state</code>, <code>toStore(() =&gt; ({ limit: 20, offset: page * 20 }))</code> from <code>svelte/store</code> makes one. <code>createMutation</code> and <code>createFunction</code> work like the Vue versions.</p>
 
 <h2 id="solid">Solid</h2>
 <p>Provide the client with <code>SupatypeContext.Provider</code>. Results are accessors, so call them to read.</p>
@@ -298,7 +298,7 @@ createApp(<span class="t">App</span>).use(supatypePlugin, supatype).mount(<span 
 <span class="k">export</span> <span class="k">function</span> <span class="t">App</span>() {
   <span class="k">return</span> &lt;<span class="t">SupatypeContext</span>.Provider value={supatype}&gt;&lt;<span class="t">Posts</span> /&gt;&lt;/<span class="t">SupatypeContext</span>.Provider&gt;
 }</pre></div>
-<p>The query runs on mount. <code>createMutation</code> and <code>createFunction</code> work like the Vue versions.</p>
+<p>The query runs on mount. To sort, page or filter from a signal, pass the options as a function, such as <code>createQuery("post", () =&gt; ({ limit: 20, offset: page() * 20 }))</code>; the query runs again whenever the signals it reads change. <code>createMutation</code> and <code>createFunction</code> work like the Vue versions.</p>
 
 <h3>How Vue, Svelte and Solid differ from React</h3>
 <ul>

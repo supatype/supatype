@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isRowsOf, reportThrown } from "@supatype/client/bindings"
+import { isRowsOf, reportThrown, withPage } from "@supatype/client/bindings"
 
 export interface UseQueryOptions {
   /** PostgREST select expression (default: '*') */
@@ -15,7 +15,7 @@ export interface UseQueryOptions {
   order?: { column: string; ascending?: boolean | undefined } | undefined
   /** Maximum number of rows to return */
   limit?: number | undefined
-  /** Row offset (for pagination) */
+  /** Row offset (for pagination). With no `limit`, a page of 100 rows is read from it. */
   offset?: number | undefined
   /** Set to false to skip the query (useful for conditional fetching) */
   enabled?: boolean | undefined
@@ -88,7 +88,8 @@ export function useQuery<
     }
     show({ loading: true })
     show(await settledRows<TRow>(client as AnyClient, table, options))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `optionsJson` stands in for `options`: a caller's inline object is new on every render, and
+    // depending on it would read again on every render.
   }, [client, table, optionsJson])
 
   useRunAndRefetch(execute, options?.refetchInterval)
@@ -165,11 +166,6 @@ function readRows(client: AnyClient, table: string, options: UseQueryOptions | u
   if (options?.order !== undefined) {
     query = query.order(options.order.column, { ascending: options.order.ascending ?? true })
   }
-  if (options?.limit !== undefined) {
-    query = query.limit(options.limit)
-  }
-  if (options?.offset !== undefined && options.limit !== undefined) {
-    query = query.range(options.offset, options.offset + options.limit - 1)
-  }
+  query = withPage(query, options)
   return options?.cache !== undefined ? query.cache(options.cache) : query
 }
