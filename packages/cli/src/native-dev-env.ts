@@ -8,6 +8,7 @@
  */
 
 import { devApiKeys, type DevApiKeys } from "./dev-api-keys.js"
+import { readEnvFile, upsertEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
@@ -143,9 +144,16 @@ export function nativeServerDotEnvLayer({ dotEnv, config, denoPort }: NativeDotE
  *
  * The keys in `.env` while they verify, as Docker dev uses. A pair signed afresh each run left
  * `.env`'s SERVICE_ROLE_KEY refused by the admin API, which compares the key as a string.
+ *
+ * A blank or missing SERVICE_ROLE_KEY in `.env` is filled with the key the server starts with, as
+ * Docker dev does. The ready panel shows only a fingerprint and points at `.env` for the key
+ * (0.9.1 release test, S37), so it has to be there. A value the user set is never replaced.
  */
 export function nativeDevApiKeys(cwd: string): DevApiKeys {
   const keys = devApiKeys(cwd)
+  if ((readEnvFile(cwd)["SERVICE_ROLE_KEY"]?.trim() ?? "") === "") {
+    upsertEnvFile(cwd, { SERVICE_ROLE_KEY: keys.serviceRoleKey })
+  }
   writeServiceRoleKeyFileUntilExit(devServiceRoleKeyPath(cwd), keys.serviceRoleKey)
   return keys
 }

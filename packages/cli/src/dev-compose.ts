@@ -1922,6 +1922,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   if (demoData !== undefined) hints.push(demoData)
 
   publishDevReady({
+    cwd,
     title: `Services running (Docker · ${project})`,
     links,
     anonKey,

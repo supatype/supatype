@@ -214,6 +214,11 @@
 
 ### Bug Fixes
 
+* **dev:** the "Services running" panel no longer prints the Postgres password or the full
+  service_role key, so neither lands in CI logs. The database URL is masked as `status` masks it,
+  and the key is shown as a fingerprint pointing at `SERVICE_ROLE_KEY` in `.env`. Native dev now
+  fills a blank or missing `SERVICE_ROLE_KEY` in `.env` with the key the stack runs with, as Docker
+  dev does, and never replaces one you set.
 * **generate:** the client's types now include the columns the engine adds for `timestamps: true` and
   `softDelete: true` (`created_at`, `updated_at`, `deleted_at`), filled by the database and so
   optional on insert, so selecting `updated_at` no longer fails `tsc`. Hook row types include them too.

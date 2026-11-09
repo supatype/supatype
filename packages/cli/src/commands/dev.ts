@@ -735,12 +735,13 @@ export function registerDev(program: Command): void {
       }
 
       publishDevReady({
+        cwd,
         title: "Services running",
         links,
         anonKey,
         serviceRoleKey,
+        databaseUrl: dbURL,
         hints: [
-          `Postgres ${dbURL}`,
           `JWT secret: #${secretFingerprint(LOCAL_JWT_SECRET)} (in .env)`,
           ...(storageOff ? ["Storage is off: the storage service did not start (the reason is above)"] : []),
         ],

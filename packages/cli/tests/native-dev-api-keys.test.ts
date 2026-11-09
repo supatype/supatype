@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { serviceRoleKeyNote } from "../src/dev-ready-panel.js"
 import { signJwt } from "../src/jwt.js"
 import { nativeDevApiKeys } from "../src/native-dev-env.js"
 import { devServiceRoleKeyPath } from "../src/service-role-key-file.js"
@@ -30,5 +31,44 @@ describe("nativeDevApiKeys", () => {
     expect(nativeDevApiKeys(dir)).toEqual({ anonKey: anon, serviceRoleKey: service })
     const keyPath = devServiceRoleKeyPath(dir)
     expect(existsSync(keyPath) && readFileSync(keyPath, "utf8").trim()).toBe(service)
+  })
+})
+
+/**
+ * 0.9.1 release test (S37): the dev panel stopped printing the service_role key and points at
+ * `.env` for it instead, which native dev had never written, so a project without one had nowhere
+ * to read the key the stack was using. Native dev fills a blank one, as Docker dev does, and
+ * leaves a line the user set alone.
+ */
+describe("nativeDevApiKeys writing SERVICE_ROLE_KEY", () => {
+  function envFile(): string {
+    return readFileSync(join(dir, ".env"), "utf8")
+  }
+
+  it("fills SERVICE_ROLE_KEY when .env has none, keeping the rest of the file", () => {
+    writeFileSync(join(dir, ".env"), `# mine\nJWT_SECRET=${SECRET}\n`, "utf8")
+
+    const { serviceRoleKey } = nativeDevApiKeys(dir)
+
+    expect(envFile()).toContain(`SERVICE_ROLE_KEY=${serviceRoleKey}`)
+    expect(envFile()).toContain("# mine")
+    expect(serviceRoleKeyNote(dir, serviceRoleKey)).toContain("(SERVICE_ROLE_KEY in .env)")
+  })
+
+  it("fills a blank SERVICE_ROLE_KEY line in place", () => {
+    writeFileSync(join(dir, ".env"), `JWT_SECRET=${SECRET}\nSERVICE_ROLE_KEY=\n`, "utf8")
+
+    const { serviceRoleKey } = nativeDevApiKeys(dir)
+
+    expect(envFile()).toBe(`JWT_SECRET=${SECRET}\nSERVICE_ROLE_KEY=${serviceRoleKey}\n`)
+  })
+
+  it("never overwrites a SERVICE_ROLE_KEY the user set, even one the stack cannot use", () => {
+    const before = `JWT_SECRET=${SECRET}\nSERVICE_ROLE_KEY=signed-with-another-secret\n`
+    writeFileSync(join(dir, ".env"), before, "utf8")
+
+    nativeDevApiKeys(dir)
+
+    expect(envFile()).toBe(before)
   })
 })

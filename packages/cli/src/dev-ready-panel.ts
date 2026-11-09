@@ -6,17 +6,36 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { detectPackageManager } from "./app/framework.js"
 import { appendStackOutput, getActiveDevSession } from "./dev-session.js"
+import { readEnvValue } from "./env-file.js"
+import { redact } from "./error-message.js"
+import { secretFingerprint } from "./local-secrets.js"
 
 export interface DevServiceLink {
   label: string
   url: string
 }
 
+/**
+ * What the panel shows, with nothing secret left in it: the service_role key only as a
+ * fingerprint and where to read it, and no password. Built by {@link publishDevReady}.
+ */
 export interface DevReadyPanel {
   title: string
   links: DevServiceLink[]
   anonKey?: string
-  serviceRoleKey?: string
+  serviceRoleKeyNote?: string
+  hints?: string[]
+}
+
+/** What dev hands {@link publishDevReady}, secrets included; they are masked before anything prints. */
+export interface DevReadyInput {
+  cwd: string
+  title: string
+  links: DevServiceLink[]
+  anonKey: string
+  serviceRoleKey: string
+  /** The database's connection string, printed with its password masked. */
+  databaseUrl?: string
   hints?: string[]
 }
 
@@ -31,7 +50,7 @@ export function devReadyPanelRowCount(panel: DevReadyPanel): number {
   if (panel.anonKey) {
     rows += 1 // "API keys (local dev)"
     rows += 1 // anon
-    if (panel.serviceRoleKey) rows += 1 // service_role
+    if (panel.serviceRoleKeyNote) rows += 1 // service_role
   }
   rows += 1 // marginBottom on panel box
   return rows
@@ -48,7 +67,7 @@ export function devReadyPanelCompactRowCount(panel: DevReadyPanel): number {
   if (panel.anonKey) {
     rows += 1
     rows += 1
-    if (panel.serviceRoleKey) rows += 1
+    if (panel.serviceRoleKeyNote) rows += 1
   }
   rows += 1 // marginBottom
   return rows
@@ -65,14 +84,45 @@ function formatStreamBlock(panel: DevReadyPanel): string {
   if (panel.anonKey) {
     lines.push("  API keys (local dev only):")
     lines.push(`    anon key       ${panel.anonKey}`)
-    lines.push(`    service_role   ${panel.serviceRoleKey ?? ""}`)
+    lines.push(`    service_role   ${panel.serviceRoleKeyNote ?? ""}`)
   }
   lines.push("  Press Ctrl+C to stop.")
   return lines.join("\n")
 }
 
-/** Pin links in the TUI or print the classic block in stream mode. */
-export function publishDevReady(panel: DevReadyPanel): void {
+/**
+ * The service_role key as the panel shows it: a fingerprint and where the key is. Printed whole,
+ * it landed in every CI log that ran `dev` (0.9.1 release test, S37). Docker dev writes the key to
+ * `.env`, and native dev fills a blank SERVICE_ROLE_KEY there, so it is normally in `.env`. Native
+ * dev leaves a value the user set alone, even one the stack cannot verify and so does not use;
+ * the key in use is then only in the file native dev hands the functions worker.
+ */
+export function serviceRoleKeyNote(cwd: string, serviceRoleKey: string): string {
+  const where = readEnvValue(cwd, "SERVICE_ROLE_KEY", "") === serviceRoleKey
+    ? "SERVICE_ROLE_KEY in .env"
+    : "in .supatype/service-role-key while dev runs"
+  return `#${secretFingerprint(serviceRoleKey)} (${where})`
+}
+
+/**
+ * The panel `input` describes, with its secrets masked. The Postgres line hides its password as
+ * `status` does (issue 80); native dev printed it whole (0.9.1 release test, FF17).
+ */
+function readyPanel(input: DevReadyInput): DevReadyPanel {
+  const database = input.databaseUrl === undefined ? [] : [`Postgres ${redact(input.databaseUrl)}`]
+  const hints = [...database, ...(input.hints ?? [])]
+  return {
+    title: input.title,
+    links: input.links,
+    anonKey: input.anonKey,
+    serviceRoleKeyNote: serviceRoleKeyNote(input.cwd, input.serviceRoleKey),
+    ...(hints.length > 0 && { hints }),
+  }
+}
+
+/** Pin links in the TUI or print the classic block in stream mode, secrets masked in both. */
+export function publishDevReady(input: DevReadyInput): void {
+  const panel = readyPanel(input)
   const session = getActiveDevSession()
   if (session?.isTui()) {
     session.bus.setReadyPanel(panel)

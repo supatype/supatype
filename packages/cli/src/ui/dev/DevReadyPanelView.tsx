@@ -124,8 +124,8 @@ export function DevReadyPanelView({
         <>
           <Text dimColor>API keys (local dev)</Text>
           <Text dimColor wrap="truncate">{`anon ${shortenKey(panel.anonKey, innerWidth - 5)}`}</Text>
-          {panel.serviceRoleKey ? (
-            <Text dimColor wrap="truncate">{`svc  ${shortenKey(panel.serviceRoleKey, innerWidth - 5)}`}</Text>
+          {panel.serviceRoleKeyNote ? (
+            <Text dimColor wrap="truncate">{`svc  ${truncate(panel.serviceRoleKeyNote, innerWidth - 5)}`}</Text>
           ) : null}
         </>
       ) : null}
