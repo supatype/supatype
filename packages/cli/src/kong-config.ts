@@ -30,7 +30,59 @@ function yamlQuotedString(s: string): string {
   return JSON.stringify(s)
 }
 
-import { runtimeRouteSpec } from "./runtime-routes.js"
+/**
+ * A raw request path with a part that is empty, "." or ".." (a "." spelled `%2E` or `%2e` too).
+ * A trailing "/" is not a part, so `/rest/v1/` passes, and a dot inside a name (`a.b`, `.vite`,
+ * `...`) is a name. Written where PCRE and JavaScript regexes agree, so the tests can run it.
+ */
+const STEP_PART_PATTERN = String.raw`/(?:\.|%2e){1,2}(?:/|$)|//`
+
+/**
+ * 0.9.1 release test RB2 (#298): Kong resolves "." and ".." parts and merges "//" before it routes
+ * and proxies, so `/storage/v1/object/b/x/../a` wrote the object "a", and `/studio/../auth/v1/...`
+ * reached auth. Native has no Kong, and there the storage service refuses such a name with 400 and
+ * the server sends such a path to no API. This refuses it on every Supatype route, in the access
+ * phase, so it judges the route Kong chose: `/studio/../auth/...` is refused on the auth route. The
+ * app's own route never carries it (`servesApp`), so the app's paths reach it as they always did.
+ * `get_raw_path` is the path as the client sent it, without the query string.
+ */
+const RAW_PATH_GUARD = `          - name: pre-function
+            config:
+              access:
+                - |
+                  local path = kong.request.get_raw_path()
+                  if ngx.re.find(path, [[${STEP_PART_PATTERN}]], "joi") then
+                    return kong.response.exit(400, { error = '"' .. path .. '": invalid request path' })
+                  end
+`
+
+/** The engine routes' key check, when the gateway has a key. */
+const ENGINE_KEY_AUTH = `          - name: key-auth
+            config:
+              key_names:
+                - apikey
+              hide_credentials: true
+`
+
+/** GraphQL goes to PostgREST's `rpc/graphql`, which reads the schema from this header. */
+const GRAPHQL_PROFILE = `          - name: request-transformer
+            config:
+              add:
+                headers:
+                  - Content-Profile:graphql_public
+`
+
+/** A route's `plugins:` list, one key however many plugins it has, or nothing. */
+function routePlugins(route: RuntimeRoute, secured: boolean): string {
+  const plugins = [
+    ...(route.servesApp === true ? [] : [RAW_PATH_GUARD]),
+    ...(route.engineProtected === true && secured ? [ENGINE_KEY_AUTH] : []),
+    ...(route.graphqlPostgrest === true ? [GRAPHQL_PROFILE] : []),
+  ]
+  return plugins.length === 0 ? "" : `        plugins:\n${plugins.join("")}`
+}
+
+import { runtimeRouteSpec, type RuntimeRoute } from "./runtime-routes.js"
 
 /**
  * Build full `kong.yml` content. Single source of truth for CLI `dev` and `self-host setup`.
@@ -58,28 +110,10 @@ consumers:
     : ""
 
   const servicesBlock = routes.map((route) => {
-    const routePlugins = route.engineProtected && secured
-      ? `        plugins:
-          - name: key-auth
-            config:
-              key_names:
-                - apikey
-              hide_credentials: true
-`
-      : ""
     const protocols = route.protocols && route.protocols.length > 0
       ? `        protocols:\n${route.protocols.map((p) => `          - ${p}`).join("\n")}\n`
       : ""
     const stripPath = route.stripPath ?? false
-    const graphqlPlugins = route.graphqlPostgrest
-      ? `        plugins:
-          - name: request-transformer
-            config:
-              add:
-                headers:
-                  - Content-Profile:graphql_public
-`
-      : ""
     return `  - name: ${route.serviceName}
     url: ${route.serviceUrl}
     routes:
@@ -87,7 +121,7 @@ consumers:
         strip_path: ${stripPath}
         paths:
 ${route.paths.map((path) => `          - ${path}`).join("\n")}
-${protocols}${routePlugins}${graphqlPlugins}`
+${protocols}${routePlugins(route, secured)}`
   }).join("\n")
 
   const acme = opts.acme

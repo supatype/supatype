@@ -187,6 +187,12 @@
 
 ### Bug Fixes
 
+* **gateway:** Docker dev and self-host now answer 400 to an API or Studio request whose path has an
+  empty, `.` or `..` part (`%2E` too), as native does. Kong used to resolve these first, so `x/../a`
+  wrote the storage object `a` and `/studio/../auth/v1/...` reached auth. Your app's own paths are
+  not checked and reach it as before.
+* **client:** `createClient` drops a trailing `/` from its URL, so `https://api.example.com/` no
+  longer builds `//rest/v1/...`, which the gateway now refuses and native never routed.
 * **storage:** a private bucket no longer tells a caller its read rule refuses which file names
   exist: download, authenticated download and signing answer 403 for a missing name exactly as for
   one that exists, where they used to answer 404 "Object not found" for a missing name. A caller the

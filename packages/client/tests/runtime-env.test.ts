@@ -222,3 +222,38 @@ describe("the page's __SUPATYPE_ENV__", () => {
     expect(message).toContain("VITE_SUPATYPE_URL")
   })
 })
+
+/**
+ * 0.9.1 release test RB2: the gateway now refuses a path with an empty part, so an address written
+ * with a trailing "/" (`SUPATYPE_URL=https://api.example.com/`) must not build `//rest/v1/...`.
+ */
+describe("an address ending in /", () => {
+  const SERVICE_REQUESTS = FIRST_REQUESTS.filter(([label]) => label !== "a realtime connect")
+
+  /** Each request's path, from every service, for a client at `address`. */
+  async function pathsFor(client: () => SupatypeClient): Promise<string[]> {
+    const seen = captureRequests()
+    // Each answer is an empty list, which some reject after the request is sent: only the address counts.
+    for (const [, request] of SERVICE_REQUESTS) await Promise.resolve(request(client())).catch(() => undefined)
+    return seen.map((r) => r.url.slice(r.url.indexOf("/", "https://".length)))
+  }
+
+  it.each(["https://api.example.com/", "https://api.example.com//"])("is used without it when given: %s", async (url) => {
+    const paths = await pathsFor(() => createClient({ url, anonKey: "k" }))
+    expect(paths).toHaveLength(SERVICE_REQUESTS.length)
+    expect(paths.filter((path) => path.includes("//"))).toEqual([])
+    expect(createClient({ url, anonKey: "k" }).url).toBe("https://api.example.com")
+  })
+
+  it("is used without it when the page sets it", async () => {
+    vi.stubGlobal("__SUPATYPE_ENV__", { url: "https://api.example.com/", anonKey: "k" })
+    const paths = await pathsFor(() => createClient({}))
+    expect(paths.filter((path) => path.includes("//"))).toEqual([])
+    expect(createClient({}).url).toBe("https://api.example.com")
+  })
+
+  it("keeps a base path the address has", async () => {
+    const paths = await pathsFor(() => createClient({ url: "https://example.com/api/", anonKey: "k" }))
+    expect(paths[0]).toMatch(/^\/api\/rest\/v1\/posts/)
+  })
+})

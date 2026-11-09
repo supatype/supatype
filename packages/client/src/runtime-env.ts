@@ -67,13 +67,22 @@ function present(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined
 }
 
+/**
+ * `url` without the "/" it may end in. Every path is joined on as `${url}/rest/v1/...`, and
+ * `https://api.example.com/` built `//rest/v1/...`, which the gateway refuses as a path with an
+ * empty part (0.9.1 release test RB2) and the server on native never routed to an API.
+ */
+function withoutTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, "")
+}
+
 /** An absolute http or https address, else undefined. */
 function httpUrl(value: unknown): string | undefined {
   const text = present(value)
   if (text === undefined) return undefined
   try {
     const protocol = new URL(text).protocol
-    return protocol === "http:" || protocol === "https:" ? text : undefined
+    return protocol === "http:" || protocol === "https:" ? withoutTrailingSlash(text) : undefined
   } catch {
     return undefined
   }
@@ -191,7 +200,8 @@ export class ClientTarget {
   #resolved: ResolvedClientTarget | undefined
 
   constructor(given: Pick<SupatypeClientConfig, "url" | "anonKey">) {
-    this.#url = present(given.url)
+    const url = present(given.url)
+    this.#url = url === undefined ? undefined : withoutTrailingSlash(url)
     this.#anonKey = present(given.anonKey)
   }
 
