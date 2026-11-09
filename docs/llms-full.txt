@@ -2852,6 +2852,28 @@ export default async function seed({ db }: SeedContext) {
 
 The condition is `{ exists }` or `{ notExists }`, naming a model and an optional `where`, or `{ environment: "staging" }`.
 
+Without `where`, the condition asks whether the table has any row. A `where` names the rows to look for, in one of two forms:
+
+`seeds/03-once.ts`:
+
+```ts
+import { like, type SeedContext } from "@supatype/cli/seed"
+
+export default async function seed({ db }: SeedContext) {
+  // Columns and values, like an upsert's `where`: every column equals its value.
+  db.$if({ notExists: { model: "Tag", where: { name: "general" } } }, () => {
+    db.tag.create({ name: "general" })
+  })
+
+  // A rule, for anything else: eq, neq, gt, gte, lt, lte, like, oneOf, isNull, notNull, and, or, not.
+  db.$if({ notExists: { model: "Tag", where: like("name", "team-%") } }, () => {
+    db.tag.create({ name: "team-default" })
+  })
+}
+```
+
+In the plain form a value is a string, number, bigint, boolean, `Date` or `null` (which matches an empty column). Each is written the way an upsert's `where` writes it, so a decimal column matches exactly. A value an earlier call returned, such as `alex.id`, cannot be compared there: the condition is checked against values known before the seed runs.
+
 A file can also export a `config`. `runOnce: true` applies the file at most once, for a one-time backfill. It covers the whole run: if one file sets it, every file in that run gets it, with a warning.
 
 `seeds/01-blog.ts`:

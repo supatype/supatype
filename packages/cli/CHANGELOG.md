@@ -41,6 +41,15 @@
 
 ### Bug Fixes
 
+* **dev:** a project's own running database on the default port keeps it when `.env` names no port,
+  instead of being moved to the next free port and saved there.
+* **seed:** a plain `where` in `$if` takes bigints and compares decimal columns exactly, as an
+  upsert's `where` does, and says plainly that a reference cannot be compared there.
+* **seed:** `$if` takes `where: { name: "x" }`, each column equal to its value like an upsert's
+  `where`, as well as `eq()` and the other predicates. The plain form failed with "not valid IR:
+  missing field type" (#303).
+* **seed:** array columns can be seeded. `tags: ["a", "b"]` and `tags: []` failed with "expression is
+  of type text". Needs schema engine 0.10.1.
 * **dev:** Ctrl+C while a Docker dev is still starting now says "Stopped during start.", takes the
   stack down and exits 130, as native dev does. It said "Shutting down…" and exited 0.
 * **dev, functions serve:** stopping dev or `functions serve` now ends everything Supatype's

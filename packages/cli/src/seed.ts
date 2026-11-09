@@ -438,10 +438,25 @@ type RegisteredCondition = SupatypeSeedRegistry extends { condition: infer C }
   ? C
   : SeedConditionInput
 
+/**
+ * Rows named the way an upsert's `where` names one: each listed column equals its value.
+ *
+ * A `null` matches a column that holds NULL, and a `Date` matches the instant it is. Each value is
+ * encoded as an upsert's `where` encodes it, so a bigint or a decimal column compares exactly.
+ * Anything a plain equality cannot say (a range, a pattern, a list) is written with the predicate
+ * helpers instead.
+ */
+export type ConditionMatch<C extends string = string> = {
+  readonly [K in C]?: LiteralValue | bigint | Date | null
+}
+
+/** What a condition's `where` takes: a rule from the predicate helpers, or a {@link ConditionMatch}. */
+export type SeedConditionWhere<C extends string = string> = Predicate<C> | ConditionMatch<C>
+
 /** The condition surface, before a generated builder narrows it to this schema's models. */
 export type SeedConditionInput =
-  | { exists: { model: string; where?: Predicate } }
-  | { notExists: { model: string; where?: Predicate } }
+  | { exists: { model: string; where?: SeedConditionWhere } }
+  | { notExists: { model: string; where?: SeedConditionWhere } }
   | { environment: string }
 
 export type SeedDb = RegisteredModels & {
