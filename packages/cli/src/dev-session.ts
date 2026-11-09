@@ -11,7 +11,7 @@ import type { ProcessOptions } from "./process-manager.js"
 import { filterCommandLogLine, filterDevSubprocessLine, filterStackLogLine, formatConsoleArgs } from "./dev-log-filter.js"
 import { DevLogBus, type DevLogLevel } from "./dev-log-bus.js"
 import { DevDashboard } from "./ui/dev/DevDashboard.js"
-import { ensureDevShutdownHooks } from "./dev-shutdown.js"
+import { ensureDevShutdownHooks, haltIfStopping } from "./dev-shutdown.js"
 import { clearDevPromptQueue } from "./ui/runtime/dev-prompt-queue.js"
 
 export type DevUiMode = "tui" | "stream"
@@ -44,8 +44,13 @@ const INK_FRAME_MS = 40
  * starting Postgres, the schema push), and a step set just before one of those was never drawn: the
  * dashboard went from the logo straight to the services. The log line each step already prints
  * stays as it was; in stream mode that line is all there is.
+ *
+ * Never settles once a Ctrl+C has begun the shutdown, so a start goes no further than the step it
+ * was on. Docker dev's start kept going under its stopped start's `compose down`, and an `up` begun
+ * after it would have left the stack running (FF11).
  */
 export async function showDevStep(step: string): Promise<void> {
+  await haltIfStopping()
   activeSession?.bus.setStep(step)
   if (activeSession?.isInkMounted() === true) await sleep(INK_FRAME_MS)
 }

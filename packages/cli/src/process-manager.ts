@@ -3,12 +3,13 @@
  * colored prefix, and restart on crash with exponential backoff.
  */
 
-import { type ChildProcess, spawn, spawnSync } from "node:child_process"
+import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { enhanceProcessOptions } from "./dev-session.js"
 import { errorMessage } from "./error-message.js"
+import { endTreeOnExit, stopTree, treeSpawnOptions } from "./process-tree.js"
 
 export interface ProcessOptions {
   /** Human-readable label (used in log prefix and PID filename). */
@@ -168,38 +169,13 @@ export class ProcessManager {
     void this.spawnAfter(this.opts.beforeStart)
   }
 
-  /** Stop the process and clear the PID file. */
+  /**
+   * Stop the process and everything it started, and clear the PID file. Ending the process alone
+   * left what it started running: the server's Deno worker kept the functions port (FF12).
+   */
   async stop(): Promise<void> {
     this.stopped = true
-    // Already exited: there is no "exit" event left to wait for, and waiting for one held every stop
-    // of a process that had ended on its own for the full five seconds below.
-    if (!this.child || this.child.killed || this.child.exitCode !== null || this.child.signalCode !== null) {
-      await this.clearPid()
-      return
-    }
-
-    const pid = this.child.pid
-    if (process.platform === "win32" && this.opts.shell && pid) {
-      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" })
-      this.child = null
-      await this.clearPid()
-      return
-    }
-
-    if (!this.child.killed) {
-      this.child.kill("SIGTERM")
-      // Give it 5s to exit gracefully, then SIGKILL.
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          this.child?.kill("SIGKILL")
-          resolve()
-        }, 5_000)
-        this.child!.once("exit", () => {
-          clearTimeout(timeout)
-          resolve()
-        })
-      })
-    }
+    if (this.child) await stopTree(this.child)
     await this.clearPid()
   }
 
@@ -221,9 +197,11 @@ export class ProcessManager {
       cwd: this.opts.cwd,
       stdio: "pipe",
       ...(this.opts.shell ? { shell: true } : {}),
+      ...treeSpawnOptions(),
     })
     this.child = child
     if (child.pid) this.writePid(child.pid)
+    endTreeOnExit(child)
     this.pipeOutput(child)
     const startedAt = Date.now()
 

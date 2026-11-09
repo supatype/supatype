@@ -1735,9 +1735,12 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     functionsWatcher: null,
   }
 
+  // As the start begins, so the stack comes down however dev ends. Until the start is done a Ctrl+C
+  // is a stopped start, as on native dev (FF11).
   registerDevShutdown(() => stopDevComposeStack(shutdownState, { project, composePath: paths.composePath }, cwd), {
     cwd,
     compose: { cwd, composePath: paths.composePath, composeProject: project },
+    duringStart: true,
   })
 
   await recoverStaleDevSession(cwd)

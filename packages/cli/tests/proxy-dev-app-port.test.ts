@@ -2,7 +2,7 @@ import type * as ChildProcessModule from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
  * Freeing the app's port ran `netstat` synchronously, and on Windows it took ten seconds: the
@@ -70,7 +70,11 @@ vi.mock("node:child_process", async (importOriginal) => {
   }
   // The faked run has no stdin for the CLI to close.
   const fakeChild = { stdin: null }
-  const execFileFake = (bin: string, args: readonly string[], ...rest: unknown[]): typeof fakeChild => {
+  const execFileFake = (
+    bin: string,
+    args: readonly string[],
+    ...rest: unknown[]
+  ): typeof fakeChild | ChildProcessModule.ChildProcess => {
     const callback = rest.find((r): r is ExecFileCallback => typeof r === "function")
     const kind = faked(`${bin} ${args.join(" ")}`)
     // Anything else fails as a command would: dev's parent watch asks PowerShell for its parent.
@@ -79,7 +83,10 @@ vi.mock("node:child_process", async (importOriginal) => {
       return fakeChild
     }
     if (kind === "kill") {
-      events.push(`kill ${args.find((a) => /^\d+$/.test(a)) ?? "?"}`)
+      const pid = args.find((a) => /^\d+$/.test(a)) ?? "?"
+      events.push(`kill ${pid}`)
+      // A real process this test started (the app, a stale run) is really ended.
+      if (pid !== String(STALE_PID)) return real.execFile(bin, [...args], { encoding: "utf8", windowsHide: true }, callback)
       setImmediate(() => callback(null, "", ""))
       return fakeChild
     }
@@ -115,9 +122,27 @@ const { spawn: realSpawn } = await vi.importActual<typeof ChildProcessModule>("n
 let dir = ""
 let manager: ProcessManager | null = null
 
+const realKill = process.kill.bind(process)
+
+// Off Windows a tree is killed with process.kill, not a command: each kill is recorded, and the
+// made-up listener's pid, which may be a real process on this machine, is never signalled.
+beforeEach(() => {
+  if (process.platform === "win32") return
+  vi.spyOn(process, "kill").mockImplementation((pid: number, signal?: string | number) => {
+    if (Math.abs(pid) === STALE_PID) {
+      if (pid < 0) events.push(`kill ${STALE_PID}`)
+      return true
+    }
+    const sent = realKill(pid, signal)
+    if (signal === "SIGKILL") events.push(`kill ${Math.abs(pid)}`)
+    return sent
+  })
+})
+
 afterEach(async () => {
   await manager?.stop()
   manager = null
+  vi.restoreAllMocks()
   endDevSession()
   events.length = 0
   // Waited for: on Windows the app can outlive its stopped shim for a moment, holding its directory.

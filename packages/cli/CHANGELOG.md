@@ -214,6 +214,13 @@
 
 ### Bug Fixes
 
+* **dev:** Ctrl+C while a Docker dev is still starting now says "Stopped during start.", takes the
+  stack down and exits 130, as native dev does. It said "Shutting down…" and exited 0.
+* **dev, functions serve:** stopping dev or `functions serve` now ends everything Supatype's
+  processes started, including the Deno functions worker native dev's server runs and whatever
+  Deno itself starts, on Ctrl+C, SIGTERM, a forced quit or a crash, so the next run no longer finds
+  the functions port taken. Windows ends the whole process tree. Linux and macOS give each process a
+  process group and end the group.
 * **dev:** a Vite app started by `supatype dev` now listens on the address and port the app proxy forwards
   to (`--host 127.0.0.1 --port <upstream port> --strictPort`), and keeps its script's own flags. On Windows,
   Vite listened on [::1] while the proxy dialled 127.0.0.1, so the App URL answered 502 or showed another

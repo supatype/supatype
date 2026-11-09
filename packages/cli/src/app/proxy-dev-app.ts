@@ -14,6 +14,7 @@ import { runCaptured, type CapturedRun } from "../run-captured.js"
 import { appendDevTaskLog } from "../dev-session.js"
 import { DEV_APP_ENV, SELF_START_EXIT_CODE, runsSupatypeDev, selfStartProblem } from "../dev-self-start.js"
 import { ProcessManager, readPid } from "../process-manager.js"
+import { signalTree } from "../process-tree.js"
 import { projectRootFromConfig, type SupatypeProjectConfig } from "../project-config.js"
 
 /** The script dev runs as the app when `app.start` names none. */
@@ -40,12 +41,19 @@ export function portFromUpstream(config: SupatypeProjectConfig): number | null {
   }
 }
 
+/**
+ * Kills `pid` and what it started (see process-tree.ts). A listener found on the port need not lead
+ * a process group of its own (Vite under the package manager the app was started with), so off
+ * Windows the process alone is killed when it leads none.
+ */
 async function killPidTree(pid: number): Promise<void> {
   if (!Number.isInteger(pid) || pid <= 0) return
-  const [bin, args] =
-    process.platform === "win32" ? ["taskkill", ["/pid", String(pid), "/T", "/F"]] : ["kill", ["-9", String(pid)]]
-  // A failed kill is a process that has already ended.
-  await runCaptured(bin, args)
+  if ((await signalTree(pid, "SIGKILL")) || process.platform === "win32") return
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch {
+    // It has already ended.
+  }
 }
 
 /**
