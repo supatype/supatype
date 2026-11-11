@@ -88,10 +88,10 @@ const channel = supatype.realtime
   .on("postgres_changes", { event: "INSERT", table: "comment", filter: `post_id=eq.${postId}` }, (change) => {
     showComment(change.new)
   })
-  .subscribe((status) => console.log(status))
+  .subscribe((status, err) => console.log(status, err?.message))
 ```
 
-Status is `SUBSCRIBING`, `SUBSCRIBED`, `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED`. `CHANNEL_ERROR` means the server refused a request on the socket, such as a join. `TIMED_OUT` means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass `table` explicitly. Without it the channel name is read as `schema:table`.
+Status is `SUBSCRIBING`, `SUBSCRIBED`, `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED`. `CHANNEL_ERROR` means the server refused a request on the socket, such as a `postgres_changes` listener for a table that does not exist, for a view, which has no changes of its own, or for a table the subscriber's role cannot read, such as `auth.users` with an anon or signed-in key: every change would be withheld from it. A channel used only for broadcast and presence is never checked against a table, whatever its name. With `CHANNEL_ERROR` the callback's second argument, `err`, is an `Error` whose message is the server's reason and names the table; it is undefined with every other status. A join hears only changes committed after it was taken. `TIMED_OUT` means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass `table` explicitly. Without it the channel name is read as `schema:table`.
 
 A channel carries one table subscription. If you call `.on("postgres_changes", ...)` more than once on a channel, the first call's table, event and filter are what the server registers. Use one channel per table.
 
@@ -124,7 +124,7 @@ Broadcast and presence have no access rules. Anyone with your anon key who knows
 
 <h2 id="hooks">Framework hooks</h2>
 
-`@supatype/react` exports `useSubscription`. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing.
+`@supatype/react` exports `useSubscription`. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing. It returns `status`, and `error`, the server's reason while the status is `CHANNEL_ERROR` and null otherwise.
 
 ```tsx
 import { useState } from "react"

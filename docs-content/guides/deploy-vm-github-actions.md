@@ -104,7 +104,8 @@ POSTGRES_DB=my-blog
 AUTHENTICATOR_PASSWORD=CHANGE_ME
 SUPATYPE_SQL_EDITOR_PASSWORD=CHANGE_ME
 SUPATYPE_CONTROL_PLANE_SECRET=CHANGE_ME
-JWT_SECRET=CHANGE_ME            # at least 32 characters
+SUPATYPE_KEYSPACE_PASSWORD=CHANGE_ME   # the cache's password, from supatype/postgres 17.2.13
+JWT_SECRET=CHANGE_ME           # at least 32 characters
 # Leave both keys blank. compose up mints them from JWT_SECRET.
 ANON_KEY=
 SERVICE_ROLE_KEY=

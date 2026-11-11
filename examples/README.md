@@ -32,7 +32,8 @@ pnpm build   # the CLI and the libraries run from their dist/
 ```
 
 **On its own.** Copy the example's folder out of the repo. In its `package.json`, change every
-`"workspace:*"` to the release you want, such as `"^0.7.0"`. Then run `pnpm install` in that folder
+`"workspace:*"` and `"workspace:^"` to the release you want, the same one for every `@supatype`
+package (`npm view @supatype/cli version` prints the latest). Then run `pnpm install` in that folder
 and skip the repo build. Steps in the example's README that say "from the repo root" run in the
 example's folder instead.
 

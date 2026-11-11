@@ -178,23 +178,28 @@ psql &quot;$DATABASE_URL&quot; -c &quot;SELECT * FROM supacache.pg_stat_keyspace
 <pre># pg_keyspace ships in the image but is not loaded by default.
 # SUPATYPE_KEYSPACE_ENABLED=1 adds it to shared_preload_libraries
 # and creates the extension in POSTGRES_DB on first start.
+# From 17.2.13, SUPATYPE_KEYSPACE_PASSWORD makes RESP require AUTH
+# and sets the credential `supatype` to it on every start.
 docker run -d \
   --name supatype-postgres \
   -e POSTGRES_PASSWORD=your-password \
   -e SUPATYPE_KEYSPACE_ENABLED=1 \
+  -e SUPATYPE_KEYSPACE_PASSWORD="$KEYSPACE_PASSWORD" \
   -e SUPATYPE_KEYSPACE_DURABILITY=ephemeral \
   -e SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES='acme:=durable' \
   -p 5432:5432 \
   -p 127.0.0.1:6379:6379 \
   supatype/postgres:17-latest
 
-redis-cli -p 6379 PING                     # PONG
+redis-cli --user supatype -a "$KEYSPACE_PASSWORD" -p 6379 PING   # PONG
+redis-cli -p 6379 PING                     # NOAUTH Authentication required.
 
-# RESP asks for no password until you set one, so the port above
-# listens on this machine only. Before you open it up:
-#   SELECT supacache.set_credential('app', 'secret', 'app_role', 'app');</pre></div>
+# Without the password, RESP answers every client, and before 17.2.13
+# a client with no password could still list keys and FLUSHALL, so
+# the port above listens on this machine only.</pre></div>
+    <p>To keep the password out of the container's configuration, mount it as a file and name it with <code>SUPATYPE_KEYSPACE_PASSWORD_FILE</code> instead, as <code>POSTGRES_PASSWORD_FILE</code> works. Set one or the other: with both, or with a file that is empty, the container stops at start. To rotate a password given as a file, rewrite the file and run <code>SELECT pg_reload_conf();</code>. The new password works at once and the old one stops working, with no restart. Clients such as the Supatype server read their password when they start, so restart them with the new one.</p>
     <h2 id="with-supatype">With Supatype</h2>
-    <p>Every Supatype project runs on this image, with migrations, access rules, an API, a typed client and Studio generated from your TypeScript types. <a href="/docs/#local-dev">Run it locally</a> in a few commands. The full reference is the extension's <a href="https://github.com/supatype/postgres/blob/develop/extensions/pg_keyspace/README.md">README</a>.</p>
+    <p>Every Supatype project runs on this image, with migrations, access rules, an API, a typed client and Studio generated from your TypeScript types. <a href="/docs/#local-dev">Run it locally</a> in a few commands. On 17.2.13 and later the CLI generates a keyspace password for each project into <code>.env</code> as <code>SUPATYPE_KEYSPACE_PASSWORD</code> and gives it to the database, the server and Kong, so nothing else can read or flush the cache. The full reference is the extension's <a href="https://github.com/supatype/postgres/blob/develop/extensions/pg_keyspace/README.md">README</a>.</p>
 
     <nav class="pn" aria-label="More pages">
       <a href="/postgres.html"><small>PREVIOUS</small><span>Postgres</span></a>

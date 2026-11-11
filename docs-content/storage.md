@@ -41,7 +41,7 @@ export type Attachments = Bucket<"attachments", {
 | `maxSize` | Largest file accepted, written as `"500KB"`, `"20MB"` or `"1GB"`. Units are B, KB, MB and GB, counted in 1024s. Anything else fails the push. |
 | `accept` | Content types the bucket takes. Exact types such as `"image/png"`, or a wildcard such as `"image/*"`. Leave it out to accept any type. |
 | `access` | The `read`, `create`, `update` and `delete` rules, covered [below](#access). Any other key fails the push. |
-| `s3BucketPolicy` | A raw S3 bucket policy as a JSON string, applied to the object store bucket in place of the default. It needs an S3 bucket per bucket, so [single-bucket mode](#own-bucket) never applies it: there one policy would cover every bucket at once. |
+| `s3BucketPolicy` | A raw S3 bucket policy as a JSON string, applied to the object store bucket in place of the default. It needs an S3 bucket per bucket, so [single-bucket mode](#own-bucket) never applies it: there one policy would cover every bucket at once. It is applied exactly as written, so its `Resource` names the S3 bucket, which is `S3_BUCKET_PREFIX` then the bucket's id: with the prefix `acme-prod-`, the bucket `avatars` needs `arn:aws:s3:::acme-prod-avatars/*`. |
 
 `supatype push` and `supatype dev` register each bucket and write its settings. Changing `maxSize`, `accept` or `accessMode` and pushing again updates the bucket. Declaring the same bucket id twice with different settings fails the push.
 
@@ -189,8 +189,8 @@ The storage service reads these environment variables. The self-host compose fil
 | `S3_BUCKET_PREFIX` | empty | With `S3_BUCKET` unset, put in front of each bucket's id to name its S3 bucket: `acme-prod-` makes `avatars` the S3 bucket `acme-prod-avatars`. S3 bucket names are global on AWS, so set one there. A prefix or a bucket id that makes no valid S3 bucket name is refused, the prefix at start and the bucket with 400. |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE` | none | Where the bytes are kept. The self-host stack sets them for its SeaweedFS. Running the service yourself, set `S3_REGION` for AWS or `S3_ENDPOINT` for another store; the service refuses to start with neither. Leave both keys blank to use the AWS SDK's own credentials. Path-style addressing is on when there is an endpoint. |
 
-:::caution
-The 1 GB quota applies to self-hosted projects too, because the compose file does not set `STORAGE_QUOTA`. Raise it on the `storage` service if you expect to store more.
+:::note[Self-hosted limits]
+The defaults above are for the storage service run on its own. A self-hosted stack has no plan, so its compose file sets `STORAGE_QUOTA`, `TIER_MAX_UPLOAD_SIZE` and `MAX_UPLOAD_SIZE` to `-1`, which means no limit. Set any of them in `.env`, in bytes, and run `supatype self-host compose up -d` to put a limit back. A bucket's `maxSize` still applies.
 :::
 
 The service reads each upload fully into memory before storing it, so very large files cost memory on the storage container while they upload.
@@ -225,6 +225,8 @@ Set `S3_BUCKET` and the storage service keeps every bucket inside that one S3 bu
 | Another S3-compatible store, such as Cloudflare R2 | `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`. `S3_REGION` defaults to `us-east-1` and path-style addressing is on; set `S3_FORCE_PATH_STYLE=false` if your store wants the bucket in the host name. |
 
 The service refuses to start without either `S3_REGION` or `S3_ENDPOINT`, or with only one of the two keys. Use a separate bucket for development and production.
+
+In a self-hosted stack the storage service runs in a container, where `localhost` is that container. For a store on the same machine, such as a MinIO you run beside the stack, set `S3_ENDPOINT` to an address the container can reach: `http://host.docker.internal:9000` with Docker Desktop on macOS and Windows, or on Linux the host's address on the Docker bridge (usually `http://172.17.0.1:9000`) or its LAN address. Native `supatype dev` runs the service on your machine, so `localhost` works there.
 
 A bucket's `s3BucketPolicy` needs an S3 bucket of its own, so single-bucket mode never applies it. The storage service refuses one with 400 on a bucket made or changed through its API. A bucket `supatype push` creates keeps the policy in its record without applying it, and nothing warns you yet. If you need a policy per bucket, leave `S3_BUCKET` unset so each bucket gets its own S3 bucket, and set `S3_BUCKET_PREFIX` to keep their names unique.
 

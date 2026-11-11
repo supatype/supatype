@@ -96,6 +96,7 @@ makes for it is asserted.
 ## Notes
 
 - Scheme: `supatype-expo-auth` (`app.json`).
-- Metro is configured for the pnpm workspace (`metro.config.js`).
+- Inside the repo, Metro resolves `@supatype/*` from the workspace's sources (`metro.config.js`).
+  Copied out on its own, it uses the packages installed from npm and watches only this folder.
 - Machine-local engine/server binaries: `supatype.local.config.ts.example`.
 - This example is private and not published to npm.

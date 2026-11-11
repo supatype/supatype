@@ -144,7 +144,7 @@ genuinely cannot express.
 Two things are still absent:
 
 - the `plugin-seo` composite, because schema-side plugin registration needs a spike first
-- a publish button: the client can publish since 0.7.0
+- a publish button: the client can publish
   ([drafts](https://www.supatype.com/docs/client.html#drafts)), but this example still publishes
   in Studio
 

@@ -282,6 +282,8 @@ $ supatype init
 
 `init` installs dependencies and writes generated secrets and API keys to `.env`. Set your public URLs there.
 
+> **CACHE PASSWORD:** When the cache runs inside Postgres, as it does by default, `supatype/postgres` 17.2.13 and later require a password for it, `SUPATYPE_KEYSPACE_PASSWORD` in `.env`. Every `supatype self-host compose` command writes a random one there when it is missing, and never replaces one you set. The compose file requires it, so `docker compose` run by hand without it stops with `SUPATYPE_KEYSPACE_PASSWORD is missing from .env`. To change it, put the new one in `.env` and run `supatype self-host compose up -d`. Password files, rotation with no restart and a second keyspace for the response cache are in [self-hosting configuration](https://www.supatype.com/docs/self-hosting/configuration.html#cache).
+
 #### 3. Start Compose
 
 ```sh
@@ -295,7 +297,7 @@ $ supatype push
 
 > **ALLOWED ORIGINS:** Browsers may call the API from the origin of `SITE_URL` and from the origins in `api.corsOrigins` (`supatype.config.ts`) or `SUPATYPE_CORS_ALLOW_ORIGINS` (`.env`). Any other origin is refused. Owners, admins and developers can change the list in Studio, on the Settings page's CORS tab: a saved list is kept in the database and replaces the default until it is reset. The site URL stays allowed whatever is saved. `*` allows every origin, and only when you write it.
 
-> **PORTS:** Only the gateway is published on every interface, at `SUPATYPE_KONG_PORT`, or on ports 80 and 443 once HTTPS is on. Postgres (`SUPATYPE_DB_PORT`, default 5432), the API server (`SUPATYPE_SERVER_PORT`, default 9999) and SeaweedFS (`SUPATYPE_SEAWEEDFS_PORT`, default 8333) bind `127.0.0.1`, so they are reachable from the server itself and nowhere else. To reach them from other machines, set `SUPATYPE_PUBLISH_ADDRESS=0.0.0.0` (or one interface's address) in `.env` and run `supatype self-host compose up -d`. Put a firewall in front first. `supatype init` lists these variables, commented out, in `.env`.
+> **PORTS:** Only the gateway is published on every interface, at `SUPATYPE_KONG_PORT`, or on ports 80 and 443 once HTTPS is on. Postgres (`SUPATYPE_DB_PORT`, default 5432), the API server (`SUPATYPE_SERVER_PORT`, default 9999) and SeaweedFS (`SUPATYPE_SEAWEEDFS_PORT`, default 8333, when the stack runs one) bind `127.0.0.1`, so they are reachable from the server itself and nowhere else. To reach them from other machines, set `SUPATYPE_PUBLISH_ADDRESS=0.0.0.0` (or one interface's address) in `.env` and run `supatype self-host compose up -d`. Put a firewall in front first. `supatype init` lists these variables, commented out, in `.env`.
 
 Images come from Docker Hub, and each CLI release runs the exact images it was tested with, never `:latest`: `supatype/studio`, `supatype/storage`, `supatype/realtime`, `supatype/functions-worker` and `supatype/control-plane` at the CLI's own version, and `supatype/schema-engine`, `supatype/server` and `supatype/postgres` at the releases pinned for it. The stack also runs `postgrest/postgrest`, `kong` and SeaweedFS, and Valkey when the cache does not run inside Postgres. Upgrading the CLI moves them; `supatype update` pulls the new tags. To run another image, set its `SUPATYPE_*_IMAGE` in `.env` (for example `SUPATYPE_SERVER_IMAGE=supatype/server:v2.3.0`), or pin `versions.engine`, `versions.server` or `versions.postgres` in `supatype.config.ts`.
 
@@ -1122,6 +1124,19 @@ Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, a
 | `@supatype/react-native` | `createNativeClient`, `secureStoreAdapter`, `asyncStorageAdapter`, `openOAuth`, `createAuthUrlListener` |
 | `@supatype/ssr` | `createServerClient`, and `GET` from `@supatype/ssr/next` |
 
+`supatype init` adds `@supatype/client` to your app, and `@supatype/ssr` as well in a Next.js app. Add the binding for your framework yourself, on the same release as `@supatype/client`:
+
+```sh
+$ npm install @supatype/react     # React and Next.js
+$ npm install @supatype/vue
+$ npm install @supatype/svelte
+$ npm install @supatype/solid
+$ npm install @supatype/react-native @supatype/react   # React Native, then:
+$ npx expo install expo-secure-store expo-web-browser expo-linking
+```
+
+With pnpm, Yarn or Bun, use that tool's add command instead.
+
 Every example below imports the client from `src/supatype.ts`, created once as shown in [Client: Create the client](https://www.supatype.com/docs/client.html#setup). With Vite, read the names `supatype dev` writes for development and `supatype build` sets for a production build:
 
 `src/supatype.ts`:
@@ -1134,6 +1149,8 @@ export const supatype = createClient({
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
+
+A build made without the values, such as a plain `vite build` that Supatype serves, reads them from `/supatype-env.js`, so `index.html` needs `<script src="/supatype-env.js" vite-ignore></script>` in its head. `init` adds it only to an `index.html` it writes itself; in a Vite app that already had one, add the tag yourself, as [Deploy your frontend: Supatype hosts it](https://www.supatype.com/docs/deploying-your-frontend.html#supatype-hosts) shows.
 
 Sign-in screens are covered on [Auth: Pre-built UI](https://www.supatype.com/docs/auth.html#ui), and the subscription hooks on [Realtime: Framework hooks](https://www.supatype.com/docs/realtime.html#hooks). This page does not repeat them.
 
@@ -1416,6 +1433,54 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 The route needs no segment config, and must not export `dynamic`: Next 16 with `cacheComponents` on, as a new create-next-app has it, refuses that with a 500. `GET` reads the request, which is what makes Next 14 and Next 16 with `cacheComponents` render it per request instead of prerendering it with the build machine's values; Next 15, and Next 16 without `cacheComponents`, render every `GET` per request anyway. A route written by `init` 0.9.1 has the line `export const dynamic = "force-dynamic"`. `supatype generate`, which the project's `prepare` script runs on every `npm install`, replaces that route with the current one while it is still as `init` wrote it, and prints `updated`; a route changed since is left alone, with a warning to delete the line. Upgrade `@supatype/ssr` with the CLI: the route needs 0.9.2 or later. The route answers `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` with `Cache-Control: no-cache`, as the Supatype server's own `/supatype-env.js` does. It answers 404 only when `SUPATYPE_PUBLIC_ENV` is `false`, and, when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset or `SUPATYPE_ANON_KEY` holds a service role key, 200, not cached, with a script that sets only `error` to a reason naming every variable to fix, which the browser client throws on its first request. The browser client, created with `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY` left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in [Deploy your frontend: Next.js](https://www.supatype.com/docs/deploying-your-frontend.html#nextjs).
 
 In a Pages Router app, `init` writes nothing and prints the steps instead: create the same route file under `app/supatype-env.js/`, beside `pages/`; in `pages/_document.tsx`, import `Script` from `next/script` and put the same `<Script>` tag inside `<Head>`; then add `@supatype/ssr` to the app's dependencies. For a static export (`output: "export"` in `next.config`), which cannot serve a route, `init` writes neither piece and prints `supatype build -- next build`, or Supatype hosting, whose server answers `/supatype-env.js` itself.
+
+#### The browser client
+
+Create the browser client once, from the generated file, for client components to import. Pass it the two `NEXT_PUBLIC_` names with no default. In `next dev` they come from `.env.development.local`. In a production build they are unset, so the client reads what `/supatype-env.js` set; a default would be fixed into the build and win over the route's values.
+
+`lib/supatype.ts`:
+
+```ts
+import { createClient } from "../supatype/generated/client"
+
+export const supatype = createClient({
+  url: process.env.NEXT_PUBLIC_SUPATYPE_URL,
+  anonKey: process.env.NEXT_PUBLIC_SUPATYPE_ANON_KEY,
+})
+```
+
+When the app is in `src/app/`, put it at `src/lib/supatype.ts` and import `"../../supatype/generated/client"`. The root layout is a Server Component, so give the provider a client component of its own, and wrap `{children}` in the layout's `<body>` with it, after the `<Script>` tag:
+
+`app/providers.tsx`:
+
+```tsx
+"use client"
+
+import type { ReactNode } from "react"
+import { SupatypeProvider } from "@supatype/react"
+import { supatype } from "@/lib/supatype"
+
+export function Providers({ children }: { children: ReactNode }) {
+  return <SupatypeProvider client={supatype}>{children}</SupatypeProvider>
+}
+```
+
+`app/posts/post-list.tsx`:
+
+```tsx
+"use client"
+
+import { useQuery } from "@supatype/react"
+
+export function PostList() {
+  const { data: posts, loading, error } = useQuery("post", { select: "id, title", limit: 20 })
+  if (loading) return <p>Loading</p>
+  if (error) return <p>{error.message}</p>
+  return <ul>{posts?.map((post) => <li key={post.id}>{post.title}</li>)}</ul>
+}
+```
+
+Every hook in the [React](https://www.supatype.com/docs/frameworks.html#react) section works the same way in a client component. The session it signs in is the one the server client below reads from the cookie.
 
 #### Server components, route handlers and middleware
 
@@ -2018,6 +2083,8 @@ Authentication > SSO lists the providers with their entity IDs, domains and stat
 
 Only owners and admins can change providers and verify domains; on a self-hosted project that means admins. The server enforces it, not just the page. Developers and viewers see the page read-only, with `Only owners and admins can change SSO providers.` Editors have no SSO page. See [Studio roles](https://www.supatype.com/docs/studio-roles.html). The Users list marks each user who signed in through SAML with `sso:` and their provider's name, for example `sso:acme`. A provider that has been removed, or was added without a name, shows the first block of its ID instead.
 
+While SAML is on, Studio's own sign-in page offers **Sign in with SSO**: an admin enters their work email and goes to the identity provider for its domain, then comes back to Studio, never to the app's site URL. Studio still lets in only people with a [Studio role](https://www.supatype.com/docs/studio-roles.html). With `auth.email.enabled: false`, the setting for a project that signs in only through SSO, Studio's email and password form is hidden, leaving single sign-on and any OAuth providers. The first SSO sign-in to an existing account removes its password, so admins of an SSO project sign in to Studio this way too.
+
 ### The admin API
 
 An app that lets its own customers set up SSO calls the auth server's admin API from its server, with the service role key. Never call it from the browser: the service role key passes every access rule.
@@ -2076,7 +2143,7 @@ export type Attachments = Bucket<"attachments", {
 | `maxSize` | Largest file accepted, written as `"500KB"`, `"20MB"` or `"1GB"`. Units are B, KB, MB and GB, counted in 1024s. Anything else fails the push. |
 | `accept` | Content types the bucket takes. Exact types such as `"image/png"`, or a wildcard such as `"image/*"`. Leave it out to accept any type. |
 | `access` | The `read`, `create`, `update` and `delete` rules, covered [below](https://www.supatype.com/docs/storage.html#access). Any other key fails the push. |
-| `s3BucketPolicy` | A raw S3 bucket policy as a JSON string, applied to the object store bucket in place of the default. It needs an S3 bucket per bucket, so [single-bucket mode](https://www.supatype.com/docs/storage.html#own-bucket) never applies it: there one policy would cover every bucket at once. |
+| `s3BucketPolicy` | A raw S3 bucket policy as a JSON string, applied to the object store bucket in place of the default. It needs an S3 bucket per bucket, so [single-bucket mode](https://www.supatype.com/docs/storage.html#own-bucket) never applies it: there one policy would cover every bucket at once. It is applied exactly as written, so its `Resource` names the S3 bucket, which is `S3_BUCKET_PREFIX` then the bucket's id: with the prefix `acme-prod-`, the bucket `avatars` needs `arn:aws:s3:::acme-prod-avatars/*`. |
 
 `supatype push` and `supatype dev` register each bucket and write its settings. Changing `maxSize`, `accept` or `accessMode` and pushing again updates the bucket. Declaring the same bucket id twice with different settings fails the push.
 
@@ -2232,7 +2299,7 @@ The storage service reads these environment variables. The self-host compose fil
 | `S3_BUCKET_PREFIX` | empty | With `S3_BUCKET` unset, put in front of each bucket's id to name its S3 bucket: `acme-prod-` makes `avatars` the S3 bucket `acme-prod-avatars`. S3 bucket names are global on AWS, so set one there. A prefix or a bucket id that makes no valid S3 bucket name is refused, the prefix at start and the bucket with 400. |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE` | none | Where the bytes are kept. The self-host stack sets them for its SeaweedFS. Running the service yourself, set `S3_REGION` for AWS or `S3_ENDPOINT` for another store; the service refuses to start with neither. Leave both keys blank to use the AWS SDK's own credentials. Path-style addressing is on when there is an endpoint. |
 
-> **WARNING:** The 1 GB quota applies to self-hosted projects too, because the compose file does not set `STORAGE_QUOTA`. Raise it on the `storage` service if you expect to store more.
+> **SELF-HOSTED LIMITS:** The defaults above are for the storage service run on its own. A self-hosted stack has no plan, so its compose file sets `STORAGE_QUOTA`, `TIER_MAX_UPLOAD_SIZE` and `MAX_UPLOAD_SIZE` to `-1`, which means no limit. Set any of them in `.env`, in bytes, and run `supatype self-host compose up -d` to put a limit back. A bucket's `maxSize` still applies.
 
 The service reads each upload fully into memory before storing it, so very large files cost memory on the storage container while they upload.
 
@@ -2264,6 +2331,8 @@ Set `S3_BUCKET` and the storage service keeps every bucket inside that one S3 bu
 | Another S3-compatible store, such as Cloudflare R2 | `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`. `S3_REGION` defaults to `us-east-1` and path-style addressing is on; set `S3_FORCE_PATH_STYLE=false` if your store wants the bucket in the host name. |
 
 The service refuses to start without either `S3_REGION` or `S3_ENDPOINT`, or with only one of the two keys. Use a separate bucket for development and production.
+
+In a self-hosted stack the storage service runs in a container, where `localhost` is that container. For a store on the same machine, such as a MinIO you run beside the stack, set `S3_ENDPOINT` to an address the container can reach: `http://host.docker.internal:9000` with Docker Desktop on macOS and Windows, or on Linux the host's address on the Docker bridge (usually `http://172.17.0.1:9000`) or its LAN address. Native `supatype dev` runs the service on your machine, so `localhost` works there.
 
 A bucket's `s3BucketPolicy` needs an S3 bucket of its own, so single-bucket mode never applies it. The storage service refuses one with 400 on a bucket made or changed through its API. A bucket `supatype push` creates keeps the policy in its record without applying it, and nothing warns you yet. If you need a policy per bucket, leave `S3_BUCKET` unset so each bucket gets its own S3 bucket, and set `S3_BUCKET_PREFIX` to keep their names unique.
 
@@ -2360,10 +2429,10 @@ const channel = supatype.realtime
   .on("postgres_changes", { event: "INSERT", table: "comment", filter: `post_id=eq.${postId}` }, (change) => {
     showComment(change.new)
   })
-  .subscribe((status) => console.log(status))
+  .subscribe((status, err) => console.log(status, err?.message))
 ```
 
-Status is `SUBSCRIBING`, `SUBSCRIBED`, `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED`. `CHANNEL_ERROR` means the server refused a request on the socket, such as a join. `TIMED_OUT` means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass `table` explicitly. Without it the channel name is read as `schema:table`.
+Status is `SUBSCRIBING`, `SUBSCRIBED`, `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED`. `CHANNEL_ERROR` means the server refused a request on the socket, such as a `postgres_changes` listener for a table that does not exist, for a view, which has no changes of its own, or for a table the subscriber's role cannot read, such as `auth.users` with an anon or signed-in key: every change would be withheld from it. A channel used only for broadcast and presence is never checked against a table, whatever its name. With `CHANNEL_ERROR` the callback's second argument, `err`, is an `Error` whose message is the server's reason and names the table; it is undefined with every other status. A join hears only changes committed after it was taken. `TIMED_OUT` means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass `table` explicitly. Without it the channel name is read as `schema:table`.
 
 A channel carries one table subscription. If you call `.on("postgres_changes", ...)` more than once on a channel, the first call's table, event and filter are what the server registers. Use one channel per table.
 
@@ -2396,7 +2465,7 @@ room.broadcast("move", { x: 120, y: 48 })
 
 ### Framework hooks
 
-`@supatype/react` exports `useSubscription`. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing.
+`@supatype/react` exports `useSubscription`. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing. It returns `status`, and `error`, the server's reason while the status is `CHANNEL_ERROR` and null otherwise.
 
 `tsx`:
 
@@ -3449,7 +3518,7 @@ $ curl https://example.com/supatype-env.js
 window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."};
 ```
 
-`supatype init` puts the tag in a static app's `index.html`, in the head, so it runs before the app's own script. For an app made another way, add it yourself, before the app's own script:
+`supatype init` puts the tag in the head of the `index.html` it writes for a static app, so it runs before the app's own script. It never changes an `index.html` that is already there, such as the one in a Vite app made before `init` ran: it prints `skipped index.html (already exists)` and adds no tag. Until you add the tag, a build made without the values throws `MissingClientValuesError` on its first request. For such an app, or one made another way, add it yourself, before the app's own script:
 
 `index.html`:
 
@@ -3500,6 +3569,28 @@ A static export (`output: "export"` in `next.config`) has no server to run the r
 A Pages Router app gets nothing written by `init`, which prints these steps instead: create the same route file under `app/supatype-env.js/`, beside `pages/`; in `pages/_document.tsx`, import `Script` from `next/script` and put `<Script src="/supatype-env.js" strategy="beforeInteractive" />` inside `<Head>`; add `@supatype/ssr` to the app's dependencies, and set the two variables where it runs.
 
 > **IF THE KEY IS MISSING:** The build still succeeds, and the page renders. With `SUPATYPE_ANON_KEY` or `SUPATYPE_URL` unset, `/supatype-env.js` still answers 200, not cached, but sets only the reason in place of the values: `window.__SUPATYPE_ENV__ = {"error":"public env unavailable: SUPATYPE_ANON_KEY is not set on this server"};`. With both unset it names both, a line each, the key first. It does the same when `SUPATYPE_ANON_KEY` holds a service role key, and answers 404 only when `SUPATYPE_PUBLIC_ENV` is off. A browser runs no script answered with an error status and tells the page nothing of why, so the reason travels in the script. The browser client's first request then throws `Supatype client has no API address and anon key. createClient was given none, and https://your-app.example.com/supatype-env.js set no API address and anon key, giving the server's reason instead:`, followed by that reason and `Fix that in the environment of the server that answers it`, then the route and the build-time variables. A server client given neither throws on its first request: `Supatype client has no API address and anon key. It was given none, and it is running on a server, where there is no page to read them from.`, followed by `Set SUPATYPE_URL and SUPATYPE_ANON_KEY in the server's environment`.
+
+### Expo
+
+An Expo Router app has no `index.html`. Its web page is rendered from `app/+html.tsx`, or `src/app/+html.tsx` when the routes are in `src/app`. `supatype init` puts the script first in that file's `<head>`, and when the app has no such file, makes it from the template the installed Expo ships, as `npx expo customize +html.tsx` does. A web build then reads both values from the server that hosts it when the page loads, so `npx expo export --platform web` needs neither. The tag is left out of development pages: `expo start --web` serves no such file, and a development build reads its values from `.env.development.local`. In an app `init` did not set up, add the tag yourself:
+
+`app/+html.tsx`:
+
+```tsx
+<head>
+  {__DEV__ ? null : <script src="/supatype-env.js" />}
+  <meta charSet="utf-8" />
+```
+
+Expo renders `+html.tsx` only when `web.output` in `app.json` is `"static"` or `"server"`, as a new app's is. With `"single"`, put `<script src="/supatype-env.js"></script>` in the head of `public/index.html` instead. A `"static"` export is plain files: have Supatype host them with `supatype app add --static ./dist`. A `"server"` export, the default from SDK 58, renders each page in a Node server (`npx expo serve`); the Supatype server in front of it answers `/supatype-env.js` itself, whatever the app mode. On any other host, build with the values instead.
+
+A native build, for iOS or Android and on EAS, has no page, so it takes its values at build time under `EXPO_PUBLIC_SUPATYPE_URL` and `EXPO_PUBLIC_SUPATYPE_ANON_KEY`. `expo export` and EAS builds run in production mode, which never reads `.env.development.local`, where `supatype dev` and `keys` put the local stack's values. Give them your deployment's: on a linked machine, build through `supatype build`; for an EAS build, set the two names in the project's EAS environment variables, with the values `supatype keys --print frontend --env production` prints.
+
+```sh
+$ supatype build -- npx expo export --platform android
+```
+
+An Expo page with neither value makes the client's first request throw, naming `app/+html.tsx` and the build-time names rather than `index.html`.
 
 ### Vercel
 
@@ -3789,7 +3880,8 @@ POSTGRES_DB=my-blog
 AUTHENTICATOR_PASSWORD=CHANGE_ME
 SUPATYPE_SQL_EDITOR_PASSWORD=CHANGE_ME
 SUPATYPE_CONTROL_PLANE_SECRET=CHANGE_ME
-JWT_SECRET=CHANGE_ME            # at least 32 characters
+SUPATYPE_KEYSPACE_PASSWORD=CHANGE_ME   # the cache's password, from supatype/postgres 17.2.13
+JWT_SECRET=CHANGE_ME           # at least 32 characters
 # Leave both keys blank. compose up mints them from JWT_SECRET.
 ANON_KEY=
 SERVICE_ROLE_KEY=
@@ -4381,26 +4473,32 @@ pg_keyspace ships in the [supatype/postgres](https://www.supatype.com/postgres.h
 # pg_keyspace ships in the image but is not loaded by default.
 # SUPATYPE_KEYSPACE_ENABLED=1 adds it to shared_preload_libraries
 # and creates the extension in POSTGRES_DB on first start.
+# From 17.2.13, SUPATYPE_KEYSPACE_PASSWORD makes RESP require AUTH
+# and sets the credential `supatype` to it on every start.
 docker run -d \
   --name supatype-postgres \
   -e POSTGRES_PASSWORD=your-password \
   -e SUPATYPE_KEYSPACE_ENABLED=1 \
+  -e SUPATYPE_KEYSPACE_PASSWORD="$KEYSPACE_PASSWORD" \
   -e SUPATYPE_KEYSPACE_DURABILITY=ephemeral \
   -e SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES='acme:=durable' \
   -p 5432:5432 \
   -p 127.0.0.1:6379:6379 \
   supatype/postgres:17-latest
 
-redis-cli -p 6379 PING                     # PONG
+redis-cli --user supatype -a "$KEYSPACE_PASSWORD" -p 6379 PING   # PONG
+redis-cli -p 6379 PING                     # NOAUTH Authentication required.
 
-# RESP asks for no password until you set one, so the port above
-# listens on this machine only. Before you open it up:
-#   SELECT supacache.set_credential('app', 'secret', 'app_role', 'app');
+# Without the password, RESP answers every client, and before 17.2.13
+# a client with no password could still list keys and FLUSHALL, so
+# the port above listens on this machine only.
 ```
+
+To keep the password out of the container's configuration, mount it as a file and name it with `SUPATYPE_KEYSPACE_PASSWORD_FILE` instead, as `POSTGRES_PASSWORD_FILE` works. Set one or the other: with both, or with a file that is empty, the container stops at start. To rotate a password given as a file, rewrite the file and run `SELECT pg_reload_conf();`. The new password works at once and the old one stops working, with no restart. Clients such as the Supatype server read their password when they start, so restart them with the new one.
 
 ### With Supatype
 
-Every Supatype project runs on this image, with migrations, access rules, an API, a typed client and Studio generated from your TypeScript types. [Run it locally](https://www.supatype.com/docs/#local-dev) in a few commands. The full reference is the extension's [README](https://github.com/supatype/postgres/blob/develop/extensions/pg_keyspace/README.md).
+Every Supatype project runs on this image, with migrations, access rules, an API, a typed client and Studio generated from your TypeScript types. [Run it locally](https://www.supatype.com/docs/#local-dev) in a few commands. On 17.2.13 and later the CLI generates a keyspace password for each project into `.env` as `SUPATYPE_KEYSPACE_PASSWORD` and gives it to the database, the server and Kong, so nothing else can read or flush the cache. The full reference is the extension's [README](https://github.com/supatype/postgres/blob/develop/extensions/pg_keyspace/README.md).
 
 ## pg_topics
 

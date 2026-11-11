@@ -24,6 +24,19 @@ Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, a
 | `@supatype/react-native` | `createNativeClient`, `secureStoreAdapter`, `asyncStorageAdapter`, `openOAuth`, `createAuthUrlListener` |
 | `@supatype/ssr` | `createServerClient`, and `GET` from `@supatype/ssr/next` |
 
+`supatype init` adds `@supatype/client` to your app, and `@supatype/ssr` as well in a Next.js app. Add the binding for your framework yourself, on the same release as `@supatype/client`:
+
+```sh
+$ npm install @supatype/react     # React and Next.js
+$ npm install @supatype/vue
+$ npm install @supatype/svelte
+$ npm install @supatype/solid
+$ npm install @supatype/react-native @supatype/react   # React Native, then:
+$ npx expo install expo-secure-store expo-web-browser expo-linking
+```
+
+With pnpm, Yarn or Bun, use that tool's add command instead.
+
 Every example below imports the client from `src/supatype.ts`, created once as shown in [Client: Create the client](/docs/client.html#setup). With Vite, read the names `supatype dev` writes for development and `supatype build` sets for a production build:
 
 ```ts title="src/supatype.ts"
@@ -34,6 +47,8 @@ export const supatype = createClient({
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
+
+A build made without the values, such as a plain `vite build` that Supatype serves, reads them from `/supatype-env.js`, so `index.html` needs `<script src="/supatype-env.js" vite-ignore></script>` in its head. `init` adds it only to an `index.html` it writes itself; in a Vite app that already had one, add the tag yourself, as [Deploy your frontend: Supatype hosts it](/docs/deploying-your-frontend.html#supatype-hosts) shows.
 
 Sign-in screens are covered on [Auth: Pre-built UI](/docs/auth.html#ui), and the subscription hooks on [Realtime: Framework hooks](/docs/realtime.html#hooks). This page does not repeat them.
 
@@ -294,6 +309,48 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 The route needs no segment config, and must not export `dynamic`: Next 16 with `cacheComponents` on, as a new create-next-app has it, refuses that with a 500. `GET` reads the request, which is what makes Next 14 and Next 16 with `cacheComponents` render it per request instead of prerendering it with the build machine's values; Next 15, and Next 16 without `cacheComponents`, render every `GET` per request anyway. A route written by `init` 0.9.1 has the line `export const dynamic = "force-dynamic"`. `supatype generate`, which the project's `prepare` script runs on every `npm install`, replaces that route with the current one while it is still as `init` wrote it, and prints `updated`; a route changed since is left alone, with a warning to delete the line. Upgrade `@supatype/ssr` with the CLI: the route needs 0.9.2 or later. The route answers `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` with `Cache-Control: no-cache`, as the Supatype server's own `/supatype-env.js` does. It answers 404 only when `SUPATYPE_PUBLIC_ENV` is `false`, and, when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset or `SUPATYPE_ANON_KEY` holds a service role key, 200, not cached, with a script that sets only `error` to a reason naming every variable to fix, which the browser client throws on its first request. The browser client, created with `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY` left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in [Deploy your frontend: Next.js](/docs/deploying-your-frontend.html#nextjs).
 
 In a Pages Router app, `init` writes nothing and prints the steps instead: create the same route file under `app/supatype-env.js/`, beside `pages/`; in `pages/_document.tsx`, import `Script` from `next/script` and put the same `<Script>` tag inside `<Head>`; then add `@supatype/ssr` to the app's dependencies. For a static export (`output: "export"` in `next.config`), which cannot serve a route, `init` writes neither piece and prints `supatype build -- next build`, or Supatype hosting, whose server answers `/supatype-env.js` itself.
+
+<h3 id="nextjs-browser">The browser client</h3>
+
+Create the browser client once, from the generated file, for client components to import. Pass it the two `NEXT_PUBLIC_` names with no default. In `next dev` they come from `.env.development.local`. In a production build they are unset, so the client reads what `/supatype-env.js` set; a default would be fixed into the build and win over the route's values.
+
+```ts title="lib/supatype.ts"
+import { createClient } from "../supatype/generated/client"
+
+export const supatype = createClient({
+  url: process.env.NEXT_PUBLIC_SUPATYPE_URL,
+  anonKey: process.env.NEXT_PUBLIC_SUPATYPE_ANON_KEY,
+})
+```
+
+When the app is in `src/app/`, put it at `src/lib/supatype.ts` and import `"../../supatype/generated/client"`. The root layout is a Server Component, so give the provider a client component of its own, and wrap `{children}` in the layout's `<body>` with it, after the `<Script>` tag:
+
+```tsx title="app/providers.tsx"
+"use client"
+
+import type { ReactNode } from "react"
+import { SupatypeProvider } from "@supatype/react"
+import { supatype } from "@/lib/supatype"
+
+export function Providers({ children }: { children: ReactNode }) {
+  return <SupatypeProvider client={supatype}>{children}</SupatypeProvider>
+}
+```
+
+```tsx title="app/posts/post-list.tsx"
+"use client"
+
+import { useQuery } from "@supatype/react"
+
+export function PostList() {
+  const { data: posts, loading, error } = useQuery("post", { select: "id, title", limit: 20 })
+  if (loading) return <p>Loading</p>
+  if (error) return <p>{error.message}</p>
+  return <ul>{posts?.map((post) => <li key={post.id}>{post.title}</li>)}</ul>
+}
+```
+
+Every hook in the [React](#react) section works the same way in a client component. The session it signs in is the one the server client below reads from the cookie.
 
 <h3 id="nextjs-server">Server components, route handlers and middleware</h3>
 

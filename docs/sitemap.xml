@@ -6,7 +6,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/</loc>
-    <lastmod>2026-11-09</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/schema.html</loc>
@@ -18,7 +18,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/frameworks.html</loc>
-    <lastmod>2026-11-09</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/auth.html</loc>
@@ -26,15 +26,15 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/sso.html</loc>
-    <lastmod>2026-11-07</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/storage.html</loc>
-    <lastmod>2026-11-09</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/realtime.html</loc>
-    <lastmod>2026-11-07</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/functions.html</loc>
@@ -42,7 +42,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/seeding.html</loc>
-    <lastmod>2026-11-09</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/studio.html</loc>
@@ -54,11 +54,11 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/deploying-your-frontend.html</loc>
-    <lastmod>2026-11-07</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/deploy-vm-github-actions.html</loc>
-    <lastmod>2026-11-09</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/from-supabase.html</loc>
@@ -74,7 +74,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/postgres/pg-keyspace.html</loc>
-    <lastmod>2026-11-07</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/postgres/pg-topics.html</loc>
@@ -90,7 +90,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/cli.html</loc>
-    <lastmod>2026-11-09</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/licensing.html</loc>
@@ -110,6 +110,6 @@
   </url>
   <url>
     <loc>https://www.supatype.com/llms-full.txt</loc>
-    <lastmod>2026-11-09</lastmod>
+    <lastmod>2026-11-10</lastmod>
   </url>
 </urlset>

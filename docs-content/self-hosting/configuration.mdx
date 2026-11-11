@@ -41,6 +41,7 @@ one that is missing, for example `POSTGRES_PASSWORD is missing from .env`.
 | `ANON_KEY` | None | The public API key, a JWT signed with `JWT_SECRET`. `supatype self-host compose up` mints it when it is blank |
 | `SERVICE_ROLE_KEY` | None | The admin API key, minted the same way. Required by the control plane |
 | `SUPATYPE_CONTROL_PLANE_SECRET` | Generated | Shared by the API server and the control plane only. Every `self-host compose` command writes one into `.env` when it is missing |
+| `SUPATYPE_KEYSPACE_PASSWORD` | Generated | The cache's password, required when the cache runs inside Postgres on `supatype/postgres` 17.2.13 or later. Generated the same way. See [Cache](#cache) |
 
 Access tokens expire after 3600 seconds. The generated file fixes this value; `.env` does not
 change it.
@@ -172,6 +173,82 @@ seconds, and replaces the default until someone presses **Reset to default**. Vi
 Before this, a standalone server with no `SUPATYPE_CORS_ALLOW_ORIGINS` allowed every origin. If a
 production web app on another origin calls your API, add its origin before upgrading.
 
+## Cache
+
+The API server's response cache, and the gateway's certificates once HTTPS is on, are kept in a
+keyspace that speaks the Redis protocol (RESP). It is
+[pg_keyspace](/postgres/pg-keyspace.html) inside the `db` container, unless `cache.provider` in
+`supatype.config.ts` is `"valkey"`, the database is external, or the Postgres image is older than
+17.2.9: then the stack runs a Valkey service instead.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUPATYPE_KEYSPACE_PASSWORD` | Generated | **Required** when the cache is pg_keyspace on `supatype/postgres` 17.2.13 or later. The password of the keyspace user `supatype`, handed to the `db` and `server` services, and to `kong` when HTTPS is on |
+| `SUPATYPE_KEYSPACE_PASSWORD_FILE` | None | A file on the host holding that password, in place of the variable. Mounted into `db` and `server`; not with HTTPS on. See [Passwords from files](#passwords-from-files) |
+| `SUPATYPE_PROJECT_KEYSPACE_ADDR` | The stack's keyspace | `host:port` of a second keyspace for the response cache alone. Unset, the response cache uses the stack's keyspace |
+| `SUPATYPE_PROJECT_KEYSPACE_USERNAME` | `supatype` | The user the server logs in to that second keyspace as |
+| `SUPATYPE_PROJECT_KEYSPACE_PASSWORD` | None | The second keyspace's password. Unset, the server sends it no password. It never falls back to `SUPATYPE_KEYSPACE_PASSWORD`, and the server refuses to start when the two are the same |
+
+`supatype init` writes a random `SUPATYPE_KEYSPACE_PASSWORD` into `.env`. Every `self-host compose`
+command, and `supatype dev`, writes one when it is missing, and never replaces one that is there.
+With the password in a file instead, none is written: see [Passwords from files](#passwords-from-files).
+The compose file requires it, so `docker compose` run by hand without it stops with
+`SUPATYPE_KEYSPACE_PASSWORD is missing from .env`. A Valkey service has no password: it is reachable on the compose network only.
+
+To change the password, put the new one in `.env` and run `supatype self-host compose up -d`.
+Compose recreates every service that receives it, so each starts with the new password. The cache
+starts empty, which costs nothing but a few cache misses; the gateway's certificates are kept.
+
+The three project keyspace variables are for a deployment that keeps cached responses in a keyspace
+of their own, apart from the one holding the stack's shared state. The server reads them from
+`.env` itself, so they need no change to the compose file. `SUPATYPE_PROJECT_KEYSPACE_PASSWORD`
+must differ from `SUPATYPE_KEYSPACE_PASSWORD`, or the server stops at start with
+`config: SUPATYPE_PROJECT_KEYSPACE_PASSWORD must differ from SUPATYPE_KEYSPACE_PASSWORD`.
+
+### Passwords from files
+
+Running the server or the `supatype/postgres` image yourself, you can give each password as a file
+instead, the way `POSTGRES_PASSWORD_FILE` works for a Docker or Kubernetes secret:
+`SUPATYPE_KEYSPACE_PASSWORD_FILE` (read by both the server and the image) and
+`SUPATYPE_PROJECT_KEYSPACE_PASSWORD_FILE` (read by the server). One trailing newline is dropped,
+and nothing else. Setting a password and its file together, or naming a file that is missing or
+empty, stops the service at start with a message naming the variable or the file.
+
+With the file, the database takes a new password with no restart: rewrite the file, then run
+`SELECT pg_reload_conf();` in the database. The old password stops working at once. The server
+reads its password when it starts, so restart it with the new one.
+
+The stack the CLI generates (`supatype dev` with Docker, and `self-host compose`) takes the file
+too. Set `SUPATYPE_KEYSPACE_PASSWORD_FILE` in `.env` or in the shell to a file on the host, either
+absolute or relative to the project directory:
+
+```bash
+SUPATYPE_KEYSPACE_PASSWORD_FILE=./secrets/keyspace-password
+```
+
+The CLI then writes no `SUPATYPE_KEYSPACE_PASSWORD`, and the compose file mounts that file read-only
+into `db` and `server` at `/run/secrets/supatype-keyspace-password` and gives both that path in
+`SUPATYPE_KEYSPACE_PASSWORD_FILE` instead of the password. Before compose runs, the CLI stops with a
+message when:
+
+- both `SUPATYPE_KEYSPACE_PASSWORD` and `SUPATYPE_KEYSPACE_PASSWORD_FILE` are set, saying where each
+  is set. A project that ran before has a generated password in `.env`: remove that line to use the
+  file. The CLI never removes it for you.
+- the file is missing, cannot be read, or holds no password.
+- HTTPS is on (`server.tls`). Kong keeps its certificates in the keyspace and gets the password
+  through its env vault, which reads environment variables only, so it cannot use a file. Keep the
+  password in `.env` for an HTTPS stack.
+
+On a Linux host the containers see the file with its host owner and mode, and the database reads
+it as the image's `postgres` user, so make it readable to them (mode 0644 or 0444). A single file
+mounted this way stays the file that was there when the container started: rewrite it in place to
+change the password, since an editor that saves a new file in its place leaves the containers with
+the old one until they restart.
+
+`supatype init` run with `SUPATYPE_KEYSPACE_PASSWORD_FILE` set in the shell writes a comment in
+place of the generated password. Native `supatype dev` reads the password from the file as well,
+and hands it to its Postgres and server itself.
+
 ## Storage
 
 By default the stack runs a SeaweedFS service for uploaded files, in the `storage-data` volume, and
@@ -194,7 +271,7 @@ service, so the S3 bucket stays private. `storage.provider` is unaffected: it is
 |----------|---------|-------------|
 | `S3_BUCKET` | None, required | The bucket. `self-host compose up` stops with a message while it is blank |
 | `S3_REGION` | None | The bucket's region. Required on AWS, where `S3_ENDPOINT` stays blank |
-| `S3_ENDPOINT` | None | The store's URL, for an S3-compatible store such as Cloudflare R2 |
+| `S3_ENDPOINT` | None | The store's URL, for an S3-compatible store such as Cloudflare R2. The storage service runs in a container, where `localhost` is that container: for a store on the same machine use `http://host.docker.internal:<port>` with Docker Desktop, or the host's address (usually `172.17.0.1`) on Linux |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | None | Keys that can read, write, list and delete objects in the bucket. Leave both blank on AWS to use the instance's or task's role |
 | `S3_FORCE_PATH_STYLE` | `true` with an endpoint, `false` without | Whether the bucket goes in the URL path rather than the host name |
 
@@ -225,7 +302,8 @@ Each service's image can be replaced from `.env`: `SUPATYPE_POSTGRES_IMAGE`, `SU
 `SUPATYPE_STORAGE_IMAGE`, `SUPATYPE_FUNCTIONS_WORKER_IMAGE`, `SUPATYPE_REALTIME_IMAGE`,
 `SUPATYPE_CONTROL_PLANE_IMAGE`, `SUPATYPE_STUDIO_IMAGE`, `SUPATYPE_ENGINE_IMAGE`,
 `SUPATYPE_SEAWEEDFS_IMAGE` and `SUPATYPE_VALKEY_IMAGE`. Left unset, each service runs the image the
-generated file names, which is the `latest` tag for Supatype's own services. A `versions` pin for
+generated file names: for Supatype's own services, the exact release the CLI was tested with, never
+`latest`, so upgrading the CLI moves them. A `versions` pin for
 `engine` or `server` in `supatype.config.ts` writes `SUPATYPE_ENGINE_IMAGE` or
 `SUPATYPE_SERVER_IMAGE` into `.env` for you.
 

@@ -164,7 +164,7 @@
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> curl https://example.com/supatype-env.js
 window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."};</pre></div>
-    <p><code>supatype init</code> puts the tag in a static app's <code>index.html</code>, in the head, so it runs before the app's own script. For an app made another way, add it yourself, before the app's own script:</p>
+    <p><code>supatype init</code> puts the tag in the head of the <code>index.html</code> it writes for a static app, so it runs before the app's own script. It never changes an <code>index.html</code> that is already there, such as the one in a Vite app made before <code>init</code> ran: it prints <code>skipped index.html (already exists)</code> and adds no tag. Until you add the tag, a build made without the values throws <code>MissingClientValuesError</code> on its first request. For such an app, or one made another way, add it yourself, before the app's own script:</p>
     <div class="cb"><div class="cb-bar"><span>index.html</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>&lt;script src="/supatype-env.js" vite-ignore&gt;&lt;/script&gt;
 &lt;script type="module" src="/src/main.ts"&gt;&lt;/script&gt;</pre></div>
@@ -204,6 +204,18 @@ window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."
       <span class="callout-label">IF THE KEY IS MISSING</span>
       <p>The build still succeeds, and the page renders. With <code>SUPATYPE_ANON_KEY</code> or <code>SUPATYPE_URL</code> unset, <code>/supatype-env.js</code> still answers 200, not cached, but sets only the reason in place of the values: <code>window.__SUPATYPE_ENV__ = {"error":"public env unavailable: SUPATYPE_ANON_KEY is not set on this server"};</code>. With both unset it names both, a line each, the key first. It does the same when <code>SUPATYPE_ANON_KEY</code> holds a service role key, and answers 404 only when <code>SUPATYPE_PUBLIC_ENV</code> is off. A browser runs no script answered with an error status and tells the page nothing of why, so the reason travels in the script. The browser client's first request then throws <code>Supatype client has no API address and anon key. createClient was given none, and https://your-app.example.com/supatype-env.js set no API address and anon key, giving the server's reason instead:</code>, followed by that reason and <code>Fix that in the environment of the server that answers it</code>, then the route and the build-time variables. A server client given neither throws on its first request: <code>Supatype client has no API address and anon key. It was given none, and it is running on a server, where there is no page to read them from.</code>, followed by <code>Set SUPATYPE_URL and SUPATYPE_ANON_KEY in the server's environment</code>.</p>
     </div>
+
+    <h2 id="expo">Expo</h2>
+    <p>An Expo Router app has no <code>index.html</code>. Its web page is rendered from <code>app/+html.tsx</code>, or <code>src/app/+html.tsx</code> when the routes are in <code>src/app</code>. <code>supatype init</code> puts the script first in that file's <code>&lt;head&gt;</code>, and when the app has no such file, makes it from the template the installed Expo ships, as <code>npx expo customize +html.tsx</code> does. A web build then reads both values from the server that hosts it when the page loads, so <code>npx expo export --platform web</code> needs neither. The tag is left out of development pages: <code>expo start --web</code> serves no such file, and a development build reads its values from <code>.env.development.local</code>. In an app <code>init</code> did not set up, add the tag yourself:</p>
+    <div class="cb"><div class="cb-bar"><span>app/+html.tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>&lt;head&gt;
+  {__DEV__ ? null : &lt;script src="/supatype-env.js" /&gt;}
+  &lt;meta charSet="utf-8" /&gt;</pre></div>
+    <p>Expo renders <code>+html.tsx</code> only when <code>web.output</code> in <code>app.json</code> is <code>"static"</code> or <code>"server"</code>, as a new app's is. With <code>"single"</code>, put <code>&lt;script src="/supatype-env.js"&gt;&lt;/script&gt;</code> in the head of <code>public/index.html</code> instead. A <code>"static"</code> export is plain files: have Supatype host them with <code>supatype app add --static ./dist</code>. A <code>"server"</code> export, the default from SDK 58, renders each page in a Node server (<code>npx expo serve</code>); the Supatype server in front of it answers <code>/supatype-env.js</code> itself, whatever the app mode. On any other host, build with the values instead.</p>
+    <p>A native build, for iOS or Android and on EAS, has no page, so it takes its values at build time under <code>EXPO_PUBLIC_SUPATYPE_URL</code> and <code>EXPO_PUBLIC_SUPATYPE_ANON_KEY</code>. <code>expo export</code> and EAS builds run in production mode, which never reads <code>.env.development.local</code>, where <code>supatype dev</code> and <code>keys</code> put the local stack's values. Give them your deployment's: on a linked machine, build through <code>supatype build</code>; for an EAS build, set the two names in the project's EAS environment variables, with the values <code>supatype keys --print frontend --env production</code> prints.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> supatype build -- npx expo export --platform android</pre></div>
+    <p>An Expo page with neither value makes the client's first request throw, naming <code>app/+html.tsx</code> and the build-time names rather than <code>index.html</code>.</p>
 
     <h2 id="vercel">Vercel</h2>
     <p>Print the values for the deployment on your own machine, where the project is linked:</p>
@@ -357,6 +369,7 @@ server: {
     <a href="#supatype-build">supatype build</a>
     <a href="#supatype-hosts">Supatype hosts it</a>
     <a href="#nextjs">Next.js</a>
+    <a href="#expo">Expo</a>
     <a href="#vercel">Vercel</a>
     <a href="#netlify">Netlify</a>
     <a href="#cloudflare">Cloudflare Pages</a>

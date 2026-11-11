@@ -86,8 +86,10 @@ supatype keys --write
 ```
 
 `supatype self-host compose up` also fills in blank keys on its own, and every `self-host compose`
-command adds `SUPATYPE_CONTROL_PLANE_SECRET` when it is missing. The three passwords are required:
-Compose stops before starting anything and names the one that is missing. See
+command adds `SUPATYPE_CONTROL_PLANE_SECRET` when it is missing. When the cache runs inside
+Postgres on `supatype/postgres` 17.2.13 or later, it adds `SUPATYPE_KEYSPACE_PASSWORD`, the cache's
+password, the same way ([Cache](/docs/self-hosting/configuration.html#cache)). The three passwords
+are required: Compose stops before starting anything and names the one that is missing. See
 [Configuration](/docs/self-hosting/configuration.html) for every variable the stack reads.
 
 `JWT_SECRET` must be at least 32 characters, because PostgREST will not start with a shorter one.
