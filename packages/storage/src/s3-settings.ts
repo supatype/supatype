@@ -33,8 +33,6 @@ export interface S3Settings {
   /** undefined: the AWS SDK's default chain (AWS_* variables, a profile, an instance or task role). */
   credentials: S3Credentials | undefined
   forcePathStyle: boolean
-  /** Base URL of a public bucket's objects straight from S3, which only per-bucket mode has. */
-  publicUrl: string
 }
 
 /** A setting, with a blank one read as unset: init writes `S3_ENDPOINT=` and the like into .env. */
@@ -114,7 +112,6 @@ function s3Store(bucket: string | undefined): S3Settings {
     credentials: credentials(),
     // AWS addresses a bucket by host name; most stores at an endpoint by path.
     forcePathStyle: pathStyle === undefined ? endpoint !== undefined : pathStyle === "true",
-    publicUrl: setting("S3_PUBLIC_URL") ?? endpoint ?? "",
   }
 }
 
@@ -126,7 +123,6 @@ const UNUSED: S3Settings = {
   region: "us-east-1",
   credentials: undefined,
   forcePathStyle: false,
-  publicUrl: "",
 }
 
 /**

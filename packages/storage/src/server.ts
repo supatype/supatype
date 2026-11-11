@@ -6,6 +6,7 @@ import * as bucketRoutes from "./routes/buckets.js"
 import * as objectRoutes from "./routes/objects.js"
 import { getDefaultCorsHeaders } from "./middleware/cors.js"
 import { isShape, shapeMismatches, type FromShape, type Shape } from "./json.js"
+import { storeUnreachable } from "./s3.js"
 
 export interface RequestContext {
   req: IncomingMessage
@@ -190,16 +191,28 @@ export function createServer() {
       }
       await matched.handler({ req, res, jwt, params: matched.params, url })
     } catch (err) {
-      if (err instanceof InvalidBody) {
-        if (!res.headersSent) sendJson(res, 400, { error: err.message })
-        return
-      }
-      console.error("Unhandled error:", err)
-      if (!res.headersSent) {
-        sendJson(res, 500, { error: "Internal server error" })
-      }
+      answerFailure(res, err)
     }
   })
+}
+
+/**
+ * The answer to a request whose handler threw: 400 for a body that cannot be read, 503 with a code
+ * for an S3 store that cannot be reached (see {@link storeUnreachable}), else a plain 500.
+ */
+export function answerFailure(res: ServerResponse, err: unknown): void {
+  if (err instanceof InvalidBody) {
+    if (!res.headersSent) sendJson(res, 400, { error: err.message })
+    return
+  }
+  const unreachable = storeUnreachable(err)
+  if (unreachable !== undefined) {
+    console.error(`[storage] ${unreachable}`)
+    if (!res.headersSent) sendJson(res, 503, { error: unreachable, code: "store_unreachable" })
+    return
+  }
+  console.error("Unhandled error:", err)
+  if (!res.headersSent) sendJson(res, 500, { error: "Internal server error" })
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────

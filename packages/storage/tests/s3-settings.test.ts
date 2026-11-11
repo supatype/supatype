@@ -162,6 +162,19 @@ describe("a bucket per Supatype bucket (S3_BUCKET unset)", () => {
   })
 })
 
+/**
+ * 0.9.2 release test round 2 (N-S26): S3_PUBLIC_URL was read into the settings and never used, since
+ * the service serves public files itself through /object/public, yet native dev and compose passed it on.
+ */
+describe("S3_PUBLIC_URL", () => {
+  it("is not a setting", async () => {
+    await s3With({ S3_BUCKET: "shared", S3_REGION: "eu-west-2", S3_PUBLIC_URL: "https://cdn.example.com" })
+    const { s3Settings } = await import("../src/s3-settings.js")
+    expect(s3Settings(true)).not.toHaveProperty("publicUrl")
+    expect(s3Settings(false)).not.toHaveProperty("publicUrl")
+  })
+})
+
 describe("the file backend", () => {
   it("starts with no S3 settings at all, since it never talks to S3", async () => {
     await expect(s3With({ STORAGE_BACKEND: "file", STORAGE_FILE_PATH: "objects" })).resolves.toBeDefined()

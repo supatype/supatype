@@ -28,6 +28,11 @@ function diskStore(): DiskStore | undefined {
   return disk
 }
 
+/** Refuses to start on an object store the service cannot use; disk has nothing to check. */
+export async function checkStore(): Promise<void> {
+  if (diskStore() === undefined) await s3.checkOneBucket()
+}
+
 export async function ensureBucket(name: string): Promise<void> {
   const local = diskStore()
   await (local ? local.ensureBucket(name) : s3.ensureBucket(name))

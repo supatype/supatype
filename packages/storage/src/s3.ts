@@ -12,8 +12,10 @@ import {
   HeadBucketCommand,
   PutBucketPolicyCommand,
   PutPublicAccessBlockCommand,
+  S3ServiceException,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import { createHash } from "node:crypto"
 import { config } from "./env.js"
 import { bucketNameRuleBroken } from "./s3-settings.js"
 
@@ -57,6 +59,69 @@ export function s3BucketNameProblem(id: string): string | null {
 }
 
 export const s3 = new S3Client(clientConfig)
+
+/** A request whose body the SDK serialized itself: an XML or JSON document, never an upload's bytes. */
+function hasSerializedBody(request: unknown): request is { body: string; headers: Record<string, string> } {
+  if (typeof request !== "object" || request === null) return false
+  if (!("body" in request) || typeof request.body !== "string" || request.body === "") return false
+  return "headers" in request && typeof request.headers === "object" && request.headers !== null
+}
+
+/**
+ * Sends Content-MD5 with every request whose body the SDK wrote, alongside its own checksum.
+ *
+ * 0.9.2 release test (N-FF10). S3 requires a checksum on DeleteObjects, a bucket policy and the other
+ * control documents, and for years that checksum was Content-MD5. Since 3.729 the SDK sends a CRC32
+ * instead and computes no MD5 at all, even with `requestChecksumCalculation: "WHEN_REQUIRED"`, which
+ * only stops the optional ones. Older S3-compatible stores (MinIO RELEASE.2024-11-07 among them)
+ * refuse such a request with `MissingContentMD5`, so every remove answered 200 and left the bytes.
+ *
+ * Only a body the SDK serialized: those are small documents, and every request S3 wants a checksum
+ * on is one. An upload's bytes keep the SDK's own CRC32 and are not hashed a second time. AWS and
+ * newer stores take both headers and check both.
+ */
+function sendContentMd5(client: S3Client): void {
+  client.middlewareStack.add(
+    (next) => async (args) => {
+      const { request } = args
+      if (hasSerializedBody(request) && request.headers["content-md5"] === undefined) {
+        request.headers["content-md5"] = createHash("md5").update(request.body).digest("base64")
+      }
+      return next(args)
+    },
+    // In the build step, where the SDK adds its own checksum, before the request is signed.
+    { name: "supatypeContentMd5", step: "build", priority: "low" },
+  )
+}
+
+sendContentMd5(s3)
+tagUnreachableStore(s3)
+
+/** An S3 request that never reached the store: refused, no such host, no route (see {@link storeUnreachable}). */
+export class StoreUnreachable extends Error {
+  constructor(readonly code: string, cause: unknown) {
+    super(`The S3 store at ${storeName()} cannot be reached (${code}): check that it is running and that the storage service can reach it`, { cause })
+  }
+}
+
+/**
+ * Turns Node's error for a connection the store never took into a {@link StoreUnreachable}, on the
+ * client's own requests only: the database client passes the same codes through, and a Postgres
+ * that is down must not be reported as the S3 store. Outermost, so after the SDK's own retries.
+ */
+function tagUnreachableStore(client: S3Client): void {
+  client.middlewareStack.add(
+    (next) => async (args) => {
+      try {
+        return await next(args)
+      } catch (err) {
+        const code = err instanceof Error && "code" in err && typeof err.code === "string" ? err.code : undefined
+        throw code !== undefined && UNREACHABLE_CODES.has(code) ? new StoreUnreachable(code, err) : err
+      }
+    },
+    { name: "supatypeStoreUnreachable", step: "initialize", priority: "high" },
+  )
+}
 
 /**
  * The client that signs upload URLs, and the only difference is that it computes no checksum.
@@ -196,6 +261,61 @@ export async function applyBucketPolicyFromConfig(
   }
   if (opts.public) await applyPublicPolicy(name)
   else await removeBucketPolicy(name)
+}
+
+/** How long the start-time bucket check waits for the store before starting anyway. */
+const BUCKET_CHECK_TIMEOUT_MS = 3_000
+
+/** The client the start-time bucket check asks with: one attempt, no retries. */
+const bucketChecker = new S3Client({ ...clientConfig, maxAttempts: 1 })
+
+/** Where the S3 store is, as an error message names it. */
+function storeName(): string {
+  return settings.endpoint ?? `AWS S3 in ${settings.region}`
+}
+
+/** Node's codes for a connection to the store that was never made: refused, no such host, no route. */
+const UNREACHABLE_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ETIMEDOUT"])
+
+/**
+ * What to tell the caller when err is the S3 store not being reachable at all, else undefined.
+ *
+ * 0.9.2 release test round 2 (R2-S4): a store down at start let the service start, as
+ * {@link checkOneBucket} means it to, but the first upload then answered a bare 500 and the
+ * ECONNREFUSED was only in the log. The SDK passes Node's own connection error through, code and all.
+ */
+export function storeUnreachable(err: unknown): string | undefined {
+  return err instanceof StoreUnreachable ? err.message : undefined
+}
+
+/**
+ * Refuses to start on an `S3_BUCKET` the store does not have, or will not let these keys reach.
+ *
+ * 0.9.2 release test (N-S23): a wrong name started cleanly and every upload answered 500. HeadBucket
+ * needs only `s3:ListBucket`, which the keys need anyway. A store that does not answer is not a
+ * reason to refuse: it may still be starting, and the first request that needs it says so then.
+ *
+ * Asked once, and given up on after {@link BUCKET_CHECK_TIMEOUT_MS}: the SDK sets no timeout and
+ * retries, so an endpoint that accepted the connection and never answered held the start forever.
+ */
+export async function checkOneBucket(): Promise<void> {
+  if (!oneBucket) return
+  const named = `S3_BUCKET is "${settings.bucket}", and ${storeName()}`
+  try {
+    await bucketChecker.send(new HeadBucketCommand({ Bucket: settings.bucket }), {
+      abortSignal: AbortSignal.timeout(BUCKET_CHECK_TIMEOUT_MS),
+    })
+  } catch (err: unknown) {
+    const status = err instanceof S3ServiceException ? err.$metadata.httpStatusCode : undefined
+    if (status === 404) throw new Error(`${named} has no bucket by that name: create it, or name one it has`)
+    if (status === 403) {
+      throw new Error(
+        `${named} refuses these keys access to that bucket (403): check the name, and that the keys have s3:ListBucket on it`,
+      )
+    }
+    const why = err instanceof Error ? err.message : String(err)
+    console.warn(`supatype-storage could not check S3_BUCKET "${settings.bucket}" at ${storeName()}, starting anyway: ${why}`)
+  }
 }
 
 /**
