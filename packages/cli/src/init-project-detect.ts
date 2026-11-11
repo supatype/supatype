@@ -4,11 +4,14 @@ import { parsePackageJson, type PackageJson } from "./package-json.js"
 import { findNextFreePort, type PortInUse } from "./dev-ports.js"
 import { isLoopbackPortInUse } from "./postgres-ctl.js"
 
-const VITE_CONFIG_NAMES = [
-  "vite.config.ts",
+/** Every name Vite looks for its config under. */
+export const VITE_CONFIG_NAMES = [
   "vite.config.js",
   "vite.config.mjs",
+  "vite.config.ts",
   "vite.config.cjs",
+  "vite.config.mts",
+  "vite.config.cts",
 ] as const
 
 const SUPATYPE_CONFIG_NAMES = [
@@ -22,6 +25,8 @@ export interface DetectedProjectSetup {
   hasExistingFiles: boolean
   hasSupatypeConfig: boolean
   hasVite: boolean
+  /** package.json lists Vite itself, so init adds none and keeps the app's own. */
+  declaresVite: boolean
   hasViteConfig: boolean
   viteDevUrl: string
   staticDir: string
@@ -31,8 +36,8 @@ export interface DetectedProjectSetup {
   summaryLines: string[]
 }
 
-/** The project's package.json, or undefined when it has none or it is not JSON. */
-function readPackageJson(cwd: string): PackageJson | undefined {
+/** The project's package.json, or undefined when it has none or it is not JSON (init skips one that is not). */
+export function readPackageJson(cwd: string): PackageJson | undefined {
   const pkgPath = join(cwd, "package.json")
   if (!existsSync(pkgPath)) return undefined
   try {
@@ -40,6 +45,11 @@ function readPackageJson(cwd: string): PackageJson | undefined {
   } catch {
     return undefined
   }
+}
+
+/** The vite range a package.json declares, from devDependencies first. */
+export function declaredVite(pkg: PackageJson | undefined): string | undefined {
+  return pkg?.devDependencies["vite"] ?? pkg?.dependencies["vite"]
 }
 
 function readVitePort(cwd: string): number {
@@ -76,7 +86,8 @@ export function detectProjectSetup(cwd: string): DetectedProjectSetup {
   const hasExistingFiles = entries.length > 0
   const pkg = readPackageJson(cwd)
   const hasViteConfig = VITE_CONFIG_NAMES.some((name) => existsSync(join(cwd, name)))
-  const hasVite = hasViteConfig || Boolean(pkg?.devDependencies["vite"] ?? pkg?.dependencies["vite"])
+  const declaresVite = declaredVite(pkg) !== undefined
+  const hasVite = hasViteConfig || declaresVite
   const viteDevUrl = `http://127.0.0.1:${readVitePort(cwd)}`
   const staticDir = detectStaticDir(cwd)
   const hasSupatypeConfig = SUPATYPE_CONFIG_NAMES.some((name) => existsSync(join(cwd, name)))
@@ -94,6 +105,7 @@ export function detectProjectSetup(cwd: string): DetectedProjectSetup {
     hasExistingFiles,
     hasSupatypeConfig,
     hasVite,
+    declaresVite,
     hasViteConfig,
     viteDevUrl,
     staticDir,

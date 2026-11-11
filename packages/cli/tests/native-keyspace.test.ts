@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createServer } from "node:net"
@@ -8,10 +8,17 @@ import {
   nativeKeyspaceLibraryPresent,
   nativeMaskLibraryPresent,
   pgServerOptions,
+  pgSettingArg,
 } from "../src/postgres-ctl.js"
-import { nativeKeyspaceAddr, nativeKeyspacePort, type NativeKeyspaceChecks } from "../src/native-keyspace.js"
+import {
+  nativeKeyspaceAddr,
+  nativeKeyspacePort,
+  writeKeyspacePasswordFile,
+  type NativeKeyspaceChecks,
+} from "../src/native-keyspace.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { projectConfig } from "./support/project-config.js"
+import { freePort } from "./support/ports.js"
 
 /**
  * Native `supatype dev` starts one Postgres, and what that Postgres can do
@@ -149,31 +156,39 @@ describe("the options pg_ctl hands the server", () => {
   })
 })
 
+// Each base is a port the system just handed out, never a fixed one: 6390 to 6393 were, and a
+// developer's own dev stacks and Valkey sidecars (6379 upward) held them, so these failed on the
+// machine they ran on rather than on the code.
 describe("choosing the keyspace port", () => {
+  /** Listens on `port` for the length of `body`. */
+  async function holding<T>(port: number, body: () => Promise<T>): Promise<T> {
+    const held = createServer()
+    await new Promise<void>((done) => held.listen(port, "127.0.0.1", done))
+    try {
+      return await body()
+    } finally {
+      await new Promise<void>((done) => held.close(() => done()))
+    }
+  }
+
   it("takes the base port when it is free", async () => {
-    await expect(firstFreePort(6390, 5)).resolves.toBe(6390)
+    const base = await freePort()
+    await expect(firstFreePort(base, 5)).resolves.toBe(base)
   })
 
   // 6379 is the first port a developer's own Redis, or a sidecar left running
   // from a previous `supatype dev`, will be holding.
   it("steps past a port something else is holding", async () => {
-    const held = createServer()
-    await new Promise<void>((done) => held.listen(6391, "127.0.0.1", done))
-    try {
-      await expect(firstFreePort(6391, 5)).resolves.toBe(6392)
-    } finally {
-      await new Promise<void>((done) => held.close(() => done()))
-    }
+    const base = await freePort()
+    const chosen = await holding(base, () => firstFreePort(base, 5))
+    expect(chosen).not.toBeNull()
+    expect(chosen).toBeGreaterThan(base)
+    expect(chosen).toBeLessThan(base + 5)
   })
 
   it("gives up rather than returning a port it could not get", async () => {
-    const held = createServer()
-    await new Promise<void>((done) => held.listen(6393, "127.0.0.1", done))
-    try {
-      await expect(firstFreePort(6393, 1)).resolves.toBeNull()
-    } finally {
-      await new Promise<void>((done) => held.close(() => done()))
-    }
+    const base = await freePort()
+    await expect(holding(base, () => firstFreePort(base, 1))).resolves.toBeNull()
   })
 })
 
@@ -190,33 +205,120 @@ describe("whether native dev serves the keyspace from Postgres", () => {
   const withoutLibrary = () => install(["supatype_mask.so"])
 
   it("serves it for a pinned project whose archive carries the library", async () => {
-    await expect(nativeKeyspacePort(project(pinned), withLibrary(), checks)).resolves.toBe(6379)
+    await expect(nativeKeyspacePort(project(pinned), withLibrary(), "17.2.13", checks)).resolves.toBe(6379)
   })
 
   it("falls back to Valkey for a pinned project whose archive lacks the library", async () => {
-    await expect(nativeKeyspacePort(project(pinned), withoutLibrary(), checks)).resolves.toBeNull()
+    await expect(nativeKeyspacePort(project(pinned), withoutLibrary(), "17.2.13", checks)).resolves.toBeNull()
   })
 
   it("honours an explicit provider over what the archive carries", async () => {
     const valkey = project({ ...pinned, cache: { provider: "valkey" } })
-    await expect(nativeKeyspacePort(valkey, withLibrary(), checks)).resolves.toBeNull()
+    await expect(nativeKeyspacePort(valkey, withLibrary(), "17.2.13", checks)).resolves.toBeNull()
     const keyspace = project({ ...pinned, cache: { provider: "pg_keyspace" } })
-    await expect(nativeKeyspacePort(keyspace, withLibrary(), checks)).resolves.toBe(6379)
+    await expect(nativeKeyspacePort(keyspace, withLibrary(), "17.2.13", checks)).resolves.toBe(6379)
   })
 
   it("keeps Valkey for an external database even when the archive carries the library", async () => {
     const external = project({ ...pinned, database: { external: { url: "postgres://u:p@h:5432/d" } } })
-    await expect(nativeKeyspacePort(external, withLibrary(), checks)).resolves.toBeNull()
+    await expect(nativeKeyspacePort(external, withLibrary(), "17.2.13", checks)).resolves.toBeNull()
   })
 
   it("falls back to Valkey when no port is free", async () => {
     const noPort: NativeKeyspaceChecks = { ...checks, freePort: () => Promise.resolve(null) }
-    await expect(nativeKeyspacePort(project(pinned), withLibrary(), noPort)).resolves.toBeNull()
+    await expect(nativeKeyspacePort(project(pinned), withLibrary(), "17.2.13", noPort)).resolves.toBeNull()
   })
 
+  const LOGIN = { username: "supatype", password: "pw" }
+
   it("uses the keyspace only once its RESP listener answers", async () => {
-    await expect(nativeKeyspaceAddr(6379, () => Promise.resolve(true))).resolves.toBe("127.0.0.1:6379")
-    await expect(nativeKeyspaceAddr(6379, () => Promise.resolve(false))).resolves.toBeNull()
-    await expect(nativeKeyspaceAddr(null, () => Promise.resolve(true))).resolves.toBeNull()
+    await expect(nativeKeyspaceAddr(6379, LOGIN, () => Promise.resolve(true))).resolves.toBe("127.0.0.1:6379")
+    await expect(nativeKeyspaceAddr(6379, LOGIN, () => Promise.resolve(false))).resolves.toBeNull()
+  })
+})
+
+/**
+ * 0.9.2 release test (N-RB2): pg_keyspace listened on 0.0.0.0 with no password, so native dev on
+ * Linux served an open, writable store to the network. From 17.2.13 the extension can listen on
+ * loopback alone and read its password from a file, refusing every client that has not logged in
+ * with it; native dev serves the keyspace
+ * only from an archive that can, and keeps the Valkey sidecar for any older one.
+ */
+describe("the native keyspace is secured (N-RB2)", () => {
+  const project = () => projectConfig({ project: { name: "acme" }, database: { provider: "native" } })
+  const stubbed: NativeKeyspaceChecks = {
+    libraryPresent: nativeKeyspaceLibraryPresent,
+    freePort: () => Promise.resolve(6379),
+  }
+
+  it("listens on loopback only and reads its password from a file, never from a setting", () => {
+    const o = pgServerOptions({
+      pgBinDir: install(["pg_keyspace.so"]),
+      dataDir: "/tmp/data",
+      port: 55432,
+      keyspacePort: 6379,
+      keyspacePasswordFile: "/state/keyspace/password",
+    })
+    expect(o).toContain("-c pg_keyspace.password_file=/state/keyspace/password")
+    expect(o).toContain("-c pg_keyspace.listen_address=127.0.0.1")
+    // Implied by the password file, which refuses every client until the file is read.
+    expect(o).not.toContain("require_auth")
+  })
+
+  it("quotes a setting with a space for the shell pg_ctl starts Postgres through", () => {
+    expect(pgSettingArg("pg_keyspace.password_file", "/Users/Ada Lovelace/k", "linux")).toBe(
+      "-c 'pg_keyspace.password_file=/Users/Ada Lovelace/k'",
+    )
+    expect(pgSettingArg("pg_keyspace.password_file", "/home/o'neil/k", "darwin")).toBe(
+      "-c 'pg_keyspace.password_file=/home/o'\\''neil/k'",
+    )
+    expect(pgSettingArg("wal_level", "logical", "linux")).toBe("-c wal_level=logical")
+  })
+
+  it("serves the keyspace from an archive at 17.2.13 or later", async () => {
+    for (const version of ["17.2.13", "17.3.0", "18.0.0"]) {
+      await expect(nativeKeyspacePort(project(), install(["pg_keyspace.so"]), version, stubbed)).resolves.toBe(6379)
+    }
+  })
+
+  it("keeps the Valkey sidecar for an archive that cannot require a password", async () => {
+    for (const version of ["17.2.12", "17.2.9", "17.2", "17", null]) {
+      await expect(nativeKeyspacePort(project(), install(["pg_keyspace.so"]), version, stubbed)).resolves.toBeNull()
+    }
+  })
+})
+
+/**
+ * The extension reads the `supatype` user's password from `pg_keyspace.password_file` itself, at
+ * start and on every reload. Native dev writes the project's password there before Postgres starts:
+ * readable by this user alone, the password never in a command line, a setting or a log.
+ */
+describe("the native keyspace password file (N-RB2)", () => {
+  const stateRoot = (): string => {
+    const root = mkdtempSync(join(tmpdir(), "supatype-ks-pw-"))
+    roots.push(root)
+    return root
+  }
+
+  it("holds the project's password and nothing else, under the project's state directory", () => {
+    const root = stateRoot()
+    const file = writeKeyspacePasswordFile(root, "s3cret with spaces")
+    expect(file).toBe(join(root, "keyspace", "password"))
+    expect(readFileSync(file, "utf8")).toBe("s3cret with spaces")
+  })
+
+  it("follows a password changed in .env at the next start", () => {
+    const root = stateRoot()
+    writeKeyspacePasswordFile(root, "first")
+    expect(readFileSync(writeKeyspacePasswordFile(root, "second"), "utf8")).toBe("second")
+  })
+
+  it.skipIf(process.platform === "win32")("is readable by this user alone, even where an earlier one was not", () => {
+    const root = stateRoot()
+    mkdirSync(join(root, "keyspace"), { recursive: true, mode: 0o755 })
+    writeFileSync(join(root, "keyspace", "password"), "old", { mode: 0o644 })
+    const file = writeKeyspacePasswordFile(root, "new")
+    expect(statSync(file).mode & 0o777).toBe(0o600)
+    expect(statSync(join(root, "keyspace")).mode & 0o777).toBe(0o700)
   })
 })

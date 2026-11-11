@@ -158,6 +158,12 @@ export interface SupatypeProjectConfig {
      *
      * Set "valkey" to keep the sidecar. Nothing about the cache's behaviour
      * changes with the answer: both speak RESP and both hold the same keys.
+     *
+     * The keyspace requires a per-project password (SUPATYPE_KEYSPACE_PASSWORD
+     * in .env) wherever the Postgres release can take one, KEYSPACE_AUTH_SINCE
+     * (postgres-image.ts) or later (0.9.2 release test N-RB2). Native `supatype dev` serves it on 127.0.0.1
+     * only, and only from an archive that can require the password; it uses
+     * the Valkey sidecar otherwise, and always on Windows.
      */
     provider?: "valkey" | "pg_keyspace"
     /**
@@ -1046,9 +1052,14 @@ export function nativeDbPort(cfg: SupatypeProjectConfig, cwd: string = process.c
   return readComposeEnvInt(cwd, DEV_DB_PORT_ENV) ?? cfg.database?.port ?? NATIVE_DB_PORT
 }
 
+/** The folder Supatype keeps each project's own under, by name. Read at each call, so a test can point it elsewhere. */
+export function supatypeProjectsRoot(): string {
+  return join(homedir(), ".supatype", "projects")
+}
+
 /** Where native dev keeps a project's Postgres data, logs, pid files and local storage. */
 export function nativeStateRoot(cfg: SupatypeProjectConfig): string {
-  return join(homedir(), ".supatype", "projects", cfg.project.name)
+  return join(supatypeProjectsRoot(), cfg.project.name)
 }
 
 /** The native Postgres data directory: `database.data_dir`, or the one in the state directory. */

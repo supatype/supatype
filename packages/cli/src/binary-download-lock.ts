@@ -10,6 +10,7 @@ import { isNumber, isOneOf, isShape, isString, type Guard } from "@supatype/shar
 import { cachePath, type Component } from "./binary-cache.js"
 import { BINARY_COMPONENTS } from "./components.js"
 import { readJsonFile } from "./json-file.js"
+import { pidAlive } from "./parent-watch.js"
 
 const LOCK_VERSION = 1 as const
 const STALE_MS = 30 * 60 * 1000
@@ -37,15 +38,6 @@ function lockPath(component: Component, version: string): string {
   return join(cachePath(component, version), ".downloading")
 }
 
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
 function readLock(component: Component, version: string): DownloadLockPayload | null {
   const path = lockPath(component, version)
   if (!existsSync(path)) return null
@@ -53,7 +45,7 @@ function readLock(component: Component, version: string): DownloadLockPayload | 
 }
 
 function isLockStale(lock: DownloadLockPayload): boolean {
-  if (!isPidAlive(lock.pid)) return true
+  if (!pidAlive(lock.pid)) return true
   const age = Date.now() - Date.parse(lock.startedAt)
   return Number.isNaN(age) || age > STALE_MS
 }

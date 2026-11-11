@@ -121,6 +121,43 @@ describe("provisionBuckets", () => {
 
     expect(warn).toHaveBeenCalledWith('[storage] Failed to provision bucket "big": HTTP 400 Bad Request: invalid bucket id')
   })
+
+  // 0.9.2 release test (N-FF11): a storage service that refused its S3 settings had exited, and
+  // `compose up` printed only `HTTP 502 Bad Gateway, with an empty body` for each bucket.
+  it("says once that the storage service is down when the gateway answers 502, and where to see why", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response("", { status: 502, statusText: "Bad Gateway" })))
+
+    await provisionBuckets("http://localhost:18473/storage/v1", "key", [{ id: "avatars" }, { id: "docs" }], {
+      storageLogs: "supatype self-host compose logs --service storage",
+    })
+
+    const down = warn.mock.calls.map(([line]) => String(line)).filter((line) => line.includes("is not answering"))
+    expect(down).toEqual([
+      "[storage] The storage service is not answering behind the gateway (HTTP 502): it has stopped or is still starting. " +
+        "See why: supatype self-host compose logs --service storage",
+    ])
+  })
+
+  it("says the storage service is down without a command when the caller has none to name", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 504, statusText: "Gateway Timeout" })))
+
+    await provisionBuckets("http://localhost:18473/storage/v1", "key", [{ id: "docs" }])
+
+    expect(warn).toHaveBeenLastCalledWith(
+      "[storage] The storage service is not answering behind the gateway (HTTP 504): it has stopped or is still starting.",
+    )
+  })
+
+  it("says nothing about the service being down when the service itself refused a bucket", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "invalid bucket id" }, { status: 400 })))
+
+    await provisionBuckets("http://localhost:18473/storage/v1", "key", [{ id: "docs" }], { storageLogs: "logs" })
+
+    expect(warn.mock.calls.some(([line]) => String(line).includes("is not answering"))).toBe(false)
+  })
 })
 
 describe("provisionBucketsFromAst", () => {

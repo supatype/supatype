@@ -44,6 +44,7 @@ const detected: DetectedProjectSetup = {
   hasExistingFiles: false,
   hasSupatypeConfig: false,
   hasVite: false,
+  declaresVite: false,
   hasViteConfig: false,
   viteDevUrl: "http://localhost:5173",
   staticDir: "./dist",
@@ -96,6 +97,41 @@ describe("init's wizard", () => {
     const result = await wizard(false)
     expect(asked.messages).not.toContain("SMTP host")
     expect(result.smtp).toBeUndefined()
+  })
+})
+
+/**
+ * 0.9.2 release test round 2 (pm N2): on a Node too old for the Vite init adds, init asked all 17
+ * questions and refused only once it came to write. It refuses as soon as Vite is chosen.
+ */
+describe("init's Vite question on an old Node", () => {
+  const realVersions = Object.getOwnPropertyDescriptor(process, "versions")
+  const onNode = (node: string): void => {
+    Object.defineProperty(process, "versions", { value: { ...process.versions, node }, configurable: true })
+  }
+  const restore = (): void => {
+    if (realVersions !== undefined) Object.defineProperty(process, "versions", realVersions)
+  }
+  const viteApp = { "Host a frontend app at /?": "proxy", "Develop locally with Vite (live reload)?": true }
+
+  it("refuses the moment Vite is chosen, asking nothing after it", async () => {
+    onNode("18.20.8")
+    try {
+      await expect(wizard(false, viteApp)).rejects.toThrow(/Vite app needs Node\.js 20\.19/)
+      expect(asked.messages).not.toContain("Vite dev server URL")
+    } finally {
+      restore()
+    }
+  })
+
+  it("asks on for an app that lists its own Vite, which init does not replace", async () => {
+    onNode("18.20.8")
+    try {
+      await wizard(false, viteApp, { ...detected, hasVite: true, declaresVite: true })
+      expect(asked.messages).toContain("Vite dev server URL")
+    } finally {
+      restore()
+    }
   })
 })
 

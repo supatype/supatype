@@ -50,7 +50,8 @@ describe("recordNativeRoutes", () => {
     recordNativeRoutes(path, true)
     const manifest = read(path)
     expect(manifest).not.toHaveProperty("functions_worker_url")
-    expect(manifest["functions_enabled"]).toBe(true)
+    expect(manifest).not.toHaveProperty("functions_enabled")
+    expect(manifest["services"]).toMatchObject({ functions: { enabled: true } })
     expect(manifest["schema"]).toBe("public")
   })
 
@@ -72,6 +73,7 @@ describe("recordNativeRoutes", () => {
     recordNativeRoutes(path, false)
     const manifest = read(path)
     expect(manifest).not.toHaveProperty("functions_worker_url")
-    expect(manifest["functions_enabled"]).toBe(false)
+    expect(manifest).not.toHaveProperty("functions_enabled")
+    expect(manifest["services"]).toMatchObject({ functions: { enabled: false } })
   })
 })

@@ -1,5 +1,83 @@
 import { existsSync, writeFileSync } from "node:fs"
+import { isJsonObject } from "@supatype/shared"
 import { readJsonObjectFile } from "./json-file.js"
+
+/**
+ * How the route manifest switches one service on or off, as the server reads it (ServiceSwitch in
+ * the server's internal/proxy/service_switch.go). Every service's entry is this, and any settings a
+ * service gains extend it. `enabled` absent says nothing: the server's start value stands (storage
+ * on unless SUPATYPE_STORAGE_DISABLED, functions on when a worker is configured, realtime off).
+ */
+export interface ServiceSwitch {
+  enabled?: boolean
+}
+
+/** The services the manifest switches, by their key in its `services` map. */
+export type SwitchableService = "realtime" | "storage" | "functions"
+
+const SWITCHABLE_SERVICES: readonly SwitchableService[] = ["realtime", "storage", "functions"]
+
+/** On, off, or undefined to say nothing, for each service to switch. */
+export type ServiceSwitches = Partial<Record<SwitchableService, boolean | undefined>>
+
+/**
+ * The keys that switched a service before `services` (realtime and functions; storage never had
+ * one released). The server still reads them, Cloud and older CLIs write them, and a `services`
+ * entry wins, so each is dropped when its service is switched, and the file says it once.
+ */
+const LEGACY_SWITCH_KEYS: Partial<Record<SwitchableService, string>> = {
+  realtime: "realtime_enabled",
+  functions: "functions_enabled",
+}
+
+/** The manifest's `services` map, one entry per service, or empty when it has none it can read. */
+function servicesOf(manifest: Record<string, unknown> | undefined): Record<string, unknown> {
+  const services = manifest?.["services"]
+  return isJsonObject(services) ? { ...services } : {}
+}
+
+/**
+ * The patch that applies `switches` over `current`: its `services` map with each switch set (or its
+ * `enabled` dropped, for undefined), the rest of each entry kept, and each switched service's legacy
+ * key dropped. One rule for every service and every writer (0.9.2): realtime, storage and functions
+ * were each switched by a key of their own, written by a rule of their own.
+ */
+export function serviceSwitchPatch(current: Record<string, unknown> | undefined, switches: ServiceSwitches): Record<string, unknown> {
+  const services = servicesOf(current)
+  const patch: Record<string, unknown> = {}
+  for (const name of SWITCHABLE_SERVICES) {
+    if (!(name in switches)) continue
+    const enabled = switches[name]
+    const { enabled: _previous, ...rest } = isJsonObject(services[name]) ? services[name] : {}
+    const entry: ServiceSwitch & Record<string, unknown> = { ...rest, ...(enabled !== undefined && { enabled }) }
+    if (Object.keys(entry).length > 0) services[name] = entry
+    else delete services[name]
+    const legacy = LEGACY_SWITCH_KEYS[name]
+    if (legacy !== undefined) patch[legacy] = undefined
+  }
+  patch["services"] = Object.keys(services).length > 0 ? services : undefined
+  return patch
+}
+
+/** Switch services on or off in the manifest, with `patch` (their URLs, say) in the same write. */
+export function switchServices(
+  manifestPath: string,
+  switches: ServiceSwitches,
+  patch: Record<string, unknown> = {},
+  opts: PatchRouteManifestOptions = {},
+): void {
+  const current = existsSync(manifestPath) ? readJsonObjectFile(manifestPath) : undefined
+  patchRouteManifest(manifestPath, { ...patch, ...serviceSwitchPatch(current, switches) }, opts)
+}
+
+/** What the manifest says of a service: its `services` entry, else its legacy key, else nothing. */
+export function serviceSwitch(manifest: Record<string, unknown>, name: SwitchableService): boolean | undefined {
+  const entry = servicesOf(manifest)[name]
+  if (isJsonObject(entry) && typeof entry["enabled"] === "boolean") return entry["enabled"]
+  const legacy = LEGACY_SWITCH_KEYS[name]
+  const value = legacy === undefined ? undefined : manifest[legacy]
+  return typeof value === "boolean" ? value : undefined
+}
 
 /** How {@link patchRouteManifest} treats a manifest it cannot read. */
 export interface PatchRouteManifestOptions {
@@ -57,7 +135,9 @@ const SERVICE_URL_KEYS = [
  * there is no Deno, so the server says functions are disabled rather than proxying to nothing.
  */
 export function recordNativeRoutes(manifestPath: string, functionsEnabled: boolean): void {
-  // Undefined drops the key: JSON has no undefined.
+  // Undefined drops the key: JSON has no undefined. The storage switch too: native storage sets it
+  // again as it starts, and one left from an earlier run would switch off a storage service of the
+  // developer's own (SUPATYPE_STORAGE_URL), which native dev does not start.
   const dropped = Object.fromEntries(SERVICE_URL_KEYS.map((key) => [key, undefined]))
-  patchRouteManifest(manifestPath, { ...dropped, functions_enabled: functionsEnabled })
+  switchServices(manifestPath, { functions: functionsEnabled, storage: undefined }, dropped)
 }

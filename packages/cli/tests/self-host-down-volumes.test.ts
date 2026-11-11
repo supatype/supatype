@@ -8,7 +8,7 @@ import { runCommand, tempProject } from "./support/command-run.js"
  * and had no way to remove them, so starting over meant `docker volume rm` by hand. `--volumes`
  * removes them after a confirmation (or `--yes`), and a plain `down` says they were kept.
  */
-const calls = vi.hoisted(() => ({ compose: [] as string[][], answer: false }))
+const calls = vi.hoisted(() => ({ compose: [] as string[][], answer: false, left: [] as string[] }))
 
 vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/self-host-compose.js")>()),
@@ -17,6 +17,7 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
     calls.compose.push(args)
     return 0
   },
+  composeProjectVolumes: () => calls.left,
 }))
 vi.mock("../src/compose-render-mode.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-render-mode.js")>()),
@@ -40,6 +41,7 @@ beforeEach(() => {
   )
   calls.compose = []
   calls.answer = false
+  calls.left = []
 })
 
 afterEach(() => project.remove())
@@ -50,14 +52,14 @@ const down = (...extra: string[]) =>
 describe("self-host compose down", () => {
   it("keeps the volumes by default and says so", async () => {
     const run = await down()
-    expect(calls.compose).toEqual([["down"]])
+    expect(calls.compose).toEqual([["down", "--remove-orphans"]])
     expect(run.output).toMatch(/volumes .*kept/i)
     expect(run.output).toContain("--volumes")
   })
 
   it("removes the volumes with --volumes --yes", async () => {
     await down("--volumes", "--yes")
-    expect(calls.compose).toEqual([["down", "--volumes"]])
+    expect(calls.compose).toEqual([["down", "--volumes", "--remove-orphans"]])
   })
 
   it("asks first with --volumes, and stops nothing when declined", async () => {
@@ -69,6 +71,21 @@ describe("self-host compose down", () => {
   it("removes them when the confirmation is accepted", async () => {
     calls.answer = true
     await down("--volumes")
-    expect(calls.compose).toEqual([["down", "--volumes"]])
+    expect(calls.compose).toEqual([["down", "--volumes", "--remove-orphans"]])
+  })
+
+  // 0.9.2 round 2 (R2-S20): after a switch to S3 the SeaweedFS container and its volume are no
+  // longer in the compose file. `down --volumes` left both and still said the stored files were gone.
+  it("says which of the stack's volumes are left, rather than that the stored files are gone", async () => {
+    calls.left = ["supatype-acme_storage-data"]
+    const run = await down("--volumes", "--yes")
+    expect(run.output).not.toMatch(/stored files are gone/)
+    expect(run.output).toContain("supatype-acme_storage-data")
+    expect(run.output).toContain("docker volume rm supatype-acme_storage-data")
+  })
+
+  it("says the database and stored files are gone when no volume of the stack is left", async () => {
+    const run = await down("--volumes", "--yes")
+    expect(run.output).toMatch(/the database and stored files are gone/)
   })
 })

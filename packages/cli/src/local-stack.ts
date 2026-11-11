@@ -14,7 +14,7 @@ import { composeDbHostPort } from "./host-database.js"
 import { composeRenderMode } from "./compose-render-mode.js"
 import { devDatabaseIdentity, isDevDatabaseUrl } from "./local-secrets.js"
 import { portHeldByComposeProject } from "./dev-ports.js"
-import { composeProjectName } from "./self-host-compose.js"
+import { localStackComposeProject } from "./dev-session-lock.js"
 import {
   connectionString,
   resolveRuntimeProvider,
@@ -58,7 +58,7 @@ export function projectStackUrl(
   // self-host `.env` from the VM guide names none, and its stack got no buckets and no Studio link.
   // Only this project's stack on it counts, so another project's default gateway is never used.
   const kongPort = composeKongHostPort(cwd)
-  if (!portHeldByComposeProject(kongPort, composeProjectName(config.project.name))) return undefined
+  if (!portHeldByComposeProject(kongPort, localStackComposeProject(cwd, config.project.name))) return undefined
   return `http://localhost:${kongPort}`
 }
 

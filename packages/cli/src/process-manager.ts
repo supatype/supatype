@@ -6,7 +6,8 @@
 import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { unlink } from "node:fs/promises"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { enhanceProcessOptions } from "./dev-session.js"
 import { errorMessage } from "./error-message.js"
 import { endTreeOnExit, stopTree, treeSpawnOptions } from "./process-tree.js"
@@ -54,6 +55,9 @@ export interface ProcessOptions {
   /** Called before auto-restart after a non-zero exit, and awaited like `beforeStart`. */
   beforeRestart?: () => void | Promise<void>
 }
+
+/** The crash-loop supervisor's waits a service's caller may set, ProcessManager's own unless given (a test shortens them). */
+export type SupervisionOptions = Pick<ProcessOptions, "initialBackoffMs" | "maxBackoffMs" | "fastCrashMs" | "giveUpWaitMs">
 
 const RESET = "\x1b[0m"
 
@@ -126,6 +130,7 @@ export class ProcessManager {
   private backoffMs: number
   /** Crashes in a row, each within `fastCrashMs` of its start. */
   private fastCrashes = 0
+  private crashCount = 0
   private opts: ProcessOptions & {
     colour: string
     cwd: string
@@ -169,11 +174,26 @@ export class ProcessManager {
     void this.spawnAfter(this.opts.beforeStart)
   }
 
+  /** How many times the process has exited with an error, or failed to start, so far. */
+  get crashes(): number {
+    return this.crashCount
+  }
+
+  /** Whether `stop()` has been called: the process is not restarted, and a watch on it can end. */
+  get stopRequested(): boolean {
+    return this.stopped
+  }
+
   /**
    * Stop the process and everything it started, and clear the PID file. Ending the process alone
    * left what it started running: the server's Deno worker kept the functions port (FF12).
+   *
+   * `reason` is said in the process's own pane. A start that gave up on a service said why only in
+   * dev's pane, so the service's pane ended on "restarting in 8000ms" and then nothing, for good
+   * (0.9.2 release test N-FF2).
    */
-  async stop(): Promise<void> {
+  async stop(reason?: string): Promise<void> {
+    if (reason !== undefined && !this.stopped) this.report(`${reason}. Stopped, and not restarting it.`)
     this.stopped = true
     if (this.child) await stopTree(this.child)
     await this.clearPid()
@@ -228,6 +248,7 @@ export class ProcessManager {
    * once the wait reaches `giveUpWaitMs` it is left stopped. A run that lasted resets both.
    */
   private restartUnlessLooping(what: string, startedAt: number): void {
+    this.crashCount++
     if (Date.now() - startedAt < this.opts.fastCrashMs) {
       this.fastCrashes++
     } else {
@@ -305,7 +326,9 @@ export class ProcessManager {
   private writePid(pid: number): void {
     try {
       mkdirSync(this.opts.pidDir, { recursive: true })
-      writeFileSync(join(this.opts.pidDir, `${this.opts.label}.pid`), String(pid))
+      const signature = programSignature(this.bin, this.args)
+      const lines = signature === undefined ? [String(pid)] : [String(pid), signature]
+      writeFileSync(join(this.opts.pidDir, `${this.opts.label}.pid`), lines.join("\n"))
     } catch {
       // Non-fatal: PID tracking is best-effort.
     }
@@ -320,11 +343,62 @@ export class ProcessManager {
   }
 }
 
-/** Read a PID from a file (returns null if not found or stale). */
-export function readPid(pidDir: string, label: string): number | null {
+/** A service's pid file: its pid, and the program it runs (see {@link programSignature}) when known. */
+export interface PidRecord {
+  pid: number
+  signature?: string
+}
+
+/**
+ * The most specific path a service is started with: the last absolute one among its program and
+ * arguments (the script `node` runs, or the binary itself). Its pid file records it, so a pid the
+ * system has since given another program is never taken for the service (FF12 remainder).
+ */
+export function programSignature(bin: string, args: readonly string[]): string | undefined {
+  return [bin, ...args].filter((part) => isAbsolute(part)).at(-1)
+}
+
+/** The pid file `label` in `pidDir`, or null when there is none or it names no pid. */
+export function readPidRecord(pidDir: string, label: string): PidRecord | null {
   const pidFile = join(pidDir, `${label}.pid`)
   if (!existsSync(pidFile)) return null
-  const raw = readFileSync(pidFile, "utf8").trim()
-  const pid = Number(raw)
-  return Number.isFinite(pid) && pid > 0 ? pid : null
+  const [first = "", signature = ""] = readFileSync(pidFile, "utf8").split(/\r?\n/).map((line) => line.trim())
+  const pid = Number(first)
+  if (!Number.isInteger(pid) || pid <= 0) return null
+  return signature === "" ? { pid } : { pid, signature }
+}
+
+/** Read a PID from a file (returns null if not found or stale). */
+export function readPid(pidDir: string, label: string): number | null {
+  return readPidRecord(pidDir, label)?.pid ?? null
+}
+
+/** How often a service switched off at the gateway for not answering is asked again. */
+const LATE_POLL_MS = 1_000
+
+/** What {@link superviseUntilReady} asks, and what it does once the service answers. */
+interface ReadyWatch<T> {
+  /** The service's answer, or undefined while it gives none. */
+  probe: () => Promise<T | undefined>
+  /** Switches the service back on at the gateway, given its answer. */
+  onReady: (answer: T) => void | Promise<void>
+  /** Whether the process has stopped for good (the supervisor gave up, which says so in its pane). */
+  isGone: () => boolean
+}
+
+/**
+ * Asks a service switched off at the gateway for not answering by its deadline until it does, and
+ * hands the answer to `onReady`. Ends when the process stops for good or dev stops it. The service is
+ * left with the crash-loop supervisor meanwhile: it was stopped instead, so nothing could switch it
+ * on later (0.9.2 release test N-FF2). Holds nothing open, so dev may stop while it runs.
+ */
+export async function superviseUntilReady<T>(proc: ProcessManager, { probe, onReady, isGone }: ReadyWatch<T>): Promise<void> {
+  const ended = (): boolean => isGone() || proc.stopRequested
+  while (!ended()) {
+    await sleep(LATE_POLL_MS, undefined, { ref: false })
+    const answer = await probe()
+    if (answer === undefined || ended()) continue
+    await onReady(answer)
+    return
+  }
 }

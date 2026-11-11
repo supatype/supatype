@@ -55,6 +55,7 @@ const detected: DetectedProjectSetup = {
   hasExistingFiles: false,
   hasSupatypeConfig: false,
   hasVite: false,
+  declaresVite: false,
   hasViteConfig: false,
   viteDevUrl: "http://localhost:5173",
   staticDir: "./dist",

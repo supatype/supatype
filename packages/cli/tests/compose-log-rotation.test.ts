@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { renderSelfHostCompose } from "../src/self-host-compose.js"
 import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
+import { composeServiceBlocks } from "./support/compose-services.js"
 
 /**
  * 0.9.1 release test RB8: the compose file set no logging options, so every container logged to
@@ -19,22 +20,6 @@ const base = {
 
 const project = (extra: Record<string, unknown>): SupatypeProjectConfig =>
   validateProjectConfig({ database: { provider: "docker" }, ...base, ...extra }, "supatype.config.ts")
-
-/** The names under `services:`, each with the lines of its block. */
-function services(compose: string): Map<string, string[]> {
-  const lines = compose.split("\n")
-  const found = new Map<string, string[]>()
-  let current: string[] | null = null
-  for (const line of lines.slice(lines.indexOf("services:") + 1)) {
-    if (/^\S/.test(line)) break
-    const name = /^ {2}([a-z][a-z0-9-]*):$/.exec(line)?.[1]
-    if (name !== undefined) {
-      current = []
-      found.set(name, current)
-    } else current?.push(line)
-  }
-  return found
-}
 
 const VARIANTS: Array<[string, SupatypeProjectConfig, boolean]> = [
   ["docker dev", project({}), true],
@@ -67,7 +52,7 @@ describe("container log rotation", () => {
       })
 
       it("gives it to every service", () => {
-        const found = services(compose)
+        const found = composeServiceBlocks(compose)
         expect(found.size, "no services parsed").toBeGreaterThan(5)
         for (const [name, block] of found) {
           expect(block, `${name} has no logging options`).toContain("    logging: *default-logging")

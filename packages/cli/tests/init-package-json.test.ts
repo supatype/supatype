@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import semver from "semver"
-import { mergeSupatypePackageJson, PREPARE_COMMAND, scaffoldPackageJson, supatypeDevScript } from "../src/init-package-json.js"
+import { mergeSupatypePackageJson, PREPARE_COMMAND, scaffoldPackageJson } from "../src/init-package-json.js"
 
 const DEPS = { cli: "0.1.1", types: "0.1.1", client: "0.1.1" }
 const NO_APP = { projectName: "existing", app: { mode: "none" }, helloFunction: false }
@@ -159,12 +159,6 @@ describe("mergeSupatypePackageJson", () => {
   it("sets a version only when the project has none", () => {
     expect(mergeSupatypePackageJson({ name: "existing" }, NO_APP, DEPS).version).toBe("0.1.0")
     expect(mergeSupatypePackageJson({ name: "existing", version: "3.2.1" }, NO_APP, DEPS).version).toBe("3.2.1")
-  })
-
-  it("names the script that runs supatype dev, for the next steps", () => {
-    expect(supatypeDevScript(mergeSupatypePackageJson({}, NO_APP, DEPS).scripts)).toBe("dev")
-    expect(supatypeDevScript(mergeSupatypePackageJson({ scripts: { dev: "next dev" } }, NO_APP, DEPS).scripts)).toBe("supatype:dev")
-    expect(supatypeDevScript(undefined)).toBe("dev")
   })
 
   it("keeps the project's own scripts, in their order, ahead of the ones it adds", () => {

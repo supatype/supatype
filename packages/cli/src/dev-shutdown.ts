@@ -268,7 +268,9 @@ const INTERRUPT_SETTLE_MS = 250
  * just after. So when the action fails, this waits a moment, and when a shutdown began, never
  * settles: the shutdown ends the process with one line, and the child's failure is not reported.
  * A failure for any other reason undoes what the start began, then is reported: it left Postgres
- * and the services running.
+ * and the services running. The dashboard is taken down before it is reported: still mounted, it
+ * held the console, so the error went to its pane and the process exited on the last frame drawn,
+ * with nothing on screen saying why, while `--stream` printed it (0.9.2 release test N-FF6).
  */
 export function stopQuietlyDuringStart<A extends unknown[]>(
   action: (...args: A) => Promise<void>,
@@ -279,6 +281,7 @@ export function stopQuietlyDuringStart<A extends unknown[]>(
     } catch (err) {
       await haltIfInterrupted()
       await drainStartUndo()
+      endDevSession()
       throw err
     }
   }

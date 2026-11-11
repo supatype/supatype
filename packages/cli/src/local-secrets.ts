@@ -294,6 +294,22 @@ export function ensureNativeAuthenticatorPassword(cwd: string): string {
   return devAuthenticatorPassword(cwd)
 }
 
+/** The `.env` key holding the project's RESP keyspace password, as the image and the server read it. */
+export const KEYSPACE_PASSWORD_ENV = "SUPATYPE_KEYSPACE_PASSWORD"
+
+/** The credential the keyspace password belongs to: the user the image and native dev create. */
+export const KEYSPACE_USERNAME = "supatype"
+
+/**
+ * The project's keyspace password: `.env`'s, or a generated one written there first (0.9.2 release
+ * test, N-RB2). The keyspace holds nothing that outlives its password, so a new one costs nothing,
+ * and a value the developer set is never replaced. Docker, self-host and native dev share it.
+ */
+export function ensureKeyspacePassword(cwd: string): string {
+  ensureGeneratedPassword(cwd, KEYSPACE_PASSWORD_ENV)
+  return readEnvValue(cwd, KEYSPACE_PASSWORD_ENV, "")
+}
+
 function ensureGeneratedPassword(cwd: string, key: string): void {
   if (!hasEnvValue(cwd, key)) upsertEnvFile(cwd, { [key]: randomBytes(24).toString("base64url") })
 }

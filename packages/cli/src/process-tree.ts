@@ -70,6 +70,22 @@ export async function signalTree(pid: number, signal: NodeJS.Signals): Promise<b
   return (await runCaptured("taskkill", taskkillArgs(pid))).status === 0
 }
 
+/**
+ * Kills `pid` and every process it started, at once: for a process this run did not start, such as
+ * one an earlier run left behind. A process need not lead a process group of its own (Vite under the
+ * package manager an app was started with), so off Windows the process alone is killed when it
+ * leads none. A pid that names no process is nothing to kill.
+ */
+export async function killPidTree(pid: number): Promise<void> {
+  if (!Number.isInteger(pid) || pid <= 0) return
+  if ((await signalTree(pid, "SIGKILL")) || process.platform === "win32") return
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch {
+    // It has already ended.
+  }
+}
+
 /** {@link signalTree}, finished before it returns, for the process "exit" handler. */
 function signalTreeNow(pid: number, signal: NodeJS.Signals): void {
   if (process.platform !== "win32") {

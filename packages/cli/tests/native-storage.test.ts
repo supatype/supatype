@@ -498,6 +498,9 @@ describe("startNativeStorage", () => {
     const started = Date.now()
     expect(await startNativeStorage(options(await freePort()), async () => crashing)).toBeNull()
     expect(Date.now() - started).toBeLessThan(15_000)
+    // It is left with the crash-loop supervisor (N-FF2), so it is stopped as dev's shutdown would.
+    await drainStartUndo()
+    resetDevShutdownForTests()
   }, 20_000)
 
   // 0.9.1 release test: the fallback to the server's built-in object store let any token, the anon
@@ -509,7 +512,7 @@ describe("startNativeStorage", () => {
       throw new Error("storage archive not available")
     }
     expect(await startNativeStorage(options(await freePort()), missing)).toBeNull()
-    expect(manifest()).toEqual({})
+    expect(manifest()).toEqual({ services: { storage: { enabled: false } } })
     const said = warn.mock.calls.flat().join("\n")
     expect(said).not.toMatch(/built-in object store answers/)
     expect(said).toMatch(/Storage is off/)
@@ -517,6 +520,77 @@ describe("startNativeStorage", () => {
     expect(said).toMatch(/storage archive not available/)
     expect(said).toMatch(/restart `supatype dev`/)
   })
+})
+
+// 0.9.2 release test N-FF2: a storage service that was not ready by its deadline was stopped, as
+// the server read whether storage was on only from its environment at start, so nothing could
+// switch it on later and the crash-loop supervisor never retried it. The server now follows the
+// manifest's services.storage switch while it runs, so the service is switched off there, left with the
+// supervisor, and switched back on once it answers, after the import.
+describe("a storage service not ready by its deadline", () => {
+  let pane: string[] = []
+  beforeEach(() => {
+    pane = []
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      pane.push(String(chunk))
+      return true
+    })
+  })
+  afterEach(async () => {
+    await drainStartUndo()
+    resetDevShutdownForTests()
+  })
+
+  /** Short waits, so a crash loop runs its course within a test. */
+  function quick(port: number, giveUpWaitMs: number, onLateStart?: NativeStorageOptions["onLateStart"]): NativeStorageOptions {
+    return {
+      ...options(port),
+      readyTimeoutMs: 300,
+      supervision: { initialBackoffMs: 20, maxBackoffMs: 50, giveUpWaitMs },
+      ...(onLateStart !== undefined && { onLateStart }),
+    }
+  }
+  const said = (spy: "log" | "warn"): string => vi.mocked(console[spy]).mock.calls.flat().join("\n")
+  const script = (body: string) => async () => ({ bin: process.execPath, args: ["-e", body] })
+
+  it("keeps a crash-looping service supervised, and switches it on once it answers", async () => {
+    const port = await freePort()
+    const runs = JSON.stringify(join(dir, "runs"))
+    const late: string[] = []
+    const launch = script(`
+const fs = require("node:fs")
+const run = (fs.existsSync(${runs}) ? Number(fs.readFileSync(${runs}, "utf8")) : 0) + 1
+fs.writeFileSync(${runs}, String(run))
+if (run <= 6) process.exit(1)
+require("node:http").createServer((q, s) => { s.writeHead(200); s.end('{"status":"ok"}') }).listen(${port}, "127.0.0.1")
+`)
+    // The first run exits at once, which ends the wait whatever the deadline. A deadline well above
+    // Node's start-up keeps the timeout from winning that race on a loaded machine (it did, at 300 ms).
+    const opts = { ...quick(port, 60_000, (storage) => void late.push(storage.url)), readyTimeoutMs: 3_000 }
+    expect(await startNativeStorage(opts, launch)).toBeNull()
+    expect(manifest()).toEqual({ services: { storage: { enabled: false } } })
+    expect(said("warn")).toMatch(/Storage \(objects in .*\) is not answering yet: the storage service exited before it was ready/)
+    const url = `http://127.0.0.1:${port}`
+    await vi.waitFor(() => expect(manifest()).toEqual({ storage_url: url, services: { storage: { enabled: true } } }), { timeout: 8_000 })
+    expect(said("log")).toContain(`[supatype] Storage answers at ${url} now, so it is switched back on at the gateway.`)
+    expect(late).toEqual([url])
+    expect(pane.join("")).toMatch(/so it is retried less often/)
+  }, 15_000)
+
+  it("switches storage off, and says so, while nothing answers", async () => {
+    const port = await freePort()
+    expect(await startNativeStorage(quick(port, 60_000), script("setInterval(() => undefined, 1000)"))).toBeNull()
+    expect(manifest()).toEqual({ services: { storage: { enabled: false } } })
+    expect(said("warn")).toMatch(/Storage \(objects in .*\) is not answering yet: the storage service did not report ready at .* within 0\.3s/)
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    expect(alive(readPid(dir, "storage") ?? 0)).toBe(true)
+  }, 10_000)
+
+  it("still says in its pane when the supervisor gives up on it", async () => {
+    expect(await startNativeStorage(quick(await freePort(), 400), script("process.exit(1)"))).toBeNull()
+    await vi.waitFor(() => expect(pane.join("")).toMatch(/\[storage\].* still crashing as it starts, not restarting it\./), { timeout: 8_000 })
+    expect(manifest()).toEqual({ services: { storage: { enabled: false } } })
+  }, 15_000)
 })
 
 // Review of round 3b: the wait for the service counted wall-clock time, so a stretch in which a

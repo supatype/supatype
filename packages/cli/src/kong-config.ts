@@ -22,7 +22,21 @@ export interface KongDeclarativeOptions {
    * When set, append a global Kong `acme` plugin (Let's Encrypt) with RESP
    * storage so the self-host gateway provisions and renews TLS automatically.
    */
-  acme?: { email: string; domain: string; redisHost: string } | undefined
+  acme?: { email: string; domain: string; redisHost: string; redisAuth?: boolean } | undefined
+}
+
+/**
+ * The keyspace login Kong's ACME plugin stores certificates with, when the keyspace requires one
+ * (0.9.2 release test, N-RB2). The password is an env vault reference to the variable compose hands
+ * Kong (KEYSPACE_PASSWORD_ENV), so kong.yml, which is a file on disk, never holds it. Kong's env
+ * vault reads `supatype-keyspace-password` as SUPATYPE_KEYSPACE_PASSWORD.
+ */
+function acmeRedisAuth(redisAuth: boolean | undefined): string {
+  if (redisAuth !== true) return ""
+  const vaultName = KEYSPACE_PASSWORD_ENV.toLowerCase().replaceAll("_", "-")
+  return `          username: ${yamlQuotedString(KEYSPACE_USERNAME)}
+          password: ${yamlQuotedString(`{vault://env/${vaultName}}`)}
+`
 }
 
 /** Escape a string for use inside YAML double quotes. */
@@ -82,6 +96,7 @@ function routePlugins(route: RuntimeRoute, secured: boolean): string {
   return plugins.length === 0 ? "" : `        plugins:\n${plugins.join("")}`
 }
 
+import { KEYSPACE_PASSWORD_ENV, KEYSPACE_USERNAME } from "./local-secrets.js"
 import { runtimeRouteSpec, type RuntimeRoute } from "./runtime-routes.js"
 
 /**
@@ -139,7 +154,7 @@ plugins:
         redis:
           host: ${yamlQuotedString(acme.redisHost)}
           port: 6379
-`
+${acmeRedisAuth(acme.redisAuth)}`
     : ""
 
   return `_format_version: "3.0"

@@ -6,6 +6,8 @@
  * line, where any local user could read it from the process list.
  */
 
+import { QUIET_SECRET_SQL } from "./secret-sql.js"
+
 /** The environment variable the script reads the authenticator password from. */
 export const AUTHENTICATOR_PASSWORD_ENV = "SUPATYPE_AUTHENTICATOR_PASSWORD"
 
@@ -137,7 +139,7 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role')
     THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF;
 END $$;
-\\getenv authenticator_password ${AUTHENTICATOR_PASSWORD_ENV}
+${QUIET_SECRET_SQL}\\getenv authenticator_password ${AUTHENTICATOR_PASSWORD_ENV}
 SELECT format('CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD %L', :'authenticator_password')
   WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') \\gexec
 SELECT format('ALTER ROLE authenticator PASSWORD %L', :'authenticator_password') \\gexec

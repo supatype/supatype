@@ -1,12 +1,12 @@
 import { setTimeout as sleep } from "node:timers/promises"
 import { isJsonObject } from "@supatype/shared"
-import { ProcessManager } from "./process-manager.js"
+import { ProcessManager, superviseUntilReady, type SupervisionOptions } from "./process-manager.js"
 import { pushStartUndo } from "./dev-shutdown.js"
 import { errorMessage } from "./error-message.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import type { ComponentLaunchSpec } from "./component-launch.js"
 import { resolveRealtimeLaunch } from "./realtime-launch.js"
-import { patchRouteManifest } from "./route-manifest.js"
+import { switchServices } from "./route-manifest.js"
 import { logicalDecodingProblem } from "./db-preflight.js"
 
 export interface NativeRealtimeOptions {
@@ -19,8 +19,9 @@ export interface NativeRealtimeOptions {
   port: string
   databaseUrl: string
   jwtSecret: string
-  /** How long realtime has to answer before it is reported not running. */
+  /** How long realtime has to answer before it is switched off at the gateway until it does. */
   readyTimeoutMs?: number
+  supervision?: SupervisionOptions
 }
 
 type ResolveLaunch = (config: SupatypeProjectConfig, cwd: string) => Promise<ComponentLaunchSpec>
@@ -56,6 +57,7 @@ function spawnRealtime(launch: ComponentLaunchSpec, opts: NativeRealtimeOptions,
     },
     // A clean exit, or crashing as it starts too often: ProcessManager restarts realtime after any other.
     onStopped,
+    ...opts.supervision,
   })
   proc.start()
   // Recorded the moment it is spawned, so a Ctrl+C while dev is still starting stops it too.
@@ -73,7 +75,9 @@ function spawnRealtime(launch: ComponentLaunchSpec, opts: NativeRealtimeOptions,
  *
  * Running means answering. Dev used to enable realtime and print its URL the moment the process
  * was spawned, so a realtime that exited at once, or disabled its database changes for want of
- * logical decoding, was announced as running all the same (local test N3).
+ * logical decoding, was announced as running all the same (local test N3). One that has not
+ * answered by the deadline is switched off at the gateway but left running, with the crash-loop
+ * supervisor, and switched back on once it answers (0.9.2 release test N-FF2).
  */
 export async function startNativeRealtime(
   opts: NativeRealtimeOptions,
@@ -94,8 +98,9 @@ export async function startNativeRealtime(
     return realtimeNotRunning(opts, await exitedReason(opts.databaseUrl, checkDecoding))
   }
   if (state.kind === "silent") {
-    await proc.stop()
-    return realtimeNotRunning(opts, `nothing answered at ${opts.url}/health/ready within ${Math.round(timeoutMs / 1000)}s.`)
+    await switchOffUntilAnswered(proc, opts, timeoutMs, checkDecoding)
+    void switchOnOnceAnswered(proc, opts, watch)
+    return proc
   }
   watch.announced()
   announceRealtime(opts, state)
@@ -176,8 +181,11 @@ function unsupportedReason(body: unknown): string | undefined {
  * blamed on a Postgres without logical decoding whatever the database said, while `wal_level` was
  * logical and the cause was a missing wal2json (local test round 3).
  */
-async function exitedReason(databaseUrl: string, checkDecoding: CheckDecoding): Promise<string> {
-  const exited = "it exited as it started, without a word"
+async function exitedReason(
+  databaseUrl: string,
+  checkDecoding: CheckDecoding,
+  exited = "it exited as it started, without a word",
+): Promise<string> {
   try {
     const problem = await checkDecoding(databaseUrl)
     return problem === undefined
@@ -188,18 +196,69 @@ async function exitedReason(databaseUrl: string, checkDecoding: CheckDecoding): 
   }
 }
 
+/**
+ * Realtime gave no answer in time: switched off at the gateway, and said why, but left running with
+ * the crash-loop supervisor. It was stopped here, so the supervisor never retried it, and its pane
+ * ended on "restarting in 8000ms" for good; a crash loop was blamed on "nothing answered" (0.9.2
+ * release test N-FF2).
+ */
+async function switchOffUntilAnswered(
+  proc: ProcessManager,
+  opts: NativeRealtimeOptions,
+  timeoutMs: number,
+  checkDecoding: CheckDecoding,
+): Promise<void> {
+  const crashes = proc.crashes
+  const why = crashes === 0
+    ? `nothing answered at ${opts.url}/health/ready within ${Math.round(timeoutMs / 1000)}s.`
+    : await exitedReason(
+      opts.databaseUrl,
+      checkDecoding,
+      `it exited with an error ${crashes} ${crashes === 1 ? "time" : "times"} as it started (its own output says why)`,
+    )
+  disableRealtime(
+    opts.manifestPath,
+    `Realtime is not answering yet: ${why} It is switched off at the gateway until it answers, and restarted when it exits.`,
+  )
+}
+
+/** Switches a realtime switched off for not answering back on once it answers, and says so. */
+function switchOnOnceAnswered(proc: ProcessManager, opts: NativeRealtimeOptions, watch: ExitWatch): Promise<void> {
+  return superviseUntilReady(proc, {
+    probe: async () => {
+      const state = await probeReady(opts.url)
+      return state.kind === "silent" ? undefined : state
+    },
+    onReady: (state) => {
+      watch.announced()
+      console.log(`[supatype] Realtime answers at ${opts.url} now, so it is switched back on at the gateway.`)
+      switchRealtimeOn(opts, state)
+    },
+    isGone: () => watch.gone.aborted,
+  })
+}
+
 /** Record and say that realtime is serving, and how much of it. */
 function announceRealtime(opts: NativeRealtimeOptions, state: RealtimeState): void {
+  if (!switchRealtimeOn(opts, state)) return
+  const connecting = state.kind === "connecting" ? " (still connecting to the database)" : ""
+  console.log(`[supatype] Realtime service: ${opts.url}${connecting}`)
+}
+
+/**
+ * Record that realtime is serving. False when it serves broadcast and presence but not database
+ * changes, which it says, with why.
+ */
+function switchRealtimeOn(opts: NativeRealtimeOptions, state: RealtimeState): boolean {
   // Enabled in every case here: the socket answers, so broadcast and presence work whatever the
   // database can do, and the gateway's own health probe asks only whether it is up.
-  patchRouteManifest(opts.manifestPath, { realtime_enabled: true, realtime_url: opts.url })
-  if (state.kind === "unsupported") return warnChangesOff(opts.url, state.reason)
-  if (state.kind !== "connecting") {
-    console.log(`[supatype] Realtime service: ${opts.url}`)
-    return
+  switchServices(opts.manifestPath, { realtime: true }, { realtime_url: opts.url })
+  if (state.kind === "unsupported") {
+    warnChangesOff(opts.url, state.reason)
+    return false
   }
-  console.log(`[supatype] Realtime service: ${opts.url} (still connecting to the database)`)
-  void followConnecting(opts.url)
+  if (state.kind === "connecting") void followConnecting(opts.url)
+  return true
 }
 
 /** Say that realtime serves broadcast and presence but not database changes, and why. */
@@ -237,7 +296,7 @@ function realtimeNotRunning(opts: NativeRealtimeOptions, why: string): null {
 
 /** Switch realtime off in the manifest and say so, `headline` first. */
 function disableRealtime(manifestPath: string, headline: string): void {
-  patchRouteManifest(manifestPath, { realtime_enabled: false, realtime_url: undefined })
+  switchServices(manifestPath, { realtime: false }, { realtime_url: undefined })
   console.warn(
     `[supatype] ⚠  ${headline} The gateway answers realtime requests with "realtime disabled", ` +
       "and WebSocket subscriptions will not work.",

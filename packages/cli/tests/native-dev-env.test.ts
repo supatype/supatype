@@ -13,6 +13,7 @@ import { isAbsolute, join } from "node:path"
 import { tmpdir } from "node:os"
 import {
   nativeDevRolesSql,
+  nativeKeyspaceServerEnv,
   nativePostgrestSchemaEnv,
   nativeServerCoreEnv,
   type NativeServerCoreInput,
@@ -154,5 +155,37 @@ describe("the roles script for a new native database", () => {
   it("creates the mask extension when the install carries the library", () => {
     installLibrary("supatype_mask")
     expect(nativeDevRolesSql(binDir)).toMatch(createsMask)
+  })
+})
+
+/**
+ * 0.9.2 release test (N-RB2): the native server logs in to the keyspace native Postgres serves.
+ * Its environment ends with the .env layer, and .env can hold a SUPATYPE_KEYSPACE_PASSWORD a Docker
+ * phase of the same project generated: given to the server beside this run's own Valkey sidecar,
+ * which has no password, its AUTH would be refused and the cache would never connect.
+ */
+describe("the keyspace login native dev hands the server", () => {
+  const login = { username: "supatype", password: "pw" }
+  const sidecar = { addr: "127.0.0.1:6380", containerName: "supatype-valkey-dev-acme", started: true }
+
+  // 0.9.2 round 2 (R2-S16): a SUPATYPE_KEYSPACE_PASSWORD_FILE in .env is blanked as well. Native dev
+  // has already read the password from it, and beside the password the server refuses to start.
+  it("is the keyspace's credential when Postgres serves the keyspace", () => {
+    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "127.0.0.1:6379", containerName: null, started: false }, login })).toEqual({
+      SUPATYPE_KEYSPACE_USERNAME: "supatype",
+      SUPATYPE_KEYSPACE_PASSWORD: "pw",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+  })
+
+  it("is blank beside this run's own Valkey sidecar, whatever .env says", () => {
+    expect(nativeKeyspaceServerEnv({ sidecar, login: null })).toEqual({
+      SUPATYPE_KEYSPACE_PASSWORD: "",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+  })
+
+  it("is left to .env for a Valkey SUPATYPE_VALKEY_ADDR names, which may have its own password", () => {
+    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "10.0.0.5:6379", containerName: null, started: false }, login: null })).toEqual({})
   })
 })

@@ -15,7 +15,9 @@ import { discoverHandlersInDir } from "./functions-discovery.js"
 import { manifestCache } from "./model-cache.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
+import { serviceSwitch } from "./route-manifest.js"
 import { hookTableColumns } from "./hook-columns.js"
+import { writeIfChanged } from "./write-if-changed.js"
 import { applyManifestMaps, isJsonObject, keptName, type ManifestHookEntry, type ManifestMaps } from "@supatype/shared"
 
 export interface DeclaredHook {
@@ -185,10 +187,13 @@ function hooksModulePath(hooksDir: string): string {
   return join(hooksDir, "_supatype", "hooks.ts")
 }
 
-/** Writes `module` to `file`, making its directory, and returns the path relative to `cwd`. */
-function writeModule(cwd: string, file: string, module: string): string {
+/**
+ * Writes `module` to `file`, making its directory. The path relative to `cwd`, or null when `file`
+ * already held it: push said "Hook handler types written to" every time, writing nothing new.
+ */
+function writeModule(cwd: string, file: string, module: string): string | null {
   mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, module, "utf8")
+  if (!writeIfChanged(file, module)) return null
   return relative(cwd, file) || file
 }
 
@@ -305,9 +310,9 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 2000
  * The first of those is why it is written at push and not left to drift.
  *
  * **Only updates a manifest that is already there.** Creating one from scratch here would be a
- * hazard: `functions_enabled` is a plain bool on the server's side, so a manifest carrying only
- * hooks would read as functions *disabled*, the exact defect this repo fixed a commit ago, arriving
- * by a different door. The compose path owns creation; this owns two keys.
+ * hazard: a manifest carrying only hooks says nothing of functions, so the server keeps its start
+ * value, off where no worker is configured (native dev), the exact defect this repo once fixed,
+ * arriving by a different door. The compose path owns creation; this owns two keys.
  *
  * Returns true when the file was rewritten.
  */
@@ -357,7 +362,7 @@ export interface HooksReport {
  * of a running worker, so the answer is the same whether or not the stack is up, and a report that
  * needs a stack is a report nobody runs before deploying.
  *
- * The case worth catching: hooks declared while `functions_enabled` is false. Nothing fails, no error
+ * The case worth catching: hooks declared while functions are switched off. Nothing fails, no error
  * appears, and every hook silently never fires.
  */
 export function hooksReport(cwd: string, hooksDir: string, ast: unknown): HooksReport {
@@ -372,7 +377,7 @@ export function hooksReport(cwd: string, hooksDir: string, ast: unknown): HooksR
     // Unparseable: the server reports that far better than a doctor line could.
     const parsed = readJsonObjectFile(manifestPath)
     if (parsed !== undefined) {
-      functionsDisabled = parsed["functions_enabled"] === false
+      functionsDisabled = serviceSwitch(parsed, "functions") === false
       mapMissing = declared.length > 0 && parsed["hooks"] === undefined
       validatorMapMissing = validators.length > 0 && parsed["validators"] === undefined
     }

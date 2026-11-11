@@ -15,10 +15,12 @@ import type { SelfHostComposePaths } from "./self-host-compose.js"
 import { degraded } from "./strict.js"
 import { dockerEnv } from "./docker-env.js"
 import { PRIVATE_TABLE_DEFAULTS_SQL } from "./native-roles-sql.js"
+import { QUIET_SECRET_SQL } from "./secret-sql.js"
 
 type ComposeTarget = Pick<SelfHostComposePaths, "composePath">
 
 const RECONCILE_AUTHENTICATOR_SQL = [
+  QUIET_SECRET_SQL,
   "\\getenv pw SUPATYPE_AUTHENTICATOR_PASSWORD",
   "ALTER ROLE authenticator WITH LOGIN PASSWORD :'pw';",
   "",
@@ -27,6 +29,7 @@ const RECONCILE_AUTHENTICATOR_SQL = [
 // `\gexec` rather than a DO block: psql does not interpolate `:'pw'` inside a dollar-quoted body.
 // The WHERE clause yields no statement at all on a volume whose image predates the role.
 const RECONCILE_SQL_EDITOR_SQL = [
+  QUIET_SECRET_SQL,
   `\\getenv pw ${SQL_EDITOR_PASSWORD_ENV}`,
   "SELECT format('ALTER ROLE supatype_sql_editor WITH LOGIN PASSWORD %L', :'pw')",
   "WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'supatype_sql_editor')",

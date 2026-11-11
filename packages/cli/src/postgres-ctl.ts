@@ -28,12 +28,17 @@ export interface PgOptions {
   keyspacePort?: number
   /** Database durable keys are written to. Ignored while everything is ephemeral. */
   keyspaceDatabase?: string
+  /**
+   * The file the keyspace reads the `supatype` user's password from (`pg_keyspace.password_file`),
+   * which native dev writes before the start (native-keyspace.ts). Only the path is a setting.
+   */
+  keyspacePasswordFile?: string
   /** The project's database, where pg_cron and pg_net run their jobs. */
   database?: string
 }
 
 /** What the server's settings are decided from: the install, the keyspace and the database. */
-type PgSettingsOptions = Pick<PgOptions, "pgBinDir" | "keyspacePort" | "keyspaceDatabase" | "database">
+type PgSettingsOptions = Pick<PgOptions, "pgBinDir" | "keyspacePort" | "keyspaceDatabase" | "keyspacePasswordFile" | "database">
 
 /**
  * Native Postgres bundles are built with prefix /usr/local/supatype-pg; dyld/ld
@@ -308,7 +313,8 @@ function nativeLibraryPresent(pgBinDir: string | null | undefined, stem: string)
 }
 
 /**
- * Where the native RESP keyspace looks for a free port, and how far it looks.
+ * Where the native RESP keyspace looks for a free port, and how far it looks;
+ * the Valkey sidecar that stands in for it looks in the same ports.
  *
  * 6379 first, because that is what a developer's tooling and the Valkey
  * sidecar before it both used, so the familiar port stays the usual answer.
@@ -363,7 +369,19 @@ export function pgServerOptions(opts: PgOptions): string {
 
 /** {@link pgServerOptions} without the port: every setting a native Postgres starts with. */
 function pgServerSettings(opts: PgSettingsOptions): string {
-  return pgServerSettingPairs(opts).map(([name, value]) => `-c ${name}=${value}`).join(" ")
+  return pgServerSettingPairs(opts).map(([name, value]) => pgSettingArg(name, value)).join(" ")
+}
+
+/**
+ * One `-c name=value` of the options pg_ctl hands the server. On Linux and macOS pg_ctl starts
+ * Postgres through `/bin/sh`, so a value with a space or a quote, as a password file under a home
+ * directory like `/Users/Ada Lovelace` has, is single-quoted for that shell. Every other value is
+ * a plain word, as before; Windows, whose archive has no keyspace, is left as it was.
+ */
+export function pgSettingArg(name: string, value: string, platform: NodeJS.Platform = process.platform): string {
+  const arg = `${name}=${value}`
+  if (platform === "win32" || /^[\w.,:/=@+-]*$/.test(arg)) return `-c ${arg}`
+  return `-c '${arg.replaceAll("'", "'\\''")}'`
 }
 
 /** {@link pgServerSettings} as name and value pairs, in the order they are given. */
@@ -401,9 +419,23 @@ function databaseSetting(name: string, opts: PgSettingsOptions): [string, string
   return opts.database ? [[name, opts.database]] : []
 }
 
+/**
+ * The keyspace's settings. 0.9.2 release test (N-RB2): it listened on 0.0.0.0 and answered every
+ * client, so native dev on Linux served an open, writable store to the network. It listens on
+ * loopback only, and reads the `supatype` user's password from the file native dev wrote
+ * (native-keyspace.ts), which also makes it refuse every client that has not logged in, from its
+ * first accept. With no file it still refuses everyone (`require_auth`), rather than serve them.
+ * `nativeKeyspacePort` only asks for a keyspace from an archive that has these settings
+ * (KEYSPACE_AUTH_SINCE).
+ */
 function keyspaceSettings(opts: PgSettingsOptions): [string, string][] {
+  const auth: [string, string] = opts.keyspacePasswordFile
+    ? ["pg_keyspace.password_file", opts.keyspacePasswordFile]
+    : ["pg_keyspace.require_auth", "on"]
   return [
     ["pg_keyspace.port", String(opts.keyspacePort)],
+    ["pg_keyspace.listen_address", "127.0.0.1"],
+    auth,
     ["pg_keyspace.durability", "ephemeral"],
     ["pg_keyspace.keys", "50000"],
     ["pg_keyspace.ring_mb", "8"],
@@ -486,14 +518,30 @@ function runPgCtlStart(opts: PgOptions, args: string[], logPath: string): void {
  * or that names no pid, is left for pg_ctl and Postgres to judge. True when it was removed.
  */
 export function removeStalePidFile(dataDir: string, alive: (pid: number) => boolean = pidAlive): boolean {
-  const pidFile = join(dataDir, "postmaster.pid")
-  if (!existsSync(pidFile)) return false
-  const firstLine = (readFileSync(pidFile, "utf8").split("\n")[0] ?? "").trim()
-  const pid = /^\d+$/.test(firstLine) ? Number(firstLine) : 0
+  const pid = readPostmasterPid(dataDir)?.pid ?? 0
   if (pid <= 0 || alive(pid)) return false
-  rmSync(pidFile, { force: true })
+  rmSync(join(dataDir, "postmaster.pid"), { force: true })
   console.log(`[supatype] Removed a stale postmaster.pid (process ${pid} is gone) from ${dataDir}.`)
   return true
+}
+
+/** What a data directory's `postmaster.pid` says about the server that wrote it. */
+export interface PostmasterPid {
+  /** The postmaster's pid; 0 when the first line is not one. */
+  pid: number
+  /** The data directory it was started on, as Postgres wrote it (forward slashes on Windows too). */
+  dataDir: string
+  /** The port it listens on; 0 when the file does not say yet. */
+  port: number
+}
+
+/** `postmaster.pid` in `dataDir`: its first, second and fourth lines. Null when there is none. */
+export function readPostmasterPid(dataDir: string): PostmasterPid | null {
+  const pidFile = join(dataDir, "postmaster.pid")
+  if (!existsSync(pidFile)) return null
+  const lines = readFileSync(pidFile, "utf8").split("\n").map((line) => line.trim())
+  const whole = (line: string | undefined): number => (/^\d+$/.test(line ?? "") ? Number(line) : 0)
+  return { pid: whole(lines[0]), dataDir: lines[1] ?? "", port: whole(lines[3]) }
 }
 
 /**

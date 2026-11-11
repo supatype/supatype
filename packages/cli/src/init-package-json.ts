@@ -1,7 +1,5 @@
 import semver from "semver"
-import { isJsonObject } from "@supatype/shared"
 import type { InitDependencyVersions } from "./init-dependency-versions.js"
-import { runsSupatypeDev } from "./dev-self-start.js"
 
 export interface MergePackageJsonOptions {
   projectName: string
@@ -51,6 +49,12 @@ const FUNCTIONS_SCRIPTS = { functions: "supatype functions serve" } as const
 
 /** The Vite major that current `@vitejs/plugin-react` requires as a peer. */
 export const VITE_RANGE = "^8"
+
+/**
+ * The Node versions that Vite major runs on: its package.json `engines.node`. Change it with VITE_RANGE:
+ * init refuses a Vite app when the Node that will run Vite is outside it (init-vite-node.ts).
+ */
+export const VITE_NODE_RANGE = "^20.19.0 || >=22.12.0"
 
 /**
  * Development-time only, so devDependencies. schema/index.ts imports @supatype/types with
@@ -131,18 +135,6 @@ function withPrepare(scripts: Record<string, string> | undefined): Record<string
 }
 
 /**
- * The script among `scripts` that runs `supatype dev`: `supatype:dev` when the merge put it beside
- * a dev script of the project's own, else `dev`.
- */
-export function supatypeDevScript(scripts: unknown): string {
-  const runs = (key: string) => {
-    const body = isJsonObject(scripts) ? scripts[key] : undefined
-    return typeof body === "string" && runsSupatypeDev(body)
-  }
-  return !runs("dev") && runs("supatype:dev") ? "supatype:dev" : "dev"
-}
-
-/**
  * The project's @supatype/client range, as `prepare` needs it: at least `floor`, the client `init`
  * would pick, since an older one may predate `supatype-prepare`. A range whose lowest version, as
  * npm's own `semver` reads it, is at or above the floor is kept. So is a spec that is not a range,
@@ -198,7 +190,10 @@ export function mergeSupatypePackageJson(
     name: pkg.name || opts.projectName,
     version: pkg.version || NEW_PROJECT_VERSION,
     private: pkg.private ?? true,
-    type: pkg.type || "module",
+    // No `type`: the app's own package.json decides how its JavaScript loads. Merged in, `"module"`
+    // made an Expo server export's CommonJS render.js fail, so `expo serve` answered every page 500
+    // (FF24). Nothing init adds needs it: the CLI runs the project's TypeScript either way, and a
+    // new vite.config is written as .mts in a package that is not ESM (scaffoldVite).
     scripts,
     dependencies,
     // A tool the project already lists in either section stays where it is.

@@ -547,15 +547,31 @@ describe("scaffold()", () => {
     }
   })
 
-  // The object store publishes 8333, and the storage service reads S3_ENDPOINT from this file.
-  // A local .env pointing anywhere else is a stack that starts and then fails on first upload.
-  it("local storage points at the port the object store actually publishes", () => {
+  // 0.9.2 release test round 2 (N-S26): `init -y` wrote S3_ENDPOINT=http://localhost:8333, which
+  // nothing reads (the compose file hands the storage service its SeaweedFS address itself), and
+  // which inside the storage container names the container. It stayed behind, dead, in a project
+  // that later moved to its own bucket.
+  it("local storage writes no S3_ENDPOINT", () => {
     scaffold(tmpRoot, {
       ...defaultScaffoldOptions("my-app"),
       storageLocal: "local",
       storageProduction: "local",
     })
     const env = readFileSync(join(tmpRoot, ".env"), "utf8")
-    expect(env).toContain("S3_ENDPOINT=http://localhost:8333")
+    expect(env).not.toMatch(/^S3_ENDPOINT=/m)
+    expect(env).not.toContain("localhost:8333")
+  })
+
+  // The storage docs: in a self-hosted stack the storage service runs in a container, where
+  // localhost is that container, so a store on the same machine is reached as host.docker.internal.
+  it("says how a container reaches a store on the same machine wherever it scaffolds S3 settings", () => {
+    for (const [storageLocal, storageProduction] of [["s3", "s3"], ["local", "s3"], ["s3", "local"]] as const) {
+      scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), storageLocal, storageProduction })
+      const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+      expect(env).toMatch(/^S3_ENDPOINT=$/m)
+      expect(env).toContain("http://host.docker.internal:<port>")
+      rmSync(tmpRoot, { recursive: true, force: true })
+      mkdirSync(tmpRoot, { recursive: true })
+    }
   })
 })

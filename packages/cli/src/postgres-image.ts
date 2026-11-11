@@ -33,6 +33,15 @@ const REPOSITORY = "supatype/postgres"
  */
 export const KEYSPACE_TOGGLE_SINCE = "17.2.9"
 
+/**
+ * The first supatype/postgres release whose keyspace can require a password: the image takes
+ * `SUPATYPE_KEYSPACE_PASSWORD`, and the extension has `pg_keyspace.password_file` and
+ * `pg_keyspace.listen_address`. Before it, a keyspace with a credential still let a client with
+ * no password list every key and FLUSHALL (0.9.2 release test, N-RB2), so native dev serves no
+ * keyspace from an older archive, and an older image is given no password it would ignore.
+ */
+export const KEYSPACE_AUTH_SINCE = "17.2.13"
+
 /** Where a tag was found: on this machine, in the registry, in neither, or the check could not run. */
 export type TagPresence = "local" | "published" | "missing" | "unknown"
 
@@ -48,6 +57,8 @@ export interface PostgresImage {
   ref: string | undefined
   /** Whether that image serves the keyspace when asked to. False when it cannot be known. */
   keyspace: boolean
+  /** Whether that image requires the keyspace password it is given ({@link KEYSPACE_AUTH_SINCE}). */
+  keyspaceAuth: boolean
   /** Set when a pin could not be honoured exactly, naming what runs instead. */
   warning?: string
 }
@@ -55,22 +66,42 @@ export interface PostgresImage {
 const EXACT = /^v?(\d+)\.(\d+)\.(\d+)$/
 const FLOATING = /^(?:\d+-)?latest$/
 
-/** Whether a supatype/postgres tag honours the keyspace toggle; false for a tag this cannot read. */
-function tagHasKeyspaceToggle(tag: string): boolean {
+/** Whether a supatype/postgres tag is `since` or later; a floating tag is, and one this cannot read is not. */
+function tagIsSince(tag: string, since: string): boolean {
   if (FLOATING.test(tag)) return true
-  if (!EXACT.test(tag)) return false
-  return compareVersions(tag, KEYSPACE_TOGGLE_SINCE) >= 0
+  return postgresVersionIsSince(tag, since)
 }
+
+/** Whether an exact Postgres release version is `since` or later; false for anything else, or none. */
+function postgresVersionIsSince(version: string | null, since: string): boolean {
+  return version !== null && EXACT.test(version) && compareVersions(version.replace(/^v/, ""), since) >= 0
+}
+
+/**
+ * Whether a native Postgres archive of `version` can require a keyspace password. Exact versions
+ * only: a native archive is downloaded by exact version, and one whose version is unknown (a local
+ * `overrides.postgres_dir` build) gets the Valkey sidecar rather than an unsecured keyspace.
+ */
+export function archiveHasKeyspaceAuth(version: string | null): boolean {
+  return postgresVersionIsSince(version, KEYSPACE_AUTH_SINCE)
+}
+
+/** What a supatype/postgres tag can do with the keyspace. */
+function tagKeyspace(tag: string): Pick<PostgresImage, "keyspace" | "keyspaceAuth"> {
+  return { keyspace: tagIsSince(tag, KEYSPACE_TOGGLE_SINCE), keyspaceAuth: tagIsSince(tag, KEYSPACE_AUTH_SINCE) }
+}
+
+/** An image nothing can be said about: no keyspace, so no password either. */
+const UNKNOWN_KEYSPACE = { keyspace: false, keyspaceAuth: false } as const
 
 /** `database.image`, run as written. A supatype/postgres tag is read like a pin; anything else is unknown. */
 function configuredImage(image: string): PostgresImage {
   const prefix = `${REPOSITORY}:`
-  const keyspace = image.startsWith(prefix) && tagHasKeyspaceToggle(image.slice(prefix.length))
-  return { ref: image, keyspace }
+  return { ref: image, ...(image.startsWith(prefix) ? tagKeyspace(image.slice(prefix.length)) : UNKNOWN_KEYSPACE) }
 }
 
 function floatingImage(tag: string): PostgresImage {
-  return { ref: `${REPOSITORY}:${tag}`, keyspace: tagHasKeyspaceToggle(tag) }
+  return { ref: `${REPOSITORY}:${tag}`, ...tagKeyspace(tag) }
 }
 
 /** An exact pin: its own tag when it can be run, else the major's latest and a warning saying so. */
@@ -79,7 +110,7 @@ function exactImage(pin: string, version: RegExpExecArray, check: PostgresTagChe
   const tag = `${major}.${minor}.${patch}`
   const ref = `${REPOSITORY}:${tag}`
   const presence = check(ref)
-  if (presence === "local" || presence === "published") return { ref, keyspace: tagHasKeyspaceToggle(tag) }
+  if (presence === "local" || presence === "published") return { ref, ...tagKeyspace(tag) }
   const fallback = floatingImage(`${major}-latest`)
   const reason =
     presence === "missing"
@@ -100,9 +131,9 @@ export function resolvePostgresImage(config: SupatypeProjectConfig, check: Postg
   const image = config.database?.image?.trim()
   if (image) return configuredImage(image)
   const pin = pinnedVersion("postgres", config)
-  if (pin === undefined) return { ref: undefined, keyspace: tagHasKeyspaceToggle(pinnedComponentVersion("postgres")) }
+  if (pin === undefined) return { ref: undefined, ...tagKeyspace(pinnedComponentVersion("postgres")) }
   // A machine-local build is named in `.env`, not here, so nothing can be said about it.
-  if (pin === VERSION_PIN_LOCAL) return { ref: undefined, keyspace: false }
+  if (pin === VERSION_PIN_LOCAL) return { ref: undefined, ...UNKNOWN_KEYSPACE }
   return pinnedImage(pin, check)
 }
 

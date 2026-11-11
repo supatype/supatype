@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { SpawnSyncReturns } from "node:child_process"
 import type { FakeRun } from "./support/fake-exec-file.js"
+import { expectQuietBeforePassword } from "./support/quiet-sql.js"
 
 /**
  * Both role fixes run `psql` inside the project's `db` container, so both have to log in as the
@@ -136,6 +137,18 @@ describe("reconcileAuthenticatorPassword", () => {
     expect(args.join(" ")).not.toContain("ks-authenticator")
     expect(input).toContain("\\getenv pw SUPATYPE_AUTHENTICATOR_PASSWORD")
     expect(args.join(" ")).not.toContain("ALTER ROLE")
+  })
+})
+
+// 0.9.2 release test round 5 (RB-1): dev reconciled the password before the image's own setup
+// turned logging off for supatype_admin, and the db log tail it printed held the password.
+describe.each([
+  ["reconcileAuthenticatorPassword", reconcileAuthenticatorPassword],
+  ["reconcileSqlEditorPassword", reconcileSqlEditorPassword],
+] as const)("%s, in the db log", (_name, run) => {
+  it("turns statement logging off before the statement that holds the password", async () => {
+    await run(paths(), cwd, "supatype-kitchen-sink")
+    expectQuietBeforePassword(psqlCall().input)
   })
 })
 

@@ -35,9 +35,11 @@ describe("self-host compose for a project whose production storage is S3", () =>
   it("runs the storage service on the project's bucket, requiring S3_BUCKET from .env", () => {
     const lines = storageLines(renderSelfHostCompose(ON_S3))
     expect(lines).toContain('S3_BUCKET: "${S3_BUCKET:?S3_BUCKET is missing from .env, and storage.production is s3 in supatype.config.ts}"')
-    for (const name of ["S3_REGION", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_FORCE_PATH_STYLE", "S3_PUBLIC_URL"]) {
+    for (const name of ["S3_REGION", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_FORCE_PATH_STYLE"]) {
       expect(lines).toContain(`${name}: "\${${name}:-}"`)
     }
+    // Nothing reads it: the storage service serves public files itself (0.9.2 round 2, N-S26).
+    expect(lines.join("\n")).not.toContain("S3_PUBLIC_URL")
     expect(lines.join("\n")).not.toContain("seaweedfs")
   })
 

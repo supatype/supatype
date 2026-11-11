@@ -15,6 +15,7 @@ import { writeCliDatabaseUrl } from "./database-url-owner.js"
 import { isInteractive } from "./ui/interactive.js"
 import { fatalError } from "./ui/fatal.js"
 import { COMPOSE_DEV_DB_PORT, hostComposeDbUrl } from "./host-database.js"
+import { registeredInitKongPorts } from "./init-port-registry.js"
 
 const MIN_PORT = 1024
 const MAX_PORT = 65535
@@ -142,7 +143,15 @@ export async function chooseInitKongPort(
   reader: ComposePortReader = dockerComposePortReader,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
-  return kongPortFromEnvironment(env) ?? findNextFreePort(COMPOSE_DEV_KONG_PORT, await reservedComposePorts(reader))
+  return kongPortFromEnvironment(env) ?? findNextFreePort(COMPOSE_DEV_KONG_PORT, await reservedForNewProject(reader))
+}
+
+/**
+ * The ports a new project must not be given: those Docker knows a Supatype stack publishes, and those
+ * init gave a project that has not started yet, so has no containers (FF26, init-port-registry.ts).
+ */
+async function reservedForNewProject(reader: ComposePortReader): Promise<Set<number>> {
+  return new Set([...(await reservedComposePorts(reader)), ...registeredInitKongPorts()])
 }
 
 export function isValidHostPort(port: number): boolean {
@@ -336,7 +345,7 @@ export async function promptKongPortChoice(
     p.log.info(`Local API gateway port (Kong): ${fromShell}, from SUPATYPE_KONG_PORT in your shell.`)
     return fromShell
   }
-  const reserved = await reservedComposePorts(reader)
+  const reserved = await reservedForNewProject(reader)
   const freeDefault = await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved)
   const port = await askKongPort(freeDefault)
   if (await isPortInUse(port)) {

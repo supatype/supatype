@@ -15,17 +15,22 @@ const messages = vi.hoisted(() => ({ info: [] as string[], error: [] as string[]
 const project = vi.hoisted(() => ({
   versions: undefined as Record<string, string> | undefined,
   latest: {},
+  /** `component@version` for each binary already on this machine. */
   cached: new Set<string>(),
 }))
+
+/** A download that finds a cached binary, and fails at the CDN for anything else. */
+const failUnlessCached = vi.hoisted(() => async (component: string, version: string) => {
+  if (project.cached.has(`${component}@${version}`)) return { path: "/cache/binary", fetched: false }
+  throw new Error("CDN answered 404")
+})
 
 vi.mock("../src/binary-cache.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/binary-cache.js")>()),
   currentPlatform: () => ({ os: "linux", arch: "amd64" }),
   fetchAllLatestVersions: vi.fn(async () => project.latest),
-  isCachedBinaryReady: vi.fn((component: string) => project.cached.has(component)),
-  download: vi.fn(async () => {
-    throw new Error("CDN answered 404")
-  }),
+  isCachedBinaryReady: vi.fn((component: string, version: string) => project.cached.has(`${component}@${version}`)),
+  download: vi.fn(failUnlessCached),
 }))
 
 vi.mock("../src/config.js", async (importOriginal) => ({
@@ -105,13 +110,22 @@ describe("supatype update when downloads fail", () => {
   })
 })
 
-/** Every native component pinned to 1.0.0 with the CDN naming the same, then `changes` applied. */
-function pinAll(changes: { versions: Record<string, string>; latest: Record<string, string | undefined> }): void {
+/**
+ * Every native component pinned to 1.0.0, cached, with the CDN naming the same, then `changes`
+ * applied. A pin at the CDN's latest is still fetched when it is not cached (FF-3), so the ones
+ * left alone are cached here, to keep each test to the components it changes. An undefined
+ * version leaves that component unpinned; an undefined latest leaves it off the CDN.
+ */
+function pinAll(changes: { versions: Record<string, string | undefined>; latest: Record<string, string | undefined> }): void {
   const base = { engine: "1.0.0", server: "1.0.0", postgres: "1.0.0", deno: "1.0.0", realtime: "1.0.0", storage: "1.0.0" }
-  project.versions = { ...base, ...changes.versions }
-  project.latest = Object.fromEntries(
-    Object.entries({ ...base, ...changes.latest }).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  )
+  for (const [component, version] of Object.entries(base)) project.cached.add(`${component}@${version}`)
+  project.versions = defined({ ...base, ...changes.versions })
+  project.latest = defined({ ...base, ...changes.latest })
+}
+
+/** `record` without its undefined entries. */
+function defined(record: Record<string, string | undefined>): Record<string, string> {
+  return Object.fromEntries(Object.entries(record).filter((entry): entry is [string, string] => entry[1] !== undefined))
 }
 
 /** The component each line of the failure report names, in the order it names them. */
@@ -132,10 +146,10 @@ describe("supatype update plans", () => {
   })
 
   it("reports failures in component order, whichever step found them", async () => {
-    // The engine's new version fails to download; the server has no latest on the CDN. The
-    // download failures were appended after the plan's, so the server came first.
-    pinAll({ versions: { engine: "0.1.0" }, latest: { engine: "0.2.0", server: undefined } })
-    expect(await reportedFailures()).toEqual(["engine", "server"])
+    // The engine's new version fails to download; Deno, unpinned, has no latest on the CDN. The
+    // download failures were appended after the plan's, so Deno came first.
+    pinAll({ versions: { engine: "0.1.0", deno: undefined }, latest: { engine: "0.2.0", deno: undefined } })
+    expect(await reportedFailures()).toEqual(["engine", "deno"])
   })
 })
 
@@ -154,9 +168,7 @@ describe("supatype update downloads", () => {
     try {
       await expect(runUpdate()).rejects.toThrow(/could not be updated/)
     } finally {
-      vi.mocked(download).mockImplementation(async () => {
-        throw new Error("CDN answered 404")
-      })
+      vi.mocked(download).mockImplementation(failUnlessCached)
     }
     const started = events.filter((event) => event.startsWith("start ")).map((event) => event.slice("start ".length))
     expect(started.length).toBeGreaterThan(1)
@@ -177,9 +189,7 @@ describe("supatype update downloads", () => {
       // Components this CLI does not pin and the CDN names nothing for still fail; not the point here.
       await runUpdate().catch(() => undefined)
     } finally {
-      vi.mocked(download).mockImplementation(async () => {
-        throw new Error("CDN answered 404")
-      })
+      vi.mocked(download).mockImplementation(failUnlessCached)
     }
     expect(messages.info.filter((message) => message.startsWith("postgres "))).toEqual([])
     expect(messages.info.filter((message) => message.startsWith("engine "))).toEqual([expect.stringMatching(/^engine v\S+ downloaded\.$/)])
@@ -218,9 +228,7 @@ describe("the advice for each failure", () => {
       expect(advice).not.toMatch(/CDN is reachable/)
       expect(advice).toMatch(/SUPATYPE_RELEASE_PUBLIC_KEY/)
     } finally {
-      vi.mocked(download).mockImplementation(async () => {
-        throw new Error("CDN answered 404")
-      })
+      vi.mocked(download).mockImplementation(failUnlessCached)
       vi.unstubAllEnvs()
       vi.unstubAllGlobals()
       rmSync(home, { recursive: true, force: true })
@@ -228,9 +236,10 @@ describe("the advice for each failure", () => {
   }, 20_000)
 
   it("does not blame the network for a version the CDN never published", async () => {
-    pinAll({ versions: {}, latest: { server: undefined } })
+    // Deno is unpinned and this CLI names no version of it, so the CDN's latest is all there is.
+    pinAll({ versions: { deno: undefined }, latest: { deno: undefined } })
     const advice = await reportedAdvice()
     expect(advice).not.toMatch(/CDN is reachable/)
-    expect(advice).toMatch(/Pin server under versions/)
+    expect(advice).toMatch(/Pin deno under versions/)
   })
 })

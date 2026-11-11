@@ -13,7 +13,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { isJsonObject } from "@supatype/shared"
-import { nativeS3StorageEnv, startNativeS3Storage, type NativeStorageOptions } from "../src/native-storage.js"
+import { nativeS3StorageEnv, startNativeS3Storage, startsStorageService, type NativeStorageOptions } from "../src/native-storage.js"
+import { drainStartUndo, resetDevShutdownForTests } from "../src/dev-shutdown.js"
 import { parseJsonAs } from "./support/json.js"
 import { freePort } from "./support/ports.js"
 import { projectConfig } from "./support/project-config.js"
@@ -57,7 +58,6 @@ describe("the storage service's environment for a project on S3", () => {
       S3_ACCESS_KEY: "AKIAEXAMPLE",
       S3_SECRET_KEY: "example-secret",
       S3_FORCE_PATH_STYLE: "true",
-      S3_PUBLIC_URL: "",
     })
   })
 })
@@ -91,6 +91,7 @@ describe("startNativeS3Storage", () => {
     const s3Env = nativeS3StorageEnv(S3_ENV)
     if (s3Env === null) throw new Error("expected the service's environment")
     const storage = await startNativeS3Storage(options(port), s3Env, async () => recordingLaunch(port, envFile))
+    if (storage === null) throw new Error("expected the service to be ready")
     try {
       expect(storage.url).toBe(`http://127.0.0.1:${port}`)
       const manifest = parseJsonAs(readFileSync(join(dir, "routes.json"), "utf8"), isJsonObject)
@@ -103,10 +104,51 @@ describe("startNativeS3Storage", () => {
     }
   }, 30_000)
 
-  it("fails, naming the bucket, when the service exits before it is ready", async () => {
+  // 0.9.2 release test N-FF2: dev failed here, as the server could not switch storage on later and
+  // had no other way to answer for it. It now follows the manifest's services.storage switch while it runs,
+  // so the service is switched off there and left with the crash-loop supervisor.
+  it("switches storage off, naming the bucket, when the service exits before it is ready", async () => {
     const s3Env = nativeS3StorageEnv(S3_ENV)
     if (s3Env === null) throw new Error("expected the service's environment")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const crashing = { bin: process.execPath, args: ["-e", "process.exit(3)"] }
-    await expect(startNativeS3Storage(options(await freePort()), s3Env, async () => crashing)).rejects.toThrow(/my-app-dev/)
+    try {
+      expect(await startNativeS3Storage(options(await freePort()), s3Env, async () => crashing)).toBeNull()
+      const manifest = parseJsonAs(readFileSync(join(dir, "routes.json"), "utf8"), isJsonObject)
+      expect(manifest).toEqual({ services: { storage: { enabled: false } } })
+      expect(warn.mock.calls.flat().join("\n")).toMatch(/Storage \(objects in S3 bucket my-app-dev\) is not answering yet/)
+    } finally {
+      await drainStartUndo()
+      resetDevShutdownForTests()
+    }
   }, 20_000)
+
+  // 0.9.2 round 2 (R2-S2): dev exited here, while the storage docs say storage is then off and
+  // dev carries on, as a local project's dev and Docker dev do.
+  it("switches storage off, naming the bucket and why, when the service cannot be found", async () => {
+    const s3Env = nativeS3StorageEnv(S3_ENV)
+    if (s3Env === null) throw new Error("expected the service's environment")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const missing = async (): Promise<never> => {
+      throw new Error("storage archive not available")
+    }
+    expect(await startNativeS3Storage(options(await freePort()), s3Env, missing)).toBeNull()
+    const manifest = parseJsonAs(readFileSync(join(dir, "routes.json"), "utf8"), isJsonObject)
+    expect(manifest).toEqual({ services: { storage: { enabled: false } } })
+    const said = warn.mock.calls.flat().join("\n")
+    expect(said).toMatch(/Storage is off/)
+    expect(said).toMatch(/S3 bucket my-app-dev.*storage archive not available/)
+  })
+})
+
+describe("whether dev starts a storage service of its own", () => {
+  it("does for a local project, and for one on S3 with a bucket of its own", () => {
+    expect(startsStorageService(projectConfig({}), null)).toBe(true)
+    expect(startsStorageService(projectConfig({ storage: { provider: "s3" } }), { S3_BUCKET: "my-app-dev" })).toBe(true)
+  })
+
+  // A service of the developer's own (SUPATYPE_STORAGE_URL) is not dev's to call off.
+  it("does not when SUPATYPE_STORAGE_URL names the developer's own service", () => {
+    expect(startsStorageService(projectConfig({ storage: { provider: "s3" } }), null)).toBe(false)
+  })
 })

@@ -18,6 +18,39 @@ import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
 import { DENO_PORT_ENV, postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
 import { devServiceRoleKeyPath, writeServiceRoleKeyFileUntilExit } from "./service-role-key-file.js"
+import { KEYSPACE_PASSWORD_ENV } from "./local-secrets.js"
+import { KEYSPACE_PASSWORD_FILE_ENV } from "./keyspace-password-file.js"
+import type { RespCredentials, ValkeySidecarResult } from "./valkey-sidecar.js"
+
+/** Where native dev's REST cache is: the server's RESP address, and its login when it needs one. */
+export interface NativeCache {
+  sidecar: ValkeySidecarResult
+  /** The keyspace's credential when native Postgres serves the cache; null for Valkey. */
+  login: RespCredentials | null
+}
+
+/**
+ * The keyspace login in supatype-server's environment, laid over the .env layer (0.9.2 release
+ * test, N-RB2): the credential when native Postgres serves the keyspace. Beside this run's own
+ * Valkey sidecar, which has no password, the password is blanked, since one .env holds for a
+ * Docker phase of the project would have the server's AUTH refused. The server reads only the
+ * SUPATYPE_KEYSPACE_* spellings, so nothing else needs blanking. A Valkey that
+ * SUPATYPE_VALKEY_ADDR names is the developer's, and so is whether .env gives it a password.
+ *
+ * SUPATYPE_KEYSPACE_PASSWORD_FILE is blanked in both cases (R2-S16): with the keyspace, native dev
+ * read the password from that file already, and the server refuses to start given both; beside the
+ * sidecar, it would send a password the sidecar does not have.
+ */
+export function nativeKeyspaceServerEnv(cache: NativeCache): Record<string, string> {
+  if (cache.login !== null) {
+    return {
+      SUPATYPE_KEYSPACE_USERNAME: cache.login.username,
+      [KEYSPACE_PASSWORD_ENV]: cache.login.password,
+      [KEYSPACE_PASSWORD_FILE_ENV]: "",
+    }
+  }
+  return cache.sidecar.started ? { [KEYSPACE_PASSWORD_ENV]: "", [KEYSPACE_PASSWORD_FILE_ENV]: "" } : {}
+}
 
 /** Inputs to the outer layer of supatype-server's environment on the native path. */
 export interface NativeServerCoreInput {

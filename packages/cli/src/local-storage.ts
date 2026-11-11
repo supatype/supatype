@@ -22,5 +22,4 @@ export const OWN_BUCKET_S3_SETTINGS = [
   "S3_ACCESS_KEY",
   "S3_SECRET_KEY",
   "S3_FORCE_PATH_STYLE",
-  "S3_PUBLIC_URL",
 ] as const

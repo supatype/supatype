@@ -21,16 +21,16 @@ const commands = (steps: string[]): string[] => steps.map((step) => step.split("
 
 describe("init's next steps", () => {
   it("ends at the project's dev script and where to open it, with no push after it", () => {
-    expect(commands(initFirstSteps(args()))).toEqual(["cd acme", "pnpm dev", "Open http://localhost:18480"])
+    expect(commands(initFirstSteps(args()))).toEqual(["cd acme", "supatype dev", "Open http://localhost:18480"])
   })
 
   it("does not list push while setup is unfinished either", () => {
     const steps = commands(initFirstSteps(args({ installed: false, keysGenerated: false, binariesReady: false })))
-    expect(steps).toEqual(["cd acme", "pnpm install", "supatype update", "supatype keys", "pnpm dev", "Open http://localhost:18480"])
+    expect(steps).toEqual(["cd acme", "pnpm install", "supatype update", "supatype keys", "supatype dev", "Open http://localhost:18480"])
   })
 
   it("says that dev applies the schema, so nobody goes looking for another command", () => {
-    const dev = initFirstSteps(args()).find((step) => step.startsWith("pnpm dev"))
+    const dev = initFirstSteps(args()).find((step) => step.startsWith("supatype dev"))
     expect(dev).toMatch(/applies the schema/)
   })
 
@@ -40,18 +40,12 @@ describe("init's next steps", () => {
     expect(steps.join("\n")).not.toMatch(/or push/)
   })
 
-  it.each([
-    ["npm", "npm run dev"],
-    ["yarn", "yarn dev"],
-    ["bun", "bun run dev"],
-  ] as const)("runs the dev script the way %s does", (packageManager, command) => {
+  // 0.9.2 release test round 2 (N-S15): init said `npm run supatype:dev` beside a framework's own
+  // dev script while every page of the docs says `supatype dev`, the command the installed CLI runs.
+  it.each(["npm", "yarn", "bun"] as const)("says supatype dev, as the docs do, with %s", (packageManager) => {
     const steps = commands(initFirstSteps(args({ result: { ...args().result, packageManager } })))
-    expect(steps).toContain(command)
-  })
-
-  it("runs supatype:dev when the project's own dev script is something else", () => {
-    const steps = commands(initFirstSteps({ ...args(), devScript: "supatype:dev" }))
-    expect(steps).toContain("pnpm supatype:dev")
+    expect(steps).toContain("supatype dev")
+    expect(steps.some((step) => step.includes("run dev") || step.includes("supatype:dev"))).toBe(false)
   })
 
   it("lines up each comment under the first", () => {
@@ -70,7 +64,7 @@ describe("init's next steps for a self-host project", () => {
   const selfHost = (domain: string): InitStepsArgs => args({ result: { ...args().result, productionTarget: "self-host", domain } })
 
   it("leads with local development, like every other project", () => {
-    expect(commands(initFirstSteps(selfHost("")))).toEqual(["cd acme", "pnpm dev", "Open http://localhost:18480"])
+    expect(commands(initFirstSteps(selfHost("")))).toEqual(["cd acme", "supatype dev", "Open http://localhost:18480"])
   })
 
   it("prints the self-host steps last, as the ones for when it is ready to deploy", () => {
@@ -91,9 +85,19 @@ describe("init's next steps for a self-host project", () => {
     expect(selfHostDeploySteps({ domain: "api.example.com" })[0]).toMatch(/A record for api\.example\.com/)
   })
 
+  // 0.9.2 release test round 2 (N-S26): a project on its own S3 bucket in production was never told
+  // the server's .env needs S3_BUCKET, which compose refuses to start without.
+  it.each(["", "api.example.com"])("names S3_BUCKET before compose up when production storage is S3 (domain %o)", (domain) => {
+    const steps = selfHostDeploySteps({ domain, storageProduction: "s3" })
+    const bucket = steps.findIndex((step) => step.includes("S3_BUCKET"))
+    expect(bucket).toBeGreaterThanOrEqual(0)
+    expect(bucket).toBeLessThan(steps.findIndex((step) => step.startsWith("supatype self-host compose up")))
+    expect(selfHostDeploySteps({ domain, storageProduction: "local" }).join("\n")).not.toContain("S3_BUCKET")
+  })
+
   it("keeps the setup steps ahead of local development", () => {
     const steps = commands(initFirstSteps({ ...selfHost("api.example.com"), installed: false }))
-    expect(steps).toEqual(["cd acme", "pnpm install", "pnpm dev", "Open http://localhost:18480"])
+    expect(steps).toEqual(["cd acme", "pnpm install", "supatype dev", "Open http://localhost:18480"])
   })
 
   /**
@@ -144,5 +148,10 @@ describe("init's secrets list", () => {
         .steps.map((line) => line.split(" ")[0])
     expect(names("local")).toEqual(expect.arrayContaining(["SUPATYPE_OBJECT_STORE_ACCESS_KEY", "SUPATYPE_OBJECT_STORE_SECRET_KEY"]))
     expect(names("s3")).not.toContain("SUPATYPE_OBJECT_STORE_ACCESS_KEY")
+  })
+
+  // 0.9.2 release test round 2 (R2-S14): the keyspace password was in .env but not in this list.
+  it("names the keyspace password", () => {
+    expect(initSecretLines().map((line) => line.split(" ")[0])).toContain("SUPATYPE_KEYSPACE_PASSWORD")
   })
 })

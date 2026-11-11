@@ -194,7 +194,7 @@ export function registerLinkOptions(linkCmd: Command): void {
     .option("--token <token>", "Access token (cloud PAT or self-host SERVICE_ROLE_KEY)")
     .option("--service-role-key <key>", "Deprecated alias for --token on self-host")
     .option("--env <name>", "Environment name (default: production)", "production")
-    .option("--fix-gitignore", "Append .supatype/ to .gitignore if missing")
+    .option("--fix-gitignore", "Add .env, .supatype/ and Supatype's other local files to .gitignore where missing")
 }
 
 export async function runLinkAction(opts: {

@@ -8,6 +8,7 @@ import { loadLocalEnvironment } from "./link.js"
 import { parsePackageJson } from "./package-json.js"
 import { composeStackHasContainers } from "./dev-session-lock.js"
 import { composeProjectName, runDockerCompose, type SelfHostComposePaths } from "./self-host-compose.js"
+import { otherFoldersStack } from "./stack-folder.js"
 import { confirm as uiConfirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { success, warn } from "./ui/messages.js"
@@ -29,6 +30,9 @@ export async function handleComposeProjectRename(
   const currentCompose = composeProjectName(currentProjectName)
   if (previousCompose === currentCompose) return
   if (!composeStackHasContainers(previousCompose)) return
+  // A stack of the old name another folder runs is that folder's, not this one's left behind: the
+  // offer to stop it stopped another project's stack (0.9.2 round 5, RB-2).
+  if (otherFoldersStack(cwd, previousCompose) !== undefined) return
 
   const message =
     `Project renamed from "${previousRef}" to "${currentProjectName}".\n` +

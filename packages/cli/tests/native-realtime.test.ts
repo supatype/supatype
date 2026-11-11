@@ -106,12 +106,12 @@ describe("startNativeRealtime", () => {
     }
 
     expect(await startNativeRealtime(options(), missing)).toBeNull()
-    expect(manifest()).toEqual({ rest_enabled: true, realtime_enabled: false })
+    expect(manifest()).toEqual({ rest_enabled: true, services: { realtime: { enabled: false } } })
   })
 
   it("enables realtime, at its URL, once it answers ready", async () => {
     expect(await start(answering(200, { status: "ok" }))).not.toBeNull()
-    expect(manifest()).toEqual({ realtime_enabled: true, realtime_url: options().url })
+    expect(manifest()).toEqual({ services: { realtime: { enabled: true } }, realtime_url: options().url })
     expect(logs.join("\n")).toContain(`Realtime service: ${options().url}`)
   })
 
@@ -128,15 +128,23 @@ require("node:http").createServer((req, res) => res.end("{}")).listen(Number(pro
 
   it("disables realtime and says so when the process exits without answering", async () => {
     expect(await start(fakeRealtime("process.exit(0)\n"))).toBeNull()
-    expect(manifest()).toEqual({ realtime_enabled: false })
+    expect(manifest()).toEqual({ services: { realtime: { enabled: false } } })
     expect(logs.join("\n")).not.toContain("Realtime service:")
     expect(warnings.join("\n")).toMatch(/Realtime is not running: it exited/)
   })
 
-  it("disables realtime when nothing ever answers at its port", async () => {
-    expect(await start(fakeRealtime("setInterval(() => {}, 1000)\n"))).toBeNull()
-    expect(manifest()).toEqual({ realtime_enabled: false })
-    expect(warnings.join("\n")).toMatch(/Realtime is not running: nothing answered/)
+  // 0.9.2 release test N-FF2: one that has not answered by the deadline is off at the gateway, and
+  // still running: it was stopped there, which took it from the crash-loop supervisor.
+  it("switches realtime off at the gateway, and says so, while nothing answers at its port", async () => {
+    const proc = await start(fakeRealtime("setInterval(() => {}, 1000)\n"))
+    expect(proc).not.toBeNull()
+    expect(manifest()).toEqual({ services: { realtime: { enabled: false } } })
+    expect(warnings.join("\n")).toMatch(
+      /Realtime is not answering yet: nothing answered at .* within 3s\. It is switched off at the gateway until it answers/,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    expect(proc?.stopRequested).toBe(false)
+    expect(manifest()).toEqual({ services: { realtime: { enabled: false } } })
   }, 10_000)
 
   it("says database changes are off when realtime disabled them, rather than that it is running", async () => {
@@ -152,7 +160,7 @@ require("node:http").createServer((req, res) => res.end("{}")).listen(Number(pro
     expect(await start(answering(503, { status: "connecting" }, 1_000))).not.toBeNull()
     expect(Date.now() - begun).toBeLessThan(options().readyTimeoutMs ?? 0)
     expect(logs.join("\n")).toContain(`Realtime service: ${options().url} (still connecting to the database)`)
-    await vi.waitFor(() => expect(manifest()).toEqual({ realtime_enabled: false }), { timeout: 5_000 })
+    await vi.waitFor(() => expect(manifest()).toEqual({ services: { realtime: { enabled: false } } }), { timeout: 5_000 })
   }, 10_000)
 
   // Local test round 7 (3b-22): on a Postgres without wal2json, realtime answers "connecting" first
@@ -173,10 +181,66 @@ http.createServer((req, res) => {
     await vi.waitFor(() => expect(warnings.join("\n")).toMatch(/Realtime is up at .* but database changes are off: wal2json is not installed/), { timeout: 6_000 })
   }, 10_000)
 
+  // 0.9.2 release test N-FF2: a realtime that had not answered by the deadline was stopped, so the
+  // crash-loop supervisor never got to retry it, and its pane ended on "restarting in 8000ms" for
+  // good. It is now off at the gateway and left with the supervisor, and back on once it answers.
+  describe("not answering by the deadline", () => {
+    let pane: string[] = []
+    beforeEach(() => {
+      pane = []
+      vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+        pane.push(String(chunk))
+        return true
+      })
+    })
+    const decodes = async (): Promise<string | undefined> => undefined
+    /** Short waits, so a crash loop runs its course within a test. */
+    const quick = (supervision: NonNullable<NativeRealtimeOptions["supervision"]>): NativeRealtimeOptions => ({
+      ...options(),
+      readyTimeoutMs: 300,
+      supervision,
+    })
+    const launched = async (opts: NativeRealtimeOptions, launch: () => Promise<ComponentLaunchSpec>) => {
+      const proc = await startNativeRealtime(opts, launch, decodes)
+      if (proc !== null) started.push(proc)
+      return proc
+    }
+
+    it("keeps a crash-looping realtime supervised, and switches it back on once it answers", async () => {
+      // Exits 1 at once on its first six runs, past the fifth that slows its restarts, then answers.
+      const runs = JSON.stringify(join(dir, "runs"))
+      const launch = fakeRealtime(`
+const fs = require("node:fs")
+const run = (fs.existsSync(${runs}) ? Number(fs.readFileSync(${runs}, "utf8")) : 0) + 1
+fs.writeFileSync(${runs}, String(run))
+if (run <= 6) process.exit(1)
+require("node:http").createServer((req, res) => res.end("{}")).listen(Number(process.env.PORT), "127.0.0.1")
+`)
+      const proc = await launched(quick({ initialBackoffMs: 20, maxBackoffMs: 50, giveUpWaitMs: 60_000 }), launch)
+      expect(proc).not.toBeNull()
+      expect(manifest()).toEqual({ services: { realtime: { enabled: false } } })
+      expect(warnings.join("\n")).toMatch(/Realtime is not answering yet: it exited with an error \d+ times? as it started/)
+      await vi.waitFor(() => expect(manifest()).toEqual({ services: { realtime: { enabled: true } }, realtime_url: options().url }), { timeout: 8_000 })
+      expect(logs.filter((line) => line.includes("switched back on at the gateway"))).toEqual([
+        `[supatype] Realtime answers at ${options().url} now, so it is switched back on at the gateway.`,
+      ])
+      expect(pane.join("")).toMatch(/so it is retried less often/)
+    }, 15_000)
+
+    it("still says in its pane when the supervisor gives up on it", async () => {
+      const proc = await launched(quick({ initialBackoffMs: 20, maxBackoffMs: 50, giveUpWaitMs: 400 }), fakeRealtime("process.exit(1)\n"))
+      expect(proc).not.toBeNull()
+      // Switched off at the deadline, before the supervisor gave up: the path the stop line was lost on.
+      expect(warnings.join("\n")).toMatch(/Realtime is not answering yet/)
+      await vi.waitFor(() => expect(pane.join("")).toMatch(/\[realtime\].* still crashing as it starts, not restarting it\./), { timeout: 8_000 })
+      expect(manifest()).toEqual({ services: { realtime: { enabled: false } } })
+    }, 15_000)
+  })
+
   it("disables realtime when it exits after starting", async () => {
     await start(answering(200, { status: "ok" }, 500))
-    expect(manifest()["realtime_enabled"]).toBe(true)
-    await vi.waitFor(() => expect(manifest()).toEqual({ realtime_enabled: false }), { timeout: 5_000 })
+    expect(manifest()["services"]).toEqual({ realtime: { enabled: true } })
+    await vi.waitFor(() => expect(manifest()).toEqual({ services: { realtime: { enabled: false } } }), { timeout: 5_000 })
     expect(warnings.join("\n")).toMatch(/Realtime exited/)
   }, 10_000)
 })

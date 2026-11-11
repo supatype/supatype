@@ -10,15 +10,15 @@ import { postApplyFailed } from "./post-apply.js"
 import { FRONTEND_URL_KEYS, frontendEnv, writeFrontendEnv } from "./frontend-env.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { askDocker, askDockerSync, DOCKER_EXEC_TIMEOUT_MS, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
-import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
+import { appPanelLinks, startProxyDevApp } from "./app/proxy-dev-app.js"
 import { loadSchemaAst, projectNameInFile } from "./config.js"
 import { withComposeSchemaPushLock } from "./schema-push-lock.js"
 import { recordDatabaseTier, sameApiSurface } from "./recorded-field-masking-tier.js"
 import {
   connectionString,
+  nativeStateRoot,
   pgSchema,
   projectRootFromConfig,
   resolveRuntimeProvider,
@@ -36,7 +36,8 @@ import { astRelatesToAuthUsers } from "./byo-preflight.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { applyForThisRun, splitShellPortUpdates } from "./shell-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
-import { devSessionLockFor, recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
+import { devSessionLockFor, enterLocalStack, recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
+import { recordStackFolder, refuseOtherFoldersStack } from "./stack-folder.js"
 import { endDevSession, showDevStep, startDevSession, withSavePushOutput } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
@@ -287,8 +288,8 @@ export async function projectComposeEngine(
 ): Promise<ComposeEngine | undefined> {
   if (resolveRuntimeProvider(config) !== "docker" || hasEngineOverride(config)) return undefined
   if (config.connection?.trim()) return undefined
+  const project = enterLocalStack(cwd, config.project.name)
   const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
-  const project = composeProjectName(config.project.name)
   const engineImage = await schemaEngineImageForPush(config, cwd)
   return {
     target: { cwd, project, composePath: paths.composePath, engineImage },
@@ -335,6 +336,10 @@ async function startComposeDatabase(
   await waitComposeHealthy(paths, cwd, timeoutMs, project)
 }
 
+/**
+ * Write dev's values into `.env`, and return those held for this run only (DR9): built from a port
+ * only the shell gave, and set in this process's environment instead. The dev session records them.
+ */
 export function upsertDevComposeEnv(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -342,7 +347,7 @@ export function upsertDevComposeEnv(
   serviceRoleKey: string,
   kongPort: number,
   devDbPort?: number,
-): void {
+): Record<string, string> {
   const apiUrl = `http://localhost:${kongPort}`
   const imagePins = checkedImagePins(config)
   const mailer = configMailerEnv(config)
@@ -414,9 +419,8 @@ export function upsertDevComposeEnv(
   // The front end's copies go where a development build reads them, not .env, which a production
   // build reads (frontend-env.ts). The URL only when it is the project's port, not the shell's.
   writeFrontendEnv(cwd, { anonKey, ...(urlsKept && { apiUrl }) }, { local: true })
-  if (devDbPort !== undefined && !usesExternalDatabase(config)) {
-    writeDevStackDatabaseUrl(cwd, devDbPort, runOnly.SUPATYPE_DEV_DB_PORT !== undefined)
-  }
+  if (devDbPort === undefined || usesExternalDatabase(config)) return runOnly
+  return { ...runOnly, ...writeDevStackDatabaseUrl(cwd, devDbPort, runOnly.SUPATYPE_DEV_DB_PORT !== undefined) }
 }
 
 /** `persist` less the front-end URL names, and whether they were among what is kept. */
@@ -445,15 +449,21 @@ function staleLocalServerImage(
  * Docker dev's DATABASE_URL: the stack's database at `devDbPort`, with the project's own user and
  * database, not hardcoded ones, which on a project not named "supatype" named a database that does
  * not exist. Written over a URL the CLI owns, for this run only when the port is the shell's; one
- * that is yours always wins (database-url-owner.ts).
+ * that is yours always wins (database-url-owner.ts). The URL when it was set for this run only.
  */
-function writeDevStackDatabaseUrl(cwd: string, devDbPort: number, runOnly: boolean): void {
+function writeDevStackDatabaseUrl(cwd: string, devDbPort: number, runOnly: boolean): Record<string, string> {
   const url = hostComposeDbUrl(cwd, devDbPort)
-  if (runOnly) setCliDatabaseUrlForRun(databaseUrlState(cwd), url)
-  else writeCliDatabaseUrl(cwd, url)
+  if (!runOnly) {
+    writeCliDatabaseUrl(cwd, url)
+    return {}
+  }
+  return setCliDatabaseUrlForRun(databaseUrlState(cwd), url) ? { DATABASE_URL: url } : {}
 }
 
-/** Keep compose + Studio on the same freshly signed dev JWTs; sync optional image pins from config. */
+/**
+ * Keep compose + Studio on the same freshly signed dev JWTs; sync optional image pins from config.
+ * The values held for this run only, as {@link upsertDevComposeEnv} returns them.
+ */
 function ensureDevComposeEnv(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -461,8 +471,8 @@ function ensureDevComposeEnv(
   serviceRoleKey: string,
   kongPort: number,
   devDbPort?: number,
-): void {
-  upsertDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
+): Record<string, string> {
+  return upsertDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 }
 
 /**
@@ -688,8 +698,12 @@ async function provisionDockerStorageBuckets(
   kongPort: number,
   serviceRoleKey: string,
 ): Promise<string | null> {
-  return unprovisionedBuckets(await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey))
+  const storageApi = `${loopbackBase(kongPort)}/storage/v1`
+  return unprovisionedBuckets(await provisionBucketsFromAst(ast, storageApi, serviceRoleKey, { storageLogs: STORAGE_LOGS }))
 }
+
+/** The command that shows the storage container's log, named when it is not answering (N-FF11). */
+const STORAGE_LOGS = "supatype self-host compose logs --service storage"
 
 let _lastPushedAst: string | null = null
 let _lastFailedAst: string | null = null
@@ -1069,7 +1083,7 @@ export async function followRecordedTier(
   opts: { recreate: boolean },
 ): Promise<void> {
   if (usesExternalDatabase(config)) return
-  const project = composeProjectName(config.project.name)
+  const project = enterLocalStack(cwd, config.project.name)
   const paths = selfHostComposePaths(cwd)
   const served = composeFieldMaskingTier(cwd, config)
   const recorded = await recordDatabaseTier(cwd, { project, composePath: paths.composePath })
@@ -1123,6 +1137,7 @@ async function runDevSchemaPush(
  * may be renames. Reads the AST the push wrote, so it is the schema that was refused.
  */
 export async function dockerDiff(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult | undefined> {
+  const project = enterLocalStack(cwd, config.project.name)
   if (hasEngineOverride(config)) {
     const ast = JSON.parse(readFileSync(join(cwd, ".supatype", "schema.ast.json"), "utf8"))
     return engineRequest(
@@ -1131,7 +1146,6 @@ export async function dockerDiff(cwd: string, config: SupatypeProjectConfig): Pr
       isDiffResult,
     )
   }
-  const project = composeProjectName(config.project.name)
   const result = await runComposeEngineDiff(selfHostComposePaths(cwd), cwd, project, config)
   return result.diff ?? undefined
 }
@@ -1182,11 +1196,12 @@ async function runComposeEnginePush(
  */
 export async function dockerEngineCapabilities(cwd: string, config: SupatypeProjectConfig): Promise<Capabilities> {
   if (hasEngineOverride(config)) return engineCapabilities()
+  const project = enterLocalStack(cwd, config.project.name)
   const engineImage = await schemaEngineImageForPush(config, cwd)
   // An image Docker could not pull throws with the daemon's sentence, and is asked again next time.
   const probe = (): Capabilities => {
     const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
-    const target = { cwd, project: composeProjectName(config.project.name), composePath: paths.composePath, engineImage }
+    const target = { cwd, project, composePath: paths.composePath, engineImage }
     return checkedCapabilities((args) => {
       const run = spawnComposeEngineSync(target, args, { runFlags: ["--no-deps"] })
       return { status: run.status, stdout: run.stdout, stderr: run.error ?? run.stderr }
@@ -1354,7 +1369,7 @@ export async function adoptSchemaDocker(
   yes: boolean,
   keys?: string[],
 ): Promise<AdoptOutcome> {
-  const project = composeProjectName(config.project.name)
+  const project = enterLocalStack(cwd, config.project.name)
   // Only these conflicts, or none for an empty list: never sent to an engine that would read
   // either as "every conflict".
   if (keys !== undefined) await requireDockerFeatures(cwd, config, [adoptKeysNeed(keys)])
@@ -1400,7 +1415,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("diffSchemaDocker requires provider: docker")
   }
-  const project = composeProjectName(config.project.name)
+  const project = enterLocalStack(cwd, config.project.name)
   if (hasEngineOverride(config)) {
     ensureDockerDbPublishedForHostEngine(cwd, config, "diff")
     return diffWithHostEngine(cwd, config)
@@ -1485,7 +1500,7 @@ export async function pushSchemaDocker(
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("pushSchemaDocker requires provider: docker")
   }
-  const project = composeProjectName(config.project.name)
+  const project = enterLocalStack(cwd, config.project.name)
   const running = pushStackMode(cwd, config)
   const mode = running ?? "standalone"
   const kongPort = await resolveKongPort(cwd, project)
@@ -1699,6 +1714,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // Per-project compose name + port isolate this project from any other Supatype
   // stack on the machine (own containers, volumes, network, and gateway port).
   const project = composeProjectName(config.project.name)
+  // Before anything is rendered or started: the stack of that name may be another folder's (RB-2).
+  refuseOtherFoldersStack(cwd, project)
+  recordStackFolder(cwd, project)
   const kongPort = await resolveKongPort(cwd, project)
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
   // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
@@ -1717,7 +1735,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const devBrand = { intro: "Local development" }
   const localServerImage = await ensureLocalServerDockerImage(cwd, config, devBrand)
 
-  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
+  // Recorded in the session's lock, so a later command from another shell runs this stack as it runs.
+  const runEnv = ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
   warnMissingStackSettings(cwd, config)
 
   console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
@@ -1872,7 +1891,14 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   writeDevSessionLock(
     cwd,
-    devSessionLockFor(config, { composeProject: project, composePath: paths.composePath, kongPort }),
+    devSessionLockFor(config, {
+      provider: "docker",
+      composeProject: project,
+      composePath: paths.composePath,
+      kongPort,
+      ...(devDbPort !== undefined && { dbPort: devDbPort }),
+      runEnv,
+    }),
   )
 
   // Only for a schema the database took, as a save does: a refused one may not even load, and its
@@ -1882,7 +1908,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     warnBucketsLeft(await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey))
   }
 
-  const pidDir = join(homedir(), ".supatype", "projects", config.project.name, "pid")
+  const pidDir = join(nativeStateRoot(config), "pid")
   mkdirSync(pidDir, { recursive: true })
 
   startDevSession()
@@ -1915,9 +1941,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     { label: "Storage", url: `http://localhost:${kongPort}/storage/v1/` },
     { label: "Realtime", url: `ws://localhost:${kongPort}/realtime/v1/` },
   ]
-  if (resolveProxyDevScript(config) !== null) {
-    links.push({ label: "App", url: `http://localhost:${kongPort}/` })
-  }
+  links.push(...appPanelLinks(config, `http://localhost:${kongPort}`))
   links.push({ label: "Studio", url: studioUrlAt(`http://localhost:${kongPort}`) })
 
   const hints: string[] = []

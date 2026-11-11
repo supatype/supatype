@@ -20,8 +20,8 @@ import { readEnvValue, upsertEnvFile } from "../env-file.js"
 import { devDatabaseIdentity } from "../local-secrets.js"
 import { composeDbPsql, type ComposeStack } from "../compose-db-psql.js"
 import { hasEngineOverride } from "../binary-cache.js"
-import { readDevSessionLock } from "../dev-session-lock.js"
-import { composeProjectName } from "../self-host-compose.js"
+import { enterLocalStack } from "../dev-session-lock.js"
+import { selfHostComposePaths } from "../self-host-compose.js"
 import { confirm as uiConfirm } from "../ui/confirm.js"
 import { adminPromptDeclined, recordAdminPromptDeclined } from "../admin-prompt-state.js"
 import { error, info, plain } from "../ui/messages.js"
@@ -729,18 +729,10 @@ function resolveDockerComposeContext(
     return null
   }
 
-  const session = readDevSessionLock(cwd)
-  if (session?.composeProject && session.composePath && existsSync(session.composePath)) {
-    return { project: session.composeProject, composePath: session.composePath }
-  }
-
-  const composePath = resolve(cwd, ".supatype/self-host/docker-compose.yml")
+  const { composePath } = selfHostComposePaths(cwd)
   if (!existsSync(composePath)) return null
-
-  return {
-    project: composeProjectName(config.project?.name ?? "project"),
-    composePath,
-  }
+  // The stack of a running dev session, not a lock a killed one left behind (0.9.2 round 2, N2).
+  return { project: enterLocalStack(cwd, config.project.name), composePath }
 }
 
 async function composeExecQuery(

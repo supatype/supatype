@@ -17,6 +17,7 @@ import { dirname, join, sep } from "node:path"
 import semver from "semver"
 import { detectFramework } from "./app/framework.js"
 import { errorMessage } from "./error-message.js"
+import { withFirstChildren, withSourceLineEnds } from "./jsx-first-child.js"
 import { file, info, plain, warn } from "./ui/messages.js"
 import { parsePackageJson } from "./package-json.js"
 import { isJsonObject, parseJsonObject } from "@supatype/shared"
@@ -223,34 +224,13 @@ function loadInRootLayout(dir: string, appDir: string): void {
  * one, a `<body>` whose attributes hold a `>`, or a `Script` that is something else.
  */
 export function withRuntimeEnvScript(source: string): string | undefined {
-  const eol = source.includes("\r\n") ? "\r\n" : "\n"
-  const text = source.replace(/\r\n/g, "\n")
-  const bodies = [...text.matchAll(/<body\b[^>]*>/g)]
-  const body = bodies[0]
-  if (bodies.length !== 1 || body === undefined || body[0].endsWith("/>") || !balancedBraces(body[0])) return undefined
-  const imported = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/script["']/m.exec(text)?.[1]
-  if (imported === undefined && /\bScript\b/.test(text)) return undefined
-  const name = imported ?? "Script"
-  const end = body.index + body[0].length
-  const tag = `\n${childIndent(text, body.index, end)}${scriptTag(name)}`
-  const withTag = text.slice(0, end) + tag + text.slice(end)
-  const result = imported === undefined ? withImport(withTag) : withTag
-  return result.replace(/\n/g, eol)
-}
-
-/** Whether every `{` in a tag's attributes is closed in it, so its `>` really ends the tag. */
-function balancedBraces(tag: string): boolean {
-  let depth = 0
-  for (const ch of tag) depth += ch === "{" ? 1 : ch === "}" ? -1 : 0
-  return depth === 0
-}
-
-/** The indentation of the line after `<body>` when deeper than its own, else its own plus two. */
-function childIndent(text: string, tagStart: number, tagEnd: number): string {
-  const lineStart = text.lastIndexOf("\n", tagStart) + 1
-  const own = /^[ \t]*/.exec(text.slice(lineStart))?.[0] ?? ""
-  const next = /^\n([ \t]*)\S/.exec(text.slice(tagEnd))?.[1]
-  return next !== undefined && next.length > own.length ? next : `${own}  `
+  return withSourceLineEnds(source, (text) => {
+    const imported = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/script["']/m.exec(text)?.[1]
+    if (imported === undefined && /\bScript\b/.test(text)) return undefined
+    const withTag = withFirstChildren(text, "body", [scriptTag(imported ?? "Script")])
+    if (withTag === undefined) return undefined
+    return imported === undefined ? withImport(withTag) : withTag
+  })
 }
 
 /** `text` importing `next/script` first, below a leading `"use client"` style directive. */

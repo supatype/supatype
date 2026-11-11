@@ -12,7 +12,7 @@
  * and no context module at all, which is how it was found.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { refreshFunctionsContext } from "../src/functions-context-refresh.js"
@@ -70,6 +70,18 @@ describe("a project that already has functions", () => {
     const source = readFileSync(join(functions, "_shared", "context.ts"), "utf8")
     expect(source).not.toBe("// stale\n")
     expect(source).toContain("FunctionContext")
+  })
+
+  // Release test 0.9.2 round 4, S-3: every push wrote the same bytes again. A running dev watches
+  // `.ts` under functions/, saw a new mtime, and restarted the functions worker each time.
+  it("leaves a current copy untouched and says nothing was written", () => {
+    const functions = projectWithFunctions()
+    refreshFunctionsContext(dir, config)
+    const file = join(functions, "_shared", "context.ts")
+    const past = new Date("2020-01-01T00:00:00Z")
+    utimesSync(file, past, past)
+    expect(refreshFunctionsContext(dir, config)).toBeUndefined()
+    expect(statSync(file).mtimeMs).toBe(past.getTime())
   })
 })
 

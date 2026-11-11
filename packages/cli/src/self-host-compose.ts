@@ -6,7 +6,9 @@ import { composeHostPath } from "./compose-host-path.js"
 export { composeHostPath } from "./compose-host-path.js"
 import { ENGINE_SERVICE } from "./compose-engine-service.js"
 import { requireDockerDaemon, requireDockerDaemonAsync, type DockerBrandOptions, type DockerReportOptions } from "./docker-runtime.js"
-import { askDocker, askDockerSync, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer, type DockerLimit } from "./docker-exec.js"
+import {
+  askDocker, askDockerSync, DOCKER_QUERY_TIMEOUT_MS, NO_DOCKER_LIMIT, spawnDocker, type DockerAnswer, type DockerLimit,
+} from "./docker-exec.js"
 import { fatalError } from "./ui/fatal.js"
 import { plain } from "./ui/messages.js"
 import { getActiveFlowApi } from "./ui/runtime/flow-session.js"
@@ -27,7 +29,12 @@ import {
 import { hasStudioOverride, pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
 import { buildKongDeclarative } from "./kong-config.js"
-import { keyspaceInPostgres } from "./cache-provider.js"
+import { keyspaceInPostgres, keyspacePasswordRequired } from "./cache-provider.js"
+import {
+  checkedKeyspacePasswordFile,
+  KEYSPACE_PASSWORD_CONTAINER_PATH,
+  KEYSPACE_PASSWORD_FILE_ENV,
+} from "./keyspace-password-file.js"
 import { postgresImageFor, runningPostgresImage } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
@@ -43,7 +50,9 @@ import {
   ENV_FILE_OVER_SHELL,
   SQL_EDITOR_PASSWORD_ENV,
   ensureControlPlaneSecret,
+  ensureKeyspacePassword,
   ensureObjectStoreCredentials,
+  KEYSPACE_PASSWORD_ENV,
   envFileOverridesShell,
   OBJECT_STORE_ACCESS_KEY_ENV,
   OBJECT_STORE_SECRET_KEY_ENV,
@@ -58,7 +67,7 @@ import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
-import { patchRouteManifest } from "./route-manifest.js"
+import { switchServices, type ServiceSwitches } from "./route-manifest.js"
 
 /**
  * The control plane secret as the server and the control plane receive it, and nobody else.
@@ -68,6 +77,43 @@ import { patchRouteManifest } from "./route-manifest.js"
  */
 const CONTROL_PLANE_SECRET_REQUIRED =
   `${CONTROL_PLANE_SECRET_ENV}: \${${CONTROL_PLANE_SECRET_ENV}:?${CONTROL_PLANE_SECRET_ENV} is missing from .env}`
+
+/**
+ * The keyspace password as the db, the server and Kong receive it, when the keyspace requires one
+ * (`keyspacePasswordRequired`). Required rather than defaulted, like the control plane secret:
+ * writeSelfHostCompose generates it first, and a stack started without it would refuse the server.
+ */
+const KEYSPACE_PASSWORD_REQUIRED =
+  `${KEYSPACE_PASSWORD_ENV}: \${${KEYSPACE_PASSWORD_ENV}:?${KEYSPACE_PASSWORD_ENV} is missing from .env}`
+
+/**
+ * The keyspace password line for a service that talks RESP to the keyspace, or nothing when it
+ * requires none. Kong is one with TLS on: its ACME plugin keeps certificates there, and kong.yml
+ * names this variable through Kong's env vault rather than holding the value. With the password in
+ * a file (`passwordFile`, R2-S16), the line names the file where {@link keyspacePasswordMount}
+ * puts it; writeSelfHostCompose refuses that beside TLS, since Kong's env vault cannot read a file.
+ */
+function keyspacePasswordEnv(config: SupatypeProjectConfig, passwordFile: string | undefined): string {
+  if (!keyspacePasswordRequired(config)) return ""
+  if (passwordFile === undefined) return `      ${KEYSPACE_PASSWORD_REQUIRED}\n`
+  return `      ${KEYSPACE_PASSWORD_FILE_ENV}: ${KEYSPACE_PASSWORD_CONTAINER_PATH}\n`
+}
+
+/** The read-only mount of the project's keyspace password file, for a service the line above names it to. */
+function keyspacePasswordMount(config: SupatypeProjectConfig, passwordFile: string | undefined): string {
+  if (!keyspacePasswordRequired(config) || passwordFile === undefined) return ""
+  return `${bindMount(passwordFile, KEYSPACE_PASSWORD_CONTAINER_PATH, true)}\n`
+}
+
+/**
+ * The server's keyspace lines. Besides the environment compose gives it, the server reads the
+ * project's .env and .env.local, and refuses to start when it finds the password beside the file,
+ * so with a file the password is set blank here, which no dotenv file overrides.
+ */
+function keyspaceServerEnv(config: SupatypeProjectConfig, passwordFile: string | undefined): string {
+  const lines = keyspacePasswordEnv(config, passwordFile)
+  return lines !== "" && passwordFile !== undefined ? `${lines}      ${KEYSPACE_PASSWORD_ENV}: ""\n` : lines
+}
 
 /** Env keys written when `versions` pins exist in supatype.config.ts. */
 export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
@@ -293,6 +339,11 @@ export function selfHostComposePaths(cwd: string): SelfHostComposePaths {
     nginxPath: join(dir, "nginx.conf"),
     s3ConfigPath: join(dir, "s3.json"),
   }
+}
+
+/** The project folder a compose file {@link selfHostComposePaths} names lives in. */
+export function projectRootOfComposePath(composePath: string): string {
+  return dirname(dirname(dirname(composePath)))
 }
 
 export function appUpstreamForCompose(config: SupatypeProjectConfig): string | undefined {
@@ -573,6 +624,12 @@ export interface SelfHostComposeOptions {
    * unset the list is today's, which is correct for every project with no versioned model.
    */
   drafts?: boolean
+  /**
+   * The host file holding the keyspace password, when the project names one with
+   * SUPATYPE_KEYSPACE_PASSWORD_FILE: read, checked and made absolute by `writeSelfHostCompose`.
+   * Unset, the db and the server are given SUPATYPE_KEYSPACE_PASSWORD from .env.
+   */
+  keyspacePasswordFile?: string
 }
 
 /**
@@ -619,6 +676,22 @@ const LOGGING_ANCHOR = `x-logging: &default-logging
 
 /** A service's `logging:` line, pointing at {@link LOGGING_ANCHOR}. */
 const LOGGING = "    logging: *default-logging"
+
+/**
+ * A long-running service's restart policy: restarted when it fails, five times at most. Never a
+ * one-shot tool (`schema-engine`), which is meant to exit.
+ *
+ * 0.9.2 release test (N-FF11): only the server had one. A storage service that refused its S3
+ * settings exited 1 under policy `no` and stayed down, and so did any service that failed on
+ * something transient, a store or database still starting. Bounded, as the server's always was,
+ * rather than `unless-stopped`: a real misconfiguration ends exited with its reason in its log, which
+ * is what the CLI's watch on a starting stack looks for (stack-exit-watch.ts), instead of
+ * restarting for ever.
+ */
+const RESTART = "    restart: on-failure:5"
+
+/** A long-running service's {@link LOGGING} and {@link RESTART} lines, which nearly every service has together. */
+const SERVICE_DEFAULTS = `${LOGGING}\n${RESTART}`
 
 /** Whether `url` (functions' direct database URL) names the stack's own `db` service. */
 export function namesComposeDatabase(url: string): boolean {
@@ -689,7 +762,7 @@ export function renderSelfHostCompose(
     : `
   studio:
 ${studioService}
-${LOGGING}
+${SERVICE_DEFAULTS}
     environment:
       SUPATYPE_CLOUD_JSON: '${studioRuntimeJson(config, publicApiUrl)}'
     expose:
@@ -742,7 +815,7 @@ ${LOGGING}
     # deliberately absent: a bucket is public because of its policy, never because the server is
     # open. Written beside this file by the same generator, so the two cannot drift.
     image: \${SUPATYPE_SEAWEEDFS_IMAGE:-${SEAWEEDFS_IMAGE}}
-${LOGGING}
+${SERVICE_DEFAULTS}
     command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
     environment:
       # Read by nothing inside. The object store loads s3.json only when it starts, so the login is
@@ -761,11 +834,17 @@ ${mounts.seaweed}
       retries: 20
       start_period: 5s
 ${seaweedPorts}`
+  // 0.9.2 release test (N-RB2): the keyspace requires the project's password where the image takes
+  // one, and everything that talks RESP to it is handed the same value from .env, or the same file
+  // (R2-S16).
+  const keyspacePasswordFile = options?.keyspacePasswordFile
+  const keyspaceAuthEnv = keyspacePasswordEnv(config, keyspacePasswordFile)
+  const keyspaceMount = keyspacePasswordMount(config, keyspacePasswordFile)
   const kongTlsEnv = tlsEnabled
     ? `      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
       KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_LUA_SSL_VERIFY_DEPTH: "2"
-`
+${keyspaceAuthEnv}`
     : ""
   const kongPorts = tlsEnabled
     ? `      - "80:8000"
@@ -783,7 +862,7 @@ ${seaweedPorts}`
     : `
   valkey:
     image: \${SUPATYPE_VALKEY_IMAGE:-valkey/valkey:8-alpine}
-${LOGGING}
+${SERVICE_DEFAULTS}
     command: ["valkey-server", "--appendonly", "yes"]
     expose:
       - "6379"
@@ -840,7 +919,7 @@ ${dbDependencyClause}      seaweedfs:
   const realtimeBlock = realtime
     ? `  realtime:
     image: ${inRepoImage("realtime")}
-${LOGGING}
+${SERVICE_DEFAULTS}
     expose:
       - "4000"
       - "4001"
@@ -943,7 +1022,7 @@ ${dbDependency}`
       # Named here rather than left to the image because only this file knows both features are in
       # the same stack.
       SUPATYPE_KEYSPACE_OUTPUT_PLUGIN_LIBRARIES: "supacache_keys, wal2json"
-`
+${keyspaceAuthEnv}`
     : ""
 
   // Not published to the host: the keyspace is reachable to the compose network
@@ -962,7 +1041,7 @@ ${dbDependency}`
 `
     : `  db:
     image: \${SUPATYPE_POSTGRES_IMAGE:-${runningPostgresImage(config)}}
-${LOGGING}
+${SERVICE_DEFAULTS}
 ${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    environment:
       POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}
@@ -973,7 +1052,7 @@ ${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    envir
       SUPATYPE_SQL_EDITOR_PASSWORD: \${SUPATYPE_SQL_EDITOR_PASSWORD:?SUPATYPE_SQL_EDITOR_PASSWORD is missing from .env}
 ${keyspaceDbEnv}${dbPorts}${keyspaceExpose}    volumes:
       - ${DB_VOLUME_KEY}:/var/lib/postgresql/data
-    healthcheck:
+${keyspaceMount}    healthcheck:
       # -h 127.0.0.1 forces TCP. Without it \`pg_isready\` uses the Unix socket, which the
       # entrypoint's temporary init server is already listening on while TCP is still refused,
       # so the container reported healthy, \`depends_on: service_healthy\` released, and every
@@ -998,7 +1077,7 @@ name: ${composeProject}
 ${LOGGING_ANCHOR}services:
 ${dbServiceBlock}  postgrest:
     image: ${POSTGREST_IMAGE}
-${LOGGING}
+${SERVICE_DEFAULTS}
     expose:
       - "3000"
     environment:
@@ -1023,7 +1102,7 @@ ${LOGGING}
 ${hookActorLines(config)}${dbDependency}
   storage:
     image: ${inRepoImage("storage")}
-${LOGGING}
+${SERVICE_DEFAULTS}
     expose:
       - "5000"
     environment:
@@ -1039,7 +1118,7 @@ ${storageS3Env(ownBucket)}      # Bytes, -1 for unlimited. A self-hosted project
 ${storageDependency}
   functions-worker:
     image: ${inRepoImage("functions-worker")}
-${LOGGING}
+${SERVICE_DEFAULTS}
     # An init as PID 1 passes the stop signal on: without one the worker ignored SIGTERM, and every
     # restart a deploy made waited out the whole stop timeout.
     init: true
@@ -1109,7 +1188,7 @@ ${dbDependency}
 ${realtimeBlock}
   control-plane:
     image: ${inRepoImage("control-plane")}
-${LOGGING}
+${SERVICE_DEFAULTS}
     expose:
       - "8080"
     volumes:
@@ -1149,7 +1228,7 @@ ${LOGGING}
     # on a slow host the gap is wide enough to lose it for good. Bounded
     # rather than unlimited, so a real misconfiguration still stops and
     # stays visible instead of hiding in a crash loop.
-    restart: on-failure:5
+${RESTART}
 ${gatewayNetworks}${serverPorts}    volumes:
       # The project is read-only: the server reads the schema, the manifest and the functions, and
       # has no business editing any of them.
@@ -1162,7 +1241,7 @@ ${mounts.projectReadOnly}
       # declared and never actually switched on. A narrower bind than making the whole project
       # writable, because the rest of the tree keeps the guarantee.
 ${mounts.projectState}
-    working_dir: /project
+${keyspaceMount}    working_dir: /project
     environment:
       SUPATYPE_MODE: ${devLocal ? "dev" : "standalone"}
       SUPATYPE_MANIFEST_PATH: .supatype/manifest.json
@@ -1185,7 +1264,7 @@ ${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
       ${CONTROL_PLANE_SECRET_REQUIRED}
       SUPATYPE_VALKEY_ADDR: ${respHost}:6379
-${appEnv}
+${keyspaceServerEnv(config, keyspacePasswordFile)}${appEnv}
       SUPATYPE_API_HOST: 0.0.0.0
       SUPATYPE_API_PORT: 9999
       SUPATYPE_API_EXTERNAL_URL: ${publicApiUrl}
@@ -1250,7 +1329,7 @@ ${mounts.engineProject}
     working_dir: ${ENGINE_SERVICE.projectDir}
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
-${LOGGING}
+${SERVICE_DEFAULTS}
 ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
     # mapped, so a project proxying the site or Studio to something on the host worked on macOS
     # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own
@@ -1305,16 +1384,8 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
   // The manifest is generated, not operator-authored, but `push` writes real values into it (the
   // schema, for one), so an existing file keeps every key but the routes below. Malformed, it is
   // left for the server to complain about rather than overwritten here.
-  if (existsSync(manifestPath)) {
-    patchRouteManifest(manifestPath, composeServiceRoutes(config), { keepMalformed: true })
-    return
-  }
-
-  patchRouteManifest(manifestPath, {
-    schema: "public",
-    postgrest_url: "http://postgrest:3000",
-    ...composeServiceRoutes(config),
-  })
+  const fresh = existsSync(manifestPath) ? {} : { schema: "public", postgrest_url: "http://postgrest:3000" }
+  switchServices(manifestPath, composeServiceSwitches(config), { ...fresh, ...composeServiceRoutes(config) }, { keepMalformed: true })
 }
 
 /**
@@ -1322,23 +1393,34 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
  * new file. Native dev shares the manifest and records its own host ports for realtime, functions
  * and storage, so a project moved from native to Docker kept native's URLs and the server proxied
  * every subscription and every /storage/v1 call to a port nothing in the stack listened on (502).
- * An older CLI's `functions_enabled: false` is put right by the same write.
  */
 function composeServiceRoutes(config: SupatypeProjectConfig): Record<string, unknown> {
   return {
     // This file always generates a `storage` service, and native dev records its own storage
     // service on a host port.
     storage_url: "http://storage:5000",
-    // Matches the compose file: a manifest advertising a service that was not generated is how
-    // the server ends up proxying subscriptions to a host that does not resolve. Undefined drops
-    // the key.
-    realtime_enabled: realtimeEnabled(config),
+    // Undefined drops the key: no realtime service is generated (composeServiceSwitches).
     realtime_url: realtimeEnabled(config) ? "http://realtime:4000" : undefined,
+    functions_worker_url: COMPOSE_FUNCTIONS_WORKER_URL,
+  }
+}
+
+/**
+ * Which services of this stack are switched on, set on every render with its routes. An older
+ * CLI's `functions_enabled: false` is put right by the same write.
+ */
+function composeServiceSwitches(config: SupatypeProjectConfig): ServiceSwitches {
+  return {
+    // The stack's storage is always on, its start value: native dev switches its own storage service
+    // off and on, and a switch it left would switch off the stack's.
+    storage: undefined,
+    // Matches the compose file: a manifest advertising a service that was not generated is how
+    // the server ends up proxying subscriptions to a host that does not resolve.
+    realtime: realtimeEnabled(config),
     // True because this file *always* generates a `functions-worker` service and hands the server
     // `SUPATYPE_FUNCTIONS_WORKER_URL`. It said false, so the server answered 404 for every function
     // in a stack that was running a worker for them, provisioned, then switched off.
-    functions_enabled: true,
-    functions_worker_url: COMPOSE_FUNCTIONS_WORKER_URL,
+    functions: true,
   }
 }
 
@@ -1518,6 +1600,20 @@ function resolveDrafts(
   return projectHasVersionedModels(cwd, config)
 }
 
+/**
+ * The host file holding the keyspace password when the project names one (R2-S16), checked before
+ * anything is written: both forms set, a file that is missing or empty, or a file beside HTTPS
+ * (whose Kong cannot read one) stop here with what to change, rather than in a container later.
+ */
+function composeKeyspacePasswordFile(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  options: SelfHostComposeOptions | undefined,
+): string | undefined {
+  const use = { required: keyspacePasswordRequired(config), tls: selfHostTlsEnabled(config, options?.devLocal === true) }
+  return checkedKeyspacePasswordFile(cwd, use, { brand: { intro: "Self-host compose" } })?.path
+}
+
 export function writeSelfHostCompose(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -1528,10 +1624,12 @@ export function writeSelfHostCompose(
   // recovery only start the database, so they warn (startComposeDatabase in dev-compose.ts).
   assertExternalUrlMatchesEnv(cwd, config)
   assertBundledDbUser(cwd, config)
+  const keyspacePasswordFile = composeKeyspacePasswordFile(cwd, config, options)
   const tier = resolveFieldMaskingTier(cwd, config, options)
   const resolved: SelfHostComposeOptions = {
     ...options,
     ...(tier !== undefined && { fieldMaskingTier: tier }),
+    ...(keyspacePasswordFile !== undefined && { keyspacePasswordFile }),
     drafts: resolveDrafts(cwd, config, options),
     functionsDatabase:
       options?.functionsDatabase ?? namesComposeDatabase(readEnvValue(cwd, "SUPATYPE_FUNCTIONS_DB_URL", "")),
@@ -1541,6 +1639,10 @@ export function writeSelfHostCompose(
   mkdirSync(paths.dir, { recursive: true })
   // Before the file that requires it is written, so no stack is ever rendered without one.
   ensureControlPlaneSecret(cwd)
+  // The keyspace password the same way, where the keyspace requires one (N-RB2) and the project
+  // keeps it in .env. An existing project gets one on its next dev or up, and compose recreates db
+  // and server with it.
+  if (keyspacePasswordRequired(config) && keyspacePasswordFile === undefined) ensureKeyspacePassword(cwd)
   // The SAML signing key too, once SAML is on: the file requires it, and it must never change.
   ensureSamlPrivateKey(cwd, config)
   // No functions/ or hooks/ here: the worker mounts the whole project and treats a missing root as
@@ -1576,6 +1678,7 @@ export function writeSelfHostCompose(
               email: acmeEmail,
               domain,
               redisHost: keyspaceInPostgres(config) ? "db" : "valkey",
+              redisAuth: keyspacePasswordRequired(config),
             },
           }
         : {}),
@@ -1599,7 +1702,15 @@ export interface RunDockerComposeOptions {
   skipDaemonProbe?: boolean
 }
 
-/** Exit with a friendly compose failure message. */
+/**
+ * What the last compose run that captured its output said when it failed, and the cause recognised,
+ * or nothing. Each run starts it afresh. Said again in the fatal message: under dev's dashboard it
+ * was printed only into the pane, which froze cut at the window's width, and the screen left after
+ * the dashboard said only "docker compose failed" (0.9.2 round 2, R2-S10).
+ */
+let lastComposeFailure: string[] = []
+
+/** Exit with a friendly compose failure message, carrying the reason the failed run gave. */
 export function exitComposeFailed(
   status: number,
   context: string,
@@ -1607,7 +1718,7 @@ export function exitComposeFailed(
 ): never {
   fatalError(
     `docker compose failed (exit ${status}).`,
-    [context, "Check logs: supatype self-host compose logs"],
+    [...lastComposeFailure, context, "Check logs: supatype self-host compose logs"],
     { ...(brand !== undefined && { brand }), exitCode: status === 0 ? 1 : status },
   )
 }
@@ -1639,6 +1750,7 @@ export function runDockerCompose(
   options?: RunDockerComposeOptions,
 ): number {
   if (options?.skipDaemonProbe !== true) requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
+  lastComposeFailure = []
   // Inside a command's flow, docker's output is captured and its stdout logged there. Written
   // straight to the terminal, it landed in the frame the flow redraws, and every line above it
   // came out twice.
@@ -1704,6 +1816,7 @@ async function quietComposeRun(
   brand?: DockerBrandOptions,
 ): Promise<number> {
   await requireDockerDaemonAsync(brand !== undefined ? { brand } : undefined)
+  lastComposeFailure = []
   const runCompose = () => askDockerCompose(composePath, args, projectRoot, composeProject, NO_DOCKER_LIMIT)
   // As in runDockerCompose: a Kong already running is reloaded when `up` moved what it routes to.
   const result =
@@ -1791,17 +1904,32 @@ function capturedComposeOutput(result: { stdout?: unknown; stderr?: unknown }): 
 }
 
 /**
- * Say what a failed compose run printed, when the CLI captured it, and any cause it recognises.
- * `captured` is null when the output already went to the terminal.
+ * Say what a failed compose run printed, when the CLI captured it, and any cause it recognises,
+ * and keep it for {@link exitComposeFailed}. `captured` is null when the output already went to the
+ * terminal, which then keeps it too.
  */
 function reportComposeFailure(args: readonly string[], captured: string | null): void {
-  if (captured) console.error(`[supatype] docker compose: ${captured}`)
-  if (args[0] !== "up") return
-  for (const line of addressPoolExhaustionHint(captured)) console.error(`[supatype] ${line}`)
+  const hints = args[0] === "up" ? addressPoolExhaustionHint(captured) : []
+  const lines = [...(captured ? [`docker compose: ${captured}`] : []), ...hints]
+  for (const line of lines) console.error(`[supatype] ${line}`)
+  if (captured !== null) lastComposeFailure = lines
 }
 
 /** Compose project name for a Supatype project, isolates docker state per project. */
 export function composeProjectName(projectName: string): string {
   const slug = projectName.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
   return `supatype-${slug || "project"}`
+}
+
+/**
+ * The volumes Docker still holds for the compose project `composeProject`, by compose's own label;
+ * none when Docker cannot say. `down --volumes` removes only those the compose file declares now,
+ * so one a service left the file with (SeaweedFS's, after a switch to S3) is still here.
+ */
+export function composeProjectVolumes(composeProject: string): string[] {
+  const listed = askDockerSync(["volume", "ls", "-q", "--filter", `label=com.docker.compose.project=${composeProject}`], {
+    timeoutMs: DOCKER_QUERY_TIMEOUT_MS,
+  })
+  if (listed.status !== 0) return []
+  return listed.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "")
 }

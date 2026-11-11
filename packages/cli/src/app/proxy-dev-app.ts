@@ -14,7 +14,7 @@ import { runCaptured, type CapturedRun } from "../run-captured.js"
 import { appendDevTaskLog } from "../dev-session.js"
 import { DEV_APP_ENV, SELF_START_EXIT_CODE, runsSupatypeDev, selfStartProblem } from "../dev-self-start.js"
 import { ProcessManager, readPid } from "../process-manager.js"
-import { signalTree } from "../process-tree.js"
+import { killPidTree } from "../process-tree.js"
 import { projectRootFromConfig, type SupatypeProjectConfig } from "../project-config.js"
 
 /** The script dev runs as the app when `app.start` names none. */
@@ -25,6 +25,16 @@ export function resolveProxyDevScript(config: SupatypeProjectConfig): string | n
   if (config.app?.mode !== "proxy") return null
   const script = config.app.start?.trim()
   return script && script.length > 0 ? script : DEFAULT_PROXY_DEV_SCRIPT
+}
+
+/**
+ * The dev panel's App link, at `/` of the gateway at `base`, for an app Supatype serves there:
+ * built files (`static`) or a dev server it forwards to (`proxy`). A static app had none, and native
+ * dev listed no App at all (0.9.2 release test round 2).
+ */
+export function appPanelLinks(config: SupatypeProjectConfig, base: string): Array<{ label: string; url: string }> {
+  const mode = config.app?.mode
+  return mode === "static" || mode === "proxy" ? [{ label: "App", url: `${base}/` }] : []
 }
 
 /** Port from app.upstream (e.g. http://localhost:5285 → 5285). */
@@ -38,21 +48,6 @@ export function portFromUpstream(config: SupatypeProjectConfig): number | null {
     return Number.isFinite(n) && n > 0 ? n : null
   } catch {
     return null
-  }
-}
-
-/**
- * Kills `pid` and what it started (see process-tree.ts). A listener found on the port need not lead
- * a process group of its own (Vite under the package manager the app was started with), so off
- * Windows the process alone is killed when it leads none.
- */
-async function killPidTree(pid: number): Promise<void> {
-  if (!Number.isInteger(pid) || pid <= 0) return
-  if ((await signalTree(pid, "SIGKILL")) || process.platform === "win32") return
-  try {
-    process.kill(pid, "SIGKILL")
-  } catch {
-    // It has already ended.
   }
 }
 

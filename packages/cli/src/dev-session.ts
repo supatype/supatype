@@ -24,13 +24,14 @@ export function resolveDevUiMode(streamFlag: boolean): DevUiMode {
 
 let activeSession: DevSession | null = null
 
-export function beginDevSession(mode: DevUiMode): DevSession {
+/** `streams` is the terminal the dashboard draws on: the process's own unless a test passes one. */
+export function beginDevSession(mode: DevUiMode, streams: Pick<RenderOptions, "stdin" | "stdout"> = {}): DevSession {
   ensureDevShutdownHooks()
   activeSession?.stop()
   activeSession = new DevSession(mode)
   if (activeSession.isTui()) {
     activeSession.enableConsoleCapture(false)
-    activeSession.startInk()
+    activeSession.startInk(streams)
   }
   return activeSession
 }

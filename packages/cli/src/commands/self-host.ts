@@ -16,7 +16,7 @@ import { devApiKeys } from "../dev-api-keys.js"
 import { fillMissingKeys } from "./keys.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import {
-  composeProjectName,
+  composeProjectVolumes,
   exitComposeFailed,
   noteUnpinnedImages,
   runDockerCompose,
@@ -25,6 +25,9 @@ import {
   writeSelfHostCompose,
 } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
+import { enterLocalStack, localStackComposeProject } from "../dev-session-lock.js"
+import { recordStackFolder } from "../stack-folder.js"
+import { composeStackWatch, ESSENTIAL_SERVICES, printExitedService, watchForFailure } from "../stack-exit-watch.js"
 import { warnBucketsLeft } from "../storage-provision.js"
 import { syncConfigMailerEnv } from "../config-mailer-env.js"
 import { takenComposePorts, type ComposeContext, type PublishedPort } from "../compose-services.js"
@@ -67,7 +70,7 @@ export function registerSelfHost(program: Command): void {
     .action(async (opts: { detach?: boolean }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd, { local: false })
-      const project = composeProjectName(config.project.name)
+      const project = enterLocalStack(cwd, config.project.name)
       const args = opts.detach ? ["up", "-d"] : ["up"]
       // Before anything is written into .env, as the key and secret checks below are.
       requireUrlSafeComposePasswords(cwd, config)
@@ -107,8 +110,13 @@ export function registerSelfHost(program: Command): void {
       if (status !== 0) {
         exitComposeFailed(status, "Could not start the self-host Compose stack.", SELF_HOST_BRAND)
       }
+      recordStackFolder(cwd, project)
       // Attached, `up` returns only once the stack has stopped, so there is nothing to provision.
-      if (opts.detach === true) await provisionAfterUp(cwd, config, project, renderOptions.devLocal)
+      if (opts.detach === true) {
+        await provisionAfterUp(cwd, config, project, renderOptions.devLocal)
+        // Unless provisioning already said the stack is not serving, with the same log lines.
+        if (process.exitCode !== 1) await refuseFailingServices(project, ESSENTIAL_SERVICES, 0)
+      }
       await warnIfHandWrittenUrlSilent(cwd)
     })
 
@@ -125,18 +133,21 @@ export function registerSelfHost(program: Command): void {
   composeCmd
     .command("restart <service>")
     .description("Recreate one service with the current config and .env, leaving the others running")
-    .action((service: string) => {
+    .action(async (service: string) => {
       const status = renderAndRunCompose(["up", "-d", "--force-recreate", "--no-deps", service])
       if (status !== 0) {
         exitComposeFailed(status, `Could not restart ${service}.`, SELF_HOST_BRAND)
       }
+      const project = localStackComposeProject(process.cwd(), loadConfig(process.cwd(), { local: false }).project.name)
+      await refuseFailingServices(project, new Set([service]), RESTART_WATCH_MS)
     })
 
   composeCmd
     .command("status")
     .description("Show compose service status")
     .action(() => {
-      process.exitCode = runAgainstStack(["ps"])
+      // Stopped services too: `ps` alone listed an exited storage as if it did not exist (N-FF11).
+      process.exitCode = runAgainstStack(["ps", "--all"])
     })
 
   composeCmd
@@ -153,6 +164,26 @@ export function registerSelfHost(program: Command): void {
 }
 
 const SELF_HOST_BRAND = { intro: "Self-host deployment" }
+
+/** How long `restart` watches the service it recreated. */
+const RESTART_WATCH_MS = 5000
+
+/**
+ * Exit 1, naming the service and its last log lines, when one of `services` has exited or keeps
+ * being restarted. Compose returns 0 once a container starts, whether or not it stays up: a
+ * storage container that refused its settings left `up` and `restart` exiting 0 (N-FF11).
+ */
+async function refuseFailingServices(project: string, services: ReadonlySet<string>, windowMs: number): Promise<void> {
+  const cwd = process.cwd()
+  const stack = { cwd, project, composePath: selfHostComposePaths(cwd).composePath }
+  const watch = composeStackWatch(stack)
+  const failed = await watchForFailure(watch, services, windowMs)
+  if (failed === undefined) return
+  await printExitedService(failed, { watch, cwd })
+  error(`The ${failed.service} service is not running.`)
+  plain(`Check: supatype self-host compose logs --service ${failed.service}`)
+  process.exitCode = 1
+}
 
 /**
  * The schema's declared buckets and the first admin user, on the stack `up` has just started, once
@@ -205,21 +236,30 @@ async function requireComposePortsFree(ctx: ComposeContext): Promise<void> {
  * `self-host compose down`. The volumes hold the database and every stored file, so removing them
  * is asked for by name and confirmed; a plain `down` says they were kept, since starting over used
  * to mean finding them with `docker volume ls`.
+ *
+ * With `--remove-orphans`: a service the compose file no longer has (SeaweedFS, after a switch to
+ * S3) kept running. Its volume is not the file's either, so `--volumes` cannot remove it, and what
+ * is left is named rather than called gone (0.9.2 round 2, R2-S20).
  */
 async function composeDown(opts: { volumes?: boolean; yes?: boolean }): Promise<void> {
   if (opts.volumes === true && opts.yes !== true && !(await confirmVolumeRemoval())) {
     plain("Nothing stopped and nothing removed.")
     return
   }
-  const status = runAgainstStack(opts.volumes === true ? ["down", "--volumes"] : ["down"])
+  const status = runAgainstStack(opts.volumes === true ? ["down", "--volumes", "--remove-orphans"] : ["down", "--remove-orphans"])
   if (status !== 0) {
     exitComposeFailed(status, "Could not stop the self-host Compose stack.", SELF_HOST_BRAND)
   }
+  if (opts.volumes !== true) {
+    info("Stopped the stack. Its volumes (the database and stored files) were kept; `supatype self-host compose down --volumes` removes them.")
+    return
+  }
+  const left = composeProjectVolumes(enterLocalStack(process.cwd(), loadConfig(process.cwd(), { local: false }).project.name))
   info(
-    opts.volumes === true
+    left.length === 0
       ? "Stopped the stack and removed its volumes: the database and stored files are gone."
-      : "Stopped the stack. Its volumes (the database and stored files) were kept; " +
-          "`supatype self-host compose down --volumes` removes them.",
+      : `Stopped the stack and removed the volumes its compose file declares. Still here, as the file no ` +
+          `longer declares them: ${left.join(", ")}. \`docker volume rm ${left.join(" ")}\` removes them.`,
   )
 }
 
@@ -264,6 +304,8 @@ function runCompose(args: string[], use: ComposeFileUse): number {
   const cwd = process.cwd()
   // The committed config, not the developer's local override: this is the self-host stack (issue 24).
   const config = loadConfig(cwd, { local: false })
+  // This folder's stack, run as a dev session running it does, before anything reads a port.
+  const project = enterLocalStack(cwd, config.project.name)
   if (use === "start") {
     requireUrlSafeComposePasswords(cwd, config)
     retireCliMailerAutoconfirm(cwd)
@@ -273,7 +315,9 @@ function runCompose(args: string[], use: ComposeFileUse): number {
     use === "on-disk"
       ? selfHostComposePaths(cwd).composePath
       : writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name)).composePath
-  return runDockerCompose(composePath, args, cwd, composeProjectName(config.project.name), {
+  const status = runDockerCompose(composePath, args, cwd, project, {
     brand: SELF_HOST_BRAND,
   })
+  if (use === "start" && status === 0) recordStackFolder(cwd, project)
+  return status
 }

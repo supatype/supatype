@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -220,8 +220,8 @@ export type Post = Model<{ id: UUID; secretNote: string }, {
   })
 
   it("never creates a manifest from scratch", () => {
-    // `functions_enabled` is a plain bool on the server's side, so a manifest carrying only hooks
-    // would read as functions *disabled*, the defect fixed one commit earlier, by another door.
+    // A manifest carrying only hooks says nothing of functions, so the server keeps its start value,
+    // off without a configured worker: the defect fixed one commit earlier, by another door.
     const { dir, ast } = project(schema)
     expect(syncManifestHooks(dir, ast)).toBe(false)
     expect(existsSync(join(dir, ".supatype", "manifest.json"))).toBe(false)
@@ -365,6 +365,24 @@ export type Post = Model<{ id: UUID }, { tableName: "posts"; hooks: { beforeChan
     expect(written).toContain(join("functions", "_supatype", "hooks.ts"))
     expect(readFileSync(join(functionsDir, "_supatype", "hooks.ts"), "utf8")).toContain("HookedTable")
   })
+
+  // Release test 0.9.2 round 4, S-3: every push wrote the same bytes again, and a running dev saw
+  // a new mtime as changed source and restarted the functions worker, dropping calls in flight.
+  it("leaves a module that already holds the same source untouched", () => {
+    const { dir, ast } = project(`
+import type { Model, UUID } from "@supatype/types"
+
+export type Post = Model<{ id: UUID }, { tableName: "posts"; hooks: { beforeChange: "x" } }>
+`)
+    const hooksDir = join(dir, "hooks")
+    writeHooksModule(dir, hooksDir, ast)
+    const file = join(hooksDir, "_supatype", "hooks.ts")
+    const past = new Date("2020-01-01T00:00:00Z")
+    utimesSync(file, past, past)
+    // Null, so push does not say it wrote the module again.
+    expect(writeHooksModule(dir, hooksDir, ast)).toBeNull()
+    expect(statSync(file).mtimeMs).toBe(past.getTime())
+  })
 })
 
 describe("model hooks: doctor report", () => {
@@ -406,6 +424,23 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
     const report = hooksReport(dir, join(dir, "functions"), ast)
     expect(report.missing).toEqual([])
     expect(report.functionsDisabled).toBe(true)
+  })
+
+  // 0.9.2: services are switched in one map now, the legacy key above still read beside it.
+  it("catches functions switched off in the services map, and a switch there winning over the legacy key", () => {
+    const { dir, ast } = project(schema)
+    addFunction(dir, "moderate-post")
+    mkdirSync(join(dir, ".supatype"), { recursive: true })
+    const manifestPath = join(dir, ".supatype", "manifest.json")
+    writeFileSync(manifestPath, JSON.stringify({ services: { functions: { enabled: false } }, hooks: { posts: {} } }), "utf8")
+    expect(hooksReport(dir, join(dir, "functions"), ast).functionsDisabled).toBe(true)
+
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({ functions_enabled: false, services: { functions: { enabled: true } }, hooks: { posts: {} } }),
+      "utf8",
+    )
+    expect(hooksReport(dir, join(dir, "functions"), ast).functionsDisabled).toBe(false)
   })
 
   it("catches a manifest with no hook map, so the server has nothing to call", () => {
