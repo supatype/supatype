@@ -2,14 +2,16 @@
 
 import React, { useState } from "react"
 import { Button, Input } from "../components/ui.js"
-import { providerLabel } from "../lib/studio-sign-in.js"
+import { providerLabel, type StudioSignInMethods } from "../lib/studio-sign-in.js"
 
 /** The ways Studio's sign-in page can sign somebody in, and what to say when it opens. */
 export interface StudioSignIn {
-  /** OAuth providers to offer, by the name `/authorize` takes. Empty offers email and password only. */
-  providers: readonly string[]
+  /** Which ways to offer: email and password, SAML single sign-on, and OAuth providers by name. */
+  methods: StudioSignInMethods
   withPassword(email: string, password: string): Promise<{ error: string | null }>
   withProvider(provider: string): Promise<{ error: string | null }>
+  /** SAML single sign-on through the provider for the work email's domain. */
+  withSSO(email: string): Promise<{ error: string | null }>
   /** A refusal to show when the page opens, such as a provider sign-in the server turned down. */
   initialError: string | null
 }
@@ -57,6 +59,12 @@ interface AttemptState {
   attempt: Attempt
 }
 
+/** A part of the page that starts sign-ins: the shared attempt state and the page's ways in. */
+interface AttemptProps {
+  state: AttemptState
+  signIn: StudioSignIn
+}
+
 function PasswordForm({ state, withPassword }: { state: AttemptState; withPassword: StudioSignIn["withPassword"] }): React.ReactElement {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -75,12 +83,27 @@ function PasswordForm({ state, withPassword }: { state: AttemptState; withPasswo
   )
 }
 
-function ProviderButtons({ state, signIn }: { state: AttemptState; signIn: StudioSignIn }): React.ReactElement | null {
-  if (signIn.providers.length === 0) return null
+/** SAML single sign-on: the work email's domain finds the identity provider. */
+function SsoForm({ state, withSSO, primary }: { state: AttemptState; withSSO: StudioSignIn["withSSO"]; primary: boolean }): React.ReactElement {
+  const [email, setEmail] = useState("")
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    void state.attempt(() => withSSO(email.trim()))
+  }
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <Field id="studio-login-sso-email" label="Work email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <Button type="submit" variant={primary ? "primary" : "secondary"} size="md" disabled={state.busy} className="w-full justify-center">
+        Sign in with SSO
+      </Button>
+    </form>
+  )
+}
+
+function ProviderButtons({ state, signIn }: AttemptProps): React.ReactElement {
   return (
     <div className="space-y-2">
-      <p className="text-center text-xs text-muted-foreground">or</p>
-      {signIn.providers.map((provider) => (
+      {signIn.methods.providers.map((provider) => (
         <Button
           key={provider}
           type="button"
@@ -109,6 +132,32 @@ function LoginHeading(): React.ReactElement {
   )
 }
 
+/**
+ * Each way the project offers, with "or" between them. Email and password go when the project turns
+ * email sign-in off (N-FF3), since the server would refuse them; SSO and OAuth stay.
+ */
+function SignInMethods({ state, signIn }: AttemptProps): React.ReactElement {
+  const { password, sso, providers } = signIn.methods
+  const sections = [
+    password && <PasswordForm key="password" state={state} withPassword={signIn.withPassword} />,
+    sso && <SsoForm key="sso" state={state} withSSO={signIn.withSSO} primary={!password} />,
+    providers.length > 0 && <ProviderButtons key="providers" state={state} signIn={signIn} />,
+  ].filter((section): section is React.ReactElement => section !== false)
+  if (sections.length === 0) {
+    return <p className="text-center text-sm text-muted-foreground">This project has no sign-in method Studio can offer.</p>
+  }
+  return (
+    <>
+      {sections.map((section, i) => (
+        <React.Fragment key={section.key}>
+          {i > 0 && <p className="text-center text-xs text-muted-foreground">or</p>}
+          {section}
+        </React.Fragment>
+      ))}
+    </>
+  )
+}
+
 export function StudioLogin({ apiBaseUrl, signIn }: StudioLoginProps): React.ReactElement {
   const { error, busy, attempt } = useAttempt(signIn.initialError)
   const state: AttemptState = { busy, attempt }
@@ -116,8 +165,7 @@ export function StudioLogin({ apiBaseUrl, signIn }: StudioLoginProps): React.Rea
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12">
       <div className="w-full max-w-sm space-y-6">
         <LoginHeading />
-        <PasswordForm state={state} withPassword={signIn.withPassword} />
-        <ProviderButtons state={state} signIn={signIn} />
+        <SignInMethods state={state} signIn={signIn} />
         {error !== null && (
           <p className="text-sm text-destructive-text" role="alert">
             {error}

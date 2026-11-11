@@ -6,7 +6,7 @@ import React, { useMemo } from "react"
 import { StudioAuthClientContext } from "../hooks/useAdminClient.js"
 import { useStudioAccess, type UseStudioAccessReturn } from "../hooks/useStudioAccess.js"
 import { useStudioAuth } from "../hooks/useStudioAuth.js"
-import { useStudioOAuthSignIn } from "../hooks/useStudioOAuthSignIn.js"
+import { useStudioSignInMethods } from "../hooks/useStudioSignInMethods.js"
 import { StudioLogin } from "../views/StudioLogin.js"
 import { Button } from "./ui.js"
 
@@ -99,16 +99,17 @@ function CheckingAccess(): React.ReactElement {
 
 type GateConnection = Pick<StudioAccessGateProps, "apiBaseUrl" | "anonKey" | "authClient">
 
-/** The sign-in page: email and password, and the project's OAuth providers. */
+/** The sign-in page: email and password, SAML single sign-on, and the project's OAuth providers. */
 function StudioSignInPage({ connection, signIn }: { connection: GateConnection; signIn: UseStudioAccessReturn["signIn"] }): React.ReactElement {
-  const oauth = useStudioOAuthSignIn(connection.apiBaseUrl, connection.anonKey, connection.authClient)
+  const external = useStudioSignInMethods(connection.apiBaseUrl, connection.anonKey, connection.authClient)
   return (
     <StudioLogin
       apiBaseUrl={connection.apiBaseUrl}
       signIn={{
-        providers: oauth.providers,
-        initialError: oauth.redirectError,
-        withProvider: oauth.signInWithProvider,
+        methods: external.methods,
+        initialError: external.redirectError,
+        withProvider: external.signInWithProvider,
+        withSSO: external.signInWithSSO,
         withPassword: async (email, password) => {
           const { error } = await signIn(email, password)
           return { error: error?.message ?? null }
