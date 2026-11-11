@@ -1,4 +1,4 @@
-import { isJsonObject, isOneOf, isRecordOf, isShape, isString, optional, type Guard } from "./json.js"
+import { isBoolean, isJsonObject, isOneOf, isRecordOf, isShape, isString, optional, type Guard } from "./json.js"
 import type { ClientMessage } from "./types.js"
 
 /**
@@ -13,6 +13,7 @@ const isSubscribe = isShape({
   event: optional(isOneOf(["INSERT", "UPDATE", "DELETE", "*"] as const)),
   table: optional(isString),
   schema: optional(isString),
+  changes: optional(isBoolean),
   filter: optional(isRecordOf(isString)),
   ref: optional(isString),
 })

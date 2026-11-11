@@ -18,6 +18,11 @@ export class TtlCache<T> {
     this.entries.clear()
   }
 
+  /** Drop one key, so the next caller loads it again. */
+  forget(key: string): void {
+    this.entries.delete(key)
+  }
+
   get(key: string, load: () => Promise<T>): Promise<T> {
     const cached = this.entries.get(key)
     if (cached && Date.now() - cached.readAt < this.ttlMs) return cached.value

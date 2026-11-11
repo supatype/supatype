@@ -112,6 +112,11 @@ export function presenceKey(claims: JwtClaims): string {
   return typeof claims.sub === "string" && claims.sub !== "" ? claims.sub : "anonymous"
 }
 
+/** True when a change to `schema.table` is `sub`'s: its table, and a join that wants row changes. */
+function receivesRowsOf(sub: Subscription, schema: string, table: string): boolean {
+  return sub.withoutRows !== true && sub.schema === schema && sub.table === table
+}
+
 /**
  * Manages connected clients and their channel subscriptions.
  */
@@ -293,7 +298,7 @@ export class ChannelManager {
 
     for (const [clientId, client] of this.clients) {
       for (const sub of client.subscriptions.values()) {
-        if (sub.schema === schema && sub.table === table) {
+        if (receivesRowsOf(sub, schema, table)) {
           results.push({ clientId, client, subscription: sub })
         }
       }
@@ -387,7 +392,7 @@ export class ChannelManager {
       if (projectRef !== null && client.projectRef !== projectRef) continue
 
       for (const sub of client.subscriptions.values()) {
-        if (sub.schema === schema && sub.table === table) {
+        if (receivesRowsOf(sub, schema, table)) {
           results.push({ clientId, client, subscription: sub })
         }
       }

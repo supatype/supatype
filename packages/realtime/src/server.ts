@@ -13,11 +13,13 @@ import {
   type ClientSocket,
   type ConnectedClient,
 } from "./channels.js"
-import { ReplicationListener } from "./replication.js"
+import { ReplicationListener, committedBefore, lsnValue } from "./replication.js"
 import { parseClientMessage } from "./client-message.js"
+import { MessageOrder } from "./message-order.js"
 import { isArrayOf, isShape, isString, type FromShape } from "./json.js"
 import { RealtimeUnsupportedError } from "./capability.js"
 import { RlsFilter } from "./rls.js"
+import { relationRefusal } from "./table-catalog.js"
 import { filterIsMaskSafe } from "./field-mask.js"
 import { matchesFilter, unreadableCondition } from "./filter-match.js"
 import { TOKEN_EXPIRED_CLOSE, TokenExpiry } from "./token-expiry.js"
@@ -57,6 +59,26 @@ function withRef(ref: string | undefined): { ref?: string } {
   return ref === undefined ? {} : { ref }
 }
 
+/** What the database said about a join: why it is refused, and the WAL position it starts at. */
+interface JoinCheck {
+  refusal: string | null
+  startLsn?: bigint | undefined
+}
+
+/**
+ * The join a channel already holds on `target`'s table, if any. A join sent again in place (a
+ * rejoin, or a new event or filter) is owed every change the join it replaces was owed, so it keeps
+ * that join's position, and no new one is read for it. A join that wanted no row changes holds no
+ * position, so a row join after it is a first join, not a rejoin.
+ */
+function sameTableJoin(
+  previous: Subscription | undefined,
+  target: { schema: string; table: string },
+): Subscription | undefined {
+  if (previous === undefined || previous.withoutRows === true) return undefined
+  return previous.schema === target.schema && previous.table === target.table ? previous : undefined
+}
+
 /** Schemas whose changes a shared instance never forwards: platform and service internals. */
 function isInternalSchema(schema: string): boolean {
   return (
@@ -92,6 +114,8 @@ export class RealtimeServer {
   private channels: ChannelManager
   private replication: ReplicationListener
   private rlsFilter: RlsFilter
+  /** The WAL position read the joins arriving now share, while it is in flight. */
+  private walPositionRead: Promise<string | null> | null = null
   private httpServer: ReturnType<typeof createServer> | null = null
   /** The inspector's internal admin API, when `adminPort` is set. */
   private admin: AdminServer | null = null
@@ -306,15 +330,16 @@ export class RealtimeServer {
       this.send(ws, { type: "system", status: "ok", message: "connected, send auth message to authenticate" })
     }
 
+    // A join waits on the database, so frames are ordered per channel: see `MessageOrder`.
+    const order = new MessageOrder((err) => console.error("[realtime] message handling failed:", err))
     ws.on("message", (data) => {
       this.channels.noteMessage(clientId)
-      try {
-        const msg = parseClientMessage(String(data))
-        if (msg === null) throw new Error("not a client message")
-        this.handleMessage(clientId, msg)
-      } catch {
+      const msg = parseClientMessage(String(data))
+      if (msg === null) {
         this.send(ws, { type: "system", status: "error", message: "invalid message format" })
+        return
       }
+      order.run(msg.type === "auth" ? null : msg.channel, () => this.handleMessage(clientId, msg))
     })
 
     ws.on("close", () => {
@@ -359,7 +384,7 @@ export class RealtimeServer {
 
   // ─── Message handling ────────────────────────────────────────────────────
 
-  private handleMessage(clientId: string, msg: ClientMessage): void {
+  private async handleMessage(clientId: string, msg: ClientMessage): Promise<void> {
     const client = this.channels.getClient(clientId)
     if (!client) return
 
@@ -368,7 +393,7 @@ export class RealtimeServer {
         this.handleAuth(clientId, client, msg.token)
         break
       case "subscribe":
-        this.handleSubscribe(clientId, client, msg)
+        await this.handleSubscribe(clientId, client, msg)
         break
       case "unsubscribe":
         this.handleUnsubscribe(clientId, client, msg.channel)
@@ -437,13 +462,7 @@ export class RealtimeServer {
     }
   }
 
-  private handleSubscribe(clientId: string, client: ConnectedClient, msg: SubscribeMessage): void {
-    const refusal = this.subscribeRefusal(client, msg.filter)
-    if (refusal !== null) {
-      this.refuse(client, msg.channel, refusal, msg.ref)
-      return
-    }
-
+  private async handleSubscribe(clientId: string, client: ConnectedClient, msg: SubscribeMessage): Promise<void> {
     // What the subscriber said, and the channel name only when they said nothing.
     //
     // Reading the table out of the channel name is a guess that happens to be right when the
@@ -453,11 +472,32 @@ export class RealtimeServer {
     //
     // The fallback stays for clients that predate `table` being sent at all: an old client and a
     // new server behave exactly as they did.
+    const target = ChannelManager.resolveTarget(msg)
+    const rejoin = sameTableJoin(client.subscriptions.get(msg.channel), target)
+    const local = this.subscribeRefusal(client, msg.filter)
+    const wantsRows = msg.changes !== false
+    const checked: JoinCheck = local !== null
+      ? { refusal: local }
+      : wantsRows
+        ? await this.checkJoin(target, {
+          wantPosition: rejoin === undefined,
+          checkTable: msg.changes === true,
+          role: client.claims ? (client.claims.role ?? "authenticated") : null,
+        })
+        : { refusal: null }
+    if (checked.refusal !== null) {
+      this.refuse(client, msg.channel, checked.refusal, msg.ref)
+      return
+    }
+
+    const startLsn = rejoin === undefined ? checked.startLsn : rejoin.startLsn
     const subscription: Subscription = {
       channel: msg.channel,
-      ...ChannelManager.resolveTarget(msg),
+      ...target,
       event: msg.event ?? "*",
       filter: msg.filter ?? {},
+      ...(startLsn !== undefined && { startLsn }),
+      ...(!wantsRows && { withoutRows: true as const }),
     }
 
     this.channels.subscribe(clientId, subscription)
@@ -473,6 +513,65 @@ export class RealtimeServer {
     const unreadable = unreadableCondition(filter ?? {})
     if (unreadable === null) return null
     return `invalid filter ${unreadable}: expected column=op.value with op one of eq, neq, gt, gte, lt, lte`
+  }
+
+  /**
+   * What the database says about a join for `target`: why it is refused, and where in the WAL it
+   * starts. Both are asked only while replication holds a connection: with no database there is
+   * nothing to ask, and a join is acknowledged as it always was, to deliver once it is back. An
+   * answer that fails is treated as unknown, as before these checks: refusing would turn a database
+   * hiccup into a channel error the client has to notice and retry.
+   *
+   * 0.9.2 release test (N-FF5): a misspelt table, or the right table in the wrong schema, was
+   * acknowledged, and the client reported SUBSCRIBED on a channel that stayed silent for good. Not
+   * asked on a shared instance: its database holds every project's schemas, and an answer would
+   * tell one project which tables another has.
+   *
+   * Only a join that asks for row changes (`checkTable`) has its table checked. Every join names
+   * one, and a broadcast or presence channel names whatever its channel name reads as (R2-RB2).
+   *
+   * N-S5: a join heard changes committed before it, decoded after it. See `committedBefore`. Not
+   * read for a rejoin on the same table (`wantPosition` false), which keeps the position it had.
+   */
+  private async checkJoin(
+    { schema, table }: { schema: string; table: string },
+    { wantPosition, checkTable, role }: { wantPosition: boolean; checkTable: boolean; role: string | null },
+  ): Promise<JoinCheck> {
+    if (!this.replication.isConnected()) return { refusal: null }
+    const [refusal, position] = await Promise.allSettled([
+      this.env.multiTenant || !checkTable ? Promise.resolve(null) : this.tableRefusal(schema, table, role),
+      wantPosition ? this.sharedWalPosition() : Promise.resolve(null),
+    ])
+    const text = position.status === "fulfilled" ? position.value : null
+    const startLsn = text === null ? null : lsnValue(text)
+    return {
+      refusal: refusal.status === "fulfilled" ? refusal.value : null,
+      ...(startLsn !== null && { startLsn }),
+    }
+  }
+
+  /**
+   * Why a row join for `schema.table` is refused: the table does not exist, is not a table, or the
+   * subscriber's `role` cannot read it, so every change would be withheld (R2-S8). The service role
+   * reads every table, and a subscriber with no token is judged at delivery as before.
+   */
+  private async tableRefusal(schema: string, table: string, role: string | null): Promise<string | null> {
+    const refusal = relationRefusal(schema, table, await this.rlsFilter.relationKind(schema, table))
+    if (refusal !== null || role === null || role === "service_role") return refusal
+    if (await this.rlsFilter.canRead(role, schema, table)) return null
+    return `role ${role} cannot read ${schema}.${table}, so none of its changes would reach this channel`
+  }
+
+  /**
+   * The WAL insert position, one query for every join that asks while it is in flight. A join that
+   * shares an earlier join's read starts a little earlier than it would have, so it can only be
+   * owed more, never withheld something it should hear.
+   */
+  private sharedWalPosition(): Promise<string | null> {
+    this.walPositionRead ??= this.rlsFilter.walPosition().finally(() => {
+      this.walPositionRead = null
+    })
+    return this.walPositionRead
   }
 
   /**
@@ -655,6 +754,7 @@ export class RealtimeServer {
     // restricted. Filters that do are matched against the masked record instead, because
     // "did I receive this event" would otherwise answer a question about a hidden value.
     if (
+      committedBefore(change, subscription.startLsn) ||
       (subscription.event !== "*" && subscription.event !== change.event) ||
       (filterIsMaskSafe(subscription.filter, masked) && !matchesFilter(change, subscription.filter))
     ) {

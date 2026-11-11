@@ -51,6 +51,14 @@ describe("ChannelManager.listChannels", () => {
     expect(list[1]!.subscribers).toBe(1)
   })
 
+  it("lists a broadcast or presence join under its channel with no table", () => {
+    const channels = new ChannelManager()
+    const id = channels.addClient(fakeSocket, { sub: "carol", role: "authenticated" }, null)
+    channels.subscribe(id, { channel: "room:3", schema: "room", table: "3", event: "*", filter: {}, withoutRows: true })
+    const room3 = channels.listChannels(null).channels.find((c) => c.name === "room:3")
+    expect(room3).toMatchObject({ subscribers: 1, targets: [] })
+  })
+
   it("never returns a filter value", () => {
     const { channels } = registry()
     expect(JSON.stringify(channels.listChannels(null))).not.toContain("secret-owner")
