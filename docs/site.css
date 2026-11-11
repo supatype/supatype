@@ -442,6 +442,19 @@ textarea.input { resize: vertical; min-height: 88px; }
 .pn a.next { text-align: right; grid-column: 2; }
 .pn small { font-family: var(--pixel); font-size: 12px; color: var(--text-4); }
 
+/* Brand logos in one raised row of boxes, each with its name and package: grey at rest, the logo
+   and box edge in the brand's colour on hover or keyboard focus. 3 across, then 2, on smaller screens. */
+.logo-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border-strong); background: var(--border); box-shadow: 5px 5px 0 var(--border); }
+.logo-grid a { --link: var(--text-4); display: flex; flex-direction: column; gap: 8px; height: 100%; padding: 24px 20px; background: var(--surface); transition: color 0.15s ease, box-shadow 0.15s ease; }
+.logo-grid a:hover, .logo-grid a:focus-visible { color: var(--brand, var(--white)); box-shadow: inset 0 0 0 1px var(--brand, var(--white)); }
+.logo-grid svg { width: 40px; height: 40px; margin-bottom: 12px; fill: currentColor; }
+.logo-grid .label { color: var(--text); }
+.logo-grid .meta { font-size: 12px; overflow-wrap: anywhere; }
+.logo-react { --brand: #61DAFB; }
+.logo-vue { --brand: #4FC08D; }
+.logo-svelte { --brand: #FF3E00; }
+.logo-solid { --brand: #4F88C6; }
+
 /* ---------- Reduced motion ---------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -458,6 +471,7 @@ textarea.input { resize: vertical; min-height: 88px; }
 @media (max-width: 960px) {
   .grid-3, .cards.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-3.fill > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .logo-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
@@ -479,6 +493,7 @@ textarea.input { resize: vertical; min-height: 88px; }
 
   .grid-3, .cards, .cards.three, .pn { grid-template-columns: minmax(0, 1fr); }
   .pn a.next { grid-column: auto; }
+  .logo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   .docs { display: block; }
   .docs-menu { display: flex; }
