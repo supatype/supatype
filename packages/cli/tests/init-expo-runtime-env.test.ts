@@ -107,7 +107,13 @@ function expoApp(opts: { routes: "app" | "src/app"; router?: boolean; template?:
   put("package.json", JSON.stringify({ name: "b-init-expo", main: "expo-router/entry", dependencies: deps }, null, 2))
   put(`${opts.routes}/index.tsx`, "export default function Index() { return null }\n")
   put("node_modules/expo/package.json", JSON.stringify({ name: "expo", version: "58.0.23", exports: { "./package.json": "./package.json" } }))
-  if (opts.template === false) return
+  if (opts.template === false) {
+    // An @expo/cli that ships no template, so the lookup stops at the app's own copy. With none
+    // here at all, Node goes on up the folders above the temp folder, and a template found up
+    // there made this case fail on CI.
+    put("node_modules/@expo/cli/package.json", JSON.stringify({ name: "@expo/cli", version: "58.1.19", exports: { "./package.json": "./package.json" } }))
+    return
+  }
   put(
     "node_modules/@expo/cli/package.json",
     JSON.stringify({ name: "@expo/cli", version: "58.1.19", exports: { "./static/template/*": "./static/template/*" } }),

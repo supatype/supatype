@@ -80,13 +80,22 @@ function startedBySupatype(info: ProcessInfo | undefined, parents: Map<number, s
   return parent !== undefined && SUPATYPE_DEV.test(parent)
 }
 
-/** Stops each service a killed dev of this project left running, saying so, and removes its pid file. */
+/** How long a stopped service is given to end, and let go of its port, before the port checks run. */
+const SERVICE_END_WAIT_MS = 3_000
+
+/**
+ * Stops each service a killed dev of this project left running, saying so, and removes its pid file.
+ * Returns once each has ended: a signal is sent, not waited on, and the port checks that follow saw
+ * the port still held on Linux (0.9.2 release test round 6, S-5).
+ */
 export async function stopLeftoverServices(state: NativeDevState): Promise<void> {
   const leftovers = await leftoverOwnServices(state)
+  const deadline = Date.now() + SERVICE_END_WAIT_MS
   await Promise.all(
     leftovers.map(async ({ label, pid }) => {
       console.log(`[supatype] This project's ${label} (pid ${pid}) was still running from a dev that did not stop cleanly; stopping it.`)
       await killPidTree(pid)
+      while (pidAlive(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
       rmSync(join(state.pidDir, `${label}.pid`), { force: true })
     }),
   )
