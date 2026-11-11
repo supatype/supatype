@@ -72,6 +72,20 @@ const PROVIDER_SUFFIX = "-oauth-provider"
  * sent back in the URL for a sign-in `signInWithSSO` started.
  */
 export const SSO_PROVIDER = "sso"
+
+/**
+ * The domain `signInWithSSO` looks a provider up by, from what a person typed: the part after the
+ * last `@` of a work email, or the whole of a bare domain, trimmed and lower-cased. Null when there
+ * is nothing to look up, so a form can refuse it before asking the server.
+ *
+ * One implementation for `<SSOForm>` and Studio's sign-in, which each had their own and disagreed:
+ * Studio found no domain in a bare one, and the form sent a domain typed after `@ ` with its space.
+ */
+export function ssoDomain(input: string): string | null {
+  const value = input.trim().toLowerCase()
+  const domain = value.slice(value.lastIndexOf("@") + 1).trim()
+  return domain === "" ? null : domain
+}
 const DEBUG_AUTH = typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1"
 
 /**
@@ -553,6 +567,7 @@ export class AuthClient {
     body["skip_http_redirect"] = true
     if (opts.redirectTo !== undefined) body["redirect_to"] = opts.redirectTo
     if (opts.captchaToken !== undefined) body["supatype_meta_security"] = { captcha_token: opts.captchaToken }
+    if (opts.studio === true) body["studio"] = true
     const flowType = opts.flowType ?? "pkce"
     return flowType === "pkce" ? { ...body, ...(await this.beginPkce()) } : body
   }

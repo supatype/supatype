@@ -129,6 +129,29 @@ describe("the subscribe frame", () => {
   })
 })
 
+/**
+ * 0.9.2 release test round 2 (R2-RB2): the server checks a join's table, and the frame names one on
+ * every join, the channel name's reading when no listener gives one. `room:probe` read as
+ * room.probe, so broadcast and presence on it were refused. The frame now says which joins want rows.
+ */
+describe("whether the join asks for row changes", () => {
+  it("says so when a listener wants row changes", async () => {
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    client.channel("lobby-chat").on("postgres_changes", { event: "*", table: "chat_message" }, () => {}).subscribe()
+    await settle()
+    expect(subscribeFrames()[0]).toMatchObject({ table: "chat_message", changes: true })
+  })
+
+  it("does not, for a channel used only for broadcast and presence", async () => {
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    client.channel("room:probe").onBroadcast("ping", () => {}).onPresence(() => {}).subscribe()
+    await settle()
+    const frame = subscribeFrames()[0]
+    expect(frame).toBeDefined()
+    expect(frame).toMatchObject({ changes: false })
+  })
+})
+
 describe("joining again after disconnect()", () => {
   it("sends a fresh subscribe frame on the new socket", async () => {
     // disconnect() dropped the socket but left the channel marked subscribed, so the new socket's

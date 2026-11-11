@@ -69,11 +69,12 @@ export function useQuery<
   options?: UseQueryOptions | undefined,
 ): UseQueryResult<TRow> {
   const client = useSupatype<TDatabase>()
-  const [state, setState] = useState<RowsState<TRow>>({ data: null, error: null, count: null, loading: true })
+  const [state, setState] = useState<RowsState<TRow>>({ data: null, error: null, count: null, loading: false, answered: null })
   const latest = useRef(0)
 
-  // Stable reference to options for the effect dep
-  const optionsJson = JSON.stringify(options)
+  // Which read this render asks for. A string, so a caller's inline options object, new on every
+  // render, does not count as a new read.
+  const key = JSON.stringify([table, options])
 
   const execute = useCallback(async () => {
     const request = ++latest.current
@@ -87,10 +88,10 @@ export function useQuery<
       return
     }
     show({ loading: true })
-    show(await settledRows<TRow>(client as AnyClient, table, options))
-    // `optionsJson` stands in for `options`: a caller's inline object is new on every render, and
-    // depending on it would read again on every render.
-  }, [client, table, optionsJson])
+    show({ ...(await settledRows<TRow>(client as AnyClient, table, options)), answered: key })
+    // `key` stands in for `table` and `options`: a caller's inline object is new on every render,
+    // and depending on it would read again on every render.
+  }, [client, key])
 
   useRunAndRefetch(execute, options?.refetchInterval)
   useRerunOnIdentityChange(client.auth, execute)
@@ -99,7 +100,8 @@ export function useQuery<
   // test (RB10): a new function each render made `useEffect(() => refetch(), [refetch])` loop.
   const refetch = useCallback(() => void execute(), [execute])
 
-  return { ...state, refetch }
+  const { data, error, count } = state
+  return { data, error, count, loading: isLoading(state, key, options?.enabled), refetch }
 }
 
 /** What the hook shows: the latest request's answer, and whether one is in flight. */
@@ -108,6 +110,18 @@ interface RowsState<TRow> {
   error: SupatypeError | null
   count: number | null
   loading: boolean
+  /** The key of the read whose answer `data` holds, or null before any has arrived. */
+  answered: string | null
+}
+
+/**
+ * Loading, worked out while rendering rather than set by the effect that starts the read. 0.9.2
+ * release test (N-FF9): set by the effect, the render where `enabled` turned true, or the options
+ * changed, still said `loading: false` with no rows for the new key, which an app reads as "done,
+ * nothing found". Until the answer for this key arrives, an enabled query is loading.
+ */
+function isLoading<TRow>(state: RowsState<TRow>, key: string, enabled: boolean | undefined): boolean {
+  return enabled !== false && (state.loading || state.answered !== key)
 }
 
 /**
@@ -118,7 +132,7 @@ async function settledRows<TRow>(
   client: AnyClient,
   table: string,
   options: UseQueryOptions | undefined,
-): Promise<RowsState<TRow>> {
+): Promise<Omit<RowsState<TRow>, "answered">> {
   try {
     const result = await readRows(client, table, options)
     return { data: isRowsOf<TRow>(result.data) ? result.data : null, error: result.error, count: result.count, loading: false }

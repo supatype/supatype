@@ -49,7 +49,8 @@ export function useQuery<
   options?: MaybeRefOrGetter<UseQueryOptions | undefined>,
 ): UseQueryReturn<TRow> {
   const client = useSupatype<TDatabase>()
-  const { data, error, loading, read } = latestRows<TRow>(client as AnyClient, table)
+  const enabledAtSetup = isEnabled(toValue(options)?.enabled)
+  const { data, error, loading, read } = latestRows<TRow>(client as AnyClient, table, enabledAtSetup)
   const fetchData = async () => {
     const current = toValue(options)
     if (isEnabled(current?.enabled)) await read(current)
@@ -74,12 +75,18 @@ function isEnabled(enabled: Ref<boolean> | boolean | undefined): boolean {
   return enabled === undefined || (typeof enabled === "boolean" ? enabled : enabled.value)
 }
 
-/** The refs a query shows, fed by reads of which only the newest may change them. */
-function latestRows<TRow>(client: AnyClient, table: string) {
+/**
+ * The refs a query shows, fed by reads of which only the newest may change them.
+ *
+ * `loading` starts as `firstReadComing`. 0.9.2 release test (N-FF9): it started false, so the
+ * render before `onMounted` began the read showed `loading: false, data: null`, which an app
+ * reads as "done, nothing found".
+ */
+function latestRows<TRow>(client: AnyClient, table: string, firstReadComing: boolean) {
   // Shallow: each fetch replaces the rows whole, and `ref` would type them as `UnwrapRef<TRow>`.
   const data = shallowRef<TRow[] | null>(null)
   const error = ref<SupatypeError | null>(null)
-  const loading = ref(false)
+  const loading = ref(firstReadComing)
   const read = latestRowsReader<TRow>(client, table, `useQuery("${table}")`, {
     started: () => {
       loading.value = true
