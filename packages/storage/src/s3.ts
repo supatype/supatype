@@ -16,7 +16,9 @@ import {
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { createHash } from "node:crypto"
+import { bucketIdProblem } from "./bucket-rules.js"
 import { config } from "./env.js"
+import { isStepPart } from "./object-names.js"
 import { bucketNameRuleBroken } from "./s3-settings.js"
 
 const settings = config.s3
@@ -37,13 +39,54 @@ function s3BucketOf(bucket: string): string {
   return oneBucket ? settings.bucket : `${settings.bucketPrefix}${bucket}`
 }
 
+/** The folder every key is under in the one S3 bucket: `S3_KEY_PREFIX` and a `/`, or "" for none. */
+const keyRoot = settings.keyPrefix === "" ? "" : `${settings.keyPrefix}/`
+
+/** The start of every key a Supatype bucket's objects have in the one S3 bucket. */
+function bucketRoot(bucket: string): string {
+  return `${keyRoot}${bucket}/`
+}
+
+/**
+ * Refuses a key that could land outside the Supatype bucket's own folder, and so outside this
+ * deployment's. The routes already refuse such names (object-names.ts, bucket-rules.ts); this is the
+ * last check before S3, so a route that misses one still cannot reach another project's files.
+ *
+ * The bucket id must pass the same rule a create does (bucket-rules.ts), and in a shared S3 bucket
+ * be plain characters too. The key may be "" (a whole bucket's listing) or end in one "/" (a
+ * folder's), and every other part must be a name: never empty, "." or "..".
+ */
+function assertInsideBucket(bucket: string, key: string): void {
+  const parts = (key.endsWith("/") ? key.slice(0, -1) : key).split("/")
+  const keyOk = key === "" || !parts.some(isStepPart)
+  const bucketOk = bucketIdProblem(bucket) === null && (keyRoot === "" || sharedFolderNameProblem(bucket) === null)
+  if (!bucketOk || !keyOk) {
+    throw new Error(`Refusing S3 key ${JSON.stringify(key)} in bucket ${JSON.stringify(bucket)}: it is outside the bucket's folder`)
+  }
+}
+
 /**
  * Where a Supatype bucket's object is in S3: key `key` in the bucket's own S3 bucket, or
- * `<bucket>/<key>` in the one S3 bucket. A bucket id never holds a `/` (bucket-rules.ts), so no
- * bucket's prefix starts another's.
+ * `[<S3_KEY_PREFIX>/]<bucket>/<key>` in the one S3 bucket. A bucket id never holds a `/`
+ * (bucket-rules.ts), so no bucket's prefix starts another's. The only place a key is built.
  */
 function at(bucket: string, key: string): { Bucket: string; Key: string } {
-  return { Bucket: s3BucketOf(bucket), Key: oneBucket ? `${bucket}/${key}` : key }
+  assertInsideBucket(bucket, key)
+  return { Bucket: s3BucketOf(bucket), Key: oneBucket ? `${bucketRoot(bucket)}${key}` : key }
+}
+
+/** A bucket id that is one plain folder name: letters, digits, `.`, `_` and `-`, no `%` or space. */
+const PLAIN_BUCKET_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
+
+/**
+ * Why bucket `id` cannot be a folder beside other deployments' in a shared S3 bucket, or null. With
+ * `S3_KEY_PREFIX` set, other projects' files are in the same S3 bucket, so a bucket id is held to
+ * plain characters: nothing a store or proxy on the way could read as a separator or an escape.
+ */
+function sharedFolderNameProblem(id: string): string | null {
+  // Starting with a letter or digit already rules out "." and "..".
+  if (PLAIN_BUCKET_ID.test(id)) return null
+  return `bucket id ${JSON.stringify(id)} must be letters, digits, ".", "_" and "-", starting with a letter or digit`
 }
 
 /**
@@ -52,6 +95,7 @@ function at(bucket: string, key: string): { Bucket: string; Key: string } {
  * keeps taking what it took before, since a self-host SeaweedFS already holds buckets by those names.
  */
 export function s3BucketNameProblem(id: string): string | null {
+  if (keyRoot !== "") return sharedFolderNameProblem(id)
   if (oneBucket || (settings.bucketPrefix === "" && settings.endpoint !== undefined)) return null
   const name = s3BucketOf(id)
   const broken = bucketNameRuleBroken(name)
@@ -163,7 +207,8 @@ export async function deleteBucket(name: string): Promise<void> {
     await s3.send(new DeleteBucketCommand({ Bucket: s3BucketOf(name) }))
     return
   }
-  await deleteKeys(settings.bucket, await keysUnder(`${name}/`))
+  assertInsideBucket(name, "")
+  await deleteKeys(settings.bucket, await keysUnder(bucketRoot(name)))
 }
 
 /** Every key under `prefix` in the one S3 bucket, as S3 names them, a page at a time. */

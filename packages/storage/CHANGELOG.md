@@ -4,6 +4,12 @@
 
 ### Features
 
+* **s3:** `S3_KEY_PREFIX`, with `S3_BUCKET`, puts every key under a folder such as
+  `abc123/production`, so several storage services share one S3 bucket, each in its own folder.
+  Supatype Cloud keeps every project environment's files this way. The folder is fixed at start and
+  refused unless it is plain folder names, bucket ids are held to plain characters, and every key
+  is checked to be inside its bucket's folder before it is sent to S3.
+
 * **backend:** `STORAGE_BACKEND=file` with `STORAGE_FILE_PATH` keeps object bytes in a directory on
   local disk instead of S3, which stays the default. Bucket and object metadata stay in the
   `storage.*` tables either way, so every rule, limit and transform is the same code on both. Names
