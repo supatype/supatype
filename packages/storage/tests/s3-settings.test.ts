@@ -21,6 +21,7 @@ const S3_KEYS = [
   "S3_FORCE_PATH_STYLE",
   "S3_PUBLIC_URL",
   "S3_BUCKET_PREFIX",
+  "S3_KEY_PREFIX",
   "STORAGE_FILE_PATH",
   "STORAGE_BACKEND",
   "AWS_ACCESS_KEY_ID",
@@ -172,6 +173,77 @@ describe("S3_PUBLIC_URL", () => {
     const { s3Settings } = await import("../src/s3-settings.js")
     expect(s3Settings(true)).not.toHaveProperty("publicUrl")
     expect(s3Settings(false)).not.toHaveProperty("publicUrl")
+  })
+})
+
+/**
+ * Supatype Cloud keeps every project's files in one S3 bucket per platform environment, each project
+ * environment under the folder `S3_KEY_PREFIX` names, `<project ref>/<environment>`. The folder is
+ * the only thing between one customer's files and another's, so it is fixed at start, from the
+ * deployment, and every key the service builds is checked to be inside it before it is sent.
+ */
+describe("a project folder in the one S3 bucket (S3_KEY_PREFIX)", () => {
+  const SHARED = { S3_BUCKET: "shared", S3_REGION: "eu-west-2", S3_ACCESS_KEY: "id", S3_SECRET_KEY: "secret" }
+
+  it("keeps every key under <project>/<environment>, then the Supatype bucket", async () => {
+    const s3 = await s3With({ ...SHARED, S3_KEY_PREFIX: "abc123/production" })
+    const url = new URL(await s3.createSignedDownloadUrl("photos", "cats/a.png", 60))
+    expect(url.host).toBe("shared.s3.eu-west-2.amazonaws.com")
+    expect(url.pathname).toBe("/abc123/production/photos/cats/a.png")
+    const upload = new URL(await s3.createSignedUploadUrl("photos", "cats/b.png", 60))
+    expect(upload.pathname).toBe("/abc123/production/photos/cats/b.png")
+  })
+
+  it("holds bucket ids to plain characters, since other projects share the S3 bucket", async () => {
+    const s3 = await s3With({ ...SHARED, S3_KEY_PREFIX: "abc123/production" })
+    expect(s3.s3BucketNameProblem("photos")).toBeNull()
+    expect(s3.s3BucketNameProblem("Team_Photos.v2")).toBeNull()
+    for (const id of ["..%2Fother", "a b", "a\\b", "..", ".", "-x", "x".repeat(64)]) {
+      expect(s3.s3BucketNameProblem(id), id).toMatch(/letters, digits/)
+    }
+  })
+
+  it("takes a single folder too", async () => {
+    const s3 = await s3With({ ...SHARED, S3_KEY_PREFIX: "abc123" })
+    expect(new URL(await s3.createSignedDownloadUrl("photos", "a.png", 60)).pathname).toBe("/abc123/photos/a.png")
+  })
+
+  it("reads a blank S3_KEY_PREFIX as unset", async () => {
+    const s3 = await s3With({ ...SHARED, S3_KEY_PREFIX: " " })
+    expect(new URL(await s3.createSignedDownloadUrl("photos", "a.png", 60)).pathname).toBe("/photos/a.png")
+  })
+
+  it("refuses to start with S3_KEY_PREFIX and no S3_BUCKET to hold the folder", async () => {
+    await expect(s3With({ S3_KEY_PREFIX: "abc123/production", S3_REGION: "eu-west-2" })).rejects.toThrow(
+      /S3_KEY_PREFIX.*S3_BUCKET/,
+    )
+  })
+
+  it.each([
+    "../other", "..", ".", "/abc", "abc/", "abc//production", "abc/../other", "abc/./production", "abc/..",
+    "Abc", "a b", "a\\b", "-abc", "abc/-x", "x".repeat(64), "a/b/c/d/e",
+  ])(
+    "refuses to start with the folder %j, which is not one to four plain folder names",
+    async (prefix) => {
+      await expect(s3With({ ...SHARED, S3_KEY_PREFIX: prefix })).rejects.toThrow(/S3_KEY_PREFIX/)
+    },
+  )
+
+  it.each([
+    ["a bucket id with a slash", "other-storage/photos", "a.png"],
+    ["a bucket id of ..", "..", "other-storage/photos/a.png"],
+    ["a bucket id of .", ".", "a.png"],
+    ["an empty bucket id", "", "a.png"],
+    ["a bucket id holding an escape", "..%2Fother", "a.png"],
+    ["a bucket id holding a backslash", "a\\b", "a.png"],
+    ["a key that climbs", "photos", "../../other-storage/photos/a.png"],
+    ["a key with a . part", "photos", "cats/./a.png"],
+    ["a key with an empty part", "photos", "cats//a.png"],
+    ["a key starting with a slash", "photos", "/a.png"],
+  ])("never signs %s, whatever the routes let through", async (_, bucket, key) => {
+    const s3 = await s3With({ ...SHARED, S3_KEY_PREFIX: "abc123/production" })
+    await expect(s3.createSignedDownloadUrl(bucket, key, 60)).rejects.toThrow(/outside/)
+    await expect(s3.createSignedUploadUrl(bucket, key, 60)).rejects.toThrow(/outside/)
   })
 })
 
