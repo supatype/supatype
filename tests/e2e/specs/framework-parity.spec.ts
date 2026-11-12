@@ -97,7 +97,7 @@ async function taskOwner(account: Account, title: string): Promise<string | null
  * join was acknowledged and whether the insert was ever delivered.
  */
 let frames: string[] = []
-let answeredAnon = false
+let anonAnswer: TaskJoinAnswer | null = null
 let joinedSignedIn = false
 
 /**
@@ -116,6 +116,30 @@ function socketRole(url: string): string {
   } catch {
     return "none"
   }
+}
+
+type TaskJoinAnswer = "joined" | "refused"
+
+/** A task channel's name: `public:task`, with or without the client's `:<n>` suffix. */
+const TASK_CHANNEL = /^public:task(:|$)/
+
+/**
+ * The server's answer to a task channel join, if the frame is one. An acknowledgement names the
+ * channel in its message, and a refusal names it in `channel`.
+ */
+function taskJoinAnswer(payload: string): TaskJoinAnswer | null {
+  let frame: unknown
+  try {
+    frame = JSON.parse(payload)
+  } catch {
+    return null
+  }
+  if (stringAt(frame, "type") !== "system") return null
+  const status = stringAt(frame, "status")
+  const subscribed = /^subscribed to (.*)$/.exec(stringAt(frame, "message") ?? "")?.[1]
+  if (status === "ok" && subscribed !== undefined && TASK_CHANNEL.test(subscribed)) return "joined"
+  if (status === "error" && TASK_CHANNEL.test(stringAt(frame, "channel") ?? "")) return "refused"
+  return null
 }
 
 /**
@@ -150,7 +174,7 @@ async function recordStatus(page: Page): Promise<void> {
 
 async function recordRealtime(page: Page): Promise<void> {
   frames = []
-  answeredAnon = false
+  anonAnswer = null
   joinedSignedIn = false
   await recordStatus(page)
   page.on("websocket", (ws) => {
@@ -162,12 +186,10 @@ async function recordRealtime(page: Page): Promise<void> {
     ws.on("framesent", (f) => stamp(">", f.payload))
     ws.on("framereceived", (f) => {
       stamp("<", f.payload)
-      const text = String(f.payload)
-      const joined = text.includes("subscribed to public:task")
-      if (role === "authenticated" && joined) joinedSignedIn = true
-      // A refusal names the channel it refuses. Tasks are read by signed-in users only, so the
-      // server refuses the anon join, and either answer means the anon socket is settled.
-      if (role === "anon" && (joined || text.includes('"channel":"public:task'))) answeredAnon = true
+      const answer = taskJoinAnswer(String(f.payload))
+      if (answer === null) return
+      if (role === "authenticated" && answer === "joined") joinedSignedIn = true
+      if (role === "anon") anonAnswer ??= answer
     })
     ws.on("close", () => stamp("close", ""))
   })
@@ -187,10 +209,11 @@ const listItem = (page: Page, title: string) => page.locator("ul.list li", { has
 async function signIn(page: Page, fw: Framework, account: Account): Promise<string> {
   await page.goto(appUrl(fw))
   await expect(page.getByRole("heading", { level: 1 })).toContainText(new RegExp(fw, "i"))
-  // The socket opened on page load is anon. Waiting for the server's answer to its join makes the
-  // sign-in below a swap of a settled socket every time, which is the case the status has to get
-  // right. The answer is a refusal: anon cannot read tasks, and the server says so at join.
-  await expect.poll(() => answeredAnon, { message: "the anon realtime join was never answered" }).toBe(true)
+  // The socket opened on page load is anon. Tasks are read by signed-in users only, so the server
+  // refuses its join. Waiting for that refusal makes the sign-in below a swap of a settled socket
+  // every time, which is the case the status has to get right, and an anon join it acknowledged
+  // would be a read rule leaking into realtime.
+  await expect.poll(() => anonAnswer, { message: "the server never refused the anon realtime join" }).toBe("refused")
   await page.getByPlaceholder("email").fill(account.email)
   await page.getByPlaceholder("password").fill(PASSWORD)
   await page.getByRole("button", { name: "Sign in", exact: true }).click()
