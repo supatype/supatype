@@ -97,7 +97,7 @@ async function taskOwner(account: Account, title: string): Promise<string | null
  * join was acknowledged and whether the insert was ever delivered.
  */
 let frames: string[] = []
-let joinedAnon = false
+let answeredAnon = false
 let joinedSignedIn = false
 
 /**
@@ -150,7 +150,7 @@ async function recordStatus(page: Page): Promise<void> {
 
 async function recordRealtime(page: Page): Promise<void> {
   frames = []
-  joinedAnon = false
+  answeredAnon = false
   joinedSignedIn = false
   await recordStatus(page)
   page.on("websocket", (ws) => {
@@ -162,9 +162,12 @@ async function recordRealtime(page: Page): Promise<void> {
     ws.on("framesent", (f) => stamp(">", f.payload))
     ws.on("framereceived", (f) => {
       stamp("<", f.payload)
-      if (!String(f.payload).includes("subscribed to public:task")) return
-      if (role === "authenticated") joinedSignedIn = true
-      if (role === "anon") joinedAnon = true
+      const text = String(f.payload)
+      const joined = text.includes("subscribed to public:task")
+      if (role === "authenticated" && joined) joinedSignedIn = true
+      // A refusal names the channel it refuses. Tasks are read by signed-in users only, so the
+      // server refuses the anon join, and either answer means the anon socket is settled.
+      if (role === "anon" && (joined || text.includes('"channel":"public:task'))) answeredAnon = true
     })
     ws.on("close", () => stamp("close", ""))
   })
@@ -184,9 +187,10 @@ const listItem = (page: Page, title: string) => page.locator("ul.list li", { has
 async function signIn(page: Page, fw: Framework, account: Account): Promise<string> {
   await page.goto(appUrl(fw))
   await expect(page.getByRole("heading", { level: 1 })).toContainText(new RegExp(fw, "i"))
-  // The socket opened on page load is anon. Waiting for its join makes the sign-in below a swap of
-  // a joined socket every time, which is the case the status has to get right.
-  await expect.poll(() => joinedAnon, { message: "the anon realtime channel never joined" }).toBe(true)
+  // The socket opened on page load is anon. Waiting for the server's answer to its join makes the
+  // sign-in below a swap of a settled socket every time, which is the case the status has to get
+  // right. The answer is a refusal: anon cannot read tasks, and the server says so at join.
+  await expect.poll(() => answeredAnon, { message: "the anon realtime join was never answered" }).toBe(true)
   await page.getByPlaceholder("email").fill(account.email)
   await page.getByPlaceholder("password").fill(PASSWORD)
   await page.getByRole("button", { name: "Sign in", exact: true }).click()
