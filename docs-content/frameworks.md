@@ -24,6 +24,19 @@ Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, a
 | `@supatype/react-native` | `createNativeClient`, `secureStoreAdapter`, `asyncStorageAdapter`, `openOAuth`, `createAuthUrlListener` |
 | `@supatype/ssr` | `createServerClient`, and `GET` from `@supatype/ssr/next` |
 
+`supatype init` adds `@supatype/client` to your app, and `@supatype/ssr` as well in a Next.js app. Add the binding for your framework yourself, on the same release as `@supatype/client`:
+
+```sh
+$ npm install @supatype/react     # React and Next.js
+$ npm install @supatype/vue
+$ npm install @supatype/svelte
+$ npm install @supatype/solid
+$ npm install @supatype/react-native @supatype/react   # React Native, then:
+$ npx expo install expo-secure-store expo-web-browser expo-linking
+```
+
+With pnpm, Yarn or Bun, use that tool's add command instead.
+
 Every example below imports the client from `src/supatype.ts`, created once as shown in [Client: Create the client](/docs/client.html#setup). With Vite, read the names `supatype dev` writes for development and `supatype build` sets for a production build:
 
 ```ts title="src/supatype.ts"
@@ -34,6 +47,8 @@ export const supatype = createClient({
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,
 })
 ```
+
+A build made without the values, such as a plain `vite build` that Supatype serves, reads them from `/supatype-env.js`, so `index.html` needs `<script src="/supatype-env.js" vite-ignore></script>` in its head. `init` adds it only to an `index.html` it writes itself; in a Vite app that already had one, add the tag yourself, as [Deploy your frontend: Supatype hosts it](/docs/deploying-your-frontend.html#supatype-hosts) shows.
 
 Sign-in screens are covered on [Auth: Pre-built UI](/docs/auth.html#ui), and the subscription hooks on [Realtime: Framework hooks](/docs/realtime.html#hooks). This page does not repeat them.
 
@@ -83,7 +98,7 @@ export function App() {
 | `select` | The select expression. Default `*`. |
 | `filter` | Equality filters, one per column. |
 | `order` | `{ column, ascending }`. Ascending by default. |
-| `limit`, `offset` | Paging. `offset` only applies when `limit` is set. |
+| `limit`, `offset` | Paging. An `offset` with no `limit` reads 100 rows, in every binding. |
 | `enabled` | `false` skips the query. |
 | `refetchInterval` | Runs the query again every so many milliseconds. |
 | `cache` | The same cache options as the client's `.cache()`. |
@@ -176,7 +191,7 @@ async function remove(id: string) {
 </template>
 ```
 
-Results are refs. The query runs when the component mounts. `enabled` may be a ref; the query runs again when it turns `true`. `useFunction(name)` returns `invoke(body)`, `data`, `error` and `loading`.
+Results are refs. The query runs when the component mounts. To sort, page or filter from component state, pass the options as a ref or a getter, such as `useQuery("post", () => ({ limit: 20, offset: page.value * 20 }))`; the query runs again whenever they change. `enabled` may be a ref; the query runs again when it turns `true`. `useFunction(name)` returns `invoke(body)`, `data`, `error` and `loading`.
 
 <h2 id="svelte">Svelte</h2>
 
@@ -208,7 +223,7 @@ Set the client once in a parent component. The `create*` functions read it from 
 {/if}
 ```
 
-`createQuery` fetches as soon as it is created and returns readable stores plus `refetch`. `createMutation` and `createFunction` work like the Vue versions.
+`createQuery` fetches as soon as it is created and returns readable stores plus `refetch`. To sort, page or filter from component state, pass the options as a store; the query runs again whenever it changes. From `$state`, `toStore(() => ({ limit: 20, offset: page * 20 }))` from `svelte/store` makes one. `createMutation` and `createFunction` work like the Vue versions.
 
 <h2 id="solid">Solid</h2>
 
@@ -233,7 +248,7 @@ export function App() {
 }
 ```
 
-The query runs on mount. `createMutation` and `createFunction` work like the Vue versions.
+The query runs on mount. To sort, page or filter from a signal, pass the options as a function, such as `createQuery("post", () => ({ limit: 20, offset: page() * 20 }))`; the query runs again whenever the signals it reads change. `createMutation` and `createFunction` work like the Vue versions.
 
 ### How Vue, Svelte and Solid differ from React
 
@@ -274,7 +289,6 @@ Wrap the app in `SupatypeProvider` from `@supatype/react` and use the same hooks
 
 ```ts title="app/supatype-env.js/route.ts"
 export { GET } from "@supatype/ssr/next"
-export const dynamic = "force-dynamic"
 ```
 
 ```tsx title="app/layout.tsx"
@@ -292,21 +306,68 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 ```
 
-Keep the `dynamic` line in the route file itself: Next reads a route's segment config from its own source and ignores a re-exported one. The route answers `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` with `Cache-Control: no-cache`, as the Supatype server's own `/supatype-env.js` does. It answers 404 only when `SUPATYPE_PUBLIC_ENV` is `false`, and, when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset or `SUPATYPE_ANON_KEY` holds a service role key, 200, not cached, with a script that sets only `error` to a reason naming every variable to fix, which the browser client throws on its first request. The browser client, created with `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY` left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in [Deploy your frontend: Next.js](/docs/deploying-your-frontend.html#nextjs).
+The route needs no segment config, and must not export `dynamic`: Next 16 with `cacheComponents` on, as a new create-next-app has it, refuses that with a 500. `GET` reads the request, which is what makes Next 14 and Next 16 with `cacheComponents` render it per request instead of prerendering it with the build machine's values; Next 15, and Next 16 without `cacheComponents`, render every `GET` per request anyway. A route written by `init` 0.9.1 has the line `export const dynamic = "force-dynamic"`. `supatype generate`, which the project's `prepare` script runs on every `npm install`, replaces that route with the current one while it is still as `init` wrote it, and prints `updated`; a route changed since is left alone, with a warning to delete the line. Upgrade `@supatype/ssr` with the CLI: the route needs 0.9.2 or later. The route answers `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` with `Cache-Control: no-cache`, as the Supatype server's own `/supatype-env.js` does. It answers 404 only when `SUPATYPE_PUBLIC_ENV` is `false`, and, when `SUPATYPE_URL` or `SUPATYPE_ANON_KEY` is unset or `SUPATYPE_ANON_KEY` holds a service role key, 200, not cached, with a script that sets only `error` to a reason naming every variable to fix, which the browser client throws on its first request. The browser client, created with `NEXT_PUBLIC_SUPATYPE_URL` and `NEXT_PUBLIC_SUPATYPE_ANON_KEY` left unset at build time, reads what the script set at its first request. How to set the two variables on each host is in [Deploy your frontend: Next.js](/docs/deploying-your-frontend.html#nextjs).
 
 In a Pages Router app, `init` writes nothing and prints the steps instead: create the same route file under `app/supatype-env.js/`, beside `pages/`; in `pages/_document.tsx`, import `Script` from `next/script` and put the same `<Script>` tag inside `<Head>`; then add `@supatype/ssr` to the app's dependencies. For a static export (`output: "export"` in `next.config`), which cannot serve a route, `init` writes neither piece and prints `supatype build -- next build`, or Supatype hosting, whose server answers `/supatype-env.js` itself.
+
+<h3 id="nextjs-browser">The browser client</h3>
+
+Create the browser client once, from the generated file, for client components to import. Pass it the two `NEXT_PUBLIC_` names with no default. In `next dev` they come from `.env.development.local`. In a production build they are unset, so the client reads what `/supatype-env.js` set; a default would be fixed into the build and win over the route's values.
+
+```ts title="lib/supatype.ts"
+import { createClient } from "../supatype/generated/client"
+
+export const supatype = createClient({
+  url: process.env.NEXT_PUBLIC_SUPATYPE_URL,
+  anonKey: process.env.NEXT_PUBLIC_SUPATYPE_ANON_KEY,
+})
+```
+
+When the app is in `src/app/`, put it at `src/lib/supatype.ts` and import `"../../supatype/generated/client"`. The root layout is a Server Component, so give the provider a client component of its own, and wrap `{children}` in the layout's `<body>` with it, after the `<Script>` tag:
+
+```tsx title="app/providers.tsx"
+"use client"
+
+import type { ReactNode } from "react"
+import { SupatypeProvider } from "@supatype/react"
+import { supatype } from "@/lib/supatype"
+
+export function Providers({ children }: { children: ReactNode }) {
+  return <SupatypeProvider client={supatype}>{children}</SupatypeProvider>
+}
+```
+
+```tsx title="app/posts/post-list.tsx"
+"use client"
+
+import { useQuery } from "@supatype/react"
+
+export function PostList() {
+  const { data: posts, loading, error } = useQuery("post", { select: "id, title", limit: 20 })
+  if (loading) return <p>Loading</p>
+  if (error) return <p>{error.message}</p>
+  return <ul>{posts?.map((post) => <li key={post.id}>{post.title}</li>)}</ul>
+}
+```
+
+Every hook in the [React](#react) section works the same way in a client component. The session it signs in is the one the server client below reads from the cookie.
 
 <h3 id="nextjs-server">Server components, route handlers and middleware</h3>
 
 In the browser the client copies the session into a cookie named `st-auth-token` (path `/`, `SameSite=Lax`, `Secure` on HTTPS). `createServerClient` from `@supatype/ssr` reads that cookie on the server and builds a client signed in as the same user. Given only its options, it takes the address and anon key from `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`, read on each call, and where one is unset, from `NEXT_PUBLIC_SUPATYPE_URL` or `NEXT_PUBLIC_SUPATYPE_ANON_KEY`. With neither, its first request throws an error saying it is running on a server and naming `SUPATYPE_URL` and `SUPATYPE_ANON_KEY`. Pass them first, as `createServerClient(url, anonKey, options)`, to use others.
 
-```ts title="src/supatype-server.ts"
+Put the helper in the folder that holds `app/`: `supatype-server.ts` at the project root for a create-next-app made without `src/`, or `src/supatype-server.ts` when the app is in `src/app/`. create-next-app points the `@/*` import alias at that folder, so `@/supatype-server` finds it in both layouts.
+
+```ts title="supatype-server.ts"
 import { cookies } from "next/headers"
+import { connection } from "next/server"
 import { createServerClient } from "@supatype/ssr"
 
 // Server Components: no setAll, so the client never refreshes the session.
 export async function serverClient() {
   const store = await cookies()
+  // Render at request time: the client reads the clock to check the session's expiry.
+  await connection()
   return createServerClient({ cookies: { getAll: () => store.getAll() } })
 }
 
@@ -360,6 +421,7 @@ What the cookie handling does and does not do:
 - Without `setAll`, as in a Server Component, the client never refreshes the session: an expired access token is sent as it is, and the API refuses it. A refresh there would spend the browser's refresh token and keep the new one to itself, so the browser's own next refresh would be refused. Do not pass a `setAll` that does nothing to get round this.
 - With `setAll`, the client refreshes an expired access token when a request it makes finds it expired, and writes every change to the session (a refresh, a sign-in, a sign-out) back through `setAll`.
 - A cookie whose access token has expired is kept only when it has a refresh token. Otherwise the server client runs as an anonymous caller.
+- Telling whether it has expired reads the clock, so `serverClient()` awaits `connection()` from `next/server` first, which renders the component at request time. Without it, Next 16 with `cacheComponents` logs `Next.js encountered the unstable value Date.now() while prerendering` for every page that uses it. `connection()` is in Next 15 and later; on Next 14 leave that line out.
 - The cookie is decoded, not verified. Queries made with it are checked by the API, so access rules hold. But do not trust `auth.getSession()` on the server to decide who someone is: call `auth.getUser()`, which asks the auth server, as the middleware above does.
 - Decoding uses `atob` and `TextDecoder`, not Node's `Buffer`, so it works on the edge runtime too.
 - Set `cookiePrefix` on both sides if you change the client's `auth.cookiePrefix`. The default is `st`.

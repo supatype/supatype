@@ -18,6 +18,8 @@ export interface DevComposeShutdownFallback {
 }
 
 let shutdownWork: (() => Promise<void>) | null = null
+/** Whether `shutdownWork` was registered as the start began, and the start has not finished yet. */
+let startRunning = false
 /** An undo of something dev's start began. */
 type StartUndo = () => void | Promise<void>
 /** The services dev's start began, undone together by an interrupted start or by the shutdown. */
@@ -127,6 +129,12 @@ export interface RegisterDevShutdownOptions {
   compose?: DevComposeShutdownFallback
   /** Project root: clears `.supatype/dev-session.json` after shutdown. */
   cwd?: string
+  /**
+   * Registered as the start begins (Docker dev, whose stack has to come down however it ends): until
+   * {@link waitForDevShutdown}, a Ctrl+C runs `work` as a stopped start, `Stopped during start.` and
+   * exit 130, as native dev's does. It ran as a running dev's shutdown, exit 0 (0.9.1 release test, FF11).
+   */
+  duringStart?: boolean
 }
 
 /** Register async teardown (stop children, compose down, etc.). Call once per dev session. */
@@ -135,6 +143,7 @@ export function registerDevShutdown(
   opts?: RegisterDevShutdownOptions,
 ): void {
   shutdownWork = work
+  startRunning = opts?.duringStart === true
   composeFallback = opts?.compose ?? null
   shutdownCwd = opts?.cwd ?? opts?.compose?.cwd ?? null
   ensureDevShutdownHooks()
@@ -235,9 +244,11 @@ export async function drainStartUndo(): Promise<unknown[]> {
  * reported ready and was gone a second later, with nothing in the output saying why.
  *
  * The interval is the handle that keeps the loop alive. Shutdown leaves through `process.exit`,
- * so it never needs clearing.
+ * so it never needs clearing. Called once the start is done, so from here a Ctrl+C is a running
+ * dev's shutdown.
  */
 export function waitForDevShutdown(): Promise<never> {
+  startRunning = false
   setInterval(() => undefined, 0x7fffffff)
   return new Promise<never>(() => undefined)
 }
@@ -257,7 +268,9 @@ const INTERRUPT_SETTLE_MS = 250
  * just after. So when the action fails, this waits a moment, and when a shutdown began, never
  * settles: the shutdown ends the process with one line, and the child's failure is not reported.
  * A failure for any other reason undoes what the start began, then is reported: it left Postgres
- * and the services running.
+ * and the services running. The dashboard is taken down before it is reported: still mounted, it
+ * held the console, so the error went to its pane and the process exited on the last frame drawn,
+ * with nothing on screen saying why, while `--stream` printed it (0.9.2 release test N-FF6).
  */
 export function stopQuietlyDuringStart<A extends unknown[]>(
   action: (...args: A) => Promise<void>,
@@ -268,6 +281,7 @@ export function stopQuietlyDuringStart<A extends unknown[]>(
     } catch (err) {
       await haltIfInterrupted()
       await drainStartUndo()
+      endDevSession()
       throw err
     }
   }
@@ -303,6 +317,7 @@ export function devShutdownHooksRegistered(): boolean {
 /** @internal Tests: reset module state between cases. */
 export function resetDevShutdownForTests(): void {
   shutdownWork = null
+  startRunning = false
   serviceUndo.length = 0
   lastUndo.length = 0
   containerUndo.length = 0
@@ -321,13 +336,16 @@ export function resetDevShutdownForTests(): void {
 }
 
 /**
- * Ctrl+C before dev registered its shutdown: dev was still starting. Undoes what the start began
- * (pushStartUndo, pushStartUndoLast), says so in one line, and exits 130. A failed undo is not reported over that
- * line: there is nothing more to do about it here.
+ * Ctrl+C while dev was still starting. Undoes what the start began (pushStartUndo,
+ * pushStartUndoLast), says so in one line, and exits 130. A failed undo is not reported over that
+ * line: there is nothing more to do about it here. Work registered as the start began (Docker dev's
+ * compose stack) runs first, and its failure is reported as a failed shutdown's is.
  */
-async function stopDuringStart(): Promise<never> {
+async function stopDuringStart(work: (() => Promise<void>) | null): Promise<never> {
   process.stderr.write("\n[supatype] Stopped during start.\n")
-  await drainStartUndo()
+  if (work === null) await drainStartUndo()
+  else await runShutdownWork(work)
+  shutdownCompleted = true
   if (shutdownCwd) clearDevSessionLock(shutdownCwd)
   process.exit(130)
 }
@@ -376,7 +394,7 @@ async function runDevShutdown(): Promise<void> {
 
   try {
     endDevSession()
-    if (!shutdownWork) return await stopDuringStart()
+    if (shutdownWork === null || startRunning) return await stopDuringStart(shutdownWork)
     process.stderr.write("\n[supatype] Shutting down…\n")
     await runShutdownWork(shutdownWork)
     shutdownCompleted = true

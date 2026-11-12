@@ -23,7 +23,7 @@ $ supatype --help
 $ supatype push --help
 ```
 
-The npm package needs Node.js 22 or later. It is the install to use on Windows.
+The npm package needs Node.js 18 or later. It is the install to use on Windows.
 
 The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
 
@@ -41,6 +41,8 @@ Run commands from the project directory, where `supatype.config.ts` is. Every co
 `--project-name` is the same as setting `SUPATYPE_PROJECT_NAME`, and it writes no file. The Compose project, the native database and the state directory under `~/.supatype/projects/` all follow it. Use it to run two stacks of one project side by side, each with its own `SUPATYPE_KONG_PORT`. The name may use lower case letters, digits, `-` and `_`, and must start with a letter or digit.
 
 Many commands that reach a database take `--connection <url>` to override the config, and `--env <name>` to pick an environment when the project is linked.
+
+Commands that use Docker first check that it answers. A Docker that says it cannot be reached fails the command at once. A Docker that is running but slow to answer, as on a machine carrying many containers, is waited for, with a line saying so, for up to 60 seconds in all; set `SUPATYPE_DOCKER_TIMEOUT` to a whole number of seconds to wait longer or shorter.
 
 :::note[Cloud]
 Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.
@@ -90,7 +92,7 @@ Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything 
 | `db check` | Check whether a database meets Supatype's requirements (for external Postgres) | `--connection <url>`, `--schema <name>`, `--emit`, `--fix`, `--authenticator-password <password>` |
 | `types check` | Validate generated client augmentation wiring |  |
 
-`--direct` skips the control plane of a linked project and runs the schema engine on this machine. `generate` reads only the schema, so it needs no database. `pull` prints its draft unless you pass `--out`. `migrations list` shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.
+`--direct` skips the control plane of a linked project and runs the schema engine on this machine. `generate` reads only the schema, so it needs no database. In a Next.js app it also replaces the `app/supatype-env.js` route `init` 0.9.1 wrote, whose `export const dynamic` line Next refuses under `cacheComponents`, while that route is still as `init` wrote it, and warns about one changed since ([Next.js](/docs/frameworks.html#nextjs)). `pull` prints its draft unless you pass `--out`. `migrations list` shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.
 
 A push never guesses a rename. A column that disappears while a new one appears is a drop and an add, and the drop loses data. In a terminal the push asks whether you meant a rename and records a yes in `supatype/renames.json`. Anywhere else it refuses and prints the `supatype rename` command that records it.
 

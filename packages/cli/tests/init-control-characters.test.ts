@@ -55,9 +55,11 @@ const detected: DetectedProjectSetup = {
   hasExistingFiles: false,
   hasSupatypeConfig: false,
   hasVite: false,
+  declaresVite: false,
   hasViteConfig: false,
   viteDevUrl: "http://localhost:5173",
   staticDir: "./dist",
+  packageScripts: {},
   summaryLines: [],
 }
 
@@ -110,25 +112,30 @@ describe("init's admin email", () => {
 })
 
 describe("every text init asks for", () => {
-  // Every branch of the wizard that asks for text: a self-hosted, proxied app developed with Vite.
+  // Every branch of the wizard that asks for text: a self-hosted app proxied to a dev server that is
+  // not Vite, the branch that asks for the server's URL and script. A Vite app asks for neither.
+  const SCRIPT = "package.json script that starts your dev server"
   const everyBranch = {
     "Where will this run in production?": "self-host",
     "Production domain for ACME TLS (optional, can set later)": "api.example.com",
     "Host a frontend app at /?": "proxy",
-    "Use Vite for local development?": true,
-    "Develop locally with Vite (live reload)?": true,
+    "Develop locally with Vite (live reload)?": false,
+    [SCRIPT]: "start",
   }
 
   it("refuses a control character", async () => {
     await wizard(everyBranch)
-    expect(asked.texts.length).toBeGreaterThanOrEqual(8)
+    expect(asked.texts.length).toBeGreaterThanOrEqual(7)
     const unchecked = asked.texts.filter((prompt) => prompt.validate?.("value\rmore") === undefined).map((p) => p.message)
     expect(unchecked).toEqual([])
   })
 
+  // The admin email has no default, and nor does the dev server's script in a new folder, where
+  // init's own `dev` is `supatype dev`.
   it("still takes an ordinary answer, or none where a default stands", async () => {
     await wizard(everyBranch)
-    const refused = asked.texts.filter((prompt) => prompt.message !== EMAIL && prompt.validate?.("") !== undefined)
+    const required = [EMAIL, SCRIPT]
+    const refused = asked.texts.filter((prompt) => !required.includes(prompt.message) && prompt.validate?.("") !== undefined)
     expect(refused.map((p) => p.message)).toEqual([])
   })
 })

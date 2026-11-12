@@ -12,14 +12,14 @@ export function serverStoreRoot(stateDir: string): string {
 }
 
 /**
- * Returns env vars that configure supatype-server to use local-disk storage, for a project that
- * {@link keepsObjectsLocally} when native dev does not run the storage service.
- *
- * @param stateDir  Per-project state directory (e.g. ~/.supatype/projects/{name}/)
+ * The S3 settings init writes into .env, which native dev and self-host compose hand the storage
+ * service as they are there for a project on its own S3 bucket. One list, so the two cannot differ.
  */
-export function localStorageEnv(stateDir: string): Record<string, string> {
-  return {
-    STORAGE_PROVIDER: "local",
-    STORAGE_PATH: serverStoreRoot(stateDir),
-  }
-}
+export const OWN_BUCKET_S3_SETTINGS = [
+  "S3_BUCKET",
+  "S3_REGION",
+  "S3_ENDPOINT",
+  "S3_ACCESS_KEY",
+  "S3_SECRET_KEY",
+  "S3_FORCE_PATH_STYLE",
+] as const

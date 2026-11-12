@@ -8,15 +8,49 @@
  */
 
 import { devApiKeys, type DevApiKeys } from "./dev-api-keys.js"
+import { readEnvFile, upsertEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
-import { nativeMailerAutoconfirmEnv } from "./mailer-autoconfirm.js"
+import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 import { mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides } from "./mailer-env.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
 import { DENO_PORT_ENV, postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
 import { devServiceRoleKeyPath, writeServiceRoleKeyFileUntilExit } from "./service-role-key-file.js"
+import { KEYSPACE_PASSWORD_ENV } from "./local-secrets.js"
+import { KEYSPACE_PASSWORD_FILE_ENV } from "./keyspace-password-file.js"
+import type { RespCredentials, ValkeySidecarResult } from "./valkey-sidecar.js"
+
+/** Where native dev's REST cache is: the server's RESP address, and its login when it needs one. */
+export interface NativeCache {
+  sidecar: ValkeySidecarResult
+  /** The keyspace's credential when native Postgres serves the cache; null for Valkey. */
+  login: RespCredentials | null
+}
+
+/**
+ * The keyspace login in supatype-server's environment, laid over the .env layer (0.9.2 release
+ * test, N-RB2): the credential when native Postgres serves the keyspace. Beside this run's own
+ * Valkey sidecar, which has no password, the password is blanked, since one .env holds for a
+ * Docker phase of the project would have the server's AUTH refused. The server reads only the
+ * SUPATYPE_KEYSPACE_* spellings, so nothing else needs blanking. A Valkey that
+ * SUPATYPE_VALKEY_ADDR names is the developer's, and so is whether .env gives it a password.
+ *
+ * SUPATYPE_KEYSPACE_PASSWORD_FILE is blanked in both cases (R2-S16): with the keyspace, native dev
+ * read the password from that file already, and the server refuses to start given both; beside the
+ * sidecar, it would send a password the sidecar does not have.
+ */
+export function nativeKeyspaceServerEnv(cache: NativeCache): Record<string, string> {
+  if (cache.login !== null) {
+    return {
+      SUPATYPE_KEYSPACE_USERNAME: cache.login.username,
+      [KEYSPACE_PASSWORD_ENV]: cache.login.password,
+      [KEYSPACE_PASSWORD_FILE_ENV]: "",
+    }
+  }
+  return cache.sidecar.started ? { [KEYSPACE_PASSWORD_ENV]: "", [KEYSPACE_PASSWORD_FILE_ENV]: "" } : {}
+}
 
 /** Inputs to the outer layer of supatype-server's environment on the native path. */
 export interface NativeServerCoreInput {
@@ -117,18 +151,20 @@ export interface NativeDotEnvLayerInput {
   /** `.env` then `.env.local`, the later file winning. */
   dotEnv: Record<string, string>
   config: SupatypeProjectConfig
-  cwd: string
   /** The Deno port dev checked was free. */
   denoPort: number
 }
 
 /** The last layer of supatype-server's environment on the native path: `.env` and what follows it. */
-export function nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }: NativeDotEnvLayerInput): Record<string, string> {
+export function nativeServerDotEnvLayer({ dotEnv, config, denoPort }: NativeDotEnvLayerInput): Record<string, string> {
   return {
     // A blank mailer value init scaffolded into .env does not erase the config's.
     ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email)),
-    // After .env: auth.email.enableConfirmations, unless the developer set their own value.
-    ...nativeMailerAutoconfirmEnv(cwd, config),
+    // auth.email.enableConfirmations and auth.email.enabled unless .env or .env.local sets them,
+    // blank counting as unset as `${NAME:-...}` does in the compose file, so native and docker dev
+    // agree. A dev stack confirms sign-ups at once when the config does not say.
+    [MAILER_AUTOCONFIRM_ENV]: dotEnv[MAILER_AUTOCONFIRM_ENV]?.trim() || configMailerAutoconfirm(config, "dev"),
+    [EMAIL_ENABLED_ENV]: dotEnv[EMAIL_ENABLED_ENV]?.trim() || configEmailEnabled(config),
     // Last, so the port dev checked is the port Deno gets: a value in .env or .env.local, blank
     // included, would otherwise replace it.
     [DENO_PORT_ENV]: String(denoPort),
@@ -141,9 +177,16 @@ export function nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }: Nativ
  *
  * The keys in `.env` while they verify, as Docker dev uses. A pair signed afresh each run left
  * `.env`'s SERVICE_ROLE_KEY refused by the admin API, which compares the key as a string.
+ *
+ * A blank or missing SERVICE_ROLE_KEY in `.env` is filled with the key the server starts with, as
+ * Docker dev does. The ready panel shows only a fingerprint and points at `.env` for the key
+ * (0.9.1 release test, S37), so it has to be there. A value the user set is never replaced.
  */
 export function nativeDevApiKeys(cwd: string): DevApiKeys {
   const keys = devApiKeys(cwd)
+  if ((readEnvFile(cwd)["SERVICE_ROLE_KEY"]?.trim() ?? "") === "") {
+    upsertEnvFile(cwd, { SERVICE_ROLE_KEY: keys.serviceRoleKey })
+  }
   writeServiceRoleKeyFileUntilExit(devServiceRoleKeyPath(cwd), keys.serviceRoleKey)
   return keys
 }

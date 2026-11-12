@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { dirname, posix } from "node:path"
 import { isJsonObject, parseJsonObject, resolveInside } from "@supatype/shared"
+import { EMBEDDED_CLI_VERSION } from "./cli-version-embedded.js"
 import { readTarGz, type TarEntry } from "./tar-reader.js"
 
 interface ExampleFile {
@@ -123,8 +124,19 @@ export async function downloadRelease(url: string): Promise<Buffer> {
   if (!response.ok) {
     throw new Error(
       `Could not download ${url} (HTTP ${response.status}). Examples are taken from the release tag ` +
-        "matching this CLI, so a CLI built from source has none to download.",
+        `matching this CLI, ${missingReleaseReason(response.status)}.`,
     )
   }
   return Buffer.from(await response.arrayBuffer())
+}
+
+/**
+ * Why there was no tarball. Only a CLI with no stamped version is built from source.
+ *
+ * 0.9.2 release test round 2 (R2-S18): a stamped release CLI whose tag was not on GitHub yet was
+ * told it was built from source.
+ */
+function missingReleaseReason(status: number): string {
+  if (EMBEDDED_CLI_VERSION === "") return "so a CLI built from source has none to download"
+  return status === 404 ? `and GitHub has no tag v${EMBEDDED_CLI_VERSION} yet` : "which GitHub did not serve"
 }

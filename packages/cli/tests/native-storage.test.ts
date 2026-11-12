@@ -29,7 +29,7 @@ vi.mock("../src/json-file.js", async (importOriginal) => {
  * Native dev runs the storage service (packages/storage) instead of the server's built-in object
  * store, so bucket rules and image transforms come from the code a deployment runs. The server is
  * pointed at the service only once it answers, and what the server's store held is imported first:
- * until that import has gone through, the server's store keeps answering, so nothing goes missing.
+ * until that import has gone through, storage is off and the old files stay where they are.
  */
 let dir = ""
 const servers: Server[] = []
@@ -498,16 +498,99 @@ describe("startNativeStorage", () => {
     const started = Date.now()
     expect(await startNativeStorage(options(await freePort()), async () => crashing)).toBeNull()
     expect(Date.now() - started).toBeLessThan(15_000)
+    // It is left with the crash-loop supervisor (N-FF2), so it is stopped as dev's shutdown would.
+    await drainStartUndo()
+    resetDevShutdownForTests()
   }, 20_000)
 
-  it("leaves the server's own store answering when the service cannot be found", async () => {
+  // 0.9.1 release test: the fallback to the server's built-in object store let any token, the anon
+  // key included, read or sign any object in a private bucket. Dev turns storage off instead.
+  it("turns storage off and says why and how to fix it when the service cannot be found", async () => {
     writeFileSync(join(dir, "routes.json"), JSON.stringify({ storage_url: "http://127.0.0.1:1" }))
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const missing = async (): Promise<never> => {
       throw new Error("storage archive not available")
     }
     expect(await startNativeStorage(options(await freePort()), missing)).toBeNull()
-    expect(manifest()).toEqual({})
+    expect(manifest()).toEqual({ services: { storage: { enabled: false } } })
+    const said = warn.mock.calls.flat().join("\n")
+    expect(said).not.toMatch(/built-in object store answers/)
+    expect(said).toMatch(/Storage is off/)
+    expect(said).toMatch(/503 "storage service is not running"/)
+    expect(said).toMatch(/storage archive not available/)
+    expect(said).toMatch(/restart `supatype dev`/)
   })
+})
+
+// 0.9.2 release test N-FF2: a storage service that was not ready by its deadline was stopped, as
+// the server read whether storage was on only from its environment at start, so nothing could
+// switch it on later and the crash-loop supervisor never retried it. The server now follows the
+// manifest's services.storage switch while it runs, so the service is switched off there, left with the
+// supervisor, and switched back on once it answers, after the import.
+describe("a storage service not ready by its deadline", () => {
+  let pane: string[] = []
+  beforeEach(() => {
+    pane = []
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      pane.push(String(chunk))
+      return true
+    })
+  })
+  afterEach(async () => {
+    await drainStartUndo()
+    resetDevShutdownForTests()
+  })
+
+  /** Short waits, so a crash loop runs its course within a test. */
+  function quick(port: number, giveUpWaitMs: number, onLateStart?: NativeStorageOptions["onLateStart"]): NativeStorageOptions {
+    return {
+      ...options(port),
+      readyTimeoutMs: 300,
+      supervision: { initialBackoffMs: 20, maxBackoffMs: 50, giveUpWaitMs },
+      ...(onLateStart !== undefined && { onLateStart }),
+    }
+  }
+  const said = (spy: "log" | "warn"): string => vi.mocked(console[spy]).mock.calls.flat().join("\n")
+  const script = (body: string) => async () => ({ bin: process.execPath, args: ["-e", body] })
+
+  it("keeps a crash-looping service supervised, and switches it on once it answers", async () => {
+    const port = await freePort()
+    const runs = JSON.stringify(join(dir, "runs"))
+    const late: string[] = []
+    const launch = script(`
+const fs = require("node:fs")
+const run = (fs.existsSync(${runs}) ? Number(fs.readFileSync(${runs}, "utf8")) : 0) + 1
+fs.writeFileSync(${runs}, String(run))
+if (run <= 6) process.exit(1)
+require("node:http").createServer((q, s) => { s.writeHead(200); s.end('{"status":"ok"}') }).listen(${port}, "127.0.0.1")
+`)
+    // The first run exits at once, which ends the wait whatever the deadline. A deadline well above
+    // Node's start-up keeps the timeout from winning that race on a loaded machine (it did, at 300 ms).
+    const opts = { ...quick(port, 60_000, (storage) => void late.push(storage.url)), readyTimeoutMs: 3_000 }
+    expect(await startNativeStorage(opts, launch)).toBeNull()
+    expect(manifest()).toEqual({ services: { storage: { enabled: false } } })
+    expect(said("warn")).toMatch(/Storage \(objects in .*\) is not answering yet: the storage service exited before it was ready/)
+    const url = `http://127.0.0.1:${port}`
+    await vi.waitFor(() => expect(manifest()).toEqual({ storage_url: url, services: { storage: { enabled: true } } }), { timeout: 8_000 })
+    expect(said("log")).toContain(`[supatype] Storage answers at ${url} now, so it is switched back on at the gateway.`)
+    expect(late).toEqual([url])
+    expect(pane.join("")).toMatch(/so it is retried less often/)
+  }, 15_000)
+
+  it("switches storage off, and says so, while nothing answers", async () => {
+    const port = await freePort()
+    expect(await startNativeStorage(quick(port, 60_000), script("setInterval(() => undefined, 1000)"))).toBeNull()
+    expect(manifest()).toEqual({ services: { storage: { enabled: false } } })
+    expect(said("warn")).toMatch(/Storage \(objects in .*\) is not answering yet: the storage service did not report ready at .* within 0\.3s/)
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    expect(alive(readPid(dir, "storage") ?? 0)).toBe(true)
+  }, 10_000)
+
+  it("still says in its pane when the supervisor gives up on it", async () => {
+    expect(await startNativeStorage(quick(await freePort(), 400), script("process.exit(1)"))).toBeNull()
+    await vi.waitFor(() => expect(pane.join("")).toMatch(/\[storage\].* still crashing as it starts, not restarting it\./), { timeout: 8_000 })
+    expect(manifest()).toEqual({ services: { storage: { enabled: false } } })
+  }, 15_000)
 })
 
 // Review of round 3b: the wait for the service counted wall-clock time, so a stretch in which a
@@ -537,14 +620,45 @@ describe("the wait for the storage service to be ready", () => {
 describe("the server's storage environment", () => {
   const config = projectConfig()
 
-  it("proxies to the service when it runs", () => {
+  // A STORAGE_PROVIDER=local or SUPATYPE_STORAGE_DISABLED=true in the shell reaches the server too
+  // (ProcessManager passes process.env on), and would put the built-in store in front of the
+  // service or turn it off, so each is blanked.
+  it("proxies to the service when it runs, and never mounts the built-in store", () => {
     const proc = new ProcessManager(process.execPath, [], { label: "storage", pidDir: dir })
-    expect(serverStorageEnv({ proc, url: "http://127.0.0.1:8002" }, config, "/state")).toEqual({
+    expect(serverStorageEnv({ proc, url: "http://127.0.0.1:8002" }, config)).toEqual({
       SUPATYPE_STORAGE_URL: "http://127.0.0.1:8002",
+      SUPATYPE_STORAGE_DISABLED: "",
+      STORAGE_PROVIDER: "",
+      STORAGE_PATH: "",
     })
   })
 
-  it("falls back to the server's own store under the state directory when it does not", () => {
-    expect(serverStorageEnv(null, config, "/state")).toMatchObject({ STORAGE_PROVIDER: "local" })
+  // 0.9.1 release test: the built-in store applies no read rules, so with the service down the
+  // server gets no storage at all. SUPATYPE_STORAGE_DISABLED has a 0.9.2 server answer 503
+  // "storage service is not running". An older server ignores it, so the URL is blank too, not
+  // unset: unset, the server proxies to its default of http://localhost:5000, whatever answers there.
+  it("gives the server no storage when the service is not running", () => {
+    expect(serverStorageEnv(null, config)).toEqual({
+      SUPATYPE_STORAGE_URL: "",
+      SUPATYPE_STORAGE_DISABLED: "true",
+      STORAGE_PROVIDER: "",
+      STORAGE_PATH: "",
+    })
+  })
+
+  // A project on S3 runs the storage service too (against its own bucket), so the server proxies
+  // to it exactly as for a project whose objects stay on this machine.
+  it("proxies a project on S3 to the service when it runs", () => {
+    const proc = new ProcessManager(process.execPath, [], { label: "storage", pidDir: dir })
+    expect(serverStorageEnv({ proc, url: "http://127.0.0.1:8002" }, projectConfig({ storage: { provider: "s3" } }))).toEqual({
+      SUPATYPE_STORAGE_URL: "http://127.0.0.1:8002",
+      SUPATYPE_STORAGE_DISABLED: "",
+      STORAGE_PROVIDER: "",
+      STORAGE_PATH: "",
+    })
+  })
+
+  it("leaves a project on S3 whose service is not running to the server's own settings", () => {
+    expect(serverStorageEnv(null, projectConfig({ storage: { provider: "s3" } }))).toEqual({})
   })
 })

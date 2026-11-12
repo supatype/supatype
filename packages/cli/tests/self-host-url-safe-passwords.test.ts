@@ -128,8 +128,8 @@ describe("self-host compose commands that leave containers as they are", () => {
   })
 
   it.each([
-    [["down"], ["down"]],
-    [["status"], ["ps"]],
+    [["down"], ["down", "--remove-orphans"]],
+    [["status"], ["ps", "--all"]],
     [["logs", "--service", "db"], ["logs", "-f", "db"]],
   ])("%j runs with a URL-unsafe password", async (command, expected) => {
     await compose(...command)
@@ -149,7 +149,7 @@ describe("self-host compose commands that leave containers as they are", () => {
     rmSync(onDisk())
     await compose("status")
     expect(rendered).toHaveLength(1)
-    expect(composeRuns).toEqual([["ps"]])
+    expect(composeRuns).toEqual([["ps", "--all"]])
   })
 })
 
@@ -189,6 +189,6 @@ describe("self-host compose commands that read the stack", () => {
     await compose("status")
     expect(rendered).toHaveLength(1)
     expect(readFileSync(onDisk(), "utf8")).toContain("services:")
-    expect(composeRuns).toEqual([["ps"]])
+    expect(composeRuns).toEqual([["ps", "--all"]])
   })
 })

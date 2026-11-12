@@ -66,6 +66,8 @@ export interface HookTables {
       headline: { [locale: string]: string } | null
       sku: string | null
       status: "draft" | "published"
+      created_at: string
+      updated_at: string
     }
     Insert: {
       id?: string
@@ -81,6 +83,8 @@ export interface HookTables {
       headline?: { [locale: string]: string } | null
       sku?: string | null
       status: "draft" | "published"
+      created_at?: string
+      updated_at?: string
     }
     Update: {
       id?: string
@@ -96,6 +100,8 @@ export interface HookTables {
       headline?: { [locale: string]: string } | null
       sku?: string | null
       status?: "draft" | "published"
+      created_at?: string
+      updated_at?: string
     }
     AfterHookHidden: { afterChange: never; afterDelete: never }
   }

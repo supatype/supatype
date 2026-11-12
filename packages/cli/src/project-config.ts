@@ -158,6 +158,12 @@ export interface SupatypeProjectConfig {
      *
      * Set "valkey" to keep the sidecar. Nothing about the cache's behaviour
      * changes with the answer: both speak RESP and both hold the same keys.
+     *
+     * The keyspace requires a per-project password (SUPATYPE_KEYSPACE_PASSWORD
+     * in .env) wherever the Postgres release can take one, KEYSPACE_AUTH_SINCE
+     * (postgres-image.ts) or later (0.9.2 release test N-RB2). Native `supatype dev` serves it on 127.0.0.1
+     * only, and only from an archive that can require the password; it uses
+     * the Valkey sidecar otherwise, and always on Windows.
      */
     provider?: "valkey" | "pg_keyspace"
     /**
@@ -279,8 +285,18 @@ export interface SupatypeProjectConfig {
   auth?: {
     email?: {
       /**
+       * Email-and-password sign-up and sign-in. Default true. `false` turns them off at the auth
+       * server, with magic links and password recovery, for a project that signs in only with
+       * OAuth or SAML.
+       *
+       * Rendered as `SUPATYPE_EXTERNAL_EMAIL_ENABLED` for `dev`, native `dev` and the self-host
+       * compose file. A `SUPATYPE_EXTERNAL_EMAIL_ENABLED` in `.env` wins over this.
+       */
+      enabled?: boolean
+      /**
        * Make a new email sign-up confirm the address before it can sign in, as Supabase's
-       * `[auth.email] enable_confirmations`. Off when unset: a dev stack auto-confirms.
+       * `[auth.email] enable_confirmations`. When unset, a self-hosted (standalone) stack sends a
+       * confirmation link and a dev stack, docker or native, confirms the sign-up at once.
        *
        * Rendered as `SUPATYPE_MAILER_AUTOCONFIRM` for `dev`, native `dev` and the self-host compose
        * file. A `SUPATYPE_MAILER_AUTOCONFIRM` you write into `.env` yourself wins over this.
@@ -315,13 +331,24 @@ export interface SupatypeProjectConfig {
   }
   storage?: {
     /**
-     * Storage backend.
-     * "local" = files on disk (LocalStoragePath required)
-     * "s3"    = AWS S3 or compatible (ambient credentials)
+     * Where native `supatype dev` keeps uploaded files. The Docker dev stack runs SeaweedFS either way,
+     * and the self-host stack follows `production` below.
+     * "local" = on this machine's disk.
+     * "s3"    = your own S3 bucket (AWS or any S3-compatible store), named by S3_BUCKET in .env. Every
+     *           Supatype bucket is a key prefix in it and the storage service serves every file. Set
+     *           S3_REGION for AWS or S3_ENDPOINT for another store; with S3_ACCESS_KEY and
+     *           S3_SECRET_KEY blank the AWS SDK finds credentials itself (an instance role, a profile).
      */
     provider: "local" | "s3"
     /** Local directory to store objects in (provider=local). */
     local_path?: string
+    /**
+     * Where the self-host stack keeps uploaded files, which init writes from its "Production
+     * storage?" answer. Unset or "local": a SeaweedFS service in the stack. "s3": your own S3 bucket,
+     * S3_BUCKET in the server's .env, with the storage service in single-bucket mode and no SeaweedFS;
+     * `self-host compose up` stops when S3_BUCKET is blank. The Docker dev stack keeps SeaweedFS either way.
+     */
+    production?: "local" | "s3"
   }
   schema?: {
     /** Path (or glob) to the schema entry point. Defaults to "schema/index.ts". */
@@ -1025,9 +1052,14 @@ export function nativeDbPort(cfg: SupatypeProjectConfig, cwd: string = process.c
   return readComposeEnvInt(cwd, DEV_DB_PORT_ENV) ?? cfg.database?.port ?? NATIVE_DB_PORT
 }
 
+/** The folder Supatype keeps each project's own under, by name. Read at each call, so a test can point it elsewhere. */
+export function supatypeProjectsRoot(): string {
+  return join(homedir(), ".supatype", "projects")
+}
+
 /** Where native dev keeps a project's Postgres data, logs, pid files and local storage. */
 export function nativeStateRoot(cfg: SupatypeProjectConfig): string {
-  return join(homedir(), ".supatype", "projects", cfg.project.name)
+  return join(supatypeProjectsRoot(), cfg.project.name)
 }
 
 /** The native Postgres data directory: `database.data_dir`, or the one in the state directory. */

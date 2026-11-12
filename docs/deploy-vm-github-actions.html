@@ -130,7 +130,7 @@
     </div>
 
     <h2 id="local">Create the project locally</h2>
-    <p>On your machine, with Node.js 22 or later.</p>
+    <p>On your machine, with Node.js 20.19 or later: the CLI needs 18, and the Vite 8 app it sets up needs 20.19.</p>
 
     <div class="step"><span class="step-num">1</span><h3>Scaffold</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
@@ -168,7 +168,7 @@
     <div class="step"><span class="step-num">4</span><h3>Install the tools and clone</h3></div>
     <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="c"># Docker: https://docs.docker.com/engine/install/ubuntu/</span>
-<span class="c"># Node.js 22 or later (Ubuntu's own nodejs package is older): https://nodejs.org/en/download</span>
+<span class="c"># Node.js 20.19 or later, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download</span>
 <span class="pr">$</span> sudo apt update &amp;&amp; sudo apt install -y git
 <span class="pr">$</span> sudo npm install -g @supatype/cli
 
@@ -187,13 +187,14 @@ POSTGRES_DB=my-blog
 AUTHENTICATOR_PASSWORD=CHANGE_ME
 SUPATYPE_SQL_EDITOR_PASSWORD=CHANGE_ME
 SUPATYPE_CONTROL_PLANE_SECRET=CHANGE_ME
-JWT_SECRET=CHANGE_ME            <span class="c"># at least 32 characters</span>
+SUPATYPE_KEYSPACE_PASSWORD=CHANGE_ME   <span class="c"># the cache's password, from supatype/postgres 17.2.13</span>
+JWT_SECRET=CHANGE_ME           <span class="c"># at least 32 characters</span>
 <span class="c"># Leave both keys blank. compose up mints them from JWT_SECRET.</span>
 ANON_KEY=
 SERVICE_ROLE_KEY=
 API_EXTERNAL_URL=https://example.com
 SITE_URL=https://example.com</pre></div>
-    <p>Then run <code>supatype keys --write</code> in <code>/opt/my-blog</code>. It signs <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> from this <code>JWT_SECRET</code> and adds the <code>VITE_SUPATYPE_URL</code> (<code>https://example.com</code>, from <code>API_EXTERNAL_URL</code>) and <code>VITE_SUPATYPE_ANON_KEY</code> copies your frontend build reads to <code>.env</code>. Keys from your laptop will not work here, because they were signed with a different secret.</p>
+    <p>Then run <code>supatype keys --write</code> in <code>/opt/my-blog</code>. It signs <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> from this <code>JWT_SECRET</code> and adds the <code>VITE_SUPATYPE_URL</code> (<code>https://example.com</code>, from <code>API_EXTERNAL_URL</code>) and <code>VITE_SUPATYPE_ANON_KEY</code> copies your frontend build reads to <code>.env</code>. With a <code>localhost</code> or <code>127.0.0.1</code> <code>API_EXTERNAL_URL</code>, as on a test machine, it treats the stack as a local one and writes those copies to <code>.env.development.local</code> instead, which a production build never reads. Keys from your laptop will not work here, because they were signed with a different secret.</p>
 
     <div class="step"><span class="step-num">6</span><h3>First boot</h3></div>
     <div class="cb"><div class="cb-bar"><span>vm</span><button type="button" class="cb-copy">Copy</button></div>

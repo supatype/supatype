@@ -52,7 +52,8 @@ const updates = {
   SUPATYPE_KONG_PORT: String(kongPort),
   API_EXTERNAL_URL: apiUrl,
   SITE_URL: apiUrl,
-  SUPATYPE_MAILER_AUTOCONFIRM: "true",
+  // No SUPATYPE_MAILER_AUTOCONFIRM: the compose file falls back to auth.email.enableConfirmations,
+  // and a value here would override the project's config (FF7).
 }
 
 const keys = new Set(Object.keys(updates))

@@ -102,6 +102,54 @@ describe("the subscribe frame", () => {
     // always carries a schema, that default overrode the "app" the server would have read.
     expect(subscribeFrames()[0]!["schema"]).toBe("app")
   })
+
+  it("joins public when a table is named and the channel name has a colon", async () => {
+    // 0.9.1 release test (RB4): the documented `.channel("post:42")` with `table: "comment"`
+    // took "post" from the channel name as the schema, joined `post.comment`, reported SUBSCRIBED
+    // and delivered nothing. The name is read as `schema:table` only when no table is given.
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    client
+      .channel("post:42")
+      .on("postgres_changes", { event: "INSERT", table: "comment", filter: "post_id=eq.42" }, () => {})
+      .subscribe()
+    await settle()
+
+    expect(subscribeFrames()[0]).toMatchObject({ channel: "post:42", schema: "public", table: "comment" })
+  })
+
+  it("keeps a schema the listener states, whatever the channel is called", async () => {
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    client
+      .channel("post:42")
+      .on("postgres_changes", { event: "*", schema: "app", table: "comment" }, () => {})
+      .subscribe()
+    await settle()
+
+    expect(subscribeFrames()[0]).toMatchObject({ schema: "app", table: "comment" })
+  })
+})
+
+/**
+ * 0.9.2 release test round 2 (R2-RB2): the server checks a join's table, and the frame names one on
+ * every join, the channel name's reading when no listener gives one. `room:probe` read as
+ * room.probe, so broadcast and presence on it were refused. The frame now says which joins want rows.
+ */
+describe("whether the join asks for row changes", () => {
+  it("says so when a listener wants row changes", async () => {
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    client.channel("lobby-chat").on("postgres_changes", { event: "*", table: "chat_message" }, () => {}).subscribe()
+    await settle()
+    expect(subscribeFrames()[0]).toMatchObject({ table: "chat_message", changes: true })
+  })
+
+  it("does not, for a channel used only for broadcast and presence", async () => {
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    client.channel("room:probe").onBroadcast("ping", () => {}).onPresence(() => {}).subscribe()
+    await settle()
+    const frame = subscribeFrames()[0]
+    expect(frame).toBeDefined()
+    expect(frame).toMatchObject({ changes: false })
+  })
 })
 
 describe("joining again after disconnect()", () => {

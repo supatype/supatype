@@ -56,6 +56,14 @@ describe("the table a subscription watches", () => {
     })
   })
 
+  it("reads public, not the channel's prefix, for a named table with no schema", () => {
+    // 0.9.1 release test (RB4): a frame naming `comment` on a channel called `post:42` was
+    // registered against `post.comment`. The name is read as `schema:table` only when it supplies
+    // the table too; a subscriber that names its table and no schema means `public`.
+    expect(resolve({ channel: "post:42", table: "comment" })).toEqual({ schema: "public", table: "comment" })
+    expect(resolve({ channel: "post:42", schema: "app", table: "comment" })).toEqual({ schema: "app", table: "comment" })
+  })
+
   it("does not invent a table from a channel named for its purpose", () => {
     // The failing case, stated as itself: without a table this resolves to something no WAL
     // change can match, which is the silence this fix removes.

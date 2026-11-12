@@ -942,3 +942,84 @@ describe.skipIf(!dockerAvailable)("list prefixes (N31)", () => {
     expect((await listStatus("avatars", "../x")).status).toBe(400)
   })
 })
+
+// ─── Which names exist, to a caller who may not read them (RB3) ──────────────
+
+/** How each read of `name` answers `token`: download, authenticated download and sign, status and body. */
+async function readsOf(token: string, bucket: string, name: string): Promise<Record<string, string>> {
+  const path = encodedPath(name)
+  const headers = { authorization: `Bearer ${token}` }
+  const answers = {
+    download: await fetch(`${base}/object/${bucket}/${path}`, { headers }),
+    authenticated: await fetch(`${base}/object/authenticated/${bucket}/${path}`, { headers }),
+    sign: await fetch(`${base}/object/sign/${bucket}/${path}`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ expiresIn: 60 }),
+    }),
+  }
+  const read: Record<string, string> = {}
+  for (const [route, res] of Object.entries(answers)) read[route] = `${res.status} ${await res.text()}`
+  return read
+}
+
+/** What {@link statusesOf} gives when every read answered `status`. */
+function everyRead(status: number): Record<string, number> {
+  return { download: status, authenticated: status, sign: status }
+}
+
+function statusesOf(reads: Record<string, string>): Record<string, number> {
+  return Object.fromEntries(Object.entries(reads).map(([route, answer]) => [route, Number(answer.split(" ")[0])]))
+}
+
+describe.skipIf(!dockerAvailable)("a private bucket's names, to a caller its read rule refuses (RB3)", () => {
+  // 0.9.1 release test: the anon key read a missing name in a private bucket as 404 "Object not
+  // found" and an existing one as 403, so anyone could probe which file names a bucket holds.
+
+  it("answers the anon key 403, the same for a name that exists and one that does not", async () => {
+    const x = user()
+    const name = unique("held")
+    expect((await upload(x.token, "dropbox", name, "x")).status).toBe(200)
+
+    const present = await readsOf(ANON, "dropbox", name)
+    const missing = await readsOf(ANON, "dropbox", unique("missing"))
+    expect(statusesOf(missing)).toEqual(everyRead(403))
+    expect(missing).toEqual(present)
+  })
+
+  it("answers a signed-in user another's file and a missing name alike where read is BucketOwner", async () => {
+    const x = user()
+    const y = user()
+    const name = unique("theirs")
+    expect((await upload(x.token, "vault", name, "secret")).status).toBe(200)
+
+    const present = await readsOf(y.token, "vault", name)
+    const missing = await readsOf(y.token, "vault", unique("missing"))
+    expect(statusesOf(missing)).toEqual(everyRead(403))
+    expect(missing).toEqual(present)
+    expect(statusesOf(await readsOf(x.token, "vault", name))).toEqual(everyRead(200))
+  })
+
+  it("still answers 404 for a missing name to a caller the read rule lets in", async () => {
+    const reads = await readsOf(user().token, "dropbox", unique("missing"))
+    expect(statusesOf(reads)).toEqual(everyRead(404))
+    expect(statusesOf(await readsOf(SERVICE, "vault", unique("missing")))).toEqual(everyRead(404))
+  })
+
+  it("lists and removes the same for the anon key whether the name exists or not", async () => {
+    const x = user()
+    const folder = `probe-${randomUUID()}`
+    const name = `${folder}/held.txt`
+    expect((await upload(x.token, "dropbox", name, "x")).status).toBe(200)
+
+    const removed = await Promise.all(
+      [name, `${folder}/missing.txt`].map(async (n) => {
+        const res = await remove(ANON, "dropbox", [n])
+        return `${res.status} ${await res.text()}`
+      }),
+    )
+    expect(removed).toEqual(["200 []", "200 []"])
+    expect(await row("dropbox", name)).toBeDefined()
+    expect(await list(ANON, "dropbox", folder)).toEqual(await list(ANON, "dropbox", `probe-${randomUUID()}`))
+  })
+})

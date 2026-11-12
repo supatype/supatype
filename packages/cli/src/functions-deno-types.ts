@@ -16,6 +16,7 @@ import {
 import { join, relative } from "node:path"
 import ts from "typescript"
 import { isJsonObject, parseJsonObject } from "@supatype/shared"
+import { writeIfChanged } from "./write-if-changed.js"
 
 const MARKER = "Supatype edge functions (IDE / tsserver)"
 
@@ -218,13 +219,12 @@ export function ensureFunctionsDenoTypes(
     wroteDenoDts = true
   }
 
-  // Always rewritten, unlike the other two: this one is a contract the runtime enforces, so a stale
-  // copy is a type error in the user's editor rather than a missing convenience.
+  // Kept current, unlike the other two: this one is a contract the runtime enforces, so a stale
+  // copy is a type error in the user's editor rather than a missing convenience. Written only when
+  // it differs: a running dev watches functions/ and restarted its worker on every push (S-3).
   const contextDir = join(functionsDir, "_shared")
-  const contextPath = join(contextDir, "context.ts")
   mkdirSync(contextDir, { recursive: true })
-  writeFileSync(contextPath, functionsContextModuleSource(), "utf8")
-  const wroteContextModule = true
+  const wroteContextModule = writeIfChanged(join(contextDir, "context.ts"), functionsContextModuleSource())
 
   let wroteTsconfig = false
   if (!existsSync(tsconfigPath)) {

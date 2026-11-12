@@ -3,12 +3,14 @@
  * colored prefix, and restart on crash with exponential backoff.
  */
 
-import { type ChildProcess, spawn, spawnSync } from "node:child_process"
+import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { unlink } from "node:fs/promises"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { enhanceProcessOptions } from "./dev-session.js"
 import { errorMessage } from "./error-message.js"
+import { endTreeOnExit, stopTree, treeSpawnOptions } from "./process-tree.js"
 
 export interface ProcessOptions {
   /** Human-readable label (used in log prefix and PID filename). */
@@ -25,8 +27,17 @@ export interface ProcessOptions {
   initialBackoffMs?: number
   /** Maximum restart backoff cap in ms. */
   maxBackoffMs?: number
-  /** Called when the process exits cleanly (code 0). */
-  onExit?: () => void
+  /** A crash this soon after the start counts toward {@link FAST_CRASH_LIMIT}. Default 5s. */
+  fastCrashMs?: number
+  /** A crash-looping process is left stopped once the wait before its next restart reaches this. Default 5 minutes. */
+  giveUpWaitMs?: number
+  /**
+   * Called when the process stops for good: a clean exit (code 0), `finalExitCode`, or crashing as
+   * it starts too often. It is not restarted after any of them.
+   */
+  onStopped?: () => void
+  /** A non-zero exit code that means restarting cannot help, so the process is left stopped. */
+  finalExitCode?: number
   /** Use shell to spawn (required for pnpm/npm/yarn .cmd shims on Windows). */
   shell?: boolean
   /**
@@ -45,7 +56,16 @@ export interface ProcessOptions {
   beforeRestart?: () => void | Promise<void>
 }
 
+/** The crash-loop supervisor's waits a service's caller may set, ProcessManager's own unless given (a test shortens them). */
+export type SupervisionOptions = Pick<ProcessOptions, "initialBackoffMs" | "maxBackoffMs" | "fastCrashMs" | "giveUpWaitMs">
+
 const RESET = "\x1b[0m"
+
+/**
+ * Crashes in a row, each soon after its start, after which a process is crash-looping: it is said
+ * so once, and its wait keeps doubling past `maxBackoffMs` until it reaches `giveUpWaitMs`.
+ */
+export const FAST_CRASH_LIMIT = 5
 
 type OutputStream = "stdout" | "stderr"
 
@@ -108,13 +128,18 @@ export class ProcessManager {
   private child: ChildProcess | null = null
   private stopped = false
   private backoffMs: number
+  /** Crashes in a row, each within `fastCrashMs` of its start. */
+  private fastCrashes = 0
+  private crashCount = 0
   private opts: ProcessOptions & {
     colour: string
     cwd: string
     env: Record<string, string>
     initialBackoffMs: number
     maxBackoffMs: number
-    onExit: () => void
+    fastCrashMs: number
+    giveUpWaitMs: number
+    onStopped: () => void
     shell: boolean
   }
   private readonly prefix: string
@@ -131,7 +156,9 @@ export class ProcessManager {
       env: {},
       initialBackoffMs: 1_000,
       maxBackoffMs: 30_000,
-      onExit: () => {},
+      fastCrashMs: 5_000,
+      giveUpWaitMs: 300_000,
+      onStopped: () => {},
       shell: false,
       ...merged,
     }
@@ -147,38 +174,28 @@ export class ProcessManager {
     void this.spawnAfter(this.opts.beforeStart)
   }
 
-  /** Stop the process and clear the PID file. */
-  async stop(): Promise<void> {
+  /** How many times the process has exited with an error, or failed to start, so far. */
+  get crashes(): number {
+    return this.crashCount
+  }
+
+  /** Whether `stop()` has been called: the process is not restarted, and a watch on it can end. */
+  get stopRequested(): boolean {
+    return this.stopped
+  }
+
+  /**
+   * Stop the process and everything it started, and clear the PID file. Ending the process alone
+   * left what it started running: the server's Deno worker kept the functions port (FF12).
+   *
+   * `reason` is said in the process's own pane. A start that gave up on a service said why only in
+   * dev's pane, so the service's pane ended on "restarting in 8000ms" and then nothing, for good
+   * (0.9.2 release test N-FF2).
+   */
+  async stop(reason?: string): Promise<void> {
+    if (reason !== undefined && !this.stopped) this.report(`${reason}. Stopped, and not restarting it.`)
     this.stopped = true
-    // Already exited: there is no "exit" event left to wait for, and waiting for one held every stop
-    // of a process that had ended on its own for the full five seconds below.
-    if (!this.child || this.child.killed || this.child.exitCode !== null || this.child.signalCode !== null) {
-      await this.clearPid()
-      return
-    }
-
-    const pid = this.child.pid
-    if (process.platform === "win32" && this.opts.shell && pid) {
-      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" })
-      this.child = null
-      await this.clearPid()
-      return
-    }
-
-    if (!this.child.killed) {
-      this.child.kill("SIGTERM")
-      // Give it 5s to exit gracefully, then SIGKILL.
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          this.child?.kill("SIGKILL")
-          resolve()
-        }, 5_000)
-        this.child!.once("exit", () => {
-          clearTimeout(timeout)
-          resolve()
-        })
-      })
-    }
+    if (this.child) await stopTree(this.child)
     await this.clearPid()
   }
 
@@ -200,27 +217,64 @@ export class ProcessManager {
       cwd: this.opts.cwd,
       stdio: "pipe",
       ...(this.opts.shell ? { shell: true } : {}),
+      ...treeSpawnOptions(),
     })
     this.child = child
     if (child.pid) this.writePid(child.pid)
+    endTreeOnExit(child)
     this.pipeOutput(child)
+    const startedAt = Date.now()
 
     child.once("error", (err) => {
       if (this.stopped) return
-      this.report(`failed to start: ${err.message}`)
-      this.scheduleRestart()
+      this.restartUnlessLooping(`failed to start: ${err.message}`, startedAt)
     })
 
     child.once("exit", (code, signal) => {
       if (this.stopped) return
       if (code === 0) {
-        this.opts.onExit()
+        this.opts.onStopped()
         return
       }
-      const reason = signal ? `signal ${signal}` : `code ${code}`
-      this.report(`process exited (${reason}), restarting in ${this.backoffMs}ms`)
-      this.scheduleRestart()
+      const what = `process exited (${signal ? `signal ${signal}` : `code ${code}`})`
+      if (code === this.opts.finalExitCode) this.leaveStopped(what)
+      else this.restartUnlessLooping(what, startedAt)
     })
+  }
+
+  /**
+   * Restarts after a crash. From the {@link FAST_CRASH_LIMIT}th in a row within `fastCrashMs` of its
+   * start, the wait doubles past `maxBackoffMs`, so a fix to what it needs is still picked up, and
+   * once the wait reaches `giveUpWaitMs` it is left stopped. A run that lasted resets both.
+   */
+  private restartUnlessLooping(what: string, startedAt: number): void {
+    this.crashCount++
+    if (Date.now() - startedAt < this.opts.fastCrashMs) {
+      this.fastCrashes++
+    } else {
+      this.fastCrashes = 0
+      this.backoffMs = this.opts.initialBackoffMs
+    }
+    if (this.crashLooping() && this.backoffMs >= this.opts.giveUpWaitMs) {
+      this.leaveStopped(`${what}, still crashing as it starts`, "Fix the error above, then restart supatype dev.")
+      return
+    }
+    if (this.fastCrashes === FAST_CRASH_LIMIT) {
+      const seconds = this.opts.fastCrashMs / 1_000
+      this.report(`it has exited ${this.fastCrashes} times in a row within ${seconds}s of starting, so it is retried less often`)
+    }
+    this.report(`${what}, restarting in ${this.backoffMs}ms`)
+    this.scheduleRestart()
+  }
+
+  private crashLooping(): boolean {
+    return this.fastCrashes >= FAST_CRASH_LIMIT
+  }
+
+  /** Says the process is not restarted, and why, and tells the caller it has stopped for good. */
+  private leaveStopped(what: string, advice?: string): void {
+    this.report(`${what}, not restarting it.${advice !== undefined ? ` ${advice}` : ""}`)
+    this.opts.onStopped()
   }
 
   /**
@@ -264,7 +318,7 @@ export class ProcessManager {
 
   private scheduleRestart(): void {
     setTimeout(() => {
-      this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
+      this.backoffMs = this.crashLooping() ? this.backoffMs * 2 : Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
       void this.spawnAfter(this.opts.beforeRestart)
     }, this.backoffMs)
   }
@@ -272,7 +326,9 @@ export class ProcessManager {
   private writePid(pid: number): void {
     try {
       mkdirSync(this.opts.pidDir, { recursive: true })
-      writeFileSync(join(this.opts.pidDir, `${this.opts.label}.pid`), String(pid))
+      const signature = programSignature(this.bin, this.args)
+      const lines = signature === undefined ? [String(pid)] : [String(pid), signature]
+      writeFileSync(join(this.opts.pidDir, `${this.opts.label}.pid`), lines.join("\n"))
     } catch {
       // Non-fatal: PID tracking is best-effort.
     }
@@ -287,11 +343,62 @@ export class ProcessManager {
   }
 }
 
-/** Read a PID from a file (returns null if not found or stale). */
-export function readPid(pidDir: string, label: string): number | null {
+/** A service's pid file: its pid, and the program it runs (see {@link programSignature}) when known. */
+export interface PidRecord {
+  pid: number
+  signature?: string
+}
+
+/**
+ * The most specific path a service is started with: the last absolute one among its program and
+ * arguments (the script `node` runs, or the binary itself). Its pid file records it, so a pid the
+ * system has since given another program is never taken for the service (FF12 remainder).
+ */
+export function programSignature(bin: string, args: readonly string[]): string | undefined {
+  return [bin, ...args].filter((part) => isAbsolute(part)).at(-1)
+}
+
+/** The pid file `label` in `pidDir`, or null when there is none or it names no pid. */
+export function readPidRecord(pidDir: string, label: string): PidRecord | null {
   const pidFile = join(pidDir, `${label}.pid`)
   if (!existsSync(pidFile)) return null
-  const raw = readFileSync(pidFile, "utf8").trim()
-  const pid = Number(raw)
-  return Number.isFinite(pid) && pid > 0 ? pid : null
+  const [first = "", signature = ""] = readFileSync(pidFile, "utf8").split(/\r?\n/).map((line) => line.trim())
+  const pid = Number(first)
+  if (!Number.isInteger(pid) || pid <= 0) return null
+  return signature === "" ? { pid } : { pid, signature }
+}
+
+/** Read a PID from a file (returns null if not found or stale). */
+export function readPid(pidDir: string, label: string): number | null {
+  return readPidRecord(pidDir, label)?.pid ?? null
+}
+
+/** How often a service switched off at the gateway for not answering is asked again. */
+const LATE_POLL_MS = 1_000
+
+/** What {@link superviseUntilReady} asks, and what it does once the service answers. */
+interface ReadyWatch<T> {
+  /** The service's answer, or undefined while it gives none. */
+  probe: () => Promise<T | undefined>
+  /** Switches the service back on at the gateway, given its answer. */
+  onReady: (answer: T) => void | Promise<void>
+  /** Whether the process has stopped for good (the supervisor gave up, which says so in its pane). */
+  isGone: () => boolean
+}
+
+/**
+ * Asks a service switched off at the gateway for not answering by its deadline until it does, and
+ * hands the answer to `onReady`. Ends when the process stops for good or dev stops it. The service is
+ * left with the crash-loop supervisor meanwhile: it was stopped instead, so nothing could switch it
+ * on later (0.9.2 release test N-FF2). Holds nothing open, so dev may stop while it runs.
+ */
+export async function superviseUntilReady<T>(proc: ProcessManager, { probe, onReady, isGone }: ReadyWatch<T>): Promise<void> {
+  const ended = (): boolean => isGone() || proc.stopRequested
+  while (!ended()) {
+    await sleep(LATE_POLL_MS, undefined, { ref: false })
+    const answer = await probe()
+    if (answer === undefined || ended()) continue
+    await onReady(answer)
+    return
+  }
 }

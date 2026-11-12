@@ -344,7 +344,7 @@ export function printHooks(report: HooksReport): void {
     plain("  Create it with: supatype hooks new <name>")
   }
   if (report.functionsDisabled) {
-    plain("\n  functions_enabled is false in .supatype/manifest.json, every hook is inert.")
+    plain("\n  Functions are switched off in .supatype/manifest.json (services.functions), every hook is inert.")
     plain("  Regenerate the stack config with: supatype self-host compose")
   }
   if (report.mapMissing) {

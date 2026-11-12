@@ -11,6 +11,8 @@ export default defineConfig({
     // tests that take 1.2s alone take over 5s under that contention and fail as timeouts.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Every test file gets a home folder of its own, so no test writes into the real ~/.supatype.
+    setupFiles: ["tests/support/isolated-home.ts"],
     exclude: [
       "**/node_modules/**",
       "**/dist/**",

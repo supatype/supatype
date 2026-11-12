@@ -1,24 +1,21 @@
 import { createClient } from "../supatype/generated/client"
-import type { Database } from "../supatype/generated/database"
 
-/** The anon key Vite injects at build time. Read through here so a build without it says so. */
-function anonKey(): string {
-  const key: unknown = import.meta.env.VITE_SUPATYPE_ANON_KEY
-  if (typeof key !== "string" || key === "") {
-    throw new Error("VITE_SUPATYPE_ANON_KEY is not set: add it to .env before building the app")
-  }
-  return key
-}
+/** A dev build's anon key, from `.env.development.local`. A production build has none. */
+const devAnonKey: unknown = import.meta.env.VITE_SUPATYPE_ANON_KEY
 
 /**
  * Supabucks is served by Supatype itself (app.mode: "static"), so the API lives
  * at the same origin as the page, no CORS, no hardcoded host. The anon key is
- * injected at build time (signed with the local dev secret).
+ * not built in: `index.html` loads `/supatype-env.js` from the server that
+ * serves the page, and the client reads the key from it at its first request.
+ * So a plain `vite build` runs on whichever stack serves it, and never ships
+ * the local stack's key.
  *
- * Typed with the generated `Database` (supatype/generated/database.ts), so
+ * Typed by the generated client (supatype/generated/client.ts), which
+ * declares the schema's models to `@supatype/client`, so
  * `supatype.from("customer")` knows its columns.
  */
 export const supatype = createClient({
   url: typeof window !== "undefined" ? window.location.origin : "http://localhost:18473",
-  anonKey: anonKey(),
+  anonKey: typeof devAnonKey === "string" ? devAnonKey : undefined,
 })

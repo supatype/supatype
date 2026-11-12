@@ -82,6 +82,11 @@ export interface SignInWithSSOOptions {
    * accepts it either way.
    */
   flowType?: AuthFlowType | undefined
+  /**
+   * Studio's own sign-in. The auth server then returns the browser to its Studio address and
+   * ignores `redirectTo`, as `studio=1` does for `signInWithOAuth`. Apps leave this unset.
+   */
+  studio?: boolean | undefined
 }
 
 /** Sign in through the SAML identity provider registered for the user's email domain. */

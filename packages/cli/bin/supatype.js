@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs"
-import { fileURLToPath } from "node:url"
+// First, so a Node older than the package supports is told so before anything else loads or fails.
+// This file is kept to syntax that Node parses as far back as it loads ES modules, and to built-in
+// names without the `node:` prefix (which Node 12 and early 14 refuse), so the check gets to run.
+import "./node-version.js"
+import { existsSync } from "fs"
+import { fileURLToPath } from "url"
 
 // Installed from npm, this file sits under a `node_modules` directory and starts the compiled
 // program for this machine (dist/cli-launcher.js says why). In the monorepo it runs the CLI's
@@ -22,7 +26,7 @@ const cli = new URL(installed ? "../dist/cli-launcher.js" : "../dist/cli.js", im
 // A fresh clone of the monorepo has no dist until its first build. Only that case gets the hint:
 // a module missing from inside a built dist is reported as it is.
 function unbuilt(e) {
-  return e?.code === "ERR_MODULE_NOT_FOUND" && !existsSync(fileURLToPath(cli))
+  return e != null && e.code === "ERR_MODULE_NOT_FOUND" && !existsSync(fileURLToPath(cli))
 }
 
 import(cli.href)
@@ -36,6 +40,6 @@ import(cli.href)
   })
   .then((m) => m.run())
   .catch((e) => {
-    console.error(e?.message ?? e)
+    console.error(e != null && e.message !== undefined ? e.message : e)
     process.exit(1)
   })

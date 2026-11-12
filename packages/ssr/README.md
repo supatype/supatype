@@ -16,18 +16,24 @@ Create server client factories that read cookies on each request: one for Server
 cannot write cookies, and one for Route Handlers and Server Actions, which can:
 
 ```ts
-// lib/supatype-server.ts
+// lib/supatype-server.ts, in the folder that holds app/ (the project root, or src/ when the app is
+// in src/app), where create-next-app's `@/*` alias points.
 import { createServerClient } from "@supatype/ssr"
 import { cookies } from "next/headers"
+import { connection } from "next/server"
 import type { Database } from "@/types/database"
 
 // The address and anon key come from SUPATYPE_URL and SUPATYPE_ANON_KEY in the server's
 // environment, read on each call, so the same build runs against whichever deployment it is
 // started for. Pass them first, as createServerClient(url, anonKey, options), to use others.
 
-// Server Components: no `setAll`, so the client never refreshes the session.
+// Server Components: no `setAll`, so the client never refreshes the session. `connection()` renders
+// the component at request time: the client reads the clock to check the session's expiry, which
+// Next 16 with `cacheComponents` logs as an error while prerendering. It is in Next 15 and later;
+// on Next 14 leave it out.
 export async function createClient() {
   const cookieStore = await cookies()
+  await connection()
   return createServerClient<Database>({
     cookies: {
       getAll() { return cookieStore.getAll() },
@@ -81,7 +87,6 @@ it loads instead, from the same two server variables, with a route and one line 
 ```ts
 // app/supatype-env.js/route.ts
 export { GET } from "@supatype/ssr/next"
-export const dynamic = "force-dynamic"
 ```
 
 ```tsx
@@ -92,8 +97,13 @@ import Script from "next/script"
 <Script src="/supatype-env.js" strategy="beforeInteractive" />
 ```
 
-Write the `dynamic` line in the route file itself: Next's build reads a route's segment config
-from that file's own source and does not recognize a re-exported one. `GET` answers
+The route needs no segment config, and must not export `dynamic`: Next 16 with `cacheComponents`
+on, as a new create-next-app has it, refuses that with a 500. `GET` reads the request, which makes
+Next 14 and Next 16 with `cacheComponents` render it per request rather than prerender it with the
+build machine's values; Next 15, and Next 16 without `cacheComponents`, render every `GET` per
+request anyway. A route written by `supatype init` 0.9.1 has `export const dynamic = "force-dynamic"`;
+`supatype generate` (run by the project's `prepare` on install) replaces it while it is still as
+init wrote it, and warns about one changed since. Otherwise delete that line. `GET` answers
 `window.__SUPATYPE_ENV__ = {"url":"...","anonKey":"..."};` from `SUPATYPE_URL` and
 `SUPATYPE_ANON_KEY` as the server has them on each request, with `Cache-Control: no-cache`, the same
 body and headers the Supatype server gives its own `/supatype-env.js`. Switched off with

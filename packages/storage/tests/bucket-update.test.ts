@@ -10,6 +10,8 @@ vi.mock("../src/s3.js", () => ({
   deleteObjects: vi.fn(),
   applyBucketPolicyFromConfig: vi.fn(),
   objectKey: vi.fn(),
+  singleBucketMode: vi.fn(() => false),
+  s3BucketNameProblem: vi.fn(() => null),
 }))
 vi.stubEnv("JWT_SECRET", "bucket-update-test-secret")
 

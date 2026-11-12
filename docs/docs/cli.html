@@ -123,7 +123,7 @@
 <pre><span class="pr">$</span> npm install -g @supatype/cli
 <span class="pr">$</span> supatype --help
 <span class="pr">$</span> supatype push --help</pre></div>
-    <p>The npm package needs Node.js 22 or later. It is the install to use on Windows.</p>
+    <p>The npm package needs Node.js 18 or later. It is the install to use on Windows.</p>
     <p>The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from <code>releases.supatype.com</code> into <code>~/.supatype/cache/cli/&lt;version&gt;/</code> and checks it against the release's signed checksums. In a scaffolded project that happens during <code>npm install</code>, when the <code>prepare</code> script runs <code>supatype generate</code>. A production install with <code>--omit=dev</code> leaves the CLI out, and <code>prepare</code> then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set <code>SUPATYPE_CDN_BASE</code> to a mirror of it. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.</p>
     <p>On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
@@ -133,6 +133,7 @@
     <p>Run commands from the project directory, where <code>supatype.config.ts</code> is. Every command also takes <code>--project-name &lt;name&gt;</code>, which names the project for this run over <code>supatype.config.ts</code>. <code>supatype --version</code> prints the CLI version.</p>
     <p><code>--project-name</code> is the same as setting <code>SUPATYPE_PROJECT_NAME</code>, and it writes no file. The Compose project, the native database and the state directory under <code>~/.supatype/projects/</code> all follow it. Use it to run two stacks of one project side by side, each with its own <code>SUPATYPE_KONG_PORT</code>. The name may use lower case letters, digits, <code>-</code> and <code>_</code>, and must start with a letter or digit.</p>
     <p>Many commands that reach a database take <code>--connection &lt;url&gt;</code> to override the config, and <code>--env &lt;name&gt;</code> to pick an environment when the project is linked.</p>
+    <p>Commands that use Docker first check that it answers. A Docker that says it cannot be reached fails the command at once. A Docker that is running but slow to answer, as on a machine carrying many containers, is waited for, with a line saying so, for up to 60 seconds in all; set <code>SUPATYPE_DOCKER_TIMEOUT</code> to a whole number of seconds to wait longer or shorter.</p>
     <div class="callout">
       <span class="callout-label">CLOUD</span>
       <p>Commands marked <strong>Cloud</strong> need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.</p>
@@ -182,7 +183,7 @@
         <tr><td><code>types check</code></td><td>Validate generated client augmentation wiring</td><td></td></tr>
       </tbody>
     </table></div>
-    <p><code>--direct</code> skips the control plane of a linked project and runs the schema engine on this machine. <code>generate</code> reads only the schema, so it needs no database. <code>pull</code> prints its draft unless you pass <code>--out</code>. <code>migrations list</code> shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.</p>
+    <p><code>--direct</code> skips the control plane of a linked project and runs the schema engine on this machine. <code>generate</code> reads only the schema, so it needs no database. In a Next.js app it also replaces the <code>app/supatype-env.js</code> route <code>init</code> 0.9.1 wrote, whose <code>export const dynamic</code> line Next refuses under <code>cacheComponents</code>, while that route is still as <code>init</code> wrote it, and warns about one changed since (<a href="/docs/frameworks.html#nextjs">Next.js</a>). <code>pull</code> prints its draft unless you pass <code>--out</code>. <code>migrations list</code> shows each migration's author, how many schema files its snapshot holds and their compressed size, and the renames it applied.</p>
     <p>A push never guesses a rename. A column that disappears while a new one appears is a drop and an add, and the drop loses data. In a terminal the push asks whether you meant a rename and records a yes in <code>supatype/renames.json</code>. Anywhere else it refuses and prints the <code>supatype rename</code> command that records it.</p>
     <p>An object passed to <code>adopt</code> is named as <code>doctor</code> names it: <code>kind:table.name</code>, or <code>kind:name</code> for a table. Studio shows the result under <a href="/docs/studio.html#database">Schema objects</a>.</p>
     <div class="callout warn">

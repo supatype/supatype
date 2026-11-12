@@ -1,6 +1,7 @@
 import { createServerClient } from "@supatype/ssr"
 import type { AugmentedDatabase } from "@supatype/client"
 import { cookies } from "next/headers"
+import { connection } from "next/server"
 
 const cookiePrefix = process.env["SUPATYPE_AUTH_COOKIE_PREFIX"] ?? "st"
 
@@ -13,9 +14,13 @@ const cookiePrefix = process.env["SUPATYPE_AUTH_COOKIE_PREFIX"] ?? "st"
  * environment on each request: the same two /supatype-env.js serves the page, so one build runs
  * against whichever deployment it is started for. A NEXT_PUBLIC_ name here would be fixed into the
  * build instead.
+ *
+ * `connection()` renders the page at request time: the client reads the clock to check the
+ * session's expiry, which Next 16 with `cacheComponents` logs as an error while prerendering.
  */
 export async function createClient() {
   const cookieStore = await cookies()
+  await connection()
   return createServerClient<AugmentedDatabase>({
     cookiePrefix,
     cookies: {

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { dirname, isAbsolute, relative, resolve } from "node:path"
 import ts from "typescript"
-import { isJsonObject, isOneOf } from "@supatype/shared"
+import { isJsonObject, isOneOf, parseJsonObject } from "@supatype/shared"
 import type { AuthUserOnDelete } from "@supatype/types"
 import { isIdentityDependent } from "./cache-identity-scope.js"
 import { HOOK_EVENTS, isAfterHookEvent } from "./hook-events.js"
@@ -361,6 +361,20 @@ function synthesizeTypeLiteralMembers(source: string): ts.TypeElement[] {
   return [...decl.type.members]
 }
 
+/**
+ * `fields` with a known mixin's fields appended, leaving out any the model already declares: a
+ * column the model states itself keeps the shape it stated.
+ */
+function withMixinFields(fields: ts.TypeLiteralNode, mixin: string): ts.TypeLiteralNode {
+  const declared = new Set(
+    fields.members.flatMap((member) => (member.name ? [getPropertyName(member.name)] : [])),
+  )
+  const added = synthesizeTypeLiteralMembers(KNOWN_MIXIN_SOURCES[mixin] ?? "{}").filter(
+    (member) => !member.name || !declared.has(getPropertyName(member.name)),
+  )
+  return ts.factory.createTypeLiteralNode([...fields.members, ...added])
+}
+
 function mergeIntersectionParts(
   parts: readonly ts.TypeNode[],
   sourceFile: ts.SourceFile,
@@ -421,7 +435,12 @@ function unwrapModelFields(
   ) {
     const inner = typeNode.typeArguments?.[0]
     if (!inner) return null
-    return unwrapModelFields(inner, sourceFile, resolveCtx, depth + 1)
+    const fields = unwrapModelFields(inner, sourceFile, resolveCtx, depth + 1)
+    // `WithTimestamps` and `WithSoftDelete` become model options, which the engine turns into
+    // columns. Publishing has no such option, so `WithPublishable` adds its column as a field, the
+    // same one `{ ... } & Publishable` adds. Unwrapping it to the inner fields alone dropped
+    // `published_at`, so the two spellings of one type built different tables.
+    return typeName === "WithPublishable" && fields ? withMixinFields(fields, "Publishable") : fields
   }
 
   const expanded = tryResolveTypeReference(typeNode, sourceFile, resolveCtx)
@@ -1437,7 +1456,7 @@ function parseBucketTypeLiteral(
     }
     if (key === "s3BucketPolicy") {
       const pol = parseJsonStringLiteral(member.type, sourceFile)
-      if (pol !== undefined) out.s3BucketPolicy = pol
+      if (pol !== undefined) out.s3BucketPolicy = bucketPolicy(bucketId, pol)
       continue
     }
   }
@@ -1467,6 +1486,16 @@ function parseJsonStringLiteral(typeNode: ts.TypeNode, sourceFile: ts.SourceFile
  * provisioning stops the schema here instead.
  */
 export const BUCKET_MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$/i
+
+/**
+ * A bucket's S3 policy, refused unless it is a JSON object. A push writes the bucket's row through
+ * the engine, so the storage service, which refuses such a policy itself, answered 409 and never
+ * saw it: the bad policy was stored and never applied.
+ */
+function bucketPolicy(bucketId: string, policy: string): string {
+  if (policy.trim() === "" || parseJsonObject(policy).ok) return policy
+  throw new Error(`Bucket "${bucketId}": s3BucketPolicy is not a JSON object. Write the policy as a JSON object in a string.`)
+}
 
 /** `types`, when each is a MIME type a bucket can accept; throws naming the first that is not. */
 function acceptedMimeTypes(bucketId: string, types: string[]): string[] {

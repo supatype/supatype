@@ -18,6 +18,7 @@ import {
   type Guard,
 } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
+import { columnFieldsOf } from "./engine-columns.js"
 import { keepsDrafts } from "./model-versioning.js"
 import { fieldsWithCallerDefaults } from "./owner-default.js"
 
@@ -25,6 +26,8 @@ export interface AstModel {
   name?: string
   tableName?: string
   fields: Record<string, Record<string, unknown>>
+  /** `timestamps` and `softDelete` here add columns no field declares: see `engine-columns.ts`. */
+  options?: Record<string, unknown>
   annotations?: {
     db?: { tableName?: string; indexes?: unknown[] }
   }
@@ -34,6 +37,7 @@ const isAstModel: Guard<AstModel> = isShape({
   name: optional(isString),
   tableName: optional(isString),
   fields: isRecordOf(isJsonObject),
+  options: optional(isJsonObject),
   annotations: optional(
     isShape({ db: optional(isShape({ tableName: optional(isString), indexes: optional(isArrayOf(isUnknown)) })) }),
   ),
@@ -189,11 +193,13 @@ function sharedTypeLines(kinds: Set<string>): string[] {
 }
 
 function modelLines(model: AstModel, models: AstModel[]): string[] {
+  // The table's columns, which include the ones the engine adds beside the declared fields.
+  const fields = columnFieldsOf(model)
   return [
     `    ${quoteKey(resolveTableName(model))}: {`,
-    `      Row: ${indent(generateRowType(model.fields), 6)}`,
-    `      Insert: ${indent(generateInsertType(fieldsWithCallerDefaults(model)), 6)}`,
-    `      Update: ${indent(generateUpdateType(model.fields), 6)}`,
+    `      Row: ${indent(generateRowType(fields), 6)}`,
+    `      Insert: ${indent(generateInsertType(fieldsWithCallerDefaults({ ...model, fields })), 6)}`,
+    `      Update: ${indent(generateUpdateType(fields), 6)}`,
     // Where `update` saves drafts and takes `{ publish: true }`.
     ...(keepsDrafts(model) ? ["      Drafts: true"] : []),
     `      ${renderRelationships(relationshipsOf(model, models, statedTableName), 6)}`,

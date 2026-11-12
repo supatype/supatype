@@ -94,6 +94,40 @@ export class RlsFilter {
     this.tables.invalidate()
   }
 
+  /** The kind of relation `schema.table` is, or null when there is none: asked before a join is acknowledged. */
+  relationKind(schema: string, table: string): Promise<string | null> {
+    return this.tables.relationKind(schema, table)
+  }
+
+  /**
+   * Whether `role` may read `schema.table` at all. Every change to a table its role cannot read is
+   * withheld from a subscriber, so a join for one would stay silent for good (R2-S8). Not cached: a
+   * GRANT takes effect at the next join.
+   *
+   * Tier 2 gives the API roles nothing on a model table: they read its api view, and a change
+   * reaches them through the engine's `can_read_<table>`, which delivery runs as them. A table with
+   * that predicate is readable there without SELECT on it.
+   */
+  async canRead(role: string, schema: string, table: string): Promise<boolean> {
+    if ((await this.fieldMasks.tier()) === "views" && (await this.tables.shape(schema, table)).readPredicate !== null) {
+      return true
+    }
+    const result = await this.pool.query<{ ok: boolean }>(
+      "SELECT has_table_privilege($1, format('%I.%I', $2::text, $3::text), 'SELECT') AS ok",
+      [role, schema, table],
+    )
+    return result.rows[0]?.ok === true
+  }
+
+  /**
+   * The WAL insert position now, read when a join is taken, so changes committed before it are not
+   * delivered to it (N-S5). Fails on a standby, which cannot report one.
+   */
+  async walPosition(): Promise<string | null> {
+    const result = await this.pool.query<{ lsn: string | null }>("SELECT pg_current_wal_insert_lsn()::text AS lsn")
+    return result.rows[0]?.lsn ?? null
+  }
+
   /** Which columns of a table carry a read restriction, for filter safety checks. */
   async maskedColumns(schema: string, table: string): Promise<Set<string>> {
     try {

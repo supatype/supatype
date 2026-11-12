@@ -70,6 +70,8 @@ function tally(channels: Map<string, ChannelTally>, client: ConnectedClient): vo
     entry.subscribers++
     if (client.presence.has(sub.channel)) entry.presence++
     entry.createdAt = Math.min(entry.createdAt, sub.createdAt ?? client.connectedAt)
+    // A broadcast or presence join watches no table, whatever its channel name reads as.
+    if (sub.withoutRows === true) continue
 
     const key = JSON.stringify([sub.schema, sub.table, sub.event])
     const target = entry.targets.get(key) ?? { schema: sub.schema, table: sub.table, event: sub.event, filtered: false, subscribers: 0 }

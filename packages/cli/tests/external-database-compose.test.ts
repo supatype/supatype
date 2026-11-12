@@ -259,7 +259,8 @@ describe("the server's own configuration keys", () => {
     // `.env`. The server reads config files into its environment before checking for retired
     // names, so its presence there is fatal. The old spelling cannot be the escape hatch when
     // having it set at all is the failure.
-    expect(compose).toContain("SUPATYPE_MAILER_AUTOCONFIRM: ${SUPATYPE_MAILER_AUTOCONFIRM:-true}")
+    // A standalone render with no auth.email.enableConfirmations sends confirmation links (0.9.2, D6).
+    expect(compose).toContain("SUPATYPE_MAILER_AUTOCONFIRM: ${SUPATYPE_MAILER_AUTOCONFIRM:-false}")
     expect(compose).not.toContain("${GOTRUE_MAILER_AUTOCONFIRM")
   })
 

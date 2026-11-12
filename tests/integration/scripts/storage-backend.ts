@@ -44,6 +44,14 @@ function check(name: string, ok: boolean, detail: string): void {
   failures += 1
 }
 
+/**
+ * Where a browser reads `key` in Supatype bucket `bucket`: path style at `S3_PUBLIC_URL`, as set
+ * above. Each Supatype bucket is its own S3 bucket here, since this run sets no `S3_BUCKET`.
+ */
+function publicObjectUrl(bucket: string, key: string): string {
+  return `${(process.env.S3_PUBLIC_URL ?? "").replace(/\/$/, "")}/${bucket}/${key}`
+}
+
 /** Fetch with no credentials at all, which is what a browser hitting a public URL sends. */
 async function anonymousStatus(url: string): Promise<number> {
   const res = await fetch(url, { redirect: "manual" })
@@ -127,10 +135,10 @@ async function publicAndPrivate(): Promise<void> {
 
   await s3.applyPublicPolicy(publicBucket)
 
-  const openStatus = await anonymousStatus(s3.publicObjectUrl(publicBucket, "open.txt"))
+  const openStatus = await anonymousStatus(publicObjectUrl(publicBucket, "open.txt"))
   check("an anonymous read of a public bucket succeeds", openStatus === 200, `answered ${openStatus}`)
 
-  const closedStatus = await anonymousStatus(s3.publicObjectUrl(privateBucket, "closed.txt"))
+  const closedStatus = await anonymousStatus(publicObjectUrl(privateBucket, "closed.txt"))
   check(
     "an anonymous read of a bucket with no policy is refused",
     closedStatus !== 200,
@@ -153,7 +161,7 @@ async function rawPolicy(): Promise<void> {
     ],
   })
   await s3.applyRawBucketPolicy(privateBucket, doc)
-  const status = await anonymousStatus(s3.publicObjectUrl(privateBucket, "closed.txt"))
+  const status = await anonymousStatus(publicObjectUrl(privateBucket, "closed.txt"))
   check("a raw policy is applied and enforced", status === 200, `answered ${status}`)
 }
 

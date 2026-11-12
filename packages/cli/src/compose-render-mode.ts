@@ -11,15 +11,18 @@
  *
  * 1. a running `supatype dev` session holds the project's lock: dev (a lock its process left behind
  *    is removed and does not count, SHa);
- * 2. otherwise, a server container is running: the mode it is running in;
+ * 2. otherwise, this folder's server container is running: the mode it is running in. One another
+ *    folder of the same project started does not count: a deploy copy rendered that folder's dev
+ *    layout (0.9.2 round 5, RB-2);
  * 3. otherwise: standalone, the safe one.
  *
  * `supatype dev` itself is the one caller that does not ask: it is what makes a stack dev.
  */
 
 import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
-import { liveDevSessionLock } from "./dev-session-lock.js"
+import { isDockerSession, liveDevSessionLock } from "./dev-session-lock.js"
 import { composeProjectName } from "./self-host-compose.js"
+import { otherFoldersStack } from "./stack-folder.js"
 
 export type ComposeRenderMode = "dev" | "standalone"
 
@@ -27,8 +30,11 @@ export type ComposeRenderMode = "dev" | "standalone"
 export interface ComposeRenderModeProbe {
   /** True when a `supatype dev` session's lock is held for the project at `cwd`. */
   devSessionLocked: (cwd: string) => boolean
-  /** The mode the compose project's running server container is in, or undefined if none runs. */
-  runningServerMode: (composeProject: string) => ComposeRenderMode | undefined
+  /**
+   * The mode the compose project's running server container is in, or undefined if none runs or
+   * the stack is another folder's than `cwd`.
+   */
+  runningServerMode: (composeProject: string, cwd: string) => ComposeRenderMode | undefined
 }
 
 /** `SUPATYPE_MODE` from a running server container's environment, as the render wrote it. */
@@ -64,9 +70,16 @@ export function claimDevRenderMode(): void {
   devSessionInThisProcess = true
 }
 
+/** Whether a Docker dev session runs in `cwd`: a native one has no compose stack to make dev. */
+function dockerSessionLocked(cwd: string): boolean {
+  const lock = liveDevSessionLock(cwd)
+  return lock !== null && isDockerSession(lock)
+}
+
 const liveProbe: ComposeRenderModeProbe = {
-  devSessionLocked: (cwd) => devSessionInThisProcess || liveDevSessionLock(cwd) !== null,
-  runningServerMode: runningServerModeFromDocker,
+  devSessionLocked: (cwd) => devSessionInThisProcess || dockerSessionLocked(cwd),
+  runningServerMode: (composeProject, cwd) =>
+    otherFoldersStack(cwd, composeProject) === undefined ? runningServerModeFromDocker(composeProject) : undefined,
 }
 
 /**
@@ -80,7 +93,7 @@ export function runningStackMode(
   probe: ComposeRenderModeProbe = liveProbe,
 ): ComposeRenderMode | undefined {
   if (probe.devSessionLocked(cwd)) return "dev"
-  return probe.runningServerMode(composeProjectName(projectName))
+  return probe.runningServerMode(composeProjectName(projectName), cwd)
 }
 
 /** The mode a render for the project `projectName` at `cwd` should use (see the module comment). */

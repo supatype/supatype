@@ -5,9 +5,9 @@
 
 import type { Command } from "commander"
 import { errorMessage, spawnFailureText } from "../error-message.js"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { basename, resolve } from "node:path"
-import { loadConfig } from "../config.js"
+import { readFileSync, writeFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { loadConfig, localConfigFile, mainConfigFile } from "../config.js"
 import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
 import { askDockerCompose, pullComposeImages, writeSelfHostCompose, composeProjectName } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
@@ -19,6 +19,7 @@ import {
   download,
   currentPlatform,
   fetchAllLatestVersions,
+  isCachedBinaryReady,
   pinnedVersion,
   ReleaseVerificationError,
   type Component,
@@ -28,16 +29,8 @@ import { defaultComponentVersion } from "../release-images.js"
 import { BINARY_COMPONENTS, RELEASE_VERSIONED_COMPONENTS } from "../components.js"
 import { error, info, plain } from "../ui/messages.js"
 import { fatalError } from "../ui/fatal.js"
-
-const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]
-
-function resolveConfigFile(cwd: string): string | null {
-  for (const name of CONFIG_CANDIDATES) {
-    const p = resolve(cwd, name)
-    if (existsSync(p)) return p
-  }
-  return null
-}
+import { pinState, withPinnedVersion, type PinEdit } from "../config-version-pin.js"
+import { compareVersions } from "../engine-floor.js"
 
 /**
  * New images alone are not a finished upgrade.
@@ -144,10 +137,14 @@ interface DownloadTarget {
   version: string
 }
 
-/** What one component needs: a newer pinned version, its unpinned version fetched, a failure to report, or nothing. */
+/**
+ * What one component needs: a newer pinned version, the version it runs fetched, a pin `--check`
+ * has something to say about, a failure to report, or nothing.
+ */
 type ComponentPlan =
   | { kind: "update"; update: ComponentUpdate }
   | { kind: "fetch"; target: DownloadTarget }
+  | { kind: "noted" }
   | { kind: "failure"; failure: UpdateFailure }
   | null
 
@@ -155,6 +152,8 @@ type ComponentPlan =
 interface NativePlans {
   updates: ComponentUpdate[]
   fetches: DownloadTarget[]
+  /** Whether `--check` said something about a pin it keeps. */
+  noted: boolean
   failures: UpdateFailure[]
 }
 
@@ -164,6 +163,8 @@ interface PlanOptions {
   latest: string | undefined
   /** `--check`: say what would be fetched instead of fetching it. */
   check: boolean
+  /** The platform whose cached binary `--check` looks for. */
+  platform: PlatformId
 }
 
 /**
@@ -184,43 +185,54 @@ async function updateNativeComponents(cwd: string, config: SupatypeProjectConfig
  */
 async function applyNativeUpdates(cwd: string, config: SupatypeProjectConfig, check: boolean): Promise<UpdateFailure[]> {
   const platform = currentPlatform()
-  const plans = await planNativeUpdates(config, check)
-  const failures = [...plans.failures, ...(await downloadAll(plans.fetches, platform))]
-  if (plans.updates.length === 0) {
-    if (failures.length === 0) info(check ? "All pinned components match CDN latest." : "All components are up to date.")
-    return failures
-  }
-
-  plain("Available updates:")
+  const plans = await planNativeUpdates(config, { check, platform })
+  if (plans.updates.length > 0) plain("Available updates:")
   for (const { component, from, to } of plans.updates) {
     plain(`  ${component}  ${from} → ${to}`)
   }
-  if (check) return failures
-
-  const failed = await downloadAll(plans.updates.map(({ component, to }) => ({ component, version: to })), platform)
-  const downloaded = plans.updates.filter(({ component }) => !failed.some((failure) => failure.name === component))
-  if (downloaded.length > 0) {
-    patchConfigVersions(cwd, downloaded)
-    pushReminder()
+  if (check) {
+    const quiet = plans.updates.length === 0 && plans.failures.length === 0 && !plans.noted
+    if (quiet) info("All pinned components match CDN latest.")
+    return plans.failures
   }
-  return [...failures, ...failed]
+
+  // One batch, so a version to fetch and a newer pin download side by side. A component is planned
+  // one way only, so a failure's name says which of the two it was.
+  const newer = plans.updates.map(({ component, to }) => ({ component, version: to }))
+  const { failed, anyFetched } = await downloadAll([...plans.fetches, ...newer], platform)
+  const failures = [...plans.failures, ...failed]
+  if (plans.updates.length === 0) {
+    // Only when nothing came down: said straight after "postgres v17.2.12 downloaded.", it read as
+    // though that download had not been needed.
+    if (failures.length === 0 && !anyFetched) info("All components are up to date.")
+    return failures
+  }
+  const downloaded = plans.updates.filter(({ component }) => !failed.some((failure) => failure.name === component))
+  const unwritten = downloaded.length > 0 ? patchConfigVersions(cwd, downloaded) : []
+  if (unwritten.length < downloaded.length) pushReminder()
+  return [...failures, ...unwritten]
 }
 
-/** Every component's plan. Nothing is downloaded here: the unpinned ones come back as fetches. */
-async function planNativeUpdates(config: SupatypeProjectConfig, check: boolean): Promise<NativePlans> {
+/** Every component's plan. Nothing is downloaded here: the versions to fetch come back as fetches. */
+async function planNativeUpdates(
+  config: SupatypeProjectConfig,
+  options: Omit<PlanOptions, "latest">,
+): Promise<NativePlans> {
   info("Fetching latest component versions from CDN...")
   const latestVersions = await fetchAllLatestVersions()
-  const plans: NativePlans = { updates: [], fetches: [], failures: [] }
+  const plans: NativePlans = { updates: [], fetches: [], noted: false, failures: [] }
   for (const component of NATIVE_COMPONENTS) {
-    const plan = planComponent(component, config, { latest: latestVersions[component], check })
+    const plan = planComponent(component, config, { ...options, latest: latestVersions[component] })
     if (plan?.kind === "update") plans.updates.push(plan.update)
     else if (plan?.kind === "fetch") plans.fetches.push(plan.target)
+    else if (plan?.kind === "noted") plans.noted = true
     else if (plan?.kind === "failure") plans.failures.push(plan.failure)
   }
   return plans
 }
 
-function planComponent(component: Component, config: SupatypeProjectConfig, { latest, check }: PlanOptions): ComponentPlan {
+function planComponent(component: Component, config: SupatypeProjectConfig, options: PlanOptions): ComponentPlan {
+  const { latest, check } = options
   const current = pinnedVersion(component, config)
   // Unpinned runs what this CLI release was tested with, so that is what to fetch, whatever
   // the CDN says; its latest is fetched only for a component this CLI does not pin.
@@ -232,12 +244,47 @@ function planComponent(component: Component, config: SupatypeProjectConfig, { la
   }
   // A local build is the developer's own, so whatever the CDN has, or lacks, does not apply to it.
   if (current === "local") return null
-  if (!latest) return missingLatest(component)
-  if (!current || current === latest) return null
-  return { kind: "update", update: { component, from: current, to: latest } }
+  // Unpinned with no version to fetch: this CLI names none, and neither does the CDN.
+  if (!current) return missingLatest(component)
+  if (latest !== undefined && movesTo(current, latest)) {
+    return { kind: "update", update: { component, from: current, to: latest } }
+  }
+  return keptPin({ component, version: current }, options)
 }
 
-/** A pinned component the CDN names no latest version for: skipped for realtime and storage, a failure otherwise. */
+/** A version made of dot-separated numbers only, which {@link compareVersions} orders exactly. */
+const PLAIN_VERSION = /^\d+(\.\d+)*$/
+
+/**
+ * Whether a pin moves to the CDN's latest. A pin ahead of it stays: `update` used to swap it for the
+ * older version, so a pin to a release the CDN had not listed yet went backwards, and a pin to one
+ * never published was quietly replaced instead of failing. A pin that is not plain numbers, such as
+ * a release candidate, cannot be ordered, and moves to the latest as it always did.
+ */
+function movesTo(current: string, latest: string): boolean {
+  if (current === latest) return false
+  if (!PLAIN_VERSION.test(current) || !PLAIN_VERSION.test(latest)) return true
+  return compareVersions(current, latest) < 0
+}
+
+/**
+ * A pin `update` keeps still has to be on this machine: one at the CDN's latest, one ahead of it,
+ * or one the CDN names no latest for. `update` skipped them, so a fresh clone pinned to one looped:
+ * `dev` said "archive not found. Run: supatype update", and `update` said everything was up to
+ * date. `download` keeps one already cached, so it is always fetched; `--check` looks in the cache
+ * and names one that is missing, and says when a pin is ahead of the CDN.
+ */
+function keptPin(target: DownloadTarget, { latest, check, platform }: PlanOptions): ComponentPlan {
+  if (!check) return { kind: "fetch", target }
+  const { component, version } = target
+  const ahead = latest !== undefined && version !== latest
+  if (ahead) plain(`  ${component}  ${version} is pinned, ahead of ${latest} on the CDN`)
+  if (isCachedBinaryReady(component, version, platform)) return ahead ? { kind: "noted" } : null
+  plain(`  ${component}  ${version} is pinned but not downloaded. \`supatype update\` fetches it.`)
+  return { kind: "noted" }
+}
+
+/** An unpinned component with no version to fetch: skipped for realtime and storage, a failure otherwise. */
 function missingLatest(component: Component): ComponentPlan {
   if (RELEASE_VERSIONED_COMPONENTS.has(component)) {
     // Realtime binaries and storage archives publish with every stable supatype v* release, but
@@ -252,30 +299,36 @@ function missingLatest(component: Component): ComponentPlan {
 
 /**
  * Download every target at once, then say how each went in the order given, so the output reads the
- * same however the downloads finish. The failures, in that order.
+ * same however the downloads finish. The failures, in that order, and whether any was fetched.
  *
  * `download` says which it already had and answers whether it fetched one, so a cached component is
  * not then said to be "downloaded" as well, and the cache is checked once, there.
  */
-async function downloadAll(targets: readonly DownloadTarget[], platform: PlatformId): Promise<UpdateFailure[]> {
+async function downloadAll(
+  targets: readonly DownloadTarget[],
+  platform: PlatformId,
+): Promise<{ failed: UpdateFailure[]; anyFetched: boolean }> {
   const attempts = targets.map((target) => ({ target, done: download(target.component, target.version, platform) }))
   await Promise.allSettled(attempts.map(({ done }) => done))
-  const failures: UpdateFailure[] = []
+  const failed: UpdateFailure[] = []
+  let anyFetched = false
   for (const { target, done } of attempts) {
-    const failure = await reportDownload(target, done)
-    if (failure !== null) failures.push(failure)
+    const outcome = await reportDownload(target, done)
+    if (typeof outcome === "boolean") anyFetched ||= outcome
+    else failed.push(outcome)
   }
-  return failures
+  return { failed, anyFetched }
 }
 
-/** Say how one settled download went. The failure, or null when it arrived. */
+/** Say how one settled download went: whether it was fetched rather than cached, or the failure. */
 async function reportDownload(
   { component, version }: DownloadTarget,
   done: Promise<{ fetched: boolean }>,
-): Promise<UpdateFailure | null> {
+): Promise<boolean | UpdateFailure> {
   try {
-    if ((await done).fetched) info(`${component} v${version} downloaded.`)
-    return null
+    const { fetched } = await done
+    if (fetched) info(`${component} v${version} downloaded.`)
+    return fetched
   } catch (err) {
     const reason = errorMessage(err)
     error(`Failed: ${component} v${version}: ${reason}`)
@@ -311,37 +364,81 @@ function exitOnFailures(failures: readonly UpdateFailure[]): void {
   )
 }
 
-/** Write each downloaded version into the project's config file. */
-function patchConfigVersions(cwd: string, updates: readonly ComponentUpdate[]): void {
-  const configPath = resolveConfigFile(cwd)
-  if (configPath === null) {
+/**
+ * Write each downloaded version into the project's config file, and say it was updated only when
+ * it was. The pins it could not change there, as failures.
+ *
+ * A pin the local override sets is the one in force, and `update` never edits that file. It used to
+ * write over a pin in supatype.config.ts that nothing ran, or find one already at the new version,
+ * and say "supatype.config.ts updated." either way, so `dev` still asked for the old version. A local
+ * override whose exported config cannot be read may pin it too, so it is not taken for one that
+ * does not, as `export default local` was (0.9.2 round 5).
+ */
+function patchConfigVersions(cwd: string, updates: readonly ComponentUpdate[]): UpdateFailure[] {
+  const file = mainConfigFile(cwd)
+  if (file === undefined) {
     error("No supatype.config.ts (or .js/.mjs) found to patch versions.")
     process.exit(1)
   }
-
-  let text = readFileSync(configPath, "utf8")
-  for (const { component, to } of updates) text = withPinnedVersion(text, component, to)
-
-  writeFileSync(configPath, text, "utf8")
-  info(`${basename(configPath)} updated.`)
+  const localFile = localConfigFile(cwd)
+  const local = localFile === undefined ? undefined : { file: localFile, text: readFileSync(resolve(cwd, localFile), "utf8") }
+  let text = readFileSync(resolve(cwd, file), "utf8")
+  let edited = false
+  const unwritten: UpdateFailure[] = []
+  for (const update of updates) {
+    const edit = pinOutcome(text, local, update)
+    if (edit.kind === "edited") {
+      text = edit.text
+      edited = true
+    } else if (edit.kind === "current") {
+      info(`${file} already pins ${update.component} ${update.to}.`)
+    } else {
+      unwritten.push(unwrittenPin(file, update, edit))
+    }
+  }
+  if (edited) {
+    writeFileSync(resolve(cwd, file), text, "utf8")
+    info(`${file} updated.`)
+  }
+  return unwritten
 }
 
-/** `text`, the config file's source, with `versions.<key>` set to `to`, adding the block when there is none. */
-function withPinnedVersion(text: string, key: string, to: string): string {
-  if (text.includes(`${key}:`)) {
-    return text.replace(
-      new RegExp(`(${key}\\s*:\\s*['"])[^'"]*(['"])`),
-      `$1${to}$2`,
-    )
-  } else if (text.includes("versions:")) {
-    return text.replace(
-      /(versions:\s*\{[^}]*)(\})/,
-      `$1,\n    ${key}: "${to}"$2`,
-    )
-  } else {
-    return text.replace(
-      /(\n)(\s*)(email:|schema:|storage:)/,
-      `$1$2versions: {\n$2  ${key}: "${to}",\n$2},\n$2$3`,
-    )
+/** What becomes of one pin: the local override's when it may set it, otherwise an edit of `text`. */
+function pinOutcome(text: string, local: { file: string; text: string } | undefined, { component, to }: ComponentUpdate): PinOutcome {
+  const state = local === undefined ? "unset" : pinState(local.text, component)
+  if (local === undefined || state === "unset") return withPinnedVersion(text, component, to)
+  return { kind: state === "set" ? "local" : "local-unreadable", file: local.file }
+}
+
+/** What became of one pin: an edit of the config file, or why there was none. */
+type PinOutcome = PinEdit | { kind: "local" | "local-unreadable"; file: string }
+
+type UnwrittenPin = Exclude<PinOutcome, { kind: "edited" | "current" }>
+
+/**
+ * A version on this machine whose pin `update` cannot change in the config file. Said as "on this
+ * machine", not "downloaded": a version already cached was said to be downloaded straight after
+ * `download` said it was cached.
+ */
+function unwrittenPin(file: string, { component, to }: ComponentUpdate, edit: UnwrittenPin): UpdateFailure {
+  return {
+    name: component,
+    reason: `v${to} is on this machine, but ${whyUnwritten(file, component, edit)}`,
+    advice: `Set versions.${component} to "${to}" by hand, in the file that pins it.`,
+  }
+}
+
+function whyUnwritten(file: string, component: string, edit: UnwrittenPin): string {
+  switch (edit.kind) {
+    case "missing":
+      return `${file} has no versions.${component} outside a comment to change`
+    case "computed":
+      return `versions.${component} in ${file} is built in code, not written as a string`
+    case "unreadable":
+      return `update cannot find the config object ${file} exports`
+    case "local":
+      return `${edit.file} pins it, and update does not edit that file`
+    case "local-unreadable":
+      return `update cannot find the config object ${edit.file} exports, so cannot tell whether it pins it`
   }
 }

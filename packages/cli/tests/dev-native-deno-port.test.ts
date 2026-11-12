@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { freePort } from "./support/ports.js"
 
 /**
  * Local test G: native dev checked Postgres, the server, PostgREST and realtime for a port already
@@ -23,12 +24,13 @@ vi.mock("../src/ui/fatal.js", () => ({
   },
 }))
 
-const { assertNativeDevPortsFree } = await import("../src/commands/dev.js")
+const { claimNativeDevPorts } = await import("../src/commands/dev.js")
 const { DENO_PORT_ENV, nativeDenoPort } = await import("../src/project-config.js")
 const { readDotEnvFiles } = await import("../src/env-file.js")
 const { nativeServerDotEnvLayer } = await import("../src/native-dev-env.js")
 
-const PORTS = { postgres: 54339, server: 54321, postgrest: 3001, realtime: 4000 }
+// PostgREST's port is held for real once the check passes (N-FF12), so it is one nothing holds.
+const PORTS = { postgres: 54339, server: 54321, postgrest: await freePort(), realtime: 4000 }
 const CONFIG: SupatypeProjectConfig = {
   project: { name: "demo" },
   database: { provider: "native" },
@@ -37,10 +39,13 @@ const CONFIG: SupatypeProjectConfig = {
 }
 let cwd: string
 
+/** A project with no Postgres of its own running. */
+const state = (): { dataDir: string; pidDir: string } => ({ dataDir: join(cwd, "data"), pidDir: join(cwd, "pid") })
+
 /** The Deno port native dev checks, and the one its server environment ends up carrying. */
 function checkedAndServed(): { checked: number; served: string | undefined } {
   const checked = nativeDenoPort(cwd)
-  const layer = nativeServerDotEnvLayer({ dotEnv: readDotEnvFiles(cwd), config: CONFIG, cwd, denoPort: checked })
+  const layer = nativeServerDotEnvLayer({ dotEnv: readDotEnvFiles(cwd), config: CONFIG, denoPort: checked })
   return { checked, served: layer[DENO_PORT_ENV] }
 }
 
@@ -58,14 +63,16 @@ afterEach(() => {
 describe("native dev's Deno port", () => {
   it("refuses to start when the Deno port is taken, naming the variable that moves it", async () => {
     busy.add(8001)
-    await expect(assertNativeDevPortsFree({ ...PORTS, deno: 8001 })).rejects.toThrow(
+    await expect(claimNativeDevPorts({ ...PORTS, deno: 8001 }, state())).rejects.toThrow(
       /Port 8001 is already in use[\s\S]*SUPATYPE_DENO_PORT/,
     )
   })
 
   it("starts when the Deno port is free", async () => {
     busy.add(8002)
-    await expect(assertNativeDevPortsFree({ ...PORTS, deno: 8001 })).resolves.toBeUndefined()
+    const claim = await claimNativeDevPorts({ ...PORTS, deno: 8001 }, state())
+    claim.postgrest.release()
+    expect(claim.leftoverPostgres).toBeNull()
   })
 
   it("is 8001 unless SUPATYPE_DENO_PORT moves it, from the shell first, then .env", () => {

@@ -25,17 +25,18 @@ pnpm build                               # the CLI and the libraries run from th
 
 cd examples/supabucks
 echo "JWT_SECRET=$(openssl rand -base64 48)" > .env
-pnpm exec supatype keys                  # mints the keys, VITE_SUPATYPE_ANON_KEY included, into .env
+pnpm exec supatype keys                  # mints ANON_KEY and SERVICE_ROLE_KEY into .env
 pnpm build                               # not the repo build: this example's own `vite build` into ./dist
 pnpm dev                                 # the stack, serving ./dist at /, and the schema pushed
 ```
 
 Open `http://localhost:18473/` and sign up.
 
-The order matters. Vite reads `VITE_SUPATYPE_ANON_KEY` at **build** time, so a build made before the
-keys exist has no key, and the app stops at start with "VITE_SUPATYPE_ANON_KEY is not set". Rebuild
-after you mint new keys, and after any change to `src/`. Until the first build, `/` answers 404:
-static mode serves whatever is in `./dist`.
+The build carries no anon key. `index.html` loads `/supatype-env.js` from the stack that serves
+it, and the client reads the key from there at its first request, so a plain `vite build` runs
+on this stack and on any deployment, and never ships the local stack's key. Rebuild after any
+change to `src/`; new keys need no rebuild. Until the first build, `/` answers 404: static mode
+serves whatever is in `./dist`.
 
 ## Seed a demo card
 

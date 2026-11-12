@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs"
+import { appendFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { runCommand, tempProject } from "./support/command-run.js"
@@ -57,8 +57,18 @@ describe("self-host compose up", () => {
   it("writes the committed config's mailer values over the ones dev wrote", async () => {
     await runCommand(registerSelfHost, ["self-host", "compose", "up"], project.dir)
     const env = readEnvFile(project.dir)
-    expect(env["SUPATYPE_MAILER_AUTOCONFIRM"]).toBe("false")
+    // Taken out: the compose file's fallback carries the committed config's value (FF7).
+    expect(env["SUPATYPE_MAILER_AUTOCONFIRM"]).toBeUndefined()
     expect(env["SUPATYPE_SMTP_HOST"]).toBeUndefined()
     expect(env["SUPATYPE_MAILER_MAILER_PROVIDER"]).toBe("smtp")
+  })
+
+  // FF7 (0.9.1 release test): the auth docs said to set SUPATYPE_MAILER_AUTOCONFIRM in .env and
+  // restart; the restart wrote the config's value back over it, because the line was the CLI's.
+  it("keeps the operator's own SUPATYPE_MAILER_AUTOCONFIRM across a restart", async () => {
+    await runCommand(registerSelfHost, ["self-host", "compose", "up"], project.dir)
+    appendFileSync(join(project.dir, ".env"), "SUPATYPE_MAILER_AUTOCONFIRM=true\n")
+    await runCommand(registerSelfHost, ["self-host", "compose", "restart", "server"], project.dir)
+    expect(readEnvFile(project.dir)["SUPATYPE_MAILER_AUTOCONFIRM"]).toBe("true")
   })
 })

@@ -1,3 +1,5 @@
+import { s3Settings } from "./s3-settings.js"
+
 /** Read an env var, falling back to a default. Throws if required and missing. */
 function env(key: string, fallback?: string): string {
   const val = process.env[key]
@@ -80,28 +82,11 @@ export const config = {
    */
   jwtSecret: env("JWT_SECRET"),
 
-  /** S3-compatible endpoint (SeaweedFS for local dev). */
-  s3Endpoint: env("S3_ENDPOINT", "http://localhost:8333"),
-
-  /** S3 region. */
-  s3Region: env("S3_REGION", "us-east-1"),
-
-  /** S3 access key. */
-  s3AccessKey: env("S3_ACCESS_KEY", "supatype"),
-
-  /** S3 secret key. */
-  s3SecretKey: env("S3_SECRET_KEY", "supatype-secret"),
-
-  /** Whether to force path-style access (required for SeaweedFS). */
-  s3ForcePathStyle: env("S3_FORCE_PATH_STYLE", "true") === "true",
-
   /**
-   * Publicly reachable base URL for S3 objects in public buckets.
-   * For SeaweedFS in local dev this is the same as S3_ENDPOINT (e.g. http://localhost:8333).
-   * For AWS set this to your CloudFront domain or the bucket's public S3 URL.
-   * Defaults to S3_ENDPOINT.
+   * How the service reaches S3: one S3 bucket holding every Supatype bucket as a key prefix when
+   * S3_BUCKET is set, else an S3 bucket per Supatype bucket (s3-settings.ts says what each reads).
    */
-  s3PublicUrl: env("S3_PUBLIC_URL", env("S3_ENDPOINT", "http://localhost:8333")),
+  s3: s3Settings(backend === "s3"),
 
   /** Per-file ceiling (bytes) when the tier sets none (default 50 MB). -1 = unlimited. */
   maxUploadSize: byteLimit("MAX_UPLOAD_SIZE") ?? 50 * 1024 * 1024,

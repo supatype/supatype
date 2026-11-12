@@ -205,6 +205,8 @@ Authentication &gt; SSO lists the providers with their entity IDs, domains and s
 
 Only owners and admins can change providers and verify domains; on a self-hosted project that means admins. The server enforces it, not just the page. Developers and viewers see the page read-only, with `Only owners and admins can change SSO providers.` Editors have no SSO page. See [Studio roles](/docs/studio-roles.html). The Users list marks each user who signed in through SAML with `sso:` and their provider's name, for example `sso:acme`. A provider that has been removed, or was added without a name, shows the first block of its ID instead.
 
+While SAML is on, Studio's own sign-in page offers **Sign in with SSO**: an admin enters their work email and goes to the identity provider for its domain, then comes back to Studio, never to the app's site URL. Studio still lets in only people with a [Studio role](/docs/studio-roles.html). With `auth.email.enabled: false`, the setting for a project that signs in only through SSO, Studio's email and password form is hidden, leaving single sign-on and any OAuth providers. The first SSO sign-in to an existing account removes its password, so admins of an SSO project sign in to Studio this way too.
+
 <h2 id="admin-api">The admin API</h2>
 
 An app that lets its own customers set up SSO calls the auth server's admin API from its server, with the service role key. Never call it from the browser: the service role key passes every access rule.

@@ -9,7 +9,7 @@
  * version share one copy and nothing is left in a project when they stop.
  */
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { cacheRoot } from "./binary-cache.js"
@@ -17,7 +17,7 @@ import { discoverHandlersInDir, discoverTsFunctionsInDir, InvalidFunctionNameErr
 import { fatalError } from "./ui/fatal.js"
 import { FUNCTIONS_WORKER_SOURCE } from "./generated/functions-worker-source.js"
 import { hooksPathFromProject, serviceRoleRoutes, type SupatypeProjectConfig } from "./project-config.js"
-import { uniqueFileToken } from "./unique-file-token.js"
+import { writeIfChanged } from "./write-if-changed.js"
 
 /** Where this CLI's worker source lives under `root`: one directory per distinct source. */
 function functionsWorkerDir(root: string = cacheRoot()): string {
@@ -32,17 +32,6 @@ export function installFunctionsWorker(root?: string): string {
   mkdirSync(dir, { recursive: true })
   for (const [name, text] of Object.entries(FUNCTIONS_WORKER_SOURCE)) writeIfChanged(join(dir, name), text)
   return join(dir, "main.ts")
-}
-
-/**
- * Writes `text` to `path` unless it already holds it. Through a temporary file and a rename, so a
- * Deno another serve has running never reads a half-written module.
- */
-function writeIfChanged(path: string, text: string): void {
-  if (existsSync(path) && readFileSync(path, "utf8") === text) return
-  const temporary = `${path}.${uniqueFileToken()}.tmp`
-  writeFileSync(temporary, text, "utf8")
-  renameSync(temporary, path)
 }
 
 /** The routes the worker serves from `hooksDir`, each as `hooks/<name>`, as it routes them. */

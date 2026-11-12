@@ -169,6 +169,22 @@
   })
 }</pre></div>
     <p>The condition is <code>{ exists }</code> or <code>{ notExists }</code>, naming a model and an optional <code>where</code>, or <code>{ environment: "staging" }</code>.</p>
+    <p>Without <code>where</code>, the condition asks whether the table has any row. A <code>where</code> names the rows to look for, in one of two forms:</p>
+    <div class="cb"><div class="cb-bar"><span>seeds/03-once.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { like, <span class="k">type</span> <span class="t">SeedContext</span> } <span class="k">from</span> <span class="s">"@supatype/cli/seed"</span>
+
+<span class="k">export default async function</span> seed({ db }: <span class="t">SeedContext</span>) {
+  <span class="c">// Columns and values, like an upsert's `where`: every column equals its value.</span>
+  db.$if({ notExists: { model: <span class="s">"Tag"</span>, where: { name: <span class="s">"general"</span> } } }, () =&gt; {
+    db.tag.create({ name: <span class="s">"general"</span> })
+  })
+
+  <span class="c">// A rule, for anything else: eq, neq, gt, gte, lt, lte, like, oneOf, isNull, notNull, and, or, not.</span>
+  db.$if({ notExists: { model: <span class="s">"Tag"</span>, where: like(<span class="s">"name"</span>, <span class="s">"team-%"</span>) } }, () =&gt; {
+    db.tag.create({ name: <span class="s">"team-default"</span> })
+  })
+}</pre></div>
+    <p>In the plain form a value is a string, number, bigint, boolean, <code>Date</code> or <code>null</code> (which matches an empty column). Each is written the way an upsert's <code>where</code> writes it, so a decimal column matches exactly. A value an earlier call returned, such as <code>alex.id</code>, cannot be compared there: the condition is checked against values known before the seed runs.</p>
     <p>A file can also export a <code>config</code>. <code>runOnce: true</code> applies the file at most once, for a one-time backfill. It covers the whole run: if one file sets it, every file in that run gets it, with a warning.</p>
     <div class="cb"><div class="cb-bar"><span>seeds/01-blog.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">export const</span> config = { runOnce: <span class="k">true</span> }</pre></div>

@@ -22,8 +22,9 @@ cp .env.example .env
 ```
 
 Set `POSTGRES_PASSWORD`, `AUTHENTICATOR_PASSWORD`, `SUPATYPE_SQL_EDITOR_PASSWORD`
-and `JWT_SECRET` to values of your own. Make each password with `openssl rand -hex 24`: 0.7.0
-does not encode these passwords when it puts them in connection URLs.
+and `JWT_SECRET` to values of your own. Make each password with `openssl rand -hex 24`: the
+generated compose file puts these passwords into connection URLs without encoding them, so
+`selfhost:up` refuses a password holding `@`, `:`, `/` or `#` and names the variable.
 
 Leave `ANON_KEY` and `SERVICE_ROLE_KEY` blank: they are JWTs signed
 with `JWT_SECRET`, so `selfhost:up` mints them on first start and leaves any

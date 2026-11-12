@@ -76,16 +76,25 @@ export async function provisionBucketsFromAst(
   ast: ParsedBuckets,
   storageApiUrl: string,
   serviceRoleKey: string,
+  options: ProvisionOptions = {},
 ): Promise<BucketProvisioning> {
   const buckets = bucketSpecsFromAst(ast)
   if (buckets.length === 0) return { total: 0, failed: [] }
   console.log("[supatype] Provisioning storage buckets...")
-  return { total: buckets.length, failed: await provisionBuckets(storageApiUrl, serviceRoleKey, buckets) }
+  return { total: buckets.length, failed: await provisionBuckets(storageApiUrl, serviceRoleKey, buckets, options) }
 }
 
 /** The line for buckets a provisioning left out, or null when it left none out. */
 export function unprovisionedBuckets({ total, failed }: BucketProvisioning): string | null {
   return failed.length === 0 ? null : `${failed.length} of ${total} bucket(s) were not provisioned: ${failed.join(", ")}`
+}
+
+/**
+ * Buckets a stack did not take, said in one line with what it means: only uploads to them fail.
+ * They were dropped without a word past each bucket's own warning. Native and Docker dev say the same.
+ */
+export function warnBucketsLeft(left: string | null): void {
+  if (left !== null) console.warn(`[supatype] ⚠  ${left}; uploads to them fail until a later push takes them.`)
 }
 
 /**
@@ -100,13 +109,40 @@ export async function provisionBuckets(
   storageApiUrl: string,
   serviceRoleKey: string,
   buckets: readonly BucketSpec[],
+  options: ProvisionOptions = {},
 ): Promise<string[]> {
   const base = storageApiUrl.replace(/\/$/, "")
   const failed: string[] = []
+  let downStatus: number | undefined
   for (const bucket of buckets) {
-    if (!(await provisionBucket(base, serviceRoleKey, bucket))) failed.push(bucket.id)
+    const write = await provisionBucket(base, serviceRoleKey, bucket)
+    if (write.kind === "created" || write.kind === "held") continue
+    failed.push(bucket.id)
+    if (write.status !== null && UPSTREAM_DOWN.has(write.status)) downStatus = write.status
   }
+  if (downStatus !== undefined) warnStorageDown(downStatus, options.storageLogs)
   return failed
+}
+
+/** What a provisioning caller knows about the stack it provisions on. */
+export interface ProvisionOptions {
+  /** The command that shows the storage service's log on this stack, named when the service is down. */
+  storageLogs?: string
+}
+
+/** What a gateway answers when the service behind it did not: nothing listening, or not in time. */
+const UPSTREAM_DOWN: ReadonlySet<number> = new Set([502, 504])
+
+/**
+ * Says once that the storage service is down, and where to see why. 0.9.2 release test (N-FF11): a
+ * service that had refused its S3 settings and exited showed up only as `HTTP 502 Bad Gateway, with
+ * an empty body` for each bucket, and its reason was in its container's log, which nothing pointed at.
+ */
+function warnStorageDown(status: number, storageLogs: string | undefined): void {
+  const where = storageLogs === undefined ? "" : ` See why: ${storageLogs}`
+  console.warn(
+    `[storage] The storage service is not answering behind the gateway (HTTP ${status}): it has stopped or is still starting.${where}`,
+  )
 }
 
 /** The create request's body for `bucket`, leaving out what it does not set. */
@@ -165,19 +201,17 @@ export function createBucket(base: string, serviceRoleKey: string, bucket: Bucke
   return postToStorage(`${base.replace(/\/$/, "")}/bucket`, headers, bucketRequestBody(bucket))
 }
 
-/** Creates `bucket`; true when it is there afterwards (created, or there already), with why when not. */
-async function provisionBucket(base: string, serviceRoleKey: string, bucket: BucketSpec): Promise<boolean> {
+/** Creates `bucket` and says what came of it: ready, or why it is not there. */
+async function provisionBucket(base: string, serviceRoleKey: string, bucket: BucketSpec): Promise<StorageWrite> {
   const write = await createBucket(base, serviceRoleKey, bucket)
   if (write.kind === "failed" && write.status === null) {
     console.warn(`[storage] Storage API unreachable, skipped bucket "${bucket.id}"`)
-    return false
-  }
-  if (write.kind === "refused" || write.kind === "failed") {
+  } else if (write.kind === "refused" || write.kind === "failed") {
     console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${write.text}`)
-    return false
+  } else if (write.kind === "created") {
+    console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
   }
-  if (write.kind === "created") console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
-  return true
+  return write
 }
 
 /**

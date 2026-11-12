@@ -23,6 +23,7 @@ import { serialRuns } from "../serial-runs.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 import { hasEnvValue, readDotEnvFiles } from "../env-file.js"
+import { retireCliMailerAutoconfirm } from "../mailer-autoconfirm.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import { loadConfig, PROJECT_CONFIG_FILES } from "../config.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
@@ -31,6 +32,8 @@ import {
   isParsedBuckets,
   nativeBucketRow,
   provisionBuckets,
+  unprovisionedBuckets,
+  warnBucketsLeft,
   withPublicFromMode,
   type ParsedStorageBucket,
 } from "../storage-provision.js"
@@ -56,6 +59,8 @@ import {
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { DEV_DB_PORT_ENV } from "../db-port.js"
+import { devSessionLockFor, writeDevSessionLock } from "../dev-session-lock.js"
+import { composeProjectName, selfHostComposePaths } from "../self-host-compose.js"
 import { devServiceRoleRoutesPath, functionsWorkerEnv, writeServiceRoleRoutesFile } from "../functions-worker-files.js"
 import { devServiceRoleKeyPath } from "../service-role-key-file.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
@@ -65,8 +70,10 @@ import {
   ensureNativeSuperuserPassword,
   givenJwtSecret,
   ignoredJwtSecretWarning,
+  KEYSPACE_USERNAME,
   secretFingerprint,
 } from "../local-secrets.js"
+import { keyspacePasswordOrigin, projectKeyspacePassword } from "../keyspace-password-file.js"
 import {
   normalisePlatformPath,
   cachePath,
@@ -84,7 +91,7 @@ import {
   OwnershipUnsupportedError,
   requireEngineFeatures,
 } from "../engine-ownership-gate.js"
-import { startProxyDevApp } from "../app/proxy-dev-app.js"
+import { appPanelLinks, startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
 import {
   markPostgrestUnpacked,
@@ -112,10 +119,13 @@ import {
 import { startNativeRealtime } from "../native-realtime.js"
 import { nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
 import { configSnapshot } from "../config-snapshot.js"
+import { refuseInsideDevApp } from "../dev-self-start.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
 import { reconcileNativeDevDatabaseUrl } from "../db-port-offer.js"
 import { extractArchive } from "../archive-extract.js"
-import { serverStorageEnv, startNativeStorage } from "../native-storage.js"
+import {
+  nativeS3StorageEnv, serverStorageEnv, startNativeS3Storage, startNativeStorage, startsStorageService, type NativeStorage,
+} from "../native-storage.js"
 import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
@@ -128,11 +138,17 @@ import {
   nativeDevApiKeys,
   nativeDevRolesSql,
   nativePostgrestSchemaEnv,
+  nativeKeyspaceServerEnv,
   nativeServerCoreEnv,
   nativeServerDotEnvLayer,
+  type NativeCache,
 } from "../native-dev-env.js"
-import { ensureValkeySidecar, externalValkey, type ValkeySidecarResult } from "../valkey-sidecar.js"
-import { nativeKeyspaceAddr as nativeKeyspaceAddrFor, nativeKeyspacePort } from "../native-keyspace.js"
+import { ensureValkeySidecar, externalValkey, type RespCredentials } from "../valkey-sidecar.js"
+import {
+  nativeKeyspaceAddr,
+  nativeKeyspacePort,
+  writeKeyspacePasswordFile,
+} from "../native-keyspace.js"
 import {
   ensureCluster,
   createdbArgs,
@@ -143,9 +159,14 @@ import {
   start as pgStart,
   stop as pgStop,
   waitReady as pgWaitReady,
+  type PgOptions,
+  connectSucceeds,
   isPortInUse,
   portCheckCommand,
 } from "../postgres-ctl.js"
+import { claimPortLock, isPortLock, type PortClaimHeld, type PortLock } from "../native-port-lock.js"
+import { leftoverOwnPostgres, recordNativeDevPid, type NativeDevState } from "../native-leftover-postgres.js"
+import { stopLeftoverServices } from "../native-leftover-services.js"
 import {
   isPasswordRejected,
   pgClientEnv,
@@ -178,7 +199,7 @@ export const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; m
     move: "Move this project's API server port with server.port in supatype.config.ts, or `supatype dev --port`.",
   },
   postgrest: {
-    holder: "Another service may be running.",
+    holder: "Another service, or another project's native dev, may be running.",
     move: "Move this project's PostgREST port with server.postgrestPort in supatype.config.ts.",
   },
   realtime: {
@@ -195,16 +216,80 @@ export const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; m
   },
 }
 
-/** Stop before anything starts when a port native dev binds is taken. Exported for tests. */
-export async function assertNativeDevPortsFree(ports: NativeDevPorts): Promise<void> {
+/** What the start keeps from native dev's port check. */
+export interface NativePortClaim {
+  /** PostgREST's port, claimed from the check until dev stops. */
+  postgrest: PortLock
+  /** This project's own Postgres, left running by a dev that is gone, for the start to restart; else null. */
+  leftoverPostgres: number | null
+}
+
+/**
+ * Stop before anything starts when a port native dev binds is taken, then claim PostgREST's for the
+ * session, refused to every other native dev's start (N-FF12, native-port-lock.ts). Exported for tests.
+ *
+ * Postgres's port held by this project's own Postgres, which a dev that did not stop cleanly left
+ * running, is not a refusal (FF12 remainder): the start restarts it (native-leftover-postgres.ts).
+ * Its services, left by a dev that was killed, are stopped first (native-leftover-services.ts).
+ */
+export async function claimNativeDevPorts(ports: NativeDevPorts, state: NativeDevState): Promise<NativePortClaim> {
+  await stopLeftoverServices(state)
+  // Beside the checks below rather than after them: a refused connect on Windows takes its full wait.
+  const ipv6Checked = warnIfServerIpv6Held(ports.server)
+  const leftoverPostgres = leftoverOwnPostgres(state, ports.postgres)
   for (const service of NATIVE_SERVICES) {
     const port = ports[service]
-    if (port === undefined || !(await isPortInUse(port))) continue
-    const { holder, move } = NATIVE_PORT_HINTS[service]
-    fatalError(`Port ${port} is already in use.`, [holder, `Check: ${portCheckCommand(port)}`, move], {
-      brand: { intro: "Local development" },
-    })
+    if (port === undefined || (service === "postgres" && leftoverPostgres !== null)) continue
+    if (await isPortInUse(port)) refuseNativePort(service, port)
   }
+  await ipv6Checked
+  const postgrest = claimPortLock(ports.postgrest)
+  if (!isPortLock(postgrest)) refuseClaimedPort(ports.postgrest, postgrest)
+  return { postgrest, leftoverPostgres }
+}
+
+/**
+ * Says so when something else listens on [::1] at the API server's port. The server then serves on
+ * 127.0.0.1 alone, and a client resolving `localhost` to ::1 first (a browser on Windows) reaches
+ * the other listener. Dev started, and no pane said so (0.9.2 round 2, R2-S22).
+ */
+async function warnIfServerIpv6Held(port: number): Promise<void> {
+  if (!(await connectSucceeds(port, 400, "::1"))) return
+  console.warn(
+    `[supatype] ⚠  Something else listens on [::1]:${port}, so the API server answers on IPv4 only: ` +
+      `use http://127.0.0.1:${port}, as http://localhost:${port} can reach the other listener.`,
+  )
+}
+
+/** Refuse to start for a port another running native dev has claimed, naming it and its claim. */
+function refuseClaimedPort(port: number, claim: PortClaimHeld): never {
+  fatalError(`Port ${port} is claimed by another native dev (pid ${claim.holder}).`, [
+    `Its claim is ${claim.path}. If no native dev is running, delete that file.`,
+    NATIVE_PORT_HINTS.postgrest.move,
+  ], { brand: { intro: "Local development" } })
+}
+
+/** What native dev says of a port it binds that something else holds: what usually does, and how to move it. */
+function portRefusalText(service: keyof NativeDevPorts, port: number): { headline: string; holder: string; move: string } {
+  return { headline: `Port ${port} is already in use.`, ...NATIVE_PORT_HINTS[service] }
+}
+
+/** Refuse to start for a port native dev binds that something else holds. */
+function refuseNativePort(service: keyof NativeDevPorts, port: number): never {
+  const { headline, holder, move } = portRefusalText(service, port)
+  fatalError(headline, [holder, `Check: ${portCheckCommand(port)}`, move], {
+    brand: { intro: "Local development" },
+  })
+}
+
+/**
+ * Refuses PostgREST's port when something other than a native dev took it since the check, as the
+ * check would have (N-FF12). A throw rather than a fatal exit, so the start undoes what it began.
+ */
+async function requirePostgrestPortFree(port: number): Promise<void> {
+  if (!(await isPortInUse(port))) return
+  const { headline, holder, move } = portRefusalText("postgrest", port)
+  throw new Error(`${headline} ${holder} ${move}`)
 }
 
 /**
@@ -252,6 +337,7 @@ export function registerDev(program: Command): void {
       yes?: boolean
       overwriteDrift?: boolean
     }) => {
+      refuseInsideDevApp()
       const cwd = process.cwd()
 
       // ── 1. Load project config (before TUI, fatal errors must hit real stderr) ──
@@ -283,20 +369,26 @@ export function registerDev(program: Command): void {
       const realtimePort = String(nativeRealtimePort(config, cwd))
       const denoPort = nativeDenoPort(cwd)
       const storagePort = nativeStoragePort(cwd)
+      // A native project on S3: the storage service on the project's own bucket, unless .env names a
+      // service of its own. Read before anything starts, so a blank S3_BUCKET is the first thing said.
+      const s3StorageEnv = provider !== "docker" && !keepsObjectsLocally(config) ? s3StorageEnvOrExit(cwd) : null
 
+      const nativeState: NativeDevState = { dataDir: nativeDataDir(config), pidDir: join(nativeStateRoot(config), "pid") }
+      let portClaim: NativePortClaim | null = null
       if (provider !== "docker") {
         // The functions worker runs on every native dev (native-worker.ts), so Deno's port is checked too.
-        await assertNativeDevPortsFree({
+        portClaim = await claimNativeDevPorts({
           postgres: pgPort,
           server: Number(serverPort),
           postgrest: Number(postgrestPort),
           realtime: Number(realtimePort),
           deno: denoPort,
-          ...(keepsObjectsLocally(config) && { storage: storagePort }),
-        })
+          ...(startsStorageService(config, s3StorageEnv) && { storage: storagePort }),
+        }, nativeState)
+        pushStartUndoLast(portClaim.postgrest.release)
         // Before anything is generated: a missing password would otherwise be replaced in .env
         // with a new one the existing cluster has never heard of.
-        requireSuperuserPassword(cwd, nativeDataDir(config))
+        requireSuperuserPassword(cwd, nativeState.dataDir)
       }
 
       // Before the session takes the terminal, so a refusal reaches it.
@@ -351,13 +443,15 @@ export function registerDev(program: Command): void {
 
       // ── 3. Per-project state directories ─────────────────────────────────
       const stateRoot = nativeStateRoot(config)
-      const pidDir = join(stateRoot, "pid")
+      const { pidDir } = nativeState
       const logsDir = join(stateRoot, "logs")
       const tmpDir = join(stateRoot, "tmp")
 
       for (const d of [pidDir, logsDir, tmpDir]) {
         mkdirSync(d, { recursive: true })
       }
+      // Before Postgres starts, so a dev started meanwhile never takes this one's Postgres for a leftover.
+      pushStartUndoLast(recordNativeDevPid(pidDir))
 
       // ── 5–7. Start Postgres ───────────────────────────────────────────────
       let dbURL: string
@@ -372,21 +466,24 @@ export function registerDev(program: Command): void {
       // pgBinDir is set on the native path and used to add DLL search path for
       // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).
       let pgBinDir: string | null = null
-      // The port the native Postgres serves RESP on, or null when this archive
-      // has no pg_keyspace and the Valkey sidecar is what the cache talks to.
-      let keyspacePort: number | null = null
+      // The keyspace this Postgres serves and its login, or null when the Valkey sidecar is what
+      // the cache talks to (native-keyspace.ts).
+      let keyspace: NativeKeyspace | null = null
 
       {
         // native: resolve pg bin dir and manage with pg_ctl
-        pgBinDir = await resolvePgBinDir(config)
-        const dataDir = nativeDataDir(config)
+        const pgInstall = await resolvePgInstall(config)
+        pgBinDir = pgInstall.binDir
+        const { dataDir } = nativeState
         mkdirSync(dataDir, { recursive: true })
-        // The RESP keyspace, when this archive carries it: one process instead
-        // of a Postgres and a Valkey container. The port is chosen rather than
-        // fixed because 6379 is the first thing a developer's own Redis or a
-        // leftover sidecar takes, and a keyspace that cannot bind its port
-        // fails inside the postmaster log where nobody is looking.
-        keyspacePort = await nativeKeyspacePort(config, pgBinDir)
+        // The RESP keyspace, when this archive carries it and can require a password: one process
+        // instead of a Postgres and a Valkey container. The port is chosen rather than fixed
+        // because 6379 is the first thing a developer's own Redis or a leftover sidecar takes.
+        const keyspacePort = await nativeKeyspacePort(config, pgBinDir, pgInstall.version)
+        // The project's password, from .env or the file SUPATYPE_KEYSPACE_PASSWORD_FILE names
+        // (R2-S16), which the keyspace reads itself from a file only this user can read, and
+        // requires from its first client (N-RB2).
+        keyspace = keyspacePort === null ? null : { port: keyspacePort, login: { username: KEYSPACE_USERNAME, password: projectKeyspacePassword(cwd) } }
 
         const pgOpts = {
           pgBinDir,
@@ -394,9 +491,11 @@ export function registerDev(program: Command): void {
           port: pgPort,
           logPath: join(logsDir, "postgres.log"),
           database: projectName,
-          ...(keyspacePort !== null
-            ? { keyspacePort, keyspaceDatabase: projectName }
-            : {}),
+          ...(keyspace !== null && {
+            keyspacePort: keyspace.port,
+            keyspaceDatabase: projectName,
+            keyspacePasswordFile: writeKeyspacePasswordFile(stateRoot, keyspace.login.password),
+          }),
         }
 
         // initdb, and createdb on a first start, need the archive's version and ICU support; asked once.
@@ -404,6 +503,7 @@ export function registerDev(program: Command): void {
         const buildOnce = (): PgBuild => (build ??= pgBuild(pgBinDir))
         // Before initdb, which a first start runs here and which takes the longest.
         await showDevStep("Starting Postgres")
+        restartLeftoverPostgres(portClaim, pgOpts)
         ensureCluster(pgOpts, pgPassword, buildOnce)
         console.log("[supatype] Starting Postgres...")
         pgStart(pgOpts)
@@ -510,21 +610,34 @@ export function registerDev(program: Command): void {
       // After the push, failed or not: init's manifest names the compose stack's services.
       recordNativeRoutes(manifestPath, worker.denoBin !== undefined)
 
-      // Valkey, or the keyspace Postgres serves, alongside realtime and storage: none needs another.
-      const valkeyStart = nativeValkey(keyspacePort, projectName)
+      // The cache, the keyspace or Valkey, alongside realtime and storage: none needs another.
+      const cacheStart = nativeCache(keyspace, projectName, cwd)
       const realtimeProc = await startNativeRealtime({
         config, cwd, manifestPath, pidDir, url: realtimeUrl, port: realtimePort,
         databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
       })
-      const nativeStorage = keepsObjectsLocally(config)
-        ? await startNativeStorage({
-          config, cwd, manifestPath, pidDir, stateRoot, port: storagePort, databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
-        })
-        : null
       // Later pushes create the buckets a schema declares in the service as well as in buckets.json.
-      if (nativeStorage !== null) schemaPush.storageApi = { url: nativeStorage.url, serviceRoleKey }
-      const valkeySidecar = await valkeyStart
+      // A project on S3 has no buckets.json for the service to import, so the buckets the first push
+      // declared, before the service ran, are created in it now. The same for a service switched on
+      // only once it answered, after its start deadline (N-FF2).
+      const useStorage = async (storage: NativeStorage): Promise<void> => {
+        const storageApi = { url: storage.url, serviceRoleKey }
+        schemaPush.storageApi = storageApi
+        if (s3StorageEnv !== null) await provisionDeclaredBuckets(engineBin, cwd, join(supatypeDir, "schema.ast.json"), { storageApi })
+      }
+      const storageOptions = {
+        config, cwd, manifestPath, pidDir, stateRoot, port: storagePort, databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
+        onLateStart: useStorage,
+      }
+      const nativeStorage = keepsObjectsLocally(config)
+        ? await startNativeStorage(storageOptions)
+        : s3StorageEnv === null ? null : await startNativeS3Storage(storageOptions, s3StorageEnv)
+      if (nativeStorage !== null) await useStorage(nativeStorage)
+      const cache = await cacheStart
 
+      // Before .env is read: a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote there would otherwise
+      // win over the config as if the developer had set it (FF7).
+      retireCliMailerAutoconfirm(cwd)
       // `.env` and `.env.local`, read once for everything the server's environment takes from them.
       const dotEnv = readDotEnvFiles(cwd)
       // What an env("NAME") in auth.providers resolves against: the shell over .env, as for the config.
@@ -537,7 +650,7 @@ export function registerDev(program: Command): void {
       const serverEnv: Record<string, string> = {
         ...nativeServerCoreEnv({
           mode: config.server.mode ?? "dev",
-          valkeyAddr: valkeySidecar.addr,
+          valkeyAddr: cache.sidecar.addr,
           projectRef: projectName,
           manifestPath,
           adminConfigPath,
@@ -591,12 +704,14 @@ export function registerDev(program: Command): void {
         ...nativeAuthMailerEnv(config.email, serverPort),
         SUPATYPE_LOG_LEVEL: "info",
         SUPATYPE_DISABLE_SIGNUP: "false",
-        ...serverStorageEnv(nativeStorage, config, stateRoot),
+        ...serverStorageEnv(nativeStorage, config),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
         // auth.sso.saml, with the signing key from .env (generated there the first time SAML is on).
         ...nativeSamlEnv(cwd, config),
-        ...nativeServerDotEnvLayer({ dotEnv, config, cwd, denoPort }),
+        ...nativeServerDotEnvLayer({ dotEnv, config, denoPort }),
+        // After .env, which can hold a keyspace password for a Docker phase of the project (N-RB2).
+        ...nativeKeyspaceServerEnv(cache),
       }
 
       await haltIfStopping()
@@ -614,6 +729,7 @@ export function registerDev(program: Command): void {
       await haltIfStopping()
       const postgrestBin = await resolvePostgrestBin(config.overrides?.postgrest)
       if (postgrestBin) {
+        await requirePostgrestPortFree(Number(postgrestPort))
         // Windows PostgREST builds are dynamically linked and require libpq/OpenSSL
         // DLLs from a Postgres bin directory, even when the database runs in Docker.
         let postgrestRuntimeBinDir = pgBinDir
@@ -701,11 +817,16 @@ export function registerDev(program: Command): void {
       const appProc = startProxyDevApp(cwd, config, pidDir)
       if (appProc) pushStartUndo(() => appProc.stop())
 
+      // No built-in store stands in for a service that did not start (native-storage.ts), so the
+      // panel lists no storage URL and repeats that storage is off, in case the warning scrolled by.
+      // A project on S3 too: its panel listed Storage while a refused S3_BUCKET kept it off (R2-S2).
+      const storageOff = nativeStorage === null && startsStorageService(config, s3StorageEnv)
       const links = [
         { label: "API", url: `http://localhost:${serverPort}` },
         { label: "REST", url: `http://localhost:${serverPort}/rest/v1/` },
         { label: "Auth", url: `http://localhost:${serverPort}/auth/v1/` },
-        { label: "Storage", url: `http://localhost:${serverPort}/storage/v1/` },
+        ...(storageOff ? [] : [{ label: "Storage", url: `http://localhost:${serverPort}/storage/v1/` }]),
+        ...appPanelLinks(config, `http://localhost:${serverPort}`),
       ]
       if (realtimeProc) {
         links.push({ label: "Realtime", url: `ws://localhost:${serverPort}/realtime/v1/` })
@@ -715,17 +836,34 @@ export function registerDev(program: Command): void {
       }
 
       publishDevReady({
+        cwd,
         title: "Services running",
         links,
         anonKey,
         serviceRoleKey,
-        hints: [`Postgres ${dbURL}`, `JWT secret: #${secretFingerprint(LOCAL_JWT_SECRET)} (in .env)`],
+        databaseUrl: dbURL,
+        hints: [
+          `JWT secret: #${secretFingerprint(LOCAL_JWT_SECRET)} (in .env)`,
+          ...(storageOff ? ["Storage is off: the storage service did not start (the reason is above)"] : []),
+        ],
       })
 
       // ── Shutdown handler ──────────────────────────────────────────────────
       // Everything the start began is undone after it, the services together and then Postgres
-      // (pushStartUndo, pushStartUndoLast), so the shutdown has nothing of its own to stop.
-      registerDevShutdown(async () => undefined)
+      // (pushStartUndo, pushStartUndoLast), so the shutdown has nothing of its own to stop. Its
+      // `cwd` clears the session record below when dev ends.
+      registerDevShutdown(async () => undefined, { cwd })
+
+      // The session's database port, for host commands run from another shell: they took that
+      // shell's SUPATYPE_DEV_DB_PORT, and a push applied its migration to another Postgres there
+      // (0.9.2 round 5, FF-7 on native). Written once ready, as Docker dev writes its own.
+      writeDevSessionLock(cwd, devSessionLockFor(config, {
+        provider: "native",
+        composeProject: composeProjectName(projectName),
+        composePath: selfHostComposePaths(cwd).composePath,
+        dbPort: pgPort,
+        runEnv: { [DEV_DB_PORT_ENV]: String(pgPort) },
+      }))
 
       // ── 10. Schema watch ──────────────────────────────────────────────────
       if (opts.watch) {
@@ -999,10 +1137,22 @@ async function writeNativeSchemaArtifacts(
   config: import("../project-config.js").SupatypeProjectConfig | undefined,
 ): Promise<void> {
   const { cwd, engineBin, astPath } = paths
-  if (paths.storagePath) await provisionDeclaredBuckets(engineBin, cwd, astPath, paths)
+  if (paths.storagePath || paths.storageApi) await provisionDeclaredBuckets(engineBin, cwd, astPath, paths)
   if (paths.adminConfigPath) await writeNativeAdminConfig(paths, paths.adminConfigPath, ast, config)
   if (config) writeNativeAppliedAst(cwd, config, ast)
   await writeNativeTypes(cwd, ast, config)
+}
+
+/**
+ * {@link nativeS3StorageEnv} from the shell over .env, as compose reads them. A blank S3_BUCKET ends
+ * dev here, before anything has started, saying what to set.
+ */
+function s3StorageEnvOrExit(cwd: string): Record<string, string> | null {
+  try {
+    return nativeS3StorageEnv({ ...readDotEnvFiles(cwd), ...process.env })
+  } catch (err) {
+    fatalError(errorMessage(err))
+  }
 }
 
 /** The storage buckets the schema declares, as the engine resolves them; none when it cannot say. */
@@ -1018,8 +1168,9 @@ async function declaredBuckets(engineBin: string, cwd: string, astPath: string):
 }
 
 /**
- * Create the storage buckets the schema declares: in buckets.json, which the server's store reads
- * and the storage service imports when it starts, and in the service itself once it runs.
+ * Create the storage buckets the schema declares: in buckets.json, which the storage service
+ * imports when it starts, and in the service itself once it runs. A project on S3 has the service
+ * alone.
  */
 async function provisionDeclaredBuckets(
   engineBin: string,
@@ -1028,22 +1179,27 @@ async function provisionDeclaredBuckets(
   paths: { storagePath?: string | undefined; storageApi?: StorageApi | undefined },
 ): Promise<void> {
   const buckets = await declaredBuckets(engineBin, cwd, astPath)
-  if (buckets.length === 0 || paths.storagePath === undefined) return
-  await provisionNativeBuckets(buckets, { storagePath: paths.storagePath, storageApi: paths.storageApi })
+  if (buckets.length === 0) return
+  await provisionNativeBuckets(buckets, paths)
 }
 
 /**
  * `buckets` in buckets.json, and in the storage service while it runs, saying how many new ones
- * are ready: a bucket the service did not take is not, though buckets.json has it. Exported for tests.
+ * are ready: a bucket the service did not take is not, though buckets.json has it. A project on S3
+ * has no buckets.json, only the service, and is told which buckets it did not take. Exported for tests.
  */
 export async function provisionNativeBuckets(
   buckets: ParsedStorageBucket[],
-  paths: { storagePath: string; storageApi?: StorageApi | undefined },
+  paths: { storagePath?: string | undefined; storageApi?: StorageApi | undefined },
 ): Promise<void> {
-  const added = provisionStorageBuckets(buckets, paths.storagePath)
+  const added = paths.storagePath === undefined ? null : provisionStorageBuckets(buckets, paths.storagePath)
   const failed = paths.storageApi
     ? await provisionBuckets(paths.storageApi.url, paths.storageApi.serviceRoleKey, bucketSpecsFromAst({ storageBuckets: buckets }))
     : []
+  if (added === null) {
+    warnBucketsLeft(unprovisionedBuckets({ total: buckets.length, failed }))
+    return
+  }
   const ready = added.filter((id) => !failed.includes(id)).length
   if (ready > 0) console.log(`[supatype] Storage: provisioned ${ready} bucket(s).`)
 }
@@ -1121,6 +1277,15 @@ function provisionStorageBuckets(
 // ---------------------------------------------------------------------------
 
 export async function resolvePgBinDir(config: Awaited<ReturnType<typeof loadConfig>>): Promise<string> {
+  return (await resolvePgInstall(config)).binDir
+}
+
+/**
+ * Native Postgres's bin directory, and the version of the archive it came from: null for
+ * `overrides.postgres_dir`, a local build whose version nothing records. The version is resolved
+ * here once, since on a build that is not a release resolving it asks the CDN.
+ */
+async function resolvePgInstall(config: Awaited<ReturnType<typeof loadConfig>>): Promise<{ binDir: string; version: string | null }> {
   const override = config.overrides?.postgres_dir
   if (override) {
     // Normalize Git Bash (/c/Users/...) paths to Win32 form (C:\Users\...) on Windows.
@@ -1131,7 +1296,7 @@ export async function resolvePgBinDir(config: Awaited<ReturnType<typeof loadConf
       throw new Error(`[overrides] postgres_dir does not contain a bin/ directory: ${resolved}`)
     }
     console.warn(`\u26a0  Using local Postgres build: ${resolved}`)
-    return binDir
+    return { binDir, version: null }
   }
 
   // Locate cached Postgres archive.
@@ -1148,7 +1313,7 @@ export async function resolvePgBinDir(config: Awaited<ReturnType<typeof loadConf
     await extractPostgresArchive(pgCacheDir, version, platform, extractedDir)
   }
 
-  return join(extractedDir, "bin")
+  return { binDir: join(extractedDir, "bin"), version }
 }
 
 async function extractPostgresArchive(
@@ -1383,15 +1548,35 @@ function runAuthMigrations(
   }
 }
 
+/** The keyspace native Postgres serves, and the login its password file gives the `supatype` user. */
+interface NativeKeyspace {
+  port: number
+  login: RespCredentials
+}
+
 /**
- * The keyspace native Postgres serves, when it answers RESP, else Valkey: one already running, or
- * the sidecar container.
+ * Native dev's REST cache: the keyspace native Postgres serves, on loopback and requiring its
+ * password, when it answers a client that logs in; else Valkey, the project's own sidecar container
+ * or the one SUPATYPE_VALKEY_ADDR names (valkey-sidecar.ts, N-S28). Windows archives carry no
+ * pg_keyspace, so Windows is always Valkey.
  */
-async function nativeValkey(keyspacePort: number | null, projectName: string): Promise<ValkeySidecarResult> {
-  const keyspace = await nativeKeyspaceAddrFor(keyspacePort)
-  if (keyspace === null) return ensureValkeySidecar(projectName)
-  console.log(`[supatype] Keyspace served by Postgres (${keyspace}).`)
-  return externalValkey(keyspace)
+async function nativeCache(keyspace: NativeKeyspace | null, projectName: string, cwd: string): Promise<NativeCache> {
+  const addr = keyspace === null ? null : await nativeKeyspaceAddr(keyspace.port, keyspace.login)
+  if (addr === null || keyspace === null) return { sidecar: await ensureValkeySidecar(projectName, cwd), login: null }
+  console.log(`[supatype] Keyspace served by Postgres (${addr}, loopback only, password ${keyspacePasswordOrigin(cwd)}).`)
+  return { sidecar: externalValkey(addr), login: keyspace.login }
+}
+
+/**
+ * Stops this project's own Postgres, left running by a dev that did not stop cleanly, so this run
+ * starts it with its own settings and stops it when it ends (FF12 remainder,
+ * native-leftover-postgres.ts).
+ */
+function restartLeftoverPostgres(claim: NativePortClaim | null, pgOpts: PgOptions): void {
+  const pid = claim?.leftoverPostgres ?? null
+  if (pid === null) return
+  console.log(`[supatype] This project's Postgres (pid ${pid}) was still running from a dev that did not stop cleanly; restarting it.`)
+  pgStop(pgOpts)
 }
 
 /** Where native dev's project database lives, and what creating it needs. */
@@ -1436,7 +1621,7 @@ function ensureProjectDatabase(db: ProjectDatabase): void {
  * What push and Docker dev write from an applied AST (applied-ast-artifacts.ts), for native dev,
  * which has no row-cache container. The manifest is made first when there is none: the hook maps
  * only go into one that exists, and the first push runs before native dev records its functions,
- * which sets `functions_enabled` before the server reads it.
+ * which switches functions (`services.functions`) before the server reads it.
  */
 function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
   const manifestPath = join(cwd, ".supatype", "manifest.json")

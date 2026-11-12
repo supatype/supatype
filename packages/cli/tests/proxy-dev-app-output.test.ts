@@ -84,11 +84,13 @@ describe("startProxyDevApp() output in the dashboard", () => {
   it("shows a crashing app's error on every restart, not only the first", async () => {
     const lines = appPane(beginDevSession("tui"))
     startApp(CRASHING_APP)
-    await vi.waitUntil(() => lines().filter((l) => l.includes("restarting in")).length >= 2, UNTIL)
-    // Stopped here so no further restart lands between the wait and the count.
+    const errors = () => lines().filter((l) => l === "✗ boom: cannot find module").length
+    // Waited for, not counted after the second restart: a run's exit can be reported before the
+    // last of its output is read, so that run's error sometimes landed just after the count.
+    // Shown only once, the error never reaches two and the wait times out.
+    await vi.waitUntil(() => lines().filter((l) => l.includes("restarting in")).length >= 2 && errors() >= 2, UNTIL)
     await manager?.stop()
-    const errors = lines().filter((l) => l === "✗ boom: cannot find module")
-    expect(errors.length).toBeGreaterThanOrEqual(2)
+    expect(errors()).toBeGreaterThanOrEqual(2)
   }, 20_000)
 })
 

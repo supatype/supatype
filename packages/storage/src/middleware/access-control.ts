@@ -18,13 +18,17 @@ import { servesAnonymously } from "../bucket-access.js"
 
 export type AccessVerdict =
   | { allowed: true }
-  | { allowed: false; status: 401 | 403; error: string }
+  | { allowed: false; status: 401 | 403 | 404; error: string }
 
 /**
- * Check whether a read (download) request is permitted.
+ * Check whether a read (download or sign) request is permitted.
  *
  * A `custom` bucket is asked about the same way as a `private` one. It used to allow every signed-in
  * caller through a placeholder, which made "custom" the most permissive mode there was.
+ *
+ * Not allowed is 404 or 403 by what the caller's read rule allows (`db.readVerdict`), never by
+ * whether the object exists: the existence check used to run on the service's own connection, so
+ * the anon key got 404 for a missing name and 403 for a present one in a private bucket.
  *
  * @param bucket - The target bucket
  * @param objectPath - Object key within the bucket
@@ -40,11 +44,12 @@ export async function checkReadAccess(
   if (!jwt) {
     return { allowed: false, status: 401, error: "Authentication required to access this file" }
   }
-  if (await db.objectVisibleTo(bucket.id, objectPath, jwt)) return { allowed: true }
-
-  // Not visible: absent, or not theirs to read. Existence is asked with the service's own
-  // connection so a missing object still produces the route's 404, rather than a 403 that would
-  // confirm nothing is there.
-  if (!(await db.getObject(bucket.id, objectPath))) return { allowed: true }
-  return { allowed: false, status: 403, error: "You do not have permission to access this file" }
+  switch (await db.readVerdict(bucket.id, objectPath, jwt)) {
+    case "visible":
+      return { allowed: true }
+    case "hidden":
+      return { allowed: false, status: 404, error: "Object not found" }
+    case "refused":
+      return { allowed: false, status: 403, error: "You do not have permission to access this file" }
+  }
 }

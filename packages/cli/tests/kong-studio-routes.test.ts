@@ -62,5 +62,11 @@ describe("kong.yml: Studio's API paths reach the server, its pages reach Studio"
     it.each(STUDIO_PAGES)(`${layout.name}: %s goes to Studio`, (path) => {
       expect(upstreamFor(yml, path)).toBe(layout.studio)
     })
+    // Kong refuses a declarative config that names one service twice ("uniqueness violation").
+    it(`${layout.name}: names each service once`, () => {
+      const names = [...yml.matchAll(/^ {2}- name: (\S+)\n {4}url:/gm)].map((m) => m[1])
+      expect(names.length).toBeGreaterThan(0)
+      expect(names.filter((name, i) => names.indexOf(name) !== i)).toEqual([])
+    })
   }
 })

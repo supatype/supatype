@@ -72,6 +72,12 @@ const TRANSIENT_PATTERNS: readonly RegExp[] = [
   /\b(ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|EPIPE|EAI_AGAIN)\b/,
   /connection (refused|reset)/i,
   /connection terminated unexpectedly/i,
+  // A connection Postgres dropped while it ran its init migrations on a slow Docker, in sqlx's
+  // words (0.9.2 release test N-FF7), and the same drop as Windows and libpq word it.
+  /expected to read \d+ bytes, got \d+ bytes at EOF/,
+  /forcibly closed by the remote host|actively refused it|connection was aborted|connection abort\b/i,
+  /broken pipe/i,
+  /server closed the connection unexpectedly/i,
   /the database system is (starting up|shutting down|in recovery)/i,
   /too many clients already/i,
   /timeout expired|timed out/i,

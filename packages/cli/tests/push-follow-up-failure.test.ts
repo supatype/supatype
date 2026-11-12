@@ -9,12 +9,22 @@ import { exitThrows } from "./support/process-exit.js"
  * Issue 41: with the stack down, `supatype push` applied the schema and then started the rest of
  * the stack; that start failed on a port clash, so push exited 1 with the schema in, and six of the
  * stack's containers kept running. As Nic decided it, a push to a stopped stack is refused before it
- * starts anything. On a running stack, a step after the apply that fails is warned about and the
- * push exits 0. An external database is pushed to with no stack running, and nothing is started.
+ * starts anything. An external database is pushed to with no stack running, and nothing is started.
+ *
+ * 0.9.1 release test FF2 and issue 301: on a running stack, a step after the apply that failed (the
+ * stack's `up -d`, the gateway wait, a bucket the storage service refused) was warned about and the
+ * push exited 0, so a pipeline passed with buckets missing. It now says the schema was applied,
+ * prints no success line, and exits 1, as a push to a linked server already did.
  */
 
-/** The running stack's mode (undefined: none runs), and every compose command run. */
-const docker = vi.hoisted(() => ({ mode: undefined as "dev" | "standalone" | undefined, compose: [] as string[][], engineRuns: 0 }))
+/** The running stack's mode (undefined: none runs), every compose command run, and what the test sets up. */
+const docker = vi.hoisted(() => ({
+  mode: undefined as "dev" | "standalone" | undefined,
+  compose: [] as string[][],
+  engineRuns: 0,
+  upFails: true,
+  buckets: [] as { id: string }[],
+}))
 
 const ANSWER = { status: 0, stdout: "", stderr: "" }
 vi.mock("node:child_process", async (importOriginal) => {
@@ -55,10 +65,10 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
   runDockerComposeQuietly: async (_path: string, args: string[]) => compose(args),
 }))
 
-/** One compose command, recorded. The stack's `up -d` fails, as a port clash does. */
+/** One compose command, recorded. The stack's `up -d` fails while `upFails` is set, as a port clash does. */
 function compose(args: string[]): number {
   docker.compose.push(args)
-  return args.join(" ") === "up -d" ? 1 : 0
+  return docker.upFails && args.join(" ") === "up -d" ? 1 : 0
 }
 
 vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({
@@ -70,7 +80,7 @@ vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({
 }))
 vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
-  loadSchemaAst: () => ({ version: 2, models: [] }),
+  loadSchemaAst: () => ({ version: 2, models: [], storageBuckets: docker.buckets }),
 }))
 vi.mock("../src/schema-sources.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/schema-sources.js")>()),
@@ -84,6 +94,11 @@ vi.mock("../src/engine-client.js", async (importOriginal) => ({
 vi.mock("../src/recorded-field-masking-tier.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/recorded-field-masking-tier.js")>()),
   recordDatabaseTier: async () => undefined,
+}))
+
+vi.mock("../src/commands/admin.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/commands/admin.js")>()),
+  ensureFirstAdminUserForProject: async () => undefined,
 }))
 
 const { pushSchemaDocker } = await import("../src/dev-compose.js")
@@ -106,6 +121,9 @@ beforeEach(() => {
   docker.mode = undefined
   docker.compose.length = 0
   docker.engineRuns = 0
+  docker.upFails = true
+  docker.buckets = []
+  process.exitCode = undefined
   printed = []
   const keep = (...parts: unknown[]): void => void printed.push(parts.map(String).join(" "))
   for (const method of ["log", "warn", "error"] as const) vi.spyOn(console, method).mockImplementation(keep)
@@ -113,6 +131,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  process.exitCode = undefined
+  vi.unstubAllGlobals()
   vi.restoreAllMocks()
   rmSync(cwd, { recursive: true, force: true })
 })
@@ -126,13 +146,47 @@ describe("supatype push on a docker project", () => {
     expect(docker.engineRuns).toBe(0)
   })
 
-  it("on a running stack, exits 0 with a warning when a step after the apply fails", async () => {
+  it("on a running stack, ends non-zero when the stack's start after the apply fails", async () => {
     docker.mode = "dev"
-    // An exit throws "exit <code>", so a push that would exit 1 fails here, saying so.
+    // An exit throws "exit <code>": the push carries on to its end and sets the code instead.
     exitThrows()
-    await pushSchemaDocker(cwd, config, { audit: [] })
+    const stepFailed = await pushSchemaDocker(cwd, config, { audit: [] })
     expect(docker.engineRuns).toBe(1)
-    expect(printed.join("\n")).toMatch(/The schema was applied, but a step after it failed/)
+    expect(process.exitCode).toBe(1)
+    expect(stepFailed).toBe(true)
+    const out = printed.join("\n")
+    expect(out).toContain("The schema was applied, but a step after it failed: docker compose up exited with status 1")
+    expect(out).not.toContain("Schema pushed.")
+  })
+
+  it("on a running stack, ends non-zero when the storage service refuses a bucket", async () => {
+    docker.mode = "standalone"
+    docker.upFails = false
+    docker.buckets = [{ id: "badpol" }, { id: "pics" }]
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) =>
+      init?.method === "POST" && String(init.body).includes('"badpol"')
+        ? Response.json({ error: "s3_bucket_policy must be a JSON object" }, { status: 400 })
+        : Response.json({ name: "ok" }),
+    )
+    exitThrows()
+    const stepFailed = await pushSchemaDocker(cwd, config, { audit: [] })
+    expect(process.exitCode).toBe(1)
+    expect(stepFailed).toBe(true)
+    const out = printed.join("\n")
+    expect(out).toContain("The schema was applied, but 1 of 2 bucket(s) were not provisioned: badpol")
+    expect(out).not.toContain("Schema pushed.")
+  })
+
+  it("on a running stack, says it pushed and leaves the exit code alone when every step finished", async () => {
+    docker.mode = "dev"
+    docker.upFails = false
+    docker.buckets = [{ id: "pics" }]
+    vi.stubGlobal("fetch", async () => Response.json({ name: "pics" }))
+    exitThrows()
+    const stepFailed = await pushSchemaDocker(cwd, config, { audit: [] })
+    expect(process.exitCode).toBeUndefined()
+    expect(stepFailed).toBe(false)
+    expect(printed.join("\n")).toContain("Schema pushed.")
   })
 
   // Issue 46: the push ran `up -d db` (and waited on it) before applying, on a stack already up.

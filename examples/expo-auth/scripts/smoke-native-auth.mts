@@ -10,7 +10,6 @@
  * Or from monorepo root:
  *   pnpm exec tsx examples/expo-auth/scripts/smoke-native-auth.mts
  */
-import { readFileSync, existsSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { AugmentedDatabase, RealtimePayload, SupatypeClient } from "@supatype/client"
@@ -21,43 +20,11 @@ import {
   createAuthUrlListener,
   type SecureStoreLike,
 } from "@supatype/react-native"
+import { smokeTarget } from "./smoke-target.mjs"
 
 const exampleRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
-function loadDotEnv(path: string): Record<string, string> {
-  if (!existsSync(path)) return {}
-  const out: Record<string, string> = {}
-  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (trimmed === "" || trimmed.startsWith("#")) continue
-    const eq = trimmed.indexOf("=")
-    if (eq <= 0) continue
-    const key = trimmed.slice(0, eq).trim()
-    let value = trimmed.slice(eq + 1).trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    out[key] = value
-  }
-  return out
-}
-
-const envFile = loadDotEnv(resolve(exampleRoot, ".env"))
-
-const GATEWAY =
-  process.env["SUPATYPE_URL"] ??
-  envFile["EXPO_PUBLIC_SUPATYPE_URL"] ??
-  envFile["PUBLIC_SUPATYPE_URL"] ??
-  "http://localhost:18473"
-
-const ANON =
-  process.env["SUPATYPE_ANON_KEY"] ??
-  envFile["EXPO_PUBLIC_SUPATYPE_ANON_KEY"] ??
-  envFile["ANON_KEY"] ??
-  ""
+const { gateway: GATEWAY, anonKey: ANON } = smokeTarget(exampleRoot)
 
 function memorySecureStore(): SecureStoreLike & { dump(): Map<string, string> } {
   const store = new Map<string, string>()

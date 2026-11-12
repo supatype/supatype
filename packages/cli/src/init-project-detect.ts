@@ -1,12 +1,17 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-import { parsePackageJson } from "./package-json.js"
+import { parsePackageJson, type PackageJson } from "./package-json.js"
+import { findNextFreePort, type PortInUse } from "./dev-ports.js"
+import { isLoopbackPortInUse } from "./postgres-ctl.js"
 
-const VITE_CONFIG_NAMES = [
-  "vite.config.ts",
+/** Every name Vite looks for its config under. */
+export const VITE_CONFIG_NAMES = [
   "vite.config.js",
   "vite.config.mjs",
+  "vite.config.ts",
   "vite.config.cjs",
+  "vite.config.mts",
+  "vite.config.cts",
 ] as const
 
 const SUPATYPE_CONFIG_NAMES = [
@@ -20,22 +25,31 @@ export interface DetectedProjectSetup {
   hasExistingFiles: boolean
   hasSupatypeConfig: boolean
   hasVite: boolean
+  /** package.json lists Vite itself, so init adds none and keeps the app's own. */
+  declaresVite: boolean
   hasViteConfig: boolean
   viteDevUrl: string
   staticDir: string
+  /** The scripts the project's package.json already has, before init adds its own. */
+  packageScripts: Record<string, string>
   /** Human-readable bullets for the init wizard. */
   summaryLines: string[]
 }
 
-function hasPackageVite(cwd: string): boolean {
+/** The project's package.json, or undefined when it has none or it is not JSON (init skips one that is not). */
+export function readPackageJson(cwd: string): PackageJson | undefined {
   const pkgPath = join(cwd, "package.json")
-  if (!existsSync(pkgPath)) return false
+  if (!existsSync(pkgPath)) return undefined
   try {
-    const pkg = parsePackageJson(readFileSync(pkgPath, "utf8"))
-    return Boolean(pkg.devDependencies["vite"] ?? pkg.dependencies["vite"])
+    return parsePackageJson(readFileSync(pkgPath, "utf8"))
   } catch {
-    return false
+    return undefined
   }
+}
+
+/** The vite range a package.json declares, from devDependencies first. */
+export function declaredVite(pkg: PackageJson | undefined): string | undefined {
+  return pkg?.devDependencies["vite"] ?? pkg?.dependencies["vite"]
 }
 
 function readVitePort(cwd: string): number {
@@ -70,8 +84,10 @@ export function detectProjectSetup(cwd: string): DetectedProjectSetup {
   }
 
   const hasExistingFiles = entries.length > 0
+  const pkg = readPackageJson(cwd)
   const hasViteConfig = VITE_CONFIG_NAMES.some((name) => existsSync(join(cwd, name)))
-  const hasVite = hasViteConfig || hasPackageVite(cwd)
+  const declaresVite = declaredVite(pkg) !== undefined
+  const hasVite = hasViteConfig || declaresVite
   const viteDevUrl = `http://127.0.0.1:${readVitePort(cwd)}`
   const staticDir = detectStaticDir(cwd)
   const hasSupatypeConfig = SUPATYPE_CONFIG_NAMES.some((name) => existsSync(join(cwd, name)))
@@ -89,9 +105,34 @@ export function detectProjectSetup(cwd: string): DetectedProjectSetup {
     hasExistingFiles,
     hasSupatypeConfig,
     hasVite,
+    declaresVite,
     hasViteConfig,
     viteDevUrl,
     staticDir,
+    packageScripts: pkg?.scripts ?? {},
     summaryLines,
+  }
+}
+
+/**
+ * `detected` with a Vite port that is free now: the detected one, or the next free after it, with
+ * a summary line saying why it moved. 0.9.1 release test (FF21): init proposed 5173 while another
+ * project's app held it, and dev's App URL then served that app. Either loopback counts, because
+ * Vite on Node's default `localhost` listens on [::1] alone on Windows. Checked with or without Vite
+ * in the project: init offers Vite, and scaffolds its config with this port, either way.
+ */
+export async function withFreeVitePort(
+  detected: DetectedProjectSetup,
+  inUse: PortInUse = isLoopbackPortInUse,
+): Promise<DetectedProjectSetup> {
+  const url = new URL(detected.viteDevUrl)
+  const port = Number(url.port)
+  const free = await findNextFreePort(port, undefined, inUse)
+  if (free === port) return detected
+  url.port = String(free)
+  return {
+    ...detected,
+    viteDevUrl: url.origin,
+    summaryLines: [...detected.summaryLines, `Port ${port} is in use, so Vite is offered ${free}`],
   }
 }

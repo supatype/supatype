@@ -10,15 +10,16 @@
  * Objects go through the service's own API, so they land in its tables and on its disk exactly as
  * an upload would. The first import sends every one, and keeps any the service holds already.
  * Each later start sends only those whose file or sidecar changed since the last import, over the
- * service's copy: native dev falls back to the server's store whenever the service fails to start,
- * and what it takes then must reach the service once it is back, while an object deleted in the
- * service since it was imported must not come back. The old files stay.
+ * service's copy: a CLI before 0.9.2 fell back to the server's store whenever the service failed to
+ * start, and what that store took must reach the service once it is back, while an object deleted
+ * in the service since it was imported must not come back. The old files stay.
  *
  * An object the service refuses (its bucket's type or size rule, say) is skipped, named in one
  * warning and in the marker, and not sent again until its file changes. Only a failure of the
  * service itself (no answer, or a 5xx) fails the import, which records nothing but the buckets the
- * service refused, so the server's store keeps answering and the next start tries again. The old store is removed by a later CLI
- * release than the one that first imported, so a project keeps its old files for one release.
+ * service refused, so storage stays off for that start and the next start tries again. The old
+ * store is removed by a later CLI release than the one that first imported, so a project keeps its
+ * old files for one release.
  */
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"

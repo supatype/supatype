@@ -13,12 +13,18 @@ import { fileURLToPath } from "node:url"
  */
 const BIN = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/supatype.js")
 
+/** The bin script into `binDir`, with the Node version check it imports first. */
+function copyBin(binDir: string): void {
+  copyFileSync(BIN, join(binDir, "supatype.js"))
+  copyFileSync(join(dirname(BIN), "node-version.js"), join(binDir, "node-version.js"))
+}
+
 let dir: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "supatype-bin-"))
   mkdirSync(join(dir, "bin"))
-  copyFileSync(BIN, join(dir, "bin", "supatype.js"))
+  copyBin(join(dir, "bin"))
   // The copy has to be read as ESM, as the package's own `"type": "module"` makes it.
   writeFileSync(join(dir, "package.json"), '{ "type": "module" }\n')
   // As in the monorepo, where the JavaScript's development dependencies are installed.
@@ -79,7 +85,7 @@ describe("bin/supatype.js installed under node_modules", () => {
     pkg = join(app, "node_modules", "@supatype", "cli")
     mkdirSync(join(pkg, "bin"), { recursive: true })
     mkdirSync(join(pkg, "dist"))
-    copyFileSync(BIN, join(pkg, "bin", "supatype.js"))
+    copyBin(join(pkg, "bin"))
     writeFileSync(join(pkg, "package.json"), '{ "type": "module" }\n')
     writeFileSync(join(pkg, "dist", "cli.js"), 'export function run() { console.error("ran the JavaScript CLI") }\n')
     writeFileSync(join(pkg, "dist", "cli-launcher.js"), 'export function run() { console.error("launched the program") }\n')

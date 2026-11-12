@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
@@ -15,6 +18,24 @@ vi.mock("../src/ui/clack.js", async (importOriginal) => {
     throw new Error("prompted for a port")
   }
   return { ...actual, p: { ...actual.p, text: refuse, select: refuse } }
+})
+
+/**
+ * A home of its own for every test. Init also skips the ports in the FF26 registry under
+ * `~/.supatype/projects/` (init-port-registry.ts), and the real one changes under this test: any
+ * init on the machine, and every scaffolding test running beside this one in the suite, records a
+ * port there. One that named 18473 made "is the default" read 18474. os.homedir() reads
+ * USERPROFILE on Windows and HOME elsewhere.
+ */
+let home: string
+beforeEach(() => {
+  home = mkdtempSync(join(tmpdir(), "supatype-init-ports-home-"))
+  vi.stubEnv("HOME", home)
+  vi.stubEnv("USERPROFILE", home)
+})
+afterEach(() => {
+  vi.unstubAllEnvs()
+  rmSync(home, { recursive: true, force: true })
 })
 
 const { chooseInitKongPort, promptKongPortChoice, reservedComposePorts } = await import("../src/dev-ports.js")

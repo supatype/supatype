@@ -29,6 +29,8 @@ declare module "@supatype/client" {
         headline: { [locale: string]: string } | null
         sku: string | null
         status: "draft" | "published"
+        created_at: string
+        updated_at: string
       }
       Insert: {
         id?: string
@@ -44,6 +46,8 @@ declare module "@supatype/client" {
         headline?: { [locale: string]: string } | null
         sku?: string | null
         status: "draft" | "published"
+        created_at?: string
+        updated_at?: string
       }
       Update: {
         id?: string
@@ -59,6 +63,8 @@ declare module "@supatype/client" {
         headline?: { [locale: string]: string } | null
         sku?: string | null
         status?: "draft" | "published"
+        created_at?: string
+        updated_at?: string
       }
       Relationships: []
     }

@@ -40,13 +40,22 @@ import { registerProjectNameOption } from "./project-name-override.js"
 import { reportCliFatal } from "./ui/fatal.js"
 import { wrapProgramActionsWithChrome } from "./ui/runtime/command-chrome.js"
 
-export async function run(): Promise<void> {
+/**
+ * The root program with what it carries ahead of every command, and nothing more: no command's
+ * target is known here, so nothing that belongs to one target (a dev session's local ports and URLs)
+ * may be loaded here for all of them (FF-7).
+ */
+export function rootProgram(): Command {
   const program = new Command()
     .name("supatype")
     .description("Supatype: type-first platform for PostgreSQL")
     .version(cliPackageVersion())
-
   registerProjectNameOption(program)
+  return program
+}
+
+export async function run(): Promise<void> {
+  const program = rootProgram()
   registerInit(program)
   registerDev(program)
   registerCache(program)

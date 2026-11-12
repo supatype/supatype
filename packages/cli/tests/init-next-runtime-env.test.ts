@@ -15,9 +15,9 @@ import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
 const ROUTE = [
   "// The deployment's API address and anon key for the browser client, read from SUPATYPE_URL and",
   "// SUPATYPE_ANON_KEY on the server at each page load. The root layout loads it before the app.",
+  "// No segment config: GET reads the request, which keeps it out of the build's prerender on every",
+  "// Next version, and Next 16 with cacheComponents refuses a `dynamic` export.",
   'export { GET } from "@supatype/ssr/next"',
-  "// Written here rather than re-exported: Next reads a route's segment config from this file only.",
-  'export const dynamic = "force-dynamic"',
   "",
 ].join("\n")
 const SCRIPT_TAG = '<Script src="/supatype-env.js" strategy="beforeInteractive" />'
@@ -67,9 +67,16 @@ function initIn(files: Record<string, string>): { read: (rel: string) => string 
 const NEXT_PACKAGE = JSON.stringify({ name: "acme", dependencies: { next: "15.5.0", react: "19.0.0" } })
 
 describe("init in a Next.js App Router app", () => {
-  it("writes the route that serves /supatype-env.js, forced dynamic in the file itself", () => {
+  it("writes the route that serves /supatype-env.js", () => {
     const { read } = initIn({ "package.json": NEXT_PACKAGE, "tsconfig.json": "{}", "app/layout.tsx": CREATE_NEXT_APP_LAYOUT })
     expect(read("app/supatype-env.js/route.ts")).toBe(ROUTE)
+  })
+
+  // 0.9.1 release test (RB6): create-next-app turns on cacheComponents, and Next then answers 500 for
+  // a route that exports `dynamic`. The route stays per request by reading the request.
+  it("writes no route segment config, which Next 16 refuses under cacheComponents", () => {
+    const { read } = initIn({ "package.json": NEXT_PACKAGE, "tsconfig.json": "{}", "app/layout.tsx": CREATE_NEXT_APP_LAYOUT })
+    expect(read("app/supatype-env.js/route.ts")).not.toMatch(/export\s+const\s+(dynamic|revalidate|fetchCache|dynamicParams)\b/)
   })
 
   it("loads it first thing in the root layout's body, with next/script before the app", () => {

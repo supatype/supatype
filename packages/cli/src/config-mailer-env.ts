@@ -1,15 +1,9 @@
 import { upsertEnvFile } from "./env-file.js"
-import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, MAILER_PROVIDER_ENV, mailerProviderEnv, SMTP_ENV } from "./mailer-env.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
-/** Every `.env` name the CLI writes from `email` and `auth.email` in the config. */
-export const CONFIG_MAILER_ENV_KEYS: readonly string[] = [
-  MAILER_AUTOCONFIRM_ENV,
-  MAILER_PROVIDER_ENV,
-  ...SMTP_ENV,
-  ...MAILER_PASSTHROUGH_ENV,
-]
+/** Every `.env` name the CLI writes from `email` in the config. */
+export const CONFIG_MAILER_ENV_KEYS: readonly string[] = [MAILER_PROVIDER_ENV, ...SMTP_ENV, ...MAILER_PASSTHROUGH_ENV]
 
 /**
  * The mailer values `config` gives, as `.env` updates, and how they are written: each under the
@@ -20,12 +14,17 @@ export const CONFIG_MAILER_ENV_KEYS: readonly string[] = [
  * started production with dev's mail catcher (issue 74) and with dev's last
  * `SUPATYPE_MAILER_AUTOCONFIRM` rather than the config's (issue 75). A value the developer wrote
  * by hand carries no marker and is only replaced where the config sets that name.
+ *
+ * `SUPATYPE_MAILER_AUTOCONFIRM` is not among them: the compose file carries the config's value as
+ * its fallback, so `.env` holds only the developer's own (FF7). Each command that starts a stack
+ * takes the line an earlier CLI wrote there out first, with `retireCliMailerAutoconfirm`.
  */
-export function configMailerEnv(
-  cwd: string,
-  config: SupatypeProjectConfig,
-): { updates: Record<string, string>; managed: readonly string[]; removeManaged: readonly string[] } {
-  const updates = { ...devMailerAutoconfirmUpdate(cwd, config), ...mailerProviderEnv(config.email) }
+export function configMailerEnv(config: SupatypeProjectConfig): {
+  updates: Record<string, string>
+  managed: readonly string[]
+  removeManaged: readonly string[]
+} {
+  const updates = mailerProviderEnv(config.email)
   return {
     updates,
     managed: CONFIG_MAILER_ENV_KEYS,
@@ -52,6 +51,6 @@ export function warnSmtpWithoutHost(
 
 /** Write {@link configMailerEnv} into `.env`, for a command that writes nothing else there. */
 export function syncConfigMailerEnv(cwd: string, config: SupatypeProjectConfig): void {
-  const { updates, managed, removeManaged } = configMailerEnv(cwd, config)
+  const { updates, managed, removeManaged } = configMailerEnv(config)
   upsertEnvFile(cwd, updates, { managed, removeManaged })
 }

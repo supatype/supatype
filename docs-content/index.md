@@ -25,7 +25,7 @@ Install the CLI, scaffold a project, and run the full stack on your machine. Sup
 $ npm install -g @supatype/cli
 ```
 
-The CLI needs Node.js 22 or later. For a machine without Node, the [CLI](/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
+The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later. For a machine without Node, the [CLI](/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
 
 On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.
 
@@ -146,7 +146,7 @@ Run the whole platform on a server you own with Docker Compose. The project layo
 
 ### 1. Prepare the server
 
-Ubuntu 22.04 or similar, Docker with Compose v2, Node.js 22 or later, and the CLI:
+Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later to build a Vite 8 app), and the CLI:
 
 ```sh
 $ npm install -g @supatype/cli
@@ -160,6 +160,10 @@ $ supatype init
 ```
 
 `init` installs dependencies and writes generated secrets and API keys to `.env`. Set your public URLs there.
+
+:::note[Cache password]
+When the cache runs inside Postgres, as it does by default, `supatype/postgres` 17.2.13 and later require a password for it, `SUPATYPE_KEYSPACE_PASSWORD` in `.env`. Every `supatype self-host compose` command writes a random one there when it is missing, and never replaces one you set. The compose file requires it, so `docker compose` run by hand without it stops with `SUPATYPE_KEYSPACE_PASSWORD is missing from .env`. To change it, put the new one in `.env` and run `supatype self-host compose up -d`. Password files, rotation with no restart and a second keyspace for the response cache are in [self-hosting configuration](/docs/self-hosting/configuration.html#cache).
+:::
 
 ### 3. Start Compose
 
@@ -179,7 +183,7 @@ Browsers may call the API from the origin of `SITE_URL` and from the origins in 
 :::
 
 :::note[Ports]
-Only the gateway is published on every interface, at `SUPATYPE_KONG_PORT`, or on ports 80 and 443 once HTTPS is on. Postgres (`SUPATYPE_DB_PORT`, default 5432), the API server (`SUPATYPE_SERVER_PORT`, default 9999) and SeaweedFS (`SUPATYPE_SEAWEEDFS_PORT`, default 8333) bind `127.0.0.1`, so they are reachable from the server itself and nowhere else. To reach them from other machines, set `SUPATYPE_PUBLISH_ADDRESS=0.0.0.0` (or one interface's address) in `.env` and run `supatype self-host compose up -d`. Put a firewall in front first. `supatype init` lists these variables, commented out, in `.env`.
+Only the gateway is published on every interface, at `SUPATYPE_KONG_PORT`, or on ports 80 and 443 once HTTPS is on. Postgres (`SUPATYPE_DB_PORT`, default 5432), the API server (`SUPATYPE_SERVER_PORT`, default 9999) and SeaweedFS (`SUPATYPE_SEAWEEDFS_PORT`, default 8333, when the stack runs one) bind `127.0.0.1`, so they are reachable from the server itself and nowhere else. To reach them from other machines, set `SUPATYPE_PUBLISH_ADDRESS=0.0.0.0` (or one interface's address) in `.env` and run `supatype self-host compose up -d`. Put a firewall in front first. `supatype init` lists these variables, commented out, in `.env`.
 :::
 
 Images come from Docker Hub, and each CLI release runs the exact images it was tested with, never `:latest`: `supatype/studio`, `supatype/storage`, `supatype/realtime`, `supatype/functions-worker` and `supatype/control-plane` at the CLI's own version, and `supatype/schema-engine`, `supatype/server` and `supatype/postgres` at the releases pinned for it. The stack also runs `postgrest/postgrest`, `kong` and SeaweedFS, and Valkey when the cache does not run inside Postgres. Upgrading the CLI moves them; `supatype update` pulls the new tags. To run another image, set its `SUPATYPE_*_IMAGE` in `.env` (for example `SUPATYPE_SERVER_IMAGE=supatype/server:v2.3.0`), or pin `versions.engine`, `versions.server` or `versions.postgres` in `supatype.config.ts`.

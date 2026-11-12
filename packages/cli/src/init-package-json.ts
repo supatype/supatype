@@ -1,5 +1,4 @@
 import semver from "semver"
-import { isJsonObject } from "@supatype/shared"
 import type { InitDependencyVersions } from "./init-dependency-versions.js"
 
 export interface MergePackageJsonOptions {
@@ -52,6 +51,12 @@ const FUNCTIONS_SCRIPTS = { functions: "supatype functions serve" } as const
 export const VITE_RANGE = "^8"
 
 /**
+ * The Node versions that Vite major runs on: its package.json `engines.node`. Change it with VITE_RANGE:
+ * init refuses a Vite app when the Node that will run Vite is outside it (init-vite-node.ts).
+ */
+export const VITE_NODE_RANGE = "^20.19.0 || >=22.12.0"
+
+/**
  * Development-time only, so devDependencies. schema/index.ts imports @supatype/types with
  * `import type`, which is erased at build; supatype.config.ts imports defineConfig, which only the
  * CLI evaluates; seed.ts is run by `supatype seed`. Nothing `supatype push` or `supatype generate`
@@ -73,7 +78,10 @@ function toolDependencies(deps: InitDependencyVersions, opts: MergePackageJsonOp
   }
 }
 
-function projectScripts(opts: MergePackageJsonOptions): Record<string, string> {
+/** What decides which scripts a project gets. */
+type ScriptOptions = Pick<MergePackageJsonOptions, "app" | "helloFunction">
+
+function projectScripts(opts: ScriptOptions): Record<string, string> {
   return {
     ...CORE_SCRIPTS,
     ...(opts.app.viteDevUrl ? VITE_SCRIPTS : {}),
@@ -127,15 +135,6 @@ function withPrepare(scripts: Record<string, string> | undefined): Record<string
 }
 
 /**
- * The script among `scripts` that runs `supatype dev`: `supatype:dev` when the merge put it beside
- * a dev script of the project's own, else `dev`.
- */
-export function supatypeDevScript(scripts: unknown): string {
-  const named = (key: string) => isJsonObject(scripts) && scripts[key] === CORE_SCRIPTS.dev
-  return !named("dev") && named("supatype:dev") ? "supatype:dev" : "dev"
-}
-
-/**
  * The project's @supatype/client range, as `prepare` needs it: at least `floor`, the client `init`
  * would pick, since an older one may predate `supatype-prepare`. A range whose lowest version, as
  * npm's own `semver` reads it, is at or above the floor is kept. So is a spec that is not a range,
@@ -166,23 +165,35 @@ function withClient(pkg: PackageJson, floor: string): Required<Pick<PackageJson,
   return { dependencies: { ...pkg.dependencies, [CLIENT]: range }, devDependencies }
 }
 
+/**
+ * The scripts a project has once `init` adds its own to `existing`: the project's own are kept, and
+ * `supatype dev` goes in as `supatype:dev` when the project's `dev` is something else.
+ */
+export function mergeSupatypeScripts(existing: Section, opts: ScriptOptions): Record<string, string> {
+  const scripts = { ...withPrepare(existing), ...absentFrom(projectScripts(opts), existing) }
+  if (scripts.dev !== CORE_SCRIPTS.dev && scripts["supatype:dev"] === undefined) {
+    scripts["supatype:dev"] = CORE_SCRIPTS.dev
+  }
+  return scripts
+}
+
 /** Merge Supatype deps/scripts into an existing package.json object, keeping what it already has. */
 export function mergeSupatypePackageJson(
   pkg: PackageJson,
   opts: MergePackageJsonOptions,
   deps: InitDependencyVersions,
 ): PackageJson {
-  const scripts = { ...withPrepare(pkg.scripts), ...absentFrom(projectScripts(opts), pkg.scripts) }
-  if (scripts.dev !== CORE_SCRIPTS.dev && scripts["supatype:dev"] === undefined) {
-    scripts["supatype:dev"] = CORE_SCRIPTS.dev
-  }
+  const scripts = mergeSupatypeScripts(pkg.scripts, opts)
   const { dependencies, devDependencies } = withClient(pkg, deps.client)
   return {
     ...pkg,
     name: pkg.name || opts.projectName,
     version: pkg.version || NEW_PROJECT_VERSION,
     private: pkg.private ?? true,
-    type: pkg.type || "module",
+    // No `type`: the app's own package.json decides how its JavaScript loads. Merged in, `"module"`
+    // made an Expo server export's CommonJS render.js fail, so `expo serve` answered every page 500
+    // (FF24). Nothing init adds needs it: the CLI runs the project's TypeScript either way, and a
+    // new vite.config is written as .mts in a package that is not ESM (scaffoldVite).
     scripts,
     dependencies,
     // A tool the project already lists in either section stays where it is.

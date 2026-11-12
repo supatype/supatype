@@ -223,11 +223,13 @@ async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushR
       { yes: run.yes, apply: "supatype push --yes" },
       consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
     )
-  await pushOfferingAdoption(
+  const stepFailed = await pushOfferingAdoption(
     () => pushConsentingToDrift(applying, run, { beforeOverwrite: gate }),
     dockerAdoptionSteps(cwd, config),
     { yes: run.yes, retry: "supatype push" },
   )
+  // Ends as a push to any other target does when a step after the schema failed (issue 301).
+  reportLocalPush({ mode: "local", environment: "local" }, undefined, stepFailed === true)
 }
 
 /** How this push was asked to treat what needs a person's say. */

@@ -2,8 +2,18 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { gzipSync } from "node:zlib"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+/** The version a release build stamps into the CLI; "" is a CLI built from source. */
+const stamp = vi.hoisted(() => ({ version: "" }))
+vi.mock("../src/cli-version-embedded.js", () => ({
+  get EMBEDDED_CLI_VERSION() {
+    return stamp.version
+  },
+}))
+
 import {
+  downloadRelease,
   exampleNames,
   exampleTarget,
   exampleTarballUrl,
@@ -181,5 +191,35 @@ describe("initFromExample()", () => {
     const result = await initFromExample({ dir, example: "blog", version: "0.7.0", download: serve(tarball) })
     expect(result.files).toBe(1)
     expect(readFileSync(join(dir, "README.md"), "utf8")).toBe("# Blog\n")
+  })
+})
+
+// 0.9.2 release test round 2 (R2-S18): a stamped release CLI whose tag was not on GitHub yet was
+// told "a CLI built from source has none to download".
+describe("downloadRelease() when the release tag is missing", () => {
+  const url = exampleTarballUrl("0.9.2")
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    stamp.version = ""
+  })
+
+  async function failure(): Promise<string> {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })))
+    return downloadRelease(url).then(
+      () => "downloaded",
+      (err: unknown) => String(err),
+    )
+  }
+
+  it("does not call a stamped release CLI built from source", async () => {
+    stamp.version = "0.9.2"
+    const message = await failure()
+    expect(message).not.toContain("built from source")
+    expect(message).toContain("GitHub has no tag v0.9.2 yet")
+  })
+
+  it("says a CLI built from source has no release to download from", async () => {
+    expect(await failure()).toContain("a CLI built from source has none to download")
   })
 })

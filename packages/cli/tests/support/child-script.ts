@@ -4,8 +4,20 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 
-/** The native Postgres the CLI caches, which tests that need a real cluster run; absent on most machines. */
-export const CACHED_PG_BIN = join(homedir(), ".supatype", "cache", "postgres", "17.2.10", "pg-17.2.10", "bin")
+/**
+ * The native Postgres the CLI caches, which tests that need a real cluster run; absent on most
+ * machines. Read from the developer's real home (isolated-home.ts gives each test file another),
+ * and only read: the cluster these tests make lives in a temp folder.
+ */
+export const CACHED_PG_BIN = join(
+  process.env["SUPATYPE_TEST_REAL_HOME"] ?? homedir(),
+  ".supatype",
+  "cache",
+  "postgres",
+  "17.2.10",
+  "pg-17.2.10",
+  "bin",
+)
 
 /** A `src/` module of the CLI as an import specifier a script in another directory can use. */
 export function cliModule(name: string): string {

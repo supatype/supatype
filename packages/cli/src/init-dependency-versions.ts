@@ -69,14 +69,13 @@ function resolvePackageVersion(
 ): string {
   if (versionPublishedOnNpm(meta, preferred)) return preferred
   const latest = latestPublishedOnNpm(meta)
-  if (latest) return latest
+  if (latest) return notOlderThan(latest, preferred)
   return preferred
 }
 
 /**
- * Pick @supatype/cli, @supatype/types and @supatype/client versions that exist on npm.
- * The running CLI may be a local dev build ahead of the registry (e.g. 0.1.3
- * while types is only published at 0.1.1).
+ * Pick @supatype/cli, @supatype/types and @supatype/client versions: the running CLI's own, or npm's
+ * latest when npm does not have the CLI's and its latest is newer (a CLI built from source).
  */
 export async function resolveInitDependencyVersions(): Promise<InitDependencyVersions> {
   const runningCli = cliPackageVersion()
@@ -93,15 +92,19 @@ export async function resolveInitDependencyVersions(): Promise<InitDependencyVer
   return {
     cli: resolvePackageVersion(cliMeta, runningCli),
     types: resolvePackageVersion(typesMeta, runningCli),
-    client: notOlderThan(resolvePackageVersion(clientMeta, runningCli), runningCli),
+    client: resolvePackageVersion(clientMeta, runningCli),
   }
 }
 
 /**
- * The client carries `supatype-prepare`, the scaffold's `prepare`, and is released with the CLI,
- * so one older than the running CLI may predate it. npm's latest is such a client while this CLI's
- * own release is still publishing, or failed to: then this CLI's version, which npm will not have
- * yet, fails the install on that version, where npm's latest failed it on a missing command.
+ * The three packages are released together, so one older than the running CLI is from an earlier
+ * release: the client may predate `supatype-prepare`, the scaffold's `prepare`. npm's latest is such
+ * a package while this CLI's own release is still publishing, or failed to: then this CLI's version,
+ * which npm will not have yet, fails the install on that version, where npm's latest failed it on a
+ * missing command.
+ *
+ * 0.9.2 release test round 2 (R2-S5): only the client had this floor, so before 0.9.2 reached npm
+ * init pinned `@supatype/cli ^0.9.1` and `@supatype/types ^0.9.1` next to `@supatype/client ^0.9.2`.
  */
 function notOlderThan(version: string, floor: string): string {
   return semver.valid(version) !== null && semver.valid(floor) !== null && semver.lt(version, floor) ? floor : version

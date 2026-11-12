@@ -56,8 +56,9 @@ export interface WriteFrontendEnvOptions {
   /** False to fill only names the file lacks or leaves blank, as `keys --write` does without --force. */
   replace?: boolean
   /**
-   * Whether the values are a local stack's. Read from `apiUrl` unless given: given for an anon key
-   * written alone, whose stack the key cannot say.
+   * Whether the values are a local stack's. Read from `apiUrl` unless given. With no `apiUrl`,
+   * nothing says which deployment an anon key is for, so it counts as a local stack's: in `.env` a
+   * plain production build baked it (0.9.1 release test, S27).
    */
   local?: boolean
 }
@@ -92,7 +93,7 @@ export function writeFrontendEnv(
   values: FrontendValues,
   options: WriteFrontendEnvOptions = {},
 ): { file: string; written: string[] } {
-  const local = options.local ?? (values.apiUrl !== undefined && isLocalUrl(values.apiUrl))
+  const local = options.local ?? (values.apiUrl === undefined || isLocalUrl(values.apiUrl))
   const file = local ? DEV_FRONTEND_ENV_FILE : ".env"
   const current = readEnvFile(dir, file)
   const named = local ? { ...frontendEnv(values), ...localServerEnv(values) } : frontendEnv(values)

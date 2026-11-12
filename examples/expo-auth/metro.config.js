@@ -5,14 +5,22 @@ const { getDefaultConfig } = require("expo/metro-config")
 const projectRoot = __dirname
 const workspaceRoot = path.resolve(projectRoot, "../..")
 const packagesRoot = path.join(workspaceRoot, "packages")
+// Inside the Supatype repo the @supatype packages are the workspace's sources, two folders up.
+// Copied out on its own (examples/README.md) they come from npm, and the folder two up is
+// whatever holds the copy, which Metro must neither watch nor resolve from.
+const inSupatypeRepo =
+  fs.existsSync(path.join(workspaceRoot, "pnpm-workspace.yaml")) &&
+  fs.existsSync(path.join(packagesRoot, "client", "package.json"))
 
 const config = getDefaultConfig(projectRoot)
 
-config.watchFolders = [workspaceRoot]
-config.resolver.nodeModulesPaths = [
-  path.resolve(projectRoot, "node_modules"),
-  path.resolve(workspaceRoot, "node_modules"),
-]
+if (inSupatypeRepo) {
+  config.watchFolders = [workspaceRoot]
+  config.resolver.nodeModulesPaths = [
+    path.resolve(projectRoot, "node_modules"),
+    path.resolve(workspaceRoot, "node_modules"),
+  ]
+}
 
 // Force a single React/RN copy from the Expo app (SDK 54 → RN 0.81.5).
 // Without this, workspace peer installs (e.g. react-native@0.86) can win
@@ -63,7 +71,7 @@ function resolveProjectModule(moduleName) {
 
 const defaultResolveRequest = config.resolver.resolveRequest
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (moduleName.startsWith("@supatype/")) {
+  if (inSupatypeRepo && moduleName.startsWith("@supatype/")) {
     const filePath = resolveSupatypeEntrypoint(moduleName)
     if (filePath) {
       return { filePath, type: "sourceFile" }

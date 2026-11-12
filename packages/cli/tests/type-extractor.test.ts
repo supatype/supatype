@@ -440,6 +440,26 @@ export type X = Model<{
     expect(b?.s3BucketPolicy).toBe('{"Version":"2012-10-17"}')
   })
 
+  // The engine writes the bucket's row itself on a push, so the storage service's own check that
+  // the policy is a JSON object never saw it: the service answered 409 and the bad policy stayed.
+  it("refuses an s3BucketPolicy that is not a JSON object, naming the bucket", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-bucket-policy-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    const schema = (policy: string): string =>
+      [
+        `import type { Model, UUID, ImageAsset, Bucket } from "@supatype/types"`,
+        `export type assets = Bucket<"legacy", { accessMode: "custom"; s3BucketPolicy: '${policy}' }>`,
+        "export type X = Model<{ id: UUID; f: ImageAsset<assets> }>",
+      ].join("\n")
+    for (const policy of ['{"Version":', '[1, 2]', '"text"']) {
+      writeFileSync(schemaPath, schema(policy), "utf8")
+      expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+        /Bucket "legacy": s3BucketPolicy is not a JSON object\. Write the policy as a JSON object in a string/,
+      )
+    }
+  })
+
   it("extracts slug source field from Slug<\"name\">", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
     dirs.push(dir)
@@ -728,6 +748,35 @@ export type Post = Model<WithTimestamps<{
     const post = ast?.models.find((m) => m.name === "Post")
     expect(post?.options.timestamps).toBe(true)
     expect(post?.options.singleton).toBeUndefined()
+  })
+
+  // 0.9.2: `WithPublishable<T>` is `T & Publishable` in `@supatype/types`, but the wrapper was
+  // unwrapped to `T` alone, so the `published_at` it adds never reached the table, while the
+  // intersection spelling of the same type did add it.
+  it("gives WithPublishable the same published_at column as the & Publishable spelling", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-publishable-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, Publishable, Timestamp, UUID, WithPublishable } from "@supatype/types"
+
+export type Wrapped = Model<WithPublishable<{ id: UUID; title: string }>, { tableName: "wrapped" }>
+export type Joined = Model<{ id: UUID; title: string } & Publishable, { tableName: "joined" }>
+export type Own = Model<WithPublishable<{ id: UUID; published_at: Timestamp }>, { tableName: "own" }>
+`,
+      "utf8",
+    )
+
+    const models = extractSchemaAstFromTypes(schemaPath, dir)?.models ?? []
+    const fieldsOf = (name: string) => models.find((m) => m.name === name)?.fields
+    expect(Object.keys(fieldsOf("Wrapped") ?? {})).toEqual(["id", "title", "published_at"])
+    expect(fieldsOf("Wrapped")).toEqual(fieldsOf("Joined"))
+    expect(fieldsOf("Wrapped")?.["published_at"]?.["required"]).not.toBe(true)
+    // A model that declares the column itself keeps its own declaration, here a required one.
+    expect(Object.keys(fieldsOf("Own") ?? {})).toEqual(["id", "published_at"])
+    expect(fieldsOf("Own")?.["published_at"]?.["required"]).toBe(true)
   })
 
   it("extracts models that use intersection `} & Timestamps` with relational fields", () => {

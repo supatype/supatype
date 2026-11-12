@@ -26,6 +26,12 @@ export interface WalChange {
    */
   columnTypes: Record<string, string>
   commitTimestamp: string
+  /**
+   * Where the change's transaction ends in the WAL, read from the slot row's `X/Y` (`lsnValue`).
+   * Absent for a change fed in some other way, or a position that could not be read, which is then
+   * never withheld from a join (see `committedBefore`).
+   */
+  commitLsn?: bigint | undefined
 }
 
 // ─── Client → Server messages ────────────────────────────────────────────────
@@ -44,6 +50,16 @@ export interface SubscribeMessage {
    */
   table?: string | undefined
   schema?: string | undefined
+  /**
+   * Whether the join listens for row changes. True: its table is checked against the database.
+   * False: a broadcast or presence join, which reads nothing from the database and is sent no row
+   * change. Absent, from a client that predates it: a row join, never refused, as before the check.
+   *
+   * A client sends `table` on every join, row changes or not: with no row listener, the table its
+   * channel name reads as. Checking every join refused broadcast and presence on any channel not
+   * named after a table (R2-RB2).
+   */
+  changes?: boolean | undefined
   filter?: Record<string, string> | undefined
   /**
    * The client's name for this request, echoed on the reply to it.
@@ -164,4 +180,12 @@ export interface Subscription {
   filter: Record<string, string>
   /** When the subscription was made, in epoch milliseconds; stamped by `ChannelManager.subscribe`. */
   createdAt?: number | undefined
+  /**
+   * The WAL insert position when the join was taken: changes committed at or before it are not
+   * this subscription's (N-S5), as `lsnValue` reads it. Absent when it could not be read, and then
+   * nothing is withheld.
+   */
+  startLsn?: bigint | undefined
+  /** Set for a join that asked for no row changes (`changes: false`): no row change reaches it. */
+  withoutRows?: true | undefined
 }

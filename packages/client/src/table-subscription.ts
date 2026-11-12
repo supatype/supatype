@@ -90,9 +90,11 @@ export function subscribeToTable<TRow>(
  * The status and error a binding shows for a channel status.
  *
  * A refused join and a reconnect that gave up are both errors: neither is going to deliver
- * anything without the caller doing something about it.
+ * anything without the caller doing something about it. A refusal shows the server's reason when
+ * the channel passed one (`err`), such as which table does not exist; "Subscription error" only
+ * when it did not.
  */
-export function subscriptionViewOf(status: ChannelStatus): SubscriptionView {
+export function subscriptionViewOf(status: ChannelStatus, err?: Error | undefined): SubscriptionView {
   switch (status) {
     case "SUBSCRIBING":
       return { status: "connecting", error: null }
@@ -101,7 +103,7 @@ export function subscriptionViewOf(status: ChannelStatus): SubscriptionView {
     case "CLOSED":
       return { status: "disconnected", error: null }
     case "CHANNEL_ERROR":
-      return { status: "error", error: new SupatypeError({ message: "Subscription error" }) }
+      return { status: "error", error: new SupatypeError({ message: err?.message ?? "Subscription error" }) }
     case "TIMED_OUT":
       return { status: "error", error: new SupatypeError({ message: "Realtime connection timed out" }) }
   }
@@ -155,6 +157,6 @@ export function watchTable<TRow>(
     },
     options,
   )
-  subscription.channel.subscribe((status) => handlers.status(subscriptionViewOf(status)))
+  subscription.channel.subscribe((status, err) => handlers.status(subscriptionViewOf(status, err)))
   return subscription.unsubscribe
 }

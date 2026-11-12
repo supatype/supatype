@@ -8,6 +8,11 @@ export interface RuntimeRoute {
   engineProtected?: boolean
   /** Route /graphql/v1 to PostgREST /rpc/graphql with graphql_public Content-Profile. */
   graphqlPostgrest?: boolean
+  /**
+   * The route that serves the project's own app at `/`. Kong's raw path check (RB2) is left off it:
+   * what the app's paths mean is the app's business, and it gets them as it always did.
+   */
+  servesApp?: boolean
 }
 
 export interface RuntimeRouteOptions {
@@ -161,6 +166,7 @@ function runtimeRouteSpecUnified(opts: RuntimeRouteOptions): RuntimeRoute[] {
     },
     {
       name: "app-root",
+      servesApp: true,
       serviceName: "supatype-server-app",
       serviceUrl: SERVER_GATEWAY,
       paths: ["/"],
@@ -228,7 +234,8 @@ function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
       stripPath: true,
       graphqlPostgrest: true,
     },
-    ...studioServerRoutes(() => "auth-v1"),
+    // One service each: Kong refuses a config naming "auth-v1" again ("uniqueness violation").
+    ...studioServerRoutes((name) => `auth-v1-${name}`),
     {
       name: "studio-exact",
       serviceName: "studio-exact",
@@ -263,6 +270,7 @@ function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
   if (staticServiceUrl && staticServiceUrl.length > 0) {
     routes.push({
       name: "app-root",
+      servesApp: true,
       serviceName: "app-root",
       serviceUrl: staticServiceUrl,
       paths: ["/"],
@@ -274,6 +282,7 @@ function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
   if (opts.appUpstream && opts.appUpstream.trim().length > 0) {
     routes.push({
       name: "app-root",
+      servesApp: true,
       serviceName: "app-root",
       serviceUrl: opts.appUpstream.trim(),
       paths: ["/"],

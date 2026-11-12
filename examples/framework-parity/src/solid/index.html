@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Parity — solid</title>
+    <title>Parity: solid</title>
+    <!-- The API address and anon key, from the Supatype server that serves this page. vite-ignore
+         keeps it out of the bundle, so the build does not warn. -->
+    <script src="/supatype-env.js" vite-ignore></script>
   </head>
   <body>
     <div id="app"></div>

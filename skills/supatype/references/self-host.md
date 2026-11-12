@@ -137,13 +137,13 @@ process ID) is removed and does not count.
 
 ### Local overrides stay local
 
-`supatype.local.config.ts` is for development. Every `self-host` command (`compose up`, `down`,
-`restart`, `status`, `logs`, `render`, and the native `serve`, `reload`, `backup` and the rest),
-`supatype deploy`, and a `supatype push` to a production stack (a linked self-host server, or the
-project's own stack while it runs standalone) load `supatype.config.ts` alone. When an override
-exists they print `Using supatype.config.ts without supatype.local.config.ts: that override is for
-local development.` So a `server: { mode: "dev" }` override no longer reaches production even when
-the file is present on the server.
+`supatype.local.config.ts` is for development. Every `self-host compose` command (`up`, `down`,
+`restart`, `status`, `logs`, `render`), `supatype deploy`, and a `supatype push` to a production
+stack (a linked self-host server, or the project's own stack while it runs standalone) load
+`supatype.config.ts` alone. When an override exists they print
+`Using supatype.config.ts without supatype.local.config.ts: that override is for local development.`
+So a `server: { mode: "dev" }` override no longer reaches production even when the file is present
+on the server.
 
 **`DATABASE_URL` in `.env` stays dev's.** `self-host compose up` no longer rewrites it to the
 self-host stack's port; that had dev and self-host rewriting the same line in turn. Host commands
@@ -288,8 +288,17 @@ The `db` service is started with the keyspace turned on
 (`SUPATYPE_KEYSPACE_ENABLED=1`, which the image reads before any server
 starts), serving RESP on `db:6379`; no `valkey` service or volume is generated,
 and both the server and Kong are pointed at `db`. The port is exposed to the
-compose network only, because RESP on a public interface is an unauthenticated read of
-every cached response.
+compose network only.
+
+**The keyspace requires a password** when the image is `supatype/postgres`
+17.2.13 or later (a floating `17-latest` counts). The CLI generates a
+per-project `SUPATYPE_KEYSPACE_PASSWORD` into `.env` the first time `dev` or
+`self-host compose up` writes the stack, and never replaces one you set. Compose
+hands it to `db`, which requires AUTH and sets the `supatype` credential to it
+on every start, to `server`, which logs in with it, and with TLS on to Kong,
+whose ACME plugin reads it through Kong's env vault. A client without it gets
+`NOAUTH` for every command, `PING` and `FLUSHALL` included. With an older image
+nothing is passed, and the keyspace answers without a password as before.
 
 To keep the Valkey sidecar instead:
 
@@ -325,10 +334,19 @@ and with TLS on Kong cannot store its certificate. So the image decides:
 | `database.image` other than a `supatype/postgres` tag | that image | Valkey |
 
 An explicit `cache.provider` always wins. On the native provider a
-`versions.postgres` pin does not decide the cache: native dev uses pg_keyspace
-when the downloaded Postgres archive carries the library and its RESP port
-answers, and falls back to the Valkey sidecar when either does not.
-`database.external` is Valkey there too.
+`versions.postgres` pin does not decide the cache: native dev serves pg_keyspace
+from its own Postgres only when the downloaded archive carries the library and
+is 17.2.13 or later, so it can listen on 127.0.0.1 alone and require the
+project's `SUPATYPE_KEYSPACE_PASSWORD` (generated into `.env`). Dev writes that
+password to `~/.supatype/projects/<name>/keyspace/password` (readable by you
+alone) before each start, Postgres reads it from there
+(`pg_keyspace.password_file`), and dev uses the keyspace once RESP answers a
+client that logs in with it. Otherwise, with
+an older archive, a local `overrides.postgres_dir` build, `database.external`,
+and always on Windows (whose archive has no pg_keyspace), it uses a Valkey
+sidecar container bound to 127.0.0.1. Each project starts its own sidecar on
+the first free port from 6379; a Valkey already running is used only when
+`SUPATYPE_VALKEY_ADDR` names it.
 
 ### What survives a restart, and what does not
 

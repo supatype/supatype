@@ -9,13 +9,14 @@
  * `app/supatype-env.js/route.ts`:
  *
  *     export { GET } from "@supatype/ssr/next"
- *     export const dynamic = "force-dynamic"
  *
- * The `dynamic` line is written in the route file itself: Next's build reads a route's segment
- * config from that file's own source, and warns that it cannot recognize a re-exported one and
- * uses the default instead. Next 15 already renders a `GET` handler per request by default; Next 14
- * prerendered one, which would bake the build machine's values into a static file. Then load it
- * before the app in the root layout:
+ * It must not be prerendered, or the build machine's values (usually none) would be served as a
+ * static file. `GET` reads the request, which is what keeps it per request on every Next version:
+ * Next 14 and Next 16 with `cacheComponents` stop prerendering a `GET` handler that reads its
+ * request, and Next 15 and 16 without it render every `GET` per request anyway. The route file
+ * needs no segment config, and must not have one: Next 16 with `cacheComponents` answers 500 for a
+ * route that exports `dynamic` (0.9.1 release test, RB6). Then load it before the app in the root
+ * layout:
  *
  *     <Script src="/supatype-env.js" strategy="beforeInteractive" />
  *
@@ -27,7 +28,11 @@
 import { jwtClaims } from "./jwt-claims.js"
 import { SERVER_ANON_KEY_ENV, SERVER_URL_ENV, serverEnv } from "./server-env.js"
 
-/** Never prerendered. Exported for tests and tools; the route file writes its own (see above). */
+/**
+ * @deprecated Do not export it from the route: Next reads no re-exported segment config, and Next 16
+ * with `cacheComponents` refuses a `dynamic` one. `GET` keeps itself per request (see above). Kept
+ * so an import of it still builds.
+ */
 export const dynamic = "force-dynamic"
 
 const PUBLIC_ENV_SWITCH = "SUPATYPE_PUBLIC_ENV"
@@ -47,8 +52,14 @@ type PublicEnv = { url: string; anonKey: string } | { error: string } | "off"
  * 200 and sets only `error`, the reason, because a browser runs no script answered with an error
  * status and tells the page nothing of why: this is the one way the client can name the fault on
  * its first call. Switched off it is 404, as the Supatype server answers.
+ *
+ * Next passes the request; reading it keeps the route out of the build's prerender (see the top of
+ * this file). Nothing in it changes the answer. It is required, not optional: Next type-checks a
+ * route handler's first parameter as `Request | NextRequest`, and `Request | undefined` failed
+ * `next build` in a Next 15 app.
  */
-export function GET(): Response {
+export function GET(request: Request): Response {
+  void request.headers
   const env = readPublicEnv()
   if (env === "off") return notFound()
   // A reason is kept by nothing, so the fixed configuration is read on the next load. Values are

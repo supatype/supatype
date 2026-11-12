@@ -27,7 +27,7 @@ This guide covers self-hosting only. Supatype Cloud is a separate product.
 
 <h2 id="local">Create the project locally</h2>
 
-On your machine, with Node.js 22 or later.
+On your machine, with Node.js 20.19 or later: the CLI needs 18, and the Vite 8 app it sets up needs 20.19.
 
 ### 1. Scaffold
 
@@ -82,7 +82,7 @@ A one-time setup on Ubuntu 22.04 or similar, with SSH access.
 
 ```sh title="vm"
 # Docker: https://docs.docker.com/engine/install/ubuntu/
-# Node.js 22 or later (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
+# Node.js 20.19 or later, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
 $ sudo apt update && sudo apt install -y git
 $ sudo npm install -g @supatype/cli
 
@@ -104,7 +104,8 @@ POSTGRES_DB=my-blog
 AUTHENTICATOR_PASSWORD=CHANGE_ME
 SUPATYPE_SQL_EDITOR_PASSWORD=CHANGE_ME
 SUPATYPE_CONTROL_PLANE_SECRET=CHANGE_ME
-JWT_SECRET=CHANGE_ME            # at least 32 characters
+SUPATYPE_KEYSPACE_PASSWORD=CHANGE_ME   # the cache's password, from supatype/postgres 17.2.13
+JWT_SECRET=CHANGE_ME           # at least 32 characters
 # Leave both keys blank. compose up mints them from JWT_SECRET.
 ANON_KEY=
 SERVICE_ROLE_KEY=
@@ -112,7 +113,7 @@ API_EXTERNAL_URL=https://example.com
 SITE_URL=https://example.com
 ```
 
-Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SERVICE_ROLE_KEY` from this `JWT_SECRET` and adds the `VITE_SUPATYPE_URL` (`https://example.com`, from `API_EXTERNAL_URL`) and `VITE_SUPATYPE_ANON_KEY` copies your frontend build reads to `.env`. Keys from your laptop will not work here, because they were signed with a different secret.
+Then run `supatype keys --write` in `/opt/my-blog`. It signs `ANON_KEY` and `SERVICE_ROLE_KEY` from this `JWT_SECRET` and adds the `VITE_SUPATYPE_URL` (`https://example.com`, from `API_EXTERNAL_URL`) and `VITE_SUPATYPE_ANON_KEY` copies your frontend build reads to `.env`. With a `localhost` or `127.0.0.1` `API_EXTERNAL_URL`, as on a test machine, it treats the stack as a local one and writes those copies to `.env.development.local` instead, which a production build never reads. Keys from your laptop will not work here, because they were signed with a different secret.
 
 ### 6. First boot
 

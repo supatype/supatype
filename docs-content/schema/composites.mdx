@@ -11,11 +11,11 @@ for you.
 |---|---|---|
 | `Timestamps` | `WithTimestamps<F>` | `created_at`, `updated_at`, both `TIMESTAMPTZ NOT NULL DEFAULT now()` |
 | `SoftDelete` | `WithSoftDelete<F>` | `deleted_at TIMESTAMPTZ`, nullable |
-| `Publishable` | `F & Publishable` | `published_at TIMESTAMPTZ`, nullable |
+| `Publishable` | `WithPublishable<F>` | `published_at TIMESTAMPTZ`, nullable |
 
-All three also work as an intersection (`{ … } & Timestamps`). For `Publishable` the intersection is
-the only form that adds the column today: the CLI unwraps `WithPublishable<F>` to `F` and drops
-`published_at`.
+All three also work as an intersection (`{ … } & Timestamps`), and both spellings build the same
+table. Inside `WithPublishable<F>`, a `published_at` that `F` declares itself keeps the shape `F`
+gives it.
 
 ## Timestamps
 

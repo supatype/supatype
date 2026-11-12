@@ -27,6 +27,7 @@ function settingRows(s: AuthSettings): SettingRow[] {
       on: !s.mailer_autoconfirm,
       envVar: "SUPATYPE_MAILER_AUTOCONFIRM",
       fromDotEnv: true,
+      configKey: "auth.email.enableConfirmations",
     },
     {
       label: "Phone confirmation",

@@ -1,32 +1,22 @@
 /**
- * self-host commands: manage self-hosted deployments.
+ * self-host commands: manage self-hosted deployments, on Docker Compose.
  *
- * Compose-based commands are the default path.
- * Native/systemd commands remain available for bare-metal deployments.
+ * 0.9.2: the hidden `self-host native` group (systemd units, a foreground supatype-server) is
+ * gone. It ran the server's built-in object store, which applies no storage read rules.
  */
 
 import { Command } from "commander"
 import { errorMessage } from "../error-message.js"
-import { existsSync, readFileSync, mkdirSync, copyFileSync, writeFileSync } from "node:fs"
-import { join, resolve } from "node:path"
-import { homedir } from "node:os"
-import { spawnSync } from "node:child_process"
-import { gzipSync } from "node:zlib"
+import { existsSync } from "node:fs"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { COMPOSE_DEV_KONG_PORT, connectionString, nativeServerPort, schemaPathFromProject, type SupatypeProjectConfig } from "../project-config.js"
-import { readComposeEnvInt } from "../env-file.js"
+import { schemaPathFromProject, type SupatypeProjectConfig } from "../project-config.js"
+import { composeKongHostPort } from "../local-gateway.js"
 import { withPublishing } from "../model-versioning.js"
 import { devApiKeys } from "../dev-api-keys.js"
-import { devPostgresPassword } from "../local-secrets.js"
-import { splitPassword } from "../host-database.js"
 import { fillMissingKeys } from "./keys.js"
 import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
-import { resolveBinary } from "../binary-cache.js"
-import { generateUnits } from "../systemd.js"
-import { readPid } from "../process-manager.js"
-import { localStorageEnv } from "../local-storage.js"
 import {
-  composeProjectName,
+  composeProjectVolumes,
   exitComposeFailed,
   noteUnpinnedImages,
   runDockerCompose,
@@ -35,14 +25,18 @@ import {
   writeSelfHostCompose,
 } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
+import { enterLocalStack, localStackComposeProject } from "../dev-session-lock.js"
+import { recordStackFolder } from "../stack-folder.js"
+import { composeStackWatch, ESSENTIAL_SERVICES, printExitedService, watchForFailure } from "../stack-exit-watch.js"
+import { warnBucketsLeft } from "../storage-provision.js"
 import { syncConfigMailerEnv } from "../config-mailer-env.js"
 import { takenComposePorts, type ComposeContext, type PublishedPort } from "../compose-services.js"
 import { isPortInUse, portCheckCommand } from "../postgres-ctl.js"
+import { retireCliMailerAutoconfirm } from "../mailer-autoconfirm.js"
 import { fatalError } from "../ui/fatal.js"
 import { warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
 import { warnMissingStackSettings } from "../stack-setting-warnings.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
-import { nextSteps } from "../ui/next-steps.js"
 import { confirm } from "../ui/confirm.js"
 import { isInteractive } from "../ui/interactive.js"
 import { withSpinner } from "../ui/progress.js"
@@ -76,7 +70,7 @@ export function registerSelfHost(program: Command): void {
     .action(async (opts: { detach?: boolean }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd, { local: false })
-      const project = composeProjectName(config.project.name)
+      const project = enterLocalStack(cwd, config.project.name)
       const args = opts.detach ? ["up", "-d"] : ["up"]
       // Before anything is written into .env, as the key and secret checks below are.
       requireUrlSafeComposePasswords(cwd, config)
@@ -92,7 +86,9 @@ export function registerSelfHost(program: Command): void {
       if (filled.length > 0) {
         console.log(`[supatype] Minted ${filled.join(" and ")} in .env from JWT_SECRET.`)
       }
-      // The committed config's mailer values, over any the last `dev` wrote from its local one.
+      // The committed config's mailer values, over any the last `dev` wrote from its local one, once the
+      // SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote is out of the way (FF7).
+      retireCliMailerAutoconfirm(cwd)
       syncConfigMailerEnv(cwd, config)
       // Before the spinner, so the warnings are not drawn over.
       warnMissingStackSettings(cwd, config)
@@ -114,8 +110,13 @@ export function registerSelfHost(program: Command): void {
       if (status !== 0) {
         exitComposeFailed(status, "Could not start the self-host Compose stack.", SELF_HOST_BRAND)
       }
+      recordStackFolder(cwd, project)
       // Attached, `up` returns only once the stack has stopped, so there is nothing to provision.
-      if (opts.detach === true) await provisionAfterUp(cwd, config, project, renderOptions.devLocal)
+      if (opts.detach === true) {
+        await provisionAfterUp(cwd, config, project, renderOptions.devLocal)
+        // Unless provisioning already said the stack is not serving, with the same log lines.
+        if (process.exitCode !== 1) await refuseFailingServices(project, ESSENTIAL_SERVICES, 0)
+      }
       await warnIfHandWrittenUrlSilent(cwd)
     })
 
@@ -132,18 +133,21 @@ export function registerSelfHost(program: Command): void {
   composeCmd
     .command("restart <service>")
     .description("Recreate one service with the current config and .env, leaving the others running")
-    .action((service: string) => {
+    .action(async (service: string) => {
       const status = renderAndRunCompose(["up", "-d", "--force-recreate", "--no-deps", service])
       if (status !== 0) {
         exitComposeFailed(status, `Could not restart ${service}.`, SELF_HOST_BRAND)
       }
+      const project = localStackComposeProject(process.cwd(), loadConfig(process.cwd(), { local: false }).project.name)
+      await refuseFailingServices(project, new Set([service]), RESTART_WATCH_MS)
     })
 
   composeCmd
     .command("status")
     .description("Show compose service status")
     .action(() => {
-      process.exitCode = runAgainstStack(["ps"])
+      // Stopped services too: `ps` alone listed an exited storage as if it did not exist (N-FF11).
+      process.exitCode = runAgainstStack(["ps", "--all"])
     })
 
   composeCmd
@@ -157,283 +161,29 @@ export function registerSelfHost(program: Command): void {
       if (opts.service) args.push(opts.service)
       process.exitCode = runAgainstStack(args)
     })
-
-  // ── Native/systemd helpers (hidden; compose is the default self-host path) ─────
-
-  const legacyCmd = new Command("native")
-  selfHostCmd.addCommand(legacyCmd, { hidden: true })
-
-  legacyCmd
-    .command("install-service")
-    .description("Generate systemd unit files and (on Linux) install + enable them")
-    .option("--output-dir <path>", "Write unit files here instead of /etc/systemd/system/")
-    .option("--user <name>", "User to run services as")
-    .option("--no-enable", "Generate unit files but do not enable/start them")
-    .action(
-      async (opts: {
-        outputDir?: string
-        user?: string
-        enable: boolean
-      }) => {
-        logNativeHint("install-service")
-        const cwd = process.cwd()
-        const config = loadConfig(cwd, { local: false })
-
-        const systemdDir = opts.outputDir ?? ".supatype/systemd"
-        const absSystemdDir = resolve(cwd, systemdDir)
-
-        info("Generating systemd unit files...")
-        const { postgres, server } = generateUnits(config, cwd, {
-          outputDir: absSystemdDir,
-          ...(opts.user !== undefined && { user: opts.user }),
-        })
-        plain(`  wrote ${postgres}`)
-        plain(`  wrote ${server}`)
-
-        if (!opts.enable) {
-          nextSteps("To install manually:", [
-            `sudo cp ${postgres} /etc/systemd/system/`,
-            `sudo cp ${server} /etc/systemd/system/`,
-            "sudo systemctl daemon-reload",
-            "sudo systemctl enable --now supatype-postgres supatype-server",
-          ])
-          return
-        }
-
-        if (process.platform !== "linux") {
-          info(
-            "systemd unit installation is only supported on Linux. " +
-            `Unit files are at ${absSystemdDir}/`,
-          )
-          return
-        }
-
-        // Install to /etc/systemd/system/
-        info("Installing to /etc/systemd/system/ (requires sudo)...")
-        const units = [
-          { src: postgres, dest: "/etc/systemd/system/supatype-postgres.service" },
-          { src: server, dest: "/etc/systemd/system/supatype-server.service" },
-        ]
-        for (const { src, dest } of units) {
-          const cp = spawnSync("sudo", ["cp", src, dest], { stdio: "inherit" })
-          if (cp.status !== 0) {
-            error(`Failed to copy ${src} to ${dest}`)
-            process.exit(1)
-          }
-        }
-
-        const daemonReload = spawnSync("sudo", ["systemctl", "daemon-reload"], { stdio: "inherit" })
-        if (daemonReload.status !== 0) { process.exit(1) }
-
-        const enable = spawnSync(
-          "sudo",
-          ["systemctl", "enable", "--now", "supatype-postgres", "supatype-server"],
-          { stdio: "inherit" },
-        )
-        if (enable.status !== 0) { process.exit(1) }
-
-        info("Services installed and started.")
-        plain("  supatype-postgres.service")
-        plain("  supatype-server.service")
-      },
-    )
-
-  // ── serve ──────────────────────────────────────────────────────────────────
-
-  legacyCmd
-    .command("serve")
-    .description("Start supatype-server in the foreground (for standalone mode)")
-    .option("--port <port>", "Override port from config")
-    .action(async (opts: { port?: string }) => {
-      logNativeHint("serve")
-      const cwd = process.cwd()
-      const config = loadConfig(cwd, { local: false })
-
-      const serverBin = await resolveBinary("server", config)
-      const port = opts.port ?? String(nativeServerPort(config))
-
-      const args = [
-        "--port", port,
-        "--mode", config.server.mode,
-        ...(config.server.domain ? ["--domain", config.server.domain] : []),
-      ]
-
-      const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
-      const storageEnv = config.storage?.provider !== "s3" ? localStorageEnv(stateDir) : {}
-
-      info(`Starting supatype-server on port ${port}...`)
-      const result = spawnSync(serverBin, args, {
-        stdio: "inherit",
-        cwd,
-        env: { ...process.env, ...storageEnv },
-      })
-      process.exitCode = result.status ?? 1
-    })
-
-  // ── reload ─────────────────────────────────────────────────────────────────
-
-  legacyCmd
-    .command("reload")
-    .description("Reload the running supatype-server (SIGHUP for config reload)")
-    .action(() => {
-      logNativeHint("reload")
-      const cwd = process.cwd()
-      const config = loadConfig(cwd, { local: false })
-      const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
-      const pid = readPid(join(stateDir, "pid"), "server")
-
-      if (!pid) {
-        // Try systemctl if running as a service
-        if (process.platform === "linux") {
-          const result = spawnSync("systemctl", ["reload", "supatype-server"], { stdio: "inherit" })
-          process.exitCode = result.status ?? 1
-          return
-        }
-        error("Server does not appear to be running (no PID file found).")
-        process.exitCode = 1
-        return
-      }
-
-      try {
-        process.kill(pid, "SIGHUP")
-        info(`Sent SIGHUP to supatype-server (pid ${pid}).`)
-      } catch (err) {
-        error(`Failed to signal pid ${pid}: ${errorMessage(err)}`)
-        process.exitCode = 1
-      }
-    })
-
-  // ── status ─────────────────────────────────────────────────────────────────
-
-  legacyCmd
-    .command("status")
-    .description("Show running status of supatype services")
-    .action(() => {
-      logNativeHint("status")
-      const cwd = process.cwd()
-      const config = loadConfig(cwd, { local: false })
-      const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
-
-      plain(`Project: ${config.project.name}\n`)
-
-      if (process.platform === "linux" && existsSync("/run/systemd/system")) {
-        // systemd is active
-        for (const svc of ["supatype-postgres", "supatype-server"]) {
-          const result = spawnSync("systemctl", ["status", "--no-pager", "--lines=0", svc], {
-            encoding: "utf8",
-          })
-          const active = result.stdout?.includes("active (running)") ? "running" : "stopped"
-          plain(`  ${svc}: ${active}`)
-        }
-      } else {
-        // PID file check
-        const serverPid = readPid(join(stateDir, "pid"), "server")
-        const pgPid = readPid(join(stateDir, "pid"), "postgres")
-        plain(`  postgres:          ${pgPid ? `running (pid ${pgPid})` : "stopped"}`)
-        plain(`  supatype-server:   ${serverPid ? `running (pid ${serverPid})` : "stopped"}`)
-      }
-
-      const logDir = join(stateDir, "logs")
-      if (existsSync(logDir)) {
-        plain(`\nLogs: ${logDir}`)
-      }
-    })
-
-  // ── logs ───────────────────────────────────────────────────────────────────
-
-  legacyCmd
-    .command("logs")
-    .description("Tail supatype service logs")
-    .option("--service <name>", "Show logs for: postgres | server")
-    .option("--lines <n>", "Number of lines to show", "50")
-    .option("-f, --follow", "Follow log output")
-    .action((opts: { service?: string; lines: string; follow?: boolean }) => {
-      logNativeHint("logs")
-      const cwd = process.cwd()
-      const config = loadConfig(cwd, { local: false })
-      const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
-      const logDir = join(stateDir, "logs")
-
-      if (process.platform === "linux" && existsSync("/run/systemd/system")) {
-        const args = ["--no-pager", "--lines", opts.lines]
-        if (opts.follow) args.push("--follow")
-        if (opts.service) args.push(`-u`, `supatype-${opts.service}`)
-        else args.push("-u", "supatype-postgres", "-u", "supatype-server")
-        spawnSync("journalctl", args, { stdio: "inherit" })
-        return
-      }
-
-      // File-based logs
-      const targets: Array<{ label: string; file: string }> = []
-      if (!opts.service || opts.service === "postgres") {
-        targets.push({ label: "postgres", file: join(logDir, "postgres.log") })
-      }
-      if (!opts.service || opts.service === "server") {
-        targets.push({ label: "server", file: join(logDir, "server.log") })
-      }
-
-      for (const { label, file } of targets) {
-        if (!existsSync(file)) {
-          plain(`[${label}] log file not found: ${file}`)
-          continue
-        }
-        if (opts.follow) {
-          const tail = spawnSync("tail", ["-f", "-n", opts.lines, file], { stdio: "inherit" })
-          process.exitCode = tail.status ?? 0
-        } else {
-          const n = parseInt(opts.lines, 10)
-          const content = readFileSync(file, "utf8")
-          const lines = content.split("\n")
-          plain(lines.slice(-n).join("\n"))
-        }
-      }
-    })
-
-  // ── backup ─────────────────────────────────────────────────────────────────
-
-  legacyCmd
-    .command("backup")
-    .description("Create a Postgres dump of the project database")
-    .option("--output <path>", "Output file path (default: ./backups/backup-<timestamp>.sql.gz)")
-    .option("--connection <url>", "Database connection URL (overrides config)")
-    .action((opts: { output?: string; connection?: string }) => {
-      logNativeHint("backup")
-      const cwd = process.cwd()
-      const config = loadConfig(cwd, { local: false })
-      const conn = opts.connection ?? connectionString(config, devPostgresPassword(cwd), cwd)
-      const outFile = opts.output ?? resolve(
-        cwd,
-        "backups",
-        `backup-${new Date().toISOString().replace(/[:.]/g, "-")}.sql.gz`,
-      )
-
-      mkdirSync(resolve(outFile, ".."), { recursive: true })
-
-      info(`Backing up database to ${outFile}...`)
-      try {
-        // Avoid shell interpolation of user-supplied values. The password goes in the
-        // environment, not on pg_dump's command line, where the process list would show it.
-        const { dsn, password } = splitPassword(conn)
-        const pgDump = spawnSync("pg_dump", [dsn], {
-          stdio: ["ignore", "pipe", "pipe"],
-          env: password === undefined ? process.env : { ...process.env, PGPASSWORD: password },
-        })
-        if (pgDump.status !== 0) {
-          const stderr = pgDump.stderr?.toString("utf8") ?? ""
-          throw new Error(stderr.trim() || "pg_dump failed")
-        }
-
-        const compressed = gzipSync(pgDump.stdout)
-        writeFileSync(outFile, compressed)
-        info("Backup complete.")
-      } catch (err) {
-        error(`Backup failed: ${errorMessage(err)}`)
-        process.exit(1)
-      }
-    })
 }
 
 const SELF_HOST_BRAND = { intro: "Self-host deployment" }
+
+/** How long `restart` watches the service it recreated. */
+const RESTART_WATCH_MS = 5000
+
+/**
+ * Exit 1, naming the service and its last log lines, when one of `services` has exited or keeps
+ * being restarted. Compose returns 0 once a container starts, whether or not it stays up: a
+ * storage container that refused its settings left `up` and `restart` exiting 0 (N-FF11).
+ */
+async function refuseFailingServices(project: string, services: ReadonlySet<string>, windowMs: number): Promise<void> {
+  const cwd = process.cwd()
+  const stack = { cwd, project, composePath: selfHostComposePaths(cwd).composePath }
+  const watch = composeStackWatch(stack)
+  const failed = await watchForFailure(watch, services, windowMs)
+  if (failed === undefined) return
+  await printExitedService(failed, { watch, cwd })
+  error(`The ${failed.service} service is not running.`)
+  plain(`Check: supatype self-host compose logs --service ${failed.service}`)
+  process.exitCode = 1
+}
 
 /**
  * The schema's declared buckets and the first admin user, on the stack `up` has just started, once
@@ -444,11 +194,10 @@ const SELF_HOST_BRAND = { intro: "Self-host deployment" }
 async function provisionAfterUp(cwd: string, config: SupatypeProjectConfig, project: string, devLocal: boolean): Promise<void> {
   const { composeGatewayHostPort, provisionStartedStack, StackNotServing } = await import("../dev-compose.js")
   try {
-    const kongPort = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT") ?? COMPOSE_DEV_KONG_PORT
-    const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", kongPort)
+    const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", composeKongHostPort(cwd))
     const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
     const stack = { composePath: selfHostComposePaths(cwd).composePath, project, gatewayPort }
-    await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey)
+    warnBucketsLeft(await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey))
   } catch (err) {
     if (!(err instanceof StackNotServing)) {
       warn(`The stack is up, but its storage buckets or first admin user could not be created: ${errorMessage(err)}`)
@@ -487,21 +236,30 @@ async function requireComposePortsFree(ctx: ComposeContext): Promise<void> {
  * `self-host compose down`. The volumes hold the database and every stored file, so removing them
  * is asked for by name and confirmed; a plain `down` says they were kept, since starting over used
  * to mean finding them with `docker volume ls`.
+ *
+ * With `--remove-orphans`: a service the compose file no longer has (SeaweedFS, after a switch to
+ * S3) kept running. Its volume is not the file's either, so `--volumes` cannot remove it, and what
+ * is left is named rather than called gone (0.9.2 round 2, R2-S20).
  */
 async function composeDown(opts: { volumes?: boolean; yes?: boolean }): Promise<void> {
   if (opts.volumes === true && opts.yes !== true && !(await confirmVolumeRemoval())) {
     plain("Nothing stopped and nothing removed.")
     return
   }
-  const status = runAgainstStack(opts.volumes === true ? ["down", "--volumes"] : ["down"])
+  const status = runAgainstStack(opts.volumes === true ? ["down", "--volumes", "--remove-orphans"] : ["down", "--remove-orphans"])
   if (status !== 0) {
     exitComposeFailed(status, "Could not stop the self-host Compose stack.", SELF_HOST_BRAND)
   }
+  if (opts.volumes !== true) {
+    info("Stopped the stack. Its volumes (the database and stored files) were kept; `supatype self-host compose down --volumes` removes them.")
+    return
+  }
+  const left = composeProjectVolumes(enterLocalStack(process.cwd(), loadConfig(process.cwd(), { local: false }).project.name))
   info(
-    opts.volumes === true
+    left.length === 0
       ? "Stopped the stack and removed its volumes: the database and stored files are gone."
-      : "Stopped the stack. Its volumes (the database and stored files) were kept; " +
-          "`supatype self-host compose down --volumes` removes them.",
+      : `Stopped the stack and removed the volumes its compose file declares. Still here, as the file no ` +
+          `longer declares them: ${left.join(", ")}. \`docker volume rm ${left.join(" ")}\` removes them.`,
   )
 }
 
@@ -546,22 +304,20 @@ function runCompose(args: string[], use: ComposeFileUse): number {
   const cwd = process.cwd()
   // The committed config, not the developer's local override: this is the self-host stack (issue 24).
   const config = loadConfig(cwd, { local: false })
+  // This folder's stack, run as a dev session running it does, before anything reads a port.
+  const project = enterLocalStack(cwd, config.project.name)
   if (use === "start") {
     requireUrlSafeComposePasswords(cwd, config)
+    retireCliMailerAutoconfirm(cwd)
     syncConfigMailerEnv(cwd, config)
   }
   const composePath =
     use === "on-disk"
       ? selfHostComposePaths(cwd).composePath
       : writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name)).composePath
-  return runDockerCompose(composePath, args, cwd, composeProjectName(config.project.name), {
+  const status = runDockerCompose(composePath, args, cwd, project, {
     brand: SELF_HOST_BRAND,
   })
-}
-
-function logNativeHint(cmd: string): void {
-  warn(
-    `self-host native ${cmd}: Docker Compose is the default path. ` +
-      "Use `supatype self-host compose` unless you need bare-metal systemd/binaries.",
-  )
+  if (use === "start" && status === 0) recordStackFolder(cwd, project)
+  return status
 }

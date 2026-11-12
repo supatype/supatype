@@ -95,8 +95,6 @@ describe("production commands read the config without the local override", () =>
     [["self-host", "compose", "restart", "server"]],
     [["self-host", "compose", "status"]],
     [["self-host", "compose", "logs"]],
-    [["self-host", "native", "install-service"]],
-    [["self-host", "native", "serve"]],
     [["deploy"]],
   ])("%j", async (args) => {
     expect((await run(args)).at(-1)).toEqual({ local: false })

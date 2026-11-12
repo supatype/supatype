@@ -5,6 +5,7 @@ import { resolve } from "node:path"
 import { localPublicApiUrl } from "../local-gateway.js"
 import { updateAppConfigInProject } from "../app-config.js"
 import { loadConfig } from "../config.js"
+import { enterLocalStack } from "../dev-session-lock.js"
 import { error, file, info, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 
@@ -56,7 +57,11 @@ function resolveStaticDir(dir?: string): string {
   return trimmed && trimmed.length > 0 ? trimmed : "./public"
 }
 
+// The app's address is found before anything is written: finding it enters the local stack, which
+// can refuse this shell's ports, and a refusal left the config written and the directory made
+// (0.9.2 round 5, S-2).
 function addStaticApp(cwd: string, staticDir: string): void {
+  const appUrl = localAppUrl(cwd)
   const abs = resolve(cwd, staticDir)
   if (!existsSync(abs)) {
     mkdirSync(abs, { recursive: true })
@@ -66,7 +71,7 @@ function addStaticApp(cwd: string, staticDir: string): void {
     const configPath = updateAppConfigInProject(cwd, { mode: "static", staticDir })
     file("updated", configPath)
     info(`Static app directory: ${staticDir}`)
-    nextSteps("Build your frontend, then:", [...applySteps(cwd), `App URL: ${localPublicApiUrl(cwd)}/`])
+    nextSteps("Build your frontend, then:", [...applySteps(cwd), `App URL: ${appUrl}`])
   } catch (err) {
     error(errorMessage(err))
     process.exit(1)
@@ -75,10 +80,11 @@ function addStaticApp(cwd: string, staticDir: string): void {
 
 function addProxyApp(cwd: string, port: string, upstream?: string): void {
   const upstreamUrl = upstream?.trim() || `http://localhost:${port}`
+  const appUrl = localAppUrl(cwd)
   try {
     const configPath = updateAppConfigInProject(cwd, { mode: "proxy", upstream: upstreamUrl })
     file("updated", configPath)
-    info(`Forwarding to ${upstreamUrl}: app at ${localPublicApiUrl(cwd)}/`)
+    info(`Forwarding to ${upstreamUrl}: app at ${appUrl}`)
     nextSteps("Next:", applySteps(cwd))
   } catch (err) {
     error(errorMessage(err))
@@ -118,4 +124,18 @@ function projectServerMode(cwd: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * Where the local stack serves the app: on a running dev session's gateway when one runs in this
+ * folder, which a port its shell gave keeps out of `.env`. A config that cannot be read names no
+ * stack to enter, and the address `.env` gives stands.
+ */
+function localAppUrl(cwd: string): string {
+  try {
+    enterLocalStack(cwd, loadConfig(cwd).project.name)
+  } catch {
+    // Nothing entered: the address below is `.env`'s.
+  }
+  return `${localPublicApiUrl(cwd)}/`
 }

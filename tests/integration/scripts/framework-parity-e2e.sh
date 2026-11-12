@@ -61,12 +61,16 @@ fail() { echo "  FAIL $*" >&2; exit 1; }
 preview_port() { echo $((PREVIEW_BASE_PORT + $1)); }
 
 echo "==> Minting keys"
-# Before the builds: Vite bakes VITE_SUPATYPE_ANON_KEY into each bundle.
 mint_keys "$EXAMPLE_DIR" "$CLI_BIN"
 
-echo "==> Building the three apps"
+echo "==> Building the three apps, as the README does"
+# Plain `vite build`s, with no key given: each page reads it from /supatype-env.js, which the
+# preview forwards to the gateway (vite.shared.ts; checked below). 0.9.1 release test (RB9):
+# passing the key here hid that the README's own builds had none. Unset in case the caller's
+# environment carries one.
 for fw in "${FRAMEWORKS[@]}"; do
-  (cd "$EXAMPLE_DIR" && VITE_SUPATYPE_ANON_KEY="$ANON_KEY" npx vite build --config "vite.$fw.config.ts" >/dev/null)
+  (cd "$EXAMPLE_DIR" && env -u VITE_SUPATYPE_ANON_KEY -u VITE_SUPATYPE_URL \
+    npx vite build --config "vite.$fw.config.ts" >/dev/null)
   [[ -f "$EXAMPLE_DIR/dist/$fw/index.html" ]] || fail "the $fw build produced no dist/$fw/index.html"
   echo "  ok   dist/$fw"
 done
@@ -112,6 +116,13 @@ if ! wait_until 60 "the three previews" previews_ready; then
   echo "ERROR: a vite preview never answered"
   exit 1
 fi
+
+echo ""
+echo "==> Each page gets its anon key through its preview"
+for i in "${!FRAMEWORKS[@]}"; do
+  expect_env_script "http://127.0.0.1:$(preview_port "$i")" \
+    || fail "the ${FRAMEWORKS[$i]} page has no way to get its anon key"
+done
 
 echo ""
 echo "==> Driving all three through the same five steps"

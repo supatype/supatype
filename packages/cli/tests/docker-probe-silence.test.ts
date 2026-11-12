@@ -31,17 +31,22 @@ const INFO_OK = answer({ status: 0, stdout: "Server Version: 28.0.1" })
 describe("probeDockerDaemon on a Docker that is slow to answer", () => {
   beforeEach(() => spawnSyncMock.mockReset())
 
-  it("asks again once, and takes the second answer", () => {
-    spawnSyncMock.mockReturnValueOnce(VERSION_OK).mockReturnValueOnce(TIMED_OUT).mockReturnValueOnce(VERSION_OK).mockReturnValueOnce(INFO_OK)
+  it("asks again once, and takes the second answer, asking only `docker info` again", () => {
+    spawnSyncMock.mockReturnValueOnce(VERSION_OK).mockReturnValueOnce(TIMED_OUT).mockReturnValueOnce(INFO_OK)
     expect(probeDockerDaemon()).toEqual({ ok: true })
-    expect(spawnSyncMock).toHaveBeenCalledTimes(4)
+    expect(spawnSyncMock.mock.calls.map((call: unknown[]) => call[1])).toEqual([
+      ["version", "--format", "{{.Client.Version}}"],
+      ["info"],
+      ["info"],
+    ])
   })
 
-  it("reports a Docker silent twice as not answering, not as not running", () => {
+  it("reports a Docker silent for the whole wait as not answering, not as not running", () => {
     spawnSyncMock.mockReturnValue(TIMED_OUT)
-    const probe = probeDockerDaemon()
+    let now = 0
+    const probe = probeDockerDaemon({ now: () => (now += 20_000) })
     expect(probe).toMatchObject({ ok: false, reason: "daemon_unresponsive" })
-    expect(spawnSyncMock).toHaveBeenCalledTimes(2)
+    expect(spawnSyncMock).toHaveBeenCalledTimes(3)
     if (probe.ok) return
     const message = formatDockerUnavailableMessage(probe)
     expect(message).not.toMatch(/not running/)
@@ -57,22 +62,27 @@ describe("probeDockerDaemon on a Docker that is slow to answer", () => {
 })
 
 /** A Docker whose first `info` hangs and whose second answers, as a Docker busy for a moment does. */
-function busyOnce(): { runner: DockerRunner; infoCalls: () => number } {
+function busyOnce(): { runner: DockerRunner; infoCalls: () => number; versionCalls: () => number } {
   let info = 0
+  let version = 0
   const runner: DockerRunner = (args) => {
-    if (args[0] === "version") return Promise.resolve<DockerAnswer>({ status: 0, stdout: "28.0.1", stderr: "", timedOut: false, missing: false })
+    if (args[0] === "version") {
+      version += 1
+      return Promise.resolve<DockerAnswer>({ status: 0, stdout: "28.0.1", stderr: "", timedOut: false, missing: false })
+    }
     info += 1
     if (info === 1) return new Promise<DockerAnswer>(() => undefined)
     return Promise.resolve<DockerAnswer>({ status: 0, stdout: "ok", stderr: "", timedOut: false, missing: false })
   }
-  return { runner, infoCalls: () => info }
+  return { runner, infoCalls: () => info, versionCalls: () => version }
 }
 
 describe("probeDockerDaemonRetrying (requireDockerDaemonAsync)", () => {
-  it("asks again once after a silence", async () => {
+  it("asks `docker info` again once after a silence, and `docker version` only the once", async () => {
     const docker = busyOnce()
-    expect(await probeDockerDaemonRetrying(docker.runner, 100)).toEqual({ ok: true })
+    expect(await probeDockerDaemonRetrying(docker.runner, { firstAskMs: 100, askMs: 100 })).toEqual({ ok: true })
     expect(docker.infoCalls()).toBe(2)
+    expect(docker.versionCalls()).toBe(1)
   })
 })
 

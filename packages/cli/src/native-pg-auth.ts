@@ -15,6 +15,7 @@ import { join } from "node:path"
 import { NATIVE_AUTH_METHOD, pgBin, pgSpawnEnv, reload, type PgOptions } from "./postgres-ctl.js"
 import { hasEnvValue } from "./env-file.js"
 import { fatalError } from "./ui/fatal.js"
+import { QUIET_SECRET_SQL } from "./secret-sql.js"
 
 const SUPERUSER_PASSWORD_ENV = "SUPATYPE_SUPERUSER_PASSWORD"
 
@@ -102,7 +103,7 @@ export function requirePasswordAuth(opts: PgOptions, superuserPassword: string):
 
 function setSuperuserPassword(opts: PgOptions, password: string): void {
   // Through psql's environment, never its arguments, so the password is not on a command line.
-  const sql = `\\getenv pw ${SUPERUSER_PASSWORD_ENV}\nALTER ROLE postgres PASSWORD :'pw';\n`
+  const sql = `${QUIET_SECRET_SQL}\\getenv pw ${SUPERUSER_PASSWORD_ENV}\nALTER ROLE postgres PASSWORD :'pw';\n`
   const result = spawnSync(
     pgBin(opts.pgBinDir, "psql"),
     ["-h", "127.0.0.1", "-p", String(opts.port), "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", "-"],

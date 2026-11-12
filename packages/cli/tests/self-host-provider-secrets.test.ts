@@ -87,6 +87,7 @@ describe("self-host compose and provider secrets", () => {
   it("is quiet when .env supplies the server's own variable instead", async () => {
     writeFileSync(join(projectDir, ".env"), "SUPATYPE_EXTERNAL_GITHUB_SECRET=from-dotenv\n")
     await render()
-    expect(warnings).toEqual([])
+    // Only the provider secret is asked about: the release's own Postgres pin may warn of its own.
+    expect(warnings.filter((line) => line.includes("GITHUB_SECRET"))).toEqual([])
   })
 })

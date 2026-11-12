@@ -10,7 +10,7 @@ checkout of your project rather than a hand-maintained stack.
 ## Prerequisites
 
 - A server with Docker 20.10+ and Docker Compose v2
-- Node.js 22 or later, for the Supatype CLI
+- Node.js 18 or later for the Supatype CLI, or 20.19 or later if the server builds a Vite 8 frontend
 - A domain name (optional but recommended for production)
 
 ## Step 1: Get the project onto the server
@@ -86,8 +86,10 @@ supatype keys --write
 ```
 
 `supatype self-host compose up` also fills in blank keys on its own, and every `self-host compose`
-command adds `SUPATYPE_CONTROL_PLANE_SECRET` when it is missing. The three passwords are required:
-Compose stops before starting anything and names the one that is missing. See
+command adds `SUPATYPE_CONTROL_PLANE_SECRET` when it is missing. When the cache runs inside
+Postgres on `supatype/postgres` 17.2.13 or later, it adds `SUPATYPE_KEYSPACE_PASSWORD`, the cache's
+password, the same way ([Cache](/docs/self-hosting/configuration.html#cache)). The three passwords
+are required: Compose stops before starting anything and names the one that is missing. See
 [Configuration](/docs/self-hosting/configuration.html) for every variable the stack reads.
 
 `JWT_SECRET` must be at least 32 characters, because PostgREST will not start with a shorter one.
@@ -120,7 +122,8 @@ supatype self-host compose status
 ```
 
 The stack runs `db`, `postgrest`, `server` (the API gateway service, including auth), `storage`,
-`seaweedfs` (the object store behind storage), `functions-worker`, `control-plane`, `studio` and
+`seaweedfs` (the object store behind storage, left out when `storage.production` is `"s3"`, see
+[Configuration](/docs/self-hosting/configuration.html#storage)), `functions-worker`, `control-plane`, `studio` and
 `kong`, plus `realtime` unless realtime is turned off, and `valkey` if you chose
 `cache: { provider: "valkey" }` or use an
 [external database](/docs/self-hosting/external-database.html). The file also declares

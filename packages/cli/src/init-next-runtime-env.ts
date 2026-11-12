@@ -12,10 +12,14 @@
  * not own. A layout init cannot edit safely is left as it is, and the two lines are printed instead.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { dirname, join, sep } from "node:path"
+import semver from "semver"
 import { detectFramework } from "./app/framework.js"
-import { file, info, plain } from "./ui/messages.js"
+import { errorMessage } from "./error-message.js"
+import { withFirstChildren, withSourceLineEnds } from "./jsx-first-child.js"
+import { file, info, plain, warn } from "./ui/messages.js"
+import { parsePackageJson } from "./package-json.js"
 import { isJsonObject, parseJsonObject } from "@supatype/shared"
 
 const SSR_PACKAGE = "@supatype/ssr"
@@ -23,15 +27,116 @@ const SCRIPT_SRC = "/supatype-env.js"
 const SCRIPT_IMPORT = 'import Script from "next/script"'
 const LAYOUT_NAMES = ["layout.tsx", "layout.jsx", "layout.js", "layout.ts"] as const
 
-/** The route file. The segment config is written in it: Next's build does not recognize a re-exported one. */
+/**
+ * The route file. It has no segment config: `GET` reads the request, which keeps it per request on
+ * every Next version, and a `dynamic` export makes Next 16 with `cacheComponents` (create-next-app's
+ * default) answer the route with a 500 (0.9.1 release test, RB6).
+ */
 export const NEXT_RUNTIME_ENV_ROUTE = [
   "// The deployment's API address and anon key for the browser client, read from SUPATYPE_URL and",
   "// SUPATYPE_ANON_KEY on the server at each page load. The root layout loads it before the app.",
+  "// No segment config: GET reads the request, which keeps it out of the build's prerender on every",
+  "// Next version, and Next 16 with cacheComponents refuses a `dynamic` export.",
   `export { GET } from "${SSR_PACKAGE}/next"`,
-  "// Written here rather than re-exported: Next reads a route's segment config from this file only.",
-  'export const dynamic = "force-dynamic"',
   "",
 ].join("\n")
+
+/** The routes earlier releases of init wrote, which are safe to replace: 0.9.1's, the only one before. */
+const EARLIER_ROUTES: readonly string[] = [
+  [
+    "// The deployment's API address and anon key for the browser client, read from SUPATYPE_URL and",
+    "// SUPATYPE_ANON_KEY on the server at each page load. The root layout loads it before the app.",
+    `export { GET } from "${SSR_PACKAGE}/next"`,
+    "// Written here rather than re-exported: Next reads a route's segment config from this file only.",
+    'export const dynamic = "force-dynamic"',
+    "",
+  ].join("\n"),
+]
+
+/** Every place init writes the route: `app/` or `src/app/`, TypeScript or not. */
+const ROUTE_PATHS = ["app", "src/app"].flatMap((appDir) => ["ts", "js"].map((ext) => `${appDir}/supatype-env.js/route.${ext}`))
+
+const DYNAMIC_EXPORT = /^\s*export\s+const\s+dynamic\b/m
+
+/**
+ * Bring the route an earlier init wrote up to date: one still as init wrote it is replaced, keeping
+ * its line endings; one changed since that still exports `dynamic` is left alone, with one warning.
+ *
+ * 0.9.1 release test (RB6): 0.9.1's route exports `dynamic`, which Next 16 with `cacheComponents`
+ * answers with a 500, and init skips a route that exists. `supatype generate` runs this, since every
+ * install runs `generate` through the project's `prepare`, so an upgrade fixes the route by itself.
+ */
+export function upgradeNextRuntimeEnvRoute(dir: string): void {
+  const routes = ROUTE_PATHS.filter((rel) => existsSync(join(dir, rel)))
+  const changed: string[] = []
+  for (const rel of routes) {
+    const path = join(dir, rel)
+    const source = readFileSync(path, "utf8")
+    const text = source.replace(/\r\n/g, "\n")
+    if (EARLIER_ROUTES.includes(text)) replaceRoute(path, rel, source.includes("\r\n") ? "\r\n" : "\n")
+    else if (DYNAMIC_EXPORT.test(text)) changed.push(rel)
+  }
+  if (changed.length > 0) {
+    warn(
+      `${changed.join(" and ")} ${changed.length === 1 ? "has" : "have"} an \`export const dynamic\` line, which Next.js refuses ` +
+        `with a 500 when cacheComponents is on (a new create-next-app's default). Remove it: GET from ${SSR_PACKAGE}/next ` +
+        "keeps the route per request by itself.",
+    )
+  }
+  if (routes.length > 0) warnOldSsr(dir)
+}
+
+/** The first `@supatype/ssr` whose `GET` reads the request, which the current route relies on. */
+const SSR_ROUTE_FLOOR = "0.9.2"
+
+/**
+ * Warn when the `@supatype/ssr` the route imports is older than {@link SSR_ROUTE_FLOOR}: its `GET`
+ * does not read the request, so Next prerenders the route and serves it with no values.
+ */
+function warnOldSsr(dir: string): void {
+  const version = installedSsrVersion(dir)
+  // A prerelease of the floor has the fix; one of an earlier version does not.
+  if (version === undefined || !semver.lt(version, `${SSR_ROUTE_FLOOR}-0`)) return
+  warn(
+    `${SSR_PACKAGE} ${version} is installed. Upgrade it to ${SSR_ROUTE_FLOOR} or later, or Next.js prerenders ` +
+      `${SCRIPT_SRC} at build time and serves it with no values.`,
+  )
+}
+
+/**
+ * The version of the `@supatype/ssr` Node would load from `dir`: the nearest
+ * `node_modules/@supatype/ssr`, in `dir` or a folder above, where a workspace hoists it. Undefined
+ * when there is none, when it cannot be read, or when it is linked to a source checkout outside
+ * any `node_modules` (a workspace package), whose version field is not a release's.
+ */
+function installedSsrVersion(dir: string): string | undefined {
+  for (let at = dir; ; at = dirname(at)) {
+    const pkgDir = join(at, "node_modules", "@supatype", "ssr")
+    if (existsSync(join(pkgDir, "package.json"))) return releasedVersion(pkgDir)
+    if (dirname(at) === at) return undefined
+  }
+}
+
+/** The version in `pkgDir`'s package.json, when it is an installed release. */
+function releasedVersion(pkgDir: string): string | undefined {
+  try {
+    if (!realpathSync(pkgDir).split(sep).includes("node_modules")) return undefined
+    const { version } = parsePackageJson(readFileSync(join(pkgDir, "package.json"), "utf8"))
+    return version !== undefined && semver.valid(version) !== null ? version : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Write the current route over one init wrote, or say why it could not be. */
+function replaceRoute(path: string, rel: string, eol: string): void {
+  try {
+    writeFileSync(path, NEXT_RUNTIME_ENV_ROUTE.replace(/\n/g, eol), "utf8")
+    file("updated", `${rel} (removed export const dynamic, which Next.js refuses under cacheComponents)`)
+  } catch (err) {
+    warn(`Could not update ${rel}: ${errorMessage(err)}. Remove its \`export const dynamic\` line by hand.`)
+  }
+}
 
 const NEXT_CONFIG_NAMES = ["next.config.ts", "next.config.mts", "next.config.mjs", "next.config.js", "next.config.cjs"] as const
 
@@ -119,34 +224,13 @@ function loadInRootLayout(dir: string, appDir: string): void {
  * one, a `<body>` whose attributes hold a `>`, or a `Script` that is something else.
  */
 export function withRuntimeEnvScript(source: string): string | undefined {
-  const eol = source.includes("\r\n") ? "\r\n" : "\n"
-  const text = source.replace(/\r\n/g, "\n")
-  const bodies = [...text.matchAll(/<body\b[^>]*>/g)]
-  const body = bodies[0]
-  if (bodies.length !== 1 || body === undefined || body[0].endsWith("/>") || !balancedBraces(body[0])) return undefined
-  const imported = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/script["']/m.exec(text)?.[1]
-  if (imported === undefined && /\bScript\b/.test(text)) return undefined
-  const name = imported ?? "Script"
-  const end = body.index + body[0].length
-  const tag = `\n${childIndent(text, body.index, end)}${scriptTag(name)}`
-  const withTag = text.slice(0, end) + tag + text.slice(end)
-  const result = imported === undefined ? withImport(withTag) : withTag
-  return result.replace(/\n/g, eol)
-}
-
-/** Whether every `{` in a tag's attributes is closed in it, so its `>` really ends the tag. */
-function balancedBraces(tag: string): boolean {
-  let depth = 0
-  for (const ch of tag) depth += ch === "{" ? 1 : ch === "}" ? -1 : 0
-  return depth === 0
-}
-
-/** The indentation of the line after `<body>` when deeper than its own, else its own plus two. */
-function childIndent(text: string, tagStart: number, tagEnd: number): string {
-  const lineStart = text.lastIndexOf("\n", tagStart) + 1
-  const own = /^[ \t]*/.exec(text.slice(lineStart))?.[0] ?? ""
-  const next = /^\n([ \t]*)\S/.exec(text.slice(tagEnd))?.[1]
-  return next !== undefined && next.length > own.length ? next : `${own}  `
+  return withSourceLineEnds(source, (text) => {
+    const imported = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/script["']/m.exec(text)?.[1]
+    if (imported === undefined && /\bScript\b/.test(text)) return undefined
+    const withTag = withFirstChildren(text, "body", [scriptTag(imported ?? "Script")])
+    if (withTag === undefined) return undefined
+    return imported === undefined ? withImport(withTag) : withTag
+  })
 }
 
 /** `text` importing `next/script` first, below a leading `"use client"` style directive. */

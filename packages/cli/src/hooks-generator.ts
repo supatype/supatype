@@ -10,6 +10,7 @@
  */
 import { isNonEmptyObject, objectAt } from "./ast-read.js"
 import { fieldsWithCallerDefaults } from "./owner-default.js"
+import { columnFieldsOf } from "./engine-columns.js"
 import {
   astModelsOf,
   generateInsertType,
@@ -34,10 +35,11 @@ function hookedModels(ast: unknown): HookedModel[] {
       // still appear here or `FieldValidator<"products", ...>` would not compile.
       return isNonEmptyObject(platform?.["hooks"]) || isNonEmptyObject(platform?.["validate"])
     })
-    // Fields as the engine writes them: an owner auth user id defaults to the caller (C9).
+    // Fields as the engine writes them: an owner auth user id defaults to the caller (C9), and the
+    // columns the engine adds beside the fields (`timestamps: true`) are on the row too (FF3).
     .map((model) => ({
       table: resolveTableName(model),
-      fields: fieldsWithCallerDefaults(model),
+      fields: fieldsWithCallerDefaults({ ...model, fields: columnFieldsOf(model) }),
       columns: modelHookColumns(model),
     }))
     .sort((a, b) => a.table.localeCompare(b.table))

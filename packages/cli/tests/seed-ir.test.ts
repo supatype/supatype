@@ -18,7 +18,15 @@ import { createHash } from "node:crypto"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { SeedCollector, type Manifest } from "../src/seed-ir.js"
-import { eq, expr, type SeedDb, type SeedOperation } from "../src/seed.js"
+import {
+  and,
+  eq,
+  expr,
+  isNull,
+  type SeedConditionWhere,
+  type SeedDb,
+  type SeedOperation,
+} from "../src/seed.js"
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -295,6 +303,98 @@ describe("what the collector encodes", () => {
       if: { kind: "notExists", model: "SiteSettings" },
     })
     expect(operations[1]).toMatchObject({ op: "create" })
+  })
+
+  /**
+   * 0.9.1 release test, FF6 and #303: `where: { name: "x" }` reached the IR as it was, and the
+   * engine refused the document with "missing field `type`". The plain object names rows the way
+   * an upsert's `where` does, one equality per column, and becomes the rule tree the IR carries.
+   */
+  describe("a condition's where", () => {
+    function condition(where: SeedConditionWhere): SeedOperation | undefined {
+      const collect = collector()
+      collect.db().$if({ notExists: { model: "SiteSettings", where } }, () => {})
+      return collect.finish().ir.operations[0]
+    }
+
+    it("turns one column's value into an equality", () => {
+      expect(condition({ name: "seeded once" })).toEqual({
+        op: "group",
+        if: { kind: "notExists", model: "SiteSettings", where: eq("name", "seeded once") },
+        operations: [],
+      })
+    })
+
+    it("requires every column to match when it names several", () => {
+      const when = new Date("2026-01-02T03:04:05.000Z")
+      expect(condition({ name: "a", live: true, rank: 2, at: when, gone: null })).toMatchObject({
+        if: {
+          where: and(
+            eq("name", "a"),
+            eq("live", true),
+            eq("rank", 2),
+            eq("at", "2026-01-02T03:04:05.000Z"),
+            isNull("gone"),
+          ),
+        },
+      })
+    })
+
+    it("reads a column called `type` as a column, not as a rule", () => {
+      expect(condition({ type: "admin" })).toMatchObject({ if: { where: eq("type", "admin") } })
+    })
+
+    it("leaves a rule from the predicate helpers as it is", () => {
+      const rule = and(eq("name", "a"), isNull("gone"))
+      expect(condition(rule)).toMatchObject({ if: { where: rule } })
+    })
+
+    it("treats an empty object as no where, so the condition asks about any row", () => {
+      expect(condition({})).toEqual({
+        op: "group",
+        if: { kind: "notExists", model: "SiteSettings" },
+        operations: [],
+      })
+    })
+
+    it("refuses a value it cannot compare, naming the column and the remedy", () => {
+      // @ts-expect-error The types refuse a list too, but the runner does not type-check a seed.
+      expect(() => condition({ tags: ["a"] })).toThrow(/`tags`.*oneOf/)
+    })
+
+    /**
+     * 0.9.2 review: the plain form skipped the encoder an upsert's `where` uses, so a bigint was
+     * refused and a decimal column was compared through a double rather than as the exact text an
+     * upsert writes.
+     */
+    function ticketCondition(where: SeedConditionWhere): SeedOperation | undefined {
+      const collect = collector()
+      collect.db().$if({ exists: { model: "TicketType", where } }, () => {})
+      return collect.finish().ir.operations[0]
+    }
+
+    it("compares a bigint as the text an upsert writes it as", () => {
+      expect(ticketCondition({ sold: 9007199254740993n })).toMatchObject({
+        if: { where: eq("sold", "9007199254740993") },
+      })
+    })
+
+    it("compares a decimal column exactly, as the text an upsert writes it as", () => {
+      expect(ticketCondition({ price: 75.5 })).toMatchObject({ if: { where: eq("price", "75.5") } })
+      expect(ticketCondition({ price: "75.50" })).toMatchObject({ if: { where: eq("price", "75.50") } })
+    })
+
+    // The engine's comparison takes a literal or a column, not a row this seed writes, so the
+    // reference is refused here, by name, rather than by the engine with "no variant matched".
+    it("refuses a reference to a row the seed writes, saying what to compare instead", () => {
+      const collect = collector()
+      const db = collect.db()
+      const alex = db["organiser"]!.create({ name: "Alex" })
+      // @ts-expect-error The types refuse a reference too, but the runner does not type-check a seed.
+      expect(() => db.$if({ exists: { model: "Event", where: { organiser: alex["id"] } } }, () => {})).toThrow(
+        /`organiser`.*reference/,
+      )
+    })
   })
 
   /**

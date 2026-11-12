@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { AuthClient } from "../src/auth.js"
+import { AuthClient, ssoDomain } from "../src/auth.js"
 import { SupatypeError } from "../src/errors.js"
 import { createCodeChallengeS256, PKCE_METHOD_S256 } from "../src/pkce.js"
 import { fetchCall, fetchReturning, jsonBody } from "./support/fetch-mock.js"
@@ -72,6 +72,19 @@ describe("signInWithSSO request", () => {
       supatype_meta_security: { captcha_token: "cap-1" },
       ...PKCE_FIELDS,
     })
+  })
+
+  it("sends studio: true only when asked, so the server returns the browser to Studio", async () => {
+    stubBrowser(PAGE)
+    const fetch = fetchReturning({ url: IDP_URL })
+    vi.stubGlobal("fetch", fetch)
+    const client = new AuthClient(AUTH_URL, HEADERS)
+
+    await client.signInWithSSO({ domain: "acme.com", options: { studio: true } })
+    await client.signInWithSSO({ domain: "acme.com", options: { studio: false } })
+
+    expect(jsonBody(fetchCall(fetch, 0).init)).toEqual({ domain: "acme.com", skip_http_redirect: true, studio: true, ...PKCE_FIELDS })
+    expect(jsonBody(fetchCall(fetch, 1).init)).toEqual({ domain: "acme.com", skip_http_redirect: true, ...PKCE_FIELDS })
   })
 })
 
@@ -256,5 +269,23 @@ describe("an SSO sign-in coming back to the app", () => {
     expect(error).toBeNull()
     expect(fetch.mock.calls.map(([input]) => String(input))).toEqual([`${AUTH_URL}/user`])
     expect((await client.getSession()).data.session?.accessToken).toBe(token)
+  })
+})
+
+describe("ssoDomain: the domain SSO is looked up by", () => {
+  it("is the part after the last @, trimmed and lower-cased", () => {
+    expect(ssoDomain("Admin@Acme.COM")).toBe("acme.com")
+    expect(ssoDomain("odd@name@acme.com")).toBe("acme.com")
+    expect(ssoDomain("  you@ Acme.com  ")).toBe("acme.com")
+  })
+
+  it("is the whole of a bare domain, which an SSO form may be typed with", () => {
+    expect(ssoDomain("Acme.com")).toBe("acme.com")
+  })
+
+  it("is null when nothing is left to look up", () => {
+    expect(ssoDomain("")).toBeNull()
+    expect(ssoDomain("admin@ ")).toBeNull()
+    expect(ssoDomain("   ")).toBeNull()
   })
 })

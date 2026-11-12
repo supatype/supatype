@@ -18,7 +18,7 @@ User guides: [docs](https://www.supatype.com/docs/) · [local dev](https://www.s
 
 ## Quick start
 
-You need Node.js 22 or later, and Docker for the default local stack.
+You need Node.js 18 or later for the CLI (20.19 or later for the Vite 8 app `supatype init` sets up), and Docker for the default local stack.
 
 ```bash
 npm install -g @supatype/cli

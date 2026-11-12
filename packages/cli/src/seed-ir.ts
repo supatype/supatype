@@ -23,6 +23,7 @@ import type {
   RefValue,
   SeedCondition,
   SeedConditionInput,
+  SeedConditionWhere,
   SeedData,
   SeedDb,
   SeedIr,
@@ -30,6 +31,7 @@ import type {
   SeedValue,
   SqlParam,
 } from "./seed.js"
+import { and, eq, isNull } from "./seed.js"
 
 /** A model's own name and the facts the encoder needs about its columns. */
 export type Manifest = Readonly<Record<string, ModelManifest>>
@@ -140,7 +142,8 @@ export class SeedCollector {
       // later operation collecting into a block that is never emitted.
       this.stack.pop()
     }
-    this.push({ op: "group", if: encodeCondition(condition), operations })
+    const encode: WhereValueEncoder = (model, column, value) => this.encodeWhereValue(model, column, value)
+    this.push({ op: "group", if: encodeCondition(condition, encode), operations })
   }
 
   private push(operation: SeedOperation): void {
@@ -248,6 +251,15 @@ export class SeedCollector {
     return undefined
   }
 
+  /**
+   * One value of a condition's plain `where`, encoded as an upsert's `where` encodes it: the
+   * model's manifest decides, so a bigint or a decimal column compares as the text an upsert writes.
+   */
+  private encodeWhereValue(model: string, column: string, value: SeedValue): SeedValue {
+    const entry = this.byModel.get(model)
+    return entry === undefined ? this.encodeLoose(value) : this.encode(entry, column, value)
+  }
+
   /** A value with no column to consult, such as an element of an array. */
   private encodeLoose(value: SeedValue): SeedValue {
     if (isPassThrough(value)) return value
@@ -312,26 +324,117 @@ function isPassThrough(value: SeedValue): boolean {
   )
 }
 
+/** How a plain `where`'s value for `column` of `model` is written into the IR. */
+type WhereValueEncoder = (model: string, column: string, value: SeedValue) => SeedValue
+
 /** The surface a seed writes, in the shape the IR carries. */
-export function encodeCondition(condition: SeedConditionInput): SeedCondition {
+export function encodeCondition(condition: SeedConditionInput, encode: WhereValueEncoder): SeedCondition {
   if ("environment" in condition) {
     return { kind: "environment", name: condition.environment }
   }
   if ("exists" in condition) {
-    return scoped("exists", condition.exists)
+    return scoped("exists", condition.exists, encode)
   }
-  return scoped("notExists", condition.notExists)
+  return scoped("notExists", condition.notExists, encode)
 }
 
 function scoped(
   kind: "exists" | "notExists",
-  target: { model: string; where?: Predicate },
+  target: { model: string; where?: SeedConditionWhere },
+  encode: WhereValueEncoder,
 ): SeedCondition {
+  const where =
+    target.where === undefined
+      ? undefined
+      : toPredicate(target.where, (column, value) => encode(target.model, column, value))
   return {
     kind,
     model: target.model,
-    ...(target.where !== undefined ? { where: target.where } : {}),
+    ...(where !== undefined && { where }),
   }
+}
+
+/**
+ * A `where` as the rule tree the IR carries.
+ *
+ * 0.9.1 release test, FF6 and #303: `where: { name: "x" }` used to reach the IR as it was, and
+ * the engine refused the whole document with "missing field `type`". A plain object now means
+ * what an upsert's `where` means, each listed column equal to its value. An empty one names no
+ * column, so it asks about any row, the same as leaving `where` out.
+ */
+function toPredicate(
+  where: SeedConditionWhere,
+  encode: (column: string, value: SeedValue) => SeedValue,
+): Predicate | undefined {
+  if (isPredicate(where)) return where
+  const rules = Object.entries(where).flatMap(([column, value]) =>
+    value === undefined ? [] : [columnEquals(column, encode(column, value))],
+  )
+  if (rules.length <= 1) return rules[0]
+  return and(...rules)
+}
+
+/**
+ * One column of a plain-object `where`, already encoded, as a rule. Typed `unknown`: a seed is not
+ * type-checked. A decimal's exact text is compared as text, which Postgres reads as the column's
+ * type, so no double comes between the value and the column.
+ */
+function columnEquals(column: string, value: unknown): Predicate {
+  if (value === null) return isNull(column)
+  if (value instanceof Date) return eq(column, value.toISOString())
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return eq(column, value)
+  }
+  if (isNumeric(value)) return eq(column, value.$numeric)
+  if (isReference(value)) {
+    // The engine compares a column with a literal known before the seed runs, never with a row
+    // the seed writes: its comparison has no reference operand.
+    throw new Error(
+      `$if where: \`${column}\` is a reference to a row this seed writes, and a condition can only ` +
+        "compare a column with a value known before the seed runs. Compare a column whose value you " +
+        "know instead, such as a unique slug or an id the seed sets itself.",
+    )
+  }
+  throw new Error(
+    `$if where: \`${column}\` must be a string, number, bigint, boolean, Date or null to compare by ` +
+      `equality. Write anything else with the predicate helpers, for example ` +
+      `oneOf("${column}", [...]) or like("${column}", "...").`,
+  )
+}
+
+function isNumeric(value: unknown): value is NumericValue {
+  return typeof value === "object" && value !== null && "$numeric" in value && typeof value.$numeric === "string"
+}
+
+function isReference(value: unknown): value is RefValue {
+  return typeof value === "object" && value !== null && "$ref" in value
+}
+
+/**
+ * The keys each rule in the tree has, and no others.
+ *
+ * Matched by the exact key set rather than by the presence of `type`, so a model with a
+ * column called `type` can still be named as `{ type: "admin" }`.
+ */
+const RULE_KEYS: Readonly<Record<Predicate["type"], readonly string[]>> = {
+  compare: ["left", "op", "right", "type"],
+  any: ["rules", "type"],
+  all: ["rules", "type"],
+  not: ["rule", "type"],
+  nullCheck: ["isNull", "operand", "type"],
+  in: ["column", "source", "type"],
+}
+
+function isRuleKind(kind: unknown): kind is Predicate["type"] {
+  return typeof kind === "string" && Object.hasOwn(RULE_KEYS, kind)
+}
+
+function isPredicate(where: SeedConditionWhere): where is Predicate {
+  const kind = where["type"]
+  if (!isRuleKind(kind)) return false
+  const expected = RULE_KEYS[kind]
+  const keys = Object.keys(where).sort()
+  return keys.length === expected.length && keys.every((key, i) => key === expected[i])
 }
 
 /** Re-exported for the runner, which has no reason to know these came from `seed.ts`. */

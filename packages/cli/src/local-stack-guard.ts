@@ -13,7 +13,8 @@ import { NoStackRunning } from "./host-database.js"
 import { loadProjectLink } from "./link.js"
 import { resolveRuntimeProvider, usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
 import { developerApiUrl } from "./resolve-api-url.js"
-import { composeProjectName, selfHostComposePaths } from "./self-host-compose.js"
+import { enterLocalStack } from "./dev-session-lock.js"
+import { selfHostComposePaths } from "./self-host-compose.js"
 
 /** How a command was told to reach its database: one named for this run, and whether it skips the link. */
 export interface StackRoute {
@@ -56,7 +57,7 @@ export function requireLocalStack(cwd: string, config: SupatypeProjectConfig, co
  */
 export function requireStackDatabase(cwd: string, config: SupatypeProjectConfig, command?: string): void {
   if (usesExternalDatabase(config)) return
-  const stack = { project: composeProjectName(config.project.name), composePath: selfHostComposePaths(cwd).composePath }
+  const stack = { project: enterLocalStack(cwd, config.project.name), composePath: selfHostComposePaths(cwd).composePath }
   if (!composeServiceIsRunning(cwd, stack, "db")) throw new NoStackRunning(command)
 }
 

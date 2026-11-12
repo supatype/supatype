@@ -62,12 +62,10 @@ export interface ObjectRow {
 export type ListedObjectRow = Omit<ObjectRow, "version">
 
 /**
- * The columns of `ObjectRow` and `ListedObjectRow`, named rather than `*`, so a row has the same
- * fields whichever bootstrap created the table (the service's adds `path_tokens`; the engine's
- * does not).
+ * The columns of `ListedObjectRow`, named rather than `*`, so a row has the same fields whichever
+ * bootstrap created the table (the service's adds `path_tokens`; the engine's does not).
  */
 const LISTED_OBJECT_COLUMNS = "id, bucket_id, name, owner, metadata, created_at, updated_at, last_accessed_at"
-const OBJECT_COLUMNS = `${LISTED_OBJECT_COLUMNS}, version`
 
 // ─── Schema bootstrap ───────────────────────────────────────────────────────────
 
@@ -253,18 +251,14 @@ export async function emptyBucket(
 // ─── Object metadata ────────────────────────────────────────────────────────────
 
 /**
- * An object's row, read with the service's own connection.
+ * Whether an object exists, with the service's own connection.
  *
- * For the checks that have to see past the caller's rules: whether an object exists at all, so a
- * missing one answers 404 rather than a 403 that would confirm nothing is there. Never for deciding
- * what a caller may do; that is `asCaller`'s job.
+ * Only for a caller already allowed to read it, as signing in a public bucket is: asked of anyone
+ * else, the answer is what tells them which names a private bucket holds (`readVerdict`).
  */
-export async function getObject(bucketId: string, name: string): Promise<ObjectRow | null> {
-  const res = await pool.query<ObjectRow>(
-    `SELECT ${OBJECT_COLUMNS} FROM storage.objects WHERE bucket_id = $1 AND name = $2`,
-    [bucketId, name],
-  )
-  return res.rows[0] ?? null
+export async function objectExists(bucketId: string, name: string): Promise<boolean> {
+  const res = await pool.query(`SELECT 1 FROM storage.objects WHERE bucket_id = $1 AND name = $2`, [bucketId, name])
+  return (res.rowCount ?? 0) > 0
 }
 
 /**
@@ -367,29 +361,80 @@ export function reportMissingGrant(err: MissingGrant): void {
 }
 
 /**
- * Can this caller see this object, according to the database?
+ * What a caller's read of one object comes to, according to the database.
  *
- * The bucket's declared read rule already exists as an RLS policy on `storage.objects`, so asking
- * Postgres is asking the rule itself. The middleware used to decide this from `access_mode` alone
- * and hardcoded owner-only for every private bucket, so a bucket declaring `BucketLoggedIn` refused
- * every user but the uploader.
+ * - `visible`: the caller's read rule shows them the object.
+ * - `hidden`: they cannot see it, and their rule would let them read the name if it held a file
+ *   nobody owns, so the answer is the 404 a missing name gets. An object they cannot see answers
+ *   the same, so the answer never says whether it exists.
+ * - `refused`: their rule would not let them read the name at all, so present or missing it is a
+ *   403. 0.9.1 release test: a missing name answered 404 and an existing one 403, so the anon key
+ *   could probe which names a private bucket holds.
  */
-export async function objectVisibleTo(bucketId: string, name: string, jwt: JwtPayload): Promise<boolean> {
+export type ReadVerdict = "visible" | "hidden" | "refused"
+
+/**
+ * Decide a read by the bucket's declared read rule, which already exists as RLS policies on
+ * `storage.objects`, so asking Postgres is asking the rule itself. Existence is never asked past
+ * the caller's rules: the middleware used to look the object up on the owner connection, which is
+ * how a missing name came to answer differently from one the caller could not see.
+ */
+export async function readVerdict(bucketId: string, name: string, jwt: JwtPayload): Promise<ReadVerdict> {
   try {
     return await asCaller(jwt, ["SELECT"], async (client) => {
-      const res = await client.query(
-        `SELECT 1 FROM storage.objects WHERE bucket_id = $1 AND name = $2 LIMIT 1`,
-        [bucketId, name],
-      )
-      return (res.rowCount ?? 0) > 0
+      const seen = await client.query(`SELECT 1 FROM storage.objects WHERE bucket_id = $1 AND name = $2 LIMIT 1`, [
+        bucketId,
+        name,
+      ])
+      if ((seen.rowCount ?? 0) > 0) return "visible"
+      // The service role reads every row, so for it nothing seen is nothing there.
+      if (isServiceRole(jwt)) return "hidden"
+      return (await unownedReadable(client, bucketId, name)) ? "hidden" : "refused"
     })
   } catch (err) {
     // Refused rather than rethrown: a missing grant must never read as "allowed", and a 500 naming
     // a Postgres table tells an operator nothing about what to do. The log says what to run.
     if (err instanceof MissingGrant) reportMissingGrant(err)
-    if (err instanceof MissingGrant || err instanceof UnknownRole) return false
+    if (err instanceof MissingGrant || err instanceof UnknownRole) return "refused"
     throw err
   }
+}
+
+/** The read policies on `storage.objects` that apply to the role the transaction is wearing. */
+const READ_POLICIES = `
+  SELECT c.relrowsecurity AS rls, p.polpermissive AS permissive, pg_get_expr(p.polqual, p.polrelid) AS qual
+    FROM pg_catalog.pg_class AS c
+    LEFT JOIN pg_catalog.pg_policy AS p
+      ON p.polrelid = c.oid
+     AND p.polcmd IN ('r', '*')
+     AND p.polqual IS NOT NULL
+     AND (0::oid = ANY (p.polroles)
+          OR EXISTS (SELECT 1 FROM unnest(p.polroles) AS r WHERE pg_has_role(current_user, r, 'MEMBER')))
+   WHERE c.oid = 'storage.objects'::regclass`
+
+/**
+ * Would the caller's read rule show them `name` if it held a file nobody owns?
+ *
+ * Postgres applies row level security only to rows that exist, so the policies are evaluated here
+ * the way it would: any permissive one, and every restrictive one, against a row of the table's
+ * own type holding only the bucket and the name. Run as the caller, so `auth.uid()` and anything a
+ * policy reads answer as they would for a real row. The expressions come from the catalog, written
+ * by whoever may create policies on the table, so they are SQL already, not request input.
+ */
+async function unownedReadable(client: pg.PoolClient, bucketId: string, name: string): Promise<boolean> {
+  const res = await client.query<{ rls: boolean; permissive: boolean | null; qual: string | null }>(READ_POLICIES)
+  if (res.rows[0]?.rls !== true) return true
+  const quals = (permissive: boolean): string[] =>
+    res.rows.flatMap((p) => (p.permissive === permissive && p.qual !== null ? [`(${p.qual})`] : []))
+  const anyOf = quals(true)
+  if (anyOf.length === 0) return false
+  const where = [`(${anyOf.join(" OR ")})`, ...quals(false)].join(" AND ")
+  const row = JSON.stringify({ bucket_id: bucketId, name })
+  const answer = await client.query<{ allowed: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM json_populate_record(NULL::storage.objects, $1::json) AS objects WHERE ${where}) AS allowed`,
+    [row],
+  )
+  return answer.rows[0]?.allowed === true
 }
 
 /** An object's name and which stored copy of its bytes is live. */

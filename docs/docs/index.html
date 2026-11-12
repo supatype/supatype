@@ -124,7 +124,7 @@
     <div class="step"><span class="step-num">1</span><h3>Install the CLI</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> npm install -g @supatype/cli</pre></div>
-    <p>The CLI needs Node.js 22 or later. For a machine without Node, the <a href="/docs/cli.html#usage">CLI</a> page has a standalone binary. The first run downloads the binaries it needs into <code>~/.supatype/cache/</code>.</p>
+    <p>The CLI needs Node.js 18 or later. Vite 8, which <code>supatype init</code> sets up for a Vite app, needs Node.js 20.19 or later. For a machine without Node, the <a href="/docs/cli.html#usage">CLI</a> page has a standalone binary. The first run downloads the binaries it needs into <code>~/.supatype/cache/</code>.</p>
     <p>On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> curl -fsSL https://supatype.com/install.sh | bash
@@ -209,7 +209,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
     <p>Run the whole platform on a server you own with Docker Compose. The project layout is the same one you use locally, so the repository you develop in is the one you deploy.</p>
 
     <div class="step"><span class="step-num">1</span><h3>Prepare the server</h3></div>
-    <p>Ubuntu 22.04 or similar, Docker with Compose v2, Node.js 22 or later, and the CLI:</p>
+    <p>Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later to build a Vite 8 app), and the CLI:</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> npm install -g @supatype/cli</pre></div>
 
@@ -218,6 +218,10 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
 <pre><span class="pr">$</span> mkdir my-app &amp;&amp; cd my-app
 <span class="pr">$</span> supatype init</pre></div>
     <p><code>init</code> installs dependencies and writes generated secrets and API keys to <code>.env</code>. Set your public URLs there.</p>
+    <div class="callout">
+      <span class="callout-label">CACHE PASSWORD</span>
+      <p>When the cache runs inside Postgres, as it does by default, <code>supatype/postgres</code> 17.2.13 and later require a password for it, <code>SUPATYPE_KEYSPACE_PASSWORD</code> in <code>.env</code>. Every <code>supatype self-host compose</code> command writes a random one there when it is missing, and never replaces one you set. The compose file requires it, so <code>docker compose</code> run by hand without it stops with <code>SUPATYPE_KEYSPACE_PASSWORD is missing from .env</code>. To change it, put the new one in <code>.env</code> and run <code>supatype self-host compose up -d</code>. Password files, rotation with no restart and a second keyspace for the response cache are in <a href="/docs/self-hosting/configuration.html#cache">self-hosting configuration</a>.</p>
+    </div>
 
     <div class="step"><span class="step-num">3</span><h3>Start Compose</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
@@ -234,7 +238,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
     </div>
     <div class="callout">
       <span class="callout-label">PORTS</span>
-      <p>Only the gateway is published on every interface, at <code>SUPATYPE_KONG_PORT</code>, or on ports 80 and 443 once HTTPS is on. Postgres (<code>SUPATYPE_DB_PORT</code>, default 5432), the API server (<code>SUPATYPE_SERVER_PORT</code>, default 9999) and SeaweedFS (<code>SUPATYPE_SEAWEEDFS_PORT</code>, default 8333) bind <code>127.0.0.1</code>, so they are reachable from the server itself and nowhere else. To reach them from other machines, set <code>SUPATYPE_PUBLISH_ADDRESS=0.0.0.0</code> (or one interface's address) in <code>.env</code> and run <code>supatype self-host compose up -d</code>. Put a firewall in front first. <code>supatype init</code> lists these variables, commented out, in <code>.env</code>.</p>
+      <p>Only the gateway is published on every interface, at <code>SUPATYPE_KONG_PORT</code>, or on ports 80 and 443 once HTTPS is on. Postgres (<code>SUPATYPE_DB_PORT</code>, default 5432), the API server (<code>SUPATYPE_SERVER_PORT</code>, default 9999) and SeaweedFS (<code>SUPATYPE_SEAWEEDFS_PORT</code>, default 8333, when the stack runs one) bind <code>127.0.0.1</code>, so they are reachable from the server itself and nowhere else. To reach them from other machines, set <code>SUPATYPE_PUBLISH_ADDRESS=0.0.0.0</code> (or one interface's address) in <code>.env</code> and run <code>supatype self-host compose up -d</code>. Put a firewall in front first. <code>supatype init</code> lists these variables, commented out, in <code>.env</code>.</p>
     </div>
     <p>Images come from Docker Hub, and each CLI release runs the exact images it was tested with, never <code>:latest</code>: <code>supatype/studio</code>, <code>supatype/storage</code>, <code>supatype/realtime</code>, <code>supatype/functions-worker</code> and <code>supatype/control-plane</code> at the CLI's own version, and <code>supatype/schema-engine</code>, <code>supatype/server</code> and <code>supatype/postgres</code> at the releases pinned for it. The stack also runs <code>postgrest/postgrest</code>, <code>kong</code> and SeaweedFS, and Valkey when the cache does not run inside Postgres. Upgrading the CLI moves them; <code>supatype update</code> pulls the new tags. To run another image, set its <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> (for example <code>SUPATYPE_SERVER_IMAGE=supatype/server:v2.3.0</code>), or pin <code>versions.engine</code>, <code>versions.server</code> or <code>versions.postgres</code> in <code>supatype.config.ts</code>.</p>
     <p>To run on a Postgres you already have, such as RDS or Cloud SQL, set <code>database: { external: { url: process.env.DATABASE_URL! } }</code> in <code>supatype.config.ts</code>. The stack then starts no <code>db</code> service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in <code>supatype/postgres</code>. Realtime needs <code>wal_level = logical</code>, a free replication slot, the <code>wal2json</code> plugin and a role with <code>REPLICATION</code>. <code>supatype db check --connection "$DATABASE_URL"</code> reports what a database lacks, and <code>--emit</code> prints the SQL that fixes what it can.</p>

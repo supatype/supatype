@@ -67,13 +67,22 @@ function present(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined
 }
 
+/**
+ * `url` without the "/" it may end in. Every path is joined on as `${url}/rest/v1/...`, and
+ * `https://api.example.com/` built `//rest/v1/...`, which the gateway refuses as a path with an
+ * empty part (0.9.1 release test RB2) and the server on native never routed to an API.
+ */
+function withoutTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, "")
+}
+
 /** An absolute http or https address, else undefined. */
 function httpUrl(value: unknown): string | undefined {
   const text = present(value)
   if (text === undefined) return undefined
   try {
     const protocol = new URL(text).protocol
-    return protocol === "http:" || protocol === "https:" ? text : undefined
+    return protocol === "http:" || protocol === "https:" ? withoutTrailingSlash(text) : undefined
   } catch {
     return undefined
   }
@@ -101,16 +110,47 @@ function buildTimeFix(n: MissingNames): string {
   )
 }
 
+/** The opening every page-side message without the global shares. */
+function noPageGlobal(n: MissingNames): string {
+  return (
+    `Supatype client has no ${n.labels}. createClient was given none, and the page had set no ` +
+    `window.__SUPATYPE_ENV__ by its first request.\n`
+  )
+}
+
 /** In a page: the page set no `__SUPATYPE_ENV__`, so the script that sets it comes first. */
 function pageMessage(n: MissingNames): string {
   return (
-    `Supatype client has no ${n.labels}. createClient was given none, and the page had set no ` +
-    `window.__SUPATYPE_ENV__ by its first request.\n` +
+    noPageGlobal(n) +
     `When Supatype hosts the app, add <script src="/supatype-env.js" vite-ignore></script> to index.html before ` +
     `the app's own script, and the server fills them in when the page loads. In a Next.js app, ` +
     `export GET from @supatype/ssr/next in app/supatype-env.js/route.ts, load it in the root layout ` +
     `with <Script src="/supatype-env.js" strategy="beforeInteractive" />, and set ${n.serverNames} ` +
     `in the server's environment.\n${buildTimeFix(n)}`
+  )
+}
+
+/**
+ * Whether this runs in an Expo app. Expo's runtime sets `globalThis.expo`, on the web as on a phone.
+ * The app's own code reads the `EXPO_PUBLIC_` names, so which names were tried is not something the
+ * client can see; the global is the one sign it has.
+ */
+function isExpoApp(): boolean {
+  const expo: unknown = Reflect.get(globalThis, "expo")
+  return typeof expo === "object" && expo !== null
+}
+
+/**
+ * In an Expo app: the page comes from `app/+html.tsx`, not an `index.html` (0.9.2 release test,
+ * N-S14), and a native build has no page at all.
+ */
+function expoPageMessage(n: MissingNames): string {
+  return (
+    noPageGlobal(n) +
+    `On the web, when Supatype hosts the export, add <script src="/supatype-env.js" /> to the <head> of ` +
+    `app/+html.tsx (src/app/+html.tsx when the routes are in src/app), and the server fills them in when ` +
+    `the page loads; supatype init adds it to an Expo Router app. A native build has no page to read ` +
+    `them from, so it takes them at build time.\n${buildTimeFix(n)}`
   )
 }
 
@@ -157,7 +197,8 @@ function pageFaultMessage(n: MissingNames): string {
   const script = pageEnvScript()
   const reason = present(pageEnv().error)
   if (reason !== undefined) return reasonMessage(n, script ?? "/supatype-env.js", reason)
-  return script === undefined ? pageMessage(n) : scriptDidNotRunMessage(n, script)
+  if (script !== undefined) return scriptDidNotRunMessage(n, script)
+  return isExpoApp() ? expoPageMessage(n) : pageMessage(n)
 }
 
 /** Each missing value's label and every name it is set under, as the error words them. */
@@ -191,7 +232,8 @@ export class ClientTarget {
   #resolved: ResolvedClientTarget | undefined
 
   constructor(given: Pick<SupatypeClientConfig, "url" | "anonKey">) {
-    this.#url = present(given.url)
+    const url = present(given.url)
+    this.#url = url === undefined ? undefined : withoutTrailingSlash(url)
     this.#anonKey = present(given.anonKey)
   }
 

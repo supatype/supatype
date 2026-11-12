@@ -18,6 +18,13 @@ type RealtimeCallback<TRow> = (payload: RealtimePayload<TRow>) => void
 
 export type ChannelStatus = "SUBSCRIBED" | "SUBSCRIBING" | "CLOSED" | "CHANNEL_ERROR" | "TIMED_OUT"
 
+/**
+ * Told each status a channel reaches. `err` carries the server's reason with a CHANNEL_ERROR it
+ * refused, such as a join for a table that does not exist, and is undefined otherwise: the same
+ * `(status, err)` shape Supabase's client uses, so a callback taking only the status is unaffected.
+ */
+export type ChannelStatusCallback = (status: ChannelStatus, err?: Error | undefined) => void
+
 interface ChannelSubscription<TRow> {
   on(
     event: "postgres_changes",
@@ -39,7 +46,7 @@ interface ChannelSubscription<TRow> {
     callback: (payload: Record<string, unknown>) => void,
   ): ChannelSubscription<TRow>
   /** Subscribe to the channel, opening the WebSocket if needed. */
-  subscribe(callback?: ((status: ChannelStatus) => void) | undefined): ChannelSubscription<TRow>
+  subscribe(callback?: ChannelStatusCallback | undefined): ChannelSubscription<TRow>
   /** Unsubscribe and clean up. */
   unsubscribe(): void
   /** Send a broadcast event to the channel. */
@@ -101,6 +108,26 @@ function parseChannelName(name: string): { schema: string; table: string } {
   const parts = name.split(":")
   if (parts.length >= 2) return { schema: parts[0]!, table: parts[1]! }
   return { schema: "public", table: name }
+}
+
+/**
+ * The schema and table a listener on channel `name` is for.
+ *
+ * The name is read as `schema:table` only when it supplies the table as well. A listener that
+ * names its table and no schema means `public`, as the docs say. 0.9.1 release test (RB4): the
+ * schema was taken from the name whatever the listener said, so the documented
+ * `channel("post:42").on(..., { table: "comment" })` joined `post.comment`, reported SUBSCRIBED
+ * and delivered nothing. The server's `resolveTarget` reads a frame the same way.
+ */
+function listenerTarget(
+  name: string,
+  opts: { schema?: string | undefined; table?: string | undefined },
+): { schema: string; table: string } {
+  if (opts.table === undefined) {
+    const named = parseChannelName(name)
+    return { schema: opts.schema ?? named.schema, table: named.table }
+  }
+  return { schema: opts.schema ?? "public", table: opts.table }
 }
 
 // ─── Server message types (subset matching @supatype/realtime) ───────────────
@@ -321,16 +348,7 @@ export class RealtimeClient {
       state.joined = undefined
       state.joining = undefined
       state.joinRef = undefined
-      this.forgetMembers(state)
-    }
-  }
-
-  private forgetMembers(state: ChannelState): void {
-    if (state.members.length === 0) return
-    const leaves = state.members
-    state.members = []
-    for (const handle of state.handles) {
-      for (const listener of handle.presenceListeners) listener({ joins: [], leaves })
+      forgetMembers(state)
     }
   }
 
@@ -354,18 +372,18 @@ export class RealtimeClient {
     state.handles.add(handle)
 
     const sub: ChannelSubscription<TRow> = {
-      on(_event, opts, callback) {
-        // Defaults read the channel name the way the server's fallback does. The schema used to
-        // default to "public" regardless, and since the frame always carries a schema, a channel
-        // named `app:orders` was registered against `public.orders`.
-        const named = parseChannelName(name)
+      on: (_event, opts, callback) => {
+        // A channel named `app:orders` with no table on the listener is `app.orders`, the way the
+        // server's fallback reads it; a listener naming its table defaults to `public`.
         handle.pgListeners.push({
           event: opts.event,
-          schema: opts.schema ?? named.schema,
-          table: opts.table ?? named.table,
+          ...listenerTarget(name, opts),
           filter: opts.filter,
           callback: forCallerRows(callback),
         })
+        // A join already sent for broadcast or presence alone delivers no rows, and `subscribe()`
+        // will not send another, so the first row listener on it joins again here.
+        this.rejoinIfUnheard(state)
         return sub
       },
 
@@ -387,7 +405,7 @@ export class RealtimeClient {
         // join on its own and a caller can still call this afterwards just to watch the status.
         // A join already acknowledged will not be acknowledged again, so say so here or the new
         // callback waits for a SUBSCRIBED that is never coming.
-        if (state.subscribed) callback?.("SUBSCRIBED")
+        if (state.subscribed && serves(state.joined, handle)) callback?.("SUBSCRIBED")
         this.ensureConnection()
         this.sendSubscribe(state)
         return sub
@@ -638,11 +656,17 @@ export class RealtimeClient {
     const affected = msg.channel === undefined ? [...this.channels.values()] : [this.answeredJoin(msg.channel, msg.ref)]
     for (const state of affected) {
       if (state === undefined) continue
+      if (msg.channel !== undefined && state.subscribed) {
+        refuseRejoin(state, new Error(msg.message))
+        continue
+      }
       // A refused join registered nothing on the server, so a channel not yet confirmed may
       // join again on this socket. Marked as sent, a retry after authenticating sent nothing.
       if (!state.subscribed) state.joinSent = false
       if (msg.ref !== undefined) state.joinRef = undefined
-      notifyHandles(state, "CHANNEL_ERROR")
+      // The server's reason goes to the callback (N-FF5): "table public.notes does not exist"
+      // tells the developer what to fix, and a bare CHANNEL_ERROR did not.
+      notifyHandles(state, "CHANNEL_ERROR", new Error(msg.message))
     }
   }
 
@@ -716,23 +740,29 @@ export class RealtimeClient {
   }
 
   /**
-   * Join `state` again when no listener left on it is for the join it holds.
+   * Join `state` again when the join it holds delivers rows to no listener left on it.
    *
    * Handles share one join, made for the oldest row listener. When that listener's handle left, the
    * join stayed registered for its table, and every other handle reported SUBSCRIBED and was sent
-   * nothing. Joined again in place, without leaving first: the server replaces a channel's
-   * subscription on a second join, where leaving would drop the presence this socket tracks there.
-   * The server tells the new join who is present all over again, so the members known now leave.
+   * nothing. A join sent before any row listener asked for no rows, so a row listener added after it
+   * was never sent any either (0.9.2 release test, FF-1). Joined again in place, without leaving
+   * first: the server replaces a channel's subscription on a second join, where leaving would drop
+   * the presence this socket tracks there.
+   *
+   * An acknowledged join stays registered and serving until the server takes this one, and for good
+   * if it refuses it. So the handles it serves stay SUBSCRIBED and its members stay present, and
+   * only a handle it does not serve is told SUBSCRIBING. Every handle used to be, and a refused
+   * rejoin then left them all in CHANNEL_ERROR with broadcast still arriving (0.9.2 round 4, S-1).
    */
   private rejoinIfUnheard(state: ChannelState): void {
     const held = state.joining ?? state.joined
     if (!state.joinSent || held === undefined) return
     const listeners = pgListenersOf(state)
-    if (listeners.length === 0 || listeners.some((listener) => sameJoin(listener, held))) return
-    state.subscribed = false
+    if (listeners.length === 0) return
+    if (held.rows && listeners.some((listener) => sameJoin(listener, held))) return
     state.joinSent = false
-    this.forgetMembers(state)
-    notifyHandles(state, "SUBSCRIBING")
+    if (state.subscribed) notifyUnserved(state, "SUBSCRIBING")
+    else notifyHandles(state, "SUBSCRIBING")
     this.sendSubscribe(state)
   }
 
@@ -762,7 +792,7 @@ interface ChannelHandle {
   pgListeners: PgListener[]
   presenceListeners: Array<(event: { joins: PresenceEntry[]; leaves: PresenceEntry[] }) => void>
   broadcastListeners: Map<string, Array<(payload: Record<string, unknown>) => void>>
-  statusCallback: ((status: ChannelStatus) => void) | null
+  statusCallback: ChannelStatusCallback | null
 }
 
 /** One channel name's join on the socket, shared by every handle on that name. */
@@ -797,8 +827,16 @@ interface ChannelState {
   members: PresenceEntry[]
 }
 
-/** What a join registers on the server: the table whose changes it delivers, and which of them. */
-type JoinTarget = Pick<PgListener, "schema" | "table" | "event" | "filter">
+/** The table, event and filter a row listener is for. */
+type RowTarget = Pick<PgListener, "schema" | "table" | "event" | "filter">
+
+/**
+ * What a join registers on the server: the table whose changes it delivers, and which of them.
+ * `rows` is whether it asked for them at all: a join for broadcast and presence alone is sent none.
+ */
+interface JoinTarget extends RowTarget {
+  rows: boolean
+}
 
 /**
  * What a join on `state` registers now: its oldest row listener's table, event and filter. With no
@@ -807,12 +845,14 @@ type JoinTarget = Pick<PgListener, "schema" | "table" | "event" | "filter">
  */
 function joinTargetOf(state: ChannelState): JoinTarget {
   const first = pgListenersOf(state)[0]
-  if (first !== undefined) return { schema: first.schema, table: first.table, event: first.event, filter: first.filter }
-  return { ...parseChannelName(state.name), event: "*", filter: undefined }
+  if (first !== undefined) {
+    return { schema: first.schema, table: first.table, event: first.event, filter: first.filter, rows: true }
+  }
+  return { ...parseChannelName(state.name), event: "*", filter: undefined, rows: false }
 }
 
 /** Whether a listener is for exactly what a join registered. */
-function sameJoin(listener: JoinTarget, join: JoinTarget): boolean {
+function sameJoin(listener: RowTarget, join: RowTarget): boolean {
   return listener.schema === join.schema && listener.table === join.table &&
     listener.event === join.event && listener.filter === join.filter
 }
@@ -834,6 +874,9 @@ function pgListenersOf(state: ChannelState): PgListener[] {
  * `lobby-chat` carrying `table: "chat_message"` (which is what `useSubscription` exists to let you
  * write), registered against a table no change can match. The socket reported SUBSCRIBED and
  * delivered nothing, which is indistinguishable from a quiet table.
+ *
+ * `changes` says whether the join has a row listener. Only a row join has its table checked and is
+ * sent row changes: broadcast and presence on `room:x` were refused as a join for room.x (R2-RB2).
  */
 function subscribeFrame(channel: string, target: JoinTarget, ref: string): Record<string, unknown> {
   return {
@@ -842,6 +885,7 @@ function subscribeFrame(channel: string, target: JoinTarget, ref: string): Recor
     event: target.event,
     table: target.table,
     schema: target.schema,
+    changes: target.rows,
     filter: filterFrame(target.filter),
     ref,
   }
@@ -858,18 +902,67 @@ function filterFrame(filter: string | undefined): Record<string, string> | undef
   return Object.keys(parsed).length > 0 ? parsed : undefined
 }
 
-/** The server took the join `state` was waiting on: from now on its rows are that join's. */
+/**
+ * The server took the join `state` was waiting on: from now on its rows are that join's.
+ *
+ * Over a join it had acknowledged, the server tells the new join who is present all over again,
+ * straight after this reply, so the members known now leave first. The handles the old join served
+ * were never told otherwise than SUBSCRIBED, so only the others are told it now.
+ */
 function acknowledgeJoin(state: ChannelState): void {
+  const replaced = state.subscribed
+  if (replaced) {
+    forgetMembers(state)
+    notifyUnserved(state, "SUBSCRIBED")
+  }
   state.subscribed = true
   if (state.joining !== undefined) state.joined = state.joining
   state.joining = undefined
   state.joinRef = undefined
-  notifyHandles(state, "SUBSCRIBED")
+  if (!replaced) notifyHandles(state, "SUBSCRIBED")
+}
+
+/**
+ * The server refused a rejoin, so the acknowledged join it was to replace still stands, and stays
+ * the one this socket holds. Only a handle with a row listener it does not serve gets the refusal.
+ */
+function refuseRejoin(state: ChannelState, refusal: Error): void {
+  state.joinSent = true
+  state.joining = undefined
+  state.joinRef = undefined
+  notifyUnserved(state, "CHANNEL_ERROR", refusal)
+}
+
+/**
+ * Whether `join` delivers rows to every row listener of `handle`, as `handleChange` routes them: by
+ * the join's table. Always, for a handle listening for none.
+ */
+function serves(join: JoinTarget | undefined, handle: ChannelHandle): boolean {
+  return handle.pgListeners.every(
+    (listener) => join?.rows === true && listener.schema === join.schema && listener.table === join.table,
+  )
 }
 
 /** Tell each handle on a channel its status. */
-function notifyHandles(state: ChannelState, status: ChannelStatus): void {
-  for (const handle of state.handles) handle.statusCallback?.(status)
+function notifyHandles(state: ChannelState, status: ChannelStatus, err?: Error | undefined): void {
+  for (const handle of state.handles) handle.statusCallback?.(status, err)
+}
+
+/** Tell its status to each handle the join `state` holds does not serve. */
+function notifyUnserved(state: ChannelState, status: ChannelStatus, err?: Error | undefined): void {
+  for (const handle of state.handles) {
+    if (!serves(state.joined, handle)) handle.statusCallback?.(status, err)
+  }
+}
+
+/** Every member this socket was told of leaves, as the next join is told them all again. */
+function forgetMembers(state: ChannelState): void {
+  if (state.members.length === 0) return
+  const leaves = state.members
+  state.members = []
+  for (const handle of state.handles) {
+    for (const listener of handle.presenceListeners) listener({ joins: [], leaves })
+  }
 }
 
 /** `members` with one entry removed per leave: a user on two tabs is two entries and leaves twice. */

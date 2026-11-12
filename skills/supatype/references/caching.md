@@ -147,8 +147,8 @@ Cloud free projects see an upgrade notice; client-only caching remains available
 
 ## Infrastructure
 
-- **Self-host (compose):** `pg_keyspace` inside the `db` container by default, or a `valkey` service with `cache.provider = "valkey"` (which is also what `database.external` gets, since pg_keyspace needs a Postgres this stack starts). See [self-host.md](self-host.md).
-- **Self-host (native `supatype dev`):** the keyspace in the Postgres it already starts, when the downloaded archive carries the library; a Valkey container beside it when not.
+- **Self-host (compose):** `pg_keyspace` inside the `db` container by default, or a `valkey` service with `cache.provider = "valkey"` (which is also what `database.external` gets, since pg_keyspace needs a Postgres this stack starts). From `supatype/postgres` 17.2.13 the keyspace requires the project's `SUPATYPE_KEYSPACE_PASSWORD`, which the CLI generates into `.env` and hands to `db`, `server` and Kong. See [self-host.md](self-host.md).
+- **Native `supatype dev`:** the keyspace in the Postgres it already starts, when the downloaded archive carries the library and is 17.2.13 or later: on 127.0.0.1 only, requiring the same `SUPATYPE_KEYSPACE_PASSWORD`. Otherwise (an older archive, and always on Windows) a Valkey container of the project's own, bound to 127.0.0.1 on the first free port from 6379. A Valkey already running is used only when `SUPATYPE_VALKEY_ADDR` names it, so two projects never share one cache.
 - **Cloud paid:** a keyspace per project; `tenant:{ref}:config.rest_cache_enabled: true`.
 - **Cloud free:** the server bypasses the cache regardless of client `server: true`.
 

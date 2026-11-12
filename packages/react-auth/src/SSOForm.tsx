@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { SSO_PROVIDER, SupatypeError, type AuthClient, type SignInWithSSOResult } from "@supatype/client"
+import { SSO_PROVIDER, SupatypeError, ssoDomain, type AuthClient, type SignInWithSSOResult } from "@supatype/client"
 import { useSupatype } from "@supatype/react"
 import type { AuthFormClassNames } from "./classNames.js"
 import { FormField, FormShell, FormMessage, useAuthSubmit, withDefaults, type Filled } from "./formParts.js"
@@ -37,16 +37,10 @@ const DEFAULT_LABELS: Filled<SSOFormLabels> = {
 
 const NO_DOMAIN = "Enter your work email address."
 
-/** The domain SSO is looked up by: the part after the last `@`, or the whole of a bare domain. */
-function ssoDomain(input: string): string {
-  const value = input.trim().toLowerCase()
-  return value.slice(value.lastIndexOf("@") + 1)
-}
-
 /** Start SSO for the address typed, refusing one with no domain before the server is asked. */
 function startSSO(auth: AuthClient, email: string, redirectTo: string | undefined): Promise<SignInWithSSOResult> {
   const domain = ssoDomain(email)
-  if (domain === "") {
+  if (domain === null) {
     const error = new SupatypeError({ message: NO_DOMAIN, code: "validation_failed" })
     return Promise.resolve({ data: { url: "" }, error })
   }

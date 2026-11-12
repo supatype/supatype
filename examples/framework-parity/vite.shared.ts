@@ -6,17 +6,19 @@ import { loadEnv, type ProxyOptions, type UserConfig } from "vite"
  * the stack.
  *
  * Each app's `root` is its own `src/<framework>` directory, and Vite reads `.env` files from the
- * root unless told otherwise. `supatype keys` and `supatype dev` write the anon key next to
- * `supatype.config.ts`, so without `envDir` every build shipped an empty key.
+ * root unless told otherwise. `supatype keys` and `supatype dev` write the local stack's values
+ * to `.env.development.local` next to `supatype.config.ts`, which only the dev server reads.
  *
  * The shared client talks to `window.location.origin`, which is right when Supatype serves the
  * build (`mode:*`) and wrong on Vite's own port, where nothing answers `/auth/v1`. So the dev and
  * preview servers forward the API paths to the gateway, and the page stays on one origin either way.
+ * `/supatype-env.js` goes the same way: a production build carries no anon key, and the page reads
+ * it from that script, which only the gateway answers.
  */
 const exampleRoot = fileURLToPath(new URL(".", import.meta.url))
 
-/** The API prefixes the client calls, all served by the gateway. */
-const API_PATHS = ["/auth", "/rest", "/realtime", "/functions", "/storage", "/graphql"]
+/** The paths the page calls, all served by the gateway: the API, and the script naming its key. */
+const API_PATHS = ["/auth", "/rest", "/realtime", "/functions", "/storage", "/graphql", "/supatype-env.js"]
 
 function gatewayUrl(mode: string): string {
   const env = loadEnv(mode, exampleRoot, "")

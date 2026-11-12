@@ -28,7 +28,8 @@ vi.mock("../src/ui/clack.js", () => {
   }
   return { p, runClackFlow: (run: (api: typeof p) => Promise<unknown>) => run(p), isCancel: () => false, CLACK_CANCEL: Symbol.for("cancel") }
 })
-vi.mock("../src/dev-ports.js", () => ({
+vi.mock("../src/dev-ports.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/dev-ports.js")>()),
   promptKongPortChoice: () => Promise.resolve(18478),
   chooseInitKongPort: () => Promise.resolve(18478),
 }))

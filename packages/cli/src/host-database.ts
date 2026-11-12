@@ -18,6 +18,7 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { runningStackMode, type ComposeRenderMode } from "./compose-render-mode.js"
 import { composeDbPublish } from "./db-port.js"
+import { enterLocalStack } from "./dev-session-lock.js"
 import { readComposeEnvInt } from "./env-file.js"
 import { devDatabaseUrl, devPostgresPassword } from "./local-secrets.js"
 import { databaseUrlState } from "./database-url-owner.js"
@@ -36,9 +37,13 @@ export { redact } from "./error-message.js"
 
 /**
  * The host port a docker project's Postgres is published on in the stack's layout: the variable
- * the compose file binds for that layout (exported first, then `.env`, as compose reads it), or
- * the port it binds when the variable is unset. Read through {@link composeDbPublish}, the same
+ * the compose file binds for that layout (exported first, then `.env`, as compose reads it), or the
+ * port it binds when the variable is unset. Read through {@link composeDbPublish}, the same
  * definition the compose template is written from.
+ *
+ * A port the shell gave dev is kept out of .env, so a command run from another shell connected to
+ * the default port, another project's database (0.9.2 round 2, R2-S17). Every path to the local
+ * stack enters it first ({@link enterLocalStack}), which puts the session's port in the environment.
  */
 export function composeDbHostPort(cwd: string, mode: ComposeRenderMode): number {
   const { envKey, defaultPort } = composeDbPublish(mode === "dev")
@@ -199,6 +204,9 @@ export function resolveHostDatabaseUrl(
     return { dsn: declared, source: "connection in supatype.config.ts", tried }
   }
 
+  // Nothing named a database: what is left is the project's own local one, so the local stack is
+  // entered, and a running dev session's run-only DATABASE_URL and ports are this run's too.
+  enterLocalStack(root, config.project.name)
   const fromEnv = candidate("DATABASE_URL in the environment", process.env["DATABASE_URL"], "not set")
   if (fromEnv !== undefined) {
     return { dsn: fromEnv, source: "DATABASE_URL in the environment", tried }

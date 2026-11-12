@@ -68,11 +68,28 @@ function readRows(client: AnyClient, table: string, options: RowsReadOptions | u
   if (options?.order !== undefined) {
     query = query.order(options.order.column, { ascending: options.order.ascending ?? true })
   }
-  if (options?.limit !== undefined) {
-    query = query.limit(options.limit)
-  }
-  if (options?.offset !== undefined) {
-    query = query.range(options.offset, options.offset + (options.limit ?? 100) - 1)
-  }
-  return query
+  return withPage(query, options)
+}
+
+/** How many rows a binding's query reads from an `offset` given with no `limit`. */
+const DEFAULT_PAGE_SIZE = 100
+
+/** A query a page can be applied to: the client's `QueryBuilder`, whatever its row type. */
+interface Pageable<Q> {
+  limit(count: number): Q
+  range(from: number, to: number): Q
+}
+
+/**
+ * `query` limited to the page `limit` and `offset` describe, for every binding's query. An offset
+ * with no limit reads `DEFAULT_PAGE_SIZE` rows: React's `useQuery` used to drop the offset there
+ * while the Vue, Svelte and Solid queries read 100, so the same options read different rows.
+ */
+export function withPage<Q extends Pageable<Q>>(
+  query: Q,
+  page: { limit?: number | undefined; offset?: number | undefined } | undefined,
+): Q {
+  const limited = page?.limit !== undefined ? query.limit(page.limit) : query
+  if (page?.offset === undefined) return limited
+  return limited.range(page.offset, page.offset + (page.limit ?? DEFAULT_PAGE_SIZE) - 1)
 }

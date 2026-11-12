@@ -92,14 +92,14 @@ export type { SelectRow, SelectError, TableRelationship } from "./select-types.j
  */
 export type AnyClient = SupatypeClient<AnyDatabase>
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
-export { AuthClient, SSO_PROVIDER } from "./auth.js"
+export { AuthClient, SSO_PROVIDER, ssoDomain } from "./auth.js"
 export { onIdentityChange, type IdentitySource } from "./identity.js"
 export { QueryBuilder, MutationBuilder, type HeadersProvider, type RequestTransport, type UnauthorizedHandler } from "./query.js"
 export { QueryCache, defaultQueryCache } from "./query-cache.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, StorageFolder, StorageListEntry, ListOptions, RemovedObject, StorageReference, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
-export type { RealtimeEvent, RealtimePayload, ChannelStatus, PresenceEntry } from "./realtime.js"
+export type { RealtimeEvent, RealtimePayload, ChannelStatus, ChannelStatusCallback, PresenceEntry } from "./realtime.js"
 // The bindings' shared subscription helpers are on `@supatype/client/bindings`, not here.
 export type { TableSubscribeOptions, TableSubscription } from "./table-subscription.js"
 export * from "./errors.js"

@@ -182,8 +182,8 @@ sub.unsubscribe()</pre></div>
   .on(<span class="s">"postgres_changes"</span>, { event: <span class="s">"INSERT"</span>, table: <span class="s">"comment"</span>, filter: <span class="s">`post_id=eq.${postId}`</span> }, (change) =&gt; {
     showComment(change.new)
   })
-  .subscribe((status) =&gt; console.log(status))</pre></div>
-    <p>Status is <code>SUBSCRIBING</code>, <code>SUBSCRIBED</code>, <code>CHANNEL_ERROR</code>, <code>TIMED_OUT</code> or <code>CLOSED</code>. <code>CHANNEL_ERROR</code> means the server refused a request on the socket, such as a join. <code>TIMED_OUT</code> means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass <code>table</code> explicitly. Without it the channel name is read as <code>schema:table</code>.</p>
+  .subscribe((status, err) =&gt; console.log(status, err?.message))</pre></div>
+    <p>Status is <code>SUBSCRIBING</code>, <code>SUBSCRIBED</code>, <code>CHANNEL_ERROR</code>, <code>TIMED_OUT</code> or <code>CLOSED</code>. <code>CHANNEL_ERROR</code> means the server refused a request on the socket, such as a <code>postgres_changes</code> listener for a table that does not exist, for a view, which has no changes of its own, or for a table the subscriber's role cannot read, such as <code>auth.users</code> with an anon or signed-in key: every change would be withheld from it. A channel used only for broadcast and presence is never checked against a table, whatever its name. With <code>CHANNEL_ERROR</code> the callback's second argument, <code>err</code>, is an <code>Error</code> whose message is the server's reason and names the table; it is undefined with every other status. A join hears only changes committed after it was taken. <code>TIMED_OUT</code> means the client gave up reconnecting. Render the status rather than assuming a channel is live: a subscription that stopped receiving looks the same as a quiet table. Pass <code>table</code> explicitly. Without it the channel name is read as <code>schema:table</code>.</p>
     <p>A channel carries one table subscription. If you call <code>.on("postgres_changes", ...)</code> more than once on a channel, the first call's table, event and filter are what the server registers. Use one channel per table.</p>
 
     <h2 id="broadcast">Broadcast and presence</h2>
@@ -209,7 +209,7 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
     <div class="callout warn"><span class="callout-label">WARNING</span><p>Broadcast and presence have no access rules. Anyone with your anon key who knows a channel's name can join it, read its messages and send to it. Do not put private data in a broadcast, and use a hard-to-guess channel name for anything you would not show the public.</p></div>
 
     <h2 id="hooks">Framework hooks</h2>
-    <p><code>@supatype/react</code> exports <code>useSubscription</code>. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing.</p>
+    <p><code>@supatype/react</code> exports <code>useSubscription</code>. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing. It returns <code>status</code>, and <code>error</code>, the server's reason while the status is <code>CHANNEL_ERROR</code> and null otherwise.</p>
     <div class="cb"><div class="cb-bar"><span>tsx</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { useState } <span class="k">from</span> <span class="s">"react"</span>
 <span class="k">import</span> { useSubscription } <span class="k">from</span> <span class="s">"@supatype/react"</span>

@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import type { ChannelStatus, RealtimePayload } from "../src/realtime.js"
-import { sentFrames, simulateServerMessage } from "./helpers/mock-websocket.js"
+import { ackNewestJoin, deliverInsert, sentFrames, simulateServerMessage, subscribeFrames } from "./helpers/mock-websocket.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "./helpers/socket-swap.js"
 
 const CHANNEL = "x"
@@ -18,16 +18,6 @@ let harness: SocketSwapHarness
 
 function unsubscribeFrames(): Array<Record<string, unknown>> {
   return sentFrames(harness.socket()).filter((frame) => frame["type"] === "unsubscribe" && frame["channel"] === CHANNEL)
-}
-
-function deliverInsert(id: number): void {
-  simulateServerMessage(harness.socket(), {
-    type: "change",
-    channel: CHANNEL,
-    event: "INSERT",
-    payload: { old: null, new: { id } },
-    timestamp: "2026-10-28T00:00:00Z",
-  })
 }
 
 beforeEach(() => {
@@ -46,7 +36,7 @@ describe("two handles on one channel name", () => {
     harness.ackJoins()
 
     a.unsubscribe()
-    deliverInsert(1)
+    deliverInsert(harness.socket(), CHANNEL, 1)
 
     expect(first).toEqual([])
     expect(second.map((p) => p.new)).toEqual([{ id: 1 }])
@@ -117,20 +107,12 @@ describe("rows on a channel whose joining handle has left", () => {
     harness.ackJoins()
 
     a.unsubscribe()
-    deliverInsert(1)
+    deliverInsert(harness.socket(), CHANNEL, 1)
 
     expect(audit).toEqual([])
     expect(messages.map((p) => [p.table, p.new])).toEqual([["messages", { id: 1 }]])
   })
 })
-
-function subscribeFrames(): Array<Record<string, unknown>> {
-  return sentFrames(harness.socket()).filter((frame) => frame["type"] === "subscribe" && frame["channel"] === CHANNEL)
-}
-
-function ackJoin(channel: string): void {
-  simulateServerMessage(harness.socket(), { type: "system", status: "ok", message: `subscribed to ${channel}` })
-}
 
 /**
  * When the handle whose listener made the join leaves and no remaining listener is for that join,
@@ -150,15 +132,15 @@ describe("a channel whose joining handle leaves while the others listen to anoth
     harness.ackJoins()
 
     a.unsubscribe()
-    const joins = subscribeFrames()
+    const joins = subscribeFrames(harness.socket(), CHANNEL)
     expect(joins).toHaveLength(2)
     expect(joins[1]).toMatchObject({ schema: "public", table: "messages", event: "INSERT", filter: { room: "eq.1" } })
     // A join on a channel already joined replaces it on the server; leaving first would drop the
     // presence this socket tracks there.
     expect(unsubscribeFrames()).toEqual([])
 
-    ackJoin(CHANNEL)
-    deliverInsert(1)
+    ackNewestJoin(harness.socket(), CHANNEL)
+    deliverInsert(harness.socket(), CHANNEL, 1)
     expect(messages.map((p) => [p.table, p.new])).toEqual([["messages", { id: 1 }]])
     expect(statuses).toEqual(["SUBSCRIBED", "SUBSCRIBING", "SUBSCRIBED"])
   })
@@ -172,9 +154,9 @@ describe("a channel whose joining handle leaves while the others listen to anoth
 
     a.unsubscribe()
     // Sent before the server took the new join: an audit_log row.
-    deliverInsert(1)
-    ackJoin(CHANNEL)
-    deliverInsert(2)
+    deliverInsert(harness.socket(), CHANNEL, 1)
+    ackNewestJoin(harness.socket(), CHANNEL)
+    deliverInsert(harness.socket(), CHANNEL, 2)
     expect(messages.map((p) => p.new)).toEqual([{ id: 2 }])
   })
 })

@@ -6,8 +6,9 @@ import { assertEnvValues } from "./env-value.js"
 export { parseEnvText }
 
 /**
- * Marks a value the CLI wrote from `supatype.config.ts`: an image pin from `versions`, or
- * `SUPATYPE_MAILER_AUTOCONFIRM` from `auth.email.enableConfirmations`.
+ * Marks a value the CLI wrote from `supatype.config.ts`: an image pin from `versions`, or a mailer
+ * setting from `email`. (`SUPATYPE_MAILER_AUTOCONFIRM` from `auth.email.enableConfirmations` was
+ * one until FF7; mailer-autoconfirm.ts takes that line out.)
  *
  * Provenance, so that removing a pin from config can clean up the stale image reference it left
  * behind *without* deleting a value the operator wrote by hand. Before this, the image keys derived
@@ -30,7 +31,8 @@ export const DATABASE_URL_MARKER = "# supatype:managed, built from supatype.conf
 /** Every label that marks a value as the CLI's, older wordings included. */
 const MARKERS: ReadonlySet<string> = new Set([MANAGED_MARKER, LEGACY_MANAGED_MARKER, DATABASE_URL_MARKER])
 
-function isMarker(text: string | undefined): boolean {
+/** Whether `text` is one of the labels the CLI writes above a value it owns. */
+export function isMarker(text: string | undefined): boolean {
   return MARKERS.has(text?.trim() ?? "")
 }
 
@@ -79,6 +81,11 @@ export interface UpsertOptions {
   label?: string
   /** Keys to delete outright, whoever wrote them. For secrets being rotated out. */
   remove?: readonly string[]
+  /**
+   * A comment line put above the first assignment of `key`, and left there when that assignment is
+   * removed: the note mailer-autoconfirm.ts leaves where it takes the CLI's line out.
+   */
+  noteAt?: { key: string; text: string }
   /** The file in `cwd` to merge into: `.env` unless given, `.env.development.local` for instance. */
   file?: string
 }
@@ -129,6 +136,7 @@ interface UpsertPlan {
   removeAlways: ReadonlySet<string>
   managed: ReadonlySet<string>
   label: string
+  noteAt: UpsertOptions["noteAt"]
 }
 
 function upsertPlan(updates: Readonly<Record<string, string>>, opts: UpsertOptions): UpsertPlan {
@@ -138,18 +146,30 @@ function upsertPlan(updates: Readonly<Record<string, string>>, opts: UpsertOptio
     removeAlways: new Set(opts.remove ?? []),
     managed: new Set(opts.managed ?? []),
     label: opts.label ?? MANAGED_MARKER,
+    noteAt: opts.noteAt,
   }
+}
+
+/** Puts `text` at the end of `kept`, above the marker there if there is one, so the marker stays with its line. */
+function pushNote(kept: EnvLine[], text: string): void {
+  const at = isMarker(kept[kept.length - 1]?.text) ? kept.length - 1 : kept.length
+  kept.splice(at, 0, { text, managed: false })
 }
 
 /** The file's lines with the plan applied in place, and the keys rewritten where they were. */
 function mergeLines(lines: readonly EnvLine[], plan: UpsertPlan): { kept: EnvLine[]; written: Set<string> } {
   const written = new Set<string>()
   const kept: EnvLine[] = []
+  let note = plan.noteAt
   for (const line of lines) {
     const key = line.key
     if (key === undefined) {
       kept.push(line)
       continue
+    }
+    if (note?.key === key) {
+      pushNote(kept, note.text)
+      note = undefined
     }
     const removed = plan.removeAlways.has(key) || (plan.removeManaged.has(key) && line.managed)
     // A second assignment of a key rewritten above goes too: compose reads the last one, so
@@ -242,23 +262,29 @@ export function envValueOwner(cwd: string, key: string): "cli" | "operator" | nu
   return env.managed.has(key) ? "cli" : "operator"
 }
 
-/** `.env` read once: its values, and the keys the CLI wrote, by the marker above their last assignment. */
+/**
+ * `.env` read once: its values, the keys the CLI wrote, by the marker above their last assignment,
+ * and its comment lines, trimmed.
+ */
 export interface EnvSnapshot {
   values: Readonly<Record<string, string>>
   managed: ReadonlySet<string>
+  comments: ReadonlySet<string>
 }
 
 /** `.env` as an {@link EnvSnapshot}; empty when there is no `.env`. */
 export function readEnvSnapshot(cwd: string): EnvSnapshot {
   const text = envText(cwd) ?? ""
   const managed = new Set<string>()
+  const comments = new Set<string>()
   // The last assignment of each key, as compose reads it.
   for (const line of parseLines(text)) {
-    if (line.key === undefined) continue
-    if (line.managed) managed.add(line.key)
+    if (line.key === undefined) {
+      if (line.text.trim().startsWith("#")) comments.add(line.text.trim())
+    } else if (line.managed) managed.add(line.key)
     else managed.delete(line.key)
   }
-  return { values: parseEnvText(text), managed }
+  return { values: parseEnvText(text), managed, comments }
 }
 
 export function readEnvInt(cwd: string, key: string): number | null {

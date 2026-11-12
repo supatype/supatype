@@ -186,4 +186,4 @@ URL with an identity provider, change it to the one above.
 
 ## Linking accounts
 
-If a user signs in with OAuth and an account with the same email already exists (from email/password sign-up), the auth server links the new identity to that account automatically, provided the provider reports the email as verified (or the server auto-confirms emails, which the generated stack does unless `auth.email.enableConfirmations` is set). Linking happens on every such sign-in, and `supatype.config.ts` has no key to turn it off. The user's `identities` list then holds one entry per provider.
+If a user signs in with OAuth and an account with the same email already exists (from email/password sign-up), the auth server links the new identity to that account automatically, provided the provider reports the email as verified (or the server auto-confirms emails, which local dev does unless `auth.email.enableConfirmations` is `true`, and a self-hosted stack does only when it is `false`). Linking happens on every such sign-in, and `supatype.config.ts` has no key to turn it off. The user's `identities` list then holds one entry per provider.

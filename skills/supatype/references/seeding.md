@@ -188,6 +188,17 @@ db.$if({ environment: "staging" }, () => { ... })
 `lte`, `like`, `isNull`, `notNull`, `oneOf`, `and`, `or`, `not`. Omit it for "is this table
 empty". The helpers are re-exported from the generated builder, so one import covers them.
 
+`where` also takes plain columns and values, the shape an upsert's `where` has: each column
+equals its value, and `null` matches an empty column. Values are written as an upsert writes
+them, so a bigint or a decimal column matches exactly. A value an earlier call returned
+(`alex.id`) cannot be compared there; compare a column whose value you know.
+
+```ts
+db.$if({ notExists: { model: "Tag", where: { name: "general" } } }, () => {
+  db.tag.create({ name: "general" })
+})
+```
+
 A condition naming another model's column does not compile.
 
 ## What a run reports

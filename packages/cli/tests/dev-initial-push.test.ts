@@ -191,6 +191,25 @@ describe("a database that is not reachable yet", () => {
     expect(s.recoverDatabase).toHaveBeenCalledTimes(1)
   })
 
+  // 0.9.2 release test N-FF7: on a slow Docker, Postgres dropped the engine's connection while it ran
+  // its init migrations, and the push was not retried, so dev came up without the schema. sqlx says
+  // "error communicating with database" around the OS's own words, which on Windows are not the
+  // "connection refused" or "reset" a Unix socket gives.
+  it.each([
+    ["Postgres closed it mid-handshake (sqlx)", "Engine /push failed (exit 1): Error: Failed to connect to database\n\nCaused by:\n    0: error communicating with database: expected to read 5 bytes, got 0 bytes at EOF\n    1: expected to read 5 bytes, got 0 bytes at EOF"],
+    ["reset, on Windows", "error communicating with database: An existing connection was forcibly closed by the remote host. (os error 10054)"],
+    ["refused, on Windows", "error communicating with database: No connection could be made because the target machine actively refused it. (os error 10061)"],
+    ["aborted, on Windows", "error communicating with database: An established connection was aborted by the software in your host machine. (os error 10053)"],
+    ["aborted, on Unix", "error communicating with database: Software caused connection abort (os error 103)"],
+    ["a broken pipe", "error communicating with database: Broken pipe (os error 32)"],
+    ["closed, as libpq says it", "psql: error: server closed the connection unexpectedly"],
+  ])("is retried when %s", async (_, message) => {
+    const s = steps([message])
+
+    expect(await pushInitialSchema(s)).toEqual({ kind: "applied" })
+    expect(s.push).toHaveBeenCalledTimes(2)
+  })
+
   it("is reported as exhausted once the attempts run out", async () => {
     const starting = "error returned from database: the database system is starting up"
     const s = steps([starting, starting, starting])

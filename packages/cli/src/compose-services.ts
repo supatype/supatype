@@ -18,7 +18,8 @@ import { existsSync } from "node:fs"
 import { loadConfig, type SupatypeProjectConfig } from "./config.js"
 import { askDocker, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { spawnFailureText } from "./error-message.js"
-import { composeProjectName, selfHostComposePaths } from "./self-host-compose.js"
+import { enterLocalStack } from "./dev-session-lock.js"
+import { selfHostComposePaths } from "./self-host-compose.js"
 
 /** Where the local stack's compose file is, and what project name it runs under. */
 export interface ComposeContext {
@@ -64,7 +65,7 @@ export function composeContext(cwd: string): ComposeContext | undefined {
     // A project whose config will not load can still have a running stack, and
     // reporting on it is more useful than refusing to.
   }
-  const projectName = config ? composeProjectName(config.project.name) : "supatype"
+  const projectName = config ? enterLocalStack(cwd, config.project.name) : "supatype"
   return { composePath: paths.composePath, projectRoot: cwd, projectName, ...(config && { config }) }
 }
 

@@ -369,6 +369,15 @@ describe("scaffold()", () => {
     expect(existsSync(join(tmpRoot, "supatype.local.config.ts"))).toBe(false)
   })
 
+  // 0.9.1 release test: a missing start was written as "dev", which in a new project is
+  // init's own "supatype dev", so dev ran itself as the app.
+  it("proxy app mode with no start writes none, not init's own dev script", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), app: { mode: "proxy", upstream: "http://localhost:4000" } })
+    const content = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(content).toContain('mode: "proxy"')
+    expect(content).not.toMatch(/^\s*start:/m)
+  })
+
   it("proxy app mode with self-host splits static production config and local proxy override", () => {
     scaffold(tmpRoot, {
       ...defaultScaffoldOptions("my-app", "self-host"),
@@ -444,7 +453,7 @@ describe("scaffold()", () => {
     })
     const config = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
     expect(config).toContain('email: { provider: "resend" }')
-    expect(config).toContain('storage: { provider: "s3" }')
+    expect(config).toContain('storage: { provider: "s3", production: "s3" }')
     const env = readFileSync(join(tmpRoot, ".env"), "utf8")
     // The names the auth server reads; an unprefixed RESEND_API_KEY was never seen by it.
     expect(env).toMatch(/^SUPATYPE_RESEND_API_KEY=$/m)
@@ -452,6 +461,21 @@ describe("scaffold()", () => {
     expect(env).not.toMatch(/^RESEND_/m)
     expect(env).toContain("S3_BUCKET=")
     expect(env).toContain("local development and production")
+  })
+
+  // 0.9.2: the storage service keeps every bucket as a prefix in S3_BUCKET, as Supabase does, and
+  // serves public files itself. The .env used to promise neither, and "ambient credentials" lived
+  // only in a config comment while the service ignored S3_BUCKET altogether.
+  it("describes the one-bucket model wherever it scaffolds S3 settings", () => {
+    for (const [storageLocal, storageProduction] of [["s3", "s3"], ["local", "s3"], ["s3", "local"]] as const) {
+      scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), storageLocal, storageProduction })
+      const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+      expect(env).toContain("Every Supatype bucket is a folder (key prefix) in S3_BUCKET")
+      expect(env).toContain("leave S3_ENDPOINT blank")
+      expect(env).toContain("leave both keys blank")
+      rmSync(tmpRoot, { recursive: true, force: true })
+      mkdirSync(tmpRoot, { recursive: true })
+    }
   })
 
   it("scaffolds SES and SMTP settings under the names the auth server reads", () => {
@@ -479,11 +503,30 @@ describe("scaffold()", () => {
       storageProduction: "s3",
     })
     const config = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
-    expect(config).toContain('provider: "local"')
-    expect(config).toContain("Production storage: external S3")
+    expect(config).toContain('storage: { provider: "local", local_path: ".supatype/storage", production: "s3" }')
     const env = readFileSync(join(tmpRoot, ".env"), "utf8")
     expect(env).toContain("local development, SeaweedFS")
-    expect(env).toContain("production, external bucket")
+    expect(env).toContain("production, your own S3 bucket")
+  })
+
+  // 0.9.2: the self-host stack reads production storage from the config, so init records the answer
+  // there rather than in a comment, and S3_ENDPOINT is written once: local SeaweedFS's address used
+  // to come first and a blank production one after it, which a .env reader takes in place of it.
+  it("records production storage in the config and writes each S3 setting once", () => {
+    for (const [storageLocal, storageProduction, written] of [
+      ["s3", "local", 'storage: { provider: "s3", production: "local" }'],
+      ["local", "local", 'storage: { provider: "local", local_path: ".supatype/storage" }'],
+      ["local", "s3", 'production: "s3" }'],
+    ] as const) {
+      scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), storageLocal, storageProduction })
+      expect(readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")).toContain(written)
+      const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+      for (const name of ["S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY"]) {
+        expect(env.match(new RegExp(`^${name}=`, "gm"))?.length ?? 0, `${storageLocal}/${storageProduction} ${name}`).toBeLessThanOrEqual(1)
+      }
+      rmSync(tmpRoot, { recursive: true, force: true })
+      mkdirSync(tmpRoot, { recursive: true })
+    }
   })
 
   // The compose generator has had this guard since SeaweedFS replaced MinIO; the .env generator
@@ -504,15 +547,31 @@ describe("scaffold()", () => {
     }
   })
 
-  // The object store publishes 8333, and the storage service reads S3_ENDPOINT from this file.
-  // A local .env pointing anywhere else is a stack that starts and then fails on first upload.
-  it("local storage points at the port the object store actually publishes", () => {
+  // 0.9.2 release test round 2 (N-S26): `init -y` wrote S3_ENDPOINT=http://localhost:8333, which
+  // nothing reads (the compose file hands the storage service its SeaweedFS address itself), and
+  // which inside the storage container names the container. It stayed behind, dead, in a project
+  // that later moved to its own bucket.
+  it("local storage writes no S3_ENDPOINT", () => {
     scaffold(tmpRoot, {
       ...defaultScaffoldOptions("my-app"),
       storageLocal: "local",
       storageProduction: "local",
     })
     const env = readFileSync(join(tmpRoot, ".env"), "utf8")
-    expect(env).toContain("S3_ENDPOINT=http://localhost:8333")
+    expect(env).not.toMatch(/^S3_ENDPOINT=/m)
+    expect(env).not.toContain("localhost:8333")
+  })
+
+  // The storage docs: in a self-hosted stack the storage service runs in a container, where
+  // localhost is that container, so a store on the same machine is reached as host.docker.internal.
+  it("says how a container reaches a store on the same machine wherever it scaffolds S3 settings", () => {
+    for (const [storageLocal, storageProduction] of [["s3", "s3"], ["local", "s3"], ["s3", "local"]] as const) {
+      scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), storageLocal, storageProduction })
+      const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+      expect(env).toMatch(/^S3_ENDPOINT=$/m)
+      expect(env).toContain("http://host.docker.internal:<port>")
+      rmSync(tmpRoot, { recursive: true, force: true })
+      mkdirSync(tmpRoot, { recursive: true })
+    }
   })
 })

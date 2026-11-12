@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "description": "Supatype CLI: schema push, introspect, generate",
   "engines": {
-    "node": ">=22"
+    "node": ">=18"
   },
   "type": "module",
   "bin": {
@@ -14,6 +14,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "bin/supatype.js",
+    "bin/node-version.js",
     "dist",
     "!dist/**/supatype-eval-*",
     "!dist/**/*.tsbuildinfo",
@@ -58,6 +59,7 @@
     "@types/semver": "7.7.1",
     "bcryptjs": "^3.0.2",
     "commander": "^12.1.0",
+    "ignore": "7.0.14",
     "ink": "^5.2.1",
     "ink-select-input": "^6.2.0",
     "ink-spinner": "^5.0.0",

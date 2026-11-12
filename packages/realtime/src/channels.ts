@@ -112,6 +112,11 @@ export function presenceKey(claims: JwtClaims): string {
   return typeof claims.sub === "string" && claims.sub !== "" ? claims.sub : "anonymous"
 }
 
+/** True when a change to `schema.table` is `sub`'s: its table, and a join that wants row changes. */
+function receivesRowsOf(sub: Subscription, schema: string, table: string): boolean {
+  return sub.withoutRows !== true && sub.schema === schema && sub.table === table
+}
+
 /**
  * Manages connected clients and their channel subscriptions.
  */
@@ -269,14 +274,19 @@ export class ChannelManager {
    *
    * Exported so the rule has one home. A test that restates it passes against a server that does
    * something else, which is how this survived in the first place.
+   *
+   * The name's schema is read only when the name supplies the table too. 0.9.1 release test (RB4):
+   * a frame naming `comment` and no schema on a channel called `post:42` was registered against
+   * `post.comment`; a named table with no schema is `public`, as the client reads it.
    */
   static resolveTarget(msg: {
     channel: string
     table?: string | undefined
     schema?: string | undefined
   }): { schema: string; table: string } {
+    if (msg.table !== undefined) return { schema: msg.schema ?? "public", table: msg.table }
     const parsed = ChannelManager.parseChannel(msg.channel)
-    return { schema: msg.schema ?? parsed.schema, table: msg.table ?? parsed.table }
+    return { schema: msg.schema ?? parsed.schema, table: parsed.table }
   }
 
   /**
@@ -288,7 +298,7 @@ export class ChannelManager {
 
     for (const [clientId, client] of this.clients) {
       for (const sub of client.subscriptions.values()) {
-        if (sub.schema === schema && sub.table === table) {
+        if (receivesRowsOf(sub, schema, table)) {
           results.push({ clientId, client, subscription: sub })
         }
       }
@@ -382,7 +392,7 @@ export class ChannelManager {
       if (projectRef !== null && client.projectRef !== projectRef) continue
 
       for (const sub of client.subscriptions.values()) {
-        if (sub.schema === schema && sub.table === table) {
+        if (receivesRowsOf(sub, schema, table)) {
           results.push({ clientId, client, subscription: sub })
         }
       }

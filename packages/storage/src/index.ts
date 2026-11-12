@@ -16,6 +16,7 @@ async function selfTest(): Promise<number> {
 
 async function serve(): Promise<void> {
   const { createServer } = await import("./server.js")
+  await (await import("./object-store.js")).checkStore()
   const port = parseInt(process.env["PORT"] ?? "5000", 10)
   const host = process.env["HOST"] ?? "0.0.0.0"
   createServer().listen(port, host, () => {

@@ -160,8 +160,13 @@ export interface LoadConfigOptions {
   local?: boolean
 }
 
-/** The local override `cwd` has, if any. */
-function localConfigFile(cwd: string): string | undefined {
+/** The file name of the config `cwd` has, if any, the local override left out. */
+export function mainConfigFile(cwd: string): string | undefined {
+  return MAIN_CONFIG_CANDIDATES.find((name) => existsSync(resolve(cwd, name)))
+}
+
+/** The file name of the local override `cwd` has, if any. */
+export function localConfigFile(cwd: string): string | undefined {
   return LOCAL_CONFIG_CANDIDATES.find((name) => existsSync(resolve(cwd, name)))
 }
 

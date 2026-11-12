@@ -25,7 +25,7 @@ describe("ProcessManager.stop", () => {
     const proc = new ProcessManager(process.execPath, ["-e", "process.exit(0)"], {
       label: "quick",
       pidDir: dir,
-      onExit: () => exited(),
+      onStopped: () => exited(),
     })
     proc.start()
     await gone

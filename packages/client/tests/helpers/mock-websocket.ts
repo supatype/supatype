@@ -101,3 +101,25 @@ export function channelOf(frame: Record<string, unknown> | undefined): string {
   if (typeof channel !== "string") throw new Error(`the frame names no channel: ${JSON.stringify(frame)}`)
   return channel
 }
+/** The subscribe frames the client sent on a socket for `channel`, in order. */
+export function subscribeFrames(ws: MockWebSocketInstance, channel: string): Array<Record<string, unknown>> {
+  return sentFrames(ws).filter((frame) => frame["type"] === "subscribe" && frame["channel"] === channel)
+}
+
+/** The server takes the newest join on `channel`, echoing its ref as the real server does. */
+export function ackNewestJoin(ws: MockWebSocketInstance, channel: string): void {
+  const newest = subscribeFrames(ws, channel).at(-1)
+  if (newest === undefined) throw new Error(`no join was sent on ${channel}`)
+  simulateServerMessage(ws, { type: "system", status: "ok", message: `subscribed to ${channel}`, ref: newest["ref"] })
+}
+
+/** The server delivers an INSERT of the row `{ id }` on `channel`. */
+export function deliverInsert(ws: MockWebSocketInstance, channel: string, id: number): void {
+  simulateServerMessage(ws, {
+    type: "change",
+    channel,
+    event: "INSERT",
+    payload: { old: null, new: { id } },
+    timestamp: "2026-11-11T00:00:00Z",
+  })
+}

@@ -1,4 +1,4 @@
-import { ref, shallowRef, onMounted, onUnmounted, watch, type Ref } from "vue"
+import { ref, shallowRef, onMounted, onUnmounted, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
@@ -28,12 +28,17 @@ export interface UseQueryReturn<TRow> {
  * <script setup>
  * import { useQuery } from '@supatype/vue'
  *
- * const { data: posts, loading, error, refetch } = useQuery('posts', {
+ * const page = ref(0)
+ * const { data: posts, loading, error, refetch } = useQuery('posts', () => ({
  *   order: { column: 'created_at', ascending: false },
  *   limit: 10,
- * })
+ *   offset: page.value * 10,
+ * }))
  * </script>
  * ```
+ *
+ * `options` may be a plain object, a ref or a getter. The query runs again whenever what a ref or
+ * getter holds changes, including a ref nested inside it such as `enabled`.
  */
 export function useQuery<
   TDatabase extends AnyDatabase = AugmentedDatabase,
@@ -41,12 +46,14 @@ export function useQuery<
   TRow = TDatabase["public"]["Tables"][TTable]["Row"],
 >(
   table: TTable,
-  options?: UseQueryOptions | undefined,
+  options?: MaybeRefOrGetter<UseQueryOptions | undefined>,
 ): UseQueryReturn<TRow> {
   const client = useSupatype<TDatabase>()
-  const { data, error, loading, read } = latestRows<TRow>(client as AnyClient, table)
+  const enabledAtSetup = isEnabled(toValue(options)?.enabled)
+  const { data, error, loading, read } = latestRows<TRow>(client as AnyClient, table, enabledAtSetup)
   const fetchData = async () => {
-    if (isEnabled(options?.enabled)) await read(options)
+    const current = toValue(options)
+    if (isEnabled(current?.enabled)) await read(current)
   }
 
   onMounted(fetchData)
@@ -55,12 +62,10 @@ export function useQuery<
   // and why the fetch above is not enough on its own.
   onUnmounted(onIdentityChange(client.auth, () => void fetchData()))
 
-  // Re-fetch when enabled changes
-  if (options?.enabled && typeof options.enabled !== "boolean") {
-    watch(options.enabled, (newVal) => {
-      if (newVal) fetchData()
-    })
-  }
+  // 0.9.1 release test (FF25): the options were read once, so a sort, page or filter held in
+  // component state changed nothing. Deep, so a ref inside the options (`enabled`) and a change
+  // inside a reactive object both count; `fetchData` skips the read while disabled.
+  watch(() => toValue(options), () => void fetchData(), { deep: true })
 
   return { data, error, loading, refetch: fetchData }
 }
@@ -70,12 +75,18 @@ function isEnabled(enabled: Ref<boolean> | boolean | undefined): boolean {
   return enabled === undefined || (typeof enabled === "boolean" ? enabled : enabled.value)
 }
 
-/** The refs a query shows, fed by reads of which only the newest may change them. */
-function latestRows<TRow>(client: AnyClient, table: string) {
+/**
+ * The refs a query shows, fed by reads of which only the newest may change them.
+ *
+ * `loading` starts as `firstReadComing`. 0.9.2 release test (N-FF9): it started false, so the
+ * render before `onMounted` began the read showed `loading: false, data: null`, which an app
+ * reads as "done, nothing found".
+ */
+function latestRows<TRow>(client: AnyClient, table: string, firstReadComing: boolean) {
   // Shallow: each fetch replaces the rows whole, and `ref` would type them as `UnwrapRef<TRow>`.
   const data = shallowRef<TRow[] | null>(null)
   const error = ref<SupatypeError | null>(null)
-  const loading = ref(false)
+  const loading = ref(firstReadComing)
   const read = latestRowsReader<TRow>(client, table, `useQuery("${table}")`, {
     started: () => {
       loading.value = true

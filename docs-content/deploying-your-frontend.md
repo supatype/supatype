@@ -68,7 +68,7 @@ $ curl https://example.com/supatype-env.js
 window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."};
 ```
 
-`supatype init` puts the tag in a static app's `index.html`, in the head, so it runs before the app's own script. For an app made another way, add it yourself, before the app's own script:
+`supatype init` puts the tag in the head of the `index.html` it writes for a static app, so it runs before the app's own script. It never changes an `index.html` that is already there, such as the one in a Vite app made before `init` ran: it prints `skipped index.html (already exists)` and adds no tag. Until you add the tag, a build made without the values throws `MissingClientValuesError` on its first request. For such an app, or one made another way, add it yourself, before the app's own script:
 
 ```html title="index.html"
 <script src="/supatype-env.js" vite-ignore></script>
@@ -119,6 +119,26 @@ A Pages Router app gets nothing written by `init`, which prints these steps inst
 :::caution[If the key is missing]
 The build still succeeds, and the page renders. With `SUPATYPE_ANON_KEY` or `SUPATYPE_URL` unset, `/supatype-env.js` still answers 200, not cached, but sets only the reason in place of the values: `window.__SUPATYPE_ENV__ = {"error":"public env unavailable: SUPATYPE_ANON_KEY is not set on this server"};`. With both unset it names both, a line each, the key first. It does the same when `SUPATYPE_ANON_KEY` holds a service role key, and answers 404 only when `SUPATYPE_PUBLIC_ENV` is off. A browser runs no script answered with an error status and tells the page nothing of why, so the reason travels in the script. The browser client's first request then throws `Supatype client has no API address and anon key. createClient was given none, and https://your-app.example.com/supatype-env.js set no API address and anon key, giving the server's reason instead:`, followed by that reason and `Fix that in the environment of the server that answers it`, then the route and the build-time variables. A server client given neither throws on its first request: `Supatype client has no API address and anon key. It was given none, and it is running on a server, where there is no page to read them from.`, followed by `Set SUPATYPE_URL and SUPATYPE_ANON_KEY in the server's environment`.
 :::
+
+<h2 id="expo">Expo</h2>
+
+An Expo Router app has no `index.html`. Its web page is rendered from `app/+html.tsx`, or `src/app/+html.tsx` when the routes are in `src/app`. `supatype init` puts the script first in that file's `<head>`, and when the app has no such file, makes it from the template the installed Expo ships, as `npx expo customize +html.tsx` does. A web build then reads both values from the server that hosts it when the page loads, so `npx expo export --platform web` needs neither. The tag is left out of development pages: `expo start --web` serves no such file, and a development build reads its values from `.env.development.local`. In an app `init` did not set up, add the tag yourself:
+
+```tsx title="app/+html.tsx"
+<head>
+  {__DEV__ ? null : <script src="/supatype-env.js" />}
+  <meta charSet="utf-8" />
+```
+
+Expo renders `+html.tsx` only when `web.output` in `app.json` is `"static"` or `"server"`, as a new app's is. With `"single"`, put `<script src="/supatype-env.js"></script>` in the head of `public/index.html` instead. A `"static"` export is plain files: have Supatype host them with `supatype app add --static ./dist`. A `"server"` export, the default from SDK 58, renders each page in a Node server (`npx expo serve`); the Supatype server in front of it answers `/supatype-env.js` itself, whatever the app mode. On any other host, build with the values instead.
+
+A native build, for iOS or Android and on EAS, has no page, so it takes its values at build time under `EXPO_PUBLIC_SUPATYPE_URL` and `EXPO_PUBLIC_SUPATYPE_ANON_KEY`. `expo export` and EAS builds run in production mode, which never reads `.env.development.local`, where `supatype dev` and `keys` put the local stack's values. Give them your deployment's: on a linked machine, build through `supatype build`; for an EAS build, set the two names in the project's EAS environment variables, with the values `supatype keys --print frontend --env production` prints.
+
+```sh
+$ supatype build -- npx expo export --platform android
+```
+
+An Expo page with neither value makes the client's first request throw, naming `app/+html.tsx` and the build-time names rather than `index.html`.
 
 <h2 id="vercel">Vercel</h2>
 

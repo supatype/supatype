@@ -57,6 +57,29 @@ const READ_PREDICATE_SQL = `
      AND p.pronargs - p.pronargdefaults = 1
      AND p.prorettype = 'boolean'::regtype`
 
+/** The relation's kind (`r` table, `p` partitioned table, `v` view, ...), when there is one. */
+const RELATION_KIND_SQL = `
+  SELECT c.relkind AS kind
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = $1 AND c.relname = $2`
+
+/** Relation kinds whose rows reach the WAL as changes: a table, and a partitioned one. */
+const TABLE_KINDS = new Set(["r", "p"])
+
+/**
+ * Why a join for `schema.table` is refused given the relation's kind, or null when it is a table.
+ *
+ * 0.9.2 release test (N-FF5): a join for a table that does not exist was acknowledged, and the
+ * client reported SUBSCRIBED for a subscription nothing could ever match.
+ */
+export function relationRefusal(schema: string, table: string, kind: string | null): string | null {
+  const name = `${schema}.${table}`
+  if (kind === null) return `table ${name} does not exist: check the table name and schema`
+  if (!TABLE_KINDS.has(kind)) return `${name} is not a table: changes are published for tables only`
+  return null
+}
+
 interface ColumnRow {
   name: string
   pk_position: number | null
@@ -79,20 +102,39 @@ export function primaryKeyOf(rows: ReadonlyArray<{ name: string; pk_position: nu
  */
 export class TableCatalog {
   private cache: TtlCache<TableShape>
+  private kinds: TtlCache<string | null>
 
   constructor(
     private pool: pg.Pool,
     ttlMs = 30_000,
   ) {
     this.cache = new TtlCache(ttlMs)
+    this.kinds = new TtlCache(ttlMs)
   }
 
   invalidate(): void {
     this.cache.clear()
+    this.kinds.clear()
   }
 
   shape(schema: string, table: string): Promise<TableShape> {
     return this.cache.get(`${schema}.${table}`, () => this.load(schema, table))
+  }
+
+  /**
+   * The relation's kind, or null when `schema.table` does not exist.
+   *
+   * Asked on every join, so a kind is cached like a shape. A missing table is not: the next
+   * migration may create it, and a misspelt name costs one catalog query per join.
+   */
+  async relationKind(schema: string, table: string): Promise<string | null> {
+    const key = `${schema}.${table}`
+    const kind = await this.kinds.get(key, async () => {
+      const result = await this.pool.query<{ kind: string }>(RELATION_KIND_SQL, [schema, table])
+      return result.rows[0]?.kind ?? null
+    })
+    if (kind === null) this.kinds.forget(key)
+    return kind
   }
 
   private async load(schema: string, table: string): Promise<TableShape> {

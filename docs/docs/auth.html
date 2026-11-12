@@ -124,7 +124,7 @@
       <li><code>supatype dev</code> with <code>database.provider: "native"</code>: the server runs as a local process on <code>server.port</code>, <code>18471</code> by default.</li>
       <li>Self-host: <code>supatype self-host compose up</code> runs the same server image. It needs <code>JWT_SECRET</code> in <code>.env</code> and fills in a blank <code>ANON_KEY</code> or <code>SERVICE_ROLE_KEY</code> from it. See <a href="/docs/#self-host">Self-hosting</a>.</li>
     </ul>
-    <p>In local dev, sign-ups are confirmed automatically, so a new user gets a session straight away with no email round trip.</p>
+    <p>In local dev, sign-ups are confirmed automatically, so a new user gets a session straight away with no email round trip. A self-hosted stack sends a confirmation link instead. See <a href="#email-settings">Email sign-in and confirmation</a>.</p>
     <div class="callout"><span class="callout-label">NOTE</span><p>Who may open Studio, and what they may do there, is decided by Studio roles. See <a href="/docs/studio-roles.html">Studio roles</a>.</p></div>
 
     <h2 id="methods">Sign-in methods</h2>
@@ -323,6 +323,17 @@ window.location.assign(data.url)
 },</pre></div>
     <div class="callout warn"><span class="callout-label">CONSOLE SENDS NOTHING</span><p><code>console</code>, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.</p></div>
     <p>For Resend, set <code>SUPATYPE_RESEND_API_KEY</code> and <code>SUPATYPE_RESEND_FROM</code> in <code>.env</code>. For SES, set <code>SUPATYPE_SES_FROM</code>; credentials come from the environment's AWS configuration.</p>
+    <h3 id="email-settings">Email sign-in and confirmation</h3>
+    <p>Two keys under <code>auth.email</code> in <code>supatype.config.ts</code> decide what email-and-password sign-in does:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>auth: {
+  email: { enabled: <span class="t">true</span>, enableConfirmations: <span class="t">true</span> },
+},</pre></div>
+    <ul>
+      <li><code>enabled</code>, default <code>true</code>. <code>false</code> turns email-and-password sign-up and sign-in off at the auth server, and magic links and password recovery with them, for a project that signs in only with OAuth or SAML.</li>
+      <li><code>enableConfirmations</code>: whether a new sign-up has to click a link in an email before it can sign in. Unset, a self-hosted stack (<code>supatype self-host compose</code>) sends the link and local dev, Docker or native, confirms the sign-up at once. <code>true</code> or <code>false</code> sets it for every stack.</li>
+    </ul>
+    <p><code>supatype dev</code> and <code>supatype self-host compose</code> pass both to the auth server on every start, as <code>SUPATYPE_EXTERNAL_EMAIL_ENABLED</code> and <code>SUPATYPE_MAILER_AUTOCONFIRM</code>. Either variable set in the project's <code>.env</code> wins over the config for that stack; the CLI never writes them there. Studio shows each under <strong>Authentication &gt; Configuration</strong>, with the key that sets it.</p>
     <h3>Environment variables</h3>
     <p>The server reads the project's <code>.env</code> when it starts, so <code>SUPATYPE_*</code> auth variables placed there take effect after a restart. In the Docker stacks, a few values are set by the generated Compose file and are read from the plain names shown.</p>
     <div class="tbl"><table>
@@ -333,7 +344,8 @@ window.location.assign(data.url)
         <tr><td><code>SITE_URL</code></td><td>Self-host: your app's URL, the default place users land after confirming or signing in</td></tr>
         <tr><td><code>SUPATYPE_URI_ALLOW_LIST</code></td><td>Other URLs <code>redirectTo</code> may point at, comma-separated</td></tr>
         <tr><td><code>DISABLE_SIGNUP</code> (self-host), <code>SUPATYPE_DISABLE_SIGNUP</code> (native dev)</td><td><code>true</code> stops new sign-ups</td></tr>
-        <tr><td><code>SUPATYPE_MAILER_AUTOCONFIRM</code></td><td><code>true</code> skips email confirmation. On in dev, and on by default in self-host until you set it to <code>false</code></td></tr>
+        <tr><td><code>SUPATYPE_EXTERNAL_EMAIL_ENABLED</code></td><td><code>false</code> turns email-and-password sign-in off. Set from <code>auth.email.enabled</code>; a value in <code>.env</code> wins</td></tr>
+        <tr><td><code>SUPATYPE_MAILER_AUTOCONFIRM</code></td><td><code>true</code> skips email confirmation. Set from <code>auth.email.enableConfirmations</code>: when that is unset, off in self-host and on in dev. A value in <code>.env</code> wins: set it there and restart the stack</td></tr>
         <tr><td><code>SUPATYPE_EXTERNAL_&lt;PROVIDER&gt;_*</code></td><td>OAuth providers, see <a href="#oauth">above</a></td></tr>
         <tr><td><code>SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED</code></td><td>Allow anonymous sign-in</td></tr>
         <tr><td><code>SUPATYPE_EXTERNAL_EMAIL_MAGIC_LINK_ENABLED</code></td><td><code>false</code> turns magic links off</td></tr>
@@ -341,7 +353,7 @@ window.location.assign(data.url)
         <tr><td><code>SUPATYPE_EXTERNAL_PHONE_ENABLED</code>, <code>SUPATYPE_SMS_PROVIDER</code></td><td>Phone sign-in. The provider is <code>twilio</code>, <code>twilio_verify</code>, <code>messagebird</code>, <code>textlocal</code> or <code>vonage</code></td></tr>
       </tbody>
     </table></div>
-    <div class="callout warn"><span class="callout-label">SELF-HOST</span><p>Self-host turns auto-confirm on unless you set <code>SUPATYPE_MAILER_AUTOCONFIRM=false</code>. Set it, and configure email delivery, before you open sign-up to the public.</p></div>
+    <div class="callout warn"><span class="callout-label">SELF-HOST</span><p>Self-host sends a confirmation link with every new email sign-up. Configure email delivery before you open sign-up to the public: with the <code>console</code> provider no link reaches anyone, so a new user has no way to confirm their address.</p></div>
     <p>To create users from a seed file, see <a href="/docs/seeding.html#users">Seeding users</a>.</p>
 
     <nav class="pn" aria-label="More pages">

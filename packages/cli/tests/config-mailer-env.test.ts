@@ -1,9 +1,10 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { CONFIG_MAILER_ENV_KEYS, configMailerEnv, syncConfigMailerEnv } from "../src/config-mailer-env.js"
 import { readEnvFile } from "../src/env-file.js"
+import { retireCliMailerAutoconfirm } from "../src/mailer-autoconfirm.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 /**
@@ -55,12 +56,17 @@ describe("syncConfigMailerEnv", () => {
     expect(readEnvFile(dir)["SUPATYPE_SMTP_HOST"]).toBe("smtp.acme.test")
   })
 
-  it("writes the committed config's autoconfirm over the one the last dev wrote", () => {
-    syncConfigMailerEnv(dir, config(undefined, false))
-    expect(readEnvFile(dir)["SUPATYPE_MAILER_AUTOCONFIRM"]).toBe("true")
+  // FF7: autoconfirm reaches the server from the compose file's fallback, not from .env, so the
+  // marked line the last dev wrote is taken out, as self-host compose does before this, and nothing
+  // takes its place.
+  it("writes no autoconfirm, and takes out the one the last dev wrote", () => {
+    writeFileSync(join(dir, ".env"), "# supatype:managed, value from supatype.config.ts\nSUPATYPE_MAILER_AUTOCONFIRM=true\n")
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    retireCliMailerAutoconfirm(dir)
     syncConfigMailerEnv(dir, config(undefined, true))
-    expect(readEnvFile(dir)["SUPATYPE_MAILER_AUTOCONFIRM"]).toBe("false")
-    expect(readFileSync(join(dir, ".env"), "utf8")).toContain("# supatype:managed")
+    expect(readEnvFile(dir)["SUPATYPE_MAILER_AUTOCONFIRM"]).toBeUndefined()
+    expect(readFileSync(join(dir, ".env"), "utf8")).not.toContain("# supatype:managed, value from supatype.config.ts\nSUPATYPE_MAILER_AUTOCONFIRM")
+    vi.restoreAllMocks()
   })
 })
 
@@ -71,6 +77,6 @@ describe("CONFIG_MAILER_ENV_KEYS", () => {
       provider: "smtp",
       smtp: { host: "h", port: 1, user: "u", pass: "p", admin_email: "a@b.c", sender_name: "s" },
     }, true)
-    for (const key of Object.keys(configMailerEnv(dir, full).updates)) expect(CONFIG_MAILER_ENV_KEYS).toContain(key)
+    for (const key of Object.keys(configMailerEnv(full).updates)) expect(CONFIG_MAILER_ENV_KEYS).toContain(key)
   })
 })

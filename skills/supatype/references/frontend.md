@@ -285,8 +285,15 @@ project; the anon key is public either way.
 ```ts
 // app/supatype-env.js/route.ts
 export { GET } from "@supatype/ssr/next"
-export const dynamic = "force-dynamic" // in this file: Next ignores a re-exported segment config
 ```
+
+No segment config: `GET` reads the request, which keeps it per request on Next 14 to 16, and
+`export const dynamic` makes Next 16 with `cacheComponents` (create-next-app's default) answer 500.
+`supatype generate` (run by `prepare` on install) replaces 0.9.1's route while it is unchanged, and
+warns about a changed one that still has the line. The server helper goes in the folder holding
+`app/` (root, or `src/`), where create-next-app's `@/*` points. A Server Component's server client helper
+awaits `connection()` from `next/server` after `cookies()` (Next 15 and later), because the client
+reads the clock to check the session's expiry, which Next 16 logs as a prerender error otherwise.
 
 and, first inside the root layout's `<body>`,
 `<Script src="/supatype-env.js" strategy="beforeInteractive" />` with

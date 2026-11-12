@@ -22,6 +22,11 @@ export interface UseSubscriptionOptions<TRow> {
 export interface UseSubscriptionResult {
   /** Current subscription status. */
   status: SubscriptionStatus
+  /**
+   * Why the server refused the subscription, such as a table that does not exist, while the status
+   * is CHANNEL_ERROR; null otherwise.
+   */
+  error: Error | null
 }
 
 /**
@@ -41,7 +46,7 @@ export function useSubscription<TRow = Record<string, unknown>>(
   opts: UseSubscriptionOptions<TRow>,
 ): UseSubscriptionResult {
   const client = useSupatype()
-  const [status, setStatus] = useState<SubscriptionStatus>("SUBSCRIBING")
+  const [result, setResult] = useState<UseSubscriptionResult>({ status: "SUBSCRIBING", error: null })
 
   // Stable ref so the effect doesn't re-run when the callback reference changes
   const callbackRef = useRef(opts.callback)
@@ -60,7 +65,12 @@ export function useSubscription<TRow = Record<string, unknown>>(
         },
         (payload) => callbackRef.current(payload),
       )
-      .subscribe((s) => setStatus(s))
+      // The reason travels with the status it explains (N-FF5), so the two never disagree. The same
+      // answer keeps the same object, so React bails out of a render as it did for a bare status.
+      .subscribe((status, err) => {
+        const error = err ?? null
+        setResult((prev) => (prev.status === status && prev.error === error ? prev : { status, error }))
+      })
 
     return () => {
       channel.unsubscribe()
@@ -68,5 +78,5 @@ export function useSubscription<TRow = Record<string, unknown>>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, channelName, opts.event, opts.schema, opts.table, opts.filter])
 
-  return { status }
+  return result
 }

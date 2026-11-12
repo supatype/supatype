@@ -168,3 +168,31 @@ describe("the front end's API address from docker dev", () => {
     expect(process.env["VITE_SUPATYPE_URL"]).toBe("http://localhost:18990")
   })
 })
+
+/**
+ * 0.9.2 release test FF-7: a command from another shell ran dev's stack with `.env`'s ports and URLs.
+ * What dev holds for its run only is handed back for its session's lock, which later commands take.
+ */
+describe("the values dev holds for its run only", () => {
+  it("are every value built from a port the shell gave, the run's DATABASE_URL among them", () => {
+    const cwd = project()
+    vi.stubEnv("SUPATYPE_KONG_PORT", "18780")
+    vi.stubEnv("SUPATYPE_DEV_DB_PORT", "54780")
+    const runEnv = upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18780, 54780)
+    expect(runEnv).toMatchObject({
+      SUPATYPE_KONG_PORT: "18780",
+      SUPATYPE_DEV_DB_PORT: "54780",
+      API_EXTERNAL_URL: "http://localhost:18780",
+      SITE_URL: "http://localhost:18780",
+      VITE_SUPATYPE_URL: "http://localhost:18780",
+      NEXT_PUBLIC_SUPATYPE_URL: "http://localhost:18780",
+    })
+    expect(runEnv["DATABASE_URL"]).toContain(":54780/")
+    expect(Object.keys(runEnv)).not.toContain("ANON_KEY")
+  })
+
+  it("are none when every port is the project's own", () => {
+    const cwd = project()
+    expect(upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 18474, 54329)).toEqual({})
+  })
+})

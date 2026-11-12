@@ -144,7 +144,7 @@ genuinely cannot express.
 Two things are still absent:
 
 - the `plugin-seo` composite, because schema-side plugin registration needs a spike first
-- a publish button: the client can publish since 0.7.0
+- a publish button: the client can publish
   ([drafts](https://www.supatype.com/docs/client.html#drafts)), but this example still publishes
   in Studio
 
@@ -169,10 +169,11 @@ pnpm build:app       # app.mode is "static", so the SPA must exist before the st
 pnpm dev             # Postgres, the schema, the whole stack
 ```
 
-The `.env` copy is not optional and the order is not arbitrary. `supatype keys` only
-prints the keys when there is no `.env` to write them to, and the SPA reads `VITE_SUPATYPE_ANON_KEY` at **build**
-time, so a build that runs before the keys exist ships `anonKey: undefined` and every request
-it makes is rejected by the gateway. Rebuild after re-minting keys.
+The `.env` copy is not optional: `supatype keys` only prints the keys when there is no `.env` to
+write them to. The SPA's build carries no anon key. Its `index.html` loads `/supatype-env.js`
+from the stack that serves it, and the client reads the key from there at its first request, so
+the same `pnpm build:app` runs on this stack and on any deployment, and never ships the local
+stack's key. Re-minting keys needs no rebuild.
 
 Then, in another terminal:
 
@@ -190,8 +191,8 @@ pnpm mode:marketing && pnpm build:marketing
 pnpm --filter @supatype/example-kitchen-sink-marketing dev
 ```
 
-Next.js reads `apps/marketing/.env.local`, not the project root, and the CLI only writes
-`VITE_`, `PUBLIC_` and `EXPO_PUBLIC_` names, so that paste is manual. Skipping it leaves
+Next.js reads `apps/marketing/.env.local`, not the project root, where the CLI writes its
+front-end names, so that paste is manual. Skipping it leaves
 `anonKey` as the empty string, which reads as an anonymous caller with no key at all.
 
 `pnpm typecheck` covers all three TypeScript projects here (the schema and scripts, `functions/`,

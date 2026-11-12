@@ -55,7 +55,17 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => {
   }
 })
 
+// What the stack does once compose returns: nothing failing unless a test says otherwise.
+let failing: { service: string; exitCode?: number; restarting?: true } | undefined
+vi.mock("../src/stack-exit-watch.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/stack-exit-watch.js")>()),
+  composeStackWatch: () => ({ logTail: async () => "storage: S3_REGION is not set" }),
+  watchForFailure: async () => failing,
+}))
+
 import { registerSelfHost } from "../src/commands/self-host.js"
+import { devSessionLockFor, writeDevSessionLock } from "../src/dev-session-lock.js"
+import { selfHostComposePaths } from "../src/self-host-compose.js"
 import { exitThrows } from "./support/process-exit.js"
 
 /**
@@ -81,6 +91,7 @@ beforeEach(() => {
   calls.length = 0
   rendered.length = 0
   composeStatus = 0
+  failing = undefined
   process.exitCode = undefined
 })
 
@@ -89,6 +100,22 @@ afterEach(() => {
   process.exitCode = undefined
   vi.restoreAllMocks()
   rmSync(projectDir, { recursive: true, force: true })
+})
+
+describe("self-host compose status", () => {
+  // N-FF11: `ps` lists running containers only, so an exited storage was missing from the list.
+  it("lists every service, stopped ones included", async () => {
+    await run("status")
+    expect(calls[0]?.args).toEqual(["ps", "--all"])
+  })
+
+  // 0.9.2 round 2 (N2): dev run with SUPATYPE_PROJECT_NAME in its shell named its stack after it.
+  it("is the stack a running dev session of this folder started under another name", async () => {
+    const stack = { composeProject: "supatype-run-b", composePath: selfHostComposePaths(process.cwd()).composePath, kongPort: 18740 }
+    writeDevSessionLock(process.cwd(), devSessionLockFor(projectConfig, stack))
+    await run("status")
+    expect(calls[0]?.project).toBe("supatype-run-b")
+  })
 })
 
 describe("self-host compose restart <service> (SA3)", () => {
@@ -105,6 +132,20 @@ describe("self-host compose restart <service> (SA3)", () => {
   it("needs a service name", async () => {
     await expect(run("restart")).rejects.toThrow(/missing required argument/i)
     expect(calls).toHaveLength(0)
+  })
+
+  // 0.9.2 release test round 2 (N-FF11): a storage container that refuses its settings exits as it
+  // starts. Compose had started it, so the restart said nothing and exited 0.
+  it("says so and exits 1 when the recreated service keeps exiting", async () => {
+    failing = { service: "storage", exitCode: 1, restarting: true }
+    const said: string[] = []
+    vi.spyOn(console, "error").mockImplementation((line: unknown) => { said.push(String(line)) })
+    vi.spyOn(console, "log").mockImplementation((line: unknown) => { said.push(String(line)) })
+
+    await run("restart", "storage")
+
+    expect(process.exitCode).toBe(1)
+    expect(said.join("\n")).toMatch(/storage[\s\S]*S3_REGION is not set[\s\S]*compose logs --service storage/)
   })
 
   it("passes compose's failure on as the exit code", async () => {

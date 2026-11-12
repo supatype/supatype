@@ -28,6 +28,7 @@ const PACKAGES = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const SCHEMA = `
 import type {
   Block, Blocks, HasMany, JSON, Localized, ManyToMany, Model, Optional, RelatedTo, Timestamp, UUID,
+  WithTimestamps,
 } from "@supatype/types"
 
 export type Feature = { title: string; description: string; icon: string }
@@ -62,10 +63,20 @@ export type Post = Model<{
   tags: ManyToMany<Tag, { through: "post_tags" }>
   published_at: Optional<Timestamp>
 }, { tableName: "posts" }>
+
+export type Note = Model<{
+  id: UUID
+  body: string
+}, { tableName: "note"; timestamps: true; softDelete: true }>
+
+export type Stamped = Model<WithTimestamps<{
+  id: UUID
+  label: string
+}>, { tableName: "stamped" }>
 `
 
 const PRELUDE = `
-import { createClient, type TableRow } from "@supatype/client"
+import { createClient, type TableInsert, type TableRow, type TableUpdate } from "@supatype/client"
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
 declare function assert<T extends true>(): void
 const client = createClient({ url: "http://localhost:1", anonKey: "k" })
@@ -183,6 +194,45 @@ describe("the generated augmentation, as TypeScript reads it", () => {
       void value
     `)
     expect(errors.join("\n")).toMatch(/column 'nope' does not exist on 'posts'/)
+  })
+
+  // 0.9.1 release test (FF3): `timestamps: true` added `created_at` and `updated_at` to the table
+  // and to the engine's `database.ts`, but not to this augmentation, so selecting either failed
+  // `tsc` with "column 'updated_at' does not exist on 'note'" while the API returned it.
+  it("types the columns a model's options add, as the database fills them", () => {
+    expect(
+      compile(dir, `
+        const q = client.from("note").select("id, created_at, updated_at, deleted_at")
+        assert<Equal<RowOf<typeof q>, {
+          id: string
+          created_at: string
+          updated_at: string
+          deleted_at: string | null
+        }>>()
+        const stamped = client.from("stamped").select("label, created_at, updated_at")
+        assert<Equal<RowOf<typeof stamped>, { label: string; created_at: string; updated_at: string }>>()
+      `),
+    ).toEqual([])
+  })
+
+  it("leaves the columns the database fills optional on insert and update", () => {
+    expect(
+      compile(dir, `
+        type Filled = "created_at" | "updated_at" | "deleted_at"
+        assert<Equal<Pick<TableInsert<"note">, Filled>, {
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+        }>>()
+        assert<Equal<Pick<TableUpdate<"note">, Filled>, {
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+        }>>()
+        const minimal: TableInsert<"note"> = { body: "hello" }
+        void minimal
+      `),
+    ).toEqual([])
   })
 
   it("types a select string known only at run time as the whole row", () => {

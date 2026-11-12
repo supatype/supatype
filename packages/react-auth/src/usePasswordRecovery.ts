@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useSupatype } from "@supatype/react"
 
 export interface PasswordRecovery {
@@ -28,5 +28,7 @@ export function usePasswordRecovery(): PasswordRecovery {
     })
     return () => data.subscription.unsubscribe()
   }, [client])
-  return { active, finish: () => setActive(false) }
+  // The same `finish` every render, so it can be an effect dependency (0.9.1 release test, RB10).
+  const finish = useCallback(() => setActive(false), [])
+  return { active, finish }
 }

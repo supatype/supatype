@@ -141,7 +141,7 @@
         <tr><td><code>maxSize</code></td><td>Largest file accepted, written as <code>"500KB"</code>, <code>"20MB"</code> or <code>"1GB"</code>. Units are B, KB, MB and GB, counted in 1024s. Anything else fails the push.</td></tr>
         <tr><td><code>accept</code></td><td>Content types the bucket takes. Exact types such as <code>"image/png"</code>, or a wildcard such as <code>"image/*"</code>. Leave it out to accept any type.</td></tr>
         <tr><td><code>access</code></td><td>The <code>read</code>, <code>create</code>, <code>update</code> and <code>delete</code> rules, covered <a href="#access">below</a>. Any other key fails the push.</td></tr>
-        <tr><td><code>s3BucketPolicy</code></td><td>A raw S3 bucket policy as a JSON string, applied to the object store bucket in place of the default.</td></tr>
+        <tr><td><code>s3BucketPolicy</code></td><td>A raw S3 bucket policy as a JSON string, applied to the object store bucket in place of the default. It needs an S3 bucket per bucket, so <a href="#own-bucket">single-bucket mode</a> never applies it: there one policy would cover every bucket at once. It is applied exactly as written, so its <code>Resource</code> names the S3 bucket, which is <code>S3_BUCKET_PREFIX</code> then the bucket's id: with the prefix <code>acme-prod-</code>, the bucket <code>avatars</code> needs <code>arn:aws:s3:::acme-prod-avatars/*</code>.</td></tr>
       </tbody>
     </table></div>
     <p><code>supatype push</code> and <code>supatype dev</code> register each bucket and write its settings. Changing <code>maxSize</code>, <code>accept</code> or <code>accessMode</code> and pushing again updates the bucket. Declaring the same bucket id twice with different settings fails the push.</p>
@@ -268,10 +268,12 @@
         <tr><td><code>DEFAULT_SIGNED_URL_EXPIRY</code></td><td>3600</td><td>Expiry when a signing request names none</td></tr>
         <tr><td><code>SIGNED_URL_SECRET</code></td><td>the JWT secret</td><td>Key that signs URL tokens. Changing it invalidates every signed URL.</td></tr>
         <tr><td><code>TRANSFORM_CACHE_TTL</code></td><td>3600</td><td><code>max-age</code>, in seconds, on transformed images</td></tr>
-        <tr><td><code>S3_ENDPOINT</code>, <code>S3_REGION</code>, <code>S3_ACCESS_KEY</code>, <code>S3_SECRET_KEY</code>, <code>S3_FORCE_PATH_STYLE</code></td><td>the local SeaweedFS</td><td>Where the bytes are kept</td></tr>
+        <tr><td><code>S3_BUCKET</code></td><td>unset</td><td>One S3 bucket that holds every bucket as a key prefix, as described <a href="#own-bucket">below</a>. Unset, each bucket gets an S3 bucket of its own, which the service creates and names <code>S3_BUCKET_PREFIX</code> then the bucket's id.</td></tr>
+        <tr><td><code>S3_BUCKET_PREFIX</code></td><td>empty</td><td>With <code>S3_BUCKET</code> unset, put in front of each bucket's id to name its S3 bucket: <code>acme-prod-</code> makes <code>avatars</code> the S3 bucket <code>acme-prod-avatars</code>. S3 bucket names are global on AWS, so set one there. A prefix or a bucket id that makes no valid S3 bucket name is refused, the prefix at start and the bucket with 400.</td></tr>
+        <tr><td><code>S3_ENDPOINT</code>, <code>S3_REGION</code>, <code>S3_ACCESS_KEY</code>, <code>S3_SECRET_KEY</code>, <code>S3_FORCE_PATH_STYLE</code></td><td>none</td><td>Where the bytes are kept. The self-host stack sets them for its SeaweedFS. Running the service yourself, set <code>S3_REGION</code> for AWS or <code>S3_ENDPOINT</code> for another store; the service refuses to start with neither. Leave both keys blank to use the AWS SDK's own credentials. Path-style addressing is on when there is an endpoint.</td></tr>
       </tbody>
     </table></div>
-    <div class="callout warn"><span class="callout-label">WARNING</span><p>The 1 GB quota applies to self-hosted projects too, because the compose file does not set <code>STORAGE_QUOTA</code>. Raise it on the <code>storage</code> service if you expect to store more.</p></div>
+    <div class="callout"><span class="callout-label">SELF-HOSTED LIMITS</span><p>The defaults above are for the storage service run on its own. A self-hosted stack has no plan, so its compose file sets <code>STORAGE_QUOTA</code>, <code>TIER_MAX_UPLOAD_SIZE</code> and <code>MAX_UPLOAD_SIZE</code> to <code>-1</code>, which means no limit. Set any of them in <code>.env</code>, in bytes, and run <code>supatype self-host compose up -d</code> to put a limit back. A bucket's <code>maxSize</code> still applies.</p></div>
     <p>The service reads each upload fully into memory before storing it, so very large files cost memory on the storage container while they upload.</p>
 
     <h2 id="where">Where files live</h2>
@@ -280,11 +282,32 @@
       <thead><tr><th scope="col">Where you run</th><th scope="col">Where the bytes go</th></tr></thead>
       <tbody>
         <tr><td><code>supatype dev</code> (Docker, the default for new projects)</td><td>A SeaweedFS container, in the <code>storage-data</code> Docker volume. Its port is not published to your machine. <code>supatype dev --reset-db</code> keeps it.</td></tr>
-        <tr><td><code>supatype dev</code> with <code>provider: "native"</code></td><td>Plain files under <code>~/.supatype/projects/&lt;name&gt;/storage</code>, served by <code>supatype-server</code></td></tr>
+        <tr><td><code>supatype dev</code> with <code>provider: "native"</code></td><td>Files under <code>~/.supatype/projects/&lt;name&gt;/storage-service</code>, served by the storage service running on your machine</td></tr>
+        <tr><td><code>supatype dev</code> with <code>provider: "native"</code> and <code>storage: { provider: "s3" }</code></td><td><a href="#own-bucket">Your own S3 bucket</a>, named by <code>S3_BUCKET</code> in <code>.env</code>, served by the storage service running on your machine</td></tr>
+        <tr><td><code>supatype self-host compose up</code> with <code>storage: { production: "s3" }</code></td><td><a href="#own-bucket">Your own S3 bucket</a>, named by <code>S3_BUCKET</code> in the server's <code>.env</code>. The stack runs no SeaweedFS. See <a href="/docs/self-hosting/configuration.html#storage">self-hosting configuration</a>.</td></tr>
         <tr><td><code>supatype self-host compose up</code></td><td>A SeaweedFS service in the stack, in the <code>storage-data</code> volume. Its S3 port, 8333, is published (<code>SUPATYPE_SEAWEEDFS_PORT</code> changes it) and needs the stack's credentials. There is no anonymous access.</td></tr>
       </tbody>
     </table></div>
-    <div class="callout warn"><span class="callout-label">WARNING</span><p>The native dev store is a stand-in. It checks that a bucket is public before serving a public URL, and that a request carries a token, but it does not apply bucket access rules, <code>maxSize</code> or <code>accept</code>, and it ignores transforms. Use the Docker provider to test storage rules before you deploy.</p></div>
+    <div class="callout warn"><span class="callout-label">WARNING</span><p>With the Native provider, the storage service is the same code a deployment runs, so bucket rules, <code>maxSize</code>, <code>accept</code> and transforms apply as they will once deployed. If it cannot start, storage is off: <code>supatype dev</code> prints why, <code>/storage/v1</code> answers 503 "storage service is not running", and storage comes back once you fix the cause and restart dev. There is no fallback store, because one that skipped your rules would let any caller read a private bucket.</p></div>
+    <h3 id="own-bucket">Your own S3 bucket</h3>
+    <p>Set <code>S3_BUCKET</code> and the storage service keeps every bucket inside that one S3 bucket, the way Supabase Storage uses <code>GLOBAL_S3_BUCKET</code>. A bucket is a row in your database and a key prefix in S3: a file <code>avatars/me.png</code> is stored under <code>avatars/me.png/&lt;version&gt;</code>. The service never creates an S3 bucket or puts a bucket policy, so:</p>
+    <ul>
+      <li>The S3 bucket stays private. Public files are served by the storage service at <code>/storage/v1/object/public/&lt;bucket&gt;/&lt;path&gt;</code>, never straight from S3.</li>
+      <li>The keys only need to read, write, list and delete objects in that one bucket (<code>s3:GetObject</code>, <code>s3:PutObject</code>, <code>s3:DeleteObject</code> and <code>s3:ListBucket</code> on AWS). They do not need to create buckets.</li>
+      <li>Deleting a bucket deletes every key under its prefix.</li>
+    </ul>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Store</th><th scope="col">Set</th></tr></thead>
+      <tbody>
+        <tr><td>AWS S3</td><td><code>S3_BUCKET</code> and <code>S3_REGION</code>. Leave <code>S3_ENDPOINT</code> blank. Leave <code>S3_ACCESS_KEY</code> and <code>S3_SECRET_KEY</code> blank to use the AWS SDK's own credentials, such as an instance or task role or <code>AWS_PROFILE</code>.</td></tr>
+        <tr><td>Another S3-compatible store, such as Cloudflare R2</td><td><code>S3_BUCKET</code>, <code>S3_ENDPOINT</code>, <code>S3_ACCESS_KEY</code> and <code>S3_SECRET_KEY</code>. <code>S3_REGION</code> defaults to <code>us-east-1</code> and path-style addressing is on; set <code>S3_FORCE_PATH_STYLE=false</code> if your store wants the bucket in the host name.</td></tr>
+      </tbody>
+    </table></div>
+    <p>The service refuses to start without either <code>S3_REGION</code> or <code>S3_ENDPOINT</code>, or with only one of the two keys. Use a separate bucket for development and production.</p>
+    <p>In a self-hosted stack the storage service runs in a container, where <code>localhost</code> is that container. For a store on the same machine, such as a MinIO you run beside the stack, set <code>S3_ENDPOINT</code> to an address the container can reach: <code>http://host.docker.internal:9000</code> with Docker Desktop on macOS and Windows, or on Linux the host's address on the Docker bridge (usually <code>http://172.17.0.1:9000</code>) or its LAN address. Native <code>supatype dev</code> runs the service on your machine, so <code>localhost</code> works there.</p>
+    <p>A bucket's <code>s3BucketPolicy</code> needs an S3 bucket of its own, so single-bucket mode never applies it. The storage service refuses one with 400 on a bucket made or changed through its API. A bucket <code>supatype push</code> creates keeps the policy in its record without applying it, and nothing warns you yet. If you need a policy per bucket, leave <code>S3_BUCKET</code> unset so each bucket gets its own S3 bucket, and set <code>S3_BUCKET_PREFIX</code> to keep their names unique.</p>
+    <p>Setting <code>S3_BUCKET</code> on a storage service that already holds files does not move them: they stay in the per-bucket S3 buckets the service made before, where it no longer looks.</p>
+    <p>With <code>storage: { provider: "s3" }</code>, native <code>supatype dev</code> starts the storage service against the bucket in <code>.env</code>, and stops with a message if <code>S3_BUCKET</code> is blank. A <code>SUPATYPE_STORAGE_URL</code> in <code>.env</code> still wins: dev then starts no storage service and sends storage requests to that URL.</p>
     <p>Back up the <code>storage-data</code> volume along with the database. A database dump holds the file records but not the bytes.</p>
     <p>Removing a bucket from the schema drops its policies on the next push. The bucket and its files stay where they are.</p>
 

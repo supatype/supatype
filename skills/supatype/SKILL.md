@@ -27,7 +27,7 @@ Guide for working with Supatype projects. If unsure about a command or flag, run
 
 ## Prerequisites
 
-Node.js 22 or later, Docker (default provider), npm/pnpm/yarn.
+Node.js 18 or later for the CLI (a Vite 8 app needs 20.19 or later), Docker (default provider), npm/pnpm/yarn.
 
 Install the CLI with npm, or on Linux and macOS with the install script or Homebrew (on Windows, use npm):
 

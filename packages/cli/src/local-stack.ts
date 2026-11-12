@@ -9,12 +9,12 @@
  * recreate a database container that did not exist (A2-N4, T2-N11).
  */
 
-import { readComposeEnvInt } from "./env-file.js"
+import { composeKongHostPort } from "./local-gateway.js"
 import { composeDbHostPort } from "./host-database.js"
 import { composeRenderMode } from "./compose-render-mode.js"
 import { devDatabaseIdentity, isDevDatabaseUrl } from "./local-secrets.js"
 import { portHeldByComposeProject } from "./dev-ports.js"
-import { composeProjectName } from "./self-host-compose.js"
+import { localStackComposeProject } from "./dev-session-lock.js"
 import {
   connectionString,
   resolveRuntimeProvider,
@@ -54,9 +54,11 @@ export function projectStackUrl(
 ): string | undefined {
   if (!isProjectDatabase(cwd, config, databaseUrl)) return undefined
   if (resolveRuntimeProvider(config) !== "docker") return serverBaseUrl(config, cwd)?.replace(/\/$/, "")
-  const kongPort = readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT")
-  if (kongPort === null) return undefined
-  if (!portHeldByComposeProject(kongPort, composeProjectName(config.project.name))) return undefined
+  // With none in `.env`, the port the compose file falls back to (0.9.1 release test FF1): a
+  // self-host `.env` from the VM guide names none, and its stack got no buckets and no Studio link.
+  // Only this project's stack on it counts, so another project's default gateway is never used.
+  const kongPort = composeKongHostPort(cwd)
+  if (!portHeldByComposeProject(kongPort, localStackComposeProject(cwd, config.project.name))) return undefined
   return `http://localhost:${kongPort}`
 }
 

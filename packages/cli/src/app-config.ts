@@ -161,22 +161,39 @@ function withAppendedProperty(text: string, root: ObjectLiteralExpression, key: 
   return comma === undefined ? splice(appended, last.getEnd(), last.getEnd(), ",") : appended
 }
 
-function getRootConfigObject(sourceFile: SourceFile): ObjectLiteralExpression {
+export function getRootConfigObject(sourceFile: SourceFile): ObjectLiteralExpression {
   const exportAssignment = sourceFile.getFirstDescendantByKind(SyntaxKind.ExportAssignment)
   if (!exportAssignment) {
     throw new Error("Could not find default export in supatype.config.ts.")
   }
-  const expr = exportAssignment.getExpression()
-  if (Node.isObjectLiteralExpression(expr)) {
-    return expr
+  const root = configObjectOf(exportAssignment.getExpression(), 0)
+  if (root !== undefined) return root
+  throw new Error(
+    "supatype.config.ts must export an object literal, defineConfig({...}), or a const holding one.",
+  )
+}
+
+/**
+ * The object literal `expr` stands for: itself, through parentheses, `as` or `satisfies`, the first
+ * argument of `defineConfig(...)`, or the initializer of a top-level const it names.
+ *
+ * `const local = { versions: {...} }` then `export default local` read as no config at all, so
+ * `update` took a local override's pin for none and wrote over the main file's (0.9.2 round 5).
+ */
+function configObjectOf(expr: Node, depth: number): ObjectLiteralExpression | undefined {
+  // A const naming itself through another is the deepest real config; this only stops a cycle.
+  if (depth > 8) return undefined
+  if (Node.isObjectLiteralExpression(expr)) return expr
+  if (Node.isParenthesizedExpression(expr) || Node.isAsExpression(expr) || Node.isSatisfiesExpression(expr)) {
+    return configObjectOf(expr.getExpression(), depth + 1)
   }
   if (Node.isCallExpression(expr)) {
-    const [firstArg] = expr.getArguments()
-    if (firstArg && Node.isObjectLiteralExpression(firstArg)) {
-      return firstArg
-    }
+    const [first] = expr.getArguments()
+    return first === undefined ? undefined : configObjectOf(first, depth + 1)
   }
-  throw new Error(
-    "supatype.config.ts must export an object literal or defineConfig({...}).",
-  )
+  if (Node.isIdentifier(expr)) {
+    const initializer = expr.getSourceFile().getVariableDeclaration(expr.getText())?.getInitializer()
+    return initializer === undefined ? undefined : configObjectOf(initializer, depth + 1)
+  }
+  return undefined
 }

@@ -24,10 +24,13 @@ import {
   generateControlPlaneSecret,
   generateObjectStoreCredentials,
   givenJwtSecret,
+  KEYSPACE_PASSWORD_ENV,
+  KEYSPACE_USERNAME,
   newJwtSecret,
   OBJECT_STORE_ACCESS_KEY_ENV,
   OBJECT_STORE_SECRET_KEY_ENV,
 } from "../local-secrets.js"
+import { KEYSPACE_PASSWORD_FILE_ENV, shellNamesKeyspacePasswordFile } from "../keyspace-password-file.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { probeDockerDaemonAsync, reportDockerUnavailable, type DockerDaemonProbe } from "../docker-runtime.js"
@@ -43,10 +46,12 @@ import {
 import { functionTemplateSource } from "../functions-template.js"
 import {
   mergeSupatypePackageJson,
+  mergeSupatypeScripts,
   PREPARE_COMMAND,
   scaffoldPackageJson,
-  supatypeDevScript,
 } from "../init-package-json.js"
+import { runsSupatypeDev } from "../dev-self-start.js"
+import { DEFAULT_PROXY_DEV_SCRIPT } from "../app/proxy-dev-app.js"
 import { downloadRelease, initFromExample } from "../init-example.js"
 import { errorMessage } from "../error-message.js"
 import { isJsonObject, parseJsonObject } from "@supatype/shared"
@@ -56,8 +61,19 @@ import {
   resolveInitDependencyVersions,
   type InitDependencyVersions,
 } from "../init-dependency-versions.js"
-import { detectProjectSetup, type DetectedProjectSetup } from "../init-project-detect.js"
-import { SUPATYPE_GITIGNORE_PATHS } from "../gitignore.js"
+import {
+  detectProjectSetup,
+  readPackageJson,
+  VITE_CONFIG_NAMES,
+  withFreeVitePort,
+  type DetectedProjectSetup,
+} from "../init-project-detect.js"
+import {
+  missingSupatypeIgnores,
+  negationOverrideNotice,
+  SUPATYPE_GITIGNORE_PATHS,
+  withSupatypeIgnores,
+} from "../gitignore.js"
 import { DEV_FRONTEND_ENV_FILE, writeFrontendEnv } from "../frontend-env.js"
 import { DEFAULT_CLIENT_PATH, DEFAULT_TYPES_PATH } from "../type-generation.js"
 import {
@@ -70,6 +86,10 @@ import {
 } from "../project-config.js"
 import { cliDatabaseUrlLines } from "../database-url-owner.js"
 import { scaffoldNextRuntimeEnv } from "../init-next-runtime-env.js"
+import { scaffoldExpoRuntimeEnv } from "../init-expo-runtime-env.js"
+import { refuseAddingViteOnOldNode, refuseViteOnOldNode } from "../init-vite-node.js"
+import { recordInitKongPort } from "../init-port-registry.js"
+import { MAILER_AUTOCONFIRM_NOTE } from "../mailer-autoconfirm.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -273,6 +293,7 @@ async function createProject(args: CreateProjectArgs): Promise<void> {
   const wants: SetupWants = { install: opts.install !== false && result.install, keys: opts.keys !== false && result.generateKeys }
   if (name) mkdirSync(dir, { recursive: true })
   scaffold(dir, result, await args.deps)
+  recordScaffoldedKongPort(dir, result)
 
   const outcome = await withStepView((view) => runSetupSteps(dir, result.packageManager, wants, view))
   exitOnFailedSetup(outcome, wants, result.packageManager)
@@ -283,7 +304,6 @@ async function createProject(args: CreateProjectArgs): Promise<void> {
     installed: wants.install && outcome.installOk,
     keysGenerated: outcome.keysGenerated,
     binariesReady: outcome.binariesReady,
-    devScript: projectDevScript(dir),
   })
 }
 
@@ -322,7 +342,7 @@ async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
 
   await runClackFlow(async () => {
     p.intro("Create a new Supatype project")
-    const detected = detectProjectSetup(dir)
+    const detected = await withFreeVitePort(detectProjectSetup(dir))
     if (detected.hasExistingFiles && detected.summaryLines.length > 0) {
       p.note(
         ["Existing project detected:", ...detected.summaryLines.map((line) => `  • ${line}`)].join(
@@ -564,17 +584,46 @@ async function promptApp(
     return { mode, staticDir: await promptStaticDir(detected, viteDevUrl !== undefined), ...(viteDevUrl ? { viteDevUrl } : {}) }
   }
 
-  if (mode === "proxy") {
-    const upstream = await askWithDefault(
-      "URL of your running dev server",
-      detected.hasVite ? detected.viteDevUrl : "http://localhost:3000",
-    )
-    const start = await askWithDefault("package.json script that starts your dev server", detected.hasVite ? "vite" : "dev")
-    const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
-    return { mode, upstream, start, ...(viteDevUrl ? { viteDevUrl } : {}) }
-  }
+  if (mode === "proxy") return promptDevServer(detected, productionTarget)
 
   return { mode: "none" }
+}
+
+/**
+ * The dev server "Local dev server" forwards to, with Vite asked first. The script was asked before
+ * Vite and offered `dev`, which in a new folder is init's own `supatype dev`, so dev ran itself as
+ * the app. A Vite app runs the `vite` script init adds, at Vite's URL. Any other app runs a script
+ * of the project's own: its `dev` or `start` is offered, but never one that runs `supatype dev`.
+ */
+async function promptDevServer(detected: DetectedProjectSetup, productionTarget: ProductionTarget): Promise<ScaffoldAppOptions> {
+  const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
+  if (viteDevUrl !== undefined) return { mode: "proxy", upstream: viteDevUrl, start: "vite", viteDevUrl }
+
+  const upstream = await askWithDefault("URL of your running dev server", "http://localhost:3000")
+  const scripts = mergeSupatypeScripts(detected.packageScripts, { app: { mode: "proxy" }, helloFunction: false })
+  const offered = ["dev", DEFAULT_PROXY_DEV_SCRIPT].find((name) => {
+    const body = scripts[name]
+    return body !== undefined && !runsSupatypeDev(body)
+  })
+  const chosen = (answer: string): string | undefined => answer.trim() || offered
+  const start = chosen(
+    await askText({
+      message: "package.json script that starts your dev server",
+      ...(offered !== undefined && { defaultValue: offered, placeholder: offered }),
+      validate: (answer) => devServerScriptProblem(chosen(answer), scripts),
+    }),
+  )
+  return { mode: "proxy", upstream, ...(start !== undefined && { start }) }
+}
+
+/** Why `script` cannot start the app's dev server, or undefined when it can. */
+function devServerScriptProblem(script: string | undefined, scripts: Record<string, string>): string | undefined {
+  if (script === undefined) return `Enter the package.json script that starts your dev server, like ${DEFAULT_PROXY_DEV_SCRIPT}.`
+  const body = scripts[script]
+  if (body !== undefined && runsSupatypeDev(body)) {
+    return `"${script}" runs supatype dev, so dev would start itself. Enter the script that starts your frontend's dev server.`
+  }
+  return undefined
 }
 
 /**
@@ -608,6 +657,9 @@ async function promptViteDevUrl(
     }),
   )
   if (!useVite) return undefined
+  // Refused here on an old Node, not after every other question (pm N2). An app that lists its
+  // own Vite keeps it, so its Node is its own business.
+  if (!detected.declaresVite) refuseAddingViteOnOldNode()
 
   return askWithDefault("Vite dev server URL", detected.viteDevUrl)
 }
@@ -745,6 +797,7 @@ export function scaffold(
   }
   // First, so a value .env cannot hold is refused before any file is written.
   const env = envTemplate(opts)
+  refuseViteOnOldNode(dir, opts.app.viteDevUrl)
 
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) {
@@ -766,9 +819,20 @@ export function scaffold(
   // The Next.js counterpart of the static page's script tag: the client and @supatype/ssr ship
   // together, so the route's package is added at the client's range.
   scaffoldNextRuntimeEnv(dir, write, `^${deps.client}`)
+  // An Expo Router app has neither an index.html nor a root layout: its page is +html.tsx.
+  scaffoldExpoRuntimeEnv(dir, write)
 
   if (opts.helloFunction) scaffoldHelloFunction(dir, write)
   scaffoldGitignore(dir, write)
+}
+
+/**
+ * Record the Kong port the project in `dir` was given, so the next init skips it before this project
+ * ever starts (FF26, init-port-registry.ts). Outside `scaffold`, which tests call by the hundred and
+ * which writes only inside `dir`; this writes under the home folder.
+ */
+export function recordScaffoldedKongPort(dir: string, opts: Pick<ScaffoldOptions, "provider" | "kongPort" | "projectName">): void {
+  if (opts.provider === "docker" && opts.kongPort !== undefined) recordInitKongPort(resolve(dir), opts.kongPort)
 }
 
 /**
@@ -822,13 +886,15 @@ function scaffoldGitignore(dir: string, write: (rel: string, content: string) =>
     return
   }
   const existing = readFileSync(gitignorePath, "utf8")
-  const merged = mergeGitignoreTemplate(existing)
-  if (merged === existing) {
+  const missing = missingSupatypeIgnores(existing)
+  if (missing.length === 0) {
     file("skipped", ".gitignore (already exists)")
     return
   }
-  writeFileSync(gitignorePath, merged, "utf8")
+  writeFileSync(gitignorePath, withSupatypeIgnores(existing, missing), "utf8")
   file("updated", ".gitignore (added Supatype's local files)")
+  const notice = negationOverrideNotice(existing, missing)
+  if (notice !== undefined) warn(notice)
 }
 
 /**
@@ -858,17 +924,20 @@ function scaffoldAppAssets(
   opts: ScaffoldOptions,
   write: (rel: string, content: string) => void,
 ): void {
+  const hasVite = Boolean(opts.app.viteDevUrl)
+  // The app's own page: a Vite app's is the root index.html, and the one in its build output is rebuilt from it.
+  const appPage = (rel: string) => (hasVite ? rel === "index.html" : rel.endsWith("index.html"))
   const writeUnlessExists = (rel: string, content: string) => {
     const full = join(dir, rel)
     if (existsSync(full)) {
       file("skipped", `${rel} (already exists)`)
+      if (servedStatically(opts) && appPage(rel)) adviseRuntimeEnvScript(full)
       return
     }
     write(rel, content)
   }
 
   const holding = holdingPageTemplate(opts.projectName, initLocalApiUrl(opts), servedStatically(opts))
-  const hasVite = Boolean(opts.app.viteDevUrl)
 
   if (opts.app.mode === "static") {
     writeUnlessExists(`${staticDirRelative(staticDirOf(opts.app))}/index.html`, holding)
@@ -898,14 +967,20 @@ function scaffoldVite(
 ): void {
   if (!opts.app.viteDevUrl) return
   write("index.html", holding)
-  const viteConfigRel = ["vite.config.ts", "vite.config.js", "vite.config.mjs", "vite.config.cjs"].find(
-    (name) => existsSync(join(dir, name)),
-  )
+  const viteConfigRel = VITE_CONFIG_NAMES.find((name) => existsSync(join(dir, name)))
   if (viteConfigRel) {
     file("skipped", `${viteConfigRel} (already exists)`)
     return
   }
-  write("vite.config.ts", viteConfigTemplate(opts.app.viteDevUrl, viteBuildOutDir(opts)))
+  write(newViteConfigName(dir), viteConfigTemplate(opts.app.viteDevUrl, viteBuildOutDir(opts)))
+}
+
+/**
+ * `vite.config.ts` in an ESM package, else `vite.config.mts`, which Vite loads as ESM by its
+ * extension: init no longer makes an existing app's package ESM (FF24), and the config imports `vite`.
+ */
+function newViteConfigName(dir: string): string {
+  return readPackageJson(dir)?.raw["type"] === "module" ? "vite.config.ts" : "vite.config.mts"
 }
 
 /**
@@ -1035,18 +1110,24 @@ function localConfigTemplate(app: ScaffoldAppOptions): string {
   return lines.join("\n")
 }
 
+/**
+ * The app block for a dev server. A missing `start` is left out, and dev then runs `start`: it was
+ * written as `dev`, which in a new project is init's own `supatype dev`.
+ */
+function proxyAppLines(app: ScaffoldAppOptions): string[] {
+  return [
+    `  app: {`,
+    `    mode: "proxy",`,
+    `    upstream: "${app.upstream ?? "http://localhost:3000"}",`,
+    ...(app.start ? [`    start: "${app.start}",`] : []),
+    ...(app.viteDevUrl ? [`    vite_dev_url: "${app.viteDevUrl}",`] : []),
+    `  },`,
+  ]
+}
+
 /** App block for supatype.local.config.ts (proxy + Vite during local dev). */
 function localDevAppConfigLines(app: ScaffoldAppOptions): string[] {
-  if (app.mode === "proxy") {
-    return [
-      `  app: {`,
-      `    mode: "proxy",`,
-      `    upstream: "${app.upstream ?? "http://localhost:3000"}",`,
-      `    start: "${app.start ?? "dev"}",`,
-      ...(app.viteDevUrl ? [`    vite_dev_url: "${app.viteDevUrl}",`] : []),
-      `  },`,
-    ]
-  }
+  if (app.mode === "proxy") return proxyAppLines(app)
   if (app.viteDevUrl) {
     return [
       `  app: {`,
@@ -1075,15 +1156,7 @@ function appConfigLines(app: ScaffoldAppOptions, productionTarget: ProductionTar
         `  },`,
       ]
     }
-    const out = [
-      `  app: {`,
-      `    mode: "proxy",`,
-      `    upstream: "${app.upstream ?? "http://localhost:3000"}",`,
-      `    start: "${app.start ?? "dev"}",`,
-    ]
-    if (app.viteDevUrl) out.push(`    vite_dev_url: "${app.viteDevUrl}",`)
-    out.push(`  },`)
-    return out
+    return proxyAppLines(app)
   }
   return [
     `  app: {`,
@@ -1138,10 +1211,22 @@ function initSiteUrl(opts: Pick<ScaffoldOptions, "provider" | "kongPort" | "app"
  * bundle a script the project does not have. Vite drops the attribute from the page it builds, and
  * a browser ignores it in a page nothing builds.
  */
+const RUNTIME_ENV_TAG = '<script src="/supatype-env.js" vite-ignore></script>'
+
 const RUNTIME_ENV_SCRIPT = `
     <!-- The deployment's API address and anon key, from the server that serves this page.
          vite-ignore tells Vite to leave it out of the bundle, so the build does not warn. -->
-    <script src="/supatype-env.js" vite-ignore></script>`
+    ${RUNTIME_ENV_TAG}`
+
+/**
+ * The tag for an app's own page, which init keeps. It used to print only "skipped index.html", and
+ * a production build of the page then threw MissingClientValuesError (0.9.2 release test round 2,
+ * N-S15).
+ */
+function adviseRuntimeEnvScript(page: string): void {
+  if (readFileSync(page, "utf8").includes("/supatype-env.js")) return
+  plain(`  add ${RUNTIME_ENV_TAG} to its <head>, so a build Supatype serves gets its API URL and anon key`)
+}
 
 function holdingPageTemplate(projectName: string, apiUrl: string, runtimeEnv: boolean): string {
   const name = escapeHtml(projectName)
@@ -1298,18 +1383,10 @@ function storageConfigLines(
   storageLocal: StorageProvider,
   storageProduction: StorageProvider,
 ): string[] {
-  const lines: string[] = []
-  if (storageLocal === "s3") {
-    lines.push(`  storage: { provider: "s3" },  // dev, configure S3_* in .env`)
-  } else {
-    lines.push(`  storage: { provider: "local", local_path: ".supatype/storage" },`)
-  }
-  if (storageProduction === "s3" && storageLocal !== "s3") {
-    lines.push(`  // Production storage: external S3 bucket, set production S3_* in .env`)
-  } else if (storageProduction === "local" && storageLocal === "s3") {
-    lines.push(`  // Production storage: SeaweedFS on your server (included in self-host compose)`)
-  }
-  return lines
+  // provider is dev's, production the self-host stack's; S3_* in .env name the bucket for either.
+  const dev = storageLocal === "s3" ? `provider: "s3"` : `provider: "local", local_path: ".supatype/storage"`
+  const production = storageLocal === "local" && storageProduction === "local" ? "" : `, production: "${storageProduction}"`
+  return [`  storage: { ${dev}${production} },`]
 }
 
 function schemaTemplate(): string {
@@ -1352,6 +1429,16 @@ function envAnswers(opts: ScaffoldOptions): Record<string, string> {
     ...(opts.adminEmail !== undefined && { SUPATYPE_ADMIN_EMAIL: opts.adminEmail }),
     ...(opts.adminPassword !== undefined && { SUPATYPE_ADMIN_PASSWORD: opts.adminPassword }),
   }
+}
+
+/**
+ * The keyspace password's line in the new .env: a generated password, or, when the shell names a
+ * file for it, a note saying so. A password beside the file stops the stack at start (R2-S16).
+ */
+function keyspacePasswordLine(): string {
+  if (!shellNamesKeyspacePasswordFile()) return `${KEYSPACE_PASSWORD_ENV}=${randomBytes(24).toString("base64url")}`
+  return `# Read from the file ${KEYSPACE_PASSWORD_FILE_ENV} names in your shell, so none is written here.
+# Do not set ${KEYSPACE_PASSWORD_ENV} as well: dev and self-host refuse to start with both.`
 }
 
 function envTemplate(opts: ScaffoldOptions): string {
@@ -1397,6 +1484,12 @@ SERVICE_ROLE_KEY=`)
 # request without it, so code running in the functions worker cannot call it directly.
 ${CONTROL_PLANE_SECRET_ENV}=${generateControlPlaneSecret()}`)
 
+  // Dev wrote it on first start, appended with no comment (0.9.2 release test round 2, R2-S14).
+  sections.push(`# The cache's password when the cache runs in Postgres (pg_keyspace): the keyspace user
+# \`${KEYSPACE_USERNAME}\`'s, which the API server logs in with, and the gateway when HTTPS is on.
+# It reads and writes every cached value.
+${keyspacePasswordLine()}`)
+
   sections.push(`# Site URL (used for email redirects)
 SITE_URL=${initSiteUrl(opts)}`)
 
@@ -1411,6 +1504,9 @@ API_EXTERNAL_URL=${initLocalApiUrl(opts)}`,
   }
 
   sections.push(emailEnvSection(opts))
+  // Where the CLI would leave it after taking out a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote.
+  // Written here, a new project never has that done to a line of the developer's own (FF7).
+  sections.push(MAILER_AUTOCONFIRM_NOTE)
   sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction))
 
   if (opts.adminEmail && opts.adminPassword) {
@@ -1421,23 +1517,26 @@ SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
     )
   }
 
-  sections.push(SELF_HOST_PORTS_ENV_SECTION)
+  sections.push(selfHostPortsEnvSection(opts.storageProduction))
 
   return sections.join("\n\n") + "\n"
 }
 
 /**
  * The host ports `supatype self-host compose` publishes, with their defaults. Commented out so the
- * defaults apply; the first anyone heard of these used to be a clash on 5432.
+ * defaults apply; the first anyone heard of these used to be a clash on 5432. A stack on the
+ * project's own S3 bucket runs no SeaweedFS, so it is not named there (0.9.2 release test round 2, N-S26).
  */
-const SELF_HOST_PORTS_ENV_SECTION = `# Self-host stack ports (supatype self-host compose). Kong, at SUPATYPE_KONG_PORT, is the way in.
-# Postgres, the API server and SeaweedFS bind 127.0.0.1 only. To reach them from other machines,
+function selfHostPortsEnvSection(storageProduction: StorageProvider): string {
+  const seaweedfs = storageProduction !== "s3"
+  return `# Self-host stack ports (supatype self-host compose). Kong, at SUPATYPE_KONG_PORT, is the way in.
+# Postgres${seaweedfs ? ", the API server and SeaweedFS" : " and the API server"} bind 127.0.0.1 only. To reach them from other machines,
 # set SUPATYPE_PUBLISH_ADDRESS=0.0.0.0 (put a firewall in front of the server first).
 # Self-host commands reach Postgres at SUPATYPE_DB_PORT for their own run; DATABASE_URL above stays dev's.
 # SUPATYPE_PUBLISH_ADDRESS=127.0.0.1
 # SUPATYPE_DB_PORT=5432
-# SUPATYPE_SERVER_PORT=9999
-# SUPATYPE_SEAWEEDFS_PORT=8333`
+# SUPATYPE_SERVER_PORT=9999${seaweedfs ? "\n# SUPATYPE_SEAWEEDFS_PORT=8333" : ""}`
+}
 
 /**
  * The scaffolded `.env`'s email settings, under the names the auth server reads. They used to be
@@ -1466,7 +1565,6 @@ SUPATYPE_SMTP_SENDER_NAME=${projectName}`
     case "console":
     default:
       return `# SMTP: unused while email.provider is console, which logs each email instead of sending it.
-# Email confirmation is auth.email.enableConfirmations in supatype.config.ts.
 # SUPATYPE_SMTP_HOST=
 # SUPATYPE_SMTP_PORT=587
 # SUPATYPE_SMTP_USER=
@@ -1481,13 +1579,7 @@ function storageEnvSections(
 ): string {
   if (storageLocal === storageProduction) {
     if (storageLocal === "s3") {
-      return `# Storage (local development and production, external bucket)
-# Use separate buckets for dev and production in your provider.
-S3_ENDPOINT=
-S3_REGION=us-east-1
-S3_BUCKET=
-S3_ACCESS_KEY=
-S3_SECRET_KEY=`
+      return s3EnvSection("local development and production", "Use a separate bucket for dev and production.")
     }
     return `${localStorageEnvSection("local")}
 
@@ -1495,9 +1587,29 @@ S3_SECRET_KEY=`
 # Included in the self-host compose stack, no extra configuration needed.`
   }
 
-  return [localStorageEnvSection(storageLocal), productionStorageEnvSection(storageProduction)].join(
-    "\n\n",
-  )
+  return [localStorageEnvSection(storageLocal), productionStorageEnvSection(storageProduction)].join("\n\n")
+}
+
+/**
+ * The settings for a bucket of your own (storage.provider "s3"), described as the storage service
+ * uses them: one S3 bucket, every Supatype bucket a key prefix in it, as Supabase Storage keeps them.
+ */
+function s3EnvSection(use: string, note?: string): string {
+  return `# Storage (${use}, your own S3 bucket)
+# Every Supatype bucket is a folder (key prefix) in S3_BUCKET, and the storage service serves every
+# file, public ones included, so the bucket itself stays private. The keys need only read, write,
+# list and delete on that one bucket.${note === undefined ? "" : ` ${note}`}
+# AWS: set S3_REGION and leave S3_ENDPOINT blank. Another S3-compatible store (Cloudflare R2,
+# SeaweedFS, and the like): set S3_ENDPOINT too. On AWS, leave both keys blank to use the AWS SDK's
+# own credentials (an instance or task role, AWS_PROFILE).
+# In the self-host stack the storage service runs in a container, where localhost is that container.
+# For a store on the same machine use http://host.docker.internal:<port> with Docker Desktop, or on
+# Linux the host's Docker bridge address (usually 172.17.0.1). Native supatype dev can use localhost.
+S3_ENDPOINT=
+S3_REGION=us-east-1
+S3_BUCKET=
+S3_ACCESS_KEY=
+S3_SECRET_KEY=`
 }
 
 /** Whether init generates the object store's login: for the local SeaweedFS, not a bucket of your own. */
@@ -1505,33 +1617,24 @@ function generatesObjectStoreLogin(storage: StorageProvider): boolean {
   return storage !== "s3"
 }
 
+/**
+ * Dev's storage settings. Local SeaweedFS takes no S3_* names: the compose file hands the storage
+ * service its address itself. The S3_ENDPOINT=http://localhost:8333 written here was read by
+ * nothing, named the storage container itself from inside it, and stayed behind when a project
+ * moved to its own bucket (0.9.2 release test round 2, N-S26).
+ */
 function localStorageEnvSection(storage: StorageProvider): string {
-  if (!generatesObjectStoreLogin(storage)) {
-    return `# Storage (local development, external bucket)
-S3_ENDPOINT=
-S3_REGION=us-east-1
-S3_BUCKET=
-S3_ACCESS_KEY=
-S3_SECRET_KEY=`
-  }
+  if (!generatesObjectStoreLogin(storage)) return s3EnvSection("local development")
   const login = generateObjectStoreCredentials()
   return `# Storage (local development, SeaweedFS)
 # The object store's login, generated for this project. It opens every file in every bucket, so
 # keep it as private as the database password.
-S3_ENDPOINT=http://localhost:8333
 ${OBJECT_STORE_ACCESS_KEY_ENV}=${login.accessKey}
 ${OBJECT_STORE_SECRET_KEY_ENV}=${login.secretKey}`
 }
 
 function productionStorageEnvSection(storage: StorageProvider): string {
-  if (storage === "s3") {
-    return `# Storage (production, external bucket)
-S3_ENDPOINT=
-S3_REGION=us-east-1
-S3_BUCKET=
-S3_ACCESS_KEY=
-S3_SECRET_KEY=`
-  }
+  if (storage === "s3") return s3EnvSection("production")
   return `# Storage (production, SeaweedFS on your server)
 # Included in the self-host compose stack, no extra configuration needed.`
 }
@@ -1587,22 +1690,6 @@ dist/
 `
 }
 
-/**
- * An existing `.gitignore` with what init adds to a project: `.supatype/` (link.json holds secrets)
- * and `.env.*.local`, where init writes the front end's development-only API address. Each is added
- * only when the file does not already cover it.
- */
-export function mergeGitignoreTemplate(existingContent: string): string {
-  const lines = existingContent.split(/\r?\n/).map((line) => line.trim())
-  const missing = [
-    ...(existingContent.includes(".supatype/") || lines.includes(".supatype") ? [] : [".supatype/"]),
-    ...(lines.includes(".env.*.local") || lines.includes("*.local") ? [] : [".env.*.local"]),
-  ]
-  if (missing.length === 0) return existingContent
-  const block = `\n# Supatype: local runtime (secrets in .supatype/link.json) and development-only env files\n${missing.join("\n")}\n`
-  return existingContent.endsWith("\n") ? `${existingContent}${block}` : `${existingContent}\n${block}`
-}
-
 // ─── Next steps ────────────────────────────────────────────────────────────--
 
 /** Say so when a Docker project's Docker is not running: from `started` when init already asked. */
@@ -1642,12 +1729,10 @@ function startInitQuestions(provider: ScaffoldOptions["provider"]): InitQuestion
 export interface InitStepsArgs {
   name: string | undefined
   result: Pick<WizardResult, "provider" | "kongPort" | "adminEmail" | "packageManager" | "helloFunction"> &
-    Partial<Pick<WizardResult, "productionTarget" | "domain" | "tlsEmail" | "storageLocal">>
+    Partial<Pick<WizardResult, "productionTarget" | "domain" | "tlsEmail" | "storageLocal" | "storageProduction">>
   installed: boolean
   keysGenerated: boolean
   binariesReady: boolean
-  /** The package.json script that runs `supatype dev`: `dev`, or `supatype:dev` beside a dev of the project's own. */
-  devScript?: string
 }
 
 /** One titled block of what init prints when it is done, with a line after its steps when it has one. */
@@ -1655,16 +1740,6 @@ export interface InitStepBlock {
   title: string
   steps: string[]
   after?: string
-}
-
-/** The script in `dir`'s package.json that runs `supatype dev`, or `dev` when it cannot be read. */
-function projectDevScript(dir: string): string {
-  try {
-    const pkg = parseJsonObject(readFileSync(join(dir, "package.json"), "utf8"))
-    return pkg.ok ? supatypeDevScript(pkg.value["scripts"]) : "dev"
-  } catch {
-    return "dev"
-  }
 }
 
 /** True when nothing is left to set up, only to run. */
@@ -1729,9 +1804,11 @@ function commented(command: string, comments: string[]): string[] {
 }
 
 /**
- * The dev script, which applies the schema and generates the types, then watches both; then where
+ * `supatype dev`, which applies the schema and generates the types, then watches both; then where
  * to open the project. `push` is for another database (`push --env <name>`), and listing it here
- * sent people to it anyway.
+ * sent people to it anyway. The command as the docs give it: init printed the package.json script
+ * (`npm run supatype:dev` beside a framework's own dev), which no page of the docs names
+ * (0.9.2 release test round 2, N-S15).
  */
 function initDevSteps(args: InitStepsArgs): string[] {
   const { result } = args
@@ -1740,7 +1817,7 @@ function initDevSteps(args: InitStepsArgs): string[] {
     result.provider === "docker" ? "runs the Docker Compose stack" : "runs the native binaries",
   ]
   if (result.adminEmail) comments.push("first admin user is created on dev")
-  const steps = commented(runScriptCommand(result.packageManager, args.devScript ?? "dev"), comments)
+  const steps = commented("supatype dev", comments)
   steps.push(`Open ${initLocalApiUrl(result)}`)
   if (result.helloFunction) {
     steps.push(...commented(runScriptCommand(result.packageManager, "functions"), ["run edge functions locally"]))
@@ -1758,6 +1835,7 @@ const INIT_SECRETS: ReadonlyArray<readonly [name: string, description: string]> 
   ["AUTHENTICATOR_PASSWORD", "PostgREST's own login; rotating the one above does not affect it"],
   ["SUPATYPE_SQL_EDITOR_PASSWORD", "Studio's SQL editor login, a role that is not a superuser"],
   ["JWT_SECRET", "signs ANON_KEY and SERVICE_ROLE_KEY; changing it invalidates every token"],
+  [KEYSPACE_PASSWORD_ENV, "the cache's login, which reads and writes every cached value"],
 ]
 
 /** The object store's login, when init generates one ({@link generatesObjectStoreLogin}). */
@@ -1773,7 +1851,8 @@ const SECRETS_CLOSING = "Keep .env out of version control, and use different val
  * development storage in an S3 bucket of your own, init generates no object-store login.
  */
 export function initSecretLines(storageLocal: StorageProvider = "local"): string[] {
-  const secrets = generatesObjectStoreLogin(storageLocal) ? [...INIT_SECRETS, ...OBJECT_STORE_SECRETS] : INIT_SECRETS
+  const generated = shellNamesKeyspacePasswordFile() ? INIT_SECRETS.filter(([name]) => name !== KEYSPACE_PASSWORD_ENV) : INIT_SECRETS
+  const secrets = generatesObjectStoreLogin(storageLocal) ? [...generated, ...OBJECT_STORE_SECRETS] : generated
   const width = Math.max(...secrets.map(([name]) => name.length)) + 2
   return secrets.map(([name, description]) => `${name.padEnd(width)}${description}`)
 }
@@ -1799,14 +1878,23 @@ function deployBlock(result: InitStepsArgs["result"]): InitStepBlock | undefined
 }
 
 /**
+ * The server's bucket, for production storage on S3: compose refuses to start without S3_BUCKET,
+ * and init's steps never named it (0.9.2 release test round 2, N-S26).
+ */
+const S3_BUCKET_STEP =
+  "Set S3_BUCKET in the server's .env, with S3_REGION for AWS or S3_ENDPOINT for another store   # production storage is your own S3 bucket"
+
+/**
  * Taking a self-host project to its own server. With a domain, DNS and the firewall come first;
  * without one, HTTPS is the last step and an optional one, since the person just said they had none.
  */
-export function selfHostDeploySteps(result: Partial<Pick<WizardResult, "domain" | "tlsEmail">>): string[] {
+export function selfHostDeploySteps(result: Partial<Pick<WizardResult, "domain" | "tlsEmail" | "storageProduction">>): string[] {
   const domain = result.domain?.trim()
   const link = "supatype link --env production ...   # then: supatype push --env production"
+  const bucket = result.storageProduction === "s3" ? [S3_BUCKET_STEP] : []
   if (!domain) {
     return [
+      ...bucket,
       "supatype self-host compose up -d   # on your server: the Docker stack",
       link,
       BUILD_STEP,
@@ -1817,6 +1905,7 @@ export function selfHostDeploySteps(result: Partial<Pick<WizardResult, "domain" 
     `1. Point DNS: an A record for ${domain} -> your server's public IP`,
     "2. Open ports 80 and 443 on the server firewall",
     ...(result.tlsEmail ? [] : ["3. Set server.tls.email in supatype.config.ts (required for HTTPS)"]),
+    ...bucket,
     "supatype self-host compose up -d   # Kong provisions HTTPS automatically",
     link,
     BUILD_STEP,
