@@ -137,6 +137,10 @@ export function createServer() {
     })
 
   return httpCreateServer(async (req, res) => {
+    // No cache keeps an answer unless its route says it may: a 404 kept by a CDN went on answering
+    // after the file was uploaded. Only a download sets its own, from the route that authorised it.
+    res.setHeader("Cache-Control", "no-store")
+
     // Health check
     if (req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" })
