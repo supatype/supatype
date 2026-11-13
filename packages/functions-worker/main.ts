@@ -279,7 +279,7 @@ function stackOrigin(): string | null {
 
 
 // `onListen` is supplied so Deno does not print its own "Listening on …" line. That line goes to
-// stderr, which this worker's patched console reports as `level: "error"` — and on cloud `level` is
+// stderr, which this worker's patched console reports as `level: "error"`, and on cloud `level` is
 // a Loki label, so every startup would appear in the dashboards as an error.
 Deno.serve({
   port,
