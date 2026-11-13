@@ -15,6 +15,12 @@
 
 ### Bug Fixes
 
+* **schema:** `ensureSchema()` turns row level security on for `storage.buckets` and `storage.objects`
+  and grants `anon` and `authenticated` what a push grants (USAGE on the schema, row access on
+  objects, nothing on buckets), on every start. The tables were created unlocked and only a later
+  `supatype push` locked them, so until then a signed-in user could read any object in a private
+  bucket wherever the API roles had table grants. Not forced: the service login and the schema
+  engine own the tables and keep working. A database created before this is closed on its next start.
 * **access:** the public download route and bucket CORS go by `access_mode` alone, as every other
   read does. A `custom` or `private` bucket with a stale `public: true` was served to anyone there.
   A bucket the schema engine wrote with no mode still goes by `public`.

@@ -105,6 +105,28 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS s3_bucket_policy text;
     ALTER TABLE storage.objects ADD COLUMN IF NOT EXISTS last_accessed_at timestamptz NOT NULL DEFAULT now();
     ALTER TABLE storage.objects ADD COLUMN IF NOT EXISTS version text;
+
+    -- Locked from the first start, not from the first push. Until a push ran, these tables had no
+    -- row level security and any signed-in user could read any object in a private bucket. Not
+    -- FORCEd: the service's own login and the schema engine's role own the tables and are exempt as
+    -- owners. Both statements are no-ops on a table already locked, so a database created before
+    -- this fix is closed by its next start. A push applies the same.
+    ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+
+    -- The grants a push applies, only to roles that exist: a database without the gateway roles yet
+    -- must still start, and the push grants them once they do.
+    DO $storage_grants$
+    DECLARE r text;
+    BEGIN
+      FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+          EXECUTE format('GRANT USAGE ON SCHEMA storage TO %I', r);
+          EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects TO %I', r);
+        END IF;
+      END LOOP;
+    END
+    $storage_grants$;
   `)
 }
 
