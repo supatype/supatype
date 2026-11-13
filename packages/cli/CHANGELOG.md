@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **functions worker:** the image runs Deno with `--allow-read=/app,/project,/functions,/hooks`
+  instead of a bare `--allow-read`, so a function, or a package it imports, can no longer read the
+  rest of the container's filesystem (`/etc`, and on a cluster the pod's service-account token). The
+  self-host stack and `supatype dev` mount the project at `/project`, which covers functions, hooks,
+  shared modules, `.env.local` and `.supatype/*.json`; Supatype Cloud's `/functions` and `/hooks` are
+  listed too. A function that read a file outside those directories now gets `NotCapable`. Native
+  `dev` and `functions serve` run Deno on your machine and are unchanged.
+
 ## 0.9.2 (2026-11-12)
 
 ### Breaking Changes

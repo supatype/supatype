@@ -23,4 +23,15 @@ RUN deno check main.ts
 ENV PORT=8001
 EXPOSE 8001
 
-CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-read", "main.ts"]
+# What a function may read, and nothing else.
+#
+# A bare --allow-read let any handler, and any package it imports, read the whole container
+# filesystem: /etc, the process table, and on a cluster the pod's service-account token. These are
+# the only directories this image is run with:
+#   /app                    the worker itself.
+#   /project                self-host compose and `supatype dev` mount the project here, read-only:
+#                           functions, hooks, shared modules, .env.local and .supatype/*.json.
+#   /functions and /hooks   where Supatype Cloud mounts them.
+# Deno reads its own module and npm caches without this permission. A deployment that mounts source
+# anywhere else sets its own --allow-read (see tests/read-scope.test.ts).
+CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-read=/app,/project,/functions,/hooks", "main.ts"]

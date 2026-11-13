@@ -48,11 +48,33 @@ function watchStdout(stream: ReadableStream<Uint8Array>, lines: string[]): Promi
   })
 }
 
+export interface StartOptions {
+  /** Run with the --allow-read list the Dockerfile ships, its image paths mapped onto this machine. */
+  readonly readFromDockerfile?: boolean
+}
+
+/**
+ * The --allow-read flag for the worker: all of the disk, or the Dockerfile CMD's directories with
+ * /app mapped to the worker's own directory and every project directory to the functions root.
+ */
+async function readFlag(root: string, fromDockerfile: boolean): Promise<string> {
+  if (!fromDockerfile) return "--allow-read"
+  const dockerfile = await Deno.readTextFile(new URL("../Dockerfile", import.meta.url))
+  const cmd = dockerfile.split("\n").find((line) => line.startsWith("CMD "))
+  const paths = (cmd === undefined ? undefined : /"--allow-read=([^"]+)"/.exec(cmd)?.[1])?.split(",") ?? []
+  const workerDir = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")
+  return "--allow-read=" + paths.map((path) => (path === "/app" ? workerDir : root)).join(",")
+}
+
 /** Starts the worker on a free port with `env` (the whole environment) over `functions`. */
-export async function startWorker(functions: Record<string, string>, env: Record<string, string>): Promise<Worker> {
+export async function startWorker(
+  functions: Record<string, string>,
+  env: Record<string, string>,
+  options: StartOptions = {},
+): Promise<Worker> {
   const root = await functionsRoot(functions)
   const child = new Deno.Command(Deno.execPath(), {
-    args: ["run", "--allow-net", "--allow-env", "--allow-read", MAIN],
+    args: ["run", "--allow-net", "--allow-env", await readFlag(root, options.readFromDockerfile === true), MAIN],
     env: { ...env, PORT: "0", SUPATYPE_FUNCTIONS_ROOT: root },
     clearEnv: true,
     stdout: "piped",
