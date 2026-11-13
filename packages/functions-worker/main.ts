@@ -8,6 +8,7 @@ import {
   runInvocation,
   type FunctionContext,
 } from "./invocation.ts"
+import { discoverRoutes, type DiscoveredRoute } from "./discover.ts"
 import {
   installStructuredLogging,
   log,
@@ -29,11 +30,6 @@ installHookDepthPropagation()
 const RESERVED_ROUTES = new Set(["_logs"])
 
 type Handler = (req: Request, ctx: FunctionContext) => Response | Promise<Response>
-
-interface DiscoveredRoute {
-  name: string
-  entrypoint: string
-}
 
 /**
  * Root for public functions, or "" when this worker serves none.
@@ -124,44 +120,6 @@ function withholdServiceRoleKey(): string {
   return key
 }
 
-async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
-  const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
-  const out: DiscoveredRoute[] = []
-
-  // The catch has to wrap the *iteration*: `Deno.readDir` returns its iterable without touching the
-  // filesystem, so a missing directory raises NotFound on the first `next()`, not here. A root that
-  // does not exist is ordinary, a project with functions but no hooks has no hooks directory, and
-  // letting it throw would fail startup and take that project's working functions down with it.
-  try {
-    for await (const entry of Deno.readDir(root)) {
-      if (entry.name.startsWith("_") || entry.name.startsWith(".")) continue
-
-      const fullPath = `${root}/${entry.name}`
-
-      if (entry.isDirectory) {
-        const indexTs = `${fullPath}/index.ts`
-        try {
-          await Deno.stat(indexTs)
-          if (!single || entry.name === single) {
-            out.push({ name: entry.name, entrypoint: indexTs })
-          }
-        } catch {
-          // no index.ts
-        }
-      } else if (entry.isFile && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
-        const name = entry.name.replace(/\.ts$/, "")
-        if (!single || name === single) {
-          out.push({ name, entrypoint: fullPath })
-        }
-      }
-    }
-  } catch (err) {
-    if (!(err instanceof Deno.errors.NotFound)) throw err
-  }
-
-  return out.sort((a, b) => a.name.localeCompare(b.name))
-}
-
 function entrypointImportUrl(entrypoint: string): string {
   const normalized = entrypoint.replace(/\\/g, "/")
   if (normalized.startsWith("file://")) return normalized
@@ -198,10 +156,14 @@ async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, H
 
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
 // Order matters: withhold, then import. See withholdServiceRoleKey.
+function singleFunction(): string | undefined {
+  return Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
+}
+
 const serviceRoleKey = withholdServiceRoleKey()
 const serviceRoleAllowed = serviceRoleRoutes()
 const root = functionsRoot()
-const routes = root ? await discoverRoutes(root) : []
+const routes = root ? await discoverRoutes(root, singleFunction()) : []
 const handlers = await loadHandlers(routes)
 
 // Hooks are namespaced so one worker can serve both without a name in `hooks/` ever shadowing, or
@@ -213,7 +175,7 @@ if (!root && !hooksDir) {
   )
 }
 if (hooksDir) {
-  const hookRoutes = await discoverRoutes(hooksDir)
+  const hookRoutes = await discoverRoutes(hooksDir, singleFunction())
   const hookHandlers = await loadHandlers(hookRoutes)
   for (const [name, handler] of Object.entries(hookHandlers)) {
     handlers[HOOKS_ROUTE_PREFIX + name] = handler
