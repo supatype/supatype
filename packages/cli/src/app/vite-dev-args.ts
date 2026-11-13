@@ -6,6 +6,11 @@
  * reaches only the host's IPv4 loopback, as host.docker.internal). The App URL answered 502, or
  * served another project's app holding 127.0.0.1 on the same port. Binding Vite to the upstream's
  * own address and port, with strictPort, puts it where the proxy looks or fails it loudly.
+ *
+ * That holds where Docker Desktop runs (macOS, Windows), which forwards host.docker.internal to the
+ * host's loopback. Docker Engine on Linux maps the name to the docker0 bridge address instead, where
+ * a Vite bound to 127.0.0.1 is not listening, so the App URL answered 502 on 0.9.2 (reported by a
+ * tester on Linux). On Linux Vite listens on every interface, which covers the loopback and the bridge.
  */
 
 /** Characters that mean a script needs a shell: chaining, pipes, redirects, quoting, variables. */
@@ -26,11 +31,15 @@ export function viteScriptArgs(body: string): string[] | null {
   return null
 }
 
-/** The address Vite should bind for an upstream on this machine's loopback; undefined otherwise. */
-function loopbackHost(hostname: string): string | undefined {
-  if (hostname === "localhost" || hostname === "127.0.0.1") return "127.0.0.1"
-  if (hostname === "[::1]") return "::1"
-  return undefined
+/**
+ * The address Vite should bind for an upstream on this machine's loopback, or undefined for any
+ * other upstream. On Linux that is every interface, so the gateway can reach it over the bridge.
+ */
+function loopbackHost(hostname: string, platform: NodeJS.Platform): string | undefined {
+  const ipv4 = hostname === "localhost" || hostname === "127.0.0.1"
+  if (!ipv4 && hostname !== "[::1]") return undefined
+  if (platform === "linux") return ipv4 ? "0.0.0.0" : "::"
+  return ipv4 ? "127.0.0.1" : "::1"
 }
 
 /** True when the script already sets `flag`, as `--flag value` or `--flag=value`. */
@@ -42,7 +51,11 @@ function setsFlag(args: readonly string[], flag: string): boolean {
  * The flags that bind Vite to the upstream's address and port, leaving out any the script already
  * sets. None for a command that is not a server (`vite build`) or an upstream that does not parse.
  */
-export function viteUpstreamFlags(scriptArgs: readonly string[], upstream: string | undefined): string[] {
+export function viteUpstreamFlags(
+  scriptArgs: readonly string[],
+  upstream: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
   const command = scriptArgs[0]
   if (command !== undefined && !command.startsWith("-") && !SERVER_COMMANDS.has(command)) return []
   let url: URL
@@ -51,7 +64,7 @@ export function viteUpstreamFlags(scriptArgs: readonly string[], upstream: strin
   } catch {
     return []
   }
-  const host = loopbackHost(url.hostname)
+  const host = loopbackHost(url.hostname, platform)
   const flags: string[] = []
   if (host !== undefined && !setsFlag(scriptArgs, "--host")) flags.push("--host", host)
   if (url.port !== "" && !setsFlag(scriptArgs, "--port")) flags.push("--port", url.port)

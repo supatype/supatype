@@ -133,6 +133,7 @@ export function resolveViteDirectSpawn(
   script: string,
   scripts: Record<string, string> | undefined,
   upstream?: string,
+  platform: NodeJS.Platform = process.platform,
 ): { bin: string; args: string[]; shell: boolean } | null {
   const scriptArgs = viteScriptArgs(scripts?.[script]?.trim() ?? "")
   if (!scriptArgs) return null
@@ -140,7 +141,7 @@ export function resolveViteDirectSpawn(
   const viteJs = join(appDir, "node_modules", "vite", "bin", "vite.js")
   if (!existsSync(viteJs)) return null
 
-  const args = [viteJs, ...scriptArgs, ...viteUpstreamFlags(scriptArgs, upstream)]
+  const args = [viteJs, ...scriptArgs, ...viteUpstreamFlags(scriptArgs, upstream, platform)]
   return { bin: nodeExecutable(viteJs), args, shell: false }
 }
 

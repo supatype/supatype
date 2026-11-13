@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **dev:** on Linux the app URL (`http://localhost:18473/`) answered 502 for a Vite app. `supatype
+  dev` started Vite on `127.0.0.1`, and Docker Engine on Linux reaches the host through the docker0
+  bridge, not the loopback, so the gateway found nothing listening. On Linux Vite now listens on
+  every interface (`--host 0.0.0.0`). Docker Desktop on macOS and Windows forwards to the loopback,
+  so nothing changes there.
+
 ## 0.9.2 (2026-11-12)
 
 ### Breaking Changes

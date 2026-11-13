@@ -91,38 +91,65 @@ function viteAppDir(): { appDir: string; viteJs: string } {
 describe("resolveViteDirectSpawn() binds Vite where the proxy dials", () => {
   it("binds the upstream's IPv4 loopback and port, strictly", () => {
     const { appDir, viteJs } = viteAppDir()
-    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://127.0.0.1:5173")
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://127.0.0.1:5173", "darwin")
     expect(result?.args).toEqual([viteJs, "--host", "127.0.0.1", "--port", "5173", "--strictPort"])
   })
 
   it("binds 127.0.0.1 for a localhost upstream too", () => {
     const { appDir, viteJs } = viteAppDir()
-    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://localhost:5174")
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://localhost:5174", "darwin")
     expect(result?.args).toEqual([viteJs, "--host", "127.0.0.1", "--port", "5174", "--strictPort"])
   })
 
   it("keeps the script's own arguments and does not repeat a flag it already sets", () => {
     const { appDir, viteJs } = viteAppDir()
     const scripts = { dev: "vite --open --port 3000" }
-    const result = resolveViteDirectSpawn(appDir, "dev", scripts, "http://127.0.0.1:5173")
+    const result = resolveViteDirectSpawn(appDir, "dev", scripts, "http://127.0.0.1:5173", "darwin")
     expect(result?.args).toEqual([viteJs, "--open", "--port", "3000", "--host", "127.0.0.1", "--strictPort"])
   })
 
   it("adds no server flags to a command that is not the dev server", () => {
     const { appDir, viteJs } = viteAppDir()
-    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite build --watch" }, "http://127.0.0.1:5173")
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite build --watch" }, "http://127.0.0.1:5173", "darwin")
     expect(result?.args).toEqual([viteJs, "build", "--watch"])
   })
 
   it("leaves a script that needs a shell to the package manager", () => {
     const { appDir } = viteAppDir()
-    expect(resolveViteDirectSpawn(appDir, "dev", { dev: "vite && echo done" }, "http://127.0.0.1:5173")).toBeNull()
+    expect(resolveViteDirectSpawn(appDir, "dev", { dev: "vite && echo done" }, "http://127.0.0.1:5173", "darwin")).toBeNull()
   })
 
   it("adds no host for an upstream that is not this machine's loopback", () => {
     const { appDir, viteJs } = viteAppDir()
-    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://192.168.1.20:5173")
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://192.168.1.20:5173", "darwin")
     expect(result?.args).toEqual([viteJs, "--port", "5173", "--strictPort"])
+  })
+})
+
+// 0.9.2, reported by a tester on Linux: Docker Engine maps host.docker.internal to the docker0
+// bridge, not the loopback, so the gateway could not reach a Vite bound to 127.0.0.1 and the App
+// URL answered 502. Docker Desktop forwards that name to the loopback, which is why macOS and
+// Windows never showed it.
+describe("resolveViteDirectSpawn() on Linux listens where the bridge arrives", () => {
+  it("binds every IPv4 interface for a 127.0.0.1 or localhost upstream", () => {
+    const { appDir, viteJs } = viteAppDir()
+    for (const upstream of ["http://127.0.0.1:5173", "http://localhost:5173"]) {
+      const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, upstream, "linux")
+      expect(result?.args).toEqual([viteJs, "--host", "0.0.0.0", "--port", "5173", "--strictPort"])
+    }
+  })
+
+  it("binds every interface for an IPv6 loopback upstream", () => {
+    const { appDir, viteJs } = viteAppDir()
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://[::1]:5173", "linux")
+    expect(result?.args).toEqual([viteJs, "--host", "::", "--port", "5173", "--strictPort"])
+  })
+
+  it("keeps a host the script already sets", () => {
+    const { appDir, viteJs } = viteAppDir()
+    const scripts = { dev: "vite --host 127.0.0.1" }
+    const result = resolveViteDirectSpawn(appDir, "dev", scripts, "http://127.0.0.1:5173", "linux")
+    expect(result?.args).toEqual([viteJs, "--host", "127.0.0.1", "--port", "5173", "--strictPort"])
   })
 })
 
