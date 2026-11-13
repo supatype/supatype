@@ -3,6 +3,8 @@ import { createContext, useContext } from "react"
 export interface PlatformContext {
   platformUrl: string | undefined
   projectRef: string | undefined
+  /** The environment Studio is open on, when the host says. */
+  environment?: string | undefined
 }
 
 export const PlatformCtx = createContext<PlatformContext>({

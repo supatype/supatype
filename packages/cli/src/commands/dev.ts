@@ -705,7 +705,7 @@ export function registerDev(program: Command): void {
         SUPATYPE_API_HOST: "localhost",
         SUPATYPE_SITE_URL: `http://localhost:${serverPort}`,
         // External URL, mailer provider, emailed-link paths and the send-email hook.
-        ...nativeAuthMailerEnv(config.email, serverPort),
+        ...nativeAuthMailerEnv(config.email, serverPort, providerEnvironment),
         SUPATYPE_LOG_LEVEL: "info",
         SUPATYPE_DISABLE_SIGNUP: "false",
         ...serverStorageEnv(nativeStorage, config),
@@ -713,7 +713,7 @@ export function registerDev(program: Command): void {
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
         // auth.sso.saml, with the signing key from .env (generated there the first time SAML is on).
         ...nativeSamlEnv(cwd, config),
-        ...nativeServerDotEnvLayer({ dotEnv, config, denoPort }),
+        ...nativeServerDotEnvLayer({ dotEnv, config, denoPort, environment: providerEnvironment }),
         // After .env, which can hold a keyspace password for a Docker phase of the project (N-RB2).
         ...nativeKeyspaceServerEnv(cache, providerEnvironment),
       }

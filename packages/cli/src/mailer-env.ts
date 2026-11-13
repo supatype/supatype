@@ -8,8 +8,39 @@
  */
 
 import type { SupatypeProjectConfig } from "./project-config.js"
+import { envReferenceName } from "@supatype/types"
 
 type EmailConfig = SupatypeProjectConfig["email"]
+
+/** The shell and `.env` as native dev sees them, to resolve an `env("NAME")` secret from. */
+export type MailerEnvironment = Readonly<Record<string, string | undefined>>
+
+/**
+ * A secret from the config: a literal as written, an `env("NAME")` as the variable's value in
+ * `environment`. With no environment, or the variable unset, a reference gives nothing, so the
+ * reference itself is never written anywhere as if it were the secret.
+ */
+function secretValue(value: string | undefined, environment: MailerEnvironment | undefined): string | undefined {
+  if (value === undefined || value === "") return undefined
+  const name = envReferenceName(value)
+  if (name === undefined) return value
+  const resolved = environment?.[name]
+  return resolved === undefined || resolved === "" ? undefined : resolved
+}
+
+/** The variable names `email.smtp.pass` and `email.resend_api_key` point at, by the name the server reads. */
+export function mailerSecretReferences(email: EmailConfig): Record<string, string> {
+  const candidates: [string, string | undefined][] = [
+    ["SUPATYPE_SMTP_PASS", email?.smtp?.pass],
+    ["SUPATYPE_RESEND_API_KEY", email?.resend_api_key],
+  ]
+  const refs: Record<string, string> = {}
+  for (const [serverName, value] of candidates) {
+    const name = value === undefined ? undefined : envReferenceName(value)
+    if (name !== undefined) refs[serverName] = name
+  }
+  return refs
+}
 
 /**
  * Where every emailed auth link points. The server resolves each link's path against
@@ -52,7 +83,7 @@ function present(value: string | undefined): string | undefined {
 }
 
 /** `email.smtp` as SUPATYPE_SMTP_*, leaving out what it does not set so `.env` can. */
-function smtpEnv(smtp: NonNullable<EmailConfig>["smtp"]): Record<string, string> {
+function smtpEnv(smtp: NonNullable<EmailConfig>["smtp"], environment: MailerEnvironment | undefined): Record<string, string> {
   if (smtp === undefined) return {}
   const out: Record<string, string> = {}
   const host = present(smtp.host)
@@ -61,7 +92,8 @@ function smtpEnv(smtp: NonNullable<EmailConfig>["smtp"]): Record<string, string>
   const user = present(smtp.user)
   if (user !== undefined) out.SUPATYPE_SMTP_USER = user
   // A password is taken as written: surrounding spaces can be part of it.
-  if (smtp.pass !== undefined && smtp.pass !== "") out.SUPATYPE_SMTP_PASS = smtp.pass
+  const pass = secretValue(smtp.pass, environment)
+  if (pass !== undefined) out.SUPATYPE_SMTP_PASS = pass
   const admin = present(smtp.admin_email)
   if (admin !== undefined) out.SUPATYPE_SMTP_ADMIN_EMAIL = admin
   const sender = present(smtp.sender_name)
@@ -70,10 +102,10 @@ function smtpEnv(smtp: NonNullable<EmailConfig>["smtp"]): Record<string, string>
 }
 
 /** Resend's or SES's settings from the config, under the names the server reads. */
-function apiProviderEnv(email: NonNullable<EmailConfig>): Record<string, string> {
+function apiProviderEnv(email: NonNullable<EmailConfig>, environment: MailerEnvironment | undefined): Record<string, string> {
   const out: Record<string, string> = {}
   if (email.provider === "resend") {
-    const key = present(email.resend_api_key)
+    const key = present(secretValue(email.resend_api_key, environment))
     if (key !== undefined) out.SUPATYPE_RESEND_API_KEY = key
     const from = present(email.resend_from)
     if (from !== undefined) out.SUPATYPE_RESEND_FROM = from
@@ -87,14 +119,17 @@ function apiProviderEnv(email: NonNullable<EmailConfig>): Record<string, string>
 /**
  * `email.provider` and its settings as the auth server's environment. Console is the documented
  * default, and it at least logs that a message would have been sent.
+ *
+ * An `env("NAME")` password or Resend key is read from `environment`; without one it is left out,
+ * and the compose file names the variable instead (see {@link mailerSecretReferences}).
  */
-export function mailerProviderEnv(email: EmailConfig): Record<string, string> {
+export function mailerProviderEnv(email: EmailConfig, environment?: MailerEnvironment): Record<string, string> {
   const provider = email?.provider ?? "console"
   return {
     // Mailer.MailerProvider, so the doubled word is the real name.
     [MAILER_PROVIDER_ENV]: provider,
-    ...(email !== undefined && provider === "smtp" ? smtpEnv(email.smtp) : {}),
-    ...(email !== undefined ? apiProviderEnv(email) : {}),
+    ...(email !== undefined && provider === "smtp" ? smtpEnv(email.smtp, environment) : {}),
+    ...(email !== undefined ? apiProviderEnv(email, environment) : {}),
   }
 }
 
