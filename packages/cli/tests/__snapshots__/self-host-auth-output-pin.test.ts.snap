@@ -1,0 +1,192 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`self-host auth output is pinned > compose provider lines 1`] = `
+"      # auth.providers from supatype.config.ts. A value in .env wins over each default, and a
+      # secret is only ever the name of the variable that holds it.
+      SUPATYPE_EXTERNAL_GITHUB_ENABLED: "\${SUPATYPE_EXTERNAL_GITHUB_ENABLED:-true}"
+      SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID: "\${SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID:-gh-client}"
+      SUPATYPE_EXTERNAL_GITHUB_SECRET: "\${SUPATYPE_EXTERNAL_GITHUB_SECRET:-\${GITHUB_SECRET:-}}"
+      SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI: "\${SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI:-\${API_EXTERNAL_URL}/auth/v1/callback}"
+      SUPATYPE_EXTERNAL_GITLAB_ENABLED: "\${SUPATYPE_EXTERNAL_GITLAB_ENABLED:-false}"
+      SUPATYPE_EXTERNAL_GITLAB_CLIENT_ID: "\${SUPATYPE_EXTERNAL_GITLAB_CLIENT_ID:-gl}"
+      SUPATYPE_EXTERNAL_GITLAB_URL: "\${SUPATYPE_EXTERNAL_GITLAB_URL:-https://gitlab.example.com}"
+      SUPATYPE_EXTERNAL_GITLAB_EMAIL_OPTIONAL: "\${SUPATYPE_EXTERNAL_GITLAB_EMAIL_OPTIONAL:-true}"
+      SUPATYPE_EXTERNAL_GITLAB_REDIRECT_URI: "\${SUPATYPE_EXTERNAL_GITLAB_REDIRECT_URI:-\${API_EXTERNAL_URL}/auth/v1/callback}"
+      SUPATYPE_EXTERNAL_GOOGLE_ENABLED: "\${SUPATYPE_EXTERNAL_GOOGLE_ENABLED:-true}"
+      SUPATYPE_EXTERNAL_GOOGLE_CLIENT_ID: "\${SUPATYPE_EXTERNAL_GOOGLE_CLIENT_ID:-\${GOOGLE_ID:-}}"
+      SUPATYPE_EXTERNAL_GOOGLE_SECRET: "\${SUPATYPE_EXTERNAL_GOOGLE_SECRET:-\${GOOGLE_SECRET:-}}"
+      SUPATYPE_EXTERNAL_GOOGLE_SKIP_NONCE_CHECK: "\${SUPATYPE_EXTERNAL_GOOGLE_SKIP_NONCE_CHECK:-true}"
+      SUPATYPE_EXTERNAL_GOOGLE_REDIRECT_URI: "\${SUPATYPE_EXTERNAL_GOOGLE_REDIRECT_URI:-\${API_EXTERNAL_URL}/auth/v1/callback}"
+      SUPATYPE_EXTERNAL_KEYCLOAK_ENABLED: "\${SUPATYPE_EXTERNAL_KEYCLOAK_ENABLED:-true}"
+      SUPATYPE_EXTERNAL_KEYCLOAK_CLIENT_ID: "\${SUPATYPE_EXTERNAL_KEYCLOAK_CLIENT_ID:-kc}"
+      SUPATYPE_EXTERNAL_KEYCLOAK_REDIRECT_URI: "\${SUPATYPE_EXTERNAL_KEYCLOAK_REDIRECT_URI:-https://api.example.com/auth/v1/callback}"
+"
+`;
+
+exports[`self-host auth output is pinned > compose server environment 1`] = `
+"    environment:
+      SUPATYPE_MODE: standalone
+      SUPATYPE_MANIFEST_PATH: .supatype/manifest.json
+      SUPATYPE_ADMIN_CONFIG_PATH: .supatype/admin-config.json
+      SUPATYPE_API_CONFIG_PATH: .supatype/api-config.json
+      SUPATYPE_POSTGREST_URL: http://postgrest:3000
+      SUPATYPE_GRAPHQL_URL: http://postgrest:3000
+      SUPATYPE_STORAGE_URL: http://storage:5000
+      SUPATYPE_URL: \${API_EXTERNAL_URL:-http://localhost:\${SUPATYPE_KONG_PORT:-18473}}
+      SUPATYPE_ANON_KEY: \${ANON_KEY:-}
+      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
+      SUPATYPE_SQL_DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}"
+      # The SQL editor's own login, not a superuser. The owner URL above stays: the server falls
+      # back to it and uses it for role membership.
+      SUPATYPE_SQL_EDITOR_DATABASE_URL: "postgresql://supatype_sql_editor:\${SUPATYPE_SQL_EDITOR_PASSWORD:?SUPATYPE_SQL_EDITOR_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}"
+      SUPATYPE_DB_PUBLIC_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}@\${SUPATYPE_DB_PUBLIC_HOST:-127.0.0.1}:\${SUPATYPE_DB_PORT:-5432}/\${POSTGRES_DB:-supatype}"
+      SUPATYPE_DB_POOLER_URL: \${SUPATYPE_DB_POOLER_URL:-}
+      SUPATYPE_ALLOW_SECRET_READBACK: \${SUPATYPE_ALLOW_SECRET_READBACK:-false}
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}
+      SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
+      SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
+      SUPATYPE_REALTIME_URL: http://realtime:4000
+      SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
+      SUPATYPE_CONTROL_PLANE_SECRET: \${SUPATYPE_CONTROL_PLANE_SECRET:?SUPATYPE_CONTROL_PLANE_SECRET is missing from .env}
+      SUPATYPE_VALKEY_ADDR: db:6379
+      SUPATYPE_KEYSPACE_PASSWORD: \${SUPATYPE_KEYSPACE_PASSWORD:?SUPATYPE_KEYSPACE_PASSWORD is missing from .env}
+      SUPATYPE_APP_MODE: none
+      SUPATYPE_API_HOST: 0.0.0.0
+      SUPATYPE_API_PORT: 9999
+      SUPATYPE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-http://localhost:\${SUPATYPE_KONG_PORT:-18473}}
+      # Browser origins allowed besides the site URL: api.corsOrigins, then whatever .env adds.
+      # A list saved in Studio replaces both until it is reset. Dev mode allows every origin.
+      SUPATYPE_CORS_ALLOW_ORIGINS: "\${SUPATYPE_CORS_ALLOW_ORIGINS:-}"
+      SUPATYPE_DB_DRIVER: postgres
+      SUPATYPE_DB_DATABASE_URL: "postgres://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}?search_path=auth"
+      SUPATYPE_SITE_URL: \${SITE_URL:-http://localhost:3000}
+      SUPATYPE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
+      SUPATYPE_JWT_EXP: 3600
+      SUPATYPE_JWT_AUD: authenticated
+      SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
+      SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
+      # auth.email.enabled and auth.email.enableConfirmations decide the fallbacks; a value in .env
+      # wins. Unset, a standalone stack sends confirmation links and a dev one confirms at once.
+      SUPATYPE_EXTERNAL_EMAIL_ENABLED: \${SUPATYPE_EXTERNAL_EMAIL_ENABLED:-true}
+      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-true}
+      # Emailed links are SUPATYPE_API_EXTERNAL_URL plus these paths. The external URL is the
+      # gateway's root, where / belongs to the app, so the server's default of /verify sent every
+      # confirmation, magic-link and recovery link to a 404. The auth routes are under /auth/v1/.
+      SUPATYPE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      SUPATYPE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      SUPATYPE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      SUPATYPE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      # email.provider and email.smtp are config, and nothing used to carry
+      # them here: with no provider and no SMTP host the auth service falls
+      # through to its noop client, so every message was dropped in silence and
+      # a project asking for smtp got the same nothing as one asking for console.
+      # The name really is MAILER_MAILER: the field is Mailer.MailerProvider.
+      SUPATYPE_MAILER_MAILER_PROVIDER: \${SUPATYPE_MAILER_MAILER_PROVIDER:-console}
+      SUPATYPE_SMTP_HOST: \${SUPATYPE_SMTP_HOST:-}
+      # 587, not empty: this one is an int on the server, and compose
+      # substitutes an unset variable as "", which fails to parse and takes
+      # the whole service down on boot. 587 is the server's own default, so
+      # leaving it unset now behaves exactly as it would with no value at all.
+      SUPATYPE_SMTP_PORT: \${SUPATYPE_SMTP_PORT:-587}
+      SUPATYPE_SMTP_USER: \${SUPATYPE_SMTP_USER:-}
+      SUPATYPE_SMTP_PASS: \${SUPATYPE_SMTP_PASS:-}
+      SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
+      SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
+      # Resend's key and sender, and SES's sender, from .env. Without these the server had no way
+      # to get them and a resend or ses provider fell back to the noop mailer.
+      SUPATYPE_RESEND_API_KEY: \${SUPATYPE_RESEND_API_KEY:-}
+      SUPATYPE_RESEND_FROM: \${SUPATYPE_RESEND_FROM:-}
+      SUPATYPE_SES_FROM: \${SUPATYPE_SES_FROM:-}
+      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
+      # auth.providers from supatype.config.ts. A value in .env wins over each default, and a
+      # secret is only ever the name of the variable that holds it.
+      SUPATYPE_EXTERNAL_GITHUB_ENABLED: "\${SUPATYPE_EXTERNAL_GITHUB_ENABLED:-true}"
+      SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID: "\${SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID:-gh-client}"
+      SUPATYPE_EXTERNAL_GITHUB_SECRET: "\${SUPATYPE_EXTERNAL_GITHUB_SECRET:-\${GITHUB_SECRET:-}}"
+      SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI: "\${SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI:-\${API_EXTERNAL_URL:-http://localhost:\${SUPATYPE_KONG_PORT:-18473}}/auth/v1/callback}"
+      SUPATYPE_EXTERNAL_GITLAB_ENABLED: "\${SUPATYPE_EXTERNAL_GITLAB_ENABLED:-false}"
+      SUPATYPE_EXTERNAL_GITLAB_CLIENT_ID: "\${SUPATYPE_EXTERNAL_GITLAB_CLIENT_ID:-gl}"
+      SUPATYPE_EXTERNAL_GITLAB_URL: "\${SUPATYPE_EXTERNAL_GITLAB_URL:-https://gitlab.example.com}"
+      SUPATYPE_EXTERNAL_GITLAB_EMAIL_OPTIONAL: "\${SUPATYPE_EXTERNAL_GITLAB_EMAIL_OPTIONAL:-true}"
+      SUPATYPE_EXTERNAL_GITLAB_REDIRECT_URI: "\${SUPATYPE_EXTERNAL_GITLAB_REDIRECT_URI:-\${API_EXTERNAL_URL:-http://localhost:\${SUPATYPE_KONG_PORT:-18473}}/auth/v1/callback}"
+      SUPATYPE_EXTERNAL_GOOGLE_ENABLED: "\${SUPATYPE_EXTERNAL_GOOGLE_ENABLED:-true}"
+      SUPATYPE_EXTERNAL_GOOGLE_CLIENT_ID: "\${SUPATYPE_EXTERNAL_GOOGLE_CLIENT_ID:-\${GOOGLE_ID:-}}"
+      SUPATYPE_EXTERNAL_GOOGLE_SECRET: "\${SUPATYPE_EXTERNAL_GOOGLE_SECRET:-\${GOOGLE_SECRET:-}}"
+      SUPATYPE_EXTERNAL_GOOGLE_SKIP_NONCE_CHECK: "\${SUPATYPE_EXTERNAL_GOOGLE_SKIP_NONCE_CHECK:-true}"
+      SUPATYPE_EXTERNAL_GOOGLE_REDIRECT_URI: "\${SUPATYPE_EXTERNAL_GOOGLE_REDIRECT_URI:-\${API_EXTERNAL_URL:-http://localhost:\${SUPATYPE_KONG_PORT:-18473}}/auth/v1/callback}"
+      SUPATYPE_EXTERNAL_KEYCLOAK_ENABLED: "\${SUPATYPE_EXTERNAL_KEYCLOAK_ENABLED:-true}"
+      SUPATYPE_EXTERNAL_KEYCLOAK_CLIENT_ID: "\${SUPATYPE_EXTERNAL_KEYCLOAK_CLIENT_ID:-kc}"
+      SUPATYPE_EXTERNAL_KEYCLOAK_REDIRECT_URI: "\${SUPATYPE_EXTERNAL_KEYCLOAK_REDIRECT_URI:-https://api.example.com/auth/v1/callback}"
+
+"
+`;
+
+exports[`self-host auth output is pinned > native provider and mailer environment 1`] = `
+{
+  "SUPATYPE_EXTERNAL_GITHUB_CLIENT_ID": "gh-client",
+  "SUPATYPE_EXTERNAL_GITHUB_ENABLED": "true",
+  "SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI": "http://localhost:3001/auth/v1/callback",
+  "SUPATYPE_EXTERNAL_GITHUB_SECRET": "gh-s",
+  "SUPATYPE_EXTERNAL_GITLAB_CLIENT_ID": "gl",
+  "SUPATYPE_EXTERNAL_GITLAB_EMAIL_OPTIONAL": "true",
+  "SUPATYPE_EXTERNAL_GITLAB_ENABLED": "false",
+  "SUPATYPE_EXTERNAL_GITLAB_REDIRECT_URI": "http://localhost:3001/auth/v1/callback",
+  "SUPATYPE_EXTERNAL_GITLAB_URL": "https://gitlab.example.com",
+  "SUPATYPE_EXTERNAL_GOOGLE_CLIENT_ID": "g-id",
+  "SUPATYPE_EXTERNAL_GOOGLE_ENABLED": "true",
+  "SUPATYPE_EXTERNAL_GOOGLE_REDIRECT_URI": "http://localhost:3001/auth/v1/callback",
+  "SUPATYPE_EXTERNAL_GOOGLE_SECRET": "g-s",
+  "SUPATYPE_EXTERNAL_GOOGLE_SKIP_NONCE_CHECK": "true",
+  "SUPATYPE_EXTERNAL_KEYCLOAK_CLIENT_ID": "kc",
+  "SUPATYPE_EXTERNAL_KEYCLOAK_ENABLED": "true",
+  "SUPATYPE_EXTERNAL_KEYCLOAK_REDIRECT_URI": "https://api.example.com/auth/v1/callback",
+}
+`;
+
+exports[`self-host auth output is pinned > native provider and mailer environment 2`] = `
+{
+  "SUPATYPE_API_EXTERNAL_URL": "http://localhost:3001/auth/v1",
+  "SUPATYPE_MAILER_MAILER_PROVIDER": "smtp",
+  "SUPATYPE_MAILER_URLPATHS_CONFIRMATION": "/auth/v1/verify",
+  "SUPATYPE_MAILER_URLPATHS_EMAIL_CHANGE": "/auth/v1/verify",
+  "SUPATYPE_MAILER_URLPATHS_INVITE": "/auth/v1/verify",
+  "SUPATYPE_MAILER_URLPATHS_RECOVERY": "/auth/v1/verify",
+  "SUPATYPE_SMTP_ADMIN_EMAIL": "a@example.com",
+  "SUPATYPE_SMTP_HOST": "smtp.example.com",
+  "SUPATYPE_SMTP_PASS": "literal-pass",
+  "SUPATYPE_SMTP_PORT": "2525",
+  "SUPATYPE_SMTP_SENDER_NAME": "Acme",
+  "SUPATYPE_SMTP_USER": "mailer",
+}
+`;
+
+exports[`self-host auth output is pinned > native provider and mailer environment 3`] = `
+{
+  "managed": [
+    "SUPATYPE_MAILER_MAILER_PROVIDER",
+    "SUPATYPE_SMTP_HOST",
+    "SUPATYPE_SMTP_PORT",
+    "SUPATYPE_SMTP_USER",
+    "SUPATYPE_SMTP_PASS",
+    "SUPATYPE_SMTP_ADMIN_EMAIL",
+    "SUPATYPE_SMTP_SENDER_NAME",
+    "SUPATYPE_RESEND_API_KEY",
+    "SUPATYPE_RESEND_FROM",
+    "SUPATYPE_SES_FROM",
+  ],
+  "removeManaged": [
+    "SUPATYPE_RESEND_API_KEY",
+    "SUPATYPE_RESEND_FROM",
+    "SUPATYPE_SES_FROM",
+  ],
+  "updates": {
+    "SUPATYPE_MAILER_MAILER_PROVIDER": "smtp",
+    "SUPATYPE_SMTP_ADMIN_EMAIL": "a@example.com",
+    "SUPATYPE_SMTP_HOST": "smtp.example.com",
+    "SUPATYPE_SMTP_PASS": "literal-pass",
+    "SUPATYPE_SMTP_PORT": "2525",
+    "SUPATYPE_SMTP_SENDER_NAME": "Acme",
+    "SUPATYPE_SMTP_USER": "mailer",
+  },
+}
+`;

@@ -12,48 +12,15 @@
  */
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { readEnvFile } from "./env-file.js"
+import { AUTH_CALLBACK_PATH, AUTH_PROVIDER_NAMES, envReferenceName, type AuthProviderName, type EnvReference } from "@supatype/types"
 
 /**
- * Every OAuth provider the auth server has (its `ProviderConfiguration`), by the name
- * `/auth/v1/authorize?provider=` takes. The env name is the same, upper-cased.
+ * Every OAuth provider the auth server has, by the name `/auth/v1/authorize?provider=` takes. The
+ * list lives in `@supatype/types`, shared with the Cloud control plane.
  */
-export const AUTH_PROVIDERS = [
-  "apple",
-  "azure",
-  "bitbucket",
-  "discord",
-  "facebook",
-  "figma",
-  "fly",
-  "github",
-  "gitlab",
-  "google",
-  "kakao",
-  "keycloak",
-  "linkedin",
-  "linkedin_oidc",
-  "notion",
-  "slack",
-  "slack_oidc",
-  "snapchat",
-  "spotify",
-  "twitch",
-  "twitter",
-  "vercel_marketplace",
-  "workos",
-  "x",
-  "zoom",
-] as const
+export const AUTH_PROVIDERS = AUTH_PROVIDER_NAMES
 
-export type AuthProviderName = (typeof AUTH_PROVIDERS)[number]
-
-/**
- * A value read from the environment when the stack starts, never stored in the config.
- *
- * The same `env(NAME)` spelling Supabase's config.toml uses. Write it with `env("NAME")` from
- * `@supatype/cli`.
- */
-export type EnvReference = `env(${string})`
+export type { AuthProviderName, EnvReference }
 
 export interface AuthProviderConfig {
   /** Default true: listing a provider is asking for it. False keeps the settings and turns it off. */
@@ -81,20 +48,14 @@ export interface AuthProviderConfig {
 
 export type AuthProvidersConfig = Partial<Record<AuthProviderName, AuthProviderConfig>>
 
-/** Where the auth server's callback is, under the API's public URL. */
-export const AUTH_CALLBACK_PATH = "/auth/v1/callback"
-
-const ENV_REFERENCE = /^env\(([A-Za-z_][A-Za-z0-9_]*)\)$/
+export { AUTH_CALLBACK_PATH }
 
 /** Build an `env(NAME)` reference. */
 export function envReference(name: string): EnvReference {
   return `env(${name})`
 }
 
-/** The variable an `env(NAME)` value names, or undefined for a literal. */
-export function envReferenceName(value: string): string | undefined {
-  return ENV_REFERENCE.exec(value.trim())?.[1]
-}
+export { envReferenceName }
 
 /** One `SUPATYPE_EXTERNAL_<PROVIDER>_<suffix>` variable, from a literal or from another variable. */
 type ProviderSetting = { suffix: string; literal: string } | { suffix: string; env: string }

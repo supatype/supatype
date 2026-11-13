@@ -12,7 +12,7 @@ import { readEnvFile, upsertEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
-import { mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides } from "./mailer-env.js"
+import { mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides, type MailerEnvironment } from "./mailer-env.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
@@ -137,11 +137,15 @@ function nativeSendEmailHookEnv(email: SupatypeProjectConfig["email"], serverPor
  * and the auth routes sit under `/auth/v1`. The verify paths are what make emailed links land
  * there: without them the server's default `/verify` resolved to the origin's root, a 404.
  */
-export function nativeAuthMailerEnv(email: SupatypeProjectConfig["email"], serverPort: string): Record<string, string> {
+export function nativeAuthMailerEnv(
+  email: SupatypeProjectConfig["email"],
+  serverPort: string,
+  environment?: MailerEnvironment,
+): Record<string, string> {
   return {
     SUPATYPE_API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
     ...mailerUrlPathsEnv(),
-    ...mailerProviderEnv(email),
+    ...mailerProviderEnv(email, environment),
     ...nativeSendEmailHookEnv(email, serverPort),
   }
 }
@@ -153,13 +157,15 @@ export interface NativeDotEnvLayerInput {
   config: SupatypeProjectConfig
   /** The Deno port dev checked was free. */
   denoPort: number
+  /** The shell and `.env`, for an `env("NAME")` mailer secret. Defaults to `dotEnv`. */
+  environment?: MailerEnvironment
 }
 
 /** The last layer of supatype-server's environment on the native path: `.env` and what follows it. */
-export function nativeServerDotEnvLayer({ dotEnv, config, denoPort }: NativeDotEnvLayerInput): Record<string, string> {
+export function nativeServerDotEnvLayer({ dotEnv, config, denoPort, environment }: NativeDotEnvLayerInput): Record<string, string> {
   return {
     // A blank mailer value init scaffolded into .env does not erase the config's.
-    ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email)),
+    ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email, environment ?? dotEnv)),
     // auth.email.enableConfirmations and auth.email.enabled unless .env or .env.local sets them,
     // blank counting as unset as `${NAME:-...}` does in the compose file, so native and docker dev
     // agree. A dev stack confirms sign-ups at once when the config does not say.

@@ -65,7 +65,14 @@ import { POSTGREST_IMAGE } from "./postgrest-release.js"
 import { postgrestHookActorEnv } from "./hook-actor.js"
 import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage } from "./release-images.js"
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV } from "./mailer-autoconfirm.js"
-import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
+import { mailerUrlPathsEnv } from "./mailer-env.js"
+import {
+  composeAllowListLine,
+  composeDisableSignupFallback,
+  composeMailerPassthrough,
+  composeSiteUrlFallback,
+  composeSmtpPass,
+} from "./compose-auth-settings.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
 import { switchServices, type ServiceSwitches } from "./route-manifest.js"
 
@@ -1273,7 +1280,7 @@ ${keyspaceServerEnv(config, keyspacePasswordFile)}${appEnv}
       SUPATYPE_CORS_ALLOW_ORIGINS: "${corsOriginsEnv(config)}"
       SUPATYPE_DB_DRIVER: postgres
       SUPATYPE_DB_DATABASE_URL: "${authUrl}${authSearchPathSeparator}search_path=auth"
-      SUPATYPE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
+      SUPATYPE_SITE_URL: \${SITE_URL:-${composeSiteUrlFallback(config, siteUrlFallback)}}
       SUPATYPE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       SUPATYPE_JWT_EXP: 3600
       SUPATYPE_JWT_AUD: authenticated
@@ -1300,14 +1307,14 @@ ${composeEnvLines(mailerUrlPathsEnv())}
       # leaving it unset now behaves exactly as it would with no value at all.
       SUPATYPE_SMTP_PORT: \${SUPATYPE_SMTP_PORT:-587}
       SUPATYPE_SMTP_USER: \${SUPATYPE_SMTP_USER:-}
-      SUPATYPE_SMTP_PASS: \${SUPATYPE_SMTP_PASS:-}
+      SUPATYPE_SMTP_PASS: ${composeSmtpPass(config)}
       SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
       SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
       # Resend's key and sender, and SES's sender, from .env. Without these the server had no way
       # to get them and a resend or ses provider fell back to the noop mailer.
-${composeEnvLines(Object.fromEntries(MAILER_PASSTHROUGH_ENV.map((name) => [name, `\${${name}:-}`])))}
-      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
-${authProviderEnv}${samlEnv}
+${composeEnvLines(composeMailerPassthrough(config))}
+      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-${composeDisableSignupFallback(config)}}
+${composeAllowListLine(config)}${authProviderEnv}${samlEnv}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started

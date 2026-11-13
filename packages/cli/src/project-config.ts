@@ -7,6 +7,7 @@ import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
 import { validateAuthSso, type AuthSsoConfig } from "./saml-config.js"
 import { validateAuthEmail } from "./mailer-autoconfirm.js"
+import { validateAuthConfigFields } from "./auth-config-validate.js"
 import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 import { isJsonObject, isString } from "@supatype/shared"
@@ -315,6 +316,18 @@ export interface SupatypeProjectConfig {
      * register that URL with the provider. A `SUPATYPE_EXTERNAL_*` value in `.env` wins over this.
      */
     providers?: AuthProvidersConfig
+    /**
+     * Where emailed links and OAuth land when no `redirectTo` is given. On self-host it is the
+     * fallback for `SITE_URL` in `.env`, which still wins; on Cloud it is pushed with `supatype push`.
+     */
+    siteUrl?: string
+    /**
+     * Which `redirectTo` values the server accepts, as globs. On self-host rendered as
+     * `SUPATYPE_URI_ALLOW_LIST`, which a value in `.env` wins over.
+     */
+    redirectUrls?: string[]
+    /** Turn new sign-ups off. On self-host a `DISABLE_SIGNUP` in `.env` wins over this. */
+    disableSignup?: boolean
     /**
      * Single sign-on with enterprise identity providers. SAML is switched on here, once for every
      * identity provider; the providers themselves are registered at runtime with `supatype sso add`:
@@ -675,6 +688,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateAuthProviders(cfg, filename)
   validateAuthSso(cfg, filename)
   validateAuthEmail(cfg, filename)
+  validateAuthConfigFields(cfg, filename)
   validateCorsOrigins(cfg, filename)
   validateStudioAuth(cfg, filename)
   validatePublicEnv(cfg, filename)

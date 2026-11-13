@@ -1461,3 +1461,5 @@ export type LocalizedModel<
   TFields extends Record<string, unknown>,
   TMeta extends LocalizedModelMeta<TFields> = {},
 > = Model<ApplyAutoLocalizedFields<TFields>, TMeta>
+
+export * from "./auth-settings.js"

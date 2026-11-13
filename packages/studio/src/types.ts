@@ -60,6 +60,11 @@ export interface StudioCoreProps {
    */
   projectRef?: string
   /**
+   * The environment this Studio is open on ("production", "staging" or "preview"), for the control
+   * plane routes that are per environment. Without it the auth pages stay read-only.
+   */
+  environment?: string
+  /**
    * Marketing URL for the Supatype Cloud offering (e.g. https://supatype.com).
    * When set, cloud-upsell screens show a CTA button linking here.
    */

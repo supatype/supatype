@@ -406,14 +406,14 @@ function GlobalGraphQLRoute(): React.ReactElement {
 
 // ─── StudioCore ────────────────────────────────────────────────────────────────
 
-export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef }: StudioCoreProps): React.ReactElement {
+export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef, environment }: StudioCoreProps): React.ReactElement {
   const localeState = useLocaleState(config)
   // A mode an earlier Studio remembered is no longer read; forgetting it once keeps no stale choice.
   useEffect(() => forgetStoredActingModes(), [])
 
   let content = (
     <CloudUrlContext.Provider value={cloudUrl}>
-    <PlatformCtx.Provider value={{ platformUrl, projectRef }}>
+    <PlatformCtx.Provider value={{ platformUrl, projectRef, environment }}>
     <AdminConfigContext.Provider value={config}>
       <AdminClientContext.Provider value={client}>
         <LocaleContext.Provider value={localeState}>
