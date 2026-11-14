@@ -79,7 +79,7 @@ import { requireStackDatabase } from "./local-stack-guard.js"
 import type { ComposeStack } from "./compose-db-psql.js"
 import type { ProcessManager } from "./process-manager.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
-import { hasEngineOverride } from "./binary-cache.js"
+import { hasEngineOverride, pinnedVersion } from "./binary-cache.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
 import {
   ensureLocalServerDockerImage,
@@ -155,7 +155,7 @@ import { configMailerEnv } from "./config-mailer-env.js"
 import { retireCliMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { fetchWithin } from "./fetch-within.js"
 import { composeStackWatch, exitedServiceFailure, type StackWatch, type WatchedStack } from "./stack-exit-watch.js"
-import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
+import { assertEngineSupportsSchema, assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
 
 /**
  * The image pins config asks for, once the engine's is known not to be older than this CLI needs.
@@ -969,6 +969,8 @@ function readSchemaToPush(
   config: SupatypeProjectConfig,
 ): { ast: ExtractedSchemaAstV2; astJson: string } {
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+  // The check `supatype push` makes: a pinned engine too old to read part of the schema drops it silently.
+  assertEngineSupportsSchema(ast, pinnedVersion("engine", config))
   return { ast, astJson: JSON.stringify(ast) }
 }
 

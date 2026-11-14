@@ -23,6 +23,8 @@
   engine older than `ENGINE_MIN_FOR_CHANNELS`. The engine drops both keys, so the push would succeed
   with nothing enforcing the channels. The constant is a placeholder until the engine release is
   known.
+* **dev:** runs the same engine floor check as `supatype push` before applying a schema, native and
+  Docker alike. It skipped it, so a pinned older engine took channels and enforced nothing.
 
 ## Unreleased
 

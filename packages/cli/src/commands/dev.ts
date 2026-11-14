@@ -81,7 +81,9 @@ import {
   hasMeaningfulOverrides,
   describeActiveOverrides,
   postgresArchiveTag,
+  pinnedVersion,
 } from "../binary-cache.js"
+import { assertEngineSupportsSchema } from "../engine-floor.js"
 import { ensureBinary } from "../ensure-binary.js"
 import {
   assertSupported,
@@ -1086,6 +1088,8 @@ async function readNativeSchema(
   skipFieldKinds: ReadonlySet<string> | undefined,
 ): Promise<ExtractedSchemaAstV2> {
   const built = await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)
+  // The check `supatype push` makes: a pinned engine too old to read part of the schema drops it silently.
+  if (config) assertEngineSupportsSchema(built.ast, pinnedVersion("engine", config))
   if (built.adapted.length > 0) {
     console.warn(
       `[supatype] ${built.adapted.length} field(s) replaced with JSONB, required extensions not available:\n` +
