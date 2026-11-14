@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { runSchemaPush } from "../src/commands/dev.js"
+import { ENGINE_MIN_FOR_CHANNELS } from "../src/engine-floor.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 /**
@@ -44,5 +45,23 @@ describe("dev's schema push", () => {
     await expect(
       runSchemaPush({ cwd, engineBin: "/nonexistent/engine", schemaPath, dbURL: "postgres://x", config }),
     ).rejects.toThrow(/realtime channels, which needs schema-engine .* or newer, and this project pins 0\.1\.9/)
+  })
+})
+
+describe("docker dev's schema push", () => {
+  it("refuses channels on a pinned engine older than the floor, before the AST file or any compose call", async () => {
+    const { runComposeSchemaPush } = await import("../src/dev-compose.js")
+    const { cwd, schemaPath, config } = project("0.1.9")
+    const paths = {} as Parameters<typeof runComposeSchemaPush>[2]
+    await expect(runComposeSchemaPush(cwd, config, paths, schemaPath, "p")).rejects.toThrow(
+      /realtime channels, which needs schema-engine .* or newer, and this project pins 0\.1\.9/,
+    )
+    expect(existsSync(join(cwd, ".supatype", "schema.ast.json"))).toBe(false)
+  })
+
+  it("lets a pin at the floor through that check", async () => {
+    const { schemaChangedSinceLastPush } = await import("../src/dev-compose.js")
+    const { cwd, schemaPath, config } = project(ENGINE_MIN_FOR_CHANNELS)
+    expect(() => schemaChangedSinceLastPush(schemaPath, cwd, config)).not.toThrow()
   })
 })
