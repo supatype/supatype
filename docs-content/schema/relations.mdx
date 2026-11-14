@@ -115,7 +115,9 @@ link. The key column is named from the **model**, not its table: `lot` and a `sh
 `tableName: "shelves"` give `lot_shelves` with `lot_id` and `shelf_id`.
 
 Junction tables take no `access` of their own: a link is readable by a caller who can read both
-rows it joins, and writable by one who can also update at least one of them. See
+rows it joins, and writable by one who can also update the model that owns the link. The owner
+is the model that declares the `ManyToMany` field; when both models declare it, either one
+owns it. See
 [Access Rules](/docs/schema/access-rules.html#many-to-many-junction-tables).
 
 ### Reading and writing links

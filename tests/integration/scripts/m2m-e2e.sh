@@ -26,7 +26,9 @@ source "$SCRIPT_DIR/lib/env-file.sh"
 e2e_project_use "$EXAMPLE_DIR" m2m
 export SUPATYPE_KONG_PORT="$KONG_PORT"
 
+CONFIG="$EXAMPLE_DIR/supatype.config.ts"
 cleanup() {
+  [[ -f "$CONFIG.bak" ]] && mv "$CONFIG.bak" "$CONFIG"
   e2e_project_down
   e2e_project_release
 }
@@ -38,6 +40,19 @@ if [[ ! -f "$CLI_BIN" ]]; then
 fi
 
 cd "$EXAMPLE_DIR"
+# M2M_ENGINE_BIN: a local engine binary to push with, written into the config for this run only.
+if [[ -n "${M2M_ENGINE_BIN:-}" ]]; then
+  cp "$CONFIG" "$CONFIG.bak"
+  M2M_ENGINE_BIN="$M2M_ENGINE_BIN" node -e '
+    const fs = require("fs")
+    const bin = process.env.M2M_ENGINE_BIN.split(String.fromCharCode(92)).join("/")
+    const before = fs.readFileSync(process.argv[1], "utf8")
+    const after = before.replace("defineConfig({", `defineConfig({
+  overrides: { engine: ${JSON.stringify(bin)} },`)
+    if (after === before) { console.error("could not set overrides.engine"); process.exit(1) }
+    fs.writeFileSync(process.argv[1], after)
+  ' "$CONFIG"
+fi
 node "$SCRIPT_DIR/ensure-compose-env.mjs" "$EXAMPLE_DIR"
 
 echo "==> Removing anything a previous run left in $E2E_COMPOSE_PROJECT"
@@ -72,6 +87,9 @@ if [[ -n "${M2M_PRE_VERIFY_SQL:-}" ]]; then
   db="$(docker ps -q --filter "label=com.docker.compose.project=$E2E_COMPOSE_PROJECT" --filter "label=com.docker.compose.service=db" | head -1)"
   docker exec -e PGPASSWORD="$(env_file_value .env POSTGRES_PASSWORD)" "$db"     psql -U "$(env_file_value .env POSTGRES_USER)" -d "$(env_file_value .env POSTGRES_DB)" -v ON_ERROR_STOP=1 -X -c "$M2M_PRE_VERIFY_SQL"
 fi
+
+echo "==> Engine that pushed"
+docker exec -e PGPASSWORD="$(env_file_value .env POSTGRES_PASSWORD)" "$(docker ps -q --filter "label=com.docker.compose.project=$E2E_COMPOSE_PROJECT" --filter "label=com.docker.compose.service=db" | head -1)"   psql -U "$(env_file_value .env POSTGRES_USER)" -d "$(env_file_value .env POSTGRES_DB)" -X -tAc   "SELECT string_agg(DISTINCT coalesce(engine_version, 'none'), ',') FROM _supatype.migrations"
 
 echo "==> The junction names the engine chose"
 db="$(docker ps -q --filter "label=com.docker.compose.project=$E2E_COMPOSE_PROJECT" --filter "label=com.docker.compose.service=db" | head -1)"

@@ -84,13 +84,14 @@ async function main(): Promise<void> {
   const left = await anon.from("lot_tag").select("tag_id").eq("lot_id", lot.id)
   check("the link is gone", left.data?.length === 0, JSON.stringify(left.data))
 
-  console.log("==> OBSERVED: a link is writable by whoever may update either end")
+  console.log("==> the model that declares the relation owns the link")
   const badge = await must("a badge", alice.client.from("badge").insert({ name: `mint-${run}` }).select("id"))
   const badgeId = badge[0]?.id
   if (badgeId === undefined) throw new Error("no badge row")
   const viaBadge = await bob.client.from("badge_lot").insert({ lot_id: lot.id, badge_id: badgeId })
-  console.log(`  info bob links alice's lot to a badge he may update: ${viaBadge.error === null ? "ALLOWED" : "refused: " + viaBadge.error.message}`)
-  check("bob (who may update the badge) can link alice's lot to it", viaBadge.error === null, viaBadge.error?.message)
+  check("bob may update the badge but not the lot, so he cannot link them", viaBadge.error !== null, "the insert succeeded")
+  const byOwner = await alice.client.from("badge_lot").insert({ lot_id: lot.id, badge_id: badgeId })
+  check("the owner of the lot can attach that badge", byOwner.error === null, byOwner.error?.message)
 
   console.log("==> the generated types know the junction")
   // @ts-expect-error a table the schema does not have is a type error

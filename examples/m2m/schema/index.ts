@@ -55,11 +55,13 @@ export type tag = Model<{
   }
 }>
 
-/** Any signed-in user may edit a badge, which the junction rule counts as the right to link it. */
+/**
+ * Any signed-in user may edit a badge. Only `lot` declares the relation, so the link belongs to
+ * `lot` and the right to edit a badge does not let anyone attach it to a lot.
+ */
 export type badge = Model<{
   id: UUID
   name: Unique<string>
-  lots: ManyToMany<lot>
 }, {
   access: {
     read: Public

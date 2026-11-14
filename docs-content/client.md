@@ -106,7 +106,7 @@ const { data: links } = await supatype.from("lot_tag").select("tag_id").eq("lot_
 await supatype.from("lot_tag").delete().eq("lot_id", lot.id).eq("tag_id", tag.id)
 ```
 
-Who may write a link follows from its two ends. A link is readable by a caller who can read both rows, and writable by a caller who can read both and may update at least one of them. A refused insert returns an error. A delete the caller may not make removes no row and returns no error, so ask for the deleted rows with `.select()` if you need to know. See [Access Rules](/docs/schema/access-rules.html#many-to-many-junction-tables).
+Who may write a link follows from its two ends. A link is readable by a caller who can read both rows, and writable by a caller who can read both and may update the model that owns the link: the one whose own `ManyToMany` field names the junction (either one, when both declare it). A refused insert returns an error. A delete the caller may not make removes no row and returns no error, so ask for the deleted rows with `.select()` if you need to know. See [Access Rules](/docs/schema/access-rules.html#many-to-many-junction-tables).
 
 `count` is `null` unless you ask for it:
 
