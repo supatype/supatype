@@ -152,7 +152,7 @@
     <p><code>enroll({ factorType: "totp" })</code> returns the factor's <code>id</code> and a QR code (<code>totp.qrCode</code>) and URI (<code>totp.uri</code>) to show the user. <code>challengeAndVerify({ factorId, code })</code> is <code>challenge</code> then <code>verify</code> in one call. Call the two separately when the code arrives later, as an SMS does. A verify raises the session to AAL2 and emits <code>MFA_CHALLENGE_VERIFIED</code>. <code>listFactors()</code> returns every factor in <code>all</code> and the verified ones in <code>totp</code> and <code>phone</code>. <code>getAuthenticatorAssuranceLevel()</code> reports the current and next level.</p>
     <h3>Anonymous users</h3>
     <p>An anonymous sign-in creates a real user with a user id and a session. Turn it on with <code>SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true</code>. Because the user has an id, an anonymous user passes <code>LoggedIn</code> and can own rows. The token carries <code>is_anonymous: true</code>.</p>
-    <p><code>signInAnonymously({ options: { data, captchaToken } })</code> takes optional metadata and a captcha token, and the user comes back with <code>isAnonymous: true</code>.</p>
+    <p><code>signInAnonymously({ options: { data, captchaToken } })</code> takes optional metadata and a captcha token, and the user comes back with <code>isAnonymous: true</code>. The flag survives a reload: a restored session keeps it, and a session saved without it takes it from the token's <code>is_anonymous</code> claim.</p>
     <h3>Keep anonymous users out</h3>
     <p>To let only registered users do something, test the claim as well as the sign-in:</p>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
