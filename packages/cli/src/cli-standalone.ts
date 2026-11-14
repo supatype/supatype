@@ -12,7 +12,8 @@ import { createHash } from "node:crypto"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
-import { fetchChecksums, readLatestVersion, type PlatformId } from "./binary-cache.js"
+import { cdnGet, ARCHIVE_TIMEOUT_MS } from "./cdn-fetch.js"
+import { fetchChecksums, readLatestVersion, withRetry, type PlatformId } from "./binary-cache.js"
 import {
   cliArchiveName,
   cliArchivePath,
@@ -37,19 +38,21 @@ const CDN_BASE = process.env["SUPATYPE_CDN_BASE"]?.replace(/\/$/, "")
   || "https://releases.supatype.com"
 
 export async function fetchStandaloneCliLatestVersion(): Promise<string> {
-  const resp = await fetch(`${CDN_BASE}/cli/latest.json`)
+  const url = `${CDN_BASE}/cli/latest.json`
+  const resp = await withRetry(() => cdnGet(url))
   if (!resp.ok) {
-    throw new Error(`Failed to fetch CLI latest.json: HTTP ${resp.status}`)
+    throw new Error(`Failed to fetch CLI latest.json from ${url}: HTTP ${resp.status}. Try again in a moment.`)
   }
   return readLatestVersion(resp, "cli/latest.json")
 }
 
 async function fetchBytes(url: string, what: string): Promise<Buffer> {
-  const resp = await fetch(url)
-  if (!resp.ok) {
-    throw new Error(`Failed to download ${what} from ${url}: HTTP ${resp.status}`)
-  }
-  return Buffer.from(await resp.arrayBuffer())
+  const resp = await withRetry(async () => {
+    const r = await cdnGet(url, ARCHIVE_TIMEOUT_MS)
+    if (!r.ok) throw new Error(`Failed to download ${what} from ${url}: HTTP ${r.status}. Try again in a moment.`)
+    return r
+  })
+  return resp.bytes
 }
 
 /**

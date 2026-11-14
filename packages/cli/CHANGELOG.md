@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.3
+
+### Bug Fixes
+
+* **self-update, install:** a stalled CDN no longer hangs the CLI. Every request for `latest.json`,
+  the checksums, the signature and the archive has a timeout (15 s, 120 s for the archive) and is
+  retried three times, and a failure names the URL and says to try again.
+* **push, dev:** a model's `cache` block now switches the server cache on. The CLI wrote the allowlist
+  only into an `.supatype/api-config.json` that nothing created, so it did nothing and said nothing.
+  It now PATCHes `/admin/v1/config/rest` on the running stack (adding only newly declared tables) and
+  falls back to creating the file from the server's default shape. The `cache_max_ttl is 0` note
+  prints whenever a table declares a cache and the TTL is 0.
+* **hooks:** the generated `hook()` and `hooks()` now pass the worker's function context through, so
+  `ctx.serviceRoleKey`, `ctx.url`, `ctx.anonKey`, `ctx.dbUrl` and `ctx.env` are typed and present on
+  every hook. A write a hook makes fires hooks again, bounded by the hook-depth header.
+* **dev:** the functions watcher restarts the worker for a folder copied in or deleted (names with no
+  extension were dropped), and reports "restarted" only once the worker answers through the gateway.
+* **admin:** when it removes `SUPATYPE_ADMIN_PASSWORD` from `.env` it now prints a line saying so.
+
 ## Unreleased
 
 ### Bug Fixes

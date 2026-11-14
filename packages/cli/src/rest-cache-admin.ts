@@ -67,7 +67,7 @@ function serviceRoleKey(cwd: string): string {
   return key
 }
 
-function adminHeaders(cwd: string): Record<string, string> {
+export function adminHeaders(cwd: string): Record<string, string> {
   const key = serviceRoleKey(cwd)
   return {
     Authorization: `Bearer ${key}`,

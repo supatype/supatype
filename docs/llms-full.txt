@@ -4890,6 +4890,14 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 
 `seed` refuses to run against a project linked to Supatype Cloud unless you pass `--force`. See [Seeding](https://www.supatype.com/docs/seeding.html).
 
+#### Switching the server cache on
+
+A model's `cache` block says which tables may be cached. It does not switch anything on: the running stack keeps its own allowlist, `cache_tables`, and a table is served from the cache only when both agree. `push` and `dev` add each newly declared table to that allowlist through the running stack and never change an entry that already exists. If the stack is not answering they create `.supatype/api-config.json` from the server's default shape and write the entry there.
+
+Both print a note while `cache_max_ttl` is 0, which it is until you set it: with a TTL of 0 nothing is cached. Set it under API, REST, Settings in Studio, or with the admin API, which is what the CLI calls:
+
+PATCH /admin/v1/config/rest Authorization: Bearer <service role key> { "cache_max_ttl": 60, "cache_tables": { "posts": { "enabled": true, "allow_public": false } } } All three fields are optional, and `schema` and `max_rows` are left alone when absent. `cache_max_ttl` is 0 to 86400 seconds. `cache_tables` **replaces the whole map**, so read it with `GET /admin/v1/config/rest` and send back the entries you want to keep. The schema's declaration is a ceiling: a table it does not declare, or declares with `enabled: false`, is switched off and listed in the answer's `adjusted` array, and a `cache_max_ttl` above a declared `maxTtl` is lowered to it. The cache is not offered on a free Cloud plan, where the call answers 403 with `rest_cache_not_available`.
+
 `reset` drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a `runOnce` seed runs again, and runs the seeds unless you pass `--no-seed`. To start the whole database again, use `supatype dev --reset-db`.
 
 ### Functions and hooks

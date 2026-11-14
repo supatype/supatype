@@ -477,7 +477,13 @@ async function resolveAdminCredentials(
 export function clearAdminSeedPassword(cwd: string): void {
   // Unconditional: this is a one-time seed password being retired, and whoever wrote it wanted it
   // gone once used.
+  const wasSet = readEnvValue(cwd, ADMIN_PASSWORD_ENV, "") !== ""
   upsertEnvFile(cwd, {}, { remove: [ADMIN_PASSWORD_ENV] })
+  // Said, because a password that vanishes from .env with no word looks like a bug, and it is the
+  // only copy the developer may have.
+  if (wasSet) {
+    info(`Removed ${ADMIN_PASSWORD_ENV} from .env: it only seeds the first admin user, and that user now exists. Keep the password somewhere safe; to add another admin run: supatype admin create-user`)
+  }
 }
 
 export async function hashPasswordForAuth(password: string): Promise<string> {

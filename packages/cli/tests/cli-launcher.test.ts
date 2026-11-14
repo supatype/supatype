@@ -56,10 +56,13 @@ describe("ensureCliProgram", () => {
   })
 
   it("names the version and the mirror setting when the download fails", async () => {
+    vi.stubEnv("SUPATYPE_RETRY_DELAY_MS", "1")
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("getaddrinfo ENOTFOUND"))))
     vi.spyOn(process.stderr, "write").mockReturnValue(true)
     const failure = ensureCliProgram("9.9.9", LINUX)
-    await expect(failure).rejects.toThrow("Could not download the Supatype CLI v9.9.9: getaddrinfo ENOTFOUND")
+    await expect(failure).rejects.toThrow("Could not download the Supatype CLI v9.9.9")
+    await expect(failure).rejects.toThrow("getaddrinfo ENOTFOUND")
+    await expect(failure).rejects.toThrow(/try again/i)
     await expect(failure).rejects.toThrow("SUPATYPE_CDN_BASE")
   })
 })

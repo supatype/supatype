@@ -83,3 +83,57 @@ jobs:
           printf '{"version":"%s","date":"%s"}\n' "${CLI_VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
           aws s3 cp latest.json "s3://${{ secrets.CDN_BUCKET }}/cli/latest.json" \
             --endpoint-url "${EP}" --cache-control "no-cache" --no-progress
+
+  # Reads the release back the way a user's machine does: through the public CDN host, not the
+  # bucket. A bucket upload that succeeded but is not served (cache, DNS, a wrong prefix) used to
+  # surface as a stranger's failed install. Every request has a timeout, and any miss fails the job.
+  verify:
+    name: verify through the CDN
+    needs: publish
+    runs-on: ubuntu-24.04
+    env:
+      CLI_VERSION: ${{ inputs.version }}
+      CDN: https://releases.supatype.com
+    steps:
+      - name: Fetch every published file back
+        run: |
+          set -euo pipefail
+          BASE="${CDN}/cli/v${CLI_VERSION}"
+          get() {
+            # Retried because the CDN may need a moment after the upload; still bounded.
+            curl --fail --silent --show-error --location \
+              --connect-timeout 10 --max-time 120 \
+              --retry 5 --retry-delay 5 --retry-all-errors \
+              --output "$2" "$1" || { echo "::error::could not fetch $1"; exit 1; }
+          }
+
+          get "${BASE}/checksums.sha256" checksums.sha256
+          get "${BASE}/checksums.sha256.minisig" checksums.sha256.minisig
+
+          # The manifest names every archive, so the list cannot drift from what was built.
+          ARCHIVES="$(awk '{print $2}' checksums.sha256 | sed 's/^\*//' | grep -E '\.(tar\.gz|zip)$' || true)"
+          if [ -z "${ARCHIVES}" ]; then
+            echo "::error::checksums.sha256 lists no archives"
+            exit 1
+          fi
+          for name in ${ARCHIVES}; do
+            get "${BASE}/${name}" "${name}"
+            expected="$(awk -v n="${name}" '{f=$2; sub(/^\*/,"",f); if (f==n) print $1}' checksums.sha256)"
+            actual="$(sha256sum "${name}" | awk '{print $1}')"
+            if [ "${expected}" != "${actual}" ]; then
+              echo "::error::${name} served by the CDN does not match checksums.sha256"
+              exit 1
+            fi
+          done
+
+      # Prereleases never move latest.json, so there is nothing to find there for them.
+      - name: Check cli/latest.json names this version
+        if: ${{ !contains(inputs.version, '-') }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --connect-timeout 10 --max-time 30 --retry 5 --retry-delay 5 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --output latest.json "${CDN}/cli/latest.json" \
+            || { echo "::error::could not fetch ${CDN}/cli/latest.json"; exit 1; }
+          grep -q "\"version\":\"${CLI_VERSION}\"" latest.json \
+            || { echo "::error::cli/latest.json does not name ${CLI_VERSION}: $(cat latest.json)"; exit 1; }

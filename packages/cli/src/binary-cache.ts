@@ -19,6 +19,7 @@
 import { setTimeout as sleep } from "node:timers/promises"
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
 import { isJsonObject } from "@supatype/shared"
+import { cdnGet } from "./cdn-fetch.js"
 import { errorMessage } from "./error-message.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { progress } from "./ui/messages.js"
@@ -595,7 +596,8 @@ export async function fetchChecksums(
   minisigUrl: string,
   binaryFilenames: string | string[],
 ): Promise<ChecksumMatch> {
-  return extractChecksum(await fetchVerifiedChecksums(checksumsUrl, minisigUrl), binaryFilenames)
+  const text = await withRetry(() => fetchVerifiedChecksums(checksumsUrl, minisigUrl))
+  return extractChecksum(text, binaryFilenames)
 }
 
 /**
@@ -617,11 +619,11 @@ export class ReleaseVerificationError extends Error {
  * in it, the engine's LICENSE included, so a caller that needs two entries fetches it once.
  */
 async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string): Promise<string> {
-  const csResp = await fetch(checksumsUrl)
+  const csResp = await cdnGet(checksumsUrl)
   if (!csResp.ok) {
-    throw new Error(`Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}`)
+    throw new Error(`Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}. Try again in a moment.`)
   }
-  const checksumsText = await csResp.text()
+  const checksumsText = csResp.text()
 
   const pubKey = releasePublicKey()
   if (!pubKey) {
@@ -645,14 +647,14 @@ async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string):
   }
 
   // Minisign signature is mandatory when a public key is configured.
-  const sigResp = await fetch(minisigUrl)
+  const sigResp = await cdnGet(minisigUrl)
   if (!sigResp.ok) {
     throw new Error(
       `Failed to fetch checksum signature from ${minisigUrl}: HTTP ${sigResp.status}\n` +
         "Cannot verify release integrity. Aborting download.",
     )
   }
-  const sigText = await sigResp.text()
+  const sigText = sigResp.text()
   verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, pubKey)
 
   return checksumsText
@@ -963,13 +965,20 @@ async function verifyChecksum(filePath: string, expected: string, component: Com
 // Retry with exponential backoff
 // ---------------------------------------------------------------------------
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+/** SUPATYPE_RETRY_DELAY_MS replaces the 1 s base so tests need not wait. */
+function retryBaseMs(): number {
+  const raw = process.env["SUPATYPE_RETRY_DELAY_MS"]
+  const ms = raw === undefined ? Number.NaN : Number(raw)
+  return Number.isFinite(ms) && ms >= 0 ? ms : 1_000
+}
+
+export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   for (let i = 1; i <= attempts; i++) {
     try {
       return await fn()
     } catch (err) {
       if (i === attempts || err instanceof ReleaseVerificationError) throw err
-      const delay = Math.pow(3, i - 1) * 1_000 // 1 s, 3 s, 9 s
+      const delay = Math.pow(3, i - 1) * retryBaseMs() // 1 s, 3 s, 9 s
       console.error(
         `[supatype] Download attempt ${i}/${attempts} failed: ${errorMessage(err)}. ` +
           `Retrying in ${delay / 1_000}s...`,
@@ -1044,16 +1053,16 @@ export function versionFor(component: Component, config: SupatypeProjectConfig):
  */
 export async function fetchLatestVersion(component: Component): Promise<string> {
   const url = `${CDN_BASE}/${component}/latest.json`
-  const resp = await fetch(url)
+  const resp = await withRetry(() => cdnGet(url))
   if (!resp.ok) {
-    throw new Error(`Failed to fetch latest version for ${component} from ${url}: HTTP ${resp.status}`)
+    throw new Error(`Failed to fetch latest version for ${component} from ${url}: HTTP ${resp.status}. Try again in a moment.`)
   }
   return readLatestVersion(resp, `latest.json for ${component}`)
 }
 
 /** The version a CDN `latest.json` (`{"version":"x.y.z"}`) names, or a throw naming the file. */
-export async function readLatestVersion(resp: Response, what: string): Promise<string> {
-  const data = await resp.json()
+export async function readLatestVersion(resp: { text(): string }, what: string): Promise<string> {
+  const data: unknown = JSON.parse(resp.text())
   const version = isJsonObject(data) ? data["version"] : undefined
   if (typeof version !== "string" || version.trim() === "") {
     throw new Error(`Invalid ${what}: missing "version" field`)

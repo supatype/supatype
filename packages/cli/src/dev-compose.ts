@@ -723,7 +723,7 @@ async function refreshSchemaArtifacts(
   config: SupatypeProjectConfig,
   ast: unknown,
 ): Promise<void> {
-  writeAstDerivedArtifacts(cwd, config, ast)
+  await writeAstDerivedArtifacts(cwd, config, ast)
   // The client and augmentation need no engine, so no engine problem keeps them from being written.
   writeDevAstOutputs(cwd, ast, config, "")
   let choice: EngineChoice
@@ -739,7 +739,7 @@ async function refreshSchemaArtifacts(
 }
 
 /** The files read straight off the applied AST, written whatever happens with the generator afterwards. */
-function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+async function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, ast: unknown): Promise<void> {
   // Before the generator: these are read straight off the AST, so an applied push whose engine
   // cannot generate still leaves the server the right maps. The server watches this file, so a
   // hook or validator added to the schema takes effect without restarting the stack.
@@ -763,7 +763,7 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // `cache` block declared and nothing switched on: `.cache({ server: true })` answered BYPASS,
   // and the only way to find out why was to open Studio and tick a box the schema had already
   // justified.
-  for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
+  for (const note of await cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
 }
 
 /**
@@ -1980,7 +1980,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       },
     })
     // The worker imports its handlers once; without this an edited function kept its old code.
-    const worker = { composePath: paths.composePath, cwd, project }
+    const worker = { composePath: paths.composePath, cwd, project, baseUrl: loopbackBase(kongPort), anonKey }
     shutdownState.functionsWatcher = watchFunctionSources(cwd, () => restartComposeFunctionsWorker(worker))
   }
 

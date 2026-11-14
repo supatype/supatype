@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -124,9 +124,20 @@ describe("what it reports rather than fixes", () => {
 })
 
 describe("files it will not touch", () => {
-  it("does nothing where there is no local server to configure", () => {
-    // A cloud-only project, or a stack that has never been started. Not an error: `dev` creates it.
-    expect(seedApiConfigCache(project(null), ast({ enabled: true }))).toBeNull()
+  it("creates the file from the server's default shape when there is none", () => {
+    // Nothing else creates it for a user project, so a model's cache block never took effect.
+    const dir = project(null)
+    const result = seedApiConfigCache(dir, ast({ enabled: true }))
+    expect(result?.seeded).toEqual(["posts"])
+    expect(result?.ttlIsOff).toBe(true)
+    expect(read(dir).rest?.cache_tables).toEqual({ posts: { enabled: true, allow_public: false } })
+    expect(read(dir).rest?.cache_max_ttl).toBe(0)
+  })
+
+  it("creates no file for a project that declares no cache", () => {
+    const dir = project(null)
+    expect(seedApiConfigCache(dir, ast(undefined))).toBeNull()
+    expect(existsSync(join(dir, ".supatype", "api-config.json"))).toBe(false)
   })
 
   it("leaves a malformed file exactly as it found it", () => {
