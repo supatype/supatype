@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **storage:** the extractor reads `Folder<N>` as a bucket-rule operand and refuses it in a model's
+  `access`, or with a position that is not a whole number from 1.
+
+### Bug Fixes
+
+* **storage:** a bucket rule that cannot be rendered on `storage.objects` (one naming a model
+  column, `In`, `Exists`, `Matches`) is refused at push, naming the bucket and the operation. It
+  used to become `FALSE` with nothing said, so a documented registered-only rule on a bucket denied
+  everyone. `BucketOwner` on `create` does not bind the path: see the storage docs.
+
 ## Unreleased
 
 ### Bug Fixes

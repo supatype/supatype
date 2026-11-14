@@ -131,6 +131,26 @@ that form works on every engine version. `Literal<false>` means the same thing o
 0.9.0, which read the claim as a JSON boolean when it is compared with a boolean. Engine 0.9.0 and
 earlier refuse it at push with `operator does not exist: text = boolean`.
 
+### Keep anonymous users out of a bucket
+
+The same rule works on a bucket, where it is applied to `storage.objects`:
+
+```typescript
+import type { All, Bucket, Claim, Eq, Literal, LoggedIn } from "@supatype/types"
+
+export type Uploads = Bucket<"uploads", {
+  accessMode: "private"
+  access: {
+    read: LoggedIn
+    // Guests can read, only registered users upload
+    create: All<[LoggedIn, Eq<Claim<"is_anonymous">, Literal<false>>]>
+  }
+}>
+```
+
+`BucketLoggedIn` admits guests, like `LoggedIn`. To give each user their own folder as well, see
+[one folder per user](/docs/storage/uploads.html#one-folder-per-user).
+
 MFA-gating works the same way with the `aal` claim; see
 [MFA](/docs/auth/mfa.html#requiring-mfa-in-access-rules).
 

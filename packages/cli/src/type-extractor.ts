@@ -1575,7 +1575,7 @@ function parsePartialBucketAccess(
       )
     }
     const bucketRule = parseAccessRule(member.type, sourceFile, resolveCtx)
-    assertAccessRuleIsRenderable(bucketRule, bucketId, key)
+    assertAccessRuleIsRenderable(bucketRule, bucketId, key, "bucket")
     access[key] = bucketRule
   }
   return access
@@ -2691,14 +2691,28 @@ function resolveIndexFieldName(fieldName: string, fields: Record<string, FieldAs
  */
 const CONSTRAINT_ONLY_NODES = new Set(["length", "itemCount", "matches"])
 
-function assertAccessRuleIsRenderable(node: unknown, model: string, operation: string): void {
+/** Where an access rule is attached: a model's table, or a bucket's `storage.objects`. */
+type AccessRuleScope = "model" | "bucket"
+
+function assertAccessRuleIsRenderable(
+  node: unknown,
+  model: string,
+  operation: string,
+  scope: AccessRuleScope = "model",
+): void {
   if (Array.isArray(node)) {
-    for (const item of node) assertAccessRuleIsRenderable(item, model, operation)
+    for (const item of node) assertAccessRuleIsRenderable(item, model, operation, scope)
     return
   }
   if (!isJsonObject(node)) return
 
   const record = node
+  if (scope === "model" && record["kind"] === "folder") {
+    throw new Error(
+      `Model "${model}": \`Folder<>\` is not supported in an \`access\` rule (\`${operation}\`). ` +
+        "It names a folder of an object's path, so it belongs in a bucket's rules.",
+    )
+  }
   // Operands are tagged `kind`, rules `type`, so both are checked: `Matches` is a rule.
   const tag = [record["kind"], record["type"]].find(
     (value) => typeof value === "string" && CONSTRAINT_ONLY_NODES.has(value),
@@ -2711,7 +2725,7 @@ function assertAccessRuleIsRenderable(node: unknown, model: string, operation: s
     )
   }
   for (const value of Object.values(record)) {
-    assertAccessRuleIsRenderable(value, model, operation)
+    assertAccessRuleIsRenderable(value, model, operation, scope)
   }
 }
 
@@ -3570,6 +3584,18 @@ function stringLiteralArg(
   return value
 }
 
+/** `Folder<N>`'s N: a whole number from 1, as Postgres arrays count. */
+function folderIndexArg(arg: ts.TypeNode | undefined): number {
+  if (arg !== undefined && ts.isLiteralTypeNode(arg) && ts.isNumericLiteral(arg.literal)) {
+    const index = Number(arg.literal.text)
+    if (Number.isSafeInteger(index) && index >= 1) return index
+  }
+  throw new Error(
+    "`Folder<>` takes the folder's position as a whole number from 1, as in `Folder<1>` for the " +
+      "first folder of the object's path.",
+  )
+}
+
 /**
  * One side of a comparison.
  *
@@ -3619,6 +3645,8 @@ function parseAccessOperand(
         }
         return { kind: ref === "Length" ? "length" : "itemCount", column }
       }
+      case "Folder":
+        return { kind: "folder", index: folderIndexArg(operandArgs[0]) }
       case "AuthUid":
         return { kind: "authUid" }
       case "AuthRole":
@@ -3674,7 +3702,7 @@ function parseAccessOperand(
 
   throw new Error(
     `\`${ownerText(typeNode, sourceFile)}\` is not a valid operand. Use a column name ` +
-      `("author_id"), AuthUid, AuthRole, Claim<"path"> or Literal<value>.`,
+      `("author_id"), AuthUid, AuthRole, Claim<"path">, Folder<N> or Literal<value>.`,
   )
 }
 

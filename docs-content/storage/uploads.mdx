@@ -130,6 +130,58 @@ export type Documents = Bucket<"documents", {
 }>
 ```
 
+:::caution[BucketOwner does not bind the path]
+`BucketOwner` does not bind the path. The storage service records the caller as `owner` on every
+upload, so on `create` the rule is always true, and any signed-in user can upload to
+`<someone-else's-id>/file.png`. Use `BucketOwner` for `read`, `update` and `delete`, and bind the
+folder with `Folder<1>` (below) on `create`.
+:::
+
+### One folder per user
+
+`Folder<N>` is the `N`th folder of the object's path, counting from 1. `Eq<Folder<1>, AuthUid>`
+admits an object only when its first folder is the caller's user id, the same rule Supabase writes
+as `(storage.foldername(name))[1] = (select auth.jwt()->>'sub')`:
+
+```typescript
+import type { AuthUid, Bucket, Eq, Folder } from "@supatype/types"
+
+type OwnFolder = Eq<Folder<1>, AuthUid>
+
+export type Documents = Bucket<"documents", {
+  accessMode: "private"
+  access: { read: OwnFolder; create: OwnFolder; update: OwnFolder; delete: OwnFolder }
+}>
+```
+
+User `a` can then upload `a/report.pdf` and not `b/report.pdf`, and a file at the root, which has no
+first folder, is refused. On `update` the rule is checked against the old name and the new one, so
+a rename cannot move a file into another user's folder. Upload with the folder in the path:
+`upload(`${user.id}/report.pdf`, file)`.
+
+A bucket rule may use `Public`, `Private`, `LoggedIn`, `BucketOwner`, `Role`, `AuthUid`, `AuthRole`,
+`Claim`, `Literal` and `Folder`, joined with `Any`, `All` and `Not`. A rule that names a column of
+a model, or reads another table (`In`, `Exists`), cannot be evaluated on stored objects and is
+refused at push with the bucket and the operation named; write `Private` to refuse an operation on
+purpose.
+
+### Registered users only
+
+Anonymous users pass `LoggedIn`. To keep guests out of a bucket, test the `is_anonymous` claim as
+well, as in [anonymous sign-in](/docs/auth/anonymous.html):
+
+```typescript
+import type { All, Bucket, Claim, Eq, Literal, LoggedIn } from "@supatype/types"
+
+export type Uploads = Bucket<"uploads", {
+  accessMode: "private"
+  access: {
+    read: LoggedIn
+    create: All<[LoggedIn, Eq<Claim<"is_anonymous">, Literal<false>>]>
+  }
+}>
+```
+
 ## File size limits
 
 Set per-bucket file size limits when creating the bucket (a service role key is required):

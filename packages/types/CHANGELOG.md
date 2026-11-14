@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **storage:** `Folder<N>` names the Nth folder of an object path (from 1) in a bucket rule, so
+  `create: Eq<Folder<1>, AuthUid>` keeps each user to their own folder. `BucketRule` now also takes
+  `Any`, `All`, `Not`, comparisons and null checks over `AuthUid`, `AuthRole`, `Claim`, `Literal`
+  and `Folder`, so a registered-only rule can be written on a bucket.
+
 ## Unreleased
 
 ### Features
