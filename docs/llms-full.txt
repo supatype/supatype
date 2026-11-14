@@ -864,6 +864,27 @@ const { data: post } = await supatype.from("post").select("*").eq("slug", "hello
 console.log(post?.title)
 ```
 
+#### Linking many-to-many rows
+
+A many-to-many link is a row in the junction table, and you write it like any other row. The junction is named after the two tables, sorted and joined with `_` (`lot_tag` for `lot` and `tag`), with a `<model>_id` column for each end. It is in the generated types, so `from("lot_tag")` is typed. Nested `connect` and `set` writes are not supported yet.
+
+`typescript`:
+
+```ts
+// add a link, and several at once
+await supatype.from("lot_tag").insert({ lot_id: lot.id, tag_id: tag.id })
+await supatype.from("lot_tag").insert(tags.map((t) => ({ lot_id: lot.id, tag_id: t.id })))
+
+// list a lot's tags, or the links themselves
+const { data } = await supatype.from("lot").select("title, tags:tag(name)").eq("id", lot.id)
+const { data: links } = await supatype.from("lot_tag").select("tag_id").eq("lot_id", lot.id)
+
+// remove a link
+await supatype.from("lot_tag").delete().eq("lot_id", lot.id).eq("tag_id", tag.id)
+```
+
+Who may write a link follows from its two ends. A link is readable by a caller who can read both rows, and writable by a caller who can read both and may update at least one of them. A refused insert returns an error. A delete the caller may not make removes no row and returns no error, so ask for the deleted rows with `.select()` if you need to know. See [Access Rules](https://www.supatype.com/docs/schema/access-rules.html#many-to-many-junction-tables).
+
 `count` is `null` unless you ask for it:
 
 `typescript`:
@@ -3060,7 +3081,7 @@ A `SupatypeAuthUserId` field with `onDelete` has a foreign key to the user, so t
 
 ### Many-to-many rows
 
-Many-to-many relations have no nested write. The rows live in the junction table, which the builder does not list. Write them with `db.$sql`, which runs in the same transaction:
+Many-to-many relations have no nested write yet. The rows live in the junction table, which the builder does not list, so a seed writes them with `db.$sql`, which runs in the same transaction. (App code can write the same rows through the client: see [Linking many-to-many rows](https://www.supatype.com/docs/client.html#many-to-many).)
 
 `seeds/03-tags.ts`:
 

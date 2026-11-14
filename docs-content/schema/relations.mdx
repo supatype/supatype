@@ -111,11 +111,37 @@ are one relation read from both ends, and share one junction table. Its name is 
 table names in alphabetical order, joined with `_` (`posts_tags` here), unless `through` names it.
 Its two key columns are `<model>_id` for each side, in snake case (`post_id`, `tag_id`), together
 the primary key, and each foreign key is `ON DELETE CASCADE`, so deleting either row removes the
-link.
+link. The key column is named from the **model**, not its table: `lot` and a `shelf` model with
+`tableName: "shelves"` give `lot_shelves` with `lot_id` and `shelf_id`.
 
 Junction tables take no `access` of their own: a link is readable by a caller who can read both
 rows it joins, and writable by one who can also update at least one of them. See
 [Access Rules](/docs/schema/access-rules.html#many-to-many-junction-tables).
+
+### Reading and writing links
+
+The junction is a table in its own right, and it is in the generated types, so you add, list and
+remove links through it with the client. For `lot` and `tag` it is `lot_tag`, with `lot_id` and
+`tag_id`:
+
+```typescript
+// add one link, or several
+await supatype.from("lot_tag").insert({ lot_id: lot.id, tag_id: tag.id })
+await supatype.from("lot_tag").insert(tags.map((t) => ({ lot_id: lot.id, tag_id: t.id })))
+
+// list a lot's tags (embedded), or the link rows
+const { data } = await supatype.from("lot").select("title, tags:tag(name)").eq("id", lot.id)
+const { data: links } = await supatype.from("lot_tag").select("tag_id").eq("lot_id", lot.id)
+
+// remove a link
+await supatype.from("lot_tag").delete().eq("lot_id", lot.id).eq("tag_id", tag.id)
+```
+
+A caller who may not write a link gets an error on insert. A delete they may not make removes no
+row and returns no error; add `.select()` to see which rows went.
+
+Nested writes (`connect` and `set` on a relation) are not supported yet. Until they are, write the
+link rows through the junction as above, or with `db.$sql` in a [seed](/docs/seeding.html#junction).
 
 ## Querying relations
 

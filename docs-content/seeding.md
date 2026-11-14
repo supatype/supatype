@@ -199,7 +199,7 @@ A `SupatypeAuthUserId` field with `onDelete` has a foreign key to the user, so t
 
 <h2 id="junction">Many-to-many rows</h2>
 
-Many-to-many relations have no nested write. The rows live in the junction table, which the builder does not list. Write them with `db.$sql`, which runs in the same transaction:
+Many-to-many relations have no nested write yet. The rows live in the junction table, which the builder does not list, so a seed writes them with `db.$sql`, which runs in the same transaction. (App code can write the same rows through the client: see [Linking many-to-many rows](/docs/client.html#many-to-many).)
 
 ```ts title="seeds/03-tags.ts"
 db.$sql(

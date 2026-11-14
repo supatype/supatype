@@ -261,7 +261,7 @@ log(<span class="s">`created a tag, referenced as ${JSON.stringify(tag.id)}`</sp
     <p>A <code>SupatypeAuthUserId</code> field with <code>onDelete</code> has a foreign key to the user, so the user must exist before the seed runs.</p>
 
     <h2 id="junction">Many-to-many rows</h2>
-    <p>Many-to-many relations have no nested write. The rows live in the junction table, which the builder does not list. Write them with <code>db.$sql</code>, which runs in the same transaction:</p>
+    <p>Many-to-many relations have no nested write yet. The rows live in the junction table, which the builder does not list, so a seed writes them with <code>db.$sql</code>, which runs in the same transaction. (App code can write the same rows through the client: see <a href="/docs/client.html#many-to-many">Linking many-to-many rows</a>.)</p>
     <div class="cb"><div class="cb-bar"><span>seeds/03-tags.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>db.$sql(
   <span class="s">`insert into post_tag (post_id, tag_id)
