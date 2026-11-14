@@ -165,6 +165,11 @@ a model, or reads another table (`In`, `Exists`), cannot be evaluated on stored 
 refused at push with the bucket and the operation named; write `Private` to refuse an operation on
 purpose.
 
+A bucket with no rules of its own inherits its model's `access`. A model rule that names one of its
+columns cannot be evaluated on stored objects, so on the bucket it denies everyone, and `supatype
+diff` and `push` warn about it naming the bucket, the model and the operation. Declare the rule in
+the bucket's `access` instead.
+
 ### Registered users only
 
 Anonymous users pass `LoggedIn`. To keep guests out of a bucket, test the `is_anonymous` claim as
