@@ -3,6 +3,7 @@ import type { RequestContext } from "../server.js"
 import { sendJson, readBodyUpTo, readShapedJson } from "../server.js"
 import * as db from "../db.js"
 import * as store from "../object-store.js"
+import type { StoredBytes } from "../disk-store.js"
 import { parseTransformParams, transformImage, UnrenderableImageError } from "../transform.js"
 import { config } from "../env.js"
 import { getEffectiveMaxUploadSize, oversizeRefusal, uploadRefusal, validateFileSize } from "../middleware/storage-limits.js"
@@ -267,7 +268,7 @@ export async function downloadPublic(ctx: RequestContext): Promise<void> {
   }
 
   const objectPath = routeName(ctx)
-  if (objectPath !== null) await serveObject(ctx, bucketId, objectPath)
+  if (objectPath !== null) await serveObject(ctx, bucketId, objectPath, { kind: "shared" })
 }
 
 // ─── Download (authenticated) ───────────────────────────────────────────────────
@@ -292,7 +293,7 @@ export async function downloadAuthenticated(ctx: RequestContext): Promise<void> 
     return
   }
 
-  await serveObject(ctx, bucketId, objectPath)
+  await serveObject(ctx, bucketId, objectPath, { kind: "none" })
 }
 
 // ─── Download (signed URL) ──────────────────────────────────────────────────────
@@ -306,35 +307,40 @@ export async function downloadSigned(ctx: RequestContext): Promise<void> {
   // A token signed for a name the service refuses still names no object of its own.
   const objectPath = routeName(ctx)
   if (objectPath === null) return
-  const bucket = await signedBucket(ctx, token, objectPath)
-  if (!bucket) return
+  const signed = await signedBucket(ctx, token, objectPath)
+  if (!signed) return
 
   // No CORS for private bucket signed URLs (task 46)
-  applyCorsHeaders(ctx.res, bucket)
+  applyCorsHeaders(ctx.res, signed.bucket)
 
-  await serveObject(ctx, bucket.id, objectPath)
+  await serveObject(ctx, signed.bucket.id, objectPath, { kind: "until", expiresAt: signed.expiresAt })
 }
 
 /**
- * The bucket a signed download names, once `token` is checked against the bucket and `objectPath`,
- * the name it serves, or null once it has answered: 404 for no bucket, 403 for a bad token. The name
- * served is the one createSignedUrl signs, so the two can never differ: a token checked against the
- * name as sent ("/x") served another ("x"). Only this service's own HMAC token (task 45). Anything
- * else used to be passed through "for S3 to validate", but the object was then fetched with the
- * service's own credentials, so nothing validated it and `?token=x` read any private object with no
- * session at all.
+ * The bucket a signed download names and when its token expires (Unix seconds), once `token` is
+ * checked against the bucket and `objectPath`, the name it serves, or null once it has answered:
+ * 404 for no bucket, 403 for a bad token. The name served is the one createSignedUrl signs, so the
+ * two can never differ: a token checked against the name as sent ("/x") served another ("x"). Only
+ * this service's own HMAC token (task 45). Anything else used to be passed through "for S3 to
+ * validate", but the object was then fetched with the service's own credentials, so nothing
+ * validated it and `?token=x` read any private object with no session at all.
  */
-async function signedBucket(ctx: RequestContext, token: string, objectPath: string): Promise<db.BucketRow | null> {
+async function signedBucket(
+  ctx: RequestContext,
+  token: string,
+  objectPath: string,
+): Promise<{ bucket: db.BucketRow; expiresAt: number } | null> {
   const bucket = await db.getBucket(ctx.params["bucket"]!)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return null
   }
-  if (!verifySignedToken(token, bucket.id, objectPath)) {
+  const payload = verifySignedToken(token, bucket.id, objectPath)
+  if (!payload) {
     sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
     return null
   }
-  return bucket
+  return { bucket, expiresAt: payload.exp }
 }
 
 // ─── Create signed URL ──────────────────────────────────────────────────────────
@@ -492,7 +498,35 @@ function isMissingObject(err: unknown): boolean {
   return $metadata?.httpStatusCode === 404
 }
 
-async function serveObject(ctx: RequestContext, bucketId: string, objectPath: string): Promise<void> {
+/**
+ * How a download may be cached, chosen by the route that let the caller read it.
+ *
+ * `shared`: a public bucket, which serves the same bytes to anyone, so any cache may keep them.
+ * `none`: a read the caller's own session allowed. Every download used to be marked `public`, so a
+ * shared cache or CDN in front of the service could keep a private file and serve it to anyone.
+ * `until`: a signed link, readable by anyone holding it until `expiresAt` (Unix seconds), so no
+ * cache keeps the bytes past the moment the link stops working.
+ */
+type CachePolicy = { kind: "shared" } | { kind: "none" } | { kind: "until"; expiresAt: number }
+
+/** How long a plain download may be kept, where its cache policy lets it be kept at all. */
+const DOWNLOAD_MAX_AGE = 3600
+
+/** The Cache-Control header for `policy`, on a response otherwise kept for `maxAge` seconds. */
+function cacheControl(policy: CachePolicy, maxAge: number): string {
+  switch (policy.kind) {
+    case "shared":
+      return `public, max-age=${maxAge}`
+    case "none":
+      return "private, no-store"
+    case "until": {
+      const left = Math.max(0, policy.expiresAt - Math.floor(Date.now() / 1000))
+      return `public, max-age=${Math.min(left, maxAge)}`
+    }
+  }
+}
+
+async function serveObject(ctx: RequestContext, bucketId: string, objectPath: string, cache: CachePolicy): Promise<void> {
   // Touches last_accessed_at, and says which stored version is live. No row is a missing object,
   // which used to be found out only by asking S3 for a key named after the path.
   const stored = await db.touchObject(bucketId, objectPath)
@@ -500,38 +534,37 @@ async function serveObject(ctx: RequestContext, bucketId: string, objectPath: st
     sendJson(ctx.res, 404, { error: "Object not found" })
     return
   }
-  const key = store.objectKey(stored.name, stored.version)
-
-  const transformOpts = parseTransformParams(ctx.url.searchParams)
-
   try {
-    const obj = await store.getObject(bucketId, key)
-
-    if (transformOpts && obj.contentType.startsWith("image/")) {
-      const transformed = await transformImage(obj.body, transformOpts)
-      ctx.res.writeHead(200, {
-        "Content-Type": transformed.contentType,
-        "Content-Length": String(transformed.buffer.length),
-        "Cache-Control": `public, max-age=${config.transformCacheTtl}`,
-      })
-      ctx.res.end(transformed.buffer)
-    } else {
-      ctx.res.writeHead(200, {
-        "Content-Type": obj.contentType,
-        "Content-Length": String(obj.body.length),
-        "Cache-Control": "public, max-age=3600",
-      })
-      ctx.res.end(obj.body)
-    }
+    const obj = await store.getObject(bucketId, store.objectKey(stored.name, stored.version))
+    await sendObject(ctx, obj, cache)
   } catch (err) {
-    if (isMissingObject(err)) {
-      sendJson(ctx.res, 404, { error: "Object not found" })
-    } else if (err instanceof UnrenderableImageError) {
-      // An empty or non-image object asked for a transform: the request is wrong, the server is
-      // not. Supabase answers this 400 with the same message.
-      sendJson(ctx.res, 400, { error: err.message })
-    } else {
-      throw err
-    }
+    sendServeFailure(ctx, err)
+  }
+}
+
+/** The object's bytes, or the image transform the request asks for, under `cache`. */
+async function sendObject(ctx: RequestContext, obj: StoredBytes, cache: CachePolicy): Promise<void> {
+  const transformOpts = parseTransformParams(ctx.url.searchParams)
+  const served = transformOpts && obj.contentType.startsWith("image/")
+    ? { ...(await transformImage(obj.body, transformOpts)), maxAge: config.transformCacheTtl }
+    : { buffer: obj.body, contentType: obj.contentType, maxAge: DOWNLOAD_MAX_AGE }
+  ctx.res.writeHead(200, {
+    "Content-Type": served.contentType,
+    "Content-Length": String(served.buffer.length),
+    "Cache-Control": cacheControl(cache, served.maxAge),
+  })
+  ctx.res.end(served.buffer)
+}
+
+/** Answers a failure to serve an object the request may read, or rethrows one it cannot place. */
+function sendServeFailure(ctx: RequestContext, err: unknown): void {
+  if (isMissingObject(err)) {
+    sendJson(ctx.res, 404, { error: "Object not found" })
+  } else if (err instanceof UnrenderableImageError) {
+    // An empty or non-image object asked for a transform: the request is wrong, the server is
+    // not. Supabase answers this 400 with the same message.
+    sendJson(ctx.res, 400, { error: err.message })
+  } else {
+    throw err
   }
 }

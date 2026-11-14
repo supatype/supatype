@@ -100,6 +100,17 @@ describe.skipIf(!dockerAvailable)("the service on the file backend", () => {
     expect((await sharp(Buffer.from(await res.arrayBuffer())).metadata()).width).toBe(8)
   })
 
+  // A 404 carried no Cache-Control, so a CDN could keep it and go on answering it after the upload.
+  it("lets no cache keep an error, while a public file keeps its own max-age", async () => {
+    const missing = await fetch(`${base}/object/public/${BUCKET}/not-yet.png`)
+    expect(missing.status).toBe(404)
+    expect(missing.headers.get("cache-control")).toBe("no-store")
+    expect((await call("POST", `/object/${BUCKET}/kept.png`, await png(4), "image/png")).status).toBe(200)
+    const served = await fetch(`${base}/object/public/${BUCKET}/kept.png`)
+    expect(served.status).toBe(200)
+    expect(served.headers.get("cache-control")).toBe("public, max-age=3600")
+  })
+
   it("refuses a type the bucket does not accept, and a file over its size limit", async () => {
     expect((await call("POST", `/object/${BUCKET}/notes.txt`, "text", "text/plain")).status).toBe(415)
     expect((await call("POST", `/object/${BUCKET}/huge.png`, Buffer.alloc(65 * 1024), "image/png")).status).toBe(413)
