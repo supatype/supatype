@@ -2,6 +2,13 @@
 
 ## 0.9.3
 
+### Breaking Changes
+
+* **bindings:** `watchTable` (on `@supatype/client/bindings`) takes the client as its first argument, not
+  `client.realtime`, because it now reads the table to seed its rows. The Vue, Solid and Svelte
+  bindings are updated; anyone calling it directly must pass the client, as `watchTable(client, table,
+  options, handlers)`.
+
 ### Features
 
 * **client:** `client.anonKey`, beside `client.url`: the anon key as given, else as the page set it,
