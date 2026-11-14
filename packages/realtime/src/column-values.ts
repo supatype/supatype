@@ -8,8 +8,9 @@
  * client that parses the JSON itself has to know which columns to parse.
  *
  * Only the types whose two forms differ are converted. `date`, `time`, text and the rest already
- * match. Anything a converter does not recognise is returned as it came: a change must never be lost
- * to a value this code cannot read.
+ * match. Arrays of any type are parsed from the Postgres array literal, each element converted as its
+ * own type would be. Anything a converter does not recognise is returned as it came: a change must
+ * never be lost to a value this code cannot read.
  */
 
 type Convert = (text: string) => unknown
@@ -55,7 +56,13 @@ function timetzValue(text: string): unknown {
   return match === null ? text : `${match[1]}${fullOffset(match[2] ?? "")}`
 }
 
+function booleanValue(text: string): unknown {
+  return text === "t" ? true : text === "f" ? false : text
+}
+
 const CONVERTERS: Record<string, Convert> = {
+  boolean: booleanValue,
+  bool: booleanValue,
   json: jsonValue,
   jsonb: jsonValue,
   timestamp: timestampValue,
@@ -131,18 +138,38 @@ function convertNode(node: ArrayNode, convert: Convert): unknown {
   return typeof node === "string" ? convert(node) : node.map((child) => convertNode(child, convert))
 }
 
+function literalElement(item: unknown): string {
+  if (item === null) return "NULL"
+  if (Array.isArray(item)) return arrayLiteralOf(item)
+  const text = typeof item === "object" ? JSON.stringify(item) : String(item)
+  return text === "" || /[\s{},"\\]/.test(text) || text.toUpperCase() === "NULL"
+    ? `"${text.replace(/["\\]/g, "\\$&")}"`
+    : text
+}
+
+/**
+ * An array as Postgres writes it, `{a,"b c"}`, which is how a filter on an array column is written.
+ * Elements converted to another form (timestamps) are written in that form, so a filter on such an
+ * array has to be too.
+ */
+export function arrayLiteralOf(items: readonly unknown[]): string {
+  return `{${items.map(literalElement).join(",")}}`
+}
+
+/** Converts one element's text, given the element's own declared type. */
+export type ElementConverter = (text: string, elementType: string) => unknown
+
 /**
  * The JSON-shaped value of a text column, or `value` itself when its type needs no conversion or
- * the text is not in the form expected. Array types convert each element.
+ * the text is not in the form expected. For an array type each element goes through `element`.
  */
-export function convertedColumnValue(value: string, columnType: string): unknown {
+export function convertedColumnValue(value: string, columnType: string, element: ElementConverter): unknown {
   const declared = normalizedType(columnType)
   if (!declared.endsWith("[]")) {
     const convert = CONVERTERS[declared]
     return convert === undefined ? value : convert(value)
   }
-  const convert = CONVERTERS[declared.replace(/(\[\])+$/, "")]
-  if (convert === undefined) return value
+  const elementType = declared.slice(0, -2)
   const parsed = parseArrayLiteral(value)
-  return parsed === undefined ? value : convertNode(parsed, convert)
+  return parsed === undefined ? value : convertNode(parsed, (text) => element(text, elementType))
 }

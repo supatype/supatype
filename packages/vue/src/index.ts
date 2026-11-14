@@ -16,3 +16,9 @@ export type { UseSubscriptionOptions, UseSubscriptionReturn, SubscriptionEvent }
 
 export { useFunction } from "./useFunction.js"
 export type { UseFunctionReturn } from "./useFunction.js"
+
+export { useChannel } from "./useChannel.js"
+export type { UseChannelReturn } from "./useChannel.js"
+
+export { useRealtimeConnection } from "./useRealtimeConnection.js"
+export type { UseRealtimeConnectionReturn } from "./useRealtimeConnection.js"

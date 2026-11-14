@@ -10,7 +10,9 @@
  */
 import { describe, expect, it } from "vitest"
 import { parseWal2json } from "../src/replication.js"
-import { valueForColumn } from "../src/exact-columns.js"
+import { exactColumnsOf, valueForColumn } from "../src/exact-columns.js"
+import { matchesFilter } from "../src/filter-match.js"
+import type { WalChange } from "../src/types.js"
 
 function insert(columns: Record<string, [string, unknown]>): string {
   return JSON.stringify({
@@ -161,5 +163,65 @@ describe("a change read from the slot", () => {
   it("still hands numerics back as before", () => {
     const [change] = parseWal2json(insert({ n: ["integer", "42"], big: ["bigint", "9007199254740993"] }))
     expect(change?.newRecord).toEqual({ n: 42, big: "9007199254740993" })
+  })
+})
+
+describe("arrays of every other type", () => {
+  it("reads integer and floating point arrays as numbers", () => {
+    expect(valueForColumn("{1,2,NULL}", "integer[]")).toEqual([1, 2, null])
+    expect(valueForColumn("{1.5,-2}", "double precision[]")).toEqual([1.5, -2])
+    expect(valueForColumn("{1,2}", "smallint[]")).toEqual([1, 2])
+  })
+
+  it("keeps bigint and numeric elements exact, as strings", () => {
+    expect(valueForColumn("{9007199254740993}", "bigint[]")).toEqual(["9007199254740993"])
+    expect(valueForColumn("{10.00,2.50}", "numeric(12,2)[]")).toEqual(["10.00", "2.50"])
+  })
+
+  it("reads boolean arrays as booleans", () => {
+    expect(valueForColumn("{t,f,NULL}", "boolean[]")).toEqual([true, false, null])
+  })
+
+  it("reads text and uuid arrays as strings, with quoting undone", () => {
+    expect(valueForColumn('{a,"b c","d\\"e","NULL",""}', "text[]")).toEqual(["a", "b c", 'd"e', "NULL", ""])
+    expect(valueForColumn("{0a1b2c3d-0000-0000-0000-000000000000}", "uuid[]")).toEqual([
+      "0a1b2c3d-0000-0000-0000-000000000000",
+    ])
+  })
+
+  it("reads a character varying array with a width", () => {
+    expect(valueForColumn("{x,y}", "character varying(80)[]")).toEqual(["x", "y"])
+  })
+
+  it("reads date arrays as the date strings REST sends", () => {
+    expect(valueForColumn("{2024-01-01,2024-01-02}", "date[]")).toEqual(["2024-01-01", "2024-01-02"])
+  })
+
+  it("reads a nested integer array", () => {
+    expect(valueForColumn("{{1,2},{3,4}}", "integer[]")).toEqual([[1, 2], [3, 4]])
+  })
+
+  it("leaves an unreadable literal as it came", () => {
+    expect(valueForColumn("{1,2", "integer[]")).toBe("{1,2")
+    expect(valueForColumn("[0:1]={1,2}", "integer[]")).toBe("[0:1]={1,2}")
+  })
+})
+
+describe("a filter on an array column", () => {
+  it("still matches the literal the filter is written as", () => {
+    const [change] = parseWal2json(insert({ tags: ["text[]", "{a,b}"] }))
+    expect(matchesFilter(change as WalChange, { tags: "eq.{a,b}" })).toBe(true)
+    expect(matchesFilter(change as WalChange, { tags: "eq.{a,c}" })).toBe(false)
+  })
+})
+
+describe("array columns are not exact columns", () => {
+  it("leaves bigint[] and numeric[] out of the exact set, since their elements are converted here", () => {
+    expect(exactColumnsOf(["a", "b", "c"], ["bigint[]", "numeric(12,2)[]", "bigint"])).toEqual({ c: "bigint" })
+  })
+
+  it("quotes an element that needs it when matching a filter", () => {
+    const [change] = parseWal2json(insert({ tags: ["text[]", '{"b c",d}'] }))
+    expect(matchesFilter(change as WalChange, { tags: 'eq.{"b c",d}' })).toBe(true)
   })
 })

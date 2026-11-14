@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **useChannel:** `useChannel(name, setup)` joins one channel and hands it to `setup` to add any number of
+  row, presence and broadcast listeners, which `useSubscription` (one table, one listener) cannot. It returns
+  `status` and `error` as `useSubscription` does, and `isConnected` and `connectionState`. `setup` runs once and
+  the channel is left on teardown.
+* **useRealtimeConnection:** `isConnected` and `connectionState` for the realtime socket itself.
+
 ## Unreleased
 
 ### Breaking Changes

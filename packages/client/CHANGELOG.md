@@ -12,6 +12,9 @@
   before retrying) or `"disconnected"`. Channel statuses are unchanged. Exports
   `RealtimeConnectionState`, `RealtimeConnectionListener` and the `ChannelSubscription` type.
 
+* **bindings:** `watchChannel` and `watchConnection` on `@supatype/client/bindings`, which the Vue, Solid
+  and Svelte `useChannel` / `createChannel` share.
+
 ### Bug Fixes
 
 * **auth:** a restored session kept the user without `isAnonymous`, so a guest looked registered after

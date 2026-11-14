@@ -1,4 +1,5 @@
 import type { WalChange } from "./types.js"
+import { arrayLiteralOf } from "./column-values.js"
 
 /**
  * Matching a subscriber's PostgREST-style column filter (`salary=gt.100000`) against a change.
@@ -195,7 +196,9 @@ const ACCEPTS: Record<FilterOp, (order: Order) => boolean> = {
 
 function satisfies(actual: unknown, condition: Condition, columnType: string | undefined): boolean {
   if (actual === null || actual === undefined) return false
-  const order = compareAs(compareKindOf(columnType), actual, condition.value)
+  // An array reaches here already parsed; a filter on it is written as Postgres writes the array.
+  const value = Array.isArray(actual) ? arrayLiteralOf(actual) : actual
+  const order = compareAs(compareKindOf(columnType), value, condition.value)
   return order !== null && ACCEPTS[condition.op](order)
 }
 

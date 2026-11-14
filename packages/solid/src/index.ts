@@ -16,3 +16,9 @@ export type { SubscriptionOptions, SubscriptionResult } from "./createSubscripti
 
 export { createFunction } from "./createFunction.js"
 export type { FunctionResult } from "./createFunction.js"
+
+export { createChannel } from "./createChannel.js"
+export type { ChannelResult } from "./createChannel.js"
+
+export { createRealtimeConnection } from "./createRealtimeConnection.js"
+export type { RealtimeConnectionResult } from "./createRealtimeConnection.js"

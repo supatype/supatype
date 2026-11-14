@@ -68,6 +68,8 @@ const ORDINARY_NUMERIC_TYPES = new Set([
 
 /** The exact kind of a wal2json column type, or null when it needs no special handling. */
 export function exactKindOf(columnType: string): ExactKind | null {
+  // An array of bigints is an array, converted element by element, not one exact value.
+  if (columnType.trimEnd().endsWith("[]")) return null
   return EXACT_TYPES[baseType(columnType)] ?? null
 }
 
@@ -80,7 +82,7 @@ export function isOrdinaryNumeric(columnType: string): boolean {
  * The value to place in a record, given the column's declared type.
  *
  * Only strings are touched. Numeric types become numbers (the exact ones stay text), and json,
- * timestamps and their arrays take the form REST sends. Everything else is passed through, which
+ * timestamps and arrays of any type take the form REST sends. Everything else is passed through, which
  * keeps this safe against a wal2json build that does not honour the option: the values arrive as
  * numbers, the exact ones are already damaged and nothing here can tell, but no working column is
  * broken by the attempt.
@@ -88,7 +90,7 @@ export function isOrdinaryNumeric(columnType: string): boolean {
 export function valueForColumn(value: unknown, columnType: string | undefined): unknown {
   if (typeof value !== "string" || columnType === undefined) return value
   if (exactKindOf(columnType) !== null) return value
-  if (!isOrdinaryNumeric(columnType)) return convertedColumnValue(value, columnType)
+  if (!isOrdinaryNumeric(columnType)) return convertedColumnValue(value, columnType, valueForColumn)
   const asNumber = Number(value)
   return Number.isNaN(asNumber) && value.trim() !== "NaN" ? value : asNumber
 }

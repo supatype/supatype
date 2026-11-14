@@ -27,7 +27,7 @@ The realtime service reads changes from Postgres logical replication, so every c
 
 Every table Supatype manages has `REPLICA IDENTITY FULL`, so the write-ahead log carries the whole previous row. A table set up outside Supatype keeps Postgres's default identity, and its `old` can hold only the key.
 
-Values arrive with the same types and formats as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings. `Json` columns arrive as the parsed value, not as JSON text. `timestamptz` arrives as ISO 8601 with a `T` and a full offset, such as `2024-01-01T12:00:00+00:00`, which every browser parses; `timestamp` is `2024-01-01T12:00:00` and `timetz` has its full offset. Fractional seconds keep their microseconds. Arrays of these types arrive as arrays. Before 0.9.3 `Json` was a string and `timestamptz` was `2024-01-01 12:00:00+00`, which Safari and Firefox read as `Invalid Date`; code that called `JSON.parse` on a `Json` column now gets the value itself.
+Values arrive with the same types and formats as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings. `Json` columns arrive as the parsed value, not as JSON text. `timestamptz` arrives as ISO 8601 with a `T` and a full offset, such as `2024-01-01T12:00:00+00:00`, which every browser parses; `timestamp` is `2024-01-01T12:00:00` and `timetz` has its full offset. Fractional seconds keep their microseconds. Arrays of any type arrive as arrays, as REST sends them: `integer[]` and `double precision[]` hold numbers, `boolean[]` holds booleans, `bigint[]` and `numeric[]` hold exact strings, and `text[]`, `uuid[]` and `date[]` hold strings. Before 0.9.3 every array arrived as Postgres's text form, such as `"{1,2}"`. Before 0.9.3 `Json` was a string and `timestamptz` was `2024-01-01 12:00:00+00`, which Safari and Firefox read as `Invalid Date`; code that called `JSON.parse` on a `Json` column now gets the value itself.
 
 <h2 id="access">Read access</h2>
 
@@ -159,7 +159,7 @@ function Auction({ id }: { id: string }) {
 }
 ```
 
-`useRealtimeConnection()` returns only `isConnected` and `connectionState`. `@supatype/vue`, `@supatype/solid` and `@supatype/svelte` do not have `useChannel` yet.
+`useRealtimeConnection()` returns only `isConnected` and `connectionState`. `@supatype/vue` has `useChannel(name, setup)` and `useRealtimeConnection()`, and `@supatype/svelte` and `@supatype/solid` have `createChannel(name, setup)` and `createRealtimeConnection()`. They return `status` and `error` as that binding's `createSubscription` does (`"connecting"`, `"connected"`, `"disconnected"` or `"error"`), plus `isConnected` and `connectionState`, each as a ref, signal accessor or store to match the binding. `setup` runs once, when the component mounts (straight away in Svelte), and the channel is left when it unmounts, so there is no `deps` argument.
 
 `@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`, which is `"connecting"`, `"connected"`, `"disconnected"` or `"error"`. `data` starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same `id`, deletes remove it. They do not load the rows that already exist, so pair them with a query.
 
