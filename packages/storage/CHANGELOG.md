@@ -23,6 +23,14 @@
   that way stayed private everywhere the mode is read. A custom bucket is never given a public S3
   policy, whatever `public` says. A bucket made private or custom loses its public-read S3 policy:
   the policy could only be put, so such a bucket stayed readable by anyone straight from S3.
+* **downloads:** each download route sets its own `Cache-Control`. Every download, plain or an image
+  transform, answered `public`, including a private file read with a user's session. A shared
+  cache or CDN in front of the service could keep that file and serve it to anyone asking for the
+  same URL. An authenticated download now answers `private, no-store`. A signed link stays
+  `public`, but its `max-age` never runs past the token's expiry, so a cache cannot keep serving
+  an expired link. A public bucket is unchanged: `max-age=3600`, and `TRANSFORM_CACHE_TTL` for
+  transforms. Every other answer, errors included, is now `no-store`. They carried no
+  `Cache-Control`, so a CDN could keep a 404 and go on answering it after the file was uploaded.
 * **limits:** `STORAGE_QUOTA=-1` is unlimited, and `TIER_MAX_UPLOAD_SIZE=-1` sets no per-file limit
   of its own, leaving `MAX_UPLOAD_SIZE` (itself unlimited at `-1`). Both used to mean "use the tier
   table", so a project told it had no quota still refused uploads past the free tier's 1 GiB and

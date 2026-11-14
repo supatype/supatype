@@ -229,7 +229,16 @@
 <span class="k">const</span> { data: files } = <span class="k">await</span> bucket.list(<span class="s">`${userId}/`</span>, { limit: <span class="s">50</span>, offset: <span class="s">0</span> })</pre></div>
     <p><code>list</code> returns up to 100 entries unless you pass <code>limit</code>. Each entry has <code>name</code>, <code>size</code>, <code>mimetype</code>, the owner and timestamps.</p>
     <p>The first argument to <code>list</code> is a folder. Folders inside it come first, then files, each in name order, and there is no sort option. Pass <code>search</code> to match names without regard to case. The result also carries <code>count</code>, the number of matching entries in all.</p>
-    <p>Every file the service serves carries <code>Cache-Control: public, max-age=3600</code>. There is no setting per upload.</p>
+    <p>How long a file may be cached depends on how it was read. There is no setting per upload.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Read through</th><th scope="col"><code>Cache-Control</code></th></tr></thead>
+      <tbody>
+        <tr><td><code>getPublicUrl</code>, on a public bucket</td><td><code>public, max-age=3600</code></td></tr>
+        <tr><td><code>download</code>, with the user's session</td><td><code>private, no-store</code>. No cache keeps it, so a CDN never serves one user's file to another.</td></tr>
+        <tr><td>A signed URL</td><td><code>public</code>, with a <code>max-age</code> of 3600 or the seconds left on the link, whichever is less. A cached copy stops when the link does.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Every other answer, including an error such as a 404, carries <code>Cache-Control: no-store</code>. A CDN never keeps "not found" for a file you upload a moment later.</p>
     <p>Public and private buckets differ in CORS too. A public bucket answers any origin. A private bucket sends no <code>Access-Control-Allow-Origin</code>, so read its files from a browser with a signed URL or <code>download</code>.</p>
     <p><code>storage.listBuckets()</code> and <code>storage.createBucket(name, { public, fileSizeLimit, allowedMimeTypes })</code> need the service role key. Use them from a server or script, not a browser. In an app, declare buckets in the schema instead. The client has no call to change or delete a bucket. To change one, edit its declaration and push.</p>
 
@@ -254,7 +263,8 @@
       <li>Images are never enlarged past their original size.</li>
       <li>Files whose type is not <code>image/*</code> are served unchanged.</li>
       <li>The same query parameters (<code>width</code>, <code>height</code>, <code>resize</code>, <code>format</code>, <code>quality</code>) work when appended to a signed URL.</li>
-      <li>Transformed responses carry <code>Cache-Control: public, max-age=3600</code> by default. Put a CDN in front if the same sizes are requested often.</li>
+      <li>On a public bucket, transformed responses carry <code>Cache-Control: public, max-age=3600</code> by default, set by <code>TRANSFORM_CACHE_TTL</code>. Put a CDN in front if the same sizes are requested often.</li>
+      <li>A transform read with the user's session is <code>private, no-store</code>, and one through a signed URL is cached no longer than the link lasts, as for plain files.</li>
     </ul>
 
     <h2 id="limits">Limits and config</h2>

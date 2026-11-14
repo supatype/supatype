@@ -143,7 +143,15 @@ const { data: files } = await bucket.list(`${userId}/`, { limit: 50, offset: 0 }
 
 The first argument to `list` is a folder. Folders inside it come first, then files, each in name order, and there is no sort option. Pass `search` to match names without regard to case. The result also carries `count`, the number of matching entries in all.
 
-Every file the service serves carries `Cache-Control: public, max-age=3600`. There is no setting per upload.
+How long a file may be cached depends on how it was read. There is no setting per upload.
+
+| Read through | `Cache-Control` |
+| --- | --- |
+| `getPublicUrl`, on a public bucket | `public, max-age=3600` |
+| `download`, with the user's session | `private, no-store`. No cache keeps it, so a CDN never serves one user's file to another. |
+| A signed URL | `public`, with a `max-age` of 3600 or the seconds left on the link, whichever is less. A cached copy stops when the link does. |
+
+Every other answer, including an error such as a 404, carries `Cache-Control: no-store`. A CDN never keeps "not found" for a file you upload a moment later.
 
 Public and private buckets differ in CORS too. A public bucket answers any origin. A private bucket sends no `Access-Control-Allow-Origin`, so read its files from a browser with a signed URL or `download`.
 
@@ -171,7 +179,8 @@ const { data: { publicUrl } } = supatype.storage.from("covers").getPublicUrl(pos
 - Images are never enlarged past their original size.
 - Files whose type is not `image/*` are served unchanged.
 - The same query parameters (`width`, `height`, `resize`, `format`, `quality`) work when appended to a signed URL.
-- Transformed responses carry `Cache-Control: public, max-age=3600` by default. Put a CDN in front if the same sizes are requested often.
+- On a public bucket, transformed responses carry `Cache-Control: public, max-age=3600` by default, set by `TRANSFORM_CACHE_TTL`. Put a CDN in front if the same sizes are requested often.
+- A transform read with the user's session is `private, no-store`, and one through a signed URL is cached no longer than the link lasts, as for plain files.
 
 <h2 id="limits">Limits and config</h2>
 
