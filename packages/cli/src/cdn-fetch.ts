@@ -8,6 +8,7 @@
  */
 import { closeSync, existsSync, openSync, rmSync, statSync, writeSync } from "node:fs"
 import { progress } from "./ui/messages.js"
+import { getActiveFlowApi } from "./ui/runtime/flow-session.js"
 
 /** How long a request may go without receiving a byte. */
 export const STALL_WINDOW_MS = 60_000
@@ -100,9 +101,11 @@ function landingOf(resp: Response, have: number): Landing {
   return { offset: 0, total: sent }
 }
 
-/** `18 / 46 MB` in place on a terminal, a start and an end line anywhere else. */
+/** `18 / 46 MB` in place on a bare terminal, a start and an end line anywhere else. */
 function downloadProgress(label: string, landing: Landing): { update: (bytes: number) => void; done: () => void } {
-  const tty = process.stdout.isTTY === true
+  // In place only on a bare terminal: under a flow the line would land in the spinner's, and a log
+  // line cannot be rewritten, so the flow gets a start and an end line through progress().
+  const tty = process.stdout.isTTY === true && getActiveFlowApi() === null
   const mb = (n: number): string => (n / 1_000_000).toFixed(1)
   const size = landing.total === null ? "" : ` (${mb(landing.total)} MB)`
   if (!tty) progress(`Downloading ${label}${size}...`)
