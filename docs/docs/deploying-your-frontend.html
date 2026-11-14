@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -211,7 +212,7 @@ window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."
 <pre>&lt;head&gt;
   {__DEV__ ? null : &lt;script src="/supatype-env.js" /&gt;}
   &lt;meta charSet="utf-8" /&gt;</pre></div>
-    <p>Expo renders <code>+html.tsx</code> only when <code>web.output</code> in <code>app.json</code> is <code>"static"</code> or <code>"server"</code>, as a new app's is. With <code>"single"</code>, put <code>&lt;script src="/supatype-env.js"&gt;&lt;/script&gt;</code> in the head of <code>public/index.html</code> instead. A <code>"static"</code> export is plain files: have Supatype host them with <code>supatype app add --static ./dist</code>. A <code>"server"</code> export, the default from SDK 58, renders each page in a Node server (<code>npx expo serve</code>); the Supatype server in front of it answers <code>/supatype-env.js</code> itself, whatever the app mode. On any other host, build with the values instead.</p>
+    <p>Expo renders <code>+html.tsx</code> only when <code>web.output</code> in <code>app.json</code> is <code>"static"</code> or <code>"server"</code>, as a new app's is. With <code>"single"</code>, put <code>&lt;script src="/supatype-env.js" vite-ignore&gt;&lt;/script&gt;</code> in the head of <code>public/index.html</code> instead. A <code>"static"</code> export is plain files: have Supatype host them with <code>supatype app add --static ./dist</code>. A <code>"server"</code> export, the default from SDK 58, renders each page in a Node server (<code>npx expo serve</code>); the Supatype server in front of it answers <code>/supatype-env.js</code> itself, whatever the app mode. On any other host, build with the values instead.</p>
     <p>A native build, for iOS or Android and on EAS, has no page, so it takes its values at build time under <code>EXPO_PUBLIC_SUPATYPE_URL</code> and <code>EXPO_PUBLIC_SUPATYPE_ANON_KEY</code>. <code>expo export</code> and EAS builds run in production mode, which never reads <code>.env.development.local</code>, where <code>supatype dev</code> and <code>keys</code> put the local stack's values. Give them your deployment's: on a linked machine, build through <code>supatype build</code>; for an EAS build, set the two names in the project's EAS environment variables, with the values <code>supatype keys --print frontend --env production</code> prints.</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> supatype build -- npx expo export --platform android</pre></div>

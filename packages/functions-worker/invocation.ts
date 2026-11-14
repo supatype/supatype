@@ -56,10 +56,11 @@ export interface FunctionContext {
    * `SUPATYPE_FUNCTIONS_DB_URL`, which compose hands this worker as `SUPATYPE_DB_URL` (and joins it
    * to the `functions-db` network when the URL names the stack's `db`).
    *
-   * It connects as whatever role the URL names and is not a request through the API, so row rules
-   * and field masking do not apply to it. The operator should give it a least-privilege role
-   * granted only what the functions need, never the admin URL. A credential: never returned or
-   * logged.
+   * It connects as whatever role the URL names and is not a request through the API, so model
+   * hooks do not run. Row rules and field masking apply for that role: a superuser or BYPASSRLS
+   * role (the admin role, service_role) skips both. The operator should give it a least-privilege
+   * login role that is neither, granted only what the functions need, never the admin URL. A
+   * credential: never returned or logged.
    */
   readonly dbUrl?: string
   readonly region: string

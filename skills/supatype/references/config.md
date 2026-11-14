@@ -117,8 +117,9 @@ SERVICE_ROLE_KEY=   # written by init, or: supatype keys; also the token for the
 SITE_URL=http://localhost:18473      # docker: the local gateway URL init chose
 SUPATYPE_KONG_PORT=18473             # docker: init takes 18473 or the next free port
 API_EXTERNAL_URL=http://localhost:18473
-# Optional, off by default: a raw database URL handed to every function as ctx.dbUrl. It bypasses
-# row rules and field masking, so use a least-privilege role, never the admin URL (self-host.md).
+# Optional, off by default: a raw database URL handed to every function as ctx.dbUrl. Rules and
+# masking apply for the role it names (superuser/BYPASSRLS skip both), so use a least-privilege login role,
+# never the admin URL, and end it with the POSTGRES_DB value (self-host.md).
 # SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:<password>@db:5432/my-project
 
 # Written by supatype dev (docker):

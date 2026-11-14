@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+There is no 0.4, 0.5 or 0.6 release: this package went from 0.3.6 straight to 0.7.0, on npm and as git tags, so
+no entries are missing from this file.
+
+## 0.8.0 (2026-11-02)
 
 ### Features
 

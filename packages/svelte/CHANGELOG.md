@@ -1,14 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Breaking Changes
-
-* **createMutation:** `mutate` returns no rows unless asked: `data` is `null` after an insert, update,
-  upsert or delete, as with the client's own writes. Pass `{ select: true }` for every column or
-  `{ select: "id,title" }` for some, as `.select()` takes them. Returning a row needs the right
-  to read it, so a table whose rules let a caller create but not read refused every insert made
-  through `createMutation`. A delete returns `null` rather than `[]`, and its rows with `select`.
+## 0.9.1 (2026-11-09)
 
 ### Bug Fixes
 
@@ -22,3 +14,15 @@
 * **createQuery:** only the newest read is shown. A refetch while a read was in flight let the older
   read finish last and replace the newer rows with its own rows, its error or its throw, and end
   loading while the newer read was still out. A throw from a replaced read is still logged.
+
+## 0.9.0 (2026-11-04)
+
+### Breaking Changes
+
+* **createMutation:** `mutate` returns no rows unless asked: `data` is `null` after an insert, update,
+  upsert or delete, as with the client's own writes. Pass `{ select: true }` for every column or
+  `{ select: "id,title" }` for some, as `.select()` takes them. Returning a row needs the right
+  to read it, so a table whose rules let a caller create but not read refused every insert made
+  through `createMutation`. A delete returns `null` rather than `[]`, and its rows with `select`.
+
+

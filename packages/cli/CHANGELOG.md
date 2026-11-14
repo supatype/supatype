@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+There is no 0.4, 0.5 or 0.6 release: this package went from 0.3.6 straight to 0.7.0, on npm and as git tags, so
+no entries are missing from this file.
+
+## 0.9.3
 
 ### Bug Fixes
 
+* **docs:** `ctx.dbUrl` no longer said to bypass row rules and field masking. They apply for the role the URL names, and only a superuser or `BYPASSRLS` role skips them. The `FunctionContext` JSDoc, the docs, the self-host example and the skill references now say so and say which database the URL ends in (`POSTGRES_DB`). Also documents `global()`, `meta.cacheStatus`, `pg_safeupdate`, presence echo, server logic in a Postgres function and a versions page, stamps every package changelog with the version it shipped in, and fails the release when one still says Unreleased.
 * **dev:** on Linux the app URL (`http://localhost:18473/`) answered 502 for a Vite app. `supatype
   dev` started Vite on `127.0.0.1`, and Docker Engine on Linux reaches the host through the docker0
   bridge, not the loopback, so the gateway found nothing listening. On Linux Vite now listens on

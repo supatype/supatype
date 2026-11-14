@@ -216,8 +216,8 @@ missing, or `API_EXTERNAL_URL` is still a `localhost` address, it stops before t
 lists every source it tried, instead of building a site that renders a blank page.
 
 The server also answers `/supatype-env.js` with its own address and anon key. An `index.html` that
-loads it with `<script src="/supatype-env.js"></script>` (`supatype init` adds the tag for a static
-app) gets both values when the page loads, so one build runs on every deployment that serves it.
+loads it with `<script src="/supatype-env.js" vite-ignore></script>` (`supatype init` adds the tag for a static
+app; `vite-ignore` stops `vite build` warning that the file does not exist) gets both values when the page loads, so one build runs on every deployment that serves it.
 For an API-only project, set `server.public_env: false` in `supatype.config.ts` to turn that
 address off; the anon key is public either way. Building on Vercel, Netlify, Cloudflare Pages or
 in CI is covered in [Deploy your frontend](/docs/deploying-your-frontend.html).

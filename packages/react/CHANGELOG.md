@@ -1,15 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Breaking Changes
-
-* **useMutation:** `mutate` returns no rows unless asked: `data` is `null` after an insert, update,
-  upsert or delete, as with the client's own writes. Pass `{ select: true }` for every column or
-  `{ select: "id,title" }` for some, as `.select()` takes them. Returning a row needs the right
-  to read it, so a table whose rules let a caller create but not read refused every insert made
-  through `useMutation`. A delete returns `null` rather than `[]`, and its rows with `select`.
-  `filter` and `publish` keep their meaning.
+## 0.9.1 (2026-11-09)
 
 ### Features
 
@@ -28,3 +19,16 @@
 * **useQuery:** only the latest request is shown. When the options changed while a read was in
   flight, the older read could finish last and replace the newer rows with its own rows, its error
   or its throw. A throw from a replaced read is still logged.
+
+## 0.9.0 (2026-11-04)
+
+### Breaking Changes
+
+* **useMutation:** `mutate` returns no rows unless asked: `data` is `null` after an insert, update,
+  upsert or delete, as with the client's own writes. Pass `{ select: true }` for every column or
+  `{ select: "id,title" }` for some, as `.select()` takes them. Returning a row needs the right
+  to read it, so a table whose rules let a caller create but not read refused every insert made
+  through `useMutation`. A delete returns `null` rather than `[]`, and its rows with `select`.
+  `filter` and `publish` keep their meaning.
+
+

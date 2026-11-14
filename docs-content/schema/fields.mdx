@@ -259,7 +259,8 @@ $$;
 NOTIFY pgrst, 'reload schema';
 ```
 
-Run it against your database with `psql`. A push leaves a function it did not make alone, and the
+Run it against your database with `psql`. A push leaves a function it did not make alone (see
+[Server logic in a Postgres function](/docs/schema.html#server-logic) for what is and is not managed), and the
 `NOTIFY` makes the API pick the new function up straight away. Then:
 
 ```typescript

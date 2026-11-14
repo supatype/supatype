@@ -582,8 +582,8 @@ directly. Call them through the API.
 
 Direct database access is an opt-in: set `SUPATYPE_FUNCTIONS_DB_URL` to a connection string for
 the stack's `db` and re-render compose (`supatype self-host compose up -d`); functions receive it
-as `ctx.dbUrl`. It connects as whatever role the URL names, so it bypasses row rules and field
-masking. Use a least-privilege role, never the admin URL. See
+as `ctx.dbUrl`. It connects as whatever role the URL names: row rules and field masking apply for that
+role, and a superuser or `BYPASSRLS` role skips both. Use a least-privilege login role, never the admin URL. See
 [the functions worker README](https://github.com/supatype/supatype/blob/main/packages/functions-worker/README.md).
 
 ## Native Postgres checks passwords

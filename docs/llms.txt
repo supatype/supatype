@@ -34,6 +34,7 @@ Contact: GitHub and Discord, linked from the site. Licensing questions: licensin
 - [Studio](https://www.supatype.com/docs/studio.html): The CMS and admin app generated from your models: editors, rich text, media, drafts and versions, live preview, API docs, GraphQL explorer, SQL runner, history
 - [Studio roles](https://www.supatype.com/docs/studio-roles.html): Admin, developer, editor and viewer: what each can do, full access vs Studio mode, masking, Send as, drafts and publishing, granting roles
 - [CLI reference](https://www.supatype.com/docs/cli.html): Every supatype command with its subcommands and main flags
+- [Versions](https://www.supatype.com/docs/versions.html): The CLI, engine, server, Postgres and Deno versions a release is made of, generated from release/images.json
 - [Local development](https://www.supatype.com/docs/#local-dev): `supatype init` and `supatype dev` run a full local stack
 - [Self-hosting](https://www.supatype.com/docs/#self-host): Docker Compose on a server you own
 - [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html): Give a production build its API URL and anon key with `supatype build`, `supatype keys --print frontend` or `/supatype-env.js`, on Vercel, Netlify, Cloudflare Pages, GitHub Actions and your own server, and why the anon key is public

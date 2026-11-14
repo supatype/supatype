@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 (2026-11-09)
 
 ### Features
 
@@ -26,3 +26,5 @@
   `anonKey`, take them from `SUPATYPE_URL` and `SUPATYPE_ANON_KEY` in the server's environment,
   read when the client is created, and where one is unset from `NEXT_PUBLIC_SUPATYPE_URL` or
   `NEXT_PUBLIC_SUPATYPE_ANON_KEY`. `createServerClient(url, anonKey, options)` works as before.
+
+
