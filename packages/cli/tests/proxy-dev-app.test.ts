@@ -3,10 +3,12 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { describe, expect, it } from "vitest"
 import {
+  linuxHostHint,
   portFromUpstream,
   resolveProxyDevScript,
   resolveViteDirectSpawn,
 } from "../src/app/proxy-dev-app.js"
+import { devAppHost } from "../src/app/vite-dev-args.js"
 import { belongsToApp } from "../src/app/port-holder.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
@@ -86,57 +88,55 @@ function viteAppDir(): { appDir: string; viteJs: string } {
   return { appDir, viteJs }
 }
 
+/** A platform where Docker Desktop forwards host.docker.internal to the loopback. */
+const DOCKER_DESKTOP = "darwin"
+
 // 0.9.1 release test (FF21): Vite on Node's default `localhost` listened on [::1] on Windows while
 // the proxy dialled 127.0.0.1, so the App URL answered 502, or another project's app on that port.
 describe("resolveViteDirectSpawn() binds Vite where the proxy dials", () => {
   it("binds the upstream's IPv4 loopback and port, strictly", () => {
     const { appDir, viteJs } = viteAppDir()
-    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://127.0.0.1:5173", "darwin")
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://127.0.0.1:5173", DOCKER_DESKTOP)
     expect(result?.args).toEqual([viteJs, "--host", "127.0.0.1", "--port", "5173", "--strictPort"])
   })
 
   it("binds 127.0.0.1 for a localhost upstream too", () => {
     const { appDir, viteJs } = viteAppDir()
-    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://localhost:5174", "darwin")
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://localhost:5174", DOCKER_DESKTOP)
     expect(result?.args).toEqual([viteJs, "--host", "127.0.0.1", "--port", "5174", "--strictPort"])
   })
 
   it("keeps the script's own arguments and does not repeat a flag it already sets", () => {
     const { appDir, viteJs } = viteAppDir()
     const scripts = { dev: "vite --open --port 3000" }
-    const result = resolveViteDirectSpawn(appDir, "dev", scripts, "http://127.0.0.1:5173", "darwin")
+    const result = resolveViteDirectSpawn(appDir, "dev", scripts, "http://127.0.0.1:5173", DOCKER_DESKTOP)
     expect(result?.args).toEqual([viteJs, "--open", "--port", "3000", "--host", "127.0.0.1", "--strictPort"])
   })
 
   it("adds no server flags to a command that is not the dev server", () => {
     const { appDir, viteJs } = viteAppDir()
-    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite build --watch" }, "http://127.0.0.1:5173", "darwin")
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite build --watch" }, "http://127.0.0.1:5173", DOCKER_DESKTOP)
     expect(result?.args).toEqual([viteJs, "build", "--watch"])
   })
 
   it("leaves a script that needs a shell to the package manager", () => {
     const { appDir } = viteAppDir()
-    expect(resolveViteDirectSpawn(appDir, "dev", { dev: "vite && echo done" }, "http://127.0.0.1:5173", "darwin")).toBeNull()
+    expect(resolveViteDirectSpawn(appDir, "dev", { dev: "vite && echo done" }, "http://127.0.0.1:5173", DOCKER_DESKTOP)).toBeNull()
   })
 
   it("adds no host for an upstream that is not this machine's loopback", () => {
     const { appDir, viteJs } = viteAppDir()
-    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://192.168.1.20:5173", "darwin")
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, "http://192.168.1.20:5173", DOCKER_DESKTOP)
     expect(result?.args).toEqual([viteJs, "--port", "5173", "--strictPort"])
   })
 })
 
-// 0.9.2, reported by a tester on Linux: Docker Engine maps host.docker.internal to the docker0
-// bridge, not the loopback, so the gateway could not reach a Vite bound to 127.0.0.1 and the App
-// URL answered 502. Docker Desktop forwards that name to the loopback, which is why macOS and
-// Windows never showed it.
+// 0.9.2, reported by a tester on Linux: the App URL answered 502 (see vite-dev-args.ts).
 describe("resolveViteDirectSpawn() on Linux listens where the bridge arrives", () => {
-  it("binds every IPv4 interface for a 127.0.0.1 or localhost upstream", () => {
+  it.each(["http://127.0.0.1:5173", "http://localhost:5173"])("binds every IPv4 interface for %s", (upstream) => {
     const { appDir, viteJs } = viteAppDir()
-    for (const upstream of ["http://127.0.0.1:5173", "http://localhost:5173"]) {
-      const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, upstream, "linux")
-      expect(result?.args).toEqual([viteJs, "--host", "0.0.0.0", "--port", "5173", "--strictPort"])
-    }
+    const result = resolveViteDirectSpawn(appDir, "dev", { dev: "vite" }, upstream, "linux")
+    expect(result?.args).toEqual([viteJs, "--host", "0.0.0.0", "--port", "5173", "--strictPort"])
   })
 
   it("binds every interface for an IPv6 loopback upstream", () => {
@@ -150,6 +150,39 @@ describe("resolveViteDirectSpawn() on Linux listens where the bridge arrives", (
     const scripts = { dev: "vite --host 127.0.0.1" }
     const result = resolveViteDirectSpawn(appDir, "dev", scripts, "http://127.0.0.1:5173", "linux")
     expect(result?.args).toEqual([viteJs, "--host", "127.0.0.1", "--port", "5173", "--strictPort"])
+  })
+})
+
+// The address dev hands every app as SUPATYPE_DEV_APP_HOST, for start scripts it cannot add
+// --host to: a script that needs a shell, or a framework other than Vite.
+describe("devAppHost()", () => {
+  it("is every interface on Linux and the loopback elsewhere", () => {
+    expect(devAppHost("http://127.0.0.1:5173", "linux")).toBe("0.0.0.0")
+    expect(devAppHost("http://localhost:3000", "linux")).toBe("0.0.0.0")
+    expect(devAppHost("http://[::1]:3000", "linux")).toBe("::")
+    expect(devAppHost("http://127.0.0.1:5173", DOCKER_DESKTOP)).toBe("127.0.0.1")
+    expect(devAppHost("http://127.0.0.1:5173", "win32")).toBe("127.0.0.1")
+  })
+
+  it("is undefined for an upstream that is not this machine's loopback, or none", () => {
+    expect(devAppHost("http://192.168.1.20:5173", "linux")).toBeUndefined()
+    expect(devAppHost(undefined, "linux")).toBeUndefined()
+    expect(devAppHost("not a url", "linux")).toBeUndefined()
+  })
+})
+
+describe("linuxHostHint()", () => {
+  it("names the variable when dev could not set the host on Linux", () => {
+    const hint = linuxHostHint("dev", "0.0.0.0", "linux", false)
+    expect(hint).toContain("SUPATYPE_DEV_APP_HOST")
+    expect(hint).toContain('"dev" script')
+    expect(hint).toContain("0.0.0.0")
+  })
+
+  it("says nothing when dev sets the host, off Linux, or for a remote upstream", () => {
+    expect(linuxHostHint("vite", "0.0.0.0", "linux", true)).toBeUndefined()
+    expect(linuxHostHint("dev", "127.0.0.1", DOCKER_DESKTOP, false)).toBeUndefined()
+    expect(linuxHostHint("dev", undefined, "linux", false)).toBeUndefined()
   })
 })
 

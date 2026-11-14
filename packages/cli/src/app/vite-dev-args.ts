@@ -33,13 +33,35 @@ export function viteScriptArgs(body: string): string[] | null {
 
 /**
  * The address Vite should bind for an upstream on this machine's loopback, or undefined for any
- * other upstream. On Linux that is every interface, so the gateway can reach it over the bridge.
+ * other upstream. Every interface on Linux, for the reason in this file's header.
  */
 function loopbackHost(hostname: string, platform: NodeJS.Platform): string | undefined {
   const ipv4 = hostname === "localhost" || hostname === "127.0.0.1"
   if (!ipv4 && hostname !== "[::1]") return undefined
   if (platform === "linux") return ipv4 ? "0.0.0.0" : "::"
   return ipv4 ? "127.0.0.1" : "::1"
+}
+
+/** The upstream URL, or undefined when it is unset or does not parse. */
+function parseUpstream(upstream: string | undefined): URL | undefined {
+  try {
+    return new URL(upstream?.trim() ?? "")
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Set on the app `supatype dev` starts: the address it should listen on. dev passes it to Vite as
+ * `--host` when it runs Vite itself. Any other start script, or a framework other than Vite, can read
+ * it instead, as the `vite.config.ts` init writes does.
+ */
+export const DEV_APP_HOST_ENV = "SUPATYPE_DEV_APP_HOST"
+
+/** The address the app should listen on for this upstream, or undefined when it is not a loopback. */
+export function devAppHost(upstream: string | undefined, platform: NodeJS.Platform): string | undefined {
+  const url = parseUpstream(upstream)
+  return url ? loopbackHost(url.hostname, platform) : undefined
 }
 
 /** True when the script already sets `flag`, as `--flag value` or `--flag=value`. */
@@ -54,16 +76,12 @@ function setsFlag(args: readonly string[], flag: string): boolean {
 export function viteUpstreamFlags(
   scriptArgs: readonly string[],
   upstream: string | undefined,
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform,
 ): string[] {
   const command = scriptArgs[0]
   if (command !== undefined && !command.startsWith("-") && !SERVER_COMMANDS.has(command)) return []
-  let url: URL
-  try {
-    url = new URL(upstream?.trim() ?? "")
-  } catch {
-    return []
-  }
+  const url = parseUpstream(upstream)
+  if (!url) return []
   const host = loopbackHost(url.hostname, platform)
   const flags: string[] = []
   if (host !== undefined && !setsFlag(scriptArgs, "--host")) flags.push("--host", host)
