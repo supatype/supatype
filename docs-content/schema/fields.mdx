@@ -30,6 +30,8 @@ TypeScript's built-ins map straight through:
 | `"a" \| "b"` | `TEXT` + `CHECK (col IN ('a','b'))` | a string-literal union, checked rather than a native `ENUM` type (see [Enums](#enums)) |
 | `T[]` | `T[]` | array of the element's column type |
 
+A TypeScript type with no column type of its own, such as a single string literal (`kind: "outbid"`) or an object type, is stored as `JSONB`, and `supatype push` warns naming the field. Use `string` for text, a union of two or more literals for an enum, or `JSON<T>` when `JSONB` is what you mean.
+
 ## Text
 
 | Type | PostgreSQL | Notes |

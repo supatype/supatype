@@ -250,6 +250,8 @@ export interface ExtractedSchemaAstV2 {
   storageBuckets?: ExtractedStorageBucketAst[]
   locales?: string[]
   defaultLocale?: string
+  /** What the extractor found worth saying about the schema; the engine prints them on push. */
+  warnings?: string[]
   /**
    * Draft visibility and preview-link bounds, from `supatype.config.ts`.
    *
@@ -522,6 +524,7 @@ export function emitSchema(
     storageBuckets?: ExtractedSchemaAstV2["storageBuckets"]
     locales?: string[]
     defaultLocale?: string
+    warnings?: string[]
   },
 ): ExtractedSchemaAstV2 {
   return {
@@ -531,5 +534,6 @@ export function emitSchema(
       extras.storageBuckets.length > 0 && { storageBuckets: extras.storageBuckets }),
     ...(extras?.locales !== undefined && extras.locales.length > 0 && { locales: extras.locales }),
     ...(extras?.defaultLocale !== undefined && { defaultLocale: extras.defaultLocale }),
+    ...(extras?.warnings !== undefined && extras.warnings.length > 0 && { warnings: extras.warnings }),
   }
 }

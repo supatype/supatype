@@ -238,6 +238,11 @@ All<[
 ]>
 ```
 
+> **`Exists<Rows<...>>` in a write rule does not look at the row being written.** The `where` inside
+> `Rows<>` is evaluated against the other table's rows, so the rule gives the same answer for every row
+> of a `create`, `update` or `delete`. To tie the rule to the row, use `In<"column", Rows<...>>`.
+> `supatype push` warns when a write rule contains one.
+
 A note on type-checking: the named rules stay bound to your model's fields, so
 `Owner<"athor_id">` is still a typo your editor catches. Column names *inside* a
 composition are checked by Postgres when the policy is created, not by the editor:

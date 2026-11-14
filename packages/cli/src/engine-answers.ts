@@ -88,6 +88,7 @@ export const isRoleAccess: Guard<RoleAccess> = isShape({
   role: isString,
   before: isStringArray,
   after: isStringArray,
+  effective: optional(isArrayOf(isShape({ verb: isString, rows: isString }))),
   link: optional(isBoolean),
   denied: optional(isShape({ verbs: isStringArray, reason: isString })),
 })

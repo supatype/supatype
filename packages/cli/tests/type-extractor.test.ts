@@ -1910,3 +1910,28 @@ export type Note = Model<{
     expect(() => accessOf(`OwnerFrom<string>`)).toThrow(/OwnerFrom<>.*string literal/)
   })
 })
+
+describe("fields stored as jsonb by fallback", () => {
+  function extractWarnings(fields: string): readonly string[] {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `import type { Model, UUID, JSON } from "@supatype/types"\nexport type Bid = Model<{ id: UUID\n${fields} }>\n`,
+    )
+    return extractSchemaAstFromTypes(schemaPath, dir)?.warnings ?? []
+  }
+
+  it("warns for a single string literal, naming the model, the field and the type", () => {
+    const warnings = extractWarnings(`  kind: "outbid"\n`)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Field "Bid.kind"')
+    expect(warnings[0]).toContain('"outbid"')
+    expect(warnings[0]).toContain("jsonb")
+  })
+
+  it("says nothing for types that have a column type", () => {
+    expect(extractWarnings(`  title: string\n  count: number\n  meta: JSON\n  kind: "a" | "b"\n`)).toEqual([])
+  })
+})

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **push, diff:** the access summary lists what each role can reach under the rules (new `effective`
+  field, printed by `diff` and `dev`), so a `Private` model no longer reads as full CRUD. `after`
+  is unchanged for `--json`.
+* **push:** a warning names any field stored as jsonb because its TypeScript type has no column type
+  (a single string literal, say). The mapping is unchanged.
+
 ## Unreleased
 
 ### Bug Fixes

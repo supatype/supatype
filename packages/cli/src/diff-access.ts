@@ -1,4 +1,4 @@
-import type { DiffResult, RoleAccess } from "./engine-client.js"
+import type { DiffResult, EffectiveAccess, RoleAccess } from "./engine-client.js"
 
 /**
  * What each API role may do on each model's table, as `diff` prints it (issue 16).
@@ -27,9 +27,26 @@ function sameVerbs(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((verb) => b.includes(verb))
 }
 
+/**
+ * What the role can reach under the rules, verbs sharing a scope grouped: `read (all rows); create,
+ * update (rows decided by rule)`. A grant a rule shuts out is not listed, so a `Private` model
+ * reads `none` whatever its grants say.
+ */
+function effectiveVerbs(effective: readonly EffectiveAccess[]): string {
+  const byRows = new Map<string, string[]>()
+  for (const { verb, rows } of effective) byRows.set(rows, [...(byRows.get(rows) ?? []), verb])
+  const groups = [...byRows].map(([rows, list]) => `${list.join(", ")} (${rows})`)
+  return groups.length === 0 ? "none" : groups.join("; ")
+}
+
+/** What the role may do after the push: from the rules when the engine sent them, else the grants. */
+function afterText(entry: RoleAccess): string {
+  return entry.effective === undefined ? verbs(entry.after) : effectiveVerbs(entry.effective)
+}
+
 /** `none -> read` for a line the push changes, else what the role may do after it. */
 function accessText(entry: RoleAccess): string {
-  const after = verbs(entry.after)
+  const after = afterText(entry)
   const text = changes(entry) ? `${verbs(entry.before)} -> ${after}` : after
   const { denied } = entry
   return denied === undefined ? text : `${text}${GAP_TEXT}(${denied.verbs.join(", ")} denied: ${denied.reason})`
