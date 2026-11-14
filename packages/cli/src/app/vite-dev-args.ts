@@ -6,6 +6,11 @@
  * reaches only the host's IPv4 loopback, as host.docker.internal). The App URL answered 502, or
  * served another project's app holding 127.0.0.1 on the same port. Binding Vite to the upstream's
  * own address and port, with strictPort, puts it where the proxy looks or fails it loudly.
+ *
+ * That holds where Docker Desktop runs (macOS, Windows), which forwards host.docker.internal to the
+ * host's loopback. Docker Engine on Linux maps the name to the docker0 bridge address instead, where
+ * a Vite bound to 127.0.0.1 is not listening, so the App URL answered 502 on 0.9.2 (reported by a
+ * tester on Linux). On Linux Vite listens on every interface, which covers the loopback and the bridge.
  */
 
 /** Characters that mean a script needs a shell: chaining, pipes, redirects, quoting, variables. */
@@ -26,11 +31,37 @@ export function viteScriptArgs(body: string): string[] | null {
   return null
 }
 
-/** The address Vite should bind for an upstream on this machine's loopback; undefined otherwise. */
-function loopbackHost(hostname: string): string | undefined {
-  if (hostname === "localhost" || hostname === "127.0.0.1") return "127.0.0.1"
-  if (hostname === "[::1]") return "::1"
-  return undefined
+/**
+ * The address Vite should bind for an upstream on this machine's loopback, or undefined for any
+ * other upstream. Every interface on Linux, for the reason in this file's header.
+ */
+function loopbackHost(hostname: string, platform: NodeJS.Platform): string | undefined {
+  const ipv4 = hostname === "localhost" || hostname === "127.0.0.1"
+  if (!ipv4 && hostname !== "[::1]") return undefined
+  if (platform === "linux") return ipv4 ? "0.0.0.0" : "::"
+  return ipv4 ? "127.0.0.1" : "::1"
+}
+
+/** The upstream URL, or undefined when it is unset or does not parse. */
+function parseUpstream(upstream: string | undefined): URL | undefined {
+  try {
+    return new URL(upstream?.trim() ?? "")
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Set on the app `supatype dev` starts: the address it should listen on. dev passes it to Vite as
+ * `--host` when it runs Vite itself. Any other start script, or a framework other than Vite, can read
+ * it instead, as the `vite.config.ts` init writes does.
+ */
+export const DEV_APP_HOST_ENV = "SUPATYPE_DEV_APP_HOST"
+
+/** The address the app should listen on for this upstream, or undefined when it is not a loopback. */
+export function devAppHost(upstream: string | undefined, platform: NodeJS.Platform): string | undefined {
+  const url = parseUpstream(upstream)
+  return url ? loopbackHost(url.hostname, platform) : undefined
 }
 
 /** True when the script already sets `flag`, as `--flag value` or `--flag=value`. */
@@ -42,16 +73,16 @@ function setsFlag(args: readonly string[], flag: string): boolean {
  * The flags that bind Vite to the upstream's address and port, leaving out any the script already
  * sets. None for a command that is not a server (`vite build`) or an upstream that does not parse.
  */
-export function viteUpstreamFlags(scriptArgs: readonly string[], upstream: string | undefined): string[] {
+export function viteUpstreamFlags(
+  scriptArgs: readonly string[],
+  upstream: string | undefined,
+  platform: NodeJS.Platform,
+): string[] {
   const command = scriptArgs[0]
   if (command !== undefined && !command.startsWith("-") && !SERVER_COMMANDS.has(command)) return []
-  let url: URL
-  try {
-    url = new URL(upstream?.trim() ?? "")
-  } catch {
-    return []
-  }
-  const host = loopbackHost(url.hostname)
+  const url = parseUpstream(upstream)
+  if (!url) return []
+  const host = loopbackHost(url.hostname, platform)
   const flags: string[] = []
   if (host !== undefined && !setsFlag(scriptArgs, "--host")) flags.push("--host", host)
   if (url.port !== "" && !setsFlag(scriptArgs, "--port")) flags.push("--port", url.port)

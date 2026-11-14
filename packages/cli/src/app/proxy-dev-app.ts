@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { detectPackageManager } from "./framework.js"
 import { nodeExecutable } from "../node-executable.js"
-import { viteScriptArgs, viteUpstreamFlags } from "./vite-dev-args.js"
+import { DEV_APP_HOST_ENV, devAppHost, viteScriptArgs, viteUpstreamFlags } from "./vite-dev-args.js"
 import { appOwnership, type AppIdentity } from "./port-holder.js"
 import { parsePackageJson } from "../package-json.js"
 import { pidAlive } from "../parent-watch.js"
@@ -133,6 +133,7 @@ export function resolveViteDirectSpawn(
   script: string,
   scripts: Record<string, string> | undefined,
   upstream?: string,
+  platform: NodeJS.Platform = process.platform,
 ): { bin: string; args: string[]; shell: boolean } | null {
   const scriptArgs = viteScriptArgs(scripts?.[script]?.trim() ?? "")
   if (!scriptArgs) return null
@@ -140,8 +141,27 @@ export function resolveViteDirectSpawn(
   const viteJs = join(appDir, "node_modules", "vite", "bin", "vite.js")
   if (!existsSync(viteJs)) return null
 
-  const args = [viteJs, ...scriptArgs, ...viteUpstreamFlags(scriptArgs, upstream)]
+  const args = [viteJs, ...scriptArgs, ...viteUpstreamFlags(scriptArgs, upstream, platform)]
   return { bin: nodeExecutable(viteJs), args, shell: false }
+}
+
+/**
+ * What to tell a Linux user whose app dev could not give an address to. dev passes `--host` only
+ * when it runs Vite itself, and on Linux a server left on 127.0.0.1 is out of the gateway's reach
+ * (see vite-dev-args.ts). Undefined when there is nothing to say.
+ */
+export function linuxHostHint(
+  script: string,
+  host: string | undefined,
+  platform: NodeJS.Platform,
+  devSetsHost: boolean,
+): string | undefined {
+  if (platform !== "linux" || devSetsHost || host === undefined) return undefined
+  return (
+    `If the app URL answers 502: on Linux the gateway reaches the "${script}" script's server over ` +
+    `the Docker bridge, so it must listen on ${host}. Set its host to process.env.${DEV_APP_HOST_ENV} ` +
+    `(for Vite, server.host in vite.config.ts).`
+  )
 }
 
 /**
@@ -185,6 +205,9 @@ export function startProxyDevApp(
   const useShell = directVite ? false : process.platform === "win32"
 
   appendDevTaskLog("app", "app", `Proxy mode: running ${bin} ${args.join(" ")} (${appDir})`)
+  const host = devAppHost(config.app?.upstream, process.platform)
+  const hint = linuxHostHint(script, host, process.platform, directVite !== null)
+  if (hint) appendDevTaskLog("app", "app", hint)
 
   // Run by the manager before each spawn, so the scan never holds up the dashboard. Stopping the
   // manager from inside the hook is what keeps the spawn that follows it from happening.
@@ -198,7 +221,7 @@ export function startProxyDevApp(
     cwd: appDir,
     colour: "\x1b[33m",
     shell: useShell,
-    env: { [DEV_APP_ENV]: "1" },
+    env: { [DEV_APP_ENV]: "1", ...(host !== undefined && { [DEV_APP_HOST_ENV]: host }) },
     finalExitCode: SELF_START_EXIT_CODE,
     ...(freePort && { beforeStart: freePort, beforeRestart: freePort }),
   })

@@ -355,6 +355,8 @@ describe("scaffold()", () => {
     expect(pkg).toContain('"build": "vite build"')
     const viteConfig = readFileSync(join(tmpRoot, "vite.config.ts"), "utf8")
     expect(viteConfig).toContain("port: 5173")
+    // On Linux the gateway arrives over the Docker bridge, so supatype dev chooses the address.
+    expect(viteConfig).toContain('host: process.env.SUPATYPE_DEV_APP_HOST ?? "127.0.0.1"')
   })
 
   it("proxy app mode writes upstream and start in the config when target is later", () => {

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **dev:** on Linux the app URL (`http://localhost:18473/`) answered 502 for a Vite app. `supatype
+  dev` started Vite on `127.0.0.1`, and Docker Engine on Linux reaches the host through the docker0
+  bridge, not the loopback, so the gateway found nothing listening. On Linux Vite now listens on
+  every interface (`--host 0.0.0.0`), so other machines on the network can reach the dev server, as
+  they already reach Studio's. Docker Desktop on macOS and Windows forwards to the loopback, so
+  nothing changes there.
+* **dev, init:** `supatype dev` sets `SUPATYPE_DEV_APP_HOST` on the app it starts, to the address
+  the app should listen on: `0.0.0.0` on Linux, `127.0.0.1` elsewhere. The `vite.config.ts` init
+  writes reads it, so a start script dev cannot add `--host` to (one that needs a shell, such as
+  `vite && ...`) reaches the gateway too. On Linux, when dev cannot set the address itself, the app
+  pane says to point the dev server's host at `SUPATYPE_DEV_APP_HOST`.
+
 ## 0.9.2 (2026-11-12)
 
 ### Breaking Changes

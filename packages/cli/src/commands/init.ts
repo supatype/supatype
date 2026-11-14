@@ -52,6 +52,7 @@ import {
 } from "../init-package-json.js"
 import { runsSupatypeDev } from "../dev-self-start.js"
 import { DEFAULT_PROXY_DEV_SCRIPT } from "../app/proxy-dev-app.js"
+import { DEV_APP_HOST_ENV } from "../app/vite-dev-args.js"
 import { downloadRelease, initFromExample } from "../init-example.js"
 import { errorMessage } from "../error-message.js"
 import { isJsonObject, parseJsonObject } from "@supatype/shared"
@@ -1369,7 +1370,9 @@ function viteConfigTemplate(viteDevUrl: string, outDir?: string): string {
 
 export default defineConfig({
 ${build}  server: {
-    host: "127.0.0.1",
+    // supatype dev sets ${DEV_APP_HOST_ENV}: 0.0.0.0 on Linux, where the gateway arrives over
+    // the Docker bridge rather than the loopback.
+    host: process.env.${DEV_APP_HOST_ENV} ?? "127.0.0.1",
     port: ${port},
     strictPort: true,
     // Docker Compose app proxy reaches the host as host.docker.internal.
