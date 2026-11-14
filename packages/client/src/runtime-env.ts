@@ -254,6 +254,12 @@ export class ClientTarget {
     return this.#findUrl() ?? ""
   }
 
+  /** The anon key if it can be found now, else an empty string. Never throws. */
+  currentAnonKey(): string {
+    this.#anonKey ??= present(pageEnv().anonKey)
+    return this.#anonKey ?? ""
+  }
+
   /** The address as given or as the page has set it, kept once found. */
   #findUrl(): string | undefined {
     this.#url ??= httpUrl(pageEnv().url)

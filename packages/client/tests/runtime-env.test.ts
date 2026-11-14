@@ -257,3 +257,17 @@ describe("an address ending in /", () => {
     expect(paths[0]).toMatch(/^\/api\/rest\/v1\/posts/)
   })
 })
+
+describe("client.anonKey", () => {
+  it("is the key as given", () => {
+    expect(createClient({ url: "https://a.example.com", anonKey: "given-key" }).anonKey).toBe("given-key")
+  })
+
+  it("is empty until the page sets one, then the page's, read when asked", () => {
+    const client = createClient({ url: "", anonKey: undefined })
+    expect(client.anonKey).toBe("")
+
+    vi.stubGlobal("__SUPATYPE_ENV__", DEPLOYED)
+    expect(client.anonKey).toBe(DEPLOYED.anonKey)
+  })
+})

@@ -22,3 +22,9 @@ export type { UseFunctionResult } from "./useFunction.js"
 
 export { RichText } from "./RichText.js"
 export type { RichTextProps } from "./RichText.js"
+
+export { useChannel } from "./useChannel.js"
+export type { UseChannelResult } from "./useChannel.js"
+
+export { useRealtimeConnection } from "./useRealtimeConnection.js"
+export type { UseRealtimeConnectionResult } from "./useRealtimeConnection.js"

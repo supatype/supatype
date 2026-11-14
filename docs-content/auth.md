@@ -63,7 +63,7 @@ Auth calls put the auth server's code in `error.code`, beside `message` and `sta
 
 An anonymous sign-in creates a real user with a user id and a session. Turn it on with `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true`. Because the user has an id, an anonymous user passes `LoggedIn` and can own rows. The token carries `is_anonymous: true`.
 
-`signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`.
+`signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`. The flag survives a reload: a restored session keeps it, and a session saved without it takes it from the token's `is_anonymous` claim.
 
 ### Keep anonymous users out
 

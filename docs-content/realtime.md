@@ -27,7 +27,7 @@ The realtime service reads changes from Postgres logical replication, so every c
 
 Every table Supatype manages has `REPLICA IDENTITY FULL`, so the write-ahead log carries the whole previous row. A table set up outside Supatype keeps Postgres's default identity, and its `old` can hold only the key.
 
-Values arrive with the same types as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings.
+Values arrive with the same types and formats as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings. `Json` columns arrive as the parsed value, not as JSON text. `timestamptz` arrives as ISO 8601 with a `T` and a full offset, such as `2024-01-01T12:00:00+00:00`, which every browser parses; `timestamp` is `2024-01-01T12:00:00` and `timetz` has its full offset. Fractional seconds keep their microseconds. Arrays of these types arrive as arrays. Before 0.9.3 `Json` was a string and `timestamptz` was `2024-01-01 12:00:00+00`, which Safari and Firefox read as `Invalid Date`; code that called `JSON.parse` on a `Json` column now gets the value itself.
 
 <h2 id="access">Read access</h2>
 
@@ -145,6 +145,22 @@ function Comments({ postId }: { postId: string }) {
 
 It needs `SupatypeProvider` above it, which takes your client as `client`. Give each use its own channel name: two hooks with the same name share a channel.
 
+`useChannel(name, setup, deps)` is for a channel that needs more than one listener, such as rows, presence and a broadcast together. `setup` receives the channel and adds its listeners; the hook subscribes, unsubscribes when the component unmounts or `name` or `deps` change, and runs `setup` again only when `deps` change, as `useEffect` does. It returns `status` and `error` as `useSubscription` does, and `isConnected` and `connectionState` for the socket itself.
+
+```tsx
+import { useChannel } from "@supatype/react"
+
+function Auction({ id }: { id: string }) {
+  const { status, isConnected } = useChannel(`auction:${id}`, (channel) => {
+    channel.on("postgres_changes", { event: "INSERT", table: "bid", filter: `auction_id=eq.${id}` }, ({ new: bid }) => addBid(bid))
+    channel.onBroadcast("outbid", (payload) => notify(payload))
+  }, [id])
+  return <p>{isConnected ? status : "reconnecting"}</p>
+}
+```
+
+`useRealtimeConnection()` returns only `isConnected` and `connectionState`. `@supatype/vue`, `@supatype/solid` and `@supatype/svelte` do not have `useChannel` yet.
+
 `@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`, which is `"connecting"`, `"connected"`, `"disconnected"` or `"error"`. `data` starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same `id`, deletes remove it. They do not load the rows that already exist, so pair them with a query.
 
 <h2 id="connection">Connection and auth</h2>
@@ -155,7 +171,9 @@ The client opens the socket at `/realtime/v1` on your project URL when the first
 
 When someone signs in, signs out or a different user signs in, the client reconnects with the new token and joins every channel again. Access is checked as the new identity from then on. A token refresh for the same user does not reconnect, so no changes are missed.
 
-If the socket drops, the client retries after 1, 2, 4 seconds and so on, doubling each time, for up to 10 attempts. Channels report `SUBSCRIBING` while it retries and `TIMED_OUT` once it gives up. Changes made while the socket was down are not replayed, so refetch after a reconnect if you need the gaps filled.
+A channel's status cannot tell a drop from a first connect, since both read `SUBSCRIBING`. For the socket itself, `supatype.realtime.isConnected` is true while it is open, and `supatype.realtime.onConnectionChange((state) => ...)` calls you each time `supatype.realtime.connectionState` changes between `"connected"`, `"connecting"` (first connect, reconnecting after a drop or a sign-in, or waiting to retry) and `"disconnected"` (nothing subscribed, `disconnect()` was called, or every retry failed). It returns a function that stops the listener, and does not call you with the state it already has. Refetch when the state returns to `"connected"` after a drop. In React, `useChannel` and `useRealtimeConnection` expose the same two values.
+
+If the socket drops, the client retries after 1, 2, 4, 8 and 16 seconds, then every 30 seconds, for up to 10 attempts. Channels report `SUBSCRIBING` while it retries and `TIMED_OUT` once it gives up. Changes made while the socket was down are not replayed, so refetch after a reconnect if you need the gaps filled.
 
 <h2 id="config">Config and requirements</h2>
 

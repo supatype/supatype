@@ -19,13 +19,25 @@ type RealtimeCallback<TRow> = (payload: RealtimePayload<TRow>) => void
 export type ChannelStatus = "SUBSCRIBED" | "SUBSCRIBING" | "CLOSED" | "CHANNEL_ERROR" | "TIMED_OUT"
 
 /**
+ * The socket itself, as opposed to any one channel's join on it.
+ *
+ * "connected": the socket is open. "connecting": it is opening for the first time, reopening after
+ * a drop or a sign-in swap, or waiting out a backoff. "disconnected": nothing is open and nothing
+ * is scheduled, because no channel has subscribed, disconnect() was called, or every retry failed.
+ */
+export type RealtimeConnectionState = "connected" | "connecting" | "disconnected"
+
+/** Called each time the connection state changes, with the new state. */
+export type RealtimeConnectionListener = (state: RealtimeConnectionState) => void
+
+/**
  * Told each status a channel reaches. `err` carries the server's reason with a CHANNEL_ERROR it
  * refused, such as a join for a table that does not exist, and is undefined otherwise: the same
  * `(status, err)` shape Supabase's client uses, so a callback taking only the status is unaffected.
  */
 export type ChannelStatusCallback = (status: ChannelStatus, err?: Error | undefined) => void
 
-interface ChannelSubscription<TRow> {
+export interface ChannelSubscription<TRow> {
   on(
     event: "postgres_changes",
     opts: {
@@ -216,6 +228,9 @@ function isServerMessage(value: unknown): value is ServerMessage {
 /** How the server's acknowledgement of a join begins; the channel name follows. */
 const SUBSCRIBED_TO = "subscribed to "
 
+/** The longest wait between reconnect attempts. Without it ten doublings from one second reach 512 s. */
+const MAX_RECONNECT_DELAY_MS = 30_000
+
 // ─── Realtime client ─────────────────────────────────────────────────────────
 
 export class RealtimeClient {
@@ -227,6 +242,8 @@ export class RealtimeClient {
   private reconnectAttempts = 0
   private maxReconnectAttempts = 10
   private baseReconnectDelay = 1000
+  private connection: RealtimeConnectionState = "disconnected"
+  private readonly connectionListeners = new Set<RealtimeConnectionListener>()
   /** The token the live socket was opened with, so an auth change can tell whether it still holds. */
   private currentToken: string | undefined
   /**
@@ -254,6 +271,39 @@ export class RealtimeClient {
   constructor(url: Deferred<string>, auth: Record<string, string> | HeadersProvider) {
     this.base = url
     this.getHeaders = asHeadersProvider(auth)
+  }
+
+  /** The socket's own state. A channel's status cannot say this: it reads SUBSCRIBING for a drop and a first connect alike. */
+  get connectionState(): RealtimeConnectionState {
+    return this.connection
+  }
+
+  /** True while the socket is open. A channel may still be waiting on its join. */
+  get isConnected(): boolean {
+    return this.connection === "connected"
+  }
+
+  /**
+   * Call `listener` each time the connection state changes. It is not called with the current state
+   * on registering: read `connectionState` or `isConnected` for that. Returns a function that stops it.
+   */
+  onConnectionChange(listener: RealtimeConnectionListener): () => void {
+    this.connectionListeners.add(listener)
+    return () => {
+      this.connectionListeners.delete(listener)
+    }
+  }
+
+  private setConnection(next: RealtimeConnectionState): void {
+    if (this.connection === next) return
+    this.connection = next
+    for (const listener of [...this.connectionListeners]) {
+      try {
+        listener(next)
+      } catch {
+        // One listener's bug must not stop the others hearing, or stop the socket doing its work.
+      }
+    }
   }
 
   /** The socket's address, as ws(s) for an http(s) one. Read when connecting, not before. */
@@ -472,6 +522,7 @@ export class RealtimeClient {
    */
   disconnect(): void {
     this.abandonSocket("client disconnect")
+    this.setConnection("disconnected")
     this.notifyChannels("CLOSED")
   }
 
@@ -508,6 +559,7 @@ export class RealtimeClient {
     // Read here, synchronously, so a client with no address or anon key throws from the subscribe
     // that asked for the socket rather than from a background attempt nobody is waiting on.
     const url = this.url
+    this.setConnection("connecting")
 
     let attempt: Promise<void>
     const isCurrent = (): boolean => this.attempt === attempt
@@ -559,6 +611,7 @@ export class RealtimeClient {
 
     ws.onopen = () => {
       this.reconnectAttempts = 0
+      this.setConnection("connected")
       // Re-subscribe all channels
       for (const state of this.channels.values()) {
         if (!state.subscribed) {
@@ -583,6 +636,8 @@ export class RealtimeClient {
       // Attempt reconnection with exponential backoff
       if (this.channels.size > 0) {
         this.scheduleReconnect()
+      } else {
+        this.setConnection("disconnected")
       }
     }
 
@@ -593,12 +648,14 @@ export class RealtimeClient {
 
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.setConnection("disconnected")
       this.notifyChannels("TIMED_OUT")
       return
     }
 
-    const delay = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts)
+    const delay = Math.min(MAX_RECONNECT_DELAY_MS, this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts))
     this.reconnectAttempts++
+    this.setConnection("connecting")
 
     this.notifyChannels("SUBSCRIBING")
 
