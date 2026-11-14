@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.3
+
+### Bug Fixes
+
+* **functions:** `npm:postgres` 3.4.6 and later failed in the functions worker with
+  `Not implemented: LibuvStreamWrap.prototype.useUserBuffer`. The Deno pin moves from 2.2.0 to 2.9.8
+  (worker image, the CLI's `releases/deno/VERSION`, the `init` template comment, the hook-adapter
+  script and the example configs); Deno fixed the call in 2.8.0. The release mirror workflow must run
+  for `v2.9.8` before the CLI can download it. `npm:postgres` (latest), `npm:postgres@3.4.5` and
+  `npm:pg` all answered a query from a function on the new worker.
+
 ## Unreleased
 
 ### Bug Fixes

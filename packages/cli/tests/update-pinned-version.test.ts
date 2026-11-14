@@ -226,7 +226,7 @@ describe("FF-4: writing the new pin into the config", () => {
     const before = withRealPin(initConfig(), '  versions: { postgres: "17.2.11", server: "local" },')
     const after = await updatePostgres(before)
     expect(after).toBe(before.replace('versions: { postgres: "17.2.11"', 'versions: { postgres: "17.2.12"'))
-    expect(after).toContain('  // versions: { engine: "0.1.2", server: "1.0.5", postgres: "17.2", deno: "2.2.0" },')
+    expect(after).toContain('  // versions: { engine: "0.1.2", server: "1.0.5", postgres: "17.2", deno: "2.9.8" },')
     expect(messages.info).toContain("supatype.config.ts updated.")
   })
 

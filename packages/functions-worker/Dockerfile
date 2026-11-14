@@ -1,5 +1,5 @@
 # Pin matches packages/cli/releases/deno/VERSION (CDN mirror uses the same).
-FROM denoland/deno:debian-2.2.0
+FROM denoland/deno:debian-2.9.8
 
 WORKDIR /app
 COPY --chmod=0644 LICENSE /LICENSE

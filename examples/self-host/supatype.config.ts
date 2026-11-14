@@ -22,7 +22,7 @@ export default defineConfig({
   // ships, and `postgres` because that image is published.
   versions: {
     postgres: "17.2.10",
-    deno: "2.2.0",
+    deno: "2.9.8",
   },
   // Named so the example shows where the cache lives. The pinned image serves the
   // keyspace (17.2.9 and later do), so the cache and Kong's certificates live in
