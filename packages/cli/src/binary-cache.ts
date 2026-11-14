@@ -19,7 +19,7 @@
 import { setTimeout as sleep } from "node:timers/promises"
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
 import { isJsonObject } from "@supatype/shared"
-import { cdnGet } from "./cdn-fetch.js"
+import { cdnGet, downloadToFile } from "./cdn-fetch.js"
 import { errorMessage } from "./error-message.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { progress } from "./ui/messages.js"
@@ -531,7 +531,9 @@ async function fetchVerifiedArtifact(
   const match = extractChecksum(manifest, archiveNameCandidates(component, version, platform))
 
   const binaryUrl = `${releaseDirUrl(component, version)}/${match.filename}`
-  await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
+  // A partial file left by an earlier run is not ours to resume; the retries below are.
+  if (existsSync(tmpPath)) unlinkSync(tmpPath)
+  await withRetry(() => downloadToFile(binaryUrl, tmpPath, `${component} ${version}`))
   await verifyChecksum(tmpPath, match.checksum, component)
 
   writeFileSync(destPath, readFileSync(tmpPath))
@@ -572,9 +574,9 @@ async function fetchEngineLicense(manifest: string, releaseUrl: string, target: 
     return "this release does not publish one"
   }
   try {
-    const resp = await fetch(`${releaseUrl}/${ENGINE_LICENSE_FILE}`)
+    const resp = await cdnGet(`${releaseUrl}/${ENGINE_LICENSE_FILE}`)
     if (!resp.ok) return `HTTP ${resp.status} from ${releaseUrl}/${ENGINE_LICENSE_FILE}`
-    const body = Buffer.from(await resp.arrayBuffer())
+    const body = resp.bytes
     if (createHash("sha256").update(body).digest("hex") !== expected) return "it does not match the signed checksum"
     writeFileSync(target, body)
     return undefined
@@ -773,56 +775,6 @@ export function extractChecksum(
 export interface ChecksumMatch {
   filename: string
   checksum: string
-}
-
-// ---------------------------------------------------------------------------
-// Streaming download with progress bar
-// ---------------------------------------------------------------------------
-
-async function streamToFileWithProgress(url: string, destPath: string): Promise<void> {
-  const resp = await fetch(url)
-  if (!resp.ok) throw new Error(`Failed to download from ${url}: HTTP ${resp.status}`)
-  if (!resp.body) throw new Error("Response body is null")
-
-  const totalStr = resp.headers.get("content-length")
-  const total = totalStr ? parseInt(totalStr, 10) : null
-  let downloaded = 0
-
-  const file = createWriteStream(destPath)
-  const reader = resp.body.getReader()
-
-  try {
-    while (true) {
-      // Node types a fetch body's chunks as `any`; a byte stream yields `Uint8Array`, so check it.
-      const chunk: { done: boolean; value?: unknown } = await reader.read()
-      if (chunk.done) break
-      const value = chunk.value
-      if (!(value instanceof Uint8Array)) throw new Error(`Download of ${url} yielded a chunk that is not bytes`)
-
-      await new Promise<void>((res, rej) => {
-        file.write(value, (err) => (err ? rej(err) : res()))
-      })
-      downloaded += value.length
-
-      if (total && process.stdout.isTTY) {
-        const pct = Math.min(100, Math.floor((downloaded / total) * 100))
-        const filled = Math.floor(pct / 5)
-        const bar = "=".repeat(filled).padEnd(20)
-        process.stdout.write(
-          `\r  [${bar}] ${pct}%  ${(downloaded / 1_000_000).toFixed(1)} / ${(total / 1_000_000).toFixed(1)} MB`,
-        )
-      }
-    }
-
-    if (total && process.stdout.isTTY) process.stdout.write("\n")
-
-    await new Promise<void>((res, rej) => {
-      file.end((err?: Error | null) => (err ? rej(err) : res()))
-    })
-  } catch (err) {
-    file.destroy()
-    throw err
-  }
 }
 
 // ---------------------------------------------------------------------------

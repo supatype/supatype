@@ -7,12 +7,12 @@
  * JSON, which made the CLI stricter about a postgres archive than about overwriting itself.
  */
 
-import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
-import { cdnGet, ARCHIVE_TIMEOUT_MS } from "./cdn-fetch.js"
+import { cdnGet, downloadToFile } from "./cdn-fetch.js"
 import { fetchChecksums, readLatestVersion, withRetry, type PlatformId } from "./binary-cache.js"
 import {
   cliArchiveName,
@@ -46,14 +46,6 @@ export async function fetchStandaloneCliLatestVersion(): Promise<string> {
   return readLatestVersion(resp, "cli/latest.json")
 }
 
-async function fetchBytes(url: string, what: string): Promise<Buffer> {
-  const resp = await withRetry(async () => {
-    const r = await cdnGet(url, ARCHIVE_TIMEOUT_MS)
-    if (!r.ok) throw new Error(`Failed to download ${what} from ${url}: HTTP ${r.status}. Try again in a moment.`)
-    return r
-  })
-  return resp.bytes
-}
 
 /**
  * Unpack the single executable from an archive.
@@ -111,8 +103,16 @@ function publishAtomically(unpacked: string, dest: string, platform: PlatformId)
   }
 }
 
-/** A version's archive for this machine, once it matches the signed checksums manifest. */
-async function fetchVerifiedArchive(version: string, platform: PlatformId, libc: LibcId): Promise<Buffer> {
+/**
+ * A version's archive for this machine, written to `archivePath` once it matches the signed
+ * checksums manifest. The download resumes across its retries, and the checksum is of the whole file.
+ */
+async function fetchVerifiedArchive(
+  version: string,
+  platform: PlatformId,
+  libc: LibcId,
+  archivePath: string,
+): Promise<void> {
   const name = cliArchiveName(platform, libc)
   const checksumsUrl = `${CDN_BASE}${cliChecksumsPath(version)}`
 
@@ -123,17 +123,17 @@ async function fetchVerifiedArchive(version: string, platform: PlatformId, libc:
   // without a public key, which is the same rule component downloads follow. The two are
   // fetched together, so a manifest that fails its signature is reported without waiting for
   // the archive.
-  const [expected, archive] = await Promise.all([
+  const archiveUrl = `${CDN_BASE}${cliArchivePath(version, platform, libc)}`
+  const [expected] = await Promise.all([
     fetchChecksums(checksumsUrl, `${checksumsUrl}.minisig`, name),
-    fetchBytes(`${CDN_BASE}${cliArchivePath(version, platform, libc)}`, name),
+    withRetry(() => downloadToFile(archiveUrl, archivePath, `supatype ${version}`)),
   ])
-  const actual = createHash("sha256").update(archive).digest("hex")
+  const actual = createHash("sha256").update(readFileSync(archivePath)).digest("hex")
   if (actual !== expected.checksum) {
     throw new Error(
       `Checksum mismatch for ${name}.\n  expected: ${expected.checksum}\n  actual:   ${actual}`,
     )
   }
-  return archive
 }
 
 /**
@@ -150,12 +150,13 @@ export async function downloadStandaloneCli(
   const dest = cliCachePath(resolved, platform)
   if (existsSync(dest)) return dest
 
-  const archive = await fetchVerifiedArchive(resolved, platform, libc)
   const staging = join(tmpdir(), `supatype-cli-${resolved}-${process.pid}`)
   try {
+    // Emptied first: the download resumes from whatever is at the archive path.
+    rmSync(staging, { recursive: true, force: true })
     mkdirSync(staging, { recursive: true })
     const archivePath = join(staging, cliArchiveName(platform, libc))
-    writeFileSync(archivePath, archive)
+    await fetchVerifiedArchive(resolved, platform, libc, archivePath)
     publishAtomically(unpackExecutable(archivePath, staging, platform), dest, platform)
     return dest
   } finally {

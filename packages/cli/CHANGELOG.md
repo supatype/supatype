@@ -4,9 +4,13 @@
 
 ### Bug Fixes
 
-* **self-update, install:** a stalled CDN no longer hangs the CLI. Every request for `latest.json`,
-  the checksums, the signature and the archive has a timeout (15 s, 120 s for the archive) and is
-  retried three times, and a failure names the URL and says to try again.
+* **self-update, install, component downloads:** a stalled CDN no longer hangs the CLI. A request
+  fails only when no bytes have arrived for 60 s (`SUPATYPE_FETCH_TIMEOUT_MS` sets the window), with
+  no limit on total time, so a slow link still finishes. It is retried up to three times, an archive
+  retry resumes with an HTTP Range request from the bytes already received (a 200 answer restarts
+  from zero), checksums and signatures are checked on the complete file, and a failure names the URL
+  and says to try again. Archives show `Downloading supatype 0.9.2: 18 / 46 MB` in place on a
+  terminal, and a start and end line otherwise.
 * **push, dev:** a model's `cache` block now switches the server cache on. The CLI wrote the allowlist
   only into an `.supatype/api-config.json` that nothing created, so it did nothing and said nothing.
   It now PATCHes `/admin/v1/config/rest` on the running stack (adding only newly declared tables) and
