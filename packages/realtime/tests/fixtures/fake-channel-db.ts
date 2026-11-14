@@ -22,10 +22,12 @@ const LOT_PREFIX = /^lot:[^:]+$/
 /** A row of `realtime_channel_access`. */
 interface AccessRow {
   channel: string
+  pattern: string
   fits: boolean
-  can_join: boolean
-  can_send: boolean
-  can_track: boolean
+  param_error: string | null
+  can_join: boolean | null
+  can_send: boolean | null
+  can_track: boolean | null
 }
 
 export type ChannelsMode = "open" | "declared"
@@ -117,12 +119,17 @@ export class FakeChannelDb implements ChannelDatabase {
   private access(topic: string, claims: JwtClaims | null): AccessRow[] {
     if (topic === "lobby") {
       const signedIn = claims?.role === "authenticated"
-      return [{ channel: "Lobby", fits: true, can_join: signedIn, can_send: signedIn, can_track: signedIn }]
+      return [{ channel: "Lobby", pattern: "lobby", fits: true, param_error: null, can_join: signedIn, can_send: signedIn, can_track: signedIn }]
+    }
+    if (topic === "announce") {
+      // A declaration with a join rule and no send or track rule: only the service role may use those.
+      const signedIn = claims?.role === "authenticated"
+      return [{ channel: "Announcements", pattern: "announce", fits: true, param_error: null, can_join: signedIn, can_send: null, can_track: null }]
     }
     const match = LOT_TOPIC.exec(topic)
     if (match === null) {
       return LOT_PREFIX.test(topic)
-        ? [{ channel: "LotChannel", fits: false, can_join: false, can_send: false, can_track: false }]
+        ? [{ channel: "LotChannel", pattern: "lot:{id}", fits: false, param_error: "id must be a UUID", can_join: false, can_send: false, can_track: false }]
         : []
     }
     return [this.lotRow(match[1] ?? "", claims)]
@@ -139,7 +146,9 @@ export class FakeChannelDb implements ChannelDatabase {
     const selling = user !== undefined && this.sellers.get(lot) === user
     return {
       channel: "LotChannel",
+      pattern: "lot:{id}",
       fits: true,
+      param_error: null,
       can_join: watching || auctioneer,
       can_send: selling || auctioneer,
       can_track: watching,

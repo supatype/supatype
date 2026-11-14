@@ -5,6 +5,7 @@ import {
   decideJoin,
   DENIED_BY_DATABASE,
   fetchAccess,
+  MAX_TOPIC_LENGTH,
   refusals,
   serviceGrant,
   undeclaredGrant,
@@ -79,6 +80,7 @@ export class ChannelGuard {
    * refused rather than silently admitted as if it were enforced; any other join is as it always was.
    */
   async authorizeJoin(claims: JwtClaims | null, topic: string, isPrivate: boolean): Promise<JoinDecision> {
+    if (topic.length > MAX_TOPIC_LENGTH) return { admitted: false, message: refusals.tooLong(topic.length) }
     const now = Date.now()
     if (this.sharedInstance) {
       return isPrivate

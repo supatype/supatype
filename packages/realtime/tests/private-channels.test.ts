@@ -164,7 +164,35 @@ describe("an anon-key socket on a declared channel (the Gavel finding)", () => {
 
     await join(member, "lot:42")
 
-    expect(refusalOf(member, "lot:42")).toMatchObject({ message: expect.stringContaining("LotChannel") })
+    expect(refusalOf(member, "lot:42")).toMatchObject({ message: "lot:42 does not fit lot:{id}: id must be a UUID" })
+  })
+
+  it("is refused a channel name over 255 characters before the database is asked anything", async () => {
+    const { open, db } = await harness()
+    const member = await open(userToken(ALICE))
+    const long = `lot:${"a".repeat(300)}`
+    const before = db.callerSessions + db.serviceSessions
+
+    await join(member, long)
+
+    expect(refusalOf(member, long)).toMatchObject({ message: "channel name is too long: 304 characters, the limit is 255" })
+    expect(db.callerSessions + db.serviceSessions).toBe(before)
+    const ok = `lot:${"a".repeat(251)}`
+    expect(await join(member, ok)).toMatchObject({ status: "error", message: expect.not.stringContaining("too long") })
+  })
+
+  it("says so when a declaration has no rule for the operation, and a rule that said no is worded differently", async () => {
+    const { open } = await harness()
+    const member = await open(userToken(ALICE))
+    await join(member, "announce")
+
+    member.send({ type: "broadcast", channel: "announce", event: "x", payload: {} })
+    const send = await member.next(isSystem("error", "declares no send rule"))
+    member.send({ type: "presence_track", channel: "announce", payload: {} })
+    const track = await member.next(isSystem("error", "declares no track rule"))
+
+    expect(send).toMatchObject({ message: "Announcements declares no send rule, so only the service role may broadcast on announce" })
+    expect(track).toMatchObject({ message: "Announcements declares no track rule, so only the service role may track presence on announce" })
   })
 })
 

@@ -13,6 +13,8 @@ const NOW = 1_000
 
 const row = (over: Partial<AccessRow> = {}): AccessRow => ({
   channel: "LotChannel",
+  pattern: "lot:{id}",
+  param_error: null,
   fits: true,
   can_join: true,
   can_send: true,
@@ -36,15 +38,34 @@ describe("a join, by the database's answer and the project's mode", () => {
     // Without this a topic one typo from a private channel would be an undeclared, open one.
     expect(decide(row({ fits: false, can_join: true }), "open")).toEqual({
       admitted: false,
-      message: "lot:1 does not fit the pattern of LotChannel",
+      message: "lot:1 does not fit lot:{id}",
     })
   })
 
-  it("reads a NULL verdict as a denial, never a grant", () => {
-    expect(decide(row({ can_join: null }), "open")).toMatchObject({ admitted: false })
+  it("names the parameter that does not fit", () => {
+    expect(decide(row({ fits: false, can_join: false, param_error: "id must be a UUID" }), "open")).toEqual({
+      admitted: false,
+      message: "lot:1 does not fit lot:{id}: id must be a UUID",
+    })
+  })
+
+  it("reads a NULL verdict as no rule, so only the service role may: never a grant", () => {
+    expect(decide(row({ can_join: null }), "open")).toEqual({
+      admitted: false,
+      message: "LotChannel declares no join rule, so only the service role may join lot:1",
+    })
     expect(decide(row({ can_send: null, can_track: null }), "open")).toMatchObject({
       admitted: true,
-      grant: { send: expect.stringContaining("send rule"), track: expect.stringContaining("track rule") },
+      grant: {
+        send: "LotChannel declares no send rule, so only the service role may broadcast on lot:1",
+        track: "LotChannel declares no track rule, so only the service role may track presence on lot:1",
+      },
+    })
+  })
+
+  it("tells a rule that said no from a declaration with no rule", () => {
+    expect(decide(row({ can_send: false }), "open")).toMatchObject({
+      grant: { send: "not allowed to broadcast on lot:1: the send rule of LotChannel denied it" },
     })
   })
 

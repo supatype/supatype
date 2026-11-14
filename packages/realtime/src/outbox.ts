@@ -9,6 +9,11 @@ import type { WalChange } from "./types.js"
  * insert into a broadcast. The table has no grants for `anon` or `authenticated`, so no client can
  * write a row of its own: a row here was written by a function that already judged the caller's
  * `send` rule, or by the service role.
+ *
+ * The send rule's event and payload checks are not applied to these rows. `realtime_send` is
+ * SECURITY DEFINER and checks the caller's send rule in SQL, and the stream carries no claims to
+ * judge them against here, so a function-sent message is trusted as that function chose to send it.
+ * Delivery reaches only members of the topic, who were each admitted by its join rule.
  */
 
 export const OUTBOX_SCHEMA = "_supatype"

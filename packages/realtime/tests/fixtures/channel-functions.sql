@@ -30,11 +30,13 @@ INSERT INTO _supatype.fixture_mode VALUES ('declared');
 CREATE FUNCTION _supatype.realtime_channel_mode() RETURNS text
 LANGUAGE sql STABLE AS $$ SELECT mode FROM _supatype.fixture_mode $$;
 
-CREATE FUNCTION _supatype.realtime_channel_access(topic text)
-RETURNS TABLE (channel text, fits boolean, can_join boolean, can_send boolean, can_track boolean)
+-- The rules, run as the caller. A rule that reads a table the caller has no privilege on raises, so
+-- the public function below catches that and answers false, as the engine's does.
+CREATE FUNCTION _supatype.realtime_channel_access_raw(topic text)
+RETURNS TABLE (channel text, pattern text, fits boolean, param_error text, can_join boolean, can_send boolean, can_track boolean)
 LANGUAGE sql STABLE SECURITY INVOKER SET search_path = '' AS $fn$
   -- lot:{id}
-  SELECT 'LotChannel'::text, TRUE,
+  SELECT 'LotChannel'::text, 'lot:{id}'::text, TRUE, NULL::text,
     (EXISTS (SELECT 1 FROM public.lot_watchers w WHERE w.lot_id = "lot"."id")
       OR coalesce(current_setting('request.jwt.claims', true)::jsonb -> 'app_metadata' ->> 'role', '') = 'auctioneer'),
     (EXISTS (SELECT 1 FROM public.lots l
@@ -47,16 +49,32 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path = '' AS $fn$
   WHERE "lot"."id" IS NOT NULL
   UNION ALL
   -- lot:{id}, a topic with the prefix whose parameter does not fit
-  SELECT 'LotChannel'::text, FALSE, FALSE, FALSE, FALSE
+  SELECT 'LotChannel'::text, 'lot:{id}'::text, FALSE, 'id must be a UUID'::text, FALSE, FALSE, FALSE
   WHERE topic ~ '^lot:[^:]+$'
     AND topic !~ '^lot:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
   UNION ALL
   -- lobby
-  SELECT 'Lobby'::text, TRUE,
+  SELECT 'Lobby'::text, 'lobby'::text, TRUE, NULL::text,
     coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') = 'authenticated',
     coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') = 'authenticated',
     coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') = 'authenticated'
   WHERE topic = 'lobby'
+  UNION ALL
+  -- announce: a join rule and no send or track rule, so those verdicts are NULL
+  SELECT 'Announcements'::text, 'announce'::text, TRUE, NULL::text,
+    coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') = 'authenticated',
+    NULL::boolean, NULL::boolean
+  WHERE topic = 'announce'
+$fn$;
+
+CREATE FUNCTION _supatype.realtime_channel_access(topic text)
+RETURNS TABLE (channel text, pattern text, fits boolean, param_error text, can_join boolean, can_send boolean, can_track boolean)
+LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = '' AS $fn$
+BEGIN
+  RETURN QUERY SELECT * FROM _supatype.realtime_channel_access_raw(topic);
+EXCEPTION WHEN insufficient_privilege THEN
+  RETURN QUERY SELECT 'LotChannel'::text, 'lot:{id}'::text, TRUE, NULL::text, FALSE, FALSE, FALSE WHERE topic LIKE 'lot:%';
+END
 $fn$;
 
 CREATE FUNCTION _supatype.realtime_channel_send_checks() RETURNS TABLE (channel text, checks jsonb)
@@ -71,4 +89,4 @@ LANGUAGE sql STABLE AS $$
   VALUES ('LotChannel'::text, 'public'::text, 'lot_watchers'::text), ('LotChannel', 'public', 'lots')
 $$;
 
-GRANT EXECUTE ON FUNCTION _supatype.realtime_channel_access(text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION _supatype.realtime_channel_access(text), _supatype.realtime_channel_access_raw(text) TO anon, authenticated;

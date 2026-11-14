@@ -77,11 +77,10 @@ describe.skipIf(!databaseUrl)("private channels against Postgres", { timeout: 30
     const refused = await join(anon, TOPIC)
     const admitted = await join(alice, TOPIC)
 
-    // anon has no privilege on lot_watchers, so Postgres raises instead of answering false. The
-    // server reads that as a denial, though it cannot name the declaration from an error.
+    // anon has no privilege on lot_watchers, so the rule raises; the function maps that to false.
     expect(refused).toMatchObject({
       status: "error",
-      message: `not allowed to join ${TOPIC}: the join rule of this channel's declaration denied it`,
+      message: `not allowed to join ${TOPIC}: the join rule of LotChannel denied it`,
     })
     expect(admitted).toMatchObject({ status: "ok", message: `subscribed to ${TOPIC}` })
   })
@@ -91,7 +90,19 @@ describe.skipIf(!databaseUrl)("private channels against Postgres", { timeout: 30
 
     const answer = await join(alice, "lot:42")
 
-    expect(answer).toMatchObject({ status: "error", message: expect.stringContaining("does not fit the pattern of LotChannel") })
+    expect(answer).toMatchObject({ status: "error", message: "lot:42 does not fit lot:{id}: id must be a UUID" })
+  })
+
+  it("reads a NULL verdict from the database as a declaration with no rule for that operation", async () => {
+    const alice = await open(userToken(ALICE))
+    await join(alice, "announce")
+
+    alice.send({ type: "broadcast", channel: "announce", event: "x", payload: {} })
+    const refusal = await alice.next(isSystem("error", "declares no send rule"), SLOW_DATABASE_MS)
+
+    expect(refusal).toMatchObject({
+      message: "Announcements declares no send rule, so only the service role may broadcast on announce",
+    })
   })
 
   it("judges a rule that reads a table under that table's own row security", async () => {
