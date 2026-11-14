@@ -12,8 +12,11 @@
   before retrying) or `"disconnected"`. Channel statuses are unchanged. Exports
   `RealtimeConnectionState`, `RealtimeConnectionListener` and the `ChannelSubscription` type.
 
-* **bindings:** `watchChannel` and `watchConnection` on `@supatype/client/bindings`, which the Vue, Solid
-  and Svelte `useChannel` / `createChannel` share.
+* **bindings:** `watchChannel`, `watchConnection` and `channelSlot` on `@supatype/client/bindings`, which the
+  Vue, Solid and Svelte `useChannel` / `createChannel` share. `watchTable` takes the client, not its realtime
+  client, so it can read the table: its rows are seeded by a read after each join and re-join and kept by
+  upsert on a key (the `key` option, default `id`), so the Vue, Solid and Svelte `useSubscription` /
+  `createSubscription` hold rows that existed before subscribing and recover from a drop.
 
 ### Bug Fixes
 

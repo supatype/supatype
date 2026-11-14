@@ -9,10 +9,11 @@
  * build, where `onMount` never runs. What is under test is how the primitive wires the channel.
  */
 
-import { vi } from "vitest"
-import { describeStatusAcrossSignIn, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
+import { vi, it, expect } from "vitest"
+import { describeStatusAcrossSignIn, createSocketSwapHarness, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
+import { fakeClient } from "../../client/tests/helpers/fake-client.js"
 
-const lifecycle = vi.hoisted(() => ({ cleanup: [] as Array<() => void>, harness: null as SocketSwapHarness | null }))
+const lifecycle = vi.hoisted(() => ({ cleanup: [] as Array<() => void>, harness: null as SocketSwapHarness | null, client: null as unknown }))
 
 vi.mock("solid-js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("solid-js")>()),
@@ -21,7 +22,7 @@ vi.mock("solid-js", async (importOriginal) => ({
 }))
 
 vi.mock("../src/context.js", () => ({
-  useSupatype: () => ({ realtime: lifecycle.harness?.realtime }),
+  useSupatype: () => lifecycle.client,
 }))
 
 import { createSubscription } from "../src/createSubscription.js"
@@ -30,6 +31,7 @@ describeStatusAcrossSignIn(
   "createSubscription",
   (harness) => {
     lifecycle.harness = harness
+    lifecycle.client = fakeClient(harness).client
     const { status, error } = createSubscription("task")
     return { status, error }
   },
@@ -37,3 +39,16 @@ describeStatusAcrossSignIn(
     for (const fn of lifecycle.cleanup.splice(0)) fn()
   },
 )
+
+it("createSubscription shows the rows the table already holds once the join is acknowledged", async () => {
+  const harness = createSocketSwapHarness()
+  lifecycle.harness = harness
+  lifecycle.client = fakeClient(harness, [[{ id: 1 }]]).client
+  const { data } = createSubscription("task")
+  await harness.settle()
+  harness.ackJoins()
+  await harness.settle()
+  expect(data()).toEqual([{ id: 1 }])
+  for (const fn of lifecycle.cleanup.splice(0)) fn()
+  harness.restore()
+})

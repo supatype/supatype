@@ -9,6 +9,7 @@ import { describe, it, expect, afterEach } from "vitest"
 import { applyRowChange, subscriptionViewOf, watchTable, type SubscriptionView } from "../src/table-subscription.js"
 import type { ChannelStatus, RealtimePayload } from "../src/realtime.js"
 import { simulateServerMessage, subscribedChannels } from "./helpers/mock-websocket.js"
+import { fakeClient } from "./helpers/fake-client.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "./helpers/socket-swap.js"
 
 interface Row {
@@ -69,7 +70,7 @@ describe("watchTable", () => {
     harness = createSocketSwapHarness()
     const rowsSeen: Row[][] = []
     const statuses: string[] = []
-    const stop = watchTable<Row>(harness.realtime, "task", { event: "INSERT" }, {
+    const stop = watchTable<Row>(fakeClient<Row>(harness).client, "task", { event: "INSERT" }, {
       rows: (rows) => rowsSeen.push(rows),
       status: (view) => statuses.push(view.status),
     })
@@ -91,8 +92,8 @@ describe("watchTable", () => {
   it("gives two watchers of one table a channel each, as from(table).subscribe() does", async () => {
     harness = createSocketSwapHarness()
     const quiet = { rows: (): void => undefined, status: (): void => undefined }
-    const first = watchTable<Row>(harness.realtime, "task", undefined, quiet)
-    const second = watchTable<Row>(harness.realtime, "task", undefined, quiet)
+    const first = watchTable<Row>(fakeClient<Row>(harness).client, "task", undefined, quiet)
+    const second = watchTable<Row>(fakeClient<Row>(harness).client, "task", undefined, quiet)
     await harness.settle()
 
     const [a, b] = firstSocketChannels()

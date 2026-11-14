@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { watchChannel, watchConnection, type SubscriptionView, type RealtimeConnectionState } from "../src/bindings.js"
+import { channelSlot, watchChannel, watchConnection, type SubscriptionView, type RealtimeConnectionState } from "../src/bindings.js"
 import { sentFrames, simulateServerMessage, subscribedChannels } from "./helpers/mock-websocket.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "./helpers/socket-swap.js"
 
@@ -55,5 +55,43 @@ describe("watchConnection", () => {
     stop()
     harness.realtime.disconnect()
     expect(seen).toHaveLength(3)
+  })
+})
+
+describe("channelSlot", () => {
+  it("leaves the old channel and joins the new one, dropping the old one's listeners", async () => {
+    const heard: string[] = []
+    const views: SubscriptionView[] = []
+    const slot = channelSlot(
+      harness.realtime,
+      (channel) => channel.onBroadcast("ping", () => heard.push("ping")),
+      (view) => views.push(view),
+    )
+    slot.join("room:1")
+    await harness.settle()
+    harness.ackJoins()
+    expect(views.map((v) => v.status)).toEqual(["connected"])
+
+    slot.join("room:2")
+    expect(views.map((v) => v.status)).toEqual(["connected", "connecting"])
+    await harness.settle()
+    expect(sentFrames(harness.sockets[0] ?? harness.socket()).some((f) => f["type"] === "unsubscribe" && f["channel"] === "room:1")).toBe(true)
+
+    simulateServerMessage(harness.socket(), { type: "broadcast", channel: "room:1", event: "ping", payload: {} })
+    expect(heard).toEqual([])
+    harness.ackJoins()
+    simulateServerMessage(harness.socket(), { type: "broadcast", channel: "room:2", event: "ping", payload: {} })
+    expect(heard).toEqual(["ping"])
+    slot.leave()
+  })
+
+  it("does nothing when asked to join the channel it is already on", async () => {
+    const setup = vi.fn()
+    const slot = channelSlot(harness.realtime, setup, () => undefined)
+    slot.join("room:1")
+    slot.join("room:1")
+    await harness.settle()
+    expect(setup).toHaveBeenCalledTimes(1)
+    slot.leave()
   })
 })

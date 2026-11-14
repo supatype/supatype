@@ -1,6 +1,6 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
-import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { watchTable, type SubscriptionState, type TableWatchOptions } from "@supatype/client/bindings"
 import { getSupatypeClient } from "./context.js"
 
@@ -32,7 +32,7 @@ export function createSubscription<
   const error = writable<SupatypeError | null>(null)
   const status = writable<SubscriptionState>("connecting")
 
-  const unsubscribe = watchTable<TRow>(client.realtime, table, options, {
+  const unsubscribe = watchTable<TRow>(client as AnyClient, table, options, {
     rows: (rows) => data.set(rows),
     status: (view) => {
       status.set(view.status)

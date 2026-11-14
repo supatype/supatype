@@ -36,3 +36,37 @@ export function watchConnection(
   onChange(realtime.connectionState)
   return realtime.onConnectionChange(onChange)
 }
+
+/** One channel at a time, which can be moved to another name. */
+export interface ChannelSlot {
+  /** Join `name`, leaving the channel held first. Joining the name already held does nothing. */
+  join(name: string): void
+  /** Leave the channel held, if any. */
+  leave(): void
+}
+
+/**
+ * A binding's channel when its name can change: the old channel is left, its listeners go with it,
+ * `setup` runs on the new one, and the status reads "connecting" until it joins. A binding calls
+ * `join` for the first name and again for each change, and `leave` when it is torn down.
+ */
+export function channelSlot<TRow = Record<string, unknown>>(
+  realtime: RealtimeClient,
+  setup: (channel: ChannelSubscription<TRow>) => void,
+  onStatus: (view: SubscriptionView) => void,
+): ChannelSlot {
+  let held: { name: string; stop: () => void } | null = null
+  const leave = (): void => {
+    held?.stop()
+    held = null
+  }
+  return {
+    join(name) {
+      if (held?.name === name) return
+      if (held !== null) onStatus({ status: "connecting", error: null })
+      leave()
+      held = { name, stop: watchChannel<TRow>(realtime, name, setup, onStatus) }
+    },
+    leave,
+  }
+}

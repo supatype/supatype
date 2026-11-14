@@ -1,6 +1,9 @@
 import type { ChannelStatus, RealtimeClient, RealtimeEvent, RealtimePayload } from "./realtime.js"
 import { SupatypeError } from "./errors.js"
 import { isJsonObject } from "./json.js"
+import { isRowsOf } from "./caller-types.js"
+import { reportThrown } from "./thrown-error.js"
+import type { AnyClient } from "./index.js"
 
 /**
  * A table's live rows, for `from(table).subscribe()` and for the Vue, Svelte and Solid bindings.
@@ -22,12 +25,21 @@ export interface SubscriptionView {
   error: SupatypeError | null
 }
 
-export interface TableWatchOptions {
+/** Which changes a table subscription hears. */
+interface TableChangeOptions {
   event?: RealtimeEvent | undefined
   filter?: string | undefined
 }
 
-export interface TableSubscribeOptions extends TableWatchOptions {
+export interface TableWatchOptions extends TableChangeOptions {
+  /**
+   * The column or columns that identify a row, which an upsert or a delete matches on. Default
+   * "id". Name the primary key when it is not `id`.
+   */
+  key?: string | readonly string[] | undefined
+}
+
+export interface TableSubscribeOptions extends TableChangeOptions {
   schema?: string | undefined
 }
 
@@ -109,28 +121,174 @@ export function subscriptionViewOf(status: ChannelStatus, err?: Error | undefine
   }
 }
 
-function rowId(row: unknown): unknown {
-  return isJsonObject(row) ? row["id"] : undefined
+const DEFAULT_KEY: readonly string[] = ["id"]
+
+function keyColumnsOf(key: string | readonly string[] | undefined): readonly string[] {
+  if (key === undefined) return DEFAULT_KEY
+  return typeof key === "string" ? [key] : key
+}
+
+/** The row's key as one comparable string, or undefined when a key column is missing or null. */
+function keyOf(row: unknown, key: readonly string[]): string | undefined {
+  if (!isJsonObject(row)) return undefined
+  const parts = key.map((column) => row[column])
+  return parts.some((part) => part === undefined || part === null) ? undefined : parts.map(String).join("\u0000")
+}
+
+/** `rows` with `next` in place of the row sharing its key, or added when none does. */
+function upserted<TRow>(rows: TRow[], next: TRow, key: readonly string[]): TRow[] {
+  const wanted = keyOf(next, key)
+  const at = wanted === undefined ? -1 : rows.findIndex((row) => keyOf(row, key) === wanted)
+  if (at < 0) return [...rows, next]
+  return rows.map((row, i) => (i === at ? next : row))
 }
 
 /**
- * The rows after one change, matched on `id`.
+ * The rows after one change, matched on `key` (the `id` column unless the subscription names others).
  *
- * An insert or update always carries the new row; one without it (which the service does not send)
- * leaves the rows as they were rather than putting a null among them.
+ * An INSERT or UPDATE is an upsert: a row seen twice is listed once, and an update to a row not seen
+ * yet adds it. A DELETE removes by key, and one for a key not held leaves the rows as they were.
+ * An insert or update without its row (which the service does not send), or one whose row has no
+ * key to match, leaves the rows as they were rather than putting a null or a duplicate among them.
  */
-export function applyRowChange<TRow>(rows: TRow[] | null, payload: RealtimePayload<TRow>): TRow[] {
+export function applyRowChange<TRow>(
+  rows: TRow[] | null,
+  payload: RealtimePayload<TRow>,
+  key: readonly string[] = DEFAULT_KEY,
+): TRow[] {
   const current = rows ?? []
-  const next = payload.new
   switch (payload.eventType) {
     case "INSERT":
-      return next === null ? current : [...current, next]
     case "UPDATE":
-      return next === null ? current : current.map((row) => (rowId(row) === rowId(next) ? next : row))
-    case "DELETE":
-      return current.filter((row) => rowId(row) !== rowId(payload.old))
+      return payload.new === null || keyOf(payload.new, key) === undefined ? current : upserted(current, payload.new, key)
+    case "DELETE": {
+      const gone = keyOf(payload.old, key)
+      return gone === undefined ? current : current.filter((row) => keyOf(row, key) !== gone)
+    }
     default:
       return current
+  }
+}
+
+// ─── Reading the table ───────────────────────────────────────────────────────
+
+/** A query the subscription's filter conditions can be applied to: the client's `QueryBuilder`. */
+interface Narrowable<Q> {
+  eq(column: string, value: unknown): Q
+  neq(column: string, value: unknown): Q
+  gt(column: string, value: unknown): Q
+  gte(column: string, value: unknown): Q
+  lt(column: string, value: unknown): Q
+  lte(column: string, value: unknown): Q
+}
+
+const CONDITION = /^([^=]+)=([a-z]+)\.(.*)$/s
+const OPERATORS = ["eq", "neq", "gt", "gte", "lt", "lte"] as const
+type Operator = (typeof OPERATORS)[number]
+
+function isOperator(text: string | undefined): text is Operator {
+  return OPERATORS.some((known) => known === text)
+}
+
+/**
+ * `query` narrowed by the conditions of a subscription's `filter`, so the rows read are the rows
+ * the subscription hears about. A condition the service ignores (an operator it does not know) is
+ * ignored here too.
+ */
+function withConditions<Q extends Narrowable<Q>>(query: Q, filter: string | undefined): Q {
+  let narrowed = query
+  for (const text of (filter ?? "").split(",")) {
+    const match = CONDITION.exec(text.trim())
+    const op = match?.[2]
+    if (match === null || !isOperator(op)) continue
+    narrowed = narrowed[op](match[1] ?? "", match[3] ?? "")
+  }
+  return narrowed
+}
+
+type TableRead<TRow> = { rows: TRow[]; error: null } | { rows: null; error: SupatypeError }
+
+async function readTable<TRow>(client: AnyClient, table: string, filter: string | undefined): Promise<TableRead<TRow>> {
+  try {
+    const result = await withConditions(client.from(table).select("*"), filter)
+    if (result.error !== null) return { rows: null, error: result.error }
+    return isRowsOf<TRow>(result.data) ? { rows: result.data, error: null } : { rows: [], error: null }
+  } catch (e) {
+    return { rows: null, error: reportThrown(`watchTable("${table}")`, e) }
+  }
+}
+
+// ─── A watched table ─────────────────────────────────────────────────────────
+
+/**
+ * One subscription's rows.
+ *
+ * Seeded by a read of the table each time the channel's join is acknowledged: the first join, and
+ * every join after a drop or a sign-in swap. Reading after the join, not before it, leaves no gap:
+ * a change committed before the join is in the read, and one committed after it is delivered. The
+ * read is not the same as the changes a drop missed, so each re-join replaces the rows with a fresh
+ * read rather than trying to patch them.
+ *
+ * Changes that arrive while a read is in flight are replayed over it, in order, so the read
+ * cannot undo them. Only the newest read counts.
+ */
+class WatchedRows<TRow> {
+  private rows: TRow[] | null = null
+  private replay: RealtimePayload<TRow>[] | null = null
+  private reads = 0
+  private joined = false
+  private view: SubscriptionView = { status: "connecting", error: null }
+  private readFailed = false
+  private stopped = false
+
+  constructor(
+    private readonly client: AnyClient,
+    private readonly table: string,
+    private readonly options: TableWatchOptions | undefined,
+    private readonly handlers: TableWatchHandlers<TRow>,
+  ) {}
+
+  change(payload: RealtimePayload<TRow>): void {
+    this.replay?.push(payload)
+    this.show(applyRowChange(this.rows, payload, keyColumnsOf(this.options?.key)))
+  }
+
+  status(view: SubscriptionView): void {
+    const rejoined = view.status === "connected" && !this.joined
+    this.joined = view.status === "connected"
+    this.view = view
+    this.handlers.status(view)
+    if (rejoined) void this.seed()
+  }
+
+  stop(): void {
+    this.stopped = true
+  }
+
+  private show(rows: TRow[]): void {
+    if (this.stopped) return
+    this.rows = rows
+    this.handlers.rows(rows)
+  }
+
+  private async seed(): Promise<void> {
+    const read = ++this.reads
+    this.replay ??= []
+    const answer = await readTable<TRow>(this.client, this.table, this.options?.filter)
+    if (read !== this.reads || this.stopped) return
+    const missed = this.replay
+    this.replay = null
+    this.reportRead(answer.error)
+    if (answer.rows === null) return
+    const key = keyColumnsOf(this.options?.key)
+    this.show(missed.reduce((rows, payload) => applyRowChange(rows, payload, key), answer.rows))
+  }
+
+  /** A failed read is the subscription's error until a read succeeds; the channel's status stands. */
+  private reportRead(error: SupatypeError | null): void {
+    if (error !== null) this.handlers.status({ ...this.view, error })
+    else if (this.readFailed) this.handlers.status(this.view)
+    this.readFailed = error !== null
   }
 }
 
@@ -138,25 +296,22 @@ export function applyRowChange<TRow>(rows: TRow[] | null, payload: RealtimePaylo
  * Subscribe to changes on a `public` table, and return the unsubscribe.
  *
  * The handlers are told the rows and the connection status; the binding decides where they live.
- * The status is watched on the channel `subscribeToTable` already joined, which is what its
- * channel's `subscribe(cb)` is for.
+ * The rows are the table's own: read when the subscription joins and again after each re-join, and
+ * kept current by upserting each change by key. `options.filter` narrows both the read and the
+ * changes. The status is watched on the channel `subscribeToTable` already joined, which is what
+ * its channel's `subscribe(cb)` is for.
  */
 export function watchTable<TRow>(
-  realtime: RealtimeClient,
+  client: AnyClient,
   table: string,
   options: TableWatchOptions | undefined,
   handlers: TableWatchHandlers<TRow>,
 ): () => void {
-  let rows: TRow[] | null = null
-  const subscription = subscribeToTable<TRow>(
-    realtime,
-    table,
-    (payload) => {
-      rows = applyRowChange(rows, payload)
-      handlers.rows(rows)
-    },
-    options,
-  )
-  subscription.channel.subscribe((status, err) => handlers.status(subscriptionViewOf(status, err)))
-  return subscription.unsubscribe
+  const watched = new WatchedRows<TRow>(client, table, options, handlers)
+  const subscription = subscribeToTable<TRow>(client.realtime, table, (payload) => watched.change(payload), options)
+  subscription.channel.subscribe((status, err) => watched.status(subscriptionViewOf(status, err)))
+  return () => {
+    watched.stop()
+    subscription.unsubscribe()
+  }
 }
