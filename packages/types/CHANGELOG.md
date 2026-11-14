@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **realtime:** `Channel<Pattern, { params, access }>` declares a realtime channel, with `join`,
+  `send` and `track` rules. `Param<"id">` names a channel parameter, and `Event<"bid">` and
+  `Payload<"amount", { kind: "number"; min: 1 }>` check a broadcast's event name and payload in a
+  `send` rule. `params` must name exactly the `{segments}` of the pattern, each a `UUID`, `string`
+  or `Int`, and the compiler refuses a key the pattern does not use. `ChannelParamNames`,
+  `ChannelConfig`, `ChannelAccess` and `PayloadCheck` are exported for tooling.
+
 ## Unreleased
 
 ### Features

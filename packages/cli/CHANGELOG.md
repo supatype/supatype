@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **realtime:** declare private channels in the schema. `export type LotChannel = Channel<"lot:{id}",
+  { params: { id: UUID }, access: { join, send, track } }>` takes the same rules as a model, with the
+  channel's parameters standing where a model has columns (`In<"id", MyLots>`, and `Param<"id">`
+  inside a `Rows<>` filter). `send` can also hold `Event<"bid">` and `Payload<"amount", { kind:
+  "number"; min: 1 }>` inside `All<[...]>`, which the realtime server checks per message. A
+  pattern's last segment can be `*`. A declaration is refused at extract time when its pattern and
+  `params` disagree, when two declarations can match one topic, when `Param<>`, `Event<>` or
+  `Payload<>` appear anywhere but a channel's rules, or when a rule names something that is not a
+  parameter. Declaring a channel enforces its pattern for every client at once.
+* **config:** `realtime.channels` is `"open"` (the default, so an existing project is unchanged) or
+  `"declared"`, which refuses broadcast and presence on a topic no declaration matches. It reaches
+  the database through push. `supatype init` writes `"declared"` for a new project.
+* **diff, push:** list channel changes (added, removed, which operation's rule changed) and warn
+  when removing a declaration or turning `declared` on takes broadcast and presence away. The lines
+  appear once the engine reports them; an older engine says nothing.
+* **push:** refuses a schema that declares channels, or sets `realtime.channels`, against a pinned
+  engine older than `ENGINE_MIN_FOR_CHANNELS`. The engine drops both keys, so the push would succeed
+  with nothing enforcing the channels. The constant is a placeholder until the engine release is
+  known.
+
 ## Unreleased
 
 ### Bug Fixes

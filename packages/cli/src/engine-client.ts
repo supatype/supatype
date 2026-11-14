@@ -16,6 +16,7 @@ import { ENGINE_SERVICE } from "./compose-engine-service.js"
 import { errorMessage, spawnFailureText } from "./error-message.js"
 import type { Capabilities } from "./engine-ownership-gate.js"
 import { hasProjectConfig, loadConfig } from "./config.js"
+import type { RealtimeChannelMode } from "./schema-ast-v2.js"
 import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
 import { findJsonLine } from "./engine-json-line.js"
@@ -123,6 +124,21 @@ export interface DiffResult {
   renameCandidates?: RenameCandidate[]
   /** What each API role may do on each model's table, now and after the push. Absent from older engines. */
   access?: RoleAccess[]
+  /** What the push does to realtime channels. Absent from engines that do not emit them. */
+  channels?: ChannelChange[]
+  /** The realtime channel mode before and after the push, when it changes or is stated. */
+  realtimeMode?: { before: RealtimeChannelMode; after: RealtimeChannelMode }
+}
+
+/**
+ * One realtime channel the push adds, removes or changes: which operations' rules changed, for
+ * a change. The engine owns the before state, so the CLI only says what it is told.
+ */
+export interface ChannelChange {
+  name: string
+  pattern: string
+  change: "added" | "removed" | "changed"
+  operations?: Array<"join" | "send" | "track">
 }
 
 /**

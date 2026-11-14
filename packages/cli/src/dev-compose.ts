@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
 import { printRoleAccess } from "./diff-access.js"
+import { printChannelChanges } from "./diff-channels.js"
 import { postApplyFailed } from "./post-apply.js"
 import { FRONTEND_URL_KEYS, frontendEnv, writeFrontendEnv } from "./frontend-env.js"
 import { withPublishing } from "./model-versioning.js"
@@ -948,7 +949,9 @@ export async function runComposeSchemaPush(
 async function printPlannedAccess(cwd: string, config: SupatypeProjectConfig): Promise<void> {
   try {
     const diff = await dockerDiff(cwd, config)
-    if (diff !== undefined) printRoleAccess(diff)
+    if (diff === undefined) return
+    printRoleAccess(diff)
+    printChannelChanges(diff)
   } catch (err) {
     console.log(`[supatype] Could not read each role's access before the push: ${errorMessage(err)}`)
   }

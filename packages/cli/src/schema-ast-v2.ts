@@ -239,6 +239,35 @@ export interface ExtractedStorageBucketAst {
   s3BucketPolicy?: string
 }
 
+/** What a realtime channel parameter holds: `UUID`, `string` or `Int` in the schema. */
+export type ChannelParamKind = "uuid" | "string" | "integer"
+
+export interface ChannelParamAst {
+  name: string
+  type: ChannelParamKind
+}
+
+/**
+ * One `Channel<>` declaration, as the engine reads it (section 14.1 of the realtime private channels
+ * plan). An operation the schema leaves out is `null`: denied to every caller but the service role.
+ */
+export interface ExtractedChannelAst {
+  name: string
+  pattern: string
+  params: ChannelParamAst[]
+  access: {
+    join: Record<string, unknown> | null
+    send: Record<string, unknown> | null
+    track: Record<string, unknown> | null
+  }
+}
+
+/**
+ * What a topic no `Channel<>` matches may carry: `open` leaves broadcast and presence as they were,
+ * `declared` refuses them. From `realtime.channels` in `supatype.config.ts`.
+ */
+export type RealtimeChannelMode = "open" | "declared"
+
 export interface ExtractedSchemaAstV2 {
   astVersion: typeof AST_VERSION
   models: ModelAstV2[]
@@ -248,6 +277,13 @@ export interface ExtractedSchemaAstV2 {
    */
   renameJournal?: RenameJournalEntry[]
   storageBuckets?: ExtractedStorageBucketAst[]
+  /** Declared realtime channels, in declaration order. Absent when the schema declares none. */
+  channels?: ExtractedChannelAst[]
+  /**
+   * Realtime settings from `supatype.config.ts`, attached by `withRealtime`. Absent when the config
+   * states none, which the engine reads as `open`.
+   */
+  realtime?: { channels: RealtimeChannelMode }
   locales?: string[]
   defaultLocale?: string
   /**
@@ -520,6 +556,7 @@ export function emitSchema(
   models: ModelAstV2[],
   extras?: {
     storageBuckets?: ExtractedSchemaAstV2["storageBuckets"]
+    channels?: ExtractedChannelAst[]
     locales?: string[]
     defaultLocale?: string
   },
@@ -529,6 +566,7 @@ export function emitSchema(
     models,
     ...(extras?.storageBuckets !== undefined &&
       extras.storageBuckets.length > 0 && { storageBuckets: extras.storageBuckets }),
+    ...(extras?.channels !== undefined && extras.channels.length > 0 && { channels: extras.channels }),
     ...(extras?.locales !== undefined && extras.locales.length > 0 && { locales: extras.locales }),
     ...(extras?.defaultLocale !== undefined && { defaultLocale: extras.defaultLocale }),
   }
