@@ -10,6 +10,7 @@ import {
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * The realtime admin API: a listener of its own, answering only the service role.
@@ -47,7 +48,7 @@ describe("the admin listener", () => {
   beforeAll(async () => {
     port = await freePort()
     adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort }))
+    server = new RealtimeServer(testEnv(port, { adminPort }), { channelDb: undeclaredChannels() })
     await server.start()
   })
 
@@ -140,7 +141,7 @@ describe("without ADMIN_PORT", () => {
   it("opens no admin listener at all", async () => {
     const port = await freePort()
     const unused = await freePort()
-    const server = new RealtimeServer(testEnv(port))
+    const server = new RealtimeServer(testEnv(port), { channelDb: undeclaredChannels() })
     await server.start()
     try {
       expect(await listening(unused)).toBe(false)

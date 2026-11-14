@@ -14,6 +14,7 @@ const isSubscribe = isShape({
   table: optional(isString),
   schema: optional(isString),
   changes: optional(isBoolean),
+  private: optional(isBoolean),
   filter: optional(isRecordOf(isString)),
   ref: optional(isString),
 })

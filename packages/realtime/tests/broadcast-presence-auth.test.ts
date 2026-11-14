@@ -13,6 +13,7 @@ import {
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * Broadcast and presence are only for a client that proved who it is and joined the channel.
@@ -44,7 +45,7 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
 
   beforeAll(async () => {
     port = await freePort()
-    server = new RealtimeServer(testEnv(port, { secureChannels }))
+    server = new RealtimeServer(testEnv(port, { secureChannels }), { channelDb: undeclaredChannels() })
     await server.start()
   })
 

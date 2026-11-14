@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import jwt from "jsonwebtoken"
 import { RealtimeServer } from "../src/server.js"
 import { SECRET, connect, freePort, isSystem, settle, testEnv, type Peer } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * A socket's identity lasts as long as the token it proved it with.
@@ -33,7 +34,7 @@ describe("an authenticated socket", () => {
 
   beforeAll(async () => {
     port = await freePort()
-    server = new RealtimeServer(testEnv(port))
+    server = new RealtimeServer(testEnv(port), { channelDb: undeclaredChannels() })
     await server.start()
   })
 

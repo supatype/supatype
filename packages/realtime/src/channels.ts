@@ -1,6 +1,7 @@
 import type { WebSocket } from "ws"
 import type { JwtClaims } from "./auth.js"
 import type { Subscription, PresenceEntry } from "./types.js"
+import type { ChannelGrant } from "./channel-access.js"
 import {
   summariseChannels,
   summariseConnection,
@@ -83,13 +84,17 @@ const ACTION_VERB: Record<ChannelAction, string> = {
 /**
  * The verified claims `client` sends `action` to `channel` under, or why it may not send it.
  *
- * Two conditions. The client holds verified claims: any token signed with the project's secret,
- * the anon key included, since that is what a signed-out SDK client connects with. And it is a
- * member of the channel. Membership carries everything else: a subscription exists only once
- * `subscribe` accepted it, so whatever subscribe enforces holds here as well.
+ * Three conditions. The client holds verified claims: any token signed with the project's secret,
+ * the anon key included, since that is what a signed-out SDK client connects with. It is a member
+ * of the channel: a subscription exists only once `subscribe` accepted it. And the grant the server
+ * recorded at join (and refreshed on every re-check) allows the action. The grant is read, never
+ * recomputed, so a frame costs no database call.
  *
- * Both used to be skipped. A socket with no token could broadcast to, and announce presence on,
- * any channel name without ever joining it.
+ * The first two used to be skipped. A socket with no token could broadcast to, and announce
+ * presence on, any channel name without ever joining it.
+ *
+ * Leaving presence is always allowed: a member must be able to take back what it announced, even
+ * after its right to announce was withdrawn.
  */
 export function admitChannelAction(
   client: ConnectedClient,
@@ -98,8 +103,21 @@ export function admitChannelAction(
 ): JwtClaims | string {
   const verb = ACTION_VERB[action]
   if (!client.claims) return `authenticate before ${verb}`
-  if (!client.subscriptions.has(channel)) return `subscribe to ${channel} before ${verb}`
-  return client.claims
+  const subscription = client.subscriptions.get(channel)
+  if (!subscription) return `subscribe to ${channel} before ${verb}`
+  return grantRefusal(subscription.access, action) ?? client.claims
+}
+
+/**
+ * Why `grant` does not allow `action`, or null when it does.
+ *
+ * No grant at all refuses everything but leaving: a subscription the server did not decide is one
+ * it cannot vouch for, and the safe reading of "nobody decided" is "no".
+ */
+function grantRefusal(grant: ChannelGrant | undefined, action: ChannelAction): string | null {
+  if (action === "presence_untrack") return null
+  if (grant === undefined) return "no access decision is recorded for this channel; rejoin it"
+  return action === "broadcast" ? grant.send : grant.track
 }
 
 /**
@@ -215,6 +233,17 @@ export class ChannelManager {
     const client = this.clients.get(id)
     this.clients.delete(id)
     return client
+  }
+
+  /** Every connection with its id, for the sweeps that judge them all (re-checks). */
+  entries(): IterableIterator<[string, ConnectedClient]> {
+    return this.clients.entries()
+  }
+
+  /** Replace what a client may do on a channel it holds, after a re-check. */
+  setAccess(clientId: string, channel: string, access: ChannelGrant): void {
+    const subscription = this.clients.get(clientId)?.subscriptions.get(channel)
+    if (subscription) subscription.access = access
   }
 
   /** Update a client's JWT claims (e.g., after auth message). */

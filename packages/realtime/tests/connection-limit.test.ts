@@ -3,6 +3,7 @@ import { WebSocket } from "ws"
 import { RealtimeServer } from "../src/server.js"
 import { expectObject } from "./fixtures/expect-json.js"
 import { connect, freePort, serviceToken, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * `CONNECTION_LIMIT` in single-tenant mode, which is how every Cloud project's own realtime runs.
@@ -38,7 +39,7 @@ describe("CONNECTION_LIMIT", () => {
   it("closes the socket past the limit with 4429, and reports the limit", async () => {
     const port = await freePort()
     const adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort, connectionLimit: 2 }))
+    server = new RealtimeServer(testEnv(port, { adminPort, connectionLimit: 2 }), { channelDb: undeclaredChannels() })
     await server.start()
 
     peers.push(await connect(port, userToken("a")), await connect(port, userToken("b")))
@@ -52,7 +53,7 @@ describe("CONNECTION_LIMIT", () => {
   it("lets everyone in when unset, and reports no limit", async () => {
     const port = await freePort()
     const adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort }))
+    server = new RealtimeServer(testEnv(port, { adminPort }), { channelDb: undeclaredChannels() })
     await server.start()
 
     for (let i = 0; i < 50; i++) peers.push(await connect(port, userToken(`u${i}`)))

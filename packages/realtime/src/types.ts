@@ -1,4 +1,5 @@
 import type { ExactColumns } from "./exact-columns.js"
+import type { ChannelGrant } from "./channel-access.js"
 
 /** Event types for database change notifications. */
 export type ChangeEvent = "INSERT" | "UPDATE" | "DELETE"
@@ -61,6 +62,12 @@ export interface SubscribeMessage {
    */
   changes?: boolean | undefined
   filter?: Record<string, string> | undefined
+  /**
+   * An assertion that the channel is private. The server enforces every declared channel whether
+   * or not this is sent, so it never loosens anything; it only makes the join fail when no
+   * declaration matches the name, which catches a typo in a channel name at once.
+   */
+  private?: boolean | undefined
   /**
    * The client's name for this request, echoed on the reply to it.
    *
@@ -155,6 +162,12 @@ export interface SystemMessage {
   /** The `ref` of the request this replies to, when that request carried one. */
   ref?: string | undefined
   /**
+   * What this server can do beyond the base protocol, on the first frame a socket receives. A
+   * client that needs one (`private_channels`) checks for it rather than assume: an older server
+   * ignores the flags it does not know and would admit what the client believes is guarded.
+   */
+  features?: string[] | undefined
+  /**
    * The channel a refusal is about. The client fails only that channel; an error without one is
    * about the socket, and fails every channel on it.
    */
@@ -188,4 +201,10 @@ export interface Subscription {
   startLsn?: bigint | undefined
   /** Set for a join that asked for no row changes (`changes: false`): no row change reaches it. */
   withoutRows?: true | undefined
+  /**
+   * What the caller may do on this channel, decided by the server when the join was accepted and
+   * again whenever access is re-checked. Never read from a client frame. Absent only on a
+   * subscription made outside the server, which is then refused every send.
+   */
+  access?: ChannelGrant | undefined
 }

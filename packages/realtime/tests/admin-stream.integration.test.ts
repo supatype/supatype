@@ -16,6 +16,7 @@ import {
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * The inspector's live stream against a real database: what each payload view may show.
@@ -150,7 +151,7 @@ describe.skipIf(!databaseUrl)("GET /admin/v1/stream payload views", () => {
     await admin.query(SETUP)
     port = await freePort()
     adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort, databaseUrl: databaseUrl!, slotName: SLOT, replicationPollInterval: 100 }))
+    server = new RealtimeServer(testEnv(port, { adminPort, databaseUrl: databaseUrl!, slotName: SLOT, replicationPollInterval: 100 }), { channelDb: undeclaredChannels() })
     await server.start()
     await server.waitForReplicationStartup()
   })
