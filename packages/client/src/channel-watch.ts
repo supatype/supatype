@@ -1,4 +1,5 @@
 import type { ChannelOptions, ChannelSubscription, RealtimeClient, RealtimeConnectionState } from "./realtime.js"
+import type { ChannelActionRefusal } from "./realtime-refusals.js"
 import { subscriptionViewOf, type SubscriptionView } from "./table-subscription.js"
 
 /**
@@ -13,6 +14,9 @@ import { subscriptionViewOf, type SubscriptionView } from "./table-subscription.
  *
  * `opts.private` asks for a private channel: see {@link ChannelOptions}. A refusal then shows as a
  * `RealtimeChannelError`, so a binding can read its `reason`.
+ *
+ * `onRefused` hears a send, track or payload the server refused on the joined channel. The status
+ * does not move for it, so it has its own channel to the binding.
  */
 export function watchChannel<TRow = Record<string, unknown>>(
   realtime: RealtimeClient,
@@ -20,9 +24,11 @@ export function watchChannel<TRow = Record<string, unknown>>(
   setup: (channel: ChannelSubscription<TRow>) => void,
   onStatus: (view: SubscriptionView) => void,
   opts?: ChannelOptions | undefined,
+  onRefused?: ((refusal: ChannelActionRefusal) => void) | undefined,
 ): () => void {
   const channel = realtime.channel<TRow>(name, opts)
   setup(channel)
+  if (onRefused !== undefined) channel.onRefused(onRefused)
   channel.subscribe((status, err) => onStatus(subscriptionViewOf(status, err)))
   return () => channel.unsubscribe()
 }
@@ -53,13 +59,14 @@ export interface ChannelSlot {
  * A binding's channel when its name can change: the old channel is left, its listeners go with it,
  * `setup` runs on the new one, and the status reads "connecting" until it joins. A binding calls
  * `join` for the first name and again for each change, and `leave` when it is torn down. `opts` is
- * given to every channel it joins.
+ * given to every channel it joins, and `onRefused` hears every refused send on them.
  */
 export function channelSlot<TRow = Record<string, unknown>>(
   realtime: RealtimeClient,
   setup: (channel: ChannelSubscription<TRow>) => void,
   onStatus: (view: SubscriptionView) => void,
   opts?: ChannelOptions | undefined,
+  onRefused?: ((refusal: ChannelActionRefusal) => void) | undefined,
 ): ChannelSlot {
   let held: { name: string; stop: () => void } | null = null
   const leave = (): void => {
@@ -71,7 +78,7 @@ export function channelSlot<TRow = Record<string, unknown>>(
       if (held?.name === name) return
       if (held !== null) onStatus({ status: "connecting", error: null })
       leave()
-      held = { name, stop: watchChannel<TRow>(realtime, name, setup, onStatus, opts) }
+      held = { name, stop: watchChannel<TRow>(realtime, name, setup, onStatus, opts, onRefused) }
     },
     leave,
   }

@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { isRealtimeChannelError } from "@supatype/client"
-import { subscribeFrames, simulateServerMessage } from "../../client/tests/helpers/mock-websocket.js"
+import { ackNewestJoin, subscribeFrames, simulateServerMessage } from "../../client/tests/helpers/mock-websocket.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
 
 const lifecycle = vi.hoisted(() => ({ cleanup: [] as Array<() => void>, harness: null as SocketSwapHarness | null }))
@@ -42,5 +42,20 @@ describe("createChannel with private: true", () => {
     simulateServerMessage(harness.socket(), { type: "system", status: "ok", message: "authenticated" })
     expect(status()).toBe("error")
     expect(isRealtimeChannelError(error())).toBe(true)
+  })
+})
+
+describe("createChannel with a refused send", () => {
+  it("exposes the refusal and keeps the status connected", async () => {
+    const harness = createSocketSwapHarness()
+    lifecycle.harness = harness
+    const { status, refusal } = createChannel("lot:42", () => undefined, { private: true })
+    await harness.settle()
+    simulateServerMessage(harness.socket(), { type: "system", status: "ok", message: "authenticated", features: ["private_channels"] })
+    ackNewestJoin(harness.socket(), "lot:42")
+    expect(refusal()).toBeNull()
+    simulateServerMessage(harness.socket(), { type: "system", status: "error", code: "send_denied", message: "not allowed", channel: "lot:42" })
+    expect(refusal()).toEqual({ channel: "lot:42", code: "send_denied", message: "not allowed" })
+    expect(status()).toBe("connected")
   })
 })

@@ -51,6 +51,8 @@
   `_supatype.realtime_send` reaches `onBroadcast` listeners like any other; the README says so.
 * **bindings:** `watchChannel` and `channelSlot` take `ChannelOptions` as a last argument, and a binding's
   `error` for a refused or withdrawn channel is the `RealtimeChannelError` itself, not a copy of its message.
+* **bindings:** `watchChannel` and `channelSlot` take an `onRefused` callback, which the Vue, Solid and
+  Svelte channel bindings expose as `refusal`.
 
 ### Bug Fixes
 

@@ -1,6 +1,6 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
-import type { AugmentedDatabase, AnyDatabase, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
 import { channelSlot, type SubscriptionState } from "@supatype/client/bindings"
 import { getSupatypeClient } from "./context.js"
 import { createRealtimeConnection, type RealtimeConnectionStore } from "./createRealtimeConnection.js"
@@ -10,6 +10,8 @@ export interface ChannelStore extends RealtimeConnectionStore {
   status: Readable<SubscriptionState>
   /** Why the server refused the join, while the status is "error"; null otherwise. */
   error: Readable<SupatypeError | null>
+  /** The latest send, track or payload the server refused on this channel; the status does not move for it. */
+  refusal: Readable<ChannelActionRefusal | null>
 }
 
 /** A name given as a store, told apart from a plain string by its `subscribe`. */
@@ -39,15 +41,24 @@ export function createChannel<TRow = Record<string, unknown>, TDatabase extends 
   const connection = createRealtimeConnection<TDatabase>()
   const status = writable<SubscriptionState>("connecting")
   const error = writable<SupatypeError | null>(null)
+  const refusal = writable<ChannelActionRefusal | null>(null)
   const slot = channelSlot<TRow>(client.realtime, setup, (view) => {
     status.set(view.status)
     error.set(view.error)
-  }, options)
+    if (view.status === "connecting") refusal.set(null)
+  }, options, (refused) => {
+    refusal.set(refused)
+  })
 
   // A store calls a new subscriber at once with its value, which is the first join.
   if (isReadable(name)) onDestroy(name.subscribe((next) => slot.join(next)))
   else slot.join(name)
   onDestroy(slot.leave)
 
-  return { status: { subscribe: status.subscribe }, error: { subscribe: error.subscribe }, ...connection }
+  return {
+    status: { subscribe: status.subscribe },
+    error: { subscribe: error.subscribe },
+    refusal: { subscribe: refusal.subscribe },
+    ...connection,
+  }
 }

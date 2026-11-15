@@ -13,6 +13,9 @@
 * **createChannel:** takes `{ private: true }` as a third argument, passed to the channel join (see the
   client changelog). A refused or withdrawn private join is status "error" with `error` a
   `RealtimeChannelError` whose `reason` says why.
+* **createChannel:** returns `refusal`, the latest broadcast, presence track or payload the server refused on the
+  channel (`{ channel, code, message }`, `code` one of `send_denied`, `track_denied`,
+  `payload_refused`), or null. The channel stays joined: `status` does not change for it.
 
 ### Bug Fixes
 

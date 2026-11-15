@@ -1,6 +1,6 @@
 import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { AugmentedDatabase, AnyDatabase, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
 import { channelSlot, type SubscriptionState } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 import { createRealtimeConnection, type RealtimeConnectionResult } from "./createRealtimeConnection.js"
@@ -10,6 +10,8 @@ export interface ChannelResult extends RealtimeConnectionResult {
   status: Accessor<SubscriptionState>
   /** Why the server refused the join, while the status is "error"; null otherwise. */
   error: Accessor<SupatypeError | null>
+  /** The latest send, track or payload the server refused on this channel; the status does not move for it. */
+  refusal: Accessor<ChannelActionRefusal | null>
 }
 
 /**
@@ -33,10 +35,14 @@ export function createChannel<TRow = Record<string, unknown>, TDatabase extends 
   const connection = createRealtimeConnection<TDatabase>()
   const [status, setStatus] = createSignal<SubscriptionState>("connecting")
   const [error, setError] = createSignal<SupatypeError | null>(null)
+  const [refusal, setRefusal] = createSignal<ChannelActionRefusal | null>(null)
   const slot = channelSlot<TRow>(client.realtime, setup, (view) => {
     setStatus(view.status)
     setError(view.error)
-  }, options)
+    if (view.status === "connecting") setRefusal(null)
+  }, options, (refused) => {
+    setRefusal(refused)
+  })
   const current = (): string => (typeof name === "function" ? name() : name)
 
   onMount(() => {
@@ -46,5 +52,5 @@ export function createChannel<TRow = Record<string, unknown>, TDatabase extends 
   // Deferred, because `onMount` above makes the first join; `on` runs the move only when the name changes.
   createEffect(on(current, (next) => slot.join(next), { defer: true }))
 
-  return { status, error, ...connection }
+  return { status, error, refusal, ...connection }
 }

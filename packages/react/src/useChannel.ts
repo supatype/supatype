@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, type DependencyList } from "react"
-import type { ChannelOptions, ChannelStatus, ChannelSubscription } from "@supatype/client"
+import type { ChannelActionRefusal, ChannelOptions, ChannelStatus, ChannelSubscription } from "@supatype/client"
 import { useSupatype } from "./context.js"
 import { useRealtimeConnection, type UseRealtimeConnectionResult } from "./useRealtimeConnection.js"
 
@@ -10,14 +10,21 @@ export interface UseChannelResult extends UseRealtimeConnectionResult {
   status: ChannelStatus
   /** Why the server refused the join, while the status is CHANNEL_ERROR; null otherwise. */
   error: Error | null
+  /**
+   * The latest broadcast, presence track or payload the server refused on this channel, or null.
+   * The channel stays joined (`status` does not change); this is how the app learns a send went
+   * nowhere. Cleared when the channel changes.
+   */
+  refusal: ChannelActionRefusal | null
 }
 
 interface ChannelState {
   status: ChannelStatus
   error: Error | null
+  refusal: ChannelActionRefusal | null
 }
 
-const JOINING: ChannelState = { status: "SUBSCRIBING", error: null }
+const JOINING: ChannelState = { status: "SUBSCRIBING", error: null, refusal: null }
 
 /**
  * Join one channel and register whatever listeners `setup` adds to it: row changes, presence and
@@ -54,9 +61,10 @@ export function useChannel<TRow = Record<string, unknown>>(
     setState(JOINING)
     const channel = realtime.channel<TRow>(name, { private: isPrivate })
     setup(channel)
+    channel.onRefused((refusal) => setState((prev) => ({ ...prev, refusal })))
     channel.subscribe((status, err) => {
       const error = err ?? null
-      setState((prev) => (prev.status === status && prev.error === error ? prev : { status, error }))
+      setState((prev) => (prev.status === status && prev.error === error ? prev : { ...prev, status, error }))
     })
     return () => {
       channel.unsubscribe()

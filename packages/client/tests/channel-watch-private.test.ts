@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { channelSlot, watchChannel } from "../src/channel-watch.js"
 import { RealtimeChannelError } from "../src/errors.js"
 import type { SubscriptionView } from "../src/table-subscription.js"
-import { simulateServerMessage, subscribeFrames } from "./helpers/mock-websocket.js"
+import { ackNewestJoin, simulateServerMessage, subscribeFrames } from "./helpers/mock-websocket.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "./helpers/socket-swap.js"
 
 let harness: SocketSwapHarness
@@ -71,5 +71,35 @@ describe("channelSlot with private: true", () => {
     await harness.settle()
     greet(["private_channels"])
     expect(subscribeFrames(harness.socket(), "lot:2")[0]?.["private"]).toBe(true)
+  })
+})
+
+describe("watchChannel and channelSlot with a refused send", () => {
+  const frame = { type: "system", status: "error", code: "send_denied", message: "not allowed", channel: "lot:42" } as const
+
+  it("hands a refused send to onRefused and leaves the view connected", async () => {
+    harness = createSocketSwapHarness()
+    const views: SubscriptionView[] = []
+    const refused: unknown[] = []
+    watchChannel(harness.realtime, "lot:42", () => undefined, (view) => views.push(view), { private: true }, (r) => refused.push(r))
+    await harness.settle()
+    greet(["private_channels"])
+    ackNewestJoin(harness.socket(), "lot:42")
+    simulateServerMessage(harness.socket(), frame)
+    expect(refused).toEqual([{ channel: "lot:42", code: "send_denied", message: "not allowed" }])
+    expect(views.at(-1)?.status).toBe("connected")
+  })
+
+  it("does the same through a slot", async () => {
+    harness = createSocketSwapHarness()
+    const refused: unknown[] = []
+    const slot = channelSlot(harness.realtime, () => undefined, () => undefined, { private: true }, (r) => refused.push(r))
+    slot.join("lot:42")
+    await harness.settle()
+    greet(["private_channels"])
+    ackNewestJoin(harness.socket(), "lot:42")
+    simulateServerMessage(harness.socket(), frame)
+    expect(refused).toHaveLength(1)
+    slot.leave()
   })
 })

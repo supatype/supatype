@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue"
-import type { AugmentedDatabase, AnyDatabase, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
 import { channelSlot, type SubscriptionState } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 import { useRealtimeConnection, type UseRealtimeConnectionReturn } from "./useRealtimeConnection.js"
@@ -9,6 +9,8 @@ export interface UseChannelReturn extends UseRealtimeConnectionReturn {
   status: Ref<SubscriptionState>
   /** Why the server refused the join, while the status is "error"; null otherwise. */
   error: Ref<SupatypeError | null>
+  /** The latest send, track or payload the server refused on this channel; the status does not move for it. */
+  refusal: Ref<ChannelActionRefusal | null>
 }
 
 /**
@@ -40,10 +42,14 @@ export function useChannel<TRow = Record<string, unknown>, TDatabase extends Any
   const connection = useRealtimeConnection<TDatabase>()
   const status = ref<SubscriptionState>("connecting")
   const error = ref<SupatypeError | null>(null)
+  const refusal = ref<ChannelActionRefusal | null>(null)
   const slot = channelSlot<TRow>(client.realtime, setup, (view) => {
     status.value = view.status
     error.value = view.error
-  }, options)
+    if (view.status === "connecting") refusal.value = null
+  }, options, (refused) => {
+    refusal.value = refused
+  })
   let mounted = false
 
   onMounted(() => {
@@ -58,5 +64,5 @@ export function useChannel<TRow = Record<string, unknown>, TDatabase extends Any
     slot.leave()
   })
 
-  return { status, error, ...connection }
+  return { status, error, refusal, ...connection }
 }
