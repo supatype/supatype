@@ -86,7 +86,7 @@ describe("shared primitives", () => {
     expect(scanStudio().asChild).toEqual([
       "components/TopBar.tsx:149  <a",
       "components/TopBar.tsx:150  <a",
-      "components/UserAccountMenu.tsx:145  <a",
+      "components/UserAccountMenu.tsx:149  <a",
     ])
   })
 
