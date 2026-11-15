@@ -76,6 +76,11 @@ function normalizeBaseUrl(base: string): string {
   return base.replace(/\/$/, "")
 }
 
+/** Where the user manages their Cloud account: the account pages Cloud serves under `/account`. */
+export function accountUrl(cloudUrl: string): string {
+  return `${normalizeBaseUrl(cloudUrl)}/account`
+}
+
 export interface UserAccountMenuProps {
   demoMode?: boolean | undefined
 }
@@ -100,8 +105,7 @@ export function UserAccountMenu({ demoMode }: UserAccountMenuProps): React.React
   const avatarUrl =
     user !== null ? avatarFromUser(user) : cookieUser?.avatar
 
-  const accountDashboardHref =
-    cloudUrl !== undefined ? `${normalizeBaseUrl(cloudUrl)}/dashboard` : null
+  const accountHref = cloudUrl !== undefined ? accountUrl(cloudUrl) : null
 
   const initials =
     avatarUrl !== undefined && avatarUrl.length > 0
@@ -140,10 +144,10 @@ export function UserAccountMenu({ demoMode }: UserAccountMenuProps): React.React
         <DropdownMenuItem asChild>
           <Link to="/settings">Project settings</Link>
         </DropdownMenuItem>
-        {accountDashboardHref !== null && (
+        {accountHref !== null && (
           <DropdownMenuItem asChild>
-            <a href={accountDashboardHref} target="_blank" rel="noreferrer">
-              Manage account…
+            <a href={accountHref} target="_blank" rel="noreferrer">
+              Account
             </a>
           </DropdownMenuItem>
         )}
