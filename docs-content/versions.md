@@ -25,7 +25,7 @@ A release is one number for the CLI and every `@supatype/*` package. The engine,
 | Schema engine | `v0.10.1` | Parses the schema, plans and applies a push (`supatype/schema-engine`) |
 | Server | `v2.5.0` | The Supatype server: the API, auth and the services behind it (`supatype/server`) |
 | Postgres | `17.2.14` | The database image, with its extensions (`supatype/postgres`) |
-| Deno | `2.2.0` | The runtime for functions and hooks |
+| Deno | `2.9.8` | The runtime for functions and hooks |
 
 The pins come from `release/images.json` in the repository, and the page is generated from it, so it is out of date only between a pin changing and the next site sync.
 
