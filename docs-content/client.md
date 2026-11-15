@@ -149,7 +149,7 @@ const { data, meta } = await supatype
 console.log(meta?.cacheStatus)  // "HIT", "MISS" or "BYPASS"
 ```
 
-The cache status is `meta.cacheStatus`, on the result next to `data` and `error`: it is not a field of the result itself. It is `"HIT"` when the cache answered, `"MISS"` when the read went to the database and its result was stored, and `"BYPASS"` when the server cache was asked for and not used (for example, the model declares no cache, or caching is off for the project). A read that did not call `.cache()` has no `meta.cacheStatus`, and `meta` itself can be absent.
+The cache status is `meta.cacheStatus`, on the result next to `data` and `error`: it is not a field of the result itself. It is `"HIT"` when a cache answered and `"MISS"` when the read went to the database. `"BYPASS"` appears only when the server says so in its `X-Supatype-Cache-Status` header. A model with no server cache, or a project with caching off, sends no header, and the read reports `"MISS"`. A read that did not call `.cache()` has no `meta.cacheStatus`, and `meta` itself can be absent.
 
 <h2 id="globals">Globals</h2>
 
