@@ -118,7 +118,7 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
       }
 
       const insert = mine()
-      expect(insert, `expected an INSERT on ${TABLE}, got ${JSON.stringify(changes)}`).toBeDefined()
+      expect(insert, `expected an INSERT on ${TABLE}, got ${JSON.stringify(changes, (_key, value: unknown) => (typeof value === "bigint" ? value.toString() : value))}`).toBeDefined()
       expect(insert?.newRecord?.["note"]).toBe("decoded without a publication")
     } finally {
       await listener.stop()

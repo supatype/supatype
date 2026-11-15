@@ -77,8 +77,8 @@ describe.skipIf(!databaseUrl)("private channels against Postgres", { timeout: 30
     if (installed.rows[0]?.fn === null) {
       throw new Error(`push ${schemaPath} to this database first: the channel functions are not installed`)
     }
-    await admin.query("DELETE FROM public.lot_watchers")
-    await admin.query("DELETE FROM public.lots")
+    await admin.query("DELETE FROM public.lot_watchers WHERE true")
+    await admin.query("DELETE FROM public.lots WHERE true")
     await admin.query("INSERT INTO public.lots (id, seller_id) VALUES ($1, $2)", [LOT, SELLER])
     await admin.query("INSERT INTO public.lot_watchers (lot_id, user_id) VALUES ($1, $2), ($1, $3)", [LOT, ALICE, SELLER])
     filter = new RlsFilter(databaseUrl!)
