@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test"
 
 /**
- * Replication, Warehouse, Backups, SSO, AI Usage and the Realtime Inspector and its settings are
- * not built anywhere, Cloud included.
+ * Replication, Warehouse, Backups, AI Usage and the Realtime Inspector and its settings are not
+ * built anywhere, Cloud included. SSO was on this list until 0.9.1 built its page, which is a link.
  *
  * Self-hosted Studio used to badge them "Cloud" and title them "Available on Supatype Cloud", which
  * told somebody running their own stack that the hosted product had features it did not. They are
@@ -17,7 +17,6 @@ const ENTRIES = [
   { section: "/studio/database/overview", label: "Replication", note: "Read replicas are coming soon" },
   { section: "/studio/database/overview", label: "Warehouse", note: "The analytical warehouse is coming soon" },
   { section: "/studio/database/overview", label: "Backups", note: "Managed backups are coming soon" },
-  { section: "/studio/authentication/users", label: "SSO", note: "SSO is coming soon" },
   { section: "/studio/ai/vectors", label: "Usage", note: "AI usage tracking is coming soon" },
   { section: "/studio/realtime", label: "Inspector", note: "The Realtime Inspector is coming soon" },
   { section: "/studio/realtime", label: "Settings", note: "Realtime settings are coming soon" },
@@ -57,9 +56,10 @@ test.describe("CORS on a self-hosted Studio", () => {
   test("says how to set the allow-list, with no Cloud upsell and no permissive claim", async ({ page }) => {
     await page.goto("/studio/settings", { waitUntil: "networkidle" })
     const main = page.locator("#studio-main")
-    await main.getByRole("button", { name: "CORS", exact: true }).click()
+    // A tab of the Settings tab bar since Studio moved to the shared Tabs component.
+    await main.getByRole("tab", { name: "CORS", exact: true }).click()
     await expect(main).toContainText("SUPATYPE_CORS_ALLOW_ORIGINS")
-    await expect(main).toContainText("its own origin only")
+    await expect(main).toContainText("its site URL")
     await expect(main).not.toContainText(/permissive/i)
     await expect(page.getByText("Supatype Cloud")).toHaveCount(0)
   })
