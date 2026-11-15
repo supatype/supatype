@@ -1,5 +1,6 @@
 import { asHeadersProvider, bearerToken, type HeadersProvider } from "./query.js"
 import { settle, type Deferred } from "./runtime-env.js"
+import type { ChannelName } from "./types.js"
 import { coerceRecordKinds, type ExactFields } from "./exact-values.js"
 import {
   PRIVATE_CHANNELS_FEATURE,
@@ -405,7 +406,7 @@ export class RealtimeClient {
    * `useSubscription` hooks with one channel name broke each other when either unmounted. The join
    * is now left only when the last handle on the name unsubscribes.
    */
-  channel<TRow = Record<string, unknown>>(name: string, opts: ChannelOptions = {}): ChannelSubscription<TRow> {
+  channel<TRow = Record<string, unknown>>(name: ChannelName, opts: ChannelOptions = {}): ChannelSubscription<TRow> {
     const state = this.getOrCreateChannel(name)
     const handle: ChannelHandle = {
       pgListeners: [],

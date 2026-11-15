@@ -4,6 +4,11 @@
 
 ### Features
 
+* **realtime:** `channel()` takes a `ChannelName`: a topic the schema declares (`lot:${string}` for
+  `Channel<"lot:{id}", ...>`, `lobby:${string}` for a trailing `*`, `${number}` for an Integer
+  parameter), which autocompletes, or any other string, which an `open` server still admits. The
+  declared topics come from the new `SupatypeChannels` interface that `supatype generate` fills in;
+  `DeclaredTopic` and `DeclaredTopics<T>` are exported. Before generating, the name is a plain string.
 * **realtime:** `channel(name, { private: true })` asserts that a channel is guarded by a schema
   `Channel` declaration. The join carries `private: true`. The server enforces declarations whether
   or not it is set; the option makes a name no declaration matches a refused join (a typo fails at
