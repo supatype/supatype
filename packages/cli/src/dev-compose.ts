@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
 import { printRoleAccess } from "./diff-access.js"
+import { printChannelChanges } from "./diff-channels.js"
 import { postApplyFailed } from "./post-apply.js"
 import { FRONTEND_URL_KEYS, frontendEnv, writeFrontendEnv } from "./frontend-env.js"
 import { withPublishing } from "./model-versioning.js"
@@ -78,7 +79,7 @@ import { requireStackDatabase } from "./local-stack-guard.js"
 import type { ComposeStack } from "./compose-db-psql.js"
 import type { ProcessManager } from "./process-manager.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
-import { hasEngineOverride } from "./binary-cache.js"
+import { hasEngineOverride, pinnedVersion } from "./binary-cache.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
 import {
   ensureLocalServerDockerImage,
@@ -123,7 +124,7 @@ import {
   adoptKeysNeed,
   assertSupported,
   engineCapabilities,
-  identityColumnsNeed,
+  schemaFeatureNeeds,
   OVERWRITE_DRIFT_NEED,
   checkedCapabilities,
   type Capabilities,
@@ -154,7 +155,7 @@ import { configMailerEnv } from "./config-mailer-env.js"
 import { retireCliMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { fetchWithin } from "./fetch-within.js"
 import { composeStackWatch, exitedServiceFailure, type StackWatch, type WatchedStack } from "./stack-exit-watch.js"
-import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
+import { assertEngineSupportsSchema, assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
 
 /**
  * The image pins config asks for, once the engine's is known not to be older than this CLI needs.
@@ -924,9 +925,9 @@ export async function runComposeSchemaPush(
     console.log("[supatype] Schema unchanged since the last push, nothing to apply.")
     return
   }
-  // Identity and generated columns only to an engine that reads them (the override's binary is
-  // asked by `engineRequest`).
-  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
+  // Identity and generated columns, and realtime channels, only to an engine that reads them (the
+  // override's binary is asked by `engineRequest`).
+  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, schemaFeatureNeeds(ast))
   if (opts.access === "plan") await printPlannedAccess(cwd, config)
   try {
     if (hasEngineOverride(config)) await applyViaHostEngine(cwd, config, ast, opts)
@@ -948,7 +949,9 @@ export async function runComposeSchemaPush(
 async function printPlannedAccess(cwd: string, config: SupatypeProjectConfig): Promise<void> {
   try {
     const diff = await dockerDiff(cwd, config)
-    if (diff !== undefined) printRoleAccess(diff)
+    if (diff === undefined) return
+    printRoleAccess(diff)
+    printChannelChanges(diff)
   } catch (err) {
     console.log(`[supatype] Could not read each role's access before the push: ${errorMessage(err)}`)
   }
@@ -966,6 +969,8 @@ function readSchemaToPush(
   config: SupatypeProjectConfig,
 ): { ast: ExtractedSchemaAstV2; astJson: string } {
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+  // The check `supatype push` makes: a pinned engine too old to read part of the schema drops it silently.
+  assertEngineSupportsSchema(ast, pinnedVersion("engine", config))
   return { ast, astJson: JSON.stringify(ast) }
 }
 
@@ -1391,7 +1396,7 @@ export async function adoptSchemaDocker(
   await requireDockerFeatures(
     cwd,
     config,
-    identityColumnsNeed(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
+    schemaFeatureNeeds(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
   )
   const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   const command = adoptCommand(yes, keys)
@@ -1448,7 +1453,7 @@ async function diffWithComposeEngine(
   project: string,
 ): Promise<DiffResult> {
   const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
-  await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
+  await requireDockerFeatures(cwd, config, schemaFeatureNeeds(ast))
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })

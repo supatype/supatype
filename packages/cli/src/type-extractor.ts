@@ -24,6 +24,7 @@ import {
   isFieldKind,
   scalar,
   type BlockDefinitionAst,
+  type ExtractedChannelAst,
   type ExtractedSchemaAstV2,
   type ExtractedStorageBucketAst,
   type FieldAnnotations,
@@ -32,6 +33,15 @@ import {
   type IdentityAst,
   type ParsedField,
 } from "./schema-ast-v2.js"
+import {
+  assertChannelsDoNotOverlap,
+  channelWarnings,
+  collectChannels,
+  parseEventRule,
+  parseParamOperand,
+  parsePayloadRule,
+  refuseChannelOnlyNodes,
+} from "./channel-extractor.js"
 import { jsonTypeArgText } from "./json-type-text.js"
 import { callerOwnedIds } from "./owner-default.js"
 import { compileBounds, measureFormFor, type DeclaredBounds } from "./field-bounds.js"
@@ -185,6 +195,9 @@ export function extractSchemaAstFromTypes(
 
   if (models.length === 0) return null
 
+  const channels = extractChannels(sourceFiles, resolveCtx)
+  refuseChannelOnlyRules(models, bucketsById)
+
   const storageBuckets =
     bucketsById.size > 0 ? [...bucketsById.values()].sort((a, b) => a.id.localeCompare(b.id)) : undefined
 
@@ -203,11 +216,36 @@ export function extractSchemaAstFromTypes(
   return emitSchema(models, {
     warnings,
     ...(storageBuckets !== undefined && storageBuckets.length > 0 && { storageBuckets }),
+    channels,
+    warnings: channelWarnings(channels),
     ...(localeConfig !== undefined && {
       locales: localeConfig.locales,
       defaultLocale: localeConfig.defaultLocale,
     }),
   })
+}
+
+/** Every `Channel<>` in the schema, refused if two can match one topic. */
+function extractChannels(
+  sourceFiles: readonly ts.SourceFile[],
+  resolveCtx: ResolveContext,
+): ExtractedChannelAst[] {
+  const channels = sourceFiles.flatMap((sourceFile) =>
+    collectChannels(sourceFile, (node) => parseAccessRule(node, sourceFile, resolveCtx)),
+  )
+  assertChannelsDoNotOverlap(channels)
+  return channels
+}
+
+/** `Param<>`, `Event<>` and `Payload<>` mean something only in a channel's rules. */
+function refuseChannelOnlyRules(
+  models: ExtractedSchemaAstV2["models"],
+  bucketsById: Map<string, ExtractedStorageBucketAst>,
+): void {
+  for (const model of models) {
+    refuseChannelOnlyNodes(`model "${model.name}"`, [model.annotations.platform.access, model.annotations.db.constraints])
+  }
+  for (const [id, bucket] of bucketsById) refuseChannelOnlyNodes(`bucket "${id}"`, bucket.access)
 }
 
 /**
@@ -3058,6 +3096,8 @@ const ACCESS_RULE_FORMS = {
   BucketLoggedIn: "BucketLoggedIn",
   BucketOwner: "BucketOwner",
   BucketRole: 'BucketRole<"name">',
+  Event: 'Event<"name">',
+  Payload: 'Payload<"field", { kind: ... }>',
 } as const
 
 type AccessRuleName = keyof typeof ACCESS_RULE_FORMS
@@ -3066,12 +3106,21 @@ function isAccessRuleName(ref: string): ref is AccessRuleName {
   return Object.hasOwn(ACCESS_RULE_FORMS, ref)
 }
 
+/** Which declaration a rule belongs to: models take most, buckets and channels each their own. */
+function ruleGroup(name: string): "model" | "bucket" | "channel" {
+  if (name.startsWith("Bucket")) return "bucket"
+  return name === "Event" || name === "Payload" ? "channel" : "model"
+}
+
 /** The error for a rule the parser does not know, listing every rule it does. */
 function unknownAccessRuleMessage(ref: string): string {
   const forms = Object.entries(ACCESS_RULE_FORMS)
-  const listed = (bucket: boolean): string =>
-    forms.filter(([name]) => name.startsWith("Bucket") === bucket).map(([, form]) => form).join(", ")
-  return `Unknown access rule "${ref}". Supported: ${listed(false)} (buckets also accept ${listed(true)}).`
+  const listed = (group: string): string =>
+    forms.filter(([name]) => ruleGroup(name) === group).map(([, form]) => form).join(", ")
+  return (
+    `Unknown access rule "${ref}". Supported: ${listed("model")} ` +
+    `(buckets also accept ${listed("bucket")}; a channel's send rule also accepts ${listed("channel")}).`
+  )
 }
 
 /** A name that is not a built-in rule: a named alias standing for one, or an error naming it. */
@@ -3207,6 +3256,10 @@ function parseAccessRule(
         ),
       }
     }
+    case "Event":
+      return parseEventRule(typeNode.typeArguments ?? [])
+    case "Payload":
+      return parsePayloadRule(typeNode.typeArguments ?? [])
     case "Not": {
       const inner = typeNode.typeArguments?.[0]
       if (!inner) {
@@ -3677,6 +3730,8 @@ function parseAccessOperand(
       }
       case "Folder":
         return { kind: "folder", index: folderIndexArg(operandArgs[0]) }
+      case "Param":
+        return parseParamOperand(operandArgs)
       case "AuthUid":
         return { kind: "authUid" }
       case "AuthRole":

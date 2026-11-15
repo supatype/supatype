@@ -925,6 +925,135 @@ export type Exists<TSource> = Access<"Exists", {
   readonly kind: "Exists"
   readonly source: TSource
 }>
+
+// ─── Realtime channels ───────────────────────────────────────────────────────
+//
+// A channel is declared the way a bucket is: an exported type alias that only `@supatype/cli`
+// reads. The pattern names the topics it covers, `params` types the `{name}` segments, and
+// `access` holds one rule per operation. The same rule language as a model, with the
+// channel's parameters standing where a model has a row's columns.
+
+/**
+ * A channel pattern's parameter, used inside a `Rows<>` filter: `Eq<"id", Param<"id">>`.
+ *
+ * At the top level of a channel rule a bare string already names a parameter
+ * (`In<"id", MyLots>`), exactly as a bare string names a column on a model. Inside a `Rows<>`
+ * filter a bare string is a column of the source table, which is why a parameter needs this
+ * operand there. `Param<>` is also accepted at the top level for authors who prefer to be explicit.
+ *
+ * Only valid in a {@link Channel} rule: anywhere else the CLI refuses it at extract time.
+ */
+export type Param<TName extends string> = Access<"Param", {
+  readonly kind: "Param"
+  readonly name: TName
+}>
+
+/**
+ * The broadcast event name, for a `send` rule: `All<[Event<"bid">, ...]>`.
+ *
+ * Checked by the realtime server against each message, with no database call. Only valid inside
+ * `send`, and only as a member of `All<[...]>`: under `Any` or `Not` the database could not say
+ * what it means. A message whose event is not named is refused.
+ */
+export type Event<TName extends string> = Access<"Event", {
+  readonly kind: "Event"
+  readonly name: TName
+}>
+
+/**
+ * What a broadcast payload's field must be. The set is closed because the realtime server
+ * evaluates it per message.
+ *
+ * - `string`: a string, at most `maxLength` characters when given.
+ * - `number`: a finite number, within `min` and `max` when given.
+ * - `boolean`: a boolean.
+ * - `required`: present and not null, of any type.
+ */
+export type PayloadCheck =
+  | { readonly kind: "string"; readonly maxLength?: number }
+  | { readonly kind: "number"; readonly min?: number; readonly max?: number }
+  | { readonly kind: "boolean" }
+  | { readonly kind: "required" }
+
+/**
+ * A rule on one field of the broadcast payload, for a `send` rule:
+ * `Payload<"amount", { kind: "number"; min: 1 }>`.
+ *
+ * Shape only. Whether the amount is a good bid is for an RPC function, since a broadcast is
+ * not a transaction. Only valid inside `send`, and only as a member of `All<[...]>`.
+ */
+export type Payload<TField extends string, TCheck extends PayloadCheck> = Access<"Payload", {
+  readonly kind: "Payload"
+  readonly field: TField
+  readonly check: TCheck
+}>
+
+/** What a channel parameter can hold. A closed set: each one is a pattern and a cast in the engine. */
+export type ChannelParamType = UUID | string | Int
+
+/** The `{name}` segments of a channel pattern: `ChannelParamNames<"a:{x}:{y}">` is `"x" | "y"`. */
+export type ChannelParamNames<TPattern extends string> =
+  TPattern extends `${string}{${infer TName}}${infer TRest}` ? TName | ChannelParamNames<TRest> : never
+
+/** A rule one channel operation can take. The model rule language, minus the row-bound rules. */
+export type ChannelRule = Public | Private | LoggedIn | Role<string> | ComposedAccessRule
+
+/** What `send` can take beyond a {@link ChannelRule}: checks on the event and the payload. */
+export type ChannelSendRule = ChannelRule | Event<string> | Payload<string, PayloadCheck>
+
+/**
+ * A channel's rules. An operation left out is denied to every caller but the service role, as on
+ * a model. At least one must be declared.
+ *
+ * - `join`: subscribe, and receive broadcasts and presence.
+ * - `send`: broadcast on the channel.
+ * - `track`: appear in the channel's presence.
+ */
+export type ChannelAccess = {
+  join?: ChannelRule
+  send?: ChannelSendRule
+  track?: ChannelRule
+}
+
+/** Second generic on {@link Channel}. `params` types every `{name}` in the pattern, and only those. */
+export type ChannelConfig<TPattern extends string = string> = {
+  params?: { readonly [K in ChannelParamNames<TPattern>]: ChannelParamType }
+  access: ChannelAccess
+}
+
+/** Makes a `params` key the pattern does not name a type error, which an object type alone lets through. */
+type NoExtraParams<TPattern extends string, TConfig extends { params?: unknown }> = {
+  params?: { readonly [K in Exclude<keyof NonNullable<TConfig["params"]>, ChannelParamNames<TPattern>>]: never }
+}
+
+/**
+ * Declares a realtime channel. Export `type LotChannel = Channel<"lot:{id}", { ... }>`.
+ *
+ * ```ts
+ * type MyLots = Rows<"lot_watchers", "lot_id", Eq<"user_id", AuthUid>>
+ *
+ * export type LotChannel = Channel<"lot:{id}", {
+ *   params: { id: UUID }
+ *   access: {
+ *     join: Any<[In<"id", MyLots>, Role<"auctioneer">]>
+ *     send: Exists<Rows<"lots", "id", All<[Eq<"id", Param<"id">>, Eq<"seller_id", AuthUid>]>>>
+ *     track: All<[LoggedIn, In<"id", MyLots>]>
+ *   }
+ * }>
+ * ```
+ *
+ * A pattern is `:`-separated segments: a literal, a `{name}` that matches one segment, or a final
+ * `*` that matches one or more remaining segments. Two declarations that can match the same topic
+ * are refused. Parameters are `UUID`, `string` or `Int`, and the engine checks the shape before
+ * the cast, so `lot:abc` against `{ id: UUID }` is "does not fit" rather than a Postgres error.
+ *
+ * Declaring a channel enforces its pattern at once, for every client. `realtime.channels` in
+ * `supatype.config.ts` decides what happens to a topic no declaration matches.
+ */
+export type Channel<
+  TPattern extends string,
+  TConfig extends ChannelConfig<TPattern> & NoExtraParams<TPattern, TConfig>,
+> = Primitive<`Channel:${TPattern}`, { pattern: TPattern; config: TConfig }>
 type BoundOwnerForFields<TFields extends Record<string, unknown>> = Access<"Owner", {
   readonly kind: "Owner"
   readonly key: OwnerEligibleFieldKeys<TFields>

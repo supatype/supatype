@@ -40,6 +40,7 @@ import {
   type PlannedChange,
 } from "../diff-output.js"
 import { printRoleAccess } from "../diff-access.js"
+import { printChannelChanges } from "../diff-channels.js"
 import { printPushWarnings } from "../engine-push-output.js"
 import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
 import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from "../destructive-consent.js"
@@ -307,6 +308,7 @@ async function pushViaTarget(
   else printDiffOperations(diff)
   // What each API role is left with, before anything is asked or applied (issue 16).
   printRoleAccess(diff)
+  printChannelChanges(diff)
   if (!(await confirmRiskyChanges(changes, run))) {
     plain("Aborted.")
     return

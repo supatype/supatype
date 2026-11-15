@@ -68,6 +68,22 @@ export const ENGINE_MIN_FOR_SEED = "0.4.0"
 export const ENGINE_MIN_FOR_GENERATED_COLUMNS = "0.7.0"
 
 /**
+ * First engine release that reads `channels` and `realtime` and emits the realtime channel access
+ * functions (the realtime private channels plan, section 14.2).
+ *
+ * **PLACEHOLDER, to be set when the engine release carrying the work is cut.** It is `0.10.1`, the
+ * engine this CLI pins today, so it refuses nothing yet, and it must be raised to the release that
+ * carries stage A of the plan *in the same change that raises the engine pin in release/images.json*.
+ * The release-images test holds the pin at or above every `ENGINE_MIN_` floor, so the two cannot
+ * drift apart once this is raised.
+ *
+ * Silent, like `versions`: an older engine does not reject the two keys, it drops them. The push
+ * succeeds, no access function exists, and a project that declared its channels private has
+ * channels nothing enforces.
+ */
+export const ENGINE_MIN_FOR_CHANNELS = "0.10.1"
+
+/**
  * The oldest engine this CLI runs at all (decision D3, local test round 3, N9). A bucket that names
  * no access mode leaves `public` out of the schema, and engine 0.7.0 fails on it with
  * ``missing field `public` ``, which says nothing about the cause.
@@ -217,6 +233,17 @@ export function modelsRequiringVersions(ast: ExtractedSchemaAstV2): string[] {
 }
 
 /**
+ * What in the schema needs the channels floor: each declared channel by name, and `realtime.channels`
+ * when the config states a mode, since an older engine drops that key too.
+ */
+export function schemaChannelDeclarations(ast: ExtractedSchemaAstV2): string[] {
+  return [
+    ...(ast.channels ?? []).map((channel) => channel.name),
+    ...(ast.realtime === undefined ? [] : ["realtime.channels"]),
+  ]
+}
+
+/**
  * One thing a schema can declare that an older engine cannot apply.
  *
  * A table rather than a second copy of the check, because there will be a third: every feature that
@@ -273,6 +300,16 @@ const ENGINE_REQUIREMENTS: EngineRequirement[] = [
       `Only engine ${ENGINE_MIN_FOR_GENERATED_COLUMNS}+ reads them. An older engine ignores ` +
       `\`identity\` and \`generated\` and applies the rest, so an identity column becomes a plain ` +
       `NOT NULL integer every insert fails on, and a generated one a plain column nothing fills.`,
+  },
+  {
+    since: ENGINE_MIN_FOR_CHANNELS,
+    declaredBy: schemaChannelDeclarations,
+    feature: "realtime channels",
+    consequence:
+      `Only engine ${ENGINE_MIN_FOR_CHANNELS}+ emits the functions the realtime service asks before it ` +
+      `admits a join, a broadcast or a presence update. An older engine drops \`channels\` and \`realtime\` ` +
+      `and applies the rest, so the push reports success while the channels you declared as private ` +
+      `are open: it enforces nothing. That silence is the reason this refuses.`,
   },
 ]
 

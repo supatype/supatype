@@ -10,6 +10,7 @@ import {
   OwnershipUnsupportedError,
   parseCapabilities,
   probeCapabilities,
+  schemaFeatureNeeds,
   type Capabilities,
   type EngineProbe,
 } from "../src/engine-ownership-gate.js"
@@ -306,5 +307,31 @@ describe("targetSchemaPush() against a server", () => {
     await targetSchemaDoctor(selfHost(), {}, { keys: ["policy:note.note_select"] })
     expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(["http://cp.test/platform/v1/projects/app/schema/doctor"])
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).not.toHaveProperty("keys")
+  })
+})
+
+describe("schemaFeatureNeeds()", () => {
+  const LOBBY = {
+    models: [],
+    channels: [{ name: "Lobby", pattern: "lobby", params: [], access: { join: { type: "authenticated" }, send: null, track: null } }],
+  }
+
+  it("needs private_channels for a declared channel or a stated mode, since an older engine drops both and enforces nothing", () => {
+    expect(schemaFeatureNeeds(LOBBY)).toEqual([{ feature: "private_channels", flag: "realtime channels (Lobby)" }])
+    expect(schemaFeatureNeeds({ models: [], realtime: { channels: "declared" } })).toEqual([
+      { feature: "private_channels", flag: "realtime channels (realtime.channels)" },
+    ])
+    expect(schemaFeatureNeeds({ models: [] })).toEqual([])
+  })
+
+  it("is refused by an engine whose capabilities do not list private_channels, and keeps the identity need", () => {
+    const needs = schemaFeatureNeeds({ ...NUMBERED, ...LOBBY, models: NUMBERED.models })
+    expect(needs.map((need) => need.feature)).toEqual(["identity_columns", "private_channels"])
+    expect(() => assertSupported({ features: new Set([...ALL, "identity_columns"]), source: "engine" }, needs)).toThrow(
+      "this Supatype engine does not support realtime channels (Lobby)",
+    )
+    expect(() =>
+      assertSupported({ features: new Set([...ALL, "identity_columns", "private_channels"]), source: "engine" }, needs),
+    ).not.toThrow()
   })
 })

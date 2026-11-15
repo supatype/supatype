@@ -4,6 +4,7 @@ import {
   boundsRequiringHelpers,
   compareVersions,
   ENGINE_MIN_FOR_BOUNDS,
+  ENGINE_MIN_FOR_CHANNELS,
   ENGINE_MIN_FOR_GENERATED_COLUMNS,
   ENGINE_MIN_FOR_RICHTEXT_TRIGGER,
   ENGINE_MIN_FOR_SEED,
@@ -11,6 +12,7 @@ import {
   fieldsGeneratedByTheDatabase,
   fieldsNeedingRichTextTrigger,
   modelsRequiringVersions,
+  schemaChannelDeclarations,
   seedUnsupportedByPinnedEngine,
 } from "../src/engine-floor.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../src/schema-ast-v2.js"
@@ -269,6 +271,47 @@ describe("the identity and generated column floor", () => {
   it("allows the release itself, unpinned and local", () => {
     for (const pin of [ENGINE_MIN_FOR_GENERATED_COLUMNS, undefined, "local"]) {
       expect(() => { assertEngineSupportsSchema(GENERATED, pin) }).not.toThrow()
+    }
+  })
+})
+
+describe("the channels floor", () => {
+  const CHANNEL = {
+    name: "LotChannel",
+    pattern: "lot:{id}",
+    params: [{ name: "id", type: "uuid" as const }],
+    access: { join: { type: "authenticated" }, send: null, track: null },
+  }
+  const withChannel = { ...WITHOUT_BOUND, channels: [CHANNEL] } as ExtractedSchemaAstV2
+  const withMode = { ...WITHOUT_BOUND, realtime: { channels: "declared" as const } } as ExtractedSchemaAstV2
+
+  it("names the declarations and the config key that need it", () => {
+    expect(schemaChannelDeclarations(withChannel)).toEqual(["LotChannel"])
+    expect(schemaChannelDeclarations(withMode)).toEqual(["realtime.channels"])
+    expect(schemaChannelDeclarations(WITHOUT_BOUND)).toEqual([])
+  })
+
+  it("refuses them on an engine that would drop the keys, saying what would go wrong", () => {
+    for (const ast of [withChannel, withMode]) {
+      try {
+        assertEngineSupportsSchema(ast, "0.1.9")
+        expect.unreachable("channels on an older engine have to be refused")
+      } catch (err) {
+        const message = errorMessage(err)
+        expect(message).toContain("realtime channels")
+        expect(message).toContain(`schema-engine ${ENGINE_MIN_FOR_CHANNELS} or newer`)
+        expect(message).toContain("enforces nothing")
+      }
+    }
+  })
+
+  it("allows a schema with no channels on any pin", () => {
+    expect(() => { assertEngineSupportsSchema(WITHOUT_BOUND, "0.1.9") }).not.toThrow()
+  })
+
+  it("allows the release itself, unpinned and local", () => {
+    for (const pin of [ENGINE_MIN_FOR_CHANNELS, undefined, "local"]) {
+      expect(() => { assertEngineSupportsSchema(withChannel, pin) }).not.toThrow()
     }
   })
 })

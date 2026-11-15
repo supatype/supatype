@@ -34,6 +34,7 @@ const LOCAL: Required<SupatypeProjectConfig> = {
   connection: "postgres://local",
   admin: { roles: ["admin"] },
   studio: { auth: { providers: ["keycloak"] } },
+  realtime: { channels: "declared" },
 }
 
 /** Every key of the config, read off `LOCAL`, which has to set each one. */

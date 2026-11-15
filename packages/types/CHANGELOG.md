@@ -11,6 +11,12 @@ no entries are missing from this file.
   `create: Eq<Folder<1>, AuthUid>` keeps each user to their own folder. `BucketRule` now also takes
   `Any`, `All`, `Not`, comparisons and null checks over `AuthUid`, `AuthRole`, `Claim`, `Literal`
   and `Folder`, so a registered-only rule can be written on a bucket.
+* **realtime:** `Channel<Pattern, { params, access }>` declares a realtime channel, with `join`,
+  `send` and `track` rules. `Param<"id">` names a channel parameter, and `Event<"bid">` and
+  `Payload<"amount", { kind: "number"; min: 1 }>` check a broadcast's event name and payload in a
+  `send` rule. `params` must name exactly the `{segments}` of the pattern, each a `UUID`, `string`
+  or `Int`, and the compiler refuses a key the pattern does not use. `ChannelParamNames`,
+  `ChannelConfig`, `ChannelAccess` and `PayloadCheck` are exported for tooling.
 
 ## 0.8.0 (2026-11-02)
 

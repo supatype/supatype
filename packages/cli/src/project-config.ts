@@ -4,6 +4,7 @@ import { join, resolve } from "node:path"
 import { readComposeEnvInt, readDotEnvFiles, shellEnvInt } from "./env-file.js"
 import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
+import type { RealtimeChannelMode } from "./schema-ast-v2.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
 import { validateAuthSso, type AuthSsoConfig } from "./saml-config.js"
 import { validateAuthEmail } from "./mailer-autoconfirm.js"
@@ -518,11 +519,29 @@ export interface SupatypeProjectConfig {
    * ```
    */
   studio?: StudioConfig
+  /**
+   * Realtime channel access. A `Channel<>` declared in the schema is enforced at once, whatever this
+   * says; this decides what happens to a topic no declaration matches:
+   *
+   * - `"open"` (the default when the key is absent): broadcast and presence work as they did, so an
+   *   existing project is unchanged.
+   * - `"declared"`: broadcast and presence on a topic no declaration matches are refused. Joining
+   *   one to listen for row changes still works. `supatype init` writes this for a new project.
+   *
+   * Carried to the database by push, so Cloud and self-host need nothing else. The realtime
+   * service's `REALTIME_CHANNELS=declared` can tighten it but never loosen it.
+   */
+  realtime?: RealtimeConfig
 }
 
 // ---------------------------------------------------------------------------
 // Merge + validate
 // ---------------------------------------------------------------------------
+
+/** `realtime` in the project config. */
+export interface RealtimeConfig {
+  channels?: RealtimeChannelMode
+}
 
 type ConfigKey = keyof SupatypeProjectConfig
 
@@ -608,6 +627,7 @@ const MERGE_RULES: { [K in ConfigKey]: MergeFn } = {
   connection: replace,
   admin: shallow,
   studio: nested("auth"),
+  realtime: shallow,
 }
 
 /**
@@ -678,6 +698,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateCorsOrigins(cfg, filename)
   validateStudioAuth(cfg, filename)
   validatePublicEnv(cfg, filename)
+  validateRealtime(cfg, filename)
 
   if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)
   return cfg
@@ -690,6 +711,19 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
  */
 export function publicEnvServerEnv(cfg: SupatypeProjectConfig): Record<string, string> {
   return cfg.server.public_env === false ? { SUPATYPE_PUBLIC_ENV: "false" } : {}
+}
+
+/**
+ * `realtime.channels`, when set, is one of the two modes. A typo such as `"strict"` would otherwise
+ * read as "not declared" and leave every undeclared channel open while the config looked locked.
+ */
+function validateRealtime(cfg: Readonly<Record<string, unknown>>, filename: string): void {
+  const section = cfg["realtime"]
+  if (section === undefined) return
+  if (!isJsonObject(section)) throw new Error(`${filename}: realtime must be an object, as in { channels: "declared" }`)
+  const mode = section["channels"]
+  if (mode === undefined || mode === "open" || mode === "declared") return
+  throw new Error(`${filename}: realtime.channels must be "open" or "declared", got ${JSON.stringify(mode)}`)
 }
 
 /** `server.public_env`, when set, is a boolean: a string "false" would read as on. */

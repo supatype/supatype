@@ -14,6 +14,41 @@ no entries are missing from this file.
   is unchanged for `--json`.
 * **push:** a warning names any field stored as jsonb because its TypeScript type has no column type
   (a single string literal, say). The mapping is unchanged.
+* **generate:** the generated client declares the schema's channels as `SupatypeChannels`, keyed by
+  pattern with each parameter's type (`"lot:{id}": { params: { id: string } }`), so
+  `realtime.channel()` autocompletes `lot:${string}` and `lobby:${string}`. Names that match no
+  declaration still type-check, since an `open` server admits them. Nothing is emitted when the
+  schema declares no channel.
+* **realtime:** declare private channels in the schema. `export type LotChannel = Channel<"lot:{id}",
+  { params: { id: UUID }, access: { join, send, track } }>` takes the same rules as a model, with the
+  channel's parameters standing where a model has columns (`In<"id", MyLots>`, and `Param<"id">`
+  inside a `Rows<>` filter). `send` can also hold `Event<"bid">` and `Payload<"amount", { kind:
+  "number"; min: 1 }>` inside `All<[...]>`, which the realtime server checks per message. A
+  pattern's last segment can be `*`. A declaration is refused at extract time when its pattern and
+  `params` disagree, when two declarations can match one topic, when `Param<>`, `Event<>` or
+  `Payload<>` appear anywhere but a channel's rules, or when a rule names something that is not a
+  parameter. Declaring a channel enforces its pattern for every client at once.
+* **config:** `realtime.channels` is `"open"` (the default, so an existing project is unchanged) or
+  `"declared"`, which refuses broadcast and presence on a topic no declaration matches. It reaches
+  the database through push. `supatype init` writes `"declared"` for a new project.
+* **diff, push:** list channel changes (added, removed, which operation's rule changed) and warn
+  when removing a declaration or turning `declared` on takes broadcast and presence away. The lines
+  appear once the engine reports them; an older engine says nothing.
+* **push:** refuses a schema that declares channels, or sets `realtime.channels`, against a pinned
+  engine older than `ENGINE_MIN_FOR_CHANNELS`. The engine drops both keys, so the push would succeed
+  with nothing enforcing the channels. The constant is a placeholder until the engine release is
+  known.
+* **push, diff, doctor, adopt, dev, deploy:** a schema that declares channels or sets
+  `realtime.channels` is sent only to an engine or server that lists `private_channels` in its
+  capabilities, as identity columns already are with `identity_columns`. This holds even while the
+  version floor above is a placeholder, so an older engine can never drop the channels in silence.
+* **dev:** runs the same engine floor check as `supatype push` before applying a schema, native and
+  Docker alike. It skipped it, so a pinned older engine took channels and enforced nothing.
+* **push, diff:** warn when a channel's `send` rule tests only `Event<>` or `Payload<>` and nothing
+  about the caller. Those nodes are checked by the realtime server and compile to TRUE in the
+  database, so `send: Event<"bid">` admits every caller, anon included. The warning names the channel
+  and suggests `send: All<[LoggedIn, Event<"bid">]>`. It is a warning, not an error, and is carried
+  to the engine in the schema's `warnings`.
 
 ### Bug Fixes
 
