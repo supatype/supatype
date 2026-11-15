@@ -1067,7 +1067,9 @@ ${keyspaceMount}    healthcheck:
       # service that connects over the network died with ECONNREFUSED on first boot. PostgREST
       # survived only because it retries. Observed on a clean stack: server, storage and
       # realtime all exited 1 while db said "healthy".
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \${POSTGRES_USER:-supatype_admin} -d \${POSTGRES_DB:-supatype}"]
+      # Exec form, with pg_isready's own -t 2 under the 5s timeout below: shell form forks it under
+      # sh, and when compose times a check out it kills the sh and orphans pg_isready.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "\${POSTGRES_USER:-supatype_admin}", "-d", "\${POSTGRES_DB:-supatype}", "-t", "2"]
       interval: 5s
       timeout: 5s
       # First boot runs initdb plus every bootstrap migration. Failures inside the start period

@@ -37,4 +37,20 @@ describe("db service init", () => {
       expect(dbService(renderSelfHostCompose(config(mode, { provider: "docker" })))).toMatch(/^ {4}init: true$/m)
     })
   }
+
+  it("probes in exec form with pg_isready's own timeout under compose's", () => {
+    // Shell form forks pg_isready under sh. When compose times a check out it kills the sh and
+    // orphans pg_isready, which the init has to reap; exec form leaves no shell to kill, and -t
+    // makes pg_isready give up before compose does.
+    const db = dbService(renderSelfHostCompose(config("dev", { provider: "docker" })))
+    expect(db).not.toContain("CMD-SHELL")
+    const test = /^ {6}test: (\[.*\])$/m.exec(db)?.[1]
+    expect(test).toBeDefined()
+    const argv: unknown = JSON.parse(test ?? "[]")
+    expect(argv).toEqual([
+      "CMD", "pg_isready", "-h", "127.0.0.1",
+      "-U", "${POSTGRES_USER:-supatype_admin}", "-d", "${POSTGRES_DB:-supatype}", "-t", "2",
+    ])
+    expect(db).toMatch(/^ {6}timeout: 5s$/m)
+  })
 })
