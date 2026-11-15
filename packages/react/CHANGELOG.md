@@ -9,6 +9,9 @@
   It unsubscribes on unmount and when `name` or `deps` change, and returns `status`, `error`,
   `isConnected` and `connectionState`.
 * **useRealtimeConnection:** `isConnected` and `connectionState` for the realtime socket itself.
+* **useChannel:** takes `{ private: true }` as a fourth argument, passed to the channel join (see the
+  client changelog). A refused or withdrawn private join is `CHANNEL_ERROR` with `error` a
+  `RealtimeChannelError` whose `reason` says why.
 
 ## Unreleased
 

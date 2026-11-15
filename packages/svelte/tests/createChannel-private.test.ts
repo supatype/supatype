@@ -1,0 +1,46 @@
+/** `createChannel(name, setup, { private: true })` joins as private and shows the typed refusal. */
+
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { get } from "svelte/store"
+import { isRealtimeChannelError } from "@supatype/client"
+import { subscribeFrames, simulateServerMessage } from "../../client/tests/helpers/mock-websocket.js"
+import { createSocketSwapHarness, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
+
+const lifecycle = vi.hoisted(() => ({ destroy: [] as Array<() => void>, harness: null as SocketSwapHarness | null }))
+
+vi.mock("svelte", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("svelte")>()),
+  onDestroy: (fn: () => void) => lifecycle.destroy.push(fn),
+}))
+
+vi.mock("../src/context.js", () => ({
+  getSupatypeClient: () => ({ realtime: lifecycle.harness?.realtime }),
+}))
+
+import { createChannel } from "../src/createChannel.js"
+
+afterEach(() => {
+  for (const fn of lifecycle.destroy.splice(0)) fn()
+  lifecycle.harness?.restore()
+})
+
+describe("createChannel with private: true", () => {
+  it("joins as private once the server announces private_channels", async () => {
+    const harness = createSocketSwapHarness()
+    lifecycle.harness = harness
+    createChannel("lot:42", () => undefined, { private: true })
+    await harness.settle()
+    simulateServerMessage(harness.socket(), { type: "system", status: "ok", message: "authenticated", features: ["private_channels"] })
+    expect(subscribeFrames(harness.socket(), "lot:42")[0]?.["private"]).toBe(true)
+  })
+
+  it("exposes the unsupported-server error as a RealtimeChannelError", async () => {
+    const harness = createSocketSwapHarness()
+    lifecycle.harness = harness
+    const { status, error } = createChannel("lot:42", () => undefined, { private: true })
+    await harness.settle()
+    simulateServerMessage(harness.socket(), { type: "system", status: "ok", message: "authenticated" })
+    expect(get(status)).toBe("error")
+    expect(isRealtimeChannelError(get(error))).toBe(true)
+  })
+})

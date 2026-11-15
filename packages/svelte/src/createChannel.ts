@@ -1,6 +1,6 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
-import type { AugmentedDatabase, AnyDatabase, ChannelSubscription, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
 import { channelSlot, type SubscriptionState } from "@supatype/client/bindings"
 import { getSupatypeClient } from "./context.js"
 import { createRealtimeConnection, type RealtimeConnectionStore } from "./createRealtimeConnection.js"
@@ -25,10 +25,15 @@ function isReadable(name: string | Readable<string>): name is Readable<string> {
  * whenever the store changes, after the old channel is left and its listeners with it. The channel
  * is left when the component is destroyed. With runes, `toStore(() => name)` from `svelte/store`
  * turns reactive state into a store.
+ *
+ * `options.private` asks for a private channel (a schema `Channel` declaration guards it): see
+ * `ChannelOptions`. A refused or withdrawn join shows as `error`, a `RealtimeChannelError` whose `reason`
+ * says why.
  */
 export function createChannel<TRow = Record<string, unknown>, TDatabase extends AnyDatabase = AugmentedDatabase>(
   name: string | Readable<string>,
   setup: (channel: ChannelSubscription<TRow>) => void,
+  options?: ChannelOptions | undefined,
 ): ChannelStore {
   const client = getSupatypeClient<TDatabase>()
   const connection = createRealtimeConnection<TDatabase>()
@@ -37,7 +42,7 @@ export function createChannel<TRow = Record<string, unknown>, TDatabase extends 
   const slot = channelSlot<TRow>(client.realtime, setup, (view) => {
     status.set(view.status)
     error.set(view.error)
-  })
+  }, options)
 
   // A store calls a new subscriber at once with its value, which is the first join.
   if (isReadable(name)) onDestroy(name.subscribe((next) => slot.join(next)))

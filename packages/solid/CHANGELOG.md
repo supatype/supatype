@@ -10,6 +10,9 @@
   an accessor: when it changes the old channel is left, its listeners go with it, and `setup` runs on the
   new one. The channel is left on teardown.
 * **createRealtimeConnection:** `isConnected` and `connectionState` for the realtime socket itself.
+* **createChannel:** takes `{ private: true }` as a third argument, passed to the channel join (see the
+  client changelog). A refused or withdrawn private join is status "error" with `error` a
+  `RealtimeChannelError` whose `reason` says why.
 
 ### Bug Fixes
 

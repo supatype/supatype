@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue"
-import type { AugmentedDatabase, AnyDatabase, ChannelSubscription, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
 import { channelSlot, type SubscriptionState } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 import { useRealtimeConnection, type UseRealtimeConnectionReturn } from "./useRealtimeConnection.js"
@@ -19,6 +19,10 @@ export interface UseChannelReturn extends UseRealtimeConnectionReturn {
  * whenever the name changes, after the old channel is left and its listeners with it. The channel
  * is left when the component unmounts.
  *
+ * `options.private` asks for a private channel (a schema `Channel` declaration guards it): see
+ * `ChannelOptions`. A refused or withdrawn join shows as `error`, a `RealtimeChannelError` whose `reason`
+ * says why.
+ *
  * @example
  * ```ts
  * const { status, isConnected } = useChannel(() => `auction:${props.id}`, (channel) => {
@@ -30,6 +34,7 @@ export interface UseChannelReturn extends UseRealtimeConnectionReturn {
 export function useChannel<TRow = Record<string, unknown>, TDatabase extends AnyDatabase = AugmentedDatabase>(
   name: MaybeRefOrGetter<string>,
   setup: (channel: ChannelSubscription<TRow>) => void,
+  options?: ChannelOptions | undefined,
 ): UseChannelReturn {
   const client = useSupatype<TDatabase>()
   const connection = useRealtimeConnection<TDatabase>()
@@ -38,7 +43,7 @@ export function useChannel<TRow = Record<string, unknown>, TDatabase extends Any
   const slot = channelSlot<TRow>(client.realtime, setup, (view) => {
     status.value = view.status
     error.value = view.error
-  })
+  }, options)
   let mounted = false
 
   onMounted(() => {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, type DependencyList } from "react"
-import type { ChannelStatus, ChannelSubscription } from "@supatype/client"
+import type { ChannelOptions, ChannelStatus, ChannelSubscription } from "@supatype/client"
 import { useSupatype } from "./context.js"
 import { useRealtimeConnection, type UseRealtimeConnectionResult } from "./useRealtimeConnection.js"
 
@@ -27,6 +27,10 @@ const JOINING: ChannelState = { status: "SUBSCRIBING", error: null }
  * subscribes, and unsubscribes when the component unmounts or `name` or `deps` change. Like
  * `useEffect`, `setup` runs again only when `deps` change, so list whatever it reads.
  *
+ * `options.private` asks for a private channel (a schema `Channel` declaration guards it): see
+ * `ChannelOptions`. A refused or withdrawn join shows as `error`, a `RealtimeChannelError` whose `reason`
+ * says why.
+ *
  * @example
  * ```tsx
  * const { status, isConnected } = useChannel<Bid>("auction:42", (channel) => {
@@ -39,14 +43,16 @@ export function useChannel<TRow = Record<string, unknown>>(
   name: string,
   setup: (channel: ChannelSubscription<TRow>) => void,
   deps: DependencyList = [],
+  options: ChannelOptions = {},
 ): UseChannelResult {
   const { realtime } = useSupatype()
   const [state, setState] = useState<ChannelState>(JOINING)
   const connection = useRealtimeConnection()
+  const isPrivate = options.private === true
 
   useEffect(() => {
     setState(JOINING)
-    const channel = realtime.channel<TRow>(name)
+    const channel = realtime.channel<TRow>(name, { private: isPrivate })
     setup(channel)
     channel.subscribe((status, err) => {
       const error = err ?? null
@@ -57,7 +63,7 @@ export function useChannel<TRow = Record<string, unknown>>(
     }
     // `setup` is read through `deps`, as with useEffect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [realtime, name, ...deps])
+  }, [realtime, name, isPrivate, ...deps])
 
   return { ...state, ...connection }
 }
