@@ -52,6 +52,8 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **push (native):** no Studio link after a push or `admin create-user` on a native project. Native dev
+  runs no Studio, and the printed `/studio/` link answered 404.
 * **dev (native):** functions get `ctx.dbUrl` only from `SUPATYPE_FUNCTIONS_DB_URL`, as on Docker. Native
   dev handed every function the auth service's admin `DATABASE_URL`, a connection that skips row rules
   and masking, and ignored `SUPATYPE_FUNCTIONS_DB_URL`.

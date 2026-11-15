@@ -20,7 +20,7 @@ import {
   resolveRuntimeProvider,
   schemaPathFromProject,
 } from "../project-config.js"
-import { isProjectDatabase, projectStackUrl, studioUrlAt } from "../local-stack.js"
+import { isProjectDatabase, projectStackUrl, stackStudioUrl } from "../local-stack.js"
 import { byoPreflight } from "../byo-preflight.js"
 import { devApiKeys, shellServiceRoleKey } from "../dev-api-keys.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
@@ -466,7 +466,7 @@ function applyToTarget(
 async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<void> {
   await writeLocalAdminConfig(ast, config)
   const stackUrl = projectStackUrl(cwd, config, target.databaseUrl)
-  const studioUrl = stackUrl === undefined ? undefined : studioUrlAt(stackUrl)
+  const studioUrl = stackStudioUrl(config, stackUrl)
   if (target.databaseUrl) {
     await ensureFirstAdminUser(target.databaseUrl, { cwd, studioUrl })
   }
