@@ -188,3 +188,36 @@ describe("a socket that fails before it opens and never closes", () => {
     expect(instances.length).toBe(1)
   })
 })
+
+describe("a socket that never finishes its handshake", () => {
+  // Seen on 0.9.3 self-host: realtime restarted under a held socket, the new one stayed
+  // CONNECTING with no error and no close, and the client waited on it for good.
+  it("is given up after the connect timeout and replaced", async () => {
+    vi.useFakeTimers()
+    const made: Array<{ readyState: number; close: () => void }> = []
+    class SilentSocket {
+      static OPEN = 1
+      static CONNECTING = 0
+      static CLOSED = 3
+      readyState = 0
+      onopen = null
+      onclose = null
+      onmessage = null
+      onerror = null
+      send = vi.fn<(data: string) => void>()
+      close = vi.fn<() => void>()
+      constructor(readonly url: string) {
+        made.push(this)
+      }
+    }
+    vi.stubGlobal("WebSocket", SilentSocket)
+    realtime = new RealtimeClient("ws://localhost:4000/realtime", async () => ({ Authorization: "Bearer t" }))
+    realtime.channel("public:task").subscribe(() => {})
+    await vi.advanceTimersByTimeAsync(0)
+    expect(made.length).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(11_000)
+    expect(made[0]?.close).toHaveBeenCalled()
+    expect(made.length).toBe(2)
+  })
+})

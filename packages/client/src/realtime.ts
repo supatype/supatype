@@ -269,6 +269,12 @@ const SUBSCRIBED_TO = "subscribed to "
 /** The longest wait between reconnect attempts. Without it ten doublings from one second reach 512 s. */
 const MAX_RECONNECT_DELAY_MS = 30_000
 
+/**
+ * How long a socket may stay CONNECTING. One opened while realtime restarts behind the gateway can
+ * stay there with no error and no close, and the client would wait on it for good.
+ */
+const CONNECT_TIMEOUT_MS = 10_000
+
 // ─── Realtime client ─────────────────────────────────────────────────────────
 
 export class RealtimeClient {
@@ -670,8 +676,12 @@ export class RealtimeClient {
     const wsUrl = token ? `${url}?token=${encodeURIComponent(token)}` : url
     const ws = new WebSocket(wsUrl)
     this.ws = ws
+    const handshake = setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) this.socketLost(ws)
+    }, CONNECT_TIMEOUT_MS)
 
     ws.onopen = () => {
+      clearTimeout(handshake)
       this.reconnectAttempts = 0
       this.setConnection("connected")
       // Re-subscribe all channels
