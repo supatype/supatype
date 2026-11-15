@@ -22,14 +22,17 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { manifestCache, type ManifestCacheEntry } from "./model-cache.js"
+import { manifestCache } from "./model-cache.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { isJsonObject } from "@supatype/shared"
+import { seedThroughStack, tableEntryFor } from "./api-config-stack.js"
 
-/** One table's entry in the runtime allowlist. The shape the server stores. */
-interface TableCacheConfig {
-  enabled: boolean
-  allow_public: boolean
+/** The server's own default configuration (apiconfig.DefaultApiConfig), for a stack that has never written one. */
+function defaultApiConfig(): Record<string, unknown> {
+  return {
+    rest: { schema: "public", max_rows: 1000, cache_max_ttl: 0, cache_tables: {} },
+    graphql: { introspection: true, max_query_depth: 10, max_rows: 1000 },
+  }
 }
 
 export interface CacheSeedResult {
@@ -44,20 +47,21 @@ export interface CacheSeedResult {
 /**
  * Bring the local allowlist in line with new declarations, and report what is still in the way.
  *
- * Returns null when there is no file to seed: a cloud-only project, or a stack that has never
- * been started. A missing file is not an error here: the file is the local server's, and `dev`
- * creates it.
+ * A missing file is created from the server's default shape, because nothing else ever creates it
+ * for a user project: the server answers defaults without one and writes it only when something
+ * PATCHes. Returns null only for a file this cannot safely edit (malformed, or no `rest` section),
+ * and when nothing is declared and there is no file, so a project without a cache gets no new file.
  */
 export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult | null {
   const declared = manifestCache(ast)
   const declaredTables = Object.keys(declared).filter((t) => declared[t]?.enabled !== false).sort()
 
   const path = join(cwd, ".supatype", "api-config.json")
-  if (!existsSync(path)) return null
+  if (!existsSync(path) && declaredTables.length === 0) return null
 
   // Malformed: the server reports this far more clearly than a push can, and rewriting it here
   // would destroy whatever the author was in the middle of.
-  const parsed = readJsonObjectFile(path)
+  const parsed = existsSync(path) ? readJsonObjectFile(path) : defaultApiConfig()
   if (parsed === undefined) return null
 
   const rest = asRecord(parsed["rest"])
@@ -67,11 +71,11 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
   const seeded: string[] = []
   for (const table of declaredTables) {
     if (table in tables) continue
-    tables[table] = seedEntry(declared[table]!)
+    tables[table] = tableEntryFor(declared[table]!)
     seeded.push(table)
   }
 
-  if (seeded.length > 0) {
+  if (seeded.length > 0 || !existsSync(path)) {
     rest["cache_tables"] = tables
     parsed["rest"] = rest
     mkdirSync(dirname(path), { recursive: true })
@@ -108,27 +112,40 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
  *
  * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.
  */
-export function cacheSeedingNotes(cwd: string, ast: unknown): string[] {
-  const result = seedApiConfigCache(cwd, ast)
-  if (result === null) return []
+export async function cacheSeedingNotes(cwd: string, ast: unknown): Promise<string[]> {
+  const declared = manifestCache(ast)
+  const tables = Object.keys(declared).filter((t) => declared[t]?.enabled !== false).sort()
+  if (tables.length === 0) return []
 
-  const notes: string[] = []
-  if (result.seeded.length > 0) {
-    notes.push(`Server cache enabled for ${result.seeded.join(", ")} in .supatype/api-config.json`)
+  // Through the running stack first, because that is the writer every mode shares. The file is
+  // for a stack that is not answering yet.
+  const stack = await seedThroughStack(cwd, declared, tables)
+  if (stack.kind === "unavailable") return []
+  if (stack.kind === "seeded") {
+    return seedNotes(stack.seeded, tables.length, stack.cacheMaxTtl <= 0, "through the running stack")
   }
-  if (result.ttlIsOff) {
+  const result = seedApiConfigCache(cwd, ast)
+  if (result === null) {
+    return [`Could not enable the server cache for ${tables.join(", ")}: .supatype/api-config.json could not be updated and the stack did not answer (${stack.reason}).`]
+  }
+  return seedNotes(result.seeded, tables.length, result.ttlIsOff, "in .supatype/api-config.json")
+}
+
+/** The lines for one seeding: what was switched on, and always the TTL note while the TTL is 0. */
+function seedNotes(seeded: string[], declaredCount: number, ttlIsOff: boolean, where: string): string[] {
+  const notes: string[] = []
+  if (seeded.length > 0) {
+    notes.push(`Server cache enabled for ${seeded.join(", ")} ${where}`)
+  }
+  if (ttlIsOff) {
     // A note rather than a fix. Zero is an off switch someone may have chosen, and a push that
     // turned caching on project-wide would be overriding a decision rather than filling in a blank.
     notes.push(
-      `${result.declared.length} table(s) declare a cache, but cache_max_ttl is 0, so nothing ` +
+      `${declaredCount} table(s) declare a cache, but cache_max_ttl is 0, so nothing ` +
         `is cached until it is set, under API > REST > Settings or in .supatype/api-config.json.`,
     )
   }
   return notes
-}
-
-function seedEntry(entry: ManifestCacheEntry): TableCacheConfig {
-  return { enabled: true, allow_public: entry.public === true }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

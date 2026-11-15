@@ -11,6 +11,7 @@
 import { isNonEmptyObject, objectAt } from "./ast-read.js"
 import { fieldsWithCallerDefaults } from "./owner-default.js"
 import { columnFieldsOf } from "./engine-columns.js"
+import { FUNCTION_CONTEXT_INTERFACE } from "./functions-deno-types.js"
 import {
   astModelsOf,
   generateInsertType,
@@ -141,10 +142,21 @@ export interface HookTables {
 ${tableEntries}
 }
 
+${FUNCTION_CONTEXT_INTERFACE}
+
 /** Only the tables that declare a hook, so \`BeforeChange<"unhooked">\` is a compile error. */
 export type HookedTable = keyof HookTables & string
 
-interface HookBase {
+/**
+ * What a hook is told, on top of the function context the worker gives every handler.
+ *
+ * The function context is flat on \`ctx\`: \`ctx.serviceRoleKey\`, \`ctx.url\`, \`ctx.anonKey\`, \`ctx.dbUrl\`
+ * and \`ctx.env\` are what a function gets, so a hook that has to write back can. A write a hook makes
+ * through the API fires hooks again, and the worker carries the hook-depth header onto calls to the
+ * stack so the server stops a loop at its depth limit. \`serviceRoleKey\` is present only when the
+ * project granted this hook's function the service role.
+ */
+interface HookBase extends FunctionContext {
   readonly table: string
   /**
    * Claims from the JWT the server already verified. \`null\` for an anonymous caller, and for an
@@ -372,11 +384,17 @@ type AnyHandler = (ctx: never) => unknown
  * does not know its own in-network address, while this worker is already told how to reach the stack.
  * \`old\` and \`deliveryId\` come only to an after-hook.
  */
-function hookContext(wire: Record<string, unknown>, signature: string | null): Record<string, unknown> {
+function hookContext(
+  wire: Record<string, unknown>,
+  signature: string | null,
+  fn: FunctionContext | undefined,
+): Record<string, unknown> {
   const filter = text(wire, "filter")
   const previousPath = text(wire, "previousPath")
   const deliveryId = text(wire, "deliveryId")
   return {
+    // First, so nothing in the function context can overwrite a field of the hook's own.
+    ...(fn !== undefined && fn),
     table: text(wire, "table") ?? "",
     operation: text(wire, "operation") ?? "",
     user: wire["user"] ?? null,
@@ -410,8 +428,8 @@ function rejectionResponse(rejection: unknown): Response {
  * contract in the transport rather than in a second envelope inside the body, so a hook written by
  * hand: or in another language, needs to know nothing about this file.
  */
-export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
-  return async (req: Request): Promise<Response> => {
+export function hook(handler: AnyHandler): (req: Request, fn?: FunctionContext) => Promise<Response> {
+  return async (req: Request, fn?: FunctionContext): Promise<Response> => {
     if (req.method !== "POST") {
       return json({ message: "A hook is invoked with POST" }, 405)
     }
@@ -420,7 +438,7 @@ export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
     const wire = await payload(req)
     if (wire === null) return json({ message: "Hook payload was not JSON" }, 400)
 
-    const ctx = hookContext(wire, req.headers.get("webhook-signature"))
+    const ctx = hookContext(wire, req.headers.get("webhook-signature"), fn)
     if (!isHandlerContext(ctx)) return json({ message: "Hook context was not built" }, 500)
 
     let verdict: unknown
@@ -452,12 +470,14 @@ export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
  * step for one deploy, and failing a write because the *other* half has not shipped yet would be the
  * wrong way round.
  */
-export function hooks(handlers: Record<string, AnyHandler | undefined>): (req: Request) => Promise<Response> {
-  return async (req: Request): Promise<Response> => {
+export function hooks(
+  handlers: Record<string, AnyHandler | undefined>,
+): (req: Request, fn?: FunctionContext) => Promise<Response> {
+  return async (req: Request, fn?: FunctionContext): Promise<Response> => {
     const event = req.headers.get("x-supatype-hook") ?? ""
     const handler = handlers[event]
     if (handler === undefined) return json({}, 200)
-    return hook(handler)(req)
+    return hook(handler)(req, fn)
   }
 }
 

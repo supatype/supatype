@@ -203,6 +203,14 @@
       </tbody>
     </table></div>
     <p><code>seed</code> refuses to run against a project linked to Supatype Cloud unless you pass <code>--force</code>. See <a href="/docs/seeding.html">Seeding</a>.</p>
+    <h3 id="server-cache">Switching the server cache on</h3>
+    <p>A model's <code>cache</code> block says which tables may be cached. It does not switch anything on: the running stack keeps its own allowlist, <code>cache_tables</code>, and a table is served from the cache only when both agree. <code>push</code> and <code>dev</code> add each newly declared table to that allowlist through the running stack and never change an entry that already exists. If the stack is not answering they create <code>.supatype/api-config.json</code> from the server's default shape and write the entry there.</p>
+    <p>Both print a note while <code>cache_max_ttl</code> is 0, which it is until you set it: with a TTL of 0 nothing is cached. Set it under API, REST, Settings in Studio, or with the admin API, which is what the CLI calls:</p>
+<pre>PATCH /admin/v1/config/rest
+Authorization: Bearer &lt;service role key&gt;
+
+{ "cache_max_ttl": 60, "cache_tables": { "posts": { "enabled": true, "allow_public": false } } }</pre>
+    <p>All three fields are optional, and <code>schema</code> and <code>max_rows</code> are left alone when absent. <code>cache_max_ttl</code> is 0 to 86400 seconds. <code>cache_tables</code> <strong>replaces the whole map</strong>, so read it with <code>GET /admin/v1/config/rest</code> and send back the entries you want to keep. The schema's declaration is a ceiling: a table it does not declare, or declares with <code>enabled: false</code>, is switched off and listed in the answer's <code>adjusted</code> array, and a <code>cache_max_ttl</code> above a declared <code>maxTtl</code> is lowered to it. The cache is not offered on a free Cloud plan, where the call answers 403 with <code>rest_cache_not_available</code>.</p>
     <p><code>reset</code> drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a <code>runOnce</code> seed runs again, and runs the seeds unless you pass <code>--no-seed</code>. To start the whole database again, use <code>supatype dev --reset-db</code>.</p>
 
     <h2 id="functions">Functions and hooks</h2>

@@ -313,7 +313,9 @@ delivery it does not answer is retried with backoff, then logged.
 
 ## When a hook writes
 
-A hook holds the service-role key, and service-role writes still fire hooks. So a `beforeChange` on
+A hook gets the same context as any function, flat on `ctx`: `ctx.url`, `ctx.anonKey`, `ctx.serviceRoleKey` (when the project granted the function the service role), `ctx.dbUrl` (when the operator set `SUPATYPE_FUNCTIONS_DB_URL`) and `ctx.env`, beside the hook's own `table`, `operation` and `user`. That is what lets a hook write back.
+
+A hook holding the service-role key writes with it, and service-role writes still fire hooks. **A write a hook makes fires hooks again**, through the API or through `ctx.dbUrl`'s change log alike, and only the hook-depth header described below bounds the chain. So a `beforeChange` on
 `posts` that writes to `posts` calls itself again: the classic trigger loop, except each hop is a
 fresh HTTP request holding a connection and a function slot.
 

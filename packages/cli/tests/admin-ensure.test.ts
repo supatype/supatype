@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   ADMIN_EMAIL_ENV,
   ADMIN_PASSWORD_ENV,
@@ -38,6 +38,43 @@ describe("clearAdminSeedPassword", () => {
       expect(content).toContain(`${ADMIN_EMAIL_ENV}=admin@example.com`)
       expect(content).not.toContain(ADMIN_PASSWORD_ENV)
       expect(content).toContain("JWT_SECRET=x")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("clearAdminSeedPassword says so", () => {
+  function envWith(content: string): string {
+    const dir = join(tmpdir(), `supatype-admin-said-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, ".env"), content, "utf8")
+    return dir
+  }
+  function printed(run: () => void): string {
+    const chunks: string[] = []
+    const out = vi.spyOn(process.stdout, "write").mockImplementation((c: string | Uint8Array) => { chunks.push(String(c)); return true })
+    const log = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { chunks.push(a.join(" ")) })
+    try { run() } finally { out.mockRestore(); log.mockRestore() }
+    return chunks.join(" ")
+  }
+
+  it("prints one line naming the variable and why, when it removed one", () => {
+    const dir = envWith(`${ADMIN_PASSWORD_ENV}=secret123
+`)
+    try {
+      const text = printed(() => clearAdminSeedPassword(dir))
+      expect(text).toContain(`Removed ${ADMIN_PASSWORD_ENV} from .env`)
+      expect(text).toContain("only seeds the first admin user")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("prints nothing when there was nothing to remove", () => {
+    const dir = envWith("JWT_SECRET=x")
+    try {
+      expect(printed(() => clearAdminSeedPassword(dir))).not.toContain("Removed")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

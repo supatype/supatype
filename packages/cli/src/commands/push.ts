@@ -478,7 +478,7 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
     await waitForRestReady(stackUrl, devApiKeys(cwd).anonKey)
   }
-  reportCacheSeeding(cwd, ast)
+  await reportCacheSeeding(cwd, ast)
   reportLocalPush(target, studioUrl, storageFailed)
 }
 
@@ -654,8 +654,8 @@ function emptyDeploy(body: HookDeployBody): boolean {
  *
  * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.
  */
-function reportCacheSeeding(cwd: string, ast: unknown): void {
-  for (const note of cacheSeedingNotes(cwd, ast)) info(note)
+async function reportCacheSeeding(cwd: string, ast: unknown): Promise<void> {
+  for (const note of await cacheSeedingNotes(cwd, ast)) info(note)
 }
 
 /** The generated adapter, flattened to the name handlers were rewritten to import. */
