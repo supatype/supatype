@@ -4,6 +4,11 @@
 
 ### Features
 
+* **generate:** the generated client declares the schema's channels as `SupatypeChannels`, keyed by
+  pattern with each parameter's type (`"lot:{id}": { params: { id: string } }`), so
+  `realtime.channel()` autocompletes `lot:${string}` and `lobby:${string}`. Names that match no
+  declaration still type-check, since an `open` server admits them. Nothing is emitted when the
+  schema declares no channel.
 * **realtime:** declare private channels in the schema. `export type LotChannel = Channel<"lot:{id}",
   { params: { id: UUID }, access: { join, send, track } }>` takes the same rules as a model, with the
   channel's parameters standing where a model has columns (`In<"id", MyLots>`, and `Param<"id">`

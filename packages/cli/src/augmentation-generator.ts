@@ -9,6 +9,7 @@ import {
 import {
   isArrayOf,
   isJsonObject,
+  isOneOf,
   isRecordOf,
   isShape,
   isString,
@@ -18,6 +19,7 @@ import {
   type Guard,
 } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
+import type { ChannelParamAst, ChannelParamKind, ExtractedChannelAst } from "./schema-ast-v2.js"
 import { columnFieldsOf } from "./engine-columns.js"
 import { keepsDrafts } from "./model-versioning.js"
 import { fieldsWithCallerDefaults } from "./owner-default.js"
@@ -104,6 +106,7 @@ export function generateClientAugmentation(ast: unknown): string {
     ...models.flatMap((model) => modelLines(model, models)),
     ...junctions.flatMap(junctionLines),
     "  }",
+    ...channelLines(ast),
     "}",
     "",
     "export {}",
@@ -450,3 +453,37 @@ const NUMERIC_ELEMENT_TYPES = new Set([
 function quoteKey(key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key)
 }
+
+const CHANNEL_PARAM_TS: Readonly<Record<ChannelParamKind, string>> = {
+  uuid: "string",
+  string: "string",
+  integer: "number",
+}
+
+/**
+ * The `SupatypeChannels` entries, one per declared channel and keyed by its pattern. The client
+ * turns each key into a template literal type (`lot:${string}`), and reads a parameter's type to
+ * tell an Integer (`${number}`) from text. Nothing is emitted when the schema declares no channel,
+ * which leaves the client's channel names plain strings.
+ */
+function channelLines(ast: unknown): string[] {
+  const declared = isJsonObject(ast) && Array.isArray(ast["channels"]) ? ast["channels"] : []
+  const channels = declared.filter(isChannelDeclaration)
+  if (channels.length === 0) return []
+  const entries = channels.map((channel) => {
+    const params = channel.params.map((param) => `${quoteKey(param.name)}: ${CHANNEL_PARAM_TS[param.type]}`)
+    const body = params.length === 0 ? "{}" : `{ ${params.join("; ")} }`
+    return `    ${JSON.stringify(channel.pattern)}: { params: ${body} }`
+  })
+  return ["  interface SupatypeChannels {", ...entries, "  }"]
+}
+
+const isChannelParam: Guard<ChannelParamAst> = isShape({
+  name: isString,
+  type: isOneOf(["uuid", "string", "integer"] as const),
+})
+
+const isChannelDeclaration: Guard<Pick<ExtractedChannelAst, "pattern" | "params">> = isShape({
+  pattern: isString,
+  params: isArrayOf(isChannelParam),
+})
