@@ -168,8 +168,42 @@ export type BucketRole<R extends string = string> = Access<"BucketRole", {
   readonly role: R
 }>
 
-/** A rule one bucket operation can take. */
-export type BucketRule = BucketPublic | BucketPrivate | BucketLoggedIn | BucketOwner | BucketRole<string>
+/**
+ * The `N`th folder of an object's path, counting from 1: in `u1/photos/a.png`, `Folder<1>` is `u1`
+ * and `Folder<2>` is `photos`. Null when the path is not that deep, so a comparison denies.
+ *
+ * Bucket rules only: a model's rule reads its own columns. `Eq<Folder<1>, AuthUid>` on `create` and
+ * `update` keeps each user to their own folder; `BucketOwner` alone does not, because the storage
+ * service writes `owner` as the caller on every upload whatever the path says.
+ */
+export type Folder<TIndex extends number> = Access<"Folder", {
+  readonly kind: "Folder"
+  readonly index: TIndex
+}>
+
+/**
+ * A rule one bucket operation can take: a `Bucket*` rule, or a rule about the caller (`AuthUid`,
+ * `AuthRole`, `Claim`) and the object's path (`Folder`) joined with `Any`, `All` and `Not`.
+ * Rules that name a model's columns are refused, naming the bucket and the operation.
+ */
+export type BucketRule =
+  | BucketPublic
+  | BucketPrivate
+  | BucketLoggedIn
+  | BucketOwner
+  | BucketRole<string>
+  | Any<readonly unknown[]>
+  | All<readonly unknown[]>
+  | Not<unknown>
+  | Eq<unknown, unknown>
+  | Neq<unknown, unknown>
+  | Gt<unknown, unknown>
+  | Gte<unknown, unknown>
+  | Lt<unknown, unknown>
+  | Lte<unknown, unknown>
+  | Like<unknown, unknown>
+  | IsNull<unknown>
+  | NotNull<unknown>
 
 /**
  * A bucket's rules on `storage.objects`: the same four operations as {@link ModelMeta.access}, each
