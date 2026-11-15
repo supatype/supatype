@@ -18,13 +18,13 @@
 #   SUPATYPE_HOOK_INTERNAL_PORT  host port for the stub internal API (default 8098)
 #   SUPATYPE_HOOK_EXTERNAL_PORT  host port for the stub external API (default 8097)
 #   SUPATYPE_E2E_PROJECT suffixes the container names, to run beside another run
-#   SUPATYPE_DENO_IMAGE  Deno image (default denoland/deno:2.1.4)
+#   SUPATYPE_DENO_IMAGE  Deno image (default denoland/deno:2.9.8)
 set -euo pipefail
 
 PORT="${SUPATYPE_HOOK_PORT:-8099}"
 INTERNAL_STUB_PORT="${SUPATYPE_HOOK_INTERNAL_PORT:-8098}"
 EXTERNAL_STUB_PORT="${SUPATYPE_HOOK_EXTERNAL_PORT:-8097}"
-DENO_IMAGE="${SUPATYPE_DENO_IMAGE:-denoland/deno:2.1.4}"
+DENO_IMAGE="${SUPATYPE_DENO_IMAGE:-denoland/deno:2.9.8}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$REPO_ROOT/tests/integration/scripts/lib/e2e-project.sh"
 CONTAINER="$(e2e_scoped supatype-hook-adapter-test)"

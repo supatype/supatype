@@ -1081,7 +1081,7 @@ function tsConfigTemplate(opts: ScaffoldOptions): string {
   lines.push(
     `  // Optional: pin component versions (native cache + Docker images synced to .env on dev/push)`,
   )
-  lines.push(`  // versions: { engine: "0.1.2", server: "1.0.5", postgres: "17.2", deno: "2.2.0" },`)
+  lines.push(`  // versions: { engine: "0.1.2", server: "1.0.5", postgres: "17.2", deno: "2.9.8" },`)
   lines.push(`  email: { provider: "${opts.email}" },`)
   lines.push(...storageConfigLines(opts.storageLocal, opts.storageProduction))
   lines.push(`  schema: { path: "${opts.schemaPath}", pg_schema: "public" },`)

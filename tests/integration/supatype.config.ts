@@ -16,7 +16,7 @@ export default defineConfig({
   // ships, and `postgres` because that image is published.
   versions: {
     postgres: "17.2",
-    deno: "2.2.0",
+    deno: "2.9.8",
   },
   schema: { path: "schema/index.ts" },
   output: {

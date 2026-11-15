@@ -200,6 +200,8 @@ On an unlinked project with a self-host Compose file, `supatype functions deploy
 
 The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.
 
+The worker runs Deno 2.9.8. Postgres drivers verified against a live database on it: `npm:postgres` (latest), `npm:postgres@3.4.5` and `npm:pg`. `npm:postgres` 3.4.6 and later does not run on Deno before 2.8, where it fails with `Not implemented: LibuvStreamWrap.prototype.useUserBuffer`; a stack on an older worker image should pin `npm:postgres@3.4.5`.
+
 Function logs are JSON lines on the container's output, each with the call's `request_id`, status and duration:
 
 ```sh
