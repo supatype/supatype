@@ -1,5 +1,5 @@
 import type { ChannelStatus, RealtimeClient, RealtimeEvent, RealtimePayload } from "./realtime.js"
-import { SupatypeError } from "./errors.js"
+import { isRealtimeChannelError, SupatypeError } from "./errors.js"
 import { isJsonObject } from "./json.js"
 import { isRowsOf } from "./caller-types.js"
 import { reportThrown } from "./thrown-error.js"
@@ -115,7 +115,8 @@ export function subscriptionViewOf(status: ChannelStatus, err?: Error | undefine
     case "CLOSED":
       return { status: "disconnected", error: null }
     case "CHANNEL_ERROR":
-      return { status: "error", error: new SupatypeError({ message: err?.message ?? "Subscription error" }) }
+      // A typed refusal is kept as it is, so the binding's error says which refusal it was.
+      return { status: "error", error: isRealtimeChannelError(err) ? err : new SupatypeError({ message: err?.message ?? "Subscription error" }) }
     case "TIMED_OUT":
       return { status: "error", error: new SupatypeError({ message: "Realtime connection timed out" }) }
   }

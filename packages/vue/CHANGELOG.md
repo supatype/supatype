@@ -4,12 +4,19 @@
 
 ### Features
 
+* **useChannel:** the channel name is a `ChannelName`: a topic the schema declares autocompletes (`lot:${string}`), and any other string is still accepted, since an `open` server admits it.
 * **useChannel:** `useChannel(name, setup)` joins one channel and hands it to `setup` to add any number of
   row, presence and broadcast listeners, which `useSubscription` (one table, one listener) cannot. It returns
   `status` and `error` as `useSubscription` does, and `isConnected` and `connectionState`. `name` is a string or
   a ref or getter: when it changes the old channel is left, its listeners go with it, and `setup` runs on the
   new one. The channel is left on teardown.
 * **useRealtimeConnection:** `isConnected` and `connectionState` for the realtime socket itself.
+* **useChannel:** takes `{ private: true }` as a third argument, passed to the channel join (see the
+  client changelog). A refused or withdrawn private join is status "error" with `error` a
+  `RealtimeChannelError` whose `reason` says why.
+* **useChannel:** returns `refusal`, the latest broadcast, presence track or payload the server refused on the
+  channel (`{ channel, code, message }`, `code` one of `send_denied`, `track_denied`,
+  `payload_refused`), or null. The channel stays joined: `status` does not change for it.
 
 ### Bug Fixes
 

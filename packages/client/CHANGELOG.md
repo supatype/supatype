@@ -53,6 +53,12 @@
   parameter), which autocompletes, or any other string, which an `open` server still admits. The
   declared topics come from the new `SupatypeChannels` interface that `supatype generate` fills in;
   `DeclaredTopic` and `DeclaredTopics<T>` are exported. Before generating, the name is a plain string.
+* **bindings:** `watchChannel` and `channelSlot` take a `ChannelName`, as `channel()` does, so the Vue, Solid
+  and Svelte channel bindings accept a declared topic or any other string.
+* **bindings:** `watchChannel` and `channelSlot` take `ChannelOptions` as a last argument, and a binding's
+  `error` for a refused or withdrawn channel is the `RealtimeChannelError` itself, not a copy of its message.
+* **bindings:** `watchChannel` and `channelSlot` take an `onRefused` callback, which the Vue, Solid and
+  Svelte channel bindings expose as `refusal`.
 
 ### Bug Fixes
 
