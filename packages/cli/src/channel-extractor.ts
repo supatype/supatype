@@ -510,7 +510,8 @@ function callerTests(send: unknown): unknown[] {
 /** True for a send rule that tests the message and nothing about who sends it. */
 function sendTestsNoCaller(send: unknown): boolean {
   if (!hasContent(send)) return false
-  return callerTests(send).every((rule) => isRecord(rule) && rule["type"] === "public")
+  // An explicit Public is a test: the author has said anyone may send.
+  return callerTests(send).length === 0
 }
 
 /**

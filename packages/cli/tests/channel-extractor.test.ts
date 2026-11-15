@@ -335,8 +335,8 @@ describe("a send rule that does not check who is sending", () => {
     expect(warnings[0]).toContain("BidChannel")
   })
 
-  it("warns when the only other test is Public, which tests no one", () => {
-    expect(warningsOf(`All<[Public, Event<"bid">]>`)).toHaveLength(1)
+  it("does not warn when the rule says Public, since the author has said anyone may send", () => {
+    expect(warningsOf(`All<[Public, Event<"bid">]>`)).toEqual([])
   })
 
   it("does not warn when the rule tests the caller beside the content", () => {
