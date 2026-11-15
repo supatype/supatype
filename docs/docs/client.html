@@ -178,6 +178,20 @@
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> { data: post } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"*"</span>).eq(<span class="s">"slug"</span>, <span class="s">"hello-world"</span>).maybeSingle()
 console.log(post?.title)</pre></div>
+    <h3 id="many-to-many">Linking many-to-many rows</h3>
+    <p>A many-to-many link is a row in the junction table, and you write it like any other row. The junction is named after the two tables, sorted and joined with <code>_</code> (<code>lot_tag</code> for <code>lot</code> and <code>tag</code>), with a <code>&lt;model&gt;_id</code> column for each end. It is in the generated types, so <code>from("lot_tag")</code> is typed. Nested <code>connect</code> and <code>set</code> writes are not supported yet.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="c">// add a link, and several at once</span>
+<span class="k">await</span> supatype.from(<span class="s">"lot_tag"</span>).insert({ lot_id: lot.id, tag_id: tag.id })
+<span class="k">await</span> supatype.from(<span class="s">"lot_tag"</span>).insert(tags.map((t) =&gt; ({ lot_id: lot.id, tag_id: t.id })))
+
+<span class="c">// list a lot's tags, or the links themselves</span>
+<span class="k">const</span> { data } = <span class="k">await</span> supatype.from(<span class="s">"lot"</span>).select(<span class="s">"title, tags:tag(name)"</span>).eq(<span class="s">"id"</span>, lot.id)
+<span class="k">const</span> { data: links } = <span class="k">await</span> supatype.from(<span class="s">"lot_tag"</span>).select(<span class="s">"tag_id"</span>).eq(<span class="s">"lot_id"</span>, lot.id)
+
+<span class="c">// remove a link</span>
+<span class="k">await</span> supatype.from(<span class="s">"lot_tag"</span>).delete().eq(<span class="s">"lot_id"</span>, lot.id).eq(<span class="s">"tag_id"</span>, tag.id)</pre></div>
+    <p>Who may write a link follows from its two ends. A link is readable by a caller who can read both rows, and writable by a caller who can read both and may update the model that owns the link: the one whose own <code>ManyToMany</code> field names the junction (either one, when both declare it). A refused insert returns an error. A delete the caller may not make removes no row and returns no error, so ask for the deleted rows with <code>.select()</code> if you need to know. See <a href="/docs/schema/access-rules.html#many-to-many-junction-tables">Access Rules</a>.</p>
     <p><code>count</code> is <code>null</code> unless you ask for it:</p>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> { count } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id"</span>, { count: <span class="s">"exact"</span> }).eq(<span class="s">"kind"</span>, <span class="s">"news"</span>)
