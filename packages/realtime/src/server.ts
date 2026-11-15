@@ -810,7 +810,7 @@ export class RealtimeServer {
    */
   async dispatchChange(change: WalChange): Promise<void> {
     if (isOutboxChange(change)) {
-      this.deliverOutbox(change)
+      await this.deliverOutbox(change)
       return
     }
     this.enforcer.noteChange(change)
@@ -838,10 +838,13 @@ export class RealtimeServer {
    * The outbox is never forwarded as a row change to anyone, whatever role subscribed to it, and on
    * a shared instance it is not delivered at all (private channels are not available there).
    */
-  private deliverOutbox(change: WalChange): void {
+  private async deliverOutbox(change: WalChange): Promise<void> {
     if (this.env.multiTenant) return
     const broadcast = outboxBroadcast(change)
     if (broadcast === null) return
+    const holders = this.channels.getChannelClients(broadcast.channel, null)
+    const grants = holders.map(({ client }) => client.subscriptions.get(broadcast.channel)?.access)
+    if (!(await this.guard.mayDeliverFromDatabase(broadcast.channel, grants))) return
     this.fanOutBroadcast(broadcast, null, null)
   }
 

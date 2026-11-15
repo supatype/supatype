@@ -58,7 +58,12 @@ function isServiceRole(claims: JwtClaims | null): boolean {
   return claims?.role === "service_role"
 }
 
+/** How many topics the once-per-topic drop log remembers before it starts over. */
+const MAX_WARNED_TOPICS = 1000
+
 export class ChannelGuard {
+  private readonly warnedUndeclared = new Set<string>()
+
   constructor(
     private readonly db: ChannelDatabase,
     private readonly catalog: ChannelCatalog,
@@ -162,6 +167,44 @@ export class ChannelGuard {
     const state = this.catalog.peek()
     if (state === null) return { state: "unreadable" }
     return state.sendChecks.get(declaration) ?? { state: "none" }
+  }
+
+  /**
+   * Whether a broadcast the database sent to `topic` may be fanned out.
+   *
+   * The database judged the send as the sender, and knows only its own mode. The effective mode is
+   * the stricter of that and `REALTIME_CHANNELS`, so with the database open and the environment
+   * declared a send to a topic nothing declares would otherwise still be delivered. In declared mode
+   * such a broadcast is dropped, and logged once per topic: the line is not per message.
+   *
+   * A holder admitted under a declaration already proves the topic is declared, so the database is
+   * asked only when no holder does (a topic held by the service role alone, or by no one). A failed
+   * answer drops the broadcast, as a failed join refuses.
+   */
+  async mayDeliverFromDatabase(topic: string, holders: readonly (ChannelGrant | undefined)[]): Promise<boolean> {
+    try {
+      const state = await this.catalog.current()
+      if (this.catalog.effectiveMode(state) !== "declared") return true
+      if (holders.some((grant) => grant !== undefined && grant.declaration !== null)) return true
+      const row = state.supported ? await this.db.asService((q) => fetchAccess(q, topic)) : null
+      if (row !== null && row.fits) return true
+      this.noteUndeclaredDrop(topic)
+      return false
+    } catch (err) {
+      this.log(`could not check whether ${topic} is declared (SQLSTATE ${sqlState(err)}); dropping a broadcast from the database`)
+      return false
+    }
+  }
+
+  private noteUndeclaredDrop(topic: string): void {
+    if (this.warnedUndeclared.has(topic)) return
+    // Bounded: topics are chosen by whoever writes to the outbox, so the set must not grow with them.
+    if (this.warnedUndeclared.size >= MAX_WARNED_TOPICS) this.warnedUndeclared.clear()
+    this.warnedUndeclared.add(topic)
+    this.log(
+      `dropping broadcasts from the database to ${topic}: it matches no declared channel and ` +
+        'this project refuses undeclared channels (realtime.channels is "declared"); logged once per topic',
+    )
   }
 
   /** The declarations whose rules read the table `key` (`schema.table`): a change to it may change who is admitted. */

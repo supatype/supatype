@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import jwt from "jsonwebtoken"
 import { RealtimeServer } from "../src/server.js"
 import type { WalChange, ServerMessage } from "../src/types.js"
@@ -760,5 +760,58 @@ describe("a broadcast sent from the database", () => {
     await settle(alice)
 
     expect(relayed(alice)).toEqual([])
+  })
+})
+
+describe("a broadcast from the database to a topic nothing declares, when the environment says declared", () => {
+  const outbox = (topic: string): WalChange =>
+    change("_supatype", "realtime_outbox", "INSERT", { id: "1", topic, event: "bid", payload: { amount: 5 }, sender: ALICE })
+  const SCRATCH = "scratch:1"
+
+  /** The database says open and the environment says declared: the stricter of the two is declared. */
+  const tightenedByEnv = (): Promise<Harness> => harness({ channels: "declared" }, (db) => { db.mode = "open" })
+
+  it("is dropped before fan-out, even to a service-role listener who holds the channel", async () => {
+    const { open, server } = await tightenedByEnv()
+    const service = await open(serviceToken())
+    await join(service, SCRATCH)
+
+    await server.dispatchChange(outbox(SCRATCH))
+    await settle(service)
+
+    expect(relayed(service)).toEqual([])
+  })
+
+  it("is still delivered to a declared topic's listener under the same settings", async () => {
+    const { open, server } = await tightenedByEnv()
+    const alice = await open(userToken(ALICE))
+    await join(alice, LOT)
+
+    await server.dispatchChange(outbox(LOT))
+
+    expect(await alice.next((m) => m.type === "broadcast")).toMatchObject({ channel: LOT, event: "bid" })
+  })
+
+  it("is still delivered when the effective mode is open", async () => {
+    const { open, server } = await harness({}, (db) => { db.mode = "open" })
+    const service = await open(serviceToken())
+    await join(service, SCRATCH)
+
+    await server.dispatchChange(outbox(SCRATCH))
+
+    expect(await service.next((m) => m.type === "broadcast")).toMatchObject({ channel: SCRATCH })
+  })
+
+  it("is logged once per topic, not once per message", async () => {
+    const { open, server } = await tightenedByEnv()
+    const service = await open(serviceToken())
+    await join(service, SCRATCH)
+    const lines: string[] = []
+    const spy = vi.spyOn(console, "error").mockImplementation((line: unknown) => { lines.push(String(line)) })
+
+    for (let i = 0; i < 3; i++) await server.dispatchChange(outbox(SCRATCH))
+    spy.mockRestore()
+
+    expect(lines.filter((l) => l.includes(SCRATCH))).toHaveLength(1)
   })
 })

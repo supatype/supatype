@@ -31,6 +31,11 @@
 
 ### Bug Fixes
 
+* **A broadcast from the database to an undeclared topic is dropped when the mode is declared.** The
+  effective mode is the stricter of the database's and `REALTIME_CHANNELS`, but a database send was
+  judged only by the database, which knows only its own mode, so with the database open and the
+  environment declared it still reached a service-role listener on an undeclared topic. It is now
+  dropped before fan-out and logged once per topic.
 * **A new token re-checks every held channel.** A channel joined with the service role records no
   declaration, so a token change re-checked only declared channels and left it with the service
   role's rights after the socket switched to a user token. Every held channel is now judged again.
