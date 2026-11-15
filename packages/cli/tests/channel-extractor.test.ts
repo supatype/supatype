@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 const HEADER = [
-  `import type { Model, UUID, Int, Channel, Param, Event, Payload, LoggedIn, In, Exists, Rows,`,
+  `import type { Model, UUID, Int, Channel, Param, Event, Payload, LoggedIn, Public, In, Exists, Rows,`,
   `  Eq, All, Any, Not, Role, AuthUid, Claim } from "@supatype/types"`,
   `export type Lot = Model<{ id: UUID }, { access: { read: LoggedIn } }>`,
   `type MyLots = Rows<"lot_watchers", "lot_id", Eq<"user_id", AuthUid>>`,
@@ -311,5 +311,41 @@ describe("channel overlap", () => {
       export type A = Channel<"org", ${ACCESS}>
       export type B = Channel<"org:*", ${ACCESS}>`)
     expect(ast?.channels).toHaveLength(2)
+  })
+})
+
+describe("a send rule that does not check who is sending", () => {
+  const channel = (send: string) => `export type BidChannel = Channel<"bid:{id}", {
+  params: { id: UUID }
+  access: { join: LoggedIn, send: ${send} }
+}>`
+  const warningsOf = (send: string): string[] => extract(channel(send))?.warnings ?? []
+
+  it("warns, naming the channel, when send tests only the event", () => {
+    const warnings = warningsOf(`Event<"bid">`)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("BidChannel")
+    expect(warnings[0]).toContain("does not check who is sending")
+    expect(warnings[0]).toContain(`All<[LoggedIn, Event<"bid">]>`)
+  })
+
+  it("warns when send tests only the event and the payload", () => {
+    const warnings = warningsOf(`All<[Event<"bid">, Payload<"amount", { kind: "number"; min: 1 }>]>`)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("BidChannel")
+  })
+
+  it("warns when the only other test is Public, which tests no one", () => {
+    expect(warningsOf(`All<[Public, Event<"bid">]>`)).toHaveLength(1)
+  })
+
+  it("does not warn when the rule tests the caller beside the content", () => {
+    expect(warningsOf(`All<[LoggedIn, Event<"bid">]>`)).toEqual([])
+    expect(warningsOf(`All<[Role<"auctioneer">, Event<"bid">, Payload<"amount", { kind: "number" }>]>`)).toEqual([])
+  })
+
+  it("does not warn when the rule has no content test, or no send rule", () => {
+    expect(warningsOf(`LoggedIn`)).toEqual([])
+    expect(extract(`export type Quiet = Channel<"quiet:{id}", { params: { id: UUID }, access: { join: LoggedIn } }>`)?.warnings).toBeUndefined()
   })
 })

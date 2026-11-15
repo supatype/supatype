@@ -470,6 +470,65 @@ export function collectChannels(sourceFile: ts.SourceFile, parseRule: ChannelRul
   return found
 }
 
+// ─── Warnings ───────────────────────────────────────────────────────────────
+
+/** Whether every leaf of the rule is an `Event` or a `Payload`: the engine's `is_content`. */
+function isContent(rule: unknown): boolean {
+  if (!isRecord(rule)) return false
+  if (rule["type"] === "event" || rule["type"] === "payload") return true
+  if (rule["type"] === "not") return isContent(rule["rule"])
+  if (rule["type"] !== "any" && rule["type"] !== "all") return false
+  const rules = asList(rule["rules"])
+  return rules.length > 0 && rules.every(isContent)
+}
+
+function hasContent(rule: unknown): boolean {
+  if (!isRecord(rule)) return false
+  if (rule["type"] === "event" || rule["type"] === "payload") return true
+  if (rule["type"] === "not") return hasContent(rule["rule"])
+  return asList(rule["rules"]).some(hasContent)
+}
+
+/** The engine's `flatten_all`: nested `All`s that hold content are opened into one list. */
+function flattenAll(rules: readonly unknown[]): unknown[] {
+  return rules.flatMap((rule) =>
+    isRecord(rule) && rule["type"] === "all" && hasContent(rule) ? flattenAll(asList(rule["rules"])) : [rule],
+  )
+}
+
+/**
+ * The tests of a `send` rule that the database decides: what is left once `Event` and `Payload` are
+ * taken out, as `split_send_rule` in the engine's `parser/channels.rs` takes them. A rule of content
+ * alone leaves none, and so does a top-level `All` whose other members are content.
+ */
+function callerTests(send: unknown): unknown[] {
+  if (isContent(send)) return []
+  if (!isRecord(send) || send["type"] !== "all") return [send]
+  return flattenAll(asList(send["rules"])).filter((rule) => !isContent(rule))
+}
+
+/** True for a send rule that tests the message and nothing about who sends it. */
+function sendTestsNoCaller(send: unknown): boolean {
+  if (!hasContent(send)) return false
+  return callerTests(send).every((rule) => isRecord(rule) && rule["type"] === "public")
+}
+
+/**
+ * One warning per channel whose `send` rule tests only the event or the payload. `Event` and
+ * `Payload` compile to TRUE in the database, so a rule made of them alone admits every caller,
+ * anon included. Not an error: an open channel with a vetted event is a legitimate design.
+ */
+export function channelWarnings(channels: readonly ExtractedChannelAst[]): string[] {
+  return channels
+    .filter((channel) => sendTestsNoCaller(channel.access.send))
+    .map(
+      (channel) =>
+        `Channel "${channel.name}": the send rule does not check who is sending, so any caller, ` +
+        `anon included, may send the events it allows. Add a caller test, for example ` +
+        `send: All<[LoggedIn, Event<"bid">]>.`,
+    )
+}
+
 // ─── Channel-only nodes elsewhere ───────────────────────────────────────────
 
 /** The name a channel-only node is written with, or undefined for any other node. */

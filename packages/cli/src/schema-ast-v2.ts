@@ -279,6 +279,8 @@ export interface ExtractedSchemaAstV2 {
   storageBuckets?: ExtractedStorageBucketAst[]
   /** Declared realtime channels, in declaration order. Absent when the schema declares none. */
   channels?: ExtractedChannelAst[]
+  /** Things the extractor noticed that are not errors, which the engine reports with a push's own. */
+  warnings?: string[]
   /**
    * Realtime settings from `supatype.config.ts`, attached by `withRealtime`. Absent when the config
    * states none, which the engine reads as `open`.
@@ -557,6 +559,7 @@ export function emitSchema(
   extras?: {
     storageBuckets?: ExtractedSchemaAstV2["storageBuckets"]
     channels?: ExtractedChannelAst[]
+    warnings?: string[]
     locales?: string[]
     defaultLocale?: string
   },
@@ -567,6 +570,7 @@ export function emitSchema(
     ...(extras?.storageBuckets !== undefined &&
       extras.storageBuckets.length > 0 && { storageBuckets: extras.storageBuckets }),
     ...(extras?.channels !== undefined && extras.channels.length > 0 && { channels: extras.channels }),
+    ...(extras?.warnings !== undefined && extras.warnings.length > 0 && { warnings: extras.warnings }),
     ...(extras?.locales !== undefined && extras.locales.length > 0 && { locales: extras.locales }),
     ...(extras?.defaultLocale !== undefined && { defaultLocale: extras.defaultLocale }),
   }

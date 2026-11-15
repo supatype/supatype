@@ -34,6 +34,11 @@
   version floor above is a placeholder, so an older engine can never drop the channels in silence.
 * **dev:** runs the same engine floor check as `supatype push` before applying a schema, native and
   Docker alike. It skipped it, so a pinned older engine took channels and enforced nothing.
+* **push, diff:** warn when a channel's `send` rule tests only `Event<>` or `Payload<>` and nothing
+  about the caller. Those nodes are checked by the realtime server and compile to TRUE in the
+  database, so `send: Event<"bid">` admits every caller, anon included. The warning names the channel
+  and suggests `send: All<[LoggedIn, Event<"bid">]>`. It is a warning, not an error, and is carried
+  to the engine in the schema's `warnings`.
 
 ## Unreleased
 

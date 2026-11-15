@@ -35,6 +35,7 @@ import {
 } from "./schema-ast-v2.js"
 import {
   assertChannelsDoNotOverlap,
+  channelWarnings,
   collectChannels,
   parseEventRule,
   parseParamOperand,
@@ -187,6 +188,7 @@ export function extractSchemaAstFromTypes(
   return emitSchema(models, {
     ...(storageBuckets !== undefined && storageBuckets.length > 0 && { storageBuckets }),
     channels,
+    warnings: channelWarnings(channels),
     ...(localeConfig !== undefined && {
       locales: localeConfig.locales,
       defaultLocale: localeConfig.defaultLocale,
