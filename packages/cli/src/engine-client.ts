@@ -129,12 +129,23 @@ export interface DiffResult {
  * One API role's access to one model's table (schema-engine `access_summary::RoleAccess`), as rule
  * verbs (`read`, `create`, `update`, `delete`): what the database grants now, and what the push leaves.
  */
+/** One operation a role can reach, and which rows: "all rows" or "rows decided by rule". */
+export interface EffectiveAccess {
+  verb: string
+  rows: string
+}
+
 export interface RoleAccess {
   model: string
   table: string
   role: string
   before: string[]
   after: string[]
+  /**
+   * What the role can reach once the push applies, from the rules rather than the grants: a verb a
+   * `Private` rule shuts out is missing here though `after` lists it. Absent from an older engine.
+   */
+  effective?: EffectiveAccess[]
   /** A many-to-many junction table: a link between two models. */
   link?: boolean
   /** What a link denies every API role because the engine could not derive it, and why. */

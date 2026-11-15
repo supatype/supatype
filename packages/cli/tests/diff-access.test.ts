@@ -99,6 +99,45 @@ describe("supatype diff output", () => {
   })
 })
 
+describe("formatRoleAccess() with effective access from the rules", () => {
+  const ALL = "all rows"
+  const BY_RULE = "rows decided by rule"
+
+  it("reads none for a model whose rules shut out every granted verb", () => {
+    const grants = ["read", "create", "update", "delete"]
+    const private_ = { ...entry("secret", "authenticated", grants, grants), effective: [] }
+    expect(formatRoleAccess([private_])).toEqual(["Access for authenticated (signed in):", "  secret   none"])
+  })
+
+  it("groups the verbs by whether the rule reaches every row or decides row by row", () => {
+    const grants = ["read", "create", "update"]
+    const mixed = {
+      ...entry("notice", "authenticated", grants, grants),
+      effective: [
+        { verb: "read", rows: ALL },
+        { verb: "create", rows: BY_RULE },
+        { verb: "update", rows: BY_RULE },
+      ],
+    }
+    expect(formatRoleAccess([mixed])).toEqual([
+      "Access for authenticated (signed in):",
+      `  notice   read (all rows); create, update (${BY_RULE})`,
+    ])
+  })
+
+  it("keeps showing what the database grants now when the push changes it", () => {
+    const changed = { ...entry("notice", "anon", [], ["read"]), effective: [{ verb: "read", rows: ALL }] }
+    expect(formatRoleAccess([changed])).toEqual(["Access for anon (signed out):", "  notice   none -> read (all rows)"])
+  })
+
+  it("is accepted from the engine, and refused when it is not a list of verbs", () => {
+    const grants = ["read"]
+    const good = { ...entry("a", "anon", grants, grants), effective: [{ verb: "read", rows: ALL }] }
+    expect(isDiffResult({ operations: [], access: [good] })).toBe(true)
+    expect(isDiffResult({ operations: [], access: [{ ...good, effective: "read" }] })).toBe(false)
+  })
+})
+
 describe("formatRoleAccess() for many-to-many links", () => {
   const READS_LINK = "an end's read rule reads this link table"
 

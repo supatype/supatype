@@ -40,6 +40,31 @@ export type { ExtractedSchemaAstV2 as ExtractedSchemaAst, ExtractedStorageBucket
 
 interface FieldParseContext {
   autoLocalize?: boolean
+  /** The model being read, so a warning can name the field in full. */
+  modelName?: string
+  /** Where a field the extractor could only store as jsonb is reported. */
+  warnings?: string[]
+}
+
+/**
+ * Say that a field's TypeScript type has no column type of its own, so it is stored as jsonb.
+ *
+ * Changing the mapping would change the column of every existing schema, so it is reported
+ * instead: a single string literal such as "outbid" lands here and is easy to take for text.
+ */
+function noteJsonFallback(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  context: FieldParseContext,
+  fieldName: string,
+): void {
+  if (context.warnings === undefined) return
+  const where = context.modelName === undefined ? fieldName : `${context.modelName}.${fieldName}`
+  context.warnings.push(
+    `Field "${where}" has the TypeScript type ${typeNode.getText(sourceFile)}, which has no column type, ` +
+      "so it is stored as jsonb. Use string for text, a union of string literals for an enum, " +
+      "or JSON if jsonb is what you mean.",
+  )
 }
 
 export function extractSchemaAstFromTypes(
@@ -80,6 +105,7 @@ export function extractSchemaAstFromTypes(
   }
 
   const models: ExtractedSchemaAstV2["models"] = []
+  const warnings: string[] = []
 
   for (const sourceFile of sourceFiles) {
     for (const stmt of sourceFile.statements) {
@@ -97,6 +123,8 @@ export function extractSchemaAstFromTypes(
       const metaHints = parseMetaLiteral(metaArg, sourceFile, resolveCtx, stmt.name.text)
       const fieldContext: FieldParseContext = {
         autoLocalize: modelTypeName === "LocalizedModel" || metaHints.autoLocalize === true,
+        modelName: stmt.name.text,
+        warnings,
       }
 
       const fields: Record<string, FieldAstV2> = {}
@@ -173,6 +201,7 @@ export function extractSchemaAstFromTypes(
   }
 
   return emitSchema(models, {
+    warnings,
     ...(storageBuckets !== undefined && storageBuckets.length > 0 && { storageBuckets }),
     ...(localeConfig !== undefined && {
       locales: localeConfig.locales,
@@ -1280,6 +1309,7 @@ function parseScalarType(
     case ts.SyntaxKind.BooleanKeyword:
       return scalar("boolean")
     default:
+      noteJsonFallback(typeNode, sourceFile, context, fieldName)
       return scalar("json")
   }
 }

@@ -6,6 +6,11 @@
 
 * **storage:** the extractor reads `Folder<N>` as a bucket-rule operand and refuses it in a model's
   `access`, or with a position that is not a whole number from 1.
+* **push, diff:** the access summary lists what each role can reach under the rules (new `effective`
+  field, printed by `diff` and `dev`), so a `Private` model no longer reads as full CRUD. `after`
+  is unchanged for `--json`.
+* **push:** a warning names any field stored as jsonb because its TypeScript type has no column type
+  (a single string literal, say). The mapping is unchanged.
 
 ### Bug Fixes
 
