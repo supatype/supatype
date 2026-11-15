@@ -185,7 +185,23 @@ describe("the keyspace login native dev hands the server", () => {
     })
   })
 
-  it("is left to .env for a Valkey SUPATYPE_VALKEY_ADDR names, which may have its own password", () => {
-    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "10.0.0.5:6379", containerName: null, started: false }, login: null })).toEqual({})
+  // Owner, 2026-11-15: a Valkey SUPATYPE_VALKEY_ADDR names is the developer's own, so it gets the
+  // password SUPATYPE_VALKEY_PASSWORD gives it, not the keyspace's. init writes a keyspace password
+  // into every .env, and handing it on made a Valkey with no password refuse the server (WRONGPASS).
+  it("is SUPATYPE_VALKEY_PASSWORD for a Valkey SUPATYPE_VALKEY_ADDR names, blank when unset", () => {
+    const named = { sidecar: { addr: "10.0.0.5:6379", containerName: null, started: false }, login: null }
+    expect(nativeKeyspaceServerEnv(named, { SUPATYPE_KEYSPACE_PASSWORD: "the keyspace's" })).toEqual({
+      SUPATYPE_KEYSPACE_PASSWORD: "",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+    expect(nativeKeyspaceServerEnv(named, { SUPATYPE_VALKEY_PASSWORD: "mine", SUPATYPE_VALKEY_USERNAME: "me" })).toEqual({
+      SUPATYPE_KEYSPACE_USERNAME: "me",
+      SUPATYPE_KEYSPACE_PASSWORD: "mine",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+  })
+
+  it("asks nothing of .env when there is no Valkey at all", () => {
+    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "", containerName: null, started: false }, login: null }, { SUPATYPE_VALKEY_PASSWORD: "mine" })).toEqual({})
   })
 })

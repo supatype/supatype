@@ -715,7 +715,7 @@ export function registerDev(program: Command): void {
         ...nativeSamlEnv(cwd, config),
         ...nativeServerDotEnvLayer({ dotEnv, config, denoPort }),
         // After .env, which can hold a keyspace password for a Docker phase of the project (N-RB2).
-        ...nativeKeyspaceServerEnv(cache),
+        ...nativeKeyspaceServerEnv(cache, providerEnvironment),
       }
 
       await haltIfStopping()

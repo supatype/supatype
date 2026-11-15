@@ -41,7 +41,7 @@ export interface NativeCache {
  * read the password from that file already, and the server refuses to start given both; beside the
  * sidecar, it would send a password the sidecar does not have.
  */
-export function nativeKeyspaceServerEnv(cache: NativeCache): Record<string, string> {
+export function nativeKeyspaceServerEnv(cache: NativeCache, env: Record<string, string | undefined> = {}): Record<string, string> {
   if (cache.login !== null) {
     return {
       SUPATYPE_KEYSPACE_USERNAME: cache.login.username,
@@ -49,7 +49,24 @@ export function nativeKeyspaceServerEnv(cache: NativeCache): Record<string, stri
       [KEYSPACE_PASSWORD_FILE_ENV]: "",
     }
   }
-  return cache.sidecar.started ? { [KEYSPACE_PASSWORD_ENV]: "", [KEYSPACE_PASSWORD_FILE_ENV]: "" } : {}
+  if (cache.sidecar.started) return { [KEYSPACE_PASSWORD_ENV]: "", [KEYSPACE_PASSWORD_FILE_ENV]: "" }
+  return cache.sidecar.addr === "" ? {} : namedValkeyLogin(env)
+}
+
+/**
+ * The login for a Valkey SUPATYPE_VALKEY_ADDR names: the developer's own, so SUPATYPE_VALKEY_PASSWORD
+ * (and SUPATYPE_VALKEY_USERNAME) from the shell or .env, never the keyspace's. init writes a keyspace
+ * password into every .env, and handing it on made a Valkey with no password refuse the server with
+ * WRONGPASS (owner, 2026-11-15).
+ */
+function namedValkeyLogin(env: Record<string, string | undefined>): Record<string, string> {
+  const password = env["SUPATYPE_VALKEY_PASSWORD"]?.trim() ?? ""
+  const username = env["SUPATYPE_VALKEY_USERNAME"]?.trim() ?? ""
+  return {
+    ...(password !== "" && username !== "" && { SUPATYPE_KEYSPACE_USERNAME: username }),
+    [KEYSPACE_PASSWORD_ENV]: password,
+    [KEYSPACE_PASSWORD_FILE_ENV]: "",
+  }
 }
 
 /** Inputs to the outer layer of supatype-server's environment on the native path. */

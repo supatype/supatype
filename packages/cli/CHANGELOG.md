@@ -52,6 +52,10 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **dev (native):** a Valkey named in `SUPATYPE_VALKEY_ADDR` logs in with `SUPATYPE_VALKEY_PASSWORD` (and
+  `SUPATYPE_VALKEY_USERNAME`), or with no password, never the keyspace's. `init` writes a keyspace password
+  into every `.env`, and a Valkey with no password refused the server with WRONGPASS. A named Valkey that
+  used `SUPATYPE_KEYSPACE_PASSWORD` as its password now needs it as `SUPATYPE_VALKEY_PASSWORD`.
 * **push:** a refused push names one `supatype rename <from> <new name>` line for a dropped table or column
   with more than three possible new names. One table dropped beside eight added printed eight lines
   naming it eight ways.
