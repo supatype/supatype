@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **sql editor:** a `DELETE` or `UPDATE` with no `WHERE` now shows, under the error, that the database
+  refuses it in every session (`pg_safeupdate`) and that `WHERE true` means every row.
+
 ## 0.9.1 (2026-11-09)
 
 ### Features
