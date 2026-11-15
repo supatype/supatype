@@ -339,7 +339,7 @@ const llmsFull = read("llms-full.txt")
 // Each result is a path from the repo root, what the file holds now (null if missing) and what it
 // should hold (null to delete it).
 const results = [
-  ...Object.keys(pages).map((url) => [`docs/${fileOf(url)}`, pages[url], synced[url]]),
+  ...Object.keys(pages).map((url) => [`docs/${fileOf(url)}`, read(fileOf(url)), synced[url]]),
   ["docs/index.html", home, withHead(home, "/", "index.html")],
   ["docs/llms-full.txt", llmsFull, llmsFullTxt(llmsFull, synced)],
   ["docs/sitemap.xml", read("sitemap.xml"), sitemapXml()],
