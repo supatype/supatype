@@ -158,6 +158,8 @@ A `RichText` field takes a plain string. It becomes a one-paragraph document. Ri
 
 A `Blocks` entry is `{ type, data }`, with the block's fields under `data`, as Studio stores it. See `sections` below.
 
+A column stored as `jsonb` takes an object or an array as it is. A string is read as JSON text, so a value that is itself a JSON string needs its quotes: `alert: JSON.stringify("outbid")`, not `alert: "outbid"`, which fails with `invalid input syntax for type json`. This includes a field whose type push stores as `jsonb` by fallback, such as a single string literal type.
+
 `expr` gives values the database works out when the seed runs:
 
 ```ts title="seeds/02-posts.ts"

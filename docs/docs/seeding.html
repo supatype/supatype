@@ -233,6 +233,7 @@ log(<span class="s">`created a tag, referenced as ${JSON.stringify(tag.id)}`</sp
     <h2 id="values">Rich text and defaults</h2>
     <p>A <code>RichText</code> field takes a plain string. It becomes a one-paragraph document. Rich text inside a block is not converted, so write the full document there.</p>
     <p>A <code>Blocks</code> entry is <code>{ type, data }</code>, with the block's fields under <code>data</code>, as Studio stores it. See <code>sections</code> below.</p>
+    <p>A column stored as <code>jsonb</code> takes an object or an array as it is. A string is read as JSON text, so a value that is itself a JSON string needs its quotes: <code>alert: JSON.stringify("outbid")</code>, not <code>alert: "outbid"</code>, which fails with <code>invalid input syntax for type json</code>. This includes a field whose type push stores as <code>jsonb</code> by fallback, such as a single string literal type.</p>
     <p><code>expr</code> gives values the database works out when the seed runs:</p>
     <div class="cb"><div class="cb-bar"><span>seeds/02-posts.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>db.post.upsert({
