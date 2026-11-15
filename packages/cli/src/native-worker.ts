@@ -13,6 +13,7 @@
  * The cost of always running it, measured on Windows with Deno 2.2: two processes and about 54 MB
  * at rest, ready in about half a second, and Deno downloaded once on a project's first dev.
  */
+import { spawnSync } from "node:child_process"
 import { relative } from "node:path"
 import { cachedVersionOf } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
@@ -78,4 +79,42 @@ async function provisionDeno(config: SupatypeProjectConfig): Promise<string | un
     )
     return undefined
   }
+}
+
+/** What a preflight run of Deno answered. */
+export interface DenoRun {
+  status: number | null
+  stdout: string
+  stderr: string
+}
+
+function runDenoInFolder(denoBin: string, cwd: string): DenoRun {
+  const result = spawnSync(denoBin, ["eval", "0"], { cwd, stdio: "pipe", encoding: "utf8", timeout: 30_000, windowsHide: true })
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
+}
+
+/**
+ * Why Deno cannot start in the project folder, as a warning, or null when it can.
+ *
+ * The server starts Deno for the worker and keeps its output to itself, so a Deno that fails at
+ * once (one older than the `deno.lock` beside it: "Failed reading lockfile") left every function
+ * answering 502 with an empty body and nothing in dev's output (0.9.3 run). `deno eval 0` reads
+ * the folder's config and lockfile as the worker does, in about a second and with no downloads.
+ */
+export function denoPreflightWarning(
+  denoBin: string | undefined,
+  cwd: string,
+  run: (denoBin: string, cwd: string) => DenoRun = runDenoInFolder,
+): string | null {
+  if (denoBin === undefined) return null
+  const answer = run(denoBin, cwd)
+  if (answer.status === 0) return null
+  // Deno colours its errors; the warning is read in a log too.
+  const detail = `${answer.stderr}${answer.stdout}`.replace(/\u001b\[[0-9;]*m/g, "").trim()
+  const lines = detail.split(/\r?\n/).map((line) => `  ${line}`).join("\n")
+  return (
+    "[supatype] ⚠  Deno cannot start in this folder, so every edge function and model hook will answer 502:\n" +
+    `${lines}\n` +
+    "  A deno.lock written by a newer Deno is the usual cause: delete it, or pin that Deno in versions.deno."
+  )
 }

@@ -52,6 +52,14 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **dev, generate (Docker):** a project that names its engine image in `SUPATYPE_ENGINE_IMAGE` writes its
+  types, seed builder and admin config with that image, the one it pushes with. The cached host engine
+  wrote them, and when it was older than the image it refused a schema the image had just pushed, three
+  times, while push still said "Schema pushed." The line the CLI writes from `versions.engine` does not
+  count: the host engine at that pin already matches it.
+* **dev (native):** dev warns, with Deno's own error, when Deno cannot start in the project folder. A
+  `deno.lock` written by a newer Deno made the worker exit at once, and every function answered 502 with
+  an empty body and nothing in dev's output.
 * **self-host:** `compose restart functions-worker` says to run `compose up` when `SUPATYPE_FUNCTIONS_DB_URL`
   names `db` but db is not on the functions network yet. Only `up` recreates db onto it, and until
   then every function using `ctx.dbUrl` failed with `getaddrinfo ENOTFOUND db`.

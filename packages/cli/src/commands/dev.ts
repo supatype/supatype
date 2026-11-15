@@ -119,7 +119,7 @@ import {
   waitForDevShutdown,
 } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
-import { nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
+import { denoPreflightWarning, nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
 import { configSnapshot } from "../config-snapshot.js"
 import { refuseInsideDevApp } from "../dev-self-start.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
@@ -600,6 +600,8 @@ export function registerDev(program: Command): void {
       // The functions worker the image runs, from the CLI's copy, on every start (native-worker.ts).
       await showDevStep("Starting services")
       const worker = await prepareNativeWorker(cwd, config)
+      const denoWarning = denoPreflightWarning(worker.denoBin, cwd)
+      if (denoWarning !== null) console.warn(denoWarning)
 
       // The server passes its environment, the key included, on to Deno, but the functions worker
       // reads the key from a file: a --watch reload evaluates it again in an environment an
