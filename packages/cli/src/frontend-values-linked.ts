@@ -8,6 +8,7 @@
  * that is not local, so the key a build ships is the one the server it names actually holds.
  */
 
+import { trimApiUrl } from "./api-url.js"
 import { isShape, isString } from "@supatype/shared"
 import { bodyReason, errorMessage } from "./error-message.js"
 import { fetchWithin } from "./fetch-within.js"
@@ -102,7 +103,7 @@ async function cloudAnonKey(target: DeployTarget, deployment: string | undefined
  * server, or a Supatype Cloud environment's own address, which serves the same.
  */
 export async function publishedAnonKey(apiUrl: string, allowLocal: boolean): Promise<FrontendFinding> {
-  const url = `${apiUrl.replace(/\/$/, "")}${PUBLIC_ENV_PATH}`
+  const url = `${trimApiUrl(apiUrl)}${PUBLIC_ENV_PATH}`
   const local = isLocalUrl(apiUrl)
   if (local && !allowLocal) return { note: `not fetched from ${url}, a local address` }
   if (!local && !apiUrl.startsWith("https://")) {

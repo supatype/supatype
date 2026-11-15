@@ -1,3 +1,4 @@
+import { trimApiUrl } from "./api-url.js"
 import { execSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
@@ -147,7 +148,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       mode: "self-host",
       environment: `branch:${branchCtx.branchId}`,
       projectRef,
-      apiBaseUrl: branchCtx.apiUrl.replace(/\/$/, ""),
+      apiBaseUrl: trimApiUrl(branchCtx.apiUrl),
       apiPrefix: "/platform/v1",
       token: branchCtx.token,
       link: loadProjectLink(cwd),
@@ -159,7 +160,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       mode: "direct",
       environment: "local",
       projectRef,
-      apiBaseUrl: (serverBaseUrl(config) ?? "").replace(/\/$/, ""),
+      apiBaseUrl: trimApiUrl(serverBaseUrl(config) ?? ""),
       apiPrefix: "/platform/v1",
       link: null,
       databaseUrl: hostDatabaseUrl(cwd, config, flags.connection),
@@ -175,7 +176,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
         mode: "local",
         environment: "local",
         projectRef: localEnv.projectRef,
-        apiBaseUrl: localEnv.apiUrl.replace(/\/$/, ""),
+        apiBaseUrl: trimApiUrl(localEnv.apiUrl),
         apiPrefix: "/platform/v1",
         token: shellServiceRoleKey(cwd),
         link: null,
@@ -186,7 +187,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       mode: "direct",
       environment: "local",
       projectRef,
-      apiBaseUrl: (serverBaseUrl(config) ?? "").replace(/\/$/, ""),
+      apiBaseUrl: trimApiUrl(serverBaseUrl(config) ?? ""),
       apiPrefix: "/platform/v1",
       link: null,
       databaseUrl: hostDatabaseUrl(cwd, config, flags.connection),
@@ -222,7 +223,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       mode: "cloud",
       environment: envName,
       projectRef: link.projectRef,
-      apiBaseUrl: (link.cloudApiUrl ?? envTarget.apiUrl).replace(/\/$/, ""),
+      apiBaseUrl: trimApiUrl(link.cloudApiUrl ?? envTarget.apiUrl),
       apiPrefix: "/api/v1",
       token,
       link,
@@ -236,7 +237,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     mode: link.kind === "local" ? "local" : "self-host",
     environment: envName,
     projectRef: link.projectRef,
-    apiBaseUrl: envTarget.apiUrl.replace(/\/$/, ""),
+    apiBaseUrl: trimApiUrl(envTarget.apiUrl),
     apiPrefix: "/platform/v1",
     token,
     link,
@@ -246,7 +247,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
 
 function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh"] | undefined {
   if (target.mode !== "cloud" || !target.refreshToken || !target.cwd) return undefined
-  const cloudApiUrl = (target.link?.cloudApiUrl ?? target.apiBaseUrl).replace(/\/$/, "")
+  const cloudApiUrl = trimApiUrl(target.link?.cloudApiUrl ?? target.apiBaseUrl)
   const cwd = target.cwd
   return {
     cloudApiUrl,
@@ -255,6 +256,7 @@ function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh
       persistCloudSession(cwd, {
         apiUrl: cloudApiUrl,
         accessToken,
+        kind: "session",
         ...(refreshToken !== undefined ? { refreshToken } : {}),
       })
       target.token = accessToken

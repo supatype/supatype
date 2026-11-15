@@ -1,6 +1,8 @@
+import { trimApiUrl } from "./api-url.js"
 import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
 import { readAuthAnswer } from "./auth-answer.js"
 import { fetchWithin } from "./fetch-within.js"
+import { isPersonalAccessToken } from "./personal-access-token.js"
 import { bodyReason, httpFailureText, isConnectionRefused, redact } from "./error-message.js"
 
 export interface TargetFetchOptions {
@@ -51,10 +53,13 @@ export class TargetApiError extends Error {
   }
 }
 
-function isAuthExpiry(status: number, code?: string, message?: string): boolean {
+/** Whether a 401 says the token is no longer good: by its `code`, the control plane's `error` code, or its older message. */
+function isAuthExpiry(status: number, json: unknown): boolean {
   if (status !== 401) return false
+  const code = bodyString(json, "code")
   if (code === "TOKEN_EXPIRED" || code === "NO_SESSION" || code === "INVALID_TOKEN") return true
-  const m = (message ?? "").toLowerCase()
+  if (bodyString(json, "error") === "invalid_token") return true
+  const m = (bodyReason(json) ?? "").toLowerCase()
   return m.includes("token expired") || m.includes("authentication required")
 }
 
@@ -64,7 +69,7 @@ const REFRESH_TIMEOUT_MS = 10_000
 async function refreshAccessToken(
   authRefresh: NonNullable<TargetFetchOptions["authRefresh"]>,
 ): Promise<string> {
-  const url = `${authRefresh.cloudApiUrl.replace(/\/$/, "")}/auth/refresh`
+  const url = `${trimApiUrl(authRefresh.cloudApiUrl)}/auth/refresh`
   let res: Response
   let body: unknown
   try {
@@ -168,14 +173,23 @@ async function acceptedResponse(url: string, opts: TargetFetchOptions, signal?: 
   let res = await send(url, opts, opts.token, signal ?? budgetSignal(opts.timeoutMs))
   if (res.ok) return res
   let answer = await answerOf(res)
-  if (opts.authRefresh && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
+  const renewal = renewalOf(opts)
+  if (renewal && isAuthExpiry(answer.status, answer.json)) {
     const spent = Date.now() - started
-    const token = await refreshAccessToken(opts.authRefresh)
+    const token = await refreshAccessToken(renewal)
     res = await send(url, opts, token, signal ?? budgetSignal(opts.timeoutMs === undefined ? undefined : opts.timeoutMs - spent))
     if (res.ok) return res
     answer = await answerOf(res)
   }
   throw refusal(answer, url, opts)
+}
+
+/**
+ * How to renew the session `opts.token` belongs to, when it can be. A personal access token has no
+ * session to renew: it is sent as it is, and a refusal of it is final.
+ */
+function renewalOf(opts: TargetFetchOptions): TargetFetchOptions["authRefresh"] {
+  return isPersonalAccessToken(opts.token) ? undefined : opts.authRefresh
 }
 
 /** A signal that aborts after `ms` (at least 1), or none without a limit. */
@@ -193,8 +207,10 @@ function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): Ta
   const code = bodyString(result.json, "code")
   const said = httpFailureText(result.status, result.statusText, result.text)
   const message = bodyReason(result.json) === undefined ? `${said} (${url})` : said
-  if (isAuthExpiry(result.status, code, message) && !opts.authRefresh) {
-    return new TargetApiError(`${message}. Session expired, run: supatype login`, result.status, code)
+  const pat = isPersonalAccessToken(opts.token)
+  if (isAuthExpiry(result.status, result.json) && (pat || !opts.authRefresh)) {
+    const ended = pat ? "Access token revoked or expired" : "Session expired"
+    return new TargetApiError(`${message}. ${ended}, run: supatype login`, result.status, code)
   }
   return new TargetApiError(message, result.status, code, isJsonObject(result.json) ? result.json : undefined)
 }
@@ -226,7 +242,7 @@ export async function targetFetch(
   opts: TargetFetchOptions,
   guard: Guard<unknown> = isUnknown,
 ): Promise<unknown> {
-  const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
+  const url = `${trimApiUrl(baseUrl)}${apiPrefix}${opts.path}`
   const result = await timedAnswer(url, opts)
   const answer = isJsonObject(result.json) && result.json["data"] !== undefined ? result.json["data"] : result.json
   if (!guard(answer)) throw new Error(`Unexpected response from ${url} (HTTP ${result.status})`)
@@ -253,7 +269,7 @@ export async function targetStream(
   apiPrefix: "/api/v1" | "/platform/v1" | "/admin/v1",
   opts: TargetFetchOptions,
 ): Promise<ReadableStream<Uint8Array>> {
-  const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
+  const url = `${trimApiUrl(baseUrl)}${apiPrefix}${opts.path}`
   const res = await streamStart(url, opts)
   if (res.body === null) throw new Error(`${url} answered with no body to stream`)
   return res.body
