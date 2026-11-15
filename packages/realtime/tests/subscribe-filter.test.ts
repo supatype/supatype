@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { RealtimeServer } from "../src/server.js"
 import { connect, freePort, isSystem, settle, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * A subscribe whose filter the server cannot read is refused, naming the condition.
@@ -22,7 +23,7 @@ describe("a subscribe filter", () => {
 
   beforeAll(async () => {
     port = await freePort()
-    server = new RealtimeServer(testEnv(port))
+    server = new RealtimeServer(testEnv(port), { channelDb: undeclaredChannels() })
     await server.start()
   })
 

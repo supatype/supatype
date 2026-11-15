@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { loadEnv } from "../src/env.js"
 import { RealtimeServer } from "../src/server.js"
 import { freePort, testEnv } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * Local test round 3c (N18): native dev's realtime listened on `0.0.0.0` and `[::]`, every address
@@ -44,7 +45,7 @@ describe("REALTIME_HOST", () => {
   it("listens on that address only, the admin API too", async () => {
     const port = await freePort()
     const adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort, host: "127.0.0.1" }))
+    server = new RealtimeServer(testEnv(port, { adminPort, host: "127.0.0.1" }), { channelDb: undeclaredChannels() })
     await server.start()
 
     expect(await accepts("127.0.0.1", port)).toBe(true)
@@ -56,7 +57,7 @@ describe("REALTIME_HOST", () => {
 
   it("listens on every address when none is named", async () => {
     const port = await freePort()
-    server = new RealtimeServer(testEnv(port))
+    server = new RealtimeServer(testEnv(port), { channelDb: undeclaredChannels() })
     await server.start()
 
     expect(await accepts("127.0.0.1", port)).toBe(true)

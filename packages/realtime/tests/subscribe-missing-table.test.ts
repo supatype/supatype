@@ -5,6 +5,7 @@ import { RlsFilter, type DeliveryVerdict } from "../src/rls.js"
 import type { JwtClaims } from "../src/auth.js"
 import type { ServerMessage, WalChange } from "../src/types.js"
 import { connect, freePort, isSystem, serviceToken, settle, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * A join for a table that does not exist is refused, naming the table.
@@ -87,7 +88,7 @@ describe("a join for a table that does not exist", () => {
     vi.spyOn(ReplicationListener.prototype, "isConnected").mockReturnValue(true)
     port = await freePort()
     filter = new FakeCatalogFilter()
-    server = new RealtimeServer(testEnv(port), { rlsFilter: filter })
+    server = new RealtimeServer(testEnv(port), { rlsFilter: filter, channelDb: undeclaredChannels() })
     await server.start()
   })
 

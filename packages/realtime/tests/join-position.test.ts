@@ -5,6 +5,7 @@ import { RlsFilter, type DeliveryVerdict } from "../src/rls.js"
 import type { JwtClaims } from "../src/auth.js"
 import type { WalChange } from "../src/types.js"
 import { connect, freePort, isSystem, settle, subscribe, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * A join hears only changes committed after it.
@@ -128,7 +129,7 @@ describe("a join and the changes committed before it", () => {
     vi.spyOn(ReplicationListener.prototype, "isConnected").mockReturnValue(true)
     port = await freePort()
     filter = new FakeDatabaseFilter()
-    server = new RealtimeServer(testEnv(port), { rlsFilter: filter })
+    server = new RealtimeServer(testEnv(port), { rlsFilter: filter, channelDb: undeclaredChannels() })
     await server.start()
   })
 

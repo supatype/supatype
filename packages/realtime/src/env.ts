@@ -22,6 +22,22 @@ export function parseSchemaFilterMode(raw: string | undefined): "all" | "develop
 }
 
 /**
+ * `REALTIME_CHANNELS`: unset is no opinion. `declared` makes a channel nothing declares refuse
+ * broadcast and presence. `open` is accepted and means nothing more than unset: the project's own
+ * setting (`realtime.channels` in its config, carried into the database by a push) can only be
+ * tightened from here, never loosened, so this can never reopen what the schema closed.
+ */
+export function parseChannelsMode(raw: string | undefined): "open" | "declared" | undefined {
+  const value = (raw ?? "").trim().toLowerCase()
+  if (value === "") return undefined
+  if (value === "open" || value === "declared") return value
+  throw new Error(`REALTIME_CHANNELS must be "open" or "declared", got "${raw}"`)
+}
+
+/** How often every held channel is judged again when nothing prompted it: five minutes. */
+export const DEFAULT_CHANNEL_RECHECK_SECONDS = 300
+
+/**
  * An optional whole-number setting: unset or empty is `null`, anything else must be a positive
  * integer. A typo stops the service rather than silently meaning "none".
  */
@@ -72,6 +88,14 @@ export interface RealtimeEnv {
   secureChannels: boolean
   /** `REALTIME_LOG_LEVEL`: see {@link LogLevel}. */
   logLevel: LogLevel
+  /** `REALTIME_CHANNELS`: see {@link parseChannelsMode}. Absent means the database decides. */
+  channels?: "open" | "declared" | undefined
+  /**
+   * `REALTIME_CHANNEL_RECHECK_S`: how often every held channel is judged again as a backstop to the
+   * re-checks a new token and a change to a table a rule reads already cause. Absent means
+   * {@link DEFAULT_CHANNEL_RECHECK_SECONDS}.
+   */
+  channelRecheckSeconds?: number | undefined
 
   // ─── Multi-tenant (cloud mode) ────────────────────────────────────
   /** When true, this instance serves multiple projects on a shared Postgres. */
@@ -111,6 +135,9 @@ export function loadEnv(): RealtimeEnv {
     replicationPollInterval: Number(process.env["REPLICATION_POLL_INTERVAL"] ?? "100"),
     secureChannels: process.env["SECURE_CHANNELS"] !== "false",
     logLevel: parseLogLevel(process.env["REALTIME_LOG_LEVEL"]),
+    channels: parseChannelsMode(process.env["REALTIME_CHANNELS"]),
+    channelRecheckSeconds:
+      parseOptionalPositiveInt("REALTIME_CHANNEL_RECHECK_S", process.env["REALTIME_CHANNEL_RECHECK_S"]) ?? undefined,
 
     // Multi-tenant settings
     multiTenant: process.env["MULTI_TENANT"] === "true",

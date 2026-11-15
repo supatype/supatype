@@ -12,6 +12,7 @@ import {
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * The Studio broadcast tester's endpoint: one fan-out with client broadcasts, sized, validated and
@@ -52,7 +53,7 @@ describe("POST /admin/v1/broadcast", () => {
   beforeAll(async () => {
     port = await freePort()
     adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort }))
+    server = new RealtimeServer(testEnv(port, { adminPort }), { channelDb: undeclaredChannels() })
     await server.start()
   })
 

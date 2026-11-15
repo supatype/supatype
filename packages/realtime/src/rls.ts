@@ -14,6 +14,7 @@ import {
 import { TableCatalog, type TableShape } from "./table-catalog.js"
 import { logDrop, sqlState, type DropSeverity } from "./drop-log.js"
 import type { LogLevel } from "./env.js"
+import type { ChannelDatabase, Queryable } from "./channel-db.js"
 
 const { Pool } = pg
 
@@ -45,6 +46,9 @@ export type DeliveryVerdict = Sendable | { refused: Refusal }
 
 const NOTHING_REDACTED: RedactedColumns = { old: [], new: [] }
 
+/** How long a channel rule may run, in milliseconds, as the text `set_config` takes. */
+const CHANNEL_CHECK_TIMEOUT_MS = "5000"
+
 /** At most this many connections judge changes for inspectors, so they never crowd out subscribers. */
 const INSPECT_POOL_MAX = 2
 
@@ -65,7 +69,7 @@ interface TableRules {
  * subscriber's role, with their JWT claims set via `set_config('request.jwt.claims', ...)`, so
  * realtime respects the same rules that protect the REST API.
  */
-export class RlsFilter {
+export class RlsFilter implements ChannelDatabase {
   private pool: pg.Pool
   /** The inspector's own connections, opened on first use: see {@link inspectAs}. */
   private inspectPool: pg.Pool | null = null
@@ -285,6 +289,37 @@ export class RlsFilter {
       // through jsonb), drop the event. A dropped event is recoverable; a leaked column is
       // not.
       return failed(`visibility check failed (SQLSTATE ${sqlState(err)})`)
+    } finally {
+      client.release()
+    }
+  }
+
+  /**
+   * Run `run` as `claims`: its role, its `request.jwt.claims`, in one transaction that is always
+   * rolled back. This is how a channel rule is judged as the caller, by the same `beginAs` that
+   * judges a change.
+   *
+   * A statement timeout bounds the rule. It is author-written SQL reading the author's tables, run
+   * on a join any socket can ask for, so one slow rule must not hold a pool connection for as long
+   * as it likes; a timeout is an error, which the guard reads as a refusal.
+   */
+  async asCaller<T>(claims: JwtClaims, run: (q: Queryable) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect()
+    try {
+      await this.beginAs(client, claims)
+      await client.query(`SELECT set_config('statement_timeout', $1, true)`, [CHANNEL_CHECK_TIMEOUT_MS])
+      return await run({ query: (sql, params) => client.query(sql, params === undefined ? undefined : [...params]) })
+    } finally {
+      await client.query("ROLLBACK").catch(() => {})
+      client.release()
+    }
+  }
+
+  /** Run `run` on one pooled connection as the service's own role: for questions about the project, not a caller. */
+  async asService<T>(run: (q: Queryable) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect()
+    try {
+      return await run({ query: (sql, params) => client.query(sql, params === undefined ? undefined : [...params]) })
     } finally {
       client.release()
     }
