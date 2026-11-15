@@ -8,7 +8,7 @@
 
 import { describe, it, expect, afterEach } from "vitest"
 import type { ChannelStatus } from "../src/realtime.js"
-import { RealtimeChannelError, RealtimeError, SupatypeError } from "../src/errors.js"
+import { RealtimeChannelError, RealtimeError, SupatypeError, isRealtimeChannelError } from "../src/errors.js"
 import { simulateServerMessage, sentFrames, subscribeFrames, ackNewestJoin } from "./helpers/mock-websocket.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "./helpers/socket-swap.js"
 
@@ -210,5 +210,21 @@ describe("a broadcast sent from the database", () => {
     simulateServerMessage(harness.socket(), { type: "broadcast", channel: "lot:42", event: "bid", payload: { amount: 12 } })
     expect(received).toEqual([{ amount: 12 }])
     expect(sentFrames(harness.socket()).filter((f) => f["type"] === "broadcast")).toHaveLength(0)
+  })
+})
+
+describe("isRealtimeChannelError", () => {
+  it("recognises the error, and an error of the same shape from another copy of the package", () => {
+    const own = new RealtimeChannelError("denied", "lot:42", "join_denied")
+    const other = Object.assign(new Error("denied"), { name: "RealtimeChannelError", channel: "lot:42", reason: "join_denied" })
+    expect(isRealtimeChannelError(own)).toBe(true)
+    expect(isRealtimeChannelError(other)).toBe(true)
+  })
+
+  it("does not take any other error for one", () => {
+    expect(isRealtimeChannelError(new Error("denied"))).toBe(false)
+    expect(isRealtimeChannelError(new RealtimeError("denied"))).toBe(false)
+    expect(isRealtimeChannelError("denied")).toBe(false)
+    expect(isRealtimeChannelError(undefined)).toBe(false)
   })
 })
