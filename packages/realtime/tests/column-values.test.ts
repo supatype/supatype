@@ -225,3 +225,14 @@ describe("array columns are not exact columns", () => {
     expect(matchesFilter(change as WalChange, { tags: 'eq.{"b c",d}' })).toBe(true)
   })
 })
+
+// The 0.9.3 run saw commitTimestamp arrive as "2026-11-15 20:11:03.607447+00", wal2json's text,
+// while the row's own timestamptz columns were ISO 8601: Safari and Firefox read the first as
+// Invalid Date, as they did the columns before.
+describe("the commit timestamp", () => {
+  it("is ISO 8601, like the row's timestamptz columns", () => {
+    const row = JSON.parse(insert({ id: ["integer", 1] })) as Record<string, unknown>
+    const [change] = parseWal2json(JSON.stringify({ ...row, timestamp: "2026-11-15 20:11:03.607447+00" }))
+    expect(change?.commitTimestamp).toBe("2026-11-15T20:11:03.607447+00:00")
+  })
+})

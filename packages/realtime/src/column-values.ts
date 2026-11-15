@@ -47,6 +47,11 @@ function timestampValue(text: string): unknown {
 }
 
 function timestamptzValue(text: string): unknown {
+  return isoTimestamptz(text)
+}
+
+/** A `timestamptz` in Postgres's text form as ISO 8601, or the text as it was when it is not one. */
+export function isoTimestamptz(text: string): string {
   const match = TIMESTAMPTZ_RE.exec(text)
   return match === null ? text : `${match[1]}T${match[2]}${fullOffset(match[3] ?? "")}`
 }

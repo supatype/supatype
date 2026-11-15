@@ -31,6 +31,9 @@
 
 ### Bug Fixes
 
+* **postgres_changes:** `commitTimestamp` is ISO 8601, like the row's own `timestamptz` columns. It
+  arrived in Postgres's text form (`2026-11-15 20:11:03.607447+00`), which Safari and Firefox read
+  as Invalid Date.
 * **A broadcast from the database to an undeclared topic is dropped when the mode is declared.** The
   effective mode is the stricter of the database's and `REALTIME_CHANNELS`, but a database send was
   judged only by the database, which knows only its own mode, so with the database open and the
