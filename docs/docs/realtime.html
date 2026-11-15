@@ -428,7 +428,7 @@ $$;</pre></div>
     <ul>
       <li>Receivers are every member the channel's <code>join</code> rule admitted. There is no new access path.</li>
       <li><code>realtime_send</code> checks the caller's <code>send</code> rule, including the event and payload checks, and raises error <code>42501</code> with the same sentence a refused broadcast gets. Only signed-in users sending as themselves pass. Anon is refused. The service role may send anything.</li>
-      <li>It writes one row to <code>_supatype.realtime_outbox</code>, which the realtime service reads from the replication slot. A trigger deletes each row as it is written, so the table never fills. Inserting into the outbox directly is judged by the same rule.</li>
+      <li>It writes one row to <code>_supatype.realtime_outbox</code>, which the realtime service reads from the replication slot. A trigger deletes each row as it is written, so the table never fills. Inserting into the outbox directly is judged by the same rule, and the row's <code>sender</code> must be the caller's own id (leave it out and the insert is refused).</li>
       <li>Under <code>declared</code>, a database send to a topic no declaration matches is dropped, and the service logs it once per topic.</li>
     </ul>
     <div class="callout warn"><span class="callout-label">SECURITY DEFINER</span><p>Keep the function <code>SECURITY INVOKER</code>, as above, so the send rule judges the user. A <code>SECURITY DEFINER</code> function owned by a superuser counts as the service role, and its sends skip every check. Do the checks inside such a function yourself.</p></div>

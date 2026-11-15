@@ -368,7 +368,7 @@ if (error) console.error(error.code, error.message)
 
 - Receivers are every member the channel's `join` rule admitted. There is no new access path.
 - `realtime_send` checks the caller's `send` rule, including the event and payload checks, and raises error `42501` with the same sentence a refused broadcast gets. Only signed-in users sending as themselves pass. Anon is refused. The service role may send anything.
-- It writes one row to `_supatype.realtime_outbox`, which the realtime service reads from the replication slot. A trigger deletes each row as it is written, so the table never fills. Inserting into the outbox directly is judged by the same rule.
+- It writes one row to `_supatype.realtime_outbox`, which the realtime service reads from the replication slot. A trigger deletes each row as it is written, so the table never fills. Inserting into the outbox directly is judged by the same rule, and the row's `sender` must be the caller's own id (leave it out and the insert is refused).
 - Under `declared`, a database send to a topic no declaration matches is dropped, and the service logs it once per topic.
 
 :::caution[Security definer]
