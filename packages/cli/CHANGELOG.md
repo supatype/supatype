@@ -52,6 +52,9 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **self-host, dev:** the compose file passes `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED`, `REALTIME_CHANNELS`
+  and `REALTIME_CHANNEL_RECHECK_S` from `.env`. The docs turn anonymous sign-in on and tune channel
+  re-checks with them, and none reached a container, so `signInAnonymously()` stayed refused.
 * **downloads:** a retried download says each failure in one sentence. The line read
   `...; try again.. Retrying in 1s...`, a doubled full stop after every CDN message.
 * **storage:** a bucket rule that cannot be rendered on `storage.objects` (one naming a model

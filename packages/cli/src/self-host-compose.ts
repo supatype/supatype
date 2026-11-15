@@ -938,6 +938,10 @@ ${SERVICE_DEFAULTS}
       # debug also logs each change a subscriber's access rules withheld; info logs only the
       # changes realtime could not judge. Set REALTIME_LOG_LEVEL in .env to change it.
       REALTIME_LOG_LEVEL: \${REALTIME_LOG_LEVEL:-info}
+      # docs/realtime.md: declared can only tighten realtime.channels; the re-check interval in
+      # seconds. Empty, the service's own defaults apply.
+      REALTIME_CHANNELS: \${REALTIME_CHANNELS:-}
+      REALTIME_CHANNEL_RECHECK_S: \${REALTIME_CHANNEL_RECHECK_S:-}
 ${dbDependency}`
     : `  # No \`realtime\` service: database.external.realtime is false. Subscriptions are
   # unavailable; REST, storage, auth and functions are unaffected.
@@ -1307,6 +1311,8 @@ ${composeEnvLines(mailerUrlPathsEnv())}
       # to get them and a resend or ses provider fell back to the noop mailer.
 ${composeEnvLines(Object.fromEntries(MAILER_PASSTHROUGH_ENV.map((name) => [name, `\${${name}:-}`])))}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
+      # Anonymous sign-in, off unless .env turns it on (docs/auth/anonymous.mdx).
+      SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED: \${SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED:-false}
 ${authProviderEnv}${samlEnv}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
