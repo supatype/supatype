@@ -240,6 +240,7 @@ $ npx supatype functions env unset RESEND_API_KEY</pre></div>
 
 <h2 id="local">Local development</h2>
 <p><code>supatype dev</code> serves functions through the same gateway as the rest of the API when a functions directory exists. You do not run anything else.</p>
+<p>With the Native provider, Deno runs in the project folder, so a project with a <code>package.json</code> resolves <code>npm:</code> imports from its <code>node_modules</code>. Install what a function imports, such as <code>npm install postgres</code> for <code>npm:postgres</code>. Without it the call fails with <code>Could not find a matching package for 'npm:postgres' in the node_modules directory</code>. Do not turn on <code>nodeModulesDir: "auto"</code> in a <code>deno.json</code> there: Deno then rewrites <code>node_modules</code>, and <code>supatype.config.ts</code> stops loading.</p>
 <p>To run functions on their own, with Deno watching for changes:</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype functions serve

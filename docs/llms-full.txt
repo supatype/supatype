@@ -3127,6 +3127,8 @@ const { data, error } = await supatype.functions.invoke("greet", { body: { name:
 
 `supatype dev` serves functions through the same gateway as the rest of the API when a functions directory exists. You do not run anything else.
 
+With the Native provider, Deno runs in the project folder, so a project with a `package.json` resolves `npm:` imports from its `node_modules`. Install what a function imports, such as `npm install postgres` for `npm:postgres`. Without it the call fails with `Could not find a matching package for 'npm:postgres' in the node_modules directory`. Do not turn on `nodeModulesDir: "auto"` in a `deno.json` there: Deno then rewrites `node_modules`, and `supatype.config.ts` stops loading.
+
 To run functions on their own, with Deno watching for changes:
 
 ```sh
