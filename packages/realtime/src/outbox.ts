@@ -4,9 +4,10 @@ import type { WalChange } from "./types.js"
 /**
  * Broadcasts sent from the database (plan 13.3).
  *
- * `_supatype.realtime_send` inserts a row into `_supatype.realtime_outbox` and deletes it in the same
- * transaction, so the row reaches the replication slot and never accumulates. The server turns the
- * insert into a broadcast. `anon` holds nothing on the table. `authenticated` may insert, but row
+ * `_supatype.realtime_send` inserts a row into `_supatype.realtime_outbox`. A trigger on the table
+ * deletes every row after it is inserted, whether it came from `realtime_send` or a direct insert,
+ * so the row reaches the replication slot and never accumulates. The server turns the insert into
+ * a broadcast. `anon` holds nothing on the table. `authenticated` may insert, but row
  * level security admits a row only as the caller's own `sender` and only when
  * `_supatype.realtime_send_refusal` (the caller's send rule, event and payload checks included)
  * finds no reason to refuse it, so a direct insert is judged exactly as a `realtime_send` call is.
@@ -26,7 +27,7 @@ export interface OutboxBroadcast {
   payload: Record<string, unknown>
 }
 
-/** True for any change to the outbox: the insert, and the delete that follows it in the same transaction. */
+/** True for any change to the outbox: the insert, and the delete the trigger makes after it. */
 export function isOutboxChange(change: WalChange): boolean {
   return change.schema === OUTBOX_SCHEMA && change.table === OUTBOX_TABLE
 }
