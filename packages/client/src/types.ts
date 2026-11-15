@@ -332,6 +332,39 @@ export type UpdateOptions<TDef extends TableDef> =
  */
 export interface SupatypeModels {}
 export interface SupatypeBuckets {}
+export interface SupatypeChannels {}
+
+/** What one `{param}` of a channel pattern holds: a number for an Integer parameter, else text. */
+type TopicParam<TParams, TName extends string> =
+  TParams extends { [K in TName]: number } ? `${number}` : string
+
+/** A pattern with every `{param}` and a trailing `*` replaced by the text that can stand there. */
+type TopicOfPattern<TPattern extends string, TParams> =
+  TPattern extends `${infer Head}{${infer Name}}${infer Rest}`
+    ? `${Head}${TopicParam<TParams, Name>}${TopicOfPattern<Rest, TParams>}`
+    : TPattern extends `${infer Head}*`
+      ? `${Head}${string}`
+      : TPattern
+
+/**
+ * The topics a set of declared channels can name, as template literal types. `{ "lot:{id}": ... }`
+ * gives `` `lot:${string}` ``, `"lobby:*"` gives `` `lobby:${string}` ``, and an Integer parameter
+ * gives `` `${number}` `` in its place. Generated code fills {@link SupatypeChannels}; this takes the
+ * declarations as an argument so it can be checked without augmenting that interface.
+ */
+export type DeclaredTopics<TChannels> = {
+  [P in keyof TChannels & string]: TopicOfPattern<P, TChannels[P] extends { params: infer R } ? R : never>
+}[keyof TChannels & string]
+
+/** The topics the project's schema declares. `never` until `supatype generate` has run. */
+export type DeclaredTopic = DeclaredTopics<SupatypeChannels>
+
+/**
+ * A channel name: a declared topic, which autocompletes, or any other string, which an `open`
+ * realtime server still admits. The `string & {}` keeps the literal suggestions from collapsing
+ * into plain `string`.
+ */
+export type ChannelName = DeclaredTopic | (string & {})
 export interface SupatypeFunctions {}
 
 /**

@@ -48,6 +48,11 @@
   `ChannelActionRefusalCode` are exported.
 * **realtime:** `ChannelOptions` is exported. A broadcast sent from the database with
   `_supatype.realtime_send` reaches `onBroadcast` listeners like any other; the README says so.
+* **realtime:** `channel()` takes a `ChannelName`: a topic the schema declares (`lot:${string}` for
+  `Channel<"lot:{id}", ...>`, `lobby:${string}` for a trailing `*`, `${number}` for an Integer
+  parameter), which autocompletes, or any other string, which an `open` server still admits. The
+  declared topics come from the new `SupatypeChannels` interface that `supatype generate` fills in;
+  `DeclaredTopic` and `DeclaredTopics<T>` are exported. Before generating, the name is a plain string.
 
 ### Bug Fixes
 
