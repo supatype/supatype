@@ -299,11 +299,11 @@ export async function engineRequest(
   if (compose !== undefined) return composeEngineRequest(endpoint, body, guard, compose)
   const bin = await getEngineBin()
   // A schema goes only to an engine that can read it: one older than this CLI needs is refused by
-  // asking it (decision D3; once per binary), and one without identity or generated columns would
-  // push plain columns and say nothing. Imported here, as the gate imports this.
+  // asking it (decision D3; once per binary), and one without identity or generated columns, or
+  // without private channels, would push the rest and say nothing. Imported here, as the gate imports this.
   if (body["ast"] !== undefined) {
-    const { assertSupported, binaryCapabilities, identityColumnsNeed } = await import("./engine-ownership-gate.js")
-    assertSupported(binaryCapabilities(bin), identityColumnsNeed(body["ast"]))
+    const { assertSupported, binaryCapabilities, schemaFeatureNeeds } = await import("./engine-ownership-gate.js")
+    assertSupported(binaryCapabilities(bin), schemaFeatureNeeds(body["ast"]))
   }
   return readEngineResult(endpoint, await spawnEngineHere(bin, endpoint, body), guard)
 }

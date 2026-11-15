@@ -56,7 +56,7 @@ import {
   adoptNeeds,
   assertSupported,
   engineCapabilities,
-  identityColumnsNeed,
+  schemaFeatureNeeds,
   serverAnswerCapabilities,
   OVERWRITE_DRIFT_NEED,
   REBASELINE_KEYS_NEED,
@@ -449,7 +449,7 @@ export async function targetSchemaDiff(
   ast: unknown,
   opts?: { schema?: string },
 ): Promise<DiffResult> {
-  await requireTargetFeatures(target, identityColumnsNeed(ast))
+  await requireTargetFeatures(target, schemaFeatureNeeds(ast))
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     return engineHere(
       target,
@@ -490,7 +490,7 @@ export async function targetSchemaPush(
   await requireTargetFeatures(target, [
     ...(overwriteDrift ? [OVERWRITE_DRIFT_NEED] : []),
     ...(runHooks ? [RUN_HOOKS_NEED] : []),
-    ...identityColumnsNeed(ast),
+    ...schemaFeatureNeeds(ast),
   ])
   // The engine's own names, which a control plane forwards as they are.
   const flags = { ...(overwriteDrift && { overwrite_drift: true }), ...(runHooks && { run_hooks: true }) }
@@ -674,7 +674,7 @@ export async function targetSchemaDoctor(
     ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
     ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
     ...(keys !== undefined ? [REBASELINE_KEYS_NEED] : []),
-    ...identityColumnsNeed(ast),
+    ...schemaFeatureNeeds(ast),
   ])
   if (runsEngineHere(target)) {
     return engineHere(target, "/doctor", { ...body, database_url: target.databaseUrl! }, isDoctorReport)
@@ -737,7 +737,7 @@ export async function targetSchemaAdopt(
   }
   // A server that dropped `keys` would adopt every conflict, and one that dropped `release` would
   // adopt instead of release: refused before sending, never degraded.
-  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release, reclaim }), ...identityColumnsNeed(ast)])
+  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release, reclaim }), ...schemaFeatureNeeds(ast)])
   if (runsEngineHere(target)) {
     return engineHere(target, "/adopt", { ...body, database_url: target.databaseUrl! }, isAdoptOutcome)
   }

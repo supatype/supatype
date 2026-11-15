@@ -124,7 +124,7 @@ import {
   adoptKeysNeed,
   assertSupported,
   engineCapabilities,
-  identityColumnsNeed,
+  schemaFeatureNeeds,
   OVERWRITE_DRIFT_NEED,
   checkedCapabilities,
   type Capabilities,
@@ -925,9 +925,9 @@ export async function runComposeSchemaPush(
     console.log("[supatype] Schema unchanged since the last push, nothing to apply.")
     return
   }
-  // Identity and generated columns only to an engine that reads them (the override's binary is
-  // asked by `engineRequest`).
-  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
+  // Identity and generated columns, and realtime channels, only to an engine that reads them (the
+  // override's binary is asked by `engineRequest`).
+  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, schemaFeatureNeeds(ast))
   if (opts.access === "plan") await printPlannedAccess(cwd, config)
   try {
     if (hasEngineOverride(config)) await applyViaHostEngine(cwd, config, ast, opts)
@@ -1396,7 +1396,7 @@ export async function adoptSchemaDocker(
   await requireDockerFeatures(
     cwd,
     config,
-    identityColumnsNeed(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
+    schemaFeatureNeeds(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
   )
   const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   const command = adoptCommand(yes, keys)
@@ -1453,7 +1453,7 @@ async function diffWithComposeEngine(
   project: string,
 ): Promise<DiffResult> {
   const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
-  await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
+  await requireDockerFeatures(cwd, config, schemaFeatureNeeds(ast))
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })

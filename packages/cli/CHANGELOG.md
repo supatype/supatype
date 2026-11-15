@@ -23,6 +23,10 @@
   engine older than `ENGINE_MIN_FOR_CHANNELS`. The engine drops both keys, so the push would succeed
   with nothing enforcing the channels. The constant is a placeholder until the engine release is
   known.
+* **push, diff, doctor, adopt, dev, deploy:** a schema that declares channels or sets
+  `realtime.channels` is sent only to an engine or server that lists `private_channels` in its
+  capabilities, as identity columns already are with `identity_columns`. This holds even while the
+  version floor above is a placeholder, so an older engine can never drop the channels in silence.
 * **dev:** runs the same engine floor check as `supatype push` before applying a schema, native and
   Docker alike. It skipped it, so a pinned older engine took channels and enforced nothing.
 
