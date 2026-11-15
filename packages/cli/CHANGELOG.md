@@ -52,6 +52,9 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **push:** a refused push names one `supatype rename <from> <new name>` line for a dropped table or column
+  with more than three possible new names. One table dropped beside eight added printed eight lines
+  naming it eight ways.
 * **dev, generate (Docker):** a project that names its engine image in `SUPATYPE_ENGINE_IMAGE` writes its
   types, seed builder and admin config with that image, the one it pushes with. The cached host engine
   wrote them, and when it was older than the image it refused a schema the image had just pushed, three
