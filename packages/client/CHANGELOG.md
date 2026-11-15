@@ -24,6 +24,11 @@
   client, so it can read the table: its rows are seeded by a read after each join and re-join and kept by
   upsert on a key (the `key` option, default `id`), so the Vue, Solid and Svelte `useSubscription` /
   `createSubscription` hold rows that existed before subscribing and recover from a drop.
+* **realtime:** `channel()` takes a `ChannelName`: a topic the schema declares (`lot:${string}` for
+  `Channel<"lot:{id}", ...>`, `lobby:${string}` for a trailing `*`, `${number}` for an Integer
+  parameter), which autocompletes, or any other string, which an `open` server still admits. The
+  declared topics come from the new `SupatypeChannels` interface that `supatype generate` fills in;
+  `DeclaredTopic` and `DeclaredTopics<T>` are exported. Before generating, the name is a plain string.
 * **realtime:** `channel(name, { private: true })` asserts that a channel is guarded by a schema
   `Channel` declaration. The join carries `private: true`. The server enforces declarations whether
   or not it is set; the option makes a name no declaration matches a refused join (a typo fails at
