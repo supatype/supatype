@@ -14,6 +14,9 @@ export type {
   TableSubscribeOptions,
   TableSubscription,
 } from "./table-subscription.js"
+export { channelSlot, watchChannel, watchConnection } from "./channel-watch.js"
+export type { ChannelSlot } from "./channel-watch.js"
+export type { ChannelSubscription, RealtimeConnectionState } from "./realtime.js"
 export { startOAuthRedirect } from "./auth-redirect.js"
 export { isClientFor, isRowsOf, isCallerValue } from "./caller-types.js"
 export { runMutation } from "./mutation-request.js"

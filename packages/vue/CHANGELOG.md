@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **useChannel:** `useChannel(name, setup)` joins one channel and hands it to `setup` to add any number of
+  row, presence and broadcast listeners, which `useSubscription` (one table, one listener) cannot. It returns
+  `status` and `error` as `useSubscription` does, and `isConnected` and `connectionState`. `name` is a string or
+  a ref or getter: when it changes the old channel is left, its listeners go with it, and `setup` runs on the
+  new one. The channel is left on teardown.
+* **useRealtimeConnection:** `isConnected` and `connectionState` for the realtime socket itself.
+
+### Bug Fixes
+
+* **useSubscription:** `data` is the table's rows. It is read once the subscription has joined and again after
+  each re-join, so rows that existed before subscribing are held and changes made while the socket was
+  down are not lost. Each change is then an upsert by key (`id`, or the new `key` option, a column or
+  an array of them): a row seen twice is listed once, an update to a row not held adds it, and a delete
+  of a key not held does nothing. A `filter` narrows the read too. Before this `data` started empty,
+  so an update or delete of a pre-existing row was dropped and a repeated insert was listed twice.
+
 ## Unreleased
 
 ### Breaking Changes

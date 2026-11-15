@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **useChannel:** `useChannel(name, setup, deps)` joins one channel and hands it to `setup` to add any
+  number of row, presence and broadcast listeners, which `useSubscription` (one row listener) cannot.
+  It unsubscribes on unmount and when `name` or `deps` change, and returns `status`, `error`,
+  `isConnected` and `connectionState`.
+* **useRealtimeConnection:** `isConnected` and `connectionState` for the realtime socket itself.
+
 ## Unreleased
 
 ### Breaking Changes

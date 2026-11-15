@@ -32,7 +32,9 @@ Every page in these docs imports the client from this one file. In development, 
 
 A production build gets your deployment's values from `supatype build`, which runs your build command with them, or from the host's settings. When Supatype serves the app, the page can read them from the server instead, with `<script src="/supatype-env.js" vite-ignore></script>` in `index.html` (`vite-ignore` keeps `vite build` from warning that it cannot bundle it); a Next.js app serves the same script from a route ([Frameworks: Next.js](/docs/frameworks.html#nextjs)). For each value the build did not carry, the client reads the one that script set, at its first request. It never guesses the address from the page. `createClient` itself never throws, so a page that creates the client at module scope still prerenders. The first request made with no address or no anon key throws a `MissingClientValuesError` naming what is missing and the variables to set, rather than returning it as `{ data: null, error }`. [Deploy your frontend](/docs/deploying-your-frontend.html) covers each host.
 
-The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
+`supatype.url` and `supatype.anonKey` are the address and anon key the client uses: the ones given to `createClient`, else the ones the page set (see above), read each time you ask. Each is an empty string while neither has one, and neither throws. Use `anonKey` for a call the client does not make, such as opening a second connection or a plain `fetch` to the API.
+
+The session is saved and restored by default. A restored session keeps the user as it was, including `isAnonymous`, `identities` and `factors`, so a guest is still a guest after a reload. Pass `auth: { persistSession: false }` to keep it in memory only.
 
 `createClient` takes these options as well as `url` and `anonKey`:
 

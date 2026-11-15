@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.9.3
+
+### Breaking Changes
+
+* **bindings:** `watchTable` (on `@supatype/client/bindings`) takes the client as its first argument, not
+  `client.realtime`, because it now reads the table to seed its rows. The Vue, Solid and Svelte
+  bindings are updated; anyone calling it directly must pass the client, as `watchTable(client, table,
+  options, handlers)`.
+
+### Features
+
+* **client:** `client.anonKey`, beside `client.url`: the anon key as given, else as the page set it,
+  read each time and an empty string while neither has one.
+* **realtime:** `client.realtime.isConnected`, `client.realtime.connectionState` and
+  `client.realtime.onConnectionChange(listener)`, which returns an unsubscribe function. The state is
+  `"connected"`, `"connecting"` (first connect, a reconnect after a drop or a sign-in swap, or a wait
+  before retrying) or `"disconnected"`. Channel statuses are unchanged. Exports
+  `RealtimeConnectionState`, `RealtimeConnectionListener` and the `ChannelSubscription` type.
+
+* **bindings:** `watchChannel`, `watchConnection` and `channelSlot` on `@supatype/client/bindings`, which the
+  Vue, Solid and Svelte `useChannel` / `createChannel` share. `watchTable` takes the client, not its realtime
+  client, so it can read the table: its rows are seeded by a read after each join and re-join and kept by
+  upsert on a key (the `key` option, default `id`), so the Vue, Solid and Svelte `useSubscription` /
+  `createSubscription` hold rows that existed before subscribing and recover from a drop.
+
+### Bug Fixes
+
+* **auth:** a restored session kept the user without `isAnonymous`, so a guest looked registered after
+  every reload. The persisted user's camelCase keys, including those of `identities` and `factors`
+  (`userId`, `identityData`, `factorType`, ...), are read back, and a user stored without the flag takes
+  it from the token's `is_anonymous` claim.
+* **realtime:** reconnect backoff is capped at 30 seconds. It doubled from one second for 10 attempts,
+  reaching 512 seconds.
+
 ## Unreleased
 
 ### Breaking Changes

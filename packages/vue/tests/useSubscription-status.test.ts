@@ -9,10 +9,11 @@
  * not Vue's mounting.
  */
 
-import { vi } from "vitest"
-import { describeStatusAcrossSignIn, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
+import { vi, it, expect } from "vitest"
+import { describeStatusAcrossSignIn, createSocketSwapHarness, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
+import { fakeClient } from "../../client/tests/helpers/fake-client.js"
 
-const lifecycle = vi.hoisted(() => ({ unmount: [] as Array<() => void>, harness: null as SocketSwapHarness | null }))
+const lifecycle = vi.hoisted(() => ({ unmount: [] as Array<() => void>, harness: null as SocketSwapHarness | null, client: null as unknown }))
 
 vi.mock("vue", async (importOriginal) => ({
   ...(await importOriginal<typeof import("vue")>()),
@@ -21,7 +22,7 @@ vi.mock("vue", async (importOriginal) => ({
 }))
 
 vi.mock("../src/context.js", () => ({
-  useSupatype: () => ({ realtime: lifecycle.harness?.realtime }),
+  useSupatype: () => lifecycle.client,
 }))
 
 import { useSubscription } from "../src/useSubscription.js"
@@ -30,6 +31,7 @@ describeStatusAcrossSignIn(
   "useSubscription",
   (harness) => {
     lifecycle.harness = harness
+    lifecycle.client = fakeClient(harness).client
     const { status, error } = useSubscription("task")
     return { status: () => status.value, error: () => error.value }
   },
@@ -37,3 +39,16 @@ describeStatusAcrossSignIn(
     for (const fn of lifecycle.unmount.splice(0)) fn()
   },
 )
+
+it("useSubscription shows the rows the table already holds once the join is acknowledged", async () => {
+  const harness = createSocketSwapHarness()
+  lifecycle.harness = harness
+  lifecycle.client = fakeClient(harness, [[{ id: 1 }]]).client
+  const { data } = useSubscription("task")
+  await harness.settle()
+  harness.ackJoins()
+  await harness.settle()
+  expect(data.value).toEqual([{ id: 1 }])
+  for (const fn of lifecycle.unmount.splice(0)) fn()
+  harness.restore()
+})

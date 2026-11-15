@@ -1,6 +1,6 @@
 import { createSignal, onMount, onCleanup } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { watchTable, type SubscriptionState, type TableWatchOptions } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 
@@ -33,7 +33,7 @@ export function createSubscription<
   const [status, setStatus] = createSignal<SubscriptionState>("connecting")
 
   onMount(() => {
-    const unsubscribe = watchTable<TRow>(client.realtime, table, options, {
+    const unsubscribe = watchTable<TRow>(client as AnyClient, table, options, {
       rows: (rows) => setData(() => rows),
       status: (view) => {
         setStatus(view.status)
