@@ -13,10 +13,15 @@
  * engine image. A refusal, an engine too old, or a config error is the answer as it is. A failed
  * fetch is remembered for the process, so an offline dev session does not try the download again
  * on every save, and the caller is told why once, after it has written with the image.
+ *
+ * A Docker project that names its engine image in `SUPATYPE_ENGINE_IMAGE` (shell or `.env`) pushes
+ * with that image, so it writes the generated files too (owner, 2026-11-15): a cached host engine
+ * older than the image refused a schema the image had just pushed. Unnamed, round 3 stands.
  */
 import type { ComposeEngine } from "./engine-client.js"
 import { hasEngineOverride, pinnedVersion } from "./binary-cache.js"
 import { BinaryUnavailable } from "./ensure-binary.js"
+import { readEnvFile } from "./env-file.js"
 import { errorMessage } from "./error-message.js"
 import { resolveRuntimeProvider, type SupatypeProjectConfig } from "./project-config.js"
 
@@ -24,11 +29,23 @@ import { resolveRuntimeProvider, type SupatypeProjectConfig } from "./project-co
 export interface GeneratedFilesEngineDeps {
   hostEngine: () => Promise<void>
   composeEngine: (cwd: string, config: SupatypeProjectConfig) => Promise<ComposeEngine | undefined>
+  /**
+   * SUPATYPE_ENGINE_IMAGE from the shell, else `.env`, or undefined when neither names one or it is
+   * only the line the CLI writes from `versions.engine`, which the host engine already matches.
+   */
+  namedImage: (cwd: string, config: SupatypeProjectConfig) => Promise<string | undefined>
 }
 
 const DEFAULT_DEPS: GeneratedFilesEngineDeps = {
   hostEngine: async () => (await import("./engine-client.js")).ensureEngine(),
   composeEngine: async (cwd, config) => (await import("./dev-compose.js")).projectComposeEngine(cwd, config),
+  namedImage: async (cwd, config) => {
+    const named = process.env["SUPATYPE_ENGINE_IMAGE"]?.trim() || readEnvFile(cwd)["SUPATYPE_ENGINE_IMAGE"]?.trim()
+    if (named === undefined || named === "") return undefined
+    // Loaded only here: the compose module is large, and `generate` on a native project never needs it.
+    const { composeDockerImageEnv } = await import("./self-host-compose.js")
+    return named === composeDockerImageEnv(config)["SUPATYPE_ENGINE_IMAGE"] ? undefined : named
+  },
 }
 
 /** The engine to write with (undefined: the host program) and, the first time it fell back, why. */
@@ -50,6 +67,7 @@ export async function generatedFilesEngine(
   deps: Partial<GeneratedFilesEngineDeps> = {},
 ): Promise<EngineChoice> {
   const use = { ...DEFAULT_DEPS, ...deps }
+  if (await pushesWithNamedImage(cwd, config, use)) return { engine: await namedImageEngine(cwd, config, use) }
   const version = pinnedVersion("engine", config) ?? "this build's"
   if (unavailable.has(version)) return { engine: await imageOrThrow(cwd, config, use, undefined) }
   try {
@@ -61,6 +79,18 @@ export async function generatedFilesEngine(
     unavailable.add(version)
     return { engine, fellBack: errorMessage(err) }
   }
+}
+
+async function pushesWithNamedImage(cwd: string, config: SupatypeProjectConfig, use: GeneratedFilesEngineDeps): Promise<boolean> {
+  if (resolveRuntimeProvider(config) !== "docker" || hasEngineOverride(config)) return false
+  return (await use.namedImage(cwd, config)) !== undefined
+}
+
+/** The image SUPATYPE_ENGINE_IMAGE names, as compose runs it for a push. */
+async function namedImageEngine(cwd: string, config: SupatypeProjectConfig, use: GeneratedFilesEngineDeps): Promise<ComposeEngine> {
+  const image = await use.composeEngine(cwd, config)
+  if (image === undefined) throw new Error("SUPATYPE_ENGINE_IMAGE names an engine image, but the project has no compose engine to run it")
+  return image
 }
 
 /** The project's engine image, or an error that keeps the host program's reason beside the image's. */
