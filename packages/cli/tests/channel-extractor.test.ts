@@ -349,3 +349,17 @@ describe("a send rule that does not check who is sending", () => {
     expect(extract(`export type Quiet = Channel<"quiet:{id}", { params: { id: UUID }, access: { join: LoggedIn } }>`)?.warnings).toBeUndefined()
   })
 })
+
+describe("warnings from the models and from the channels", () => {
+  it("keeps both: a jsonb fallback field and a send rule that does not check the caller", () => {
+    const warnings =
+      extract(`export type Bid = Model<{ id: UUID, kind: "outbid" }>
+export type BidChannel = Channel<"bid:{id}", {
+  params: { id: UUID }
+  access: { join: LoggedIn, send: Event<"bid"> }
+}>`)?.warnings ?? []
+    expect(warnings).toHaveLength(2)
+    expect(warnings.some((w) => w.includes("Bid.kind") && w.includes("jsonb"))).toBe(true)
+    expect(warnings.some((w) => w.includes("BidChannel") && w.includes("does not check who is sending"))).toBe(true)
+  })
+})

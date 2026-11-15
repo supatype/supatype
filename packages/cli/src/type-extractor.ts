@@ -214,10 +214,9 @@ export function extractSchemaAstFromTypes(
   }
 
   return emitSchema(models, {
-    warnings,
     ...(storageBuckets !== undefined && storageBuckets.length > 0 && { storageBuckets }),
     channels,
-    warnings: channelWarnings(channels),
+    warnings: [...warnings, ...channelWarnings(channels)],
     ...(localeConfig !== undefined && {
       locales: localeConfig.locales,
       defaultLocale: localeConfig.defaultLocale,
