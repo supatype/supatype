@@ -1,3 +1,4 @@
+import { DEFAULT_API_URL, trimApiUrl } from "./api-url.js"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { isNumber, isOneOf, isRecordOf, isShape, isString, optional, type Guard } from "@supatype/shared"
@@ -190,12 +191,12 @@ export function migrateLegacyLinkFiles(cwd: string): void {
     projectRef,
     defaultEnvironment: "production",
     token: cloud.token,
-    cloudApiUrl: cloud.apiUrl ?? "https://api.supatype.com",
+    cloudApiUrl: cloud.apiUrl ?? DEFAULT_API_URL,
     linkedAt: now,
     environments: {
       production: {
         name: "production",
-        apiUrl: cloud.apiUrl ?? "https://api.supatype.com",
+        apiUrl: cloud.apiUrl ?? DEFAULT_API_URL,
         linkedAt: now,
       },
     },
@@ -227,7 +228,7 @@ export function createSelfHostLink(params: {
   const now = new Date().toISOString()
   const env: EnvironmentTarget = {
     name: envName,
-    apiUrl: params.apiUrl.replace(/\/$/, ""),
+    apiUrl: trimApiUrl(params.apiUrl),
     token: params.token,
     linkedAt: now,
   }
@@ -275,7 +276,7 @@ export function createCloudLink(params: {
   for (const e of envs) {
     envMap[e.name] = {
       name: e.name,
-      apiUrl: e.apiUrl.replace(/\/$/, ""),
+      apiUrl: trimApiUrl(e.apiUrl),
       linkedAt: now,
     }
   }
@@ -288,7 +289,7 @@ export function createCloudLink(params: {
     projectRef: params.projectRef,
     defaultEnvironment: "production",
     token: params.token,
-    cloudApiUrl: params.cloudApiUrl.replace(/\/$/, ""),
+    cloudApiUrl: trimApiUrl(params.cloudApiUrl),
     linkedAt: now,
     environments: params.existing
       ? { ...params.existing.environments, ...envMap }

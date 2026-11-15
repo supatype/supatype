@@ -10,8 +10,10 @@
 import { createDecipheriv, createECDH, hkdfSync, randomUUID, type ECDH } from "node:crypto"
 import { hostname } from "node:os"
 import { isShape, isString } from "@supatype/shared"
+import { errorMessage } from "./error-message.js"
+import { trimApiUrl } from "./api-url.js"
+import { fetchWithin } from "./fetch-within.js"
 
-const PRODUCTION_ACCOUNTS_URL = "https://accounts.supatype.com"
 const HKDF_INFO = "supatype-cli-login"
 const GCM_TAG_BYTES = 16
 const FETCH_TIMEOUT_MS = 15_000
@@ -43,20 +45,38 @@ export function newLoginSession(tokenName: string): LoginSession {
   return { sessionId: randomUUID(), tokenName, keys }
 }
 
-/**
- * Where the accounts site is: `SUPATYPE_ACCOUNTS_URL` when set, else the API URL's own host with its
- * `api.` label swapped for `accounts.` (api.lvh.me:18680 gives accounts.lvh.me:18680), else production.
- */
-export function accountsUrl(apiUrl: string, env: NodeJS.ProcessEnv = process.env): string {
-  const named = env["SUPATYPE_ACCOUNTS_URL"]?.trim()
-  if (named) return named.replace(/\/+$/, "")
+const isLoginConfig = isShape({ accounts_url: isString })
+
+/** `value` as an http(s) URL without its closing slashes, or undefined when it is not one. */
+function webUrl(value: string): string | undefined {
   try {
-    const url = new URL(apiUrl)
-    if (url.hostname.startsWith("api.")) return `${url.protocol}//accounts.${url.host.slice("api.".length)}`
+    const url = new URL(value)
+    return url.protocol === "http:" || url.protocol === "https:" ? trimApiUrl(value) : undefined
   } catch {
-    // An API URL that is not a URL cannot name a host; production is the only answer left.
+    return undefined
   }
-  return PRODUCTION_ACCOUNTS_URL
+}
+
+function accountsUnknown(apiUrl: string, why: string): Error {
+  return new Error(`Could not find the accounts site for ${apiUrl}: ${why}. Set SUPATYPE_ACCOUNTS_URL to its address and run: supatype login`)
+}
+
+/**
+ * Where the accounts site is: `SUPATYPE_ACCOUNTS_URL` when set, else what the control plane says at
+ * `/api/v1/cli/login/config`. Never a guess from the API URL's name: when it cannot be found this
+ * throws, naming the API URL.
+ */
+export async function accountsUrl(apiUrl: string, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  const named = env["SUPATYPE_ACCOUNTS_URL"]?.trim()
+  if (named) return trimApiUrl(named)
+  const res = await fetchWithin(`${trimApiUrl(apiUrl)}/api/v1/cli/login/config`, FETCH_TIMEOUT_MS).catch((err: unknown) => {
+    throw accountsUnknown(apiUrl, `it did not answer (${errorMessage(err)})`)
+  })
+  if (!res.ok) throw accountsUnknown(apiUrl, `it answered ${res.status}`)
+  const body: unknown = await res.json().catch(() => undefined)
+  const found = isLoginConfig(body) ? webUrl(body.accounts_url) : undefined
+  if (found === undefined) throw accountsUnknown(apiUrl, "it did not give an http(s) accounts_url")
+  return found
 }
 
 /** The page the user approves on, carrying the session, the token's name and the CLI's public key. */
@@ -74,9 +94,8 @@ export function loginUrl(accounts: string, session: LoginSession): string {
  * the code (404: not approved, wrong, used or expired, which it deliberately does not tell apart).
  */
 export async function fetchSealedToken(apiUrl: string, sessionId: string, deviceCode: string): Promise<SealedToken | undefined> {
-  const code = deviceCode.replace(/[\s-]/g, "").toUpperCase()
-  const url = `${apiUrl.replace(/\/+$/, "")}/api/v1/cli/login/${encodeURIComponent(sessionId)}?device_code=${encodeURIComponent(code)}`
-  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+  const url = `${trimApiUrl(apiUrl)}/api/v1/cli/login/${encodeURIComponent(sessionId)}?device_code=${encodeURIComponent(deviceCode)}`
+  const res = await fetchWithin(url, FETCH_TIMEOUT_MS)
   if (res.status === 404) return undefined
   if (!res.ok) throw new Error(`Login failed (${res.status}) at ${url.split("?")[0] ?? url}`)
   const body: unknown = await res.json().catch(() => undefined)

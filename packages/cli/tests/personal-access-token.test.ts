@@ -53,3 +53,26 @@ describe("a stored personal access token", () => {
     expect(onRefreshed).toHaveBeenCalledWith({ accessToken: "new-jwt", refreshToken: "r2" })
   })
 })
+
+describe("what counts as the control plane refusing a token", () => {
+  it("is the exact invalid_token error, not a message that merely mentions it", async () => {
+    const answers = [
+      new Response(JSON.stringify({ message: "field invalid_token_hint is wrong" }), { status: 401 }),
+    ]
+    const calls: string[] = []
+    vi.stubGlobal("fetch", async (url: string) => {
+      calls.push(url)
+      return answers.shift() ?? new Response("{}", { status: 500 })
+    })
+    const onRefreshed = vi.fn()
+    await expect(
+      targetFetch("http://cp.test", "/api/v1", {
+        method: "GET",
+        path: "/projects",
+        token: "old.session.jwt",
+        authRefresh: { cloudApiUrl: "http://cp.test", refreshToken: "r", onRefreshed },
+      }),
+    ).rejects.toThrow()
+    expect(calls.some((url) => url.endsWith("/auth/refresh"))).toBe(false)
+  })
+})

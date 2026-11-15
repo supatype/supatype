@@ -11,17 +11,24 @@ import {
   saveProjectLink,
   type ProjectLink,
 } from "./link.js"
-import { isJsonObject, isOneOf, isShape, isString, optional } from "@supatype/shared"
+import { isOneOf, isShape, isString, optional } from "@supatype/shared"
+import { trimApiUrl } from "./api-url.js"
 import { responseFailureText } from "./error-message.js"
+import { fetchWithin } from "./fetch-within.js"
 import { isPersonalAccessToken } from "./personal-access-token.js"
 import { readJsonFile } from "./json-file.js"
 
 export const CREDENTIALS_VERSION = 1 as const
 
+/** What a stored token is: a personal access token, which is never renewed, or a session, which is. */
+export type CredentialKind = "pat" | "session"
+
 export interface CloudCredentials {
   version: typeof CREDENTIALS_VERSION
   apiUrl: string
   accessToken: string
+  /** Absent in a file an older CLI wrote; read it through {@link credentialKind}. */
+  kind?: CredentialKind
   refreshToken?: string
   email?: string
   updatedAt: string
@@ -35,10 +42,16 @@ const isStoredCredentials = isShape({
   version: optional(isOneOf([CREDENTIALS_VERSION])),
   apiUrl: isString,
   accessToken: isString,
+  kind: optional(isOneOf(["pat", "session"] as const)),
   refreshToken: optional(isString),
   email: optional(isString),
   updatedAt: optional(isString),
 })
+
+/** The kind of `creds`: as stored, else by the token's shape for a file written before the kind was stored. */
+export function credentialKind(creds: CloudCredentials): CredentialKind {
+  return creds.kind ?? (isPersonalAccessToken(creds.accessToken) ? "pat" : "session")
+}
 
 export function credentialsPath(): string {
   return join(homedir(), ".supatype", "credentials.json")
@@ -76,8 +89,8 @@ export function resolveCloudAccessToken(link: ProjectLink): string | undefined {
   if (link.kind !== "cloud") return undefined
   const creds = loadCloudCredentials()
   if (!creds) return undefined
-  const linkApi = (link.cloudApiUrl ?? "").replace(/\/$/, "")
-  const credApi = creds.apiUrl.replace(/\/$/, "")
+  const linkApi = trimApiUrl(link.cloudApiUrl ?? "")
+  const credApi = trimApiUrl(creds.apiUrl)
   if (linkApi && credApi && linkApi !== credApi) return undefined
   return creds.accessToken
 }
@@ -87,8 +100,8 @@ export function resolveCloudRefreshToken(link: ProjectLink): string | undefined 
   if (link.kind !== "cloud") return undefined
   const creds = loadCloudCredentials()
   if (!creds?.refreshToken) return undefined
-  const linkApi = (link.cloudApiUrl ?? "").replace(/\/$/, "")
-  const credApi = creds.apiUrl.replace(/\/$/, "")
+  const linkApi = trimApiUrl(link.cloudApiUrl ?? "")
+  const credApi = trimApiUrl(creds.apiUrl)
   if (linkApi && credApi && linkApi !== credApi) return undefined
   return creds.refreshToken
 }
@@ -99,27 +112,26 @@ export function persistCloudSession(
   params: {
     apiUrl: string
     accessToken: string
+    kind: CredentialKind
     refreshToken?: string
     email?: string
   },
 ): void {
-  const apiUrl = params.apiUrl.replace(/\/$/, "")
+  const apiUrl = trimApiUrl(params.apiUrl)
   const existing = loadCloudCredentials()
   // A personal access token replaces the session whole: the old refresh token belongs to a session
   // that no longer signs anything in, and a token that cannot be renewed must not be offered one.
-  const pat = isPersonalAccessToken(params.accessToken)
+  const pat = params.kind === "pat"
   const refreshToken = pat ? undefined : (params.refreshToken ?? existing?.refreshToken)
+  const email = params.email ?? existing?.email
   saveCloudCredentials({
     version: CREDENTIALS_VERSION,
     apiUrl,
     accessToken: params.accessToken,
+    kind: params.kind,
     updatedAt: new Date().toISOString(),
     ...(refreshToken !== undefined ? { refreshToken } : {}),
-    ...(params.email !== undefined
-      ? { email: params.email }
-      : existing?.email !== undefined
-        ? { email: existing.email }
-        : {}),
+    ...(email !== undefined ? { email } : {}),
   })
 
   const link = loadProjectLink(cwd)
@@ -136,18 +148,17 @@ export function persistCloudSession(
 /** How long asking who a token belongs to may take. */
 const WHOAMI_TIMEOUT_MS = 10_000
 
+const isWhoami = isShape({ user: isShape({ email: isString }) })
+
 /** The email `accessToken` signs in as, from the control plane's `/auth/me`; throws when it is refused or unreachable. */
 export async function fetchCloudEmail(apiUrl: string, accessToken: string): Promise<string> {
-  const res = await fetch(`${apiUrl.replace(/\/$/, "")}/auth/me`, {
+  const res = await fetchWithin(`${trimApiUrl(apiUrl)}/auth/me`, WHOAMI_TIMEOUT_MS, {
     headers: { Authorization: `Bearer ${accessToken}` },
-    signal: AbortSignal.timeout(WHOAMI_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`The control plane did not accept the token: ${await responseFailureText(res)}`)
-  const body: unknown = await res.json().catch(() => ({}))
-  const user = isJsonObject(body) ? body["user"] : undefined
-  const email = isJsonObject(user) ? user["email"] : undefined
-  if (!isString(email)) throw new Error("The control plane did not say whose token this is.")
-  return email
+  const body: unknown = await res.json().catch(() => undefined)
+  if (!isWhoami(body)) throw new Error("The control plane did not say whose token this is.")
+  return body.user.email
 }
 
 /**

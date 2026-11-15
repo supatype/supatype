@@ -4,8 +4,8 @@
 
 ### Features
 
-* **login:** `supatype login` signs in through the browser. It opens the accounts site (derived from
-  the API URL, or `SUPATYPE_ACCOUNTS_URL`) and always prints the URL; after you approve, type the
+* **login:** `supatype login` signs in through the browser. It opens the accounts site (which the
+  control plane names at `/api/v1/cli/login/config`, or `SUPATYPE_ACCOUNTS_URL`) and always prints the URL; after you approve, type the
   code the page shows into the terminal and the CLI stores the personal access token (`spt_...`)
   the control plane sealed to this CLI's key. `--name` names the token, `--no-browser` only prints
   the URL, and `--token <spt_...>` (or `SUPATYPE_ACCESS_TOKEN`) stores a token made in your account,

@@ -25,11 +25,16 @@ interface StoredLogin {
 export class FakeCliLoginServer {
   readonly pat = `spt_${randomBytes(20).toString("hex")}`
   readonly deviceCode = "ABCD2345"
-  /** The device codes the CLI sent, in order, as they arrived in the query string. */
+  /** The device codes the CLI sent, in order, as they arrived in the query string, untouched; like the real server, it ignores dashes, spaces and case when comparing. */
   readonly codesTried: string[] = []
   /** The Authorization headers `/auth/me` saw. */
   readonly meAuthorization: string[] = []
   email = "dev@example.test"
+  /** What `/api/v1/cli/login/config` answers with; a status other than 200 makes it fail. */
+  accountsUrl: unknown = "http://accounts.example.test"
+  configStatus = 200
+  /** How many times the config was asked for. */
+  configAsks = 0
   private readonly logins = new Map<string, StoredLogin>()
   private server: Server | undefined
 
@@ -81,12 +86,17 @@ export class FakeCliLoginServer {
       if (authorization !== `Bearer ${this.pat}`) return reply(401, { error: "invalid_token" })
       return reply(200, { user: { id: "u1", email: this.email }, orgs: [] })
     }
+    if (url.pathname === "/api/v1/cli/login/config") {
+      this.configAsks++
+      if (this.configStatus !== 200) return reply(this.configStatus, { error: "nope" })
+      return reply(200, { accounts_url: this.accountsUrl })
+    }
     const match = /^\/api\/v1\/cli\/login\/([^/]+)$/.exec(url.pathname)
     if (match?.[1] === undefined) return reply(404, { error: "not_found" })
     const code = url.searchParams.get("device_code") ?? ""
     this.codesTried.push(code)
     const stored = this.logins.get(match[1])
-    if (stored === undefined || code.replace("-", "").toUpperCase() !== stored.deviceCode) {
+    if (stored === undefined || code.replace(/[\s-]/g, "").toUpperCase() !== stored.deviceCode) {
       return reply(404, { error: "not_found" })
     }
     this.logins.delete(match[1])

@@ -2,6 +2,7 @@ import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { DEFAULT_API_URL, trimApiUrl } from "../api-url.js"
 import { envAccessToken, loadCloudCredentials, persistCloudSession } from "../cloud-credentials.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "../link.js"
 import { targetFetch } from "../target-client.js"
@@ -57,7 +58,7 @@ export function loadCloudConfig(cwd: string): CloudConfig | null {
   const legacy = existsSync(legacyPath) ? readJsonFile(legacyPath, isCloudConfig) : undefined
   if (legacy !== undefined) return legacy
   return {
-    apiUrl: link.cloudApiUrl ?? "https://api.supatype.com",
+    apiUrl: link.cloudApiUrl ?? DEFAULT_API_URL,
     token: link.token ?? loadCloudCredentials()?.accessToken ?? "",
     projectSlug: link.projectRef,
     ...(link.orgId !== undefined ? { orgId: link.orgId } : {}),
@@ -97,6 +98,7 @@ async function cloudFetch<T>(
               persistCloudSession(cwd, {
                 apiUrl: config.apiUrl,
                 accessToken,
+                kind: "session",
                 ...(nextRefresh !== undefined ? { refreshToken: nextRefresh } : {}),
               })
               config.token = accessToken
@@ -327,12 +329,12 @@ function getCloudConfigOrExit(): CloudConfig {
     const creds = loadCloudCredentials()
     const token = envAccessToken() ?? creds?.accessToken
     const apiUrl =
-      process.env["SUPATYPE_API_URL"] ?? creds?.apiUrl ?? "https://api.supatype.com"
+      process.env["SUPATYPE_API_URL"] ?? creds?.apiUrl ?? DEFAULT_API_URL
     if (!token) {
       error("Not connected to Supatype Cloud. Run: supatype login (then supatype link), or set SUPATYPE_ACCESS_TOKEN.")
       process.exit(1)
     }
-    config = { apiUrl: apiUrl.replace(/\/$/, ""), token }
+    config = { apiUrl: trimApiUrl(apiUrl), token }
   }
   return config
 }

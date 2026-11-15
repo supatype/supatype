@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs"
 import { hostname } from "node:os"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { accountsUrl } from "../src/browser-login.js"
 import { registerLogin } from "../src/commands/login.js"
 import { clearCloudCredentials, credentialsPath, loadCloudCredentials, saveCloudCredentials } from "../src/cloud-credentials.js"
 import { FakeCliLoginServer, loginUrlFrom } from "./support/fake-cli-login-server.js"
@@ -37,7 +36,7 @@ beforeEach(async () => {
   clearCloudCredentials()
   Object.assign(terminal, { answers: [], asked: 0, beforeAnswer: undefined, interactive: true })
   opened.urls.length = 0
-  vi.stubEnv("SUPATYPE_ACCOUNTS_URL", "http://accounts.example.test")
+  vi.stubEnv("SUPATYPE_ACCOUNTS_URL", "")
 })
 
 afterEach(async () => {
@@ -97,7 +96,7 @@ describe("supatype login in the browser", () => {
     approveWhenAsked()
     const run = await login([])
     expect(run.exitCode).toBeUndefined()
-    expect(server.codesTried).toEqual(["WXYZ9999", "ABCD2345"])
+    expect(server.codesTried).toEqual(["WXYZ-9999", "abcd-2345"])
     expect(run.output).toMatch(/code was not accepted/i)
     expect(loadCloudCredentials()?.accessToken).toBe(server.pat)
   })
@@ -127,11 +126,41 @@ describe("supatype login in the browser", () => {
     expect(run.output).toContain("--token")
   })
 
-  it("derives the accounts URL from the API URL when SUPATYPE_ACCOUNTS_URL is not set", () => {
-    expect(accountsUrl("http://api.lvh.me:18680", {})).toBe("http://accounts.lvh.me:18680")
-    expect(accountsUrl("https://api.supatype.com", {})).toBe("https://accounts.supatype.com")
-    expect(accountsUrl("http://localhost:4001", {})).toBe("https://accounts.supatype.com")
-    expect(accountsUrl("http://api.lvh.me:18680", { SUPATYPE_ACCOUNTS_URL: "http://x.test/" })).toBe("http://x.test")
+  it("takes SUPATYPE_ACCOUNTS_URL over the control plane's answer, and does not ask it", async () => {
+    vi.stubEnv("SUPATYPE_ACCOUNTS_URL", "http://env-accounts.test/")
+    terminal.answers = ["ABCD-2345"]
+    approveWhenAsked()
+    const run = await login([])
+    expect(loginUrlFrom(run.output).url.origin).toBe("http://env-accounts.test")
+    expect(server.configAsks).toBe(0)
+  })
+
+  it("asks the control plane where the accounts site is, with no guess from the API URL", async () => {
+    server.accountsUrl = "http://accounts.elsewhere.test/"
+    terminal.answers = ["ABCD-2345"]
+    approveWhenAsked()
+    const run = await login([])
+    expect(loginUrlFrom(run.output).url.origin).toBe("http://accounts.elsewhere.test")
+    expect(server.configAsks).toBe(1)
+  })
+})
+
+describe("supatype login when the accounts site cannot be found", () => {
+  const cases: Array<[string, () => void]> = [
+    ["the control plane refuses the config request", () => { server.configStatus = 500 }],
+    ["the answer is not a URL", () => { server.accountsUrl = "not a url" }],
+    ["the answer is not http or https", () => { server.accountsUrl = "ftp://accounts.example.test" }],
+    ["the answer has no accounts_url", () => { server.accountsUrl = undefined }],
+  ]
+  it.each(cases)("stops, naming the API URL and SUPATYPE_ACCOUNTS_URL, when %s", async (_, setUp) => {
+    setUp()
+    const run = await login([])
+    expect(run.exitCode).toBe(1)
+    expect(run.output).toContain(apiUrl)
+    expect(run.output).toContain("SUPATYPE_ACCOUNTS_URL")
+    expect(opened.urls).toEqual([])
+    expect(terminal.asked).toBe(0)
+    expect(existsSync(credentialsPath())).toBe(false)
   })
 })
 
