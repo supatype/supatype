@@ -7,7 +7,7 @@ import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 // A running stack: restarting one that has no containers is refused (stack-running.ts), and this
 // file is about what restart runs once it goes ahead.
-vi.mock("../src/stack-running.js", () => ({ restartRefusal: () => null }))
+vi.mock("../src/stack-running.js", () => ({ restartRefusal: () => null, functionsNetworkNote: () => null, dbContainerNetworks: () => null }))
 
 /**
  * SH2: every `supatype self-host compose` command rendered the file as standalone, so restarting one

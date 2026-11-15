@@ -52,6 +52,9 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **self-host:** `compose restart functions-worker` says to run `compose up` when `SUPATYPE_FUNCTIONS_DB_URL`
+  names `db` but db is not on the functions network yet. Only `up` recreates db onto it, and until
+  then every function using `ctx.dbUrl` failed with `getaddrinfo ENOTFOUND db`.
 * **self-host:** `compose restart <service>` refuses a stack that is not running and names `compose up`.
   It recreated the one service alone, with a database volume and networks for a stack that did not
   exist, so a folder sharing a stopped stack's name got a stray container holding its own mount.

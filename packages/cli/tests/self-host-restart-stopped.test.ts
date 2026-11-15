@@ -23,3 +23,26 @@ describe("restart on a stack that is not running", () => {
     expect(restartRefusal("functions-worker", "supatype-app", () => null)).toBeNull()
   })
 })
+
+/**
+ * The database joins the `functions-db` network only when SUPATYPE_FUNCTIONS_DB_URL names it, and
+ * only when `up` recreates it. Set after `up` and followed by `restart functions-worker`, the
+ * worker came back with the URL while db stayed off the network, so every function using
+ * ctx.dbUrl failed with `getaddrinfo ENOTFOUND db`. restart now says to run `up`.
+ */
+describe("restarting the worker after functions were given the database", () => {
+  it("says to run up when db is not on the functions network yet", async () => {
+    const { functionsNetworkNote } = await import("../src/stack-running.js")
+    const note = functionsNetworkNote("functions-worker", "supatype-app", true, ["supatype-app_default"])
+    expect(note).toContain("supatype self-host compose up")
+    expect(note).toContain("ENOTFOUND db")
+  })
+
+  it("says nothing once db is on it, for another service, or with no database URL", async () => {
+    const { functionsNetworkNote } = await import("../src/stack-running.js")
+    expect(functionsNetworkNote("functions-worker", "supatype-app", true, ["supatype-app_default", "supatype-app_functions-db"])).toBeNull()
+    expect(functionsNetworkNote("storage", "supatype-app", true, ["supatype-app_default"])).toBeNull()
+    expect(functionsNetworkNote("functions-worker", "supatype-app", false, ["supatype-app_default"])).toBeNull()
+    expect(functionsNetworkNote("functions-worker", "supatype-app", true, null)).toBeNull()
+  })
+})

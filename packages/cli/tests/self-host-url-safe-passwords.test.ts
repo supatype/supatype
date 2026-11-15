@@ -52,7 +52,7 @@ import { registerSelfHost } from "../src/commands/self-host.js"
 
 // A running stack: restarting one that has no containers is refused (stack-running.ts), and this
 // file is about what restart runs once it goes ahead.
-vi.mock("../src/stack-running.js", () => ({ restartRefusal: () => null }))
+vi.mock("../src/stack-running.js", () => ({ restartRefusal: () => null, functionsNetworkNote: () => null, dbContainerNetworks: () => null }))
 
 /**
  * The compose file puts POSTGRES_PASSWORD, AUTHENTICATOR_PASSWORD and the SQL editor's password

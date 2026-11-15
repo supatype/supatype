@@ -18,6 +18,7 @@ import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import {
   composeProjectVolumes,
   exitComposeFailed,
+  namesComposeDatabase,
   noteUnpinnedImages,
   runDockerCompose,
   runDockerComposeQuietly,
@@ -27,7 +28,8 @@ import {
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { enterLocalStack, localStackComposeProject } from "../dev-session-lock.js"
 import { recordStackFolder } from "../stack-folder.js"
-import { restartRefusal } from "../stack-running.js"
+import { dbContainerNetworks, functionsNetworkNote, restartRefusal } from "../stack-running.js"
+import { readEnvValue } from "../env-file.js"
 import { composeStackWatch, ESSENTIAL_SERVICES, printExitedService, watchForFailure } from "../stack-exit-watch.js"
 import { warnBucketsLeft } from "../storage-provision.js"
 import { syncConfigMailerEnv } from "../config-mailer-env.js"
@@ -144,6 +146,7 @@ export function registerSelfHost(program: Command): void {
       }
       const project = localStackComposeProject(process.cwd(), loadConfig(process.cwd(), { local: false }).project.name)
       await refuseFailingServices(project, new Set([service]), RESTART_WATCH_MS)
+      warnFunctionsNetwork(cwd, project, service)
     })
 
   composeCmd
@@ -168,6 +171,13 @@ export function registerSelfHost(program: Command): void {
 }
 
 const SELF_HOST_BRAND = { intro: "Self-host deployment" }
+
+/** After restarting the worker: whether db can be reached on the functions network yet (stack-running.ts). */
+function warnFunctionsNetwork(cwd: string, project: string, service: string): void {
+  const wantsDb = namesComposeDatabase(readEnvValue(cwd, "SUPATYPE_FUNCTIONS_DB_URL", ""))
+  const note = functionsNetworkNote(service, project, wantsDb, wantsDb ? dbContainerNetworks(project) : null)
+  if (note !== null) warn(note)
+}
 
 /** How long `restart` watches the service it recreated. */
 const RESTART_WATCH_MS = 5000
