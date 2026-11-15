@@ -6,14 +6,14 @@ import type { WalChange } from "./types.js"
  *
  * `_supatype.realtime_send` inserts a row into `_supatype.realtime_outbox` and deletes it in the same
  * transaction, so the row reaches the replication slot and never accumulates. The server turns the
- * insert into a broadcast. The table has no grants for `anon` or `authenticated`, so no client can
- * write a row of its own: a row here was written by a function that already judged the caller's
- * `send` rule, or by the service role.
+ * insert into a broadcast. `anon` holds nothing on the table. `authenticated` may insert, but row
+ * level security admits a row only as the caller's own `sender` and only when
+ * `_supatype.realtime_send_refusal` (the caller's send rule, event and payload checks included)
+ * finds no reason to refuse it, so a direct insert is judged exactly as a `realtime_send` call is.
  *
- * The send rule's event and payload checks are not applied to these rows. `realtime_send` is
- * SECURITY DEFINER and checks the caller's send rule in SQL, and the stream carries no claims to
- * judge them against here, so a function-sent message is trusted as that function chose to send it.
- * Delivery reaches only members of the topic, who were each admitted by its join rule.
+ * The send rule's checks are therefore not applied again here: the database already applied them as
+ * the caller (`realtime_send` is SECURITY INVOKER), and the stream carries no claims to judge them
+ * against. Delivery reaches only members of the topic, who were each admitted by its join rule.
  */
 
 export const OUTBOX_SCHEMA = "_supatype"

@@ -26,6 +26,13 @@
 
 ### Bug Fixes
 
+* **A new token re-checks every held channel.** A channel joined with the service role records no
+  declaration, so a token change re-checked only declared channels and left it with the service
+  role's rights after the socket switched to a user token. Every held channel is now judged again.
+* **The channel catalog is read again at the timed re-check.** It was read at start and after a push
+  the watcher saw, so a missed push left a stale mode, stale content checks, or "no channel functions"
+  from before the first push, which enforced nothing on any declared channel. The backstop re-check
+  now re-reads it first.
 * **postgres_changes payloads change shape.** Values now match what REST returns. `json` and `jsonb`
   columns arrive as the parsed value, where they were the JSON text. `timestamptz` arrives as ISO 8601,
   `2024-01-01T12:00:00+00:00`, where it was `2024-01-01 12:00:00+00`, which Safari and Firefox read as

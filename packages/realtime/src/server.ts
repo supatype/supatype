@@ -521,7 +521,9 @@ export class RealtimeServer {
       this.send(client.ws, { type: "system", status: "ok", message: "authenticated" })
       // A new identity may be admitted to less than the old one was. Judged again before the next
       // frame is handled (the `auth` frame is a barrier), and closed if the database cannot say.
-      await this.enforcer.recheckClient(clientId, client, { kind: "declared" }, true)
+      // Every held channel, not only declared ones: a channel joined as the service role records no
+      // declaration, and skipping it would let a socket keep the service role's rights as a user.
+      await this.enforcer.recheckClient(clientId, client, { kind: "all" }, true)
     } else {
       this.send(client.ws, { type: "system", status: "error", message: "invalid token" })
     }

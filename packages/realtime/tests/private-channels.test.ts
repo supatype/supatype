@@ -390,6 +390,19 @@ describe("access that was taken away", () => {
     await alice.next(isSystem("error", `subscribe to ${LOT} before broadcasting`))
   })
 
+  it("withdraws a channel joined with the service role when the new token is a user it does not admit", async () => {
+    const { open } = await harness()
+    const peer = await open(serviceToken())
+    await join(peer, LOT)
+
+    peer.send({ type: "auth", token: userToken(EVE) })
+    const withdrawn = await peer.next(isSystem("error", "was withdrawn"), 3000)
+
+    expect(withdrawn).toMatchObject({ channel: LOT })
+    peer.send({ type: "broadcast", channel: LOT, event: "bid", payload: { amount: 5 } })
+    await peer.next(isSystem("error", `subscribe to ${LOT} before broadcasting`))
+  })
+
   it("keeps the channel when the new token still admits the user", async () => {
     const { open } = await harness()
     const alice = await open(userToken(ALICE))
@@ -581,6 +594,34 @@ describe("the switch", () => {
     const heard = await listener.next((m) => m.type === "broadcast")
 
     expect(heard).toMatchObject({ event: "hi" })
+  })
+
+  it("reads the mode again at the timed re-check, so a change the push watcher missed still takes effect", async () => {
+    const { open, db } = await harness({ channelRecheckSeconds: 1 }, (fake) => {
+      fake.mode = "open"
+    })
+    const peer = await open(userToken(ALICE))
+    await join(peer, "lobby-2")
+    db.mode = "declared"
+
+    await sleep(1600)
+    peer.send({ type: "broadcast", channel: "lobby-2", event: "hi", payload: {} })
+    const refusal = await peer.next(isSystem("error", "matches no declared channel"), 3000)
+
+    expect(refusal).toMatchObject({ channel: "lobby-2" })
+  })
+
+  it("enforces channels the first push declared, even when the server started before the functions existed", async () => {
+    const { open, db } = await harness({ channelRecheckSeconds: 1 }, (fake) => {
+      fake.noFunctions = true
+    })
+    const anon = await open(anonKey())
+    await join(anon, LOT)
+    db.noFunctions = false
+
+    const withdrawn = await anon.next(isSystem("error", "was withdrawn"), 4000)
+
+    expect(withdrawn).toMatchObject({ channel: LOT })
   })
 
   it("in open mode still enforces a channel that is declared", async () => {

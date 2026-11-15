@@ -67,7 +67,6 @@ export class ChannelEnforcer {
 
   /** A schema push may have changed the rules themselves, so every held channel is judged against the new ones. */
   async afterSchemaPush(): Promise<void> {
-    await this.catalog.reload()
     await this.rechecker.runNow({ kind: "all" })
   }
 
@@ -143,7 +142,14 @@ export class ChannelEnforcer {
     if (entry) this.hooks.announceLeave(client, channel, entry)
   }
 
+  /**
+   * A sweep of every channel (a push, or the backstop timer) reads the catalog again first. The
+   * push watcher can miss a push (one shorter than its poll, or no replication at all), and a
+   * catalog that is never re-read keeps a stale mode, stale content checks, or "no functions" from
+   * before the first push, which enforces nothing. The timer bounds that to one interval.
+   */
   private async recheckAll(scope: RecheckScope): Promise<void> {
+    if (scope.kind === "all") await this.catalog.reload()
     const queue = [...this.channels.entries()]
     const worker = async (): Promise<void> => {
       for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
