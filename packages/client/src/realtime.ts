@@ -692,19 +692,28 @@ export class RealtimeClient {
       }
     }
 
-    ws.onclose = () => {
-      this.ws = null
-      this.forgetJoins()
-      // Attempt reconnection with exponential backoff
-      if (this.channels.size > 0) {
-        this.scheduleReconnect()
-      } else {
-        this.setConnection("disconnected")
-      }
-    }
+    ws.onclose = () => this.socketLost(ws)
 
     ws.onerror = () => {
-      // onclose will fire after onerror
+      // An open socket's error is followed by its close. One that never opened may not be: Node's
+      // built-in WebSocket, refused by a gateway answering 502, fires error and then nothing, and
+      // counted as live it was never replaced. So that one is dropped here.
+      if (ws.readyState !== WebSocket.OPEN) this.socketLost(ws)
+    }
+  }
+
+  /** `ws` closed or failed to open: forget it and reconnect with backoff, once per socket. */
+  private socketLost(ws: WebSocket): void {
+    if (this.ws !== ws) return
+    ws.onclose = null
+    ws.onerror = null
+    if (ws.readyState !== WebSocket.CLOSED) ws.close()
+    this.ws = null
+    this.forgetJoins()
+    if (this.channels.size > 0) {
+      this.scheduleReconnect()
+    } else {
+      this.setConnection("disconnected")
     }
   }
 

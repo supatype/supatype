@@ -62,6 +62,9 @@
 
 ### Bug Fixes
 
+* **realtime:** a socket that fails before it opens is dropped and retried. Node's built-in
+  WebSocket, refused with a 502 while realtime restarted, fired error and never close, so the client
+  counted it as live and stopped reconnecting for good.
 * **auth:** a restored session kept the user without `isAnonymous`, so a guest looked registered after
   every reload. The persisted user's camelCase keys, including those of `identities` and `factors`
   (`userId`, `identityData`, `factorType`, ...), are read back, and a user stored without the flag takes

@@ -159,3 +159,32 @@ describe("reconnect backoff", () => {
     expect(delays).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000, 30000])
   })
 })
+
+describe("a socket that fails before it opens and never closes", () => {
+  // Node's built-in WebSocket, against a gateway answering 502 while realtime restarts, fires
+  // error and then nothing: readyState stays CONNECTING. Waiting for a close that never comes
+  // left the client counting that socket as live, so it never tried again (seen on 0.9.3).
+  it("drops the socket on the error and reconnects", async () => {
+    realtime.channel("public:task").subscribe(() => {})
+    await settle()
+    const seen = record()
+    const first = newest()
+    first.readyState = 0
+    first.onerror?.(new Event("error"))
+
+    expect(seen).toEqual(["connecting"])
+    await vi.waitFor(() => expect(instances.length).toBe(2), { timeout: 3000 })
+    await vi.waitFor(() => expect(seen).toEqual(["connecting", "connected"]), { timeout: 3000 })
+  })
+
+  it("leaves an open socket's error to its close", async () => {
+    realtime.channel("public:task").subscribe(() => {})
+    await settle()
+    const seen = record()
+    newest().onerror?.(new Event("error"))
+    await settle()
+
+    expect(seen).toEqual([])
+    expect(instances.length).toBe(1)
+  })
+})
