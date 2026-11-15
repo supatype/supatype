@@ -18,12 +18,36 @@
   `"connected"`, `"connecting"` (first connect, a reconnect after a drop or a sign-in swap, or a wait
   before retrying) or `"disconnected"`. Channel statuses are unchanged. Exports
   `RealtimeConnectionState`, `RealtimeConnectionListener` and the `ChannelSubscription` type.
-
 * **bindings:** `watchChannel`, `watchConnection` and `channelSlot` on `@supatype/client/bindings`, which the
   Vue, Solid and Svelte `useChannel` / `createChannel` share. `watchTable` takes the client, not its realtime
   client, so it can read the table: its rows are seeded by a read after each join and re-join and kept by
   upsert on a key (the `key` option, default `id`), so the Vue, Solid and Svelte `useSubscription` /
   `createSubscription` hold rows that existed before subscribing and recover from a drop.
+* **realtime:** `channel(name, { private: true })` asserts that a channel is guarded by a schema
+  `Channel` declaration. The join carries `private: true`. The server enforces declarations whether
+  or not it is set; the option makes a name no declaration matches a refused join (a typo fails at
+  once) and makes the client refuse to join at all when the server does not announce
+  `private_channels` on its first frame, since an older server would ignore the flag and admit an
+  open channel. A private join waits for that first frame before it is sent.
+* **realtime:** `RealtimeChannelError` (a `RealtimeError`) is what a channel's status callback gets
+  with `CHANNEL_ERROR` for any channel-scoped refusal. `reason` is `unsupported_server`,
+  `join_denied`, `not_declared`, `does_not_fit`, `unavailable`, `shared_instance`, `withdrawn` or
+  `refused`; `channel` names it and `retryable` is true for `unavailable`. It was a plain `Error`
+  with the server's message, which `message` still carries. `isRealtimeChannelError(value)` tells one from any other error, across copies of the package.
+* **realtime:** access the server takes away from a channel you hold (token change, periodic
+  re-check, declaration removed) reaches every handle as `CHANNEL_ERROR` with reason `withdrawn`.
+  It was swallowed for a handle with no row listener. The client does not rejoin by itself;
+  subscribing again does.
+* **realtime:** a refusal is read from the `code` the server sends, not from its sentence, so a reworded
+  message cannot change what the client does. A server that sends no code is still read by its
+  sentence, and a code the client does not know is `refused`.
+* **realtime:** a broadcast, presence track or payload the server refuses on a channel that is
+  joined no longer moves the channel to `CHANNEL_ERROR`. `onRefused((refusal) => ...)` on a channel
+  handle receives `{ channel, code, message }` with `code` one of `send_denied`, `track_denied` or
+  `payload_refused`; the status stays `SUBSCRIBED`. `ChannelActionRefusal` and
+  `ChannelActionRefusalCode` are exported.
+* **realtime:** `ChannelOptions` is exported. A broadcast sent from the database with
+  `_supatype.realtime_send` reaches `onBroadcast` listeners like any other; the README says so.
 
 ### Bug Fixes
 
