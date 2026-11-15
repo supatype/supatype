@@ -57,6 +57,7 @@ describe("private channels on a shared instance", () => {
     expect(answer).toMatchObject({
       status: "error",
       channel: `lot:${LOT_ID}`,
+      code: "shared_instance",
       message: "private channels are not available on a shared realtime instance",
     })
   })

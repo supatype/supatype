@@ -9,13 +9,14 @@ import {
   refusals,
   serviceGrant,
   undeclaredGrant,
-  withdrawalMessage,
+  withdrawalRefusal,
   type AccessRow,
   type ChannelGrant,
   type ChannelMode,
   type JoinDecision,
 } from "./channel-access.js"
 import { sqlState } from "./drop-log.js"
+import { refusal, type Refusal } from "./refusal-codes.js"
 import type { ChannelSendChecks } from "./send-checks.js"
 import type { Subscription } from "./types.js"
 
@@ -32,7 +33,7 @@ import type { Subscription } from "./types.js"
 const ANONYMOUS: JwtClaims = { role: "anon" }
 
 /** What a re-check found for one held channel: its new grant, or the reason it is withdrawn. */
-export type RecheckOutcome = { channel: string; grant: ChannelGrant } | { channel: string; withdrawn: string }
+export type RecheckOutcome = { channel: string; grant: ChannelGrant } | { channel: string; withdrawn: Refusal }
 
 /** Which held channels a re-check covers. */
 export type RecheckScope =
@@ -80,11 +81,11 @@ export class ChannelGuard {
    * refused rather than silently admitted as if it were enforced; any other join is as it always was.
    */
   async authorizeJoin(claims: JwtClaims | null, topic: string, isPrivate: boolean): Promise<JoinDecision> {
-    if (topic.length > MAX_TOPIC_LENGTH) return { admitted: false, message: refusals.tooLong(topic.length) }
+    if (topic.length > MAX_TOPIC_LENGTH) return { admitted: false, ...refusal("refused", refusals.tooLong(topic.length)) }
     const now = Date.now()
     if (this.sharedInstance) {
       return isPrivate
-        ? { admitted: false, message: refusals.sharedInstance }
+        ? { admitted: false, ...refusal("shared_instance", refusals.sharedInstance) }
         : { admitted: true, grant: undeclaredGrant(topic, "open", now) }
     }
     if (isServiceRole(claims)) return { admitted: true, grant: serviceGrant(now) }
@@ -92,7 +93,7 @@ export class ChannelGuard {
       return await this.decide(claims, topic, isPrivate, now)
     } catch (err) {
       this.log(`could not check access to a channel (SQLSTATE ${sqlState(err)}); refusing the join`)
-      return { admitted: false, message: refusals.unreachable(topic) }
+      return { admitted: false, ...refusal("unavailable", refusals.unreachable(topic)) }
     }
   }
 
@@ -146,7 +147,7 @@ export class ChannelGuard {
       now,
     })
     if (decision.admitted) return { channel: sub.channel, grant: decision.grant }
-    return { channel: sub.channel, withdrawn: withdrawalMessage(sub.channel, row) }
+    return { channel: sub.channel, withdrawn: withdrawalRefusal(sub.channel, row) }
   }
 
   /**

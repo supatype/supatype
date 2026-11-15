@@ -1,5 +1,6 @@
 import type { ExactColumns } from "./exact-columns.js"
 import type { ChannelGrant } from "./channel-access.js"
+import type { RefusalCode } from "./refusal-codes.js"
 
 /** Event types for database change notifications. */
 export type ChangeEvent = "INSERT" | "UPDATE" | "DELETE"
@@ -159,6 +160,11 @@ export interface SystemMessage {
   type: "system"
   status: "ok" | "error"
   message: string
+  /**
+   * On a refusal or a withdrawal: why, as a fixed code a client acts on (`refusal-codes.ts`). The
+   * sentence in `message` is for people and may change; this does not.
+   */
+  code?: RefusalCode | undefined
   /** The `ref` of the request this replies to, when that request carried one. */
   ref?: string | undefined
   /**

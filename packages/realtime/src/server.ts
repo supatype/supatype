@@ -24,6 +24,7 @@ import { ChannelCatalog } from "./channel-catalog.js"
 import { ChannelGuard } from "./channel-guard.js"
 import { ChannelEnforcer } from "./channel-enforcement.js"
 import { refusals, type ChannelGrant } from "./channel-access.js"
+import { refusal, type Refusal } from "./refusal-codes.js"
 import { sendChecksAdmit } from "./send-checks.js"
 import { isOutboxChange, outboxBroadcast } from "./outbox.js"
 import { DEFAULT_CHANNEL_RECHECK_SECONDS } from "./env.js"
@@ -172,7 +173,7 @@ export class RealtimeServer {
       this.guard,
       catalog,
       {
-        refuse: (client, channel, message) => this.refuse(client, channel, message),
+        refuse: (client, channel, why) => this.refuse(client, channel, why),
         announceLeave: (client, channel, entry) => this.announcePresence(client, channel, { joins: [], leaves: [entry] }),
       },
       log,
@@ -398,7 +399,7 @@ export class RealtimeServer {
       this.channels.noteMessage(clientId)
       const msg = parseClientMessage(String(data))
       if (msg === null) {
-        this.send(ws, { type: "system", status: "error", message: "invalid message format" })
+        this.send(ws, { type: "system", status: "error", code: "refused", message: "invalid message format" })
         return
       }
       order.run(msg.type === "auth" ? null : msg.channel, () => this.handleMessage(clientId, msg))
@@ -480,13 +481,13 @@ export class RealtimeServer {
     msg: Extract<ClientMessage, { type: ChannelAction }>,
   ): void {
     const admitted = admitChannelAction(client, msg.channel, msg.type)
-    if (typeof admitted === "string") {
-      this.refuse(client, msg.channel, admitted)
+    if ("refusal" in admitted) {
+      this.refuse(client, msg.channel, admitted.refusal)
       return
     }
     switch (msg.type) {
       case "presence_track":
-        this.handlePresenceTrack(clientId, client, admitted, msg)
+        this.handlePresenceTrack(clientId, client, admitted.claims, msg)
         break
       case "presence_untrack":
         this.handlePresenceUntrack(clientId, client, msg.channel)
@@ -502,8 +503,8 @@ export class RealtimeServer {
    * channel as about the whole socket, so a refusal without one put every healthy channel the
    * client had into CHANNEL_ERROR.
    */
-  private refuse(client: ConnectedClient, channel: string, message: string, ref?: string | undefined): void {
-    this.send(client.ws, { type: "system", status: "error", message, channel, ...withRef(ref) })
+  private refuse(client: ConnectedClient, channel: string, why: Refusal, ref?: string | undefined): void {
+    this.send(client.ws, { type: "system", status: "error", code: why.code, message: why.message, channel, ...withRef(ref) })
   }
 
   private handleUnsubscribe(clientId: string, client: ConnectedClient, channel: string): void {
@@ -525,7 +526,7 @@ export class RealtimeServer {
       // declaration, and skipping it would let a socket keep the service role's rights as a user.
       await this.enforcer.recheckClient(clientId, client, { kind: "all" }, true)
     } else {
-      this.send(client.ws, { type: "system", status: "error", message: "invalid token" })
+      this.send(client.ws, { type: "system", status: "error", code: "refused", message: "invalid token" })
     }
   }
 
@@ -553,7 +554,7 @@ export class RealtimeServer {
       })
       : { refusal: null }
     if (checked.refusal !== null) {
-      this.refuse(client, msg.channel, checked.refusal, msg.ref)
+      this.refuse(client, msg.channel, refusal("refused", checked.refusal), msg.ref)
       return
     }
 
@@ -586,13 +587,13 @@ export class RealtimeServer {
   private async authorizeJoin(clientId: string, client: ConnectedClient, msg: SubscribeMessage): Promise<ChannelGrant | null> {
     const local = this.subscribeRefusal(client, msg.filter)
     if (local !== null) {
-      this.refuse(client, msg.channel, local, msg.ref)
+      this.refuse(client, msg.channel, refusal("refused", local), msg.ref)
       return null
     }
     const decision = await this.guard.authorizeJoin(client.claims, msg.channel, msg.private === true)
     if (decision.admitted) return decision.grant
     this.enforcer.dropMembership(clientId, client, msg.channel)
-    this.refuse(client, msg.channel, decision.message, msg.ref)
+    this.refuse(client, msg.channel, decision, msg.ref)
     return null
   }
 
@@ -754,7 +755,8 @@ export class RealtimeServer {
     const subscription = sender.subscriptions.get(msg.channel)
     const declaration = subscription?.access?.declaration ?? null
     if (!sendChecksAdmit(this.guard.sendChecksFor(declaration), msg.event, msg.payload)) {
-      this.refuse(sender, msg.channel, refusals.payload(msg.event, msg.channel, declaration ?? "this channel"))
+      const message = refusals.payload(msg.event, msg.channel, declaration ?? "this channel")
+      this.refuse(sender, msg.channel, refusal("payload_refused", message))
       return
     }
     this.fanOutBroadcast(msg, sender.projectRef, senderClientId)

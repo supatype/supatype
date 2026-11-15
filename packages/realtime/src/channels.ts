@@ -2,6 +2,7 @@ import type { WebSocket } from "ws"
 import type { JwtClaims } from "./auth.js"
 import type { Subscription, PresenceEntry } from "./types.js"
 import type { ChannelGrant } from "./channel-access.js"
+import { refusal, type Refusal } from "./refusal-codes.js"
 import {
   summariseChannels,
   summariseConnection,
@@ -100,12 +101,19 @@ export function admitChannelAction(
   client: ConnectedClient,
   channel: string,
   action: ChannelAction,
-): JwtClaims | string {
+): { claims: JwtClaims } | { refusal: Refusal } {
   const verb = ACTION_VERB[action]
-  if (!client.claims) return `authenticate before ${verb}`
+  const code = deniedCode(action)
+  if (!client.claims) return { refusal: refusal(code, `authenticate before ${verb}`) }
   const subscription = client.subscriptions.get(channel)
-  if (!subscription) return `subscribe to ${channel} before ${verb}`
-  return grantRefusal(subscription.access, action) ?? client.claims
+  if (!subscription) return { refusal: refusal(code, `subscribe to ${channel} before ${verb}`) }
+  const denied = grantRefusal(subscription.access, action)
+  return denied === null ? { claims: client.claims } : { refusal: denied }
+}
+
+/** The code a refused `action` carries: a broadcast is a send, presence is a track. */
+function deniedCode(action: ChannelAction): "send_denied" | "track_denied" {
+  return action === "broadcast" ? "send_denied" : "track_denied"
 }
 
 /**
@@ -114,9 +122,9 @@ export function admitChannelAction(
  * No grant at all refuses everything but leaving: a subscription the server did not decide is one
  * it cannot vouch for, and the safe reading of "nobody decided" is "no".
  */
-function grantRefusal(grant: ChannelGrant | undefined, action: ChannelAction): string | null {
+function grantRefusal(grant: ChannelGrant | undefined, action: ChannelAction): Refusal | null {
   if (action === "presence_untrack") return null
-  if (grant === undefined) return "no access decision is recorded for this channel; rejoin it"
+  if (grant === undefined) return refusal(deniedCode(action), "no access decision is recorded for this channel; rejoin it")
   return action === "broadcast" ? grant.send : grant.track
 }
 

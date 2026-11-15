@@ -20,6 +20,11 @@
   broadcast from `_supatype.realtime_channel_send_checks()`, with no database call.
 * **Broadcast from the database.** A row `_supatype.realtime_send` writes to `_supatype.realtime_outbox`
   is delivered as a broadcast to every member admitted to the channel.
+* **Every refusal and withdrawal carries a `code`.** A `system` error frame now has a fixed, closed
+  `code` (`join_denied`, `not_declared`, `does_not_fit`, `unavailable`, `shared_instance`, `withdrawn`,
+  `send_denied`, `track_denied`, `payload_refused`, `refused`) beside the human `message`, so a client
+  acts on the code and not on the wording. A refused broadcast or presence track uses `send_denied`,
+  `track_denied` or `payload_refused`, which tell the client the channel itself is still healthy.
 * The first frame of a socket carries `features: ["private_channels"]` so a client can tell this server
   from one that ignores the flag. A shared (multi-tenant) instance does not enforce channel rules and
   refuses a join opened as private.

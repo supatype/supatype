@@ -114,6 +114,7 @@ describe("an anon-key socket on a declared channel (the Gavel finding)", () => {
     await join(anon, LOT)
 
     expect(refusalOf(anon, LOT)).toMatchObject({
+      code: "join_denied",
       message: `not allowed to join ${LOT}: the join rule of LotChannel denied it`,
     })
   })
@@ -164,7 +165,7 @@ describe("an anon-key socket on a declared channel (the Gavel finding)", () => {
 
     await join(member, "lot:42")
 
-    expect(refusalOf(member, "lot:42")).toMatchObject({ message: "lot:42 does not fit lot:{id}: id must be a UUID" })
+    expect(refusalOf(member, "lot:42")).toMatchObject({ code: "does_not_fit", message: "lot:42 does not fit lot:{id}: id must be a UUID" })
   })
 
   it("is refused a channel name over 255 characters before the database is asked anything", async () => {
@@ -175,7 +176,7 @@ describe("an anon-key socket on a declared channel (the Gavel finding)", () => {
 
     await join(member, long)
 
-    expect(refusalOf(member, long)).toMatchObject({ message: "channel name is too long: 304 characters, the limit is 255" })
+    expect(refusalOf(member, long)).toMatchObject({ code: "refused", message: "channel name is too long: 304 characters, the limit is 255" })
     expect(db.callerSessions + db.serviceSessions).toBe(before)
     const ok = `lot:${"a".repeat(251)}`
     expect(await join(member, ok)).toMatchObject({ status: "error", message: expect.not.stringContaining("too long") })
@@ -191,8 +192,8 @@ describe("an anon-key socket on a declared channel (the Gavel finding)", () => {
     member.send({ type: "presence_track", channel: "announce", payload: {} })
     const track = await member.next(isSystem("error", "declares no track rule"))
 
-    expect(send).toMatchObject({ message: "Announcements declares no send rule, so only the service role may broadcast on announce" })
-    expect(track).toMatchObject({ message: "Announcements declares no track rule, so only the service role may track presence on announce" })
+    expect(send).toMatchObject({ code: "send_denied", message: "Announcements declares no send rule, so only the service role may broadcast on announce" })
+    expect(track).toMatchObject({ code: "track_denied", message: "Announcements declares no track rule, so only the service role may track presence on announce" })
   })
 })
 
@@ -224,6 +225,7 @@ describe("a signed-in user on a declared channel", () => {
 
     expect(refusal).toMatchObject({
       channel: LOT,
+      code: "send_denied",
       message: `not allowed to broadcast on ${LOT}: the send rule of LotChannel denied it`,
     })
     expect(heard).toEqual({ type: "broadcast", channel: LOT, event: "bid", payload: { amount: 5 } })
@@ -245,6 +247,7 @@ describe("a signed-in user on a declared channel", () => {
     const joined = await auctioneer.next((m) => m.type === "presence")
 
     expect(refusal).toMatchObject({
+      code: "track_denied",
       message: `not allowed to track presence on ${LOT}: the track rule of LotChannel denied it`,
     })
     expect(joined.type === "presence" && joined.joins).toEqual([{ user_id: ALICE, status: "here" }])
@@ -328,6 +331,7 @@ describe("a database that does not answer", () => {
     await member.next(isSystem("error", `subscribe to ${LOT} before broadcasting`))
 
     expect(refusalOf(member, LOT)).toMatchObject({
+      code: "unavailable",
       message: `could not check access to ${LOT} because the database did not answer; retry`,
     })
     await settle(watcher)
@@ -383,6 +387,7 @@ describe("access that was taken away", () => {
 
     expect(withdrawn).toMatchObject({
       channel: LOT,
+      code: "withdrawn",
       message: `access to ${LOT} was withdrawn: the join rule of LotChannel no longer admits this user`,
     })
     expect(left.type === "presence" && left.leaves).toEqual([{ user_id: ALICE, status: "here" }])
@@ -444,7 +449,7 @@ describe("access that was taken away", () => {
     alice.send({ type: "auth", token: userToken(ALICE) })
     const withdrawn = await alice.next(isSystem("error", `could not check access to ${LOT}`))
 
-    expect(withdrawn).toMatchObject({ channel: LOT })
+    expect(withdrawn).toMatchObject({ channel: LOT, code: "unavailable" })
     db.fault = null
     alice.send({ type: "broadcast", channel: LOT, event: "bid", payload: { amount: 5 } })
     await alice.next(isSystem("error", `subscribe to ${LOT} before broadcasting`))
@@ -531,6 +536,7 @@ describe("the content of a broadcast", () => {
 
     expect(lowRefusal).toMatchObject({
       channel: LOT,
+      code: "payload_refused",
       message: `not allowed to broadcast bid on ${LOT}: the send rule of LotChannel refused the payload`,
     })
     expect(heard).toMatchObject({ event: "bid", payload: { amount: 7 } })

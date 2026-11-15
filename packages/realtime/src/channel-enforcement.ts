@@ -4,6 +4,7 @@ import { tableKey } from "./channel-catalog.js"
 import { inScope, type ChannelGuard, type RecheckOutcome, type RecheckScope } from "./channel-guard.js"
 import { ChannelRechecker } from "./channel-recheck.js"
 import { refusals, type ChannelGrant } from "./channel-access.js"
+import { refusal, type Refusal } from "./refusal-codes.js"
 import { sqlState } from "./drop-log.js"
 import type { PresenceEntry, Subscription, WalChange } from "./types.js"
 
@@ -16,7 +17,7 @@ const DEBOUNCE_MS = 1000
 /** What the enforcer needs the server to do for it: speak to a socket and to a channel. */
 export interface EnforcementHooks {
   /** Tell one client why it was refused, naming the channel, so only that channel fails. */
-  refuse(client: ConnectedClient, channel: string, message: string): void
+  refuse(client: ConnectedClient, channel: string, why: Refusal): void
   /** Tell the members of `channel` that `entry` left its presence. */
   announceLeave(client: ConnectedClient, channel: string, entry: PresenceEntry): void
 }
@@ -83,9 +84,9 @@ export class ChannelEnforcer {
   }
 
   /** Remove a client from a channel and tell it why. */
-  withdraw(clientId: string, client: ConnectedClient, channel: string, message: string): void {
+  withdraw(clientId: string, client: ConnectedClient, channel: string, why: Refusal): void {
     this.dropMembership(clientId, client, channel)
-    this.hooks.refuse(client, channel, message)
+    this.hooks.refuse(client, channel, why)
   }
 
   /**
@@ -116,7 +117,7 @@ export class ChannelEnforcer {
   }
 
   private withdrawAll(clientId: string, client: ConnectedClient, subs: readonly Subscription[]): void {
-    for (const sub of subs) this.withdraw(clientId, client, sub.channel, refusals.unreachable(sub.channel))
+    for (const sub of subs) this.withdraw(clientId, client, sub.channel, refusal("unavailable", refusals.unreachable(sub.channel)))
   }
 
   private apply(

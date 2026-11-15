@@ -1,6 +1,7 @@
 import type { Queryable } from "./channel-db.js"
 import { sqlState } from "./drop-log.js"
 import { isBoolean, isShape, isString, nullable } from "./json.js"
+import { refusal, type Refusal } from "./refusal-codes.js"
 
 /**
  * What a project says about channels, and what a caller may do on one: the pure half of private
@@ -47,14 +48,14 @@ const isAccessRow = isShape({
  * What a caller may do on one channel, decided once at join and read on every later frame.
  *
  * `send` and `track` are the refusal to give when the caller attempts them, or null when allowed.
- * Holding the sentence rather than a boolean keeps the refusal beside the decision that made it, so
- * a frame costs a property read and says exactly why.
+ * Holding the refusal (code and sentence) rather than a boolean keeps it beside the decision that
+ * made it, so a frame costs a property read and says exactly why.
  */
 export interface ChannelGrant {
   /** The declaration the topic matched, or null for an undeclared channel and for the service role. */
   declaration: string | null
-  send: string | null
-  track: string | null
+  send: Refusal | null
+  track: Refusal | null
   /** Whether the join said it was private: if the declaration is later removed, the channel goes. */
   openedAsPrivate: boolean
   checkedAt: number
@@ -151,16 +152,21 @@ export const refusals = {
 // ─── Decisions ─────────────────────────────────────────────────────────────
 
 /** Why a join is refused, or the grant it is admitted with. */
-export type JoinDecision = { admitted: true; grant: ChannelGrant } | { admitted: false; message: string }
+export type JoinDecision = { admitted: true; grant: ChannelGrant } | ({ admitted: false } & Refusal)
 
 /** The refusal for one operation: none when admitted, the denial when a rule said no, the no-rule sentence for null. */
-function opRefusal(verdict: boolean | null, denial: string, noRule: string): string | null {
+function opRefusal(code: "send_denied" | "track_denied", verdict: boolean | null, denial: string, noRule: string): Refusal | null {
   if (verdict === true) return null
-  return verdict === false ? denial : noRule
+  return refusal(code, verdict === false ? denial : noRule)
 }
 
-function joinRefusal(topic: string, row: AccessRow): string {
-  return row.can_join === null ? refusals.noRule("join", topic, row.channel) : refusals.join(topic, row.channel)
+function joinRefusal(topic: string, row: AccessRow): Refusal {
+  const message = row.can_join === null ? refusals.noRule("join", topic, row.channel) : refusals.join(topic, row.channel)
+  return refusal("join_denied", message)
+}
+
+function refused(why: Refusal): { admitted: false } & Refusal {
+  return { admitted: false, ...why }
 }
 
 /** Every right, for the service role: it bypasses channel rules as it bypasses RLS. */
@@ -176,8 +182,14 @@ export function serviceGrant(now: number): ChannelGrant {
  * but nobody can send or track, so there is nothing to hear and no presence to leak.
  */
 export function undeclaredGrant(topic: string, mode: ChannelMode, now: number): ChannelGrant {
-  const refusal = mode === "declared" ? refusals.undeclared(topic) : null
-  return { declaration: null, send: refusal, track: refusal, openedAsPrivate: false, checkedAt: now }
+  const message = mode === "declared" ? refusals.undeclared(topic) : null
+  return {
+    declaration: null,
+    send: message === null ? null : refusal("send_denied", message),
+    track: message === null ? null : refusal("track_denied", message),
+    openedAsPrivate: false,
+    checkedAt: now,
+  }
 }
 
 /**
@@ -195,25 +207,27 @@ export function decideJoin(
 ): JoinDecision {
   const { mode, isPrivate, now } = options
   if (row === null) {
-    if (isPrivate) return { admitted: false, message: refusals.privateButUndeclared(topic) }
+    if (isPrivate) return refused(refusal("not_declared", refusals.privateButUndeclared(topic)))
     return { admitted: true, grant: undeclaredGrant(topic, mode, now) }
   }
-  if (!row.fits) return { admitted: false, message: refusals.doesNotFit(topic, row) }
-  if (row.can_join !== true) return { admitted: false, message: joinRefusal(topic, row) }
+  if (!row.fits) return refused(refusal("does_not_fit", refusals.doesNotFit(topic, row)))
+  if (row.can_join !== true) return refused(joinRefusal(topic, row))
   return {
     admitted: true,
     grant: {
       declaration: row.channel,
-      send: opRefusal(row.can_send, refusals.send(topic, row.channel), refusals.noRule("broadcast on", topic, row.channel)),
-      track: opRefusal(row.can_track, refusals.track(topic, row.channel), refusals.noRule("track presence on", topic, row.channel)),
+      send: opRefusal("send_denied", row.can_send, refusals.send(topic, row.channel), refusals.noRule("broadcast on", topic, row.channel)),
+      track: opRefusal("track_denied", row.can_track, refusals.track(topic, row.channel), refusals.noRule("track presence on", topic, row.channel)),
       openedAsPrivate: isPrivate,
       checkedAt: now,
     },
   }
 }
 
-/** The sentence for a held channel that a re-check no longer admits, in the terms of what changed. */
-export function withdrawalMessage(topic: string, row: AccessRow | null): string {
-  if (row === null) return refusals.withdrawnUndeclared(topic)
-  return row.fits ? refusals.withdrawn(topic, row.channel) : refusals.doesNotFit(topic, row)
+/** The refusal for a held channel that a re-check no longer admits, in the terms of what changed. */
+export function withdrawalRefusal(topic: string, row: AccessRow | null): Refusal {
+  if (row === null) return refusal("withdrawn", refusals.withdrawnUndeclared(topic))
+  return row.fits
+    ? refusal("withdrawn", refusals.withdrawn(topic, row.channel))
+    : refusal("does_not_fit", refusals.doesNotFit(topic, row))
 }

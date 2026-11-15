@@ -38,6 +38,7 @@ describe("a join, by the database's answer and the project's mode", () => {
     // Without this a topic one typo from a private channel would be an undeclared, open one.
     expect(decide(row({ fits: false, can_join: true }), "open")).toEqual({
       admitted: false,
+      code: "does_not_fit",
       message: "lot:1 does not fit lot:{id}",
     })
   })
@@ -45,6 +46,7 @@ describe("a join, by the database's answer and the project's mode", () => {
   it("names the parameter that does not fit", () => {
     expect(decide(row({ fits: false, can_join: false, param_error: "id must be a UUID" }), "open")).toEqual({
       admitted: false,
+      code: "does_not_fit",
       message: "lot:1 does not fit lot:{id}: id must be a UUID",
     })
   })
@@ -52,20 +54,21 @@ describe("a join, by the database's answer and the project's mode", () => {
   it("reads a NULL verdict as no rule, so only the service role may: never a grant", () => {
     expect(decide(row({ can_join: null }), "open")).toEqual({
       admitted: false,
+      code: "join_denied",
       message: "LotChannel declares no join rule, so only the service role may join lot:1",
     })
     expect(decide(row({ can_send: null, can_track: null }), "open")).toMatchObject({
       admitted: true,
       grant: {
-        send: "LotChannel declares no send rule, so only the service role may broadcast on lot:1",
-        track: "LotChannel declares no track rule, so only the service role may track presence on lot:1",
+        send: { code: "send_denied", message: "LotChannel declares no send rule, so only the service role may broadcast on lot:1" },
+        track: { code: "track_denied", message: "LotChannel declares no track rule, so only the service role may track presence on lot:1" },
       },
     })
   })
 
   it("tells a rule that said no from a declaration with no rule", () => {
     expect(decide(row({ can_send: false }), "open")).toMatchObject({
-      grant: { send: "not allowed to broadcast on lot:1: the send rule of LotChannel denied it" },
+      grant: { send: { code: "send_denied", message: "not allowed to broadcast on lot:1: the send rule of LotChannel denied it" } },
     })
   })
 
@@ -73,6 +76,7 @@ describe("a join, by the database's answer and the project's mode", () => {
     for (const mode of ["open", "declared"] as const) {
       expect(decide(null, mode, true)).toEqual({
         admitted: false,
+        code: "not_declared",
         message: "lot:1 was opened as private, but no Channel declaration matches it",
       })
     }
@@ -82,7 +86,10 @@ describe("a join, by the database's answer and the project's mode", () => {
     expect(decide(null, "open")).toMatchObject({ admitted: true, grant: { send: null, track: null } })
     expect(decide(null, "declared")).toMatchObject({
       admitted: true,
-      grant: { send: expect.stringContaining("matches no declared channel"), track: expect.stringContaining("matches no declared channel") },
+      grant: {
+        send: { code: "send_denied", message: expect.stringContaining("matches no declared channel") },
+        track: { code: "track_denied", message: expect.stringContaining("matches no declared channel") },
+      },
     })
   })
 

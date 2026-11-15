@@ -85,7 +85,7 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
   it.runIf(secureChannels)("refuses a subscribe before authenticating, naming the channel", async () => {
     const stranger = await open()
     stranger.send({ type: "subscribe", channel: CHANNEL })
-    expect(await stranger.next(isSystem("error", "authenticate before subscribing"))).toMatchObject({ channel: CHANNEL })
+    expect(await stranger.next(isSystem("error", "authenticate before subscribing"))).toMatchObject({ channel: CHANNEL, code: "refused" })
   })
 
   it("refuses a broadcast to a channel the sender has not joined", async () => {
