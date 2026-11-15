@@ -63,6 +63,15 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => {
   }
 })
 
+// These restarts are about which environment compose runs with, not whether the stack is up. The real
+// checks ask Docker for the stack's containers, so on a machine with Docker running but no `acme`
+// stack they refuse and exit before compose runs; here the stack is taken to be running.
+vi.mock("../src/stack-running.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/stack-running.js")>()),
+  restartRefusal: () => null,
+  dbContainerNetworks: () => null,
+}))
+
 vi.mock("../src/stack-exit-watch.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/stack-exit-watch.js")>()),
   composeStackWatch: () => ({ logTail: async () => "" }),
