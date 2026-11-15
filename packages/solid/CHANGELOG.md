@@ -4,6 +4,7 @@
 
 ### Features
 
+* **createChannel:** the channel name is a `ChannelName`: a topic the schema declares autocompletes (`lot:${string}`), and any other string is still accepted, since an `open` server admits it.
 * **createChannel:** `createChannel(name, setup)` joins one channel and hands it to `setup` to add any number of
   row, presence and broadcast listeners, which `createSubscription` (one table, one listener) cannot. It returns
   `status` and `error` as `createSubscription` does, and `isConnected` and `connectionState`. `name` is a string or

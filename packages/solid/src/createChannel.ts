@@ -1,6 +1,6 @@
 import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelName, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
 import { channelSlot, type SubscriptionState } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 import { createRealtimeConnection, type RealtimeConnectionResult } from "./createRealtimeConnection.js"
@@ -27,7 +27,7 @@ export interface ChannelResult extends RealtimeConnectionResult {
  * says why.
  */
 export function createChannel<TRow = Record<string, unknown>, TDatabase extends AnyDatabase = AugmentedDatabase>(
-  name: string | Accessor<string>,
+  name: ChannelName | Accessor<ChannelName>,
   setup: (channel: ChannelSubscription<TRow>) => void,
   options?: ChannelOptions | undefined,
 ): ChannelResult {
@@ -43,7 +43,7 @@ export function createChannel<TRow = Record<string, unknown>, TDatabase extends 
   }, options, (refused) => {
     setRefusal(refused)
   })
-  const current = (): string => (typeof name === "function" ? name() : name)
+  const current = (): ChannelName => (typeof name === "function" ? name() : name)
 
   onMount(() => {
     slot.join(current())

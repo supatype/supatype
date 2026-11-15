@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue"
-import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelName, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
 import { channelSlot, type SubscriptionState } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 import { useRealtimeConnection, type UseRealtimeConnectionReturn } from "./useRealtimeConnection.js"
@@ -34,7 +34,7 @@ export interface UseChannelReturn extends UseRealtimeConnectionReturn {
  * ```
  */
 export function useChannel<TRow = Record<string, unknown>, TDatabase extends AnyDatabase = AugmentedDatabase>(
-  name: MaybeRefOrGetter<string>,
+  name: MaybeRefOrGetter<ChannelName>,
   setup: (channel: ChannelSubscription<TRow>) => void,
   options?: ChannelOptions | undefined,
 ): UseChannelReturn {

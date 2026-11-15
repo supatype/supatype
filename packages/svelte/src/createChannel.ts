@@ -1,6 +1,6 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
-import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, ChannelActionRefusal, ChannelName, ChannelOptions, ChannelSubscription, SupatypeError } from "@supatype/client"
 import { channelSlot, type SubscriptionState } from "@supatype/client/bindings"
 import { getSupatypeClient } from "./context.js"
 import { createRealtimeConnection, type RealtimeConnectionStore } from "./createRealtimeConnection.js"
@@ -15,7 +15,7 @@ export interface ChannelStore extends RealtimeConnectionStore {
 }
 
 /** A name given as a store, told apart from a plain string by its `subscribe`. */
-function isReadable(name: string | Readable<string>): name is Readable<string> {
+function isReadable(name: ChannelName | Readable<ChannelName>): name is Readable<ChannelName> {
   return typeof name !== "string"
 }
 
@@ -33,7 +33,7 @@ function isReadable(name: string | Readable<string>): name is Readable<string> {
  * says why.
  */
 export function createChannel<TRow = Record<string, unknown>, TDatabase extends AnyDatabase = AugmentedDatabase>(
-  name: string | Readable<string>,
+  name: ChannelName | Readable<ChannelName>,
   setup: (channel: ChannelSubscription<TRow>) => void,
   options?: ChannelOptions | undefined,
 ): ChannelStore {

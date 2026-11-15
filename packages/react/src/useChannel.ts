@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, type DependencyList } from "react"
-import type { ChannelActionRefusal, ChannelOptions, ChannelStatus, ChannelSubscription } from "@supatype/client"
+import type { ChannelActionRefusal, ChannelName, ChannelOptions, ChannelStatus, ChannelSubscription } from "@supatype/client"
 import { useSupatype } from "./context.js"
 import { useRealtimeConnection, type UseRealtimeConnectionResult } from "./useRealtimeConnection.js"
 
@@ -47,7 +47,7 @@ const JOINING: ChannelState = { status: "SUBSCRIBING", error: null, refusal: nul
  * ```
  */
 export function useChannel<TRow = Record<string, unknown>>(
-  name: string,
+  name: ChannelName,
   setup: (channel: ChannelSubscription<TRow>) => void,
   deps: DependencyList = [],
   options: ChannelOptions = {},

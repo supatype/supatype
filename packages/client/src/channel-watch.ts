@@ -1,4 +1,5 @@
 import type { ChannelOptions, ChannelSubscription, RealtimeClient, RealtimeConnectionState } from "./realtime.js"
+import type { ChannelName } from "./types.js"
 import type { ChannelActionRefusal } from "./realtime-refusals.js"
 import { subscriptionViewOf, type SubscriptionView } from "./table-subscription.js"
 
@@ -20,7 +21,7 @@ import { subscriptionViewOf, type SubscriptionView } from "./table-subscription.
  */
 export function watchChannel<TRow = Record<string, unknown>>(
   realtime: RealtimeClient,
-  name: string,
+  name: ChannelName,
   setup: (channel: ChannelSubscription<TRow>) => void,
   onStatus: (view: SubscriptionView) => void,
   opts?: ChannelOptions | undefined,
@@ -50,7 +51,7 @@ export function watchConnection(
 /** One channel at a time, which can be moved to another name. */
 export interface ChannelSlot {
   /** Join `name`, leaving the channel held first. Joining the name already held does nothing. */
-  join(name: string): void
+  join(name: ChannelName): void
   /** Leave the channel held, if any. */
   leave(): void
 }
@@ -68,7 +69,7 @@ export function channelSlot<TRow = Record<string, unknown>>(
   opts?: ChannelOptions | undefined,
   onRefused?: ((refusal: ChannelActionRefusal) => void) | undefined,
 ): ChannelSlot {
-  let held: { name: string; stop: () => void } | null = null
+  let held: { name: ChannelName; stop: () => void } | null = null
   const leave = (): void => {
     held?.stop()
     held = null
