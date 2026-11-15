@@ -64,9 +64,10 @@ export function dockerPgStart(opts: DockerPgOptions): void {
     POSTGRES_PASSWORD: password,
     POSTGRES_DB: projectName,
   })
-  // `run` pulls the image first when this machine does not have it.
+  // `run` pulls the image first when this machine does not have it. `--init` for the same reason
+  // the compose `db` service sets `init: true`: postgres as PID 1 restarts on an orphaned child.
   const result = askDockerSync(
-    ["run", "-d", "--name", name, ...secrets.args, "-p", `${port}:5432`, "-v", `${volume}:/var/lib/postgresql/data`, image],
+    ["run", "-d", "--init", "--name", name, ...secrets.args, "-p", `${port}:5432`, "-v", `${volume}:/var/lib/postgresql/data`, image],
     { env: secrets.env, timeoutMs: DOCKER_PULL_TIMEOUT_MS },
   )
 

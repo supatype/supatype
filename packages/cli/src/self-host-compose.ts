@@ -1045,6 +1045,10 @@ ${keyspaceAuthEnv}`
 `
     : `  db:
     image: \${SUPATYPE_POSTGRES_IMAGE:-${runningPostgresImage(config)}}
+    # Docker's tini as PID 1, so postgres is not. PID 1 adopts every orphan in the container, and
+    # Postgres 17 restarts the whole server when an adopted child it never forked exits non-0/1,
+    # which is what a health check killed on timeout leaves behind (an orphaned pg_isready, exit 2).
+    init: true
 ${SERVICE_DEFAULTS}
 ${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    environment:
       POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
