@@ -284,7 +284,7 @@ you run the storage service yourself with one S3 bucket per bucket.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SUPATYPE_FUNCTIONS_DB_URL` | None | A Postgres URL handed to every function as `ctx.dbUrl`. It bypasses access rules and field masking, so name a least-privilege role, never the admin URL |
+| `SUPATYPE_FUNCTIONS_DB_URL` | None | A Postgres URL handed to every function as `ctx.dbUrl`. Rules and masking apply for the role the URL names; a superuser or `BYPASSRLS` role (the admin role, `service_role`) skips both. Name a least-privilege login role, never the admin URL, and end the URL with the database in `POSTGRES_DB` |
 | `STRIPE_SECRET_KEY` | None | Passed to the functions worker |
 | `STRIPE_WEBHOOK_SECRET` | None | Passed to the functions worker |
 

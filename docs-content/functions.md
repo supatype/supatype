@@ -198,7 +198,7 @@ $ docker compose -p supatype-<project> -f .supatype/self-host/docker-compose.yml
 
 On an unlinked project with a self-host Compose file, `supatype functions deploy` uploads nothing. It lists the functions it found on disk and prints that restart command.
 
-The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.
+The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection is not a request through the API: model hooks do not run, and row rules and field masking apply only for the role the URL names. A superuser or `BYPASSRLS` role (the admin role, `service_role`) skips both, so point it at a login role that is neither, granted only what your functions need. The database name at the end of the URL is the value of `POSTGRES_DB` in your `.env`.
 
 The worker runs Deno 2.9.8. Postgres drivers verified against a live database on it: `npm:postgres` (latest), `npm:postgres@3.4.5` and `npm:pg`. `npm:postgres` 3.4.6 and later does not run on Deno before 2.8, where it fails with `Not implemented: LibuvStreamWrap.prototype.useUserBuffer`; a stack on an older worker image should pin `npm:postgres@3.4.5`.
 

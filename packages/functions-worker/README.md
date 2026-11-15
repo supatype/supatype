@@ -38,8 +38,8 @@ Compose passes that value to this worker as `SUPATYPE_DB_URL`, and when the URL 
 separate variable from the project's `DATABASE_URL` on purpose, so handing functions a database
 connection is a decision rather than a default.
 
-What it is not: a request through the API. It connects as whatever role the URL names, so it
-**bypasses the schema's row rules and field masking**. With the admin URL
+What it is not: a request through the API. It connects as whatever role the URL names, so the schema's row rules and field
+masking apply for that role, and a superuser or `BYPASSRLS` role skips both. With the admin URL
 (`supatype_admin`, the one in `DATABASE_URL`) a function reads and writes every row and every
 column of every table, whatever the schema says. Every function in the project receives it, and a
 function is a public endpoint.
@@ -57,6 +57,8 @@ GRANT SELECT ON public.orders TO functions_reader;
 # .env (the host is the compose service name, `db`)
 SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:a-long-random-password@db:5432/my-project
 ```
+
+The last path segment is the database name: the `POSTGRES_DB` value in the project's `.env` (`supatype init` sets it to the project name), not a fixed string.
 
 Then run `supatype self-host compose up -d` (it renders the file again), or restart
 `supatype dev`. In the function, treat the URL as a credential: never return it or log it.

@@ -47,8 +47,8 @@ Functions receive a raw Postgres connection URL as `ctx.dbUrl` only when the ope
 `DATABASE_URL`. When the URL names the stack's `db` service, the functions worker also joins the
 `functions-db` network so it can reach Postgres.
 
-It is not a request through the API: it connects as whatever role the URL names and **bypasses
-row rules and field masking**. With the admin URL (`supatype_admin`, as in `DATABASE_URL`) every
+It is not a request through the API: it connects as whatever role the URL names. Row rules and field masking apply for
+that role; a superuser or `BYPASSRLS` role skips both. With the admin URL (`supatype_admin`, as in `DATABASE_URL`) every
 function, each of them a public endpoint, can read and write every row and column. Use a
 least-privilege role granted only what the functions need:
 
@@ -63,6 +63,8 @@ GRANT SELECT ON public.orders TO functions_reader;
 # .env (host is the compose service, db)
 SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:a-long-random-password@db:5432/my-project
 ```
+
+The last path segment is the database name: the `POSTGRES_DB` value in the project's `.env`, not a fixed string.
 
 Apply it with `supatype self-host compose up -d` (it renders the file again and recreates what
 changed), or restart `supatype dev`. In a function, check `ctx.dbUrl !== undefined` before connecting, and never

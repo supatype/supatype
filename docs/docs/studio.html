@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -238,6 +239,7 @@
       <li>Statements that drop, empty or overwrite data (<code>DROP</code>, <code>TRUNCATE</code>, <code>DELETE</code>, <code>UPDATE</code>, and an <code>ALTER</code> that drops something or turns off row level security) ask first and name what they change.</li>
       <li><code>EXPLAIN (FORMAT JSON)</code> draws the plan as a tree.</li>
       <li>Query History lists earlier runs in this session.</li>
+      <li>A <code>DELETE</code> or <code>UPDATE</code> with no <code>WHERE</code> fails with <code>DELETE requires a WHERE clause</code>. That is <code>pg_safeupdate</code>, which the image loads for every session, this runner included. Write <code>WHERE true</code> to mean every row. On a connection of your own, <code>SET safeupdate.enabled = 0</code> turns the check off for that session.</li>
     </ul>
     <div class="callout warn">
       <span class="callout-label">FULL ACCESS</span>

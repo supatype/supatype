@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -141,7 +142,7 @@
         <tr><td><code>pg_net</code></td><td>Async HTTP requests from triggers and functions.</td></tr>
         <tr><td><code>pgjwt</code></td><td>JWT signing and checking in SQL.</td></tr>
         <tr><td><code>pg_cron</code></td><td>Scheduled jobs inside Postgres.</td></tr>
-        <tr><td><code>pg_safeupdate</code></td><td>Stops UPDATE and DELETE with no WHERE clause.</td></tr>
+        <tr><td><code>pg_safeupdate</code></td><td>Stops UPDATE and DELETE with no WHERE clause. It is in <code>shared_preload_libraries</code>, so it applies to every session: API requests, Studio's SQL runner and your own <code>psql</code>. Write <code>WHERE true</code> to mean every row, or <code>SET safeupdate.enabled = 0</code> to turn it off for the session.</td></tr>
         <tr><td><code>pg_plan_filter</code></td><td>Rejects queries over a cost limit.</td></tr>
         <tr><td><code>wal2json</code></td><td>Logical decoding as JSON, for realtime.</td></tr>
       </tbody>

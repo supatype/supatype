@@ -117,6 +117,32 @@ await supatype.from("post").select("id").ilike("title", "%hello%").range(0, 19)
 
 Reads also take `order`, `limit` and `range`. Filters work on `update` and `delete` too.
 
+<h2 id="cache">Cache a read</h2>
+
+`.cache({ ttl })` keeps a read's result in the client's memory for `ttl` milliseconds. Add `server: true` to cache it on the server as well, for a model that declares a `cache`; add `public: true` to share one entry between users when the model allows it.
+
+```ts
+const { data, meta } = await supatype
+  .from("post")
+  .select("id, title")
+  .cache({ ttl: 30_000, server: true })  // milliseconds
+
+console.log(meta?.cacheStatus)  // "HIT", "MISS" or "BYPASS"
+```
+
+The cache status is `meta.cacheStatus`, on the result next to `data` and `error`: it is not a field of the result itself. It is `"HIT"` when the cache answered, `"MISS"` when the read went to the database and its result was stored, and `"BYPASS"` when the server cache was asked for and not used (for example, the model declares no cache, or caching is off for the project). A read that did not call `.cache()` has no `meta.cacheStatus`, and `meta` itself can be absent.
+
+<h2 id="globals">Globals</h2>
+
+A singleton model (`singleton: true`) holds one row that always exists, such as site settings. `global(name)` reads and updates it without a filter. `name` is the model's snake case name, as in `_global_site_settings`; for a model that sets its own `tableName`, use `from(tableName)` instead.
+
+```ts
+const { data: settings } = await supatype.global<{ title: string }>("site_settings").get()
+await supatype.global("site_settings").update({ title: "New title" })
+```
+
+`get()` returns the row, or `null`. `update(fields)` changes only the fields you name and returns the row. Both return `{ data, error }`, and the model's access rules apply as for any other read or write.
+
 <h2 id="write">Insert, update, delete</h2>
 
 ```ts
@@ -132,6 +158,8 @@ await supatype.from("comment").delete().eq("id", commentId)
 ```
 
 A write returns no rows unless you add `.select()`: without it, `data` is `null`. Returning a row needs permission to read it, so leave `.select()` off when the access rules let the caller create a row but not read it. On a write, `single()` and `maybeSingle()` work only after `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
+
+An update or delete with no filter is refused, so `.delete()` alone returns an error instead of emptying the table. The `supatype/postgres` image loads `pg_safeupdate`, which raises `DELETE requires a WHERE clause` (or the same for `UPDATE`). To change every row, add a filter that matches all of them, such as `.not("id", "is", null)`.
 
 A `RichText` field takes a plain string on write.
 
@@ -243,7 +271,7 @@ await supatype.functions.invoke("stats", { method: "GET", headers: { "x-region":
 
 Inside a function, `ctx.url` is the API's internal address, for calls the function makes. `ctx.publicUrl` is the public address, for links you give to people.
 
-`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`.
+`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`. A function is not part of the schema: see [Server logic in a Postgres function](/docs/schema.html#server-logic) for writing one and what Supatype does not manage.
 
 <h2 id="graphql">GraphQL</h2>
 

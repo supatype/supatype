@@ -180,6 +180,7 @@ The GraphQL page sends queries to `POST /graphql/v1`. Pick a model to start from
 - Statements that drop, empty or overwrite data (`DROP`, `TRUNCATE`, `DELETE`, `UPDATE`, and an `ALTER` that drops something or turns off row level security) ask first and name what they change.
 - `EXPLAIN (FORMAT JSON)` draws the plan as a tree.
 - Query History lists earlier runs in this session.
+- A `DELETE` or `UPDATE` with no `WHERE` fails with `DELETE requires a WHERE clause`. That is `pg_safeupdate`, which the image loads for every session, this runner included. Write `WHERE true` to mean every row. On a connection of your own, `SET safeupdate.enabled = 0` turns the check off for that session.
 
 :::caution[Full access]
 Queries run as `supatype_sql_editor`, which has the rights of the role that owns your tables. Row level security does not apply and masked columns show in full. It is not a superuser. Every query is recorded. Only admins and developers can open it.

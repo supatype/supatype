@@ -1,5 +1,7 @@
 # Supatype: full context for language models
 
+Docs version: Supatype 0.9.2 (released 2026-11-12). Engine v0.10.1, server v2.5.0, Postgres 17.2.14, Deno 2.2.0.
+
 > Zero drift: one set of TypeScript types runs the whole stack, database to component. One schema derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, auth, storage, realtime, Studio editing views and the typed client. Self-hostable. SDKs MIT, CLI and services Apache 2.0, API server MIT, Postgres image PostgreSQL License, schema engine source-available under BSL 1.1.
 
 This file is the expanded companion to https://www.supatype.com/llms.txt: a summary first, then the full text of every docs and guide page. Prefer linking agents here when they need product facts without scraping HTML.
@@ -59,7 +61,7 @@ Schema (https://www.supatype.com/docs/schema.html):
 Client (https://www.supatype.com/docs/client.html):
 - Import `createClient` from the generated `supatype/generated/client.ts`, with no type argument. It knows which models keep drafts.
 - On a drafts model, `update` saves a draft; `update(data, { publish: true })` also publishes; `.draft()` reads drafts; `rpc("publish", { model_table, record_id }, { schema: "supatype" })` publishes.
-- Realtime: `from(table).subscribe(cb, { event })`. Functions: `functions.invoke(name, { body })`. `error` is a plain object with `message` and, when known, `code`, `status`, `details`, `hint` and `field`. Auth calls and storage object calls (upload, download and the rest) throw on a network failure.
+- Realtime: `from(table).subscribe(cb, { event })`. Functions: `functions.invoke(name, { body })`. `error` is a `SupatypeError` (an `Error`) with `message` and, when known, `code`, `status`, `details`, `hint` and `field`. A cached read reports `meta.cacheStatus` (`HIT`, `MISS` or `BYPASS`) on the result, not at its top level. `global(name)` reads and updates a singleton model's one row. Auth calls and storage object calls (upload, download and the rest) throw on a network failure.
 - `BigInt` columns read as `bigint`; `Decimal` and `Money` read as strings, so no digits are lost.
 - GraphQL: `graphql<T>(query, variables)`. Rich text, blocks and json fields come back as objects, not the JSON strings pg_graphql sends: the client reads the schema once per role and decodes every `JSON` scalar field the query selects, through aliases, fragments, relations and lists. A field it cannot place stays as returned. Relation fields use the schema's names (`talks`, not `talkCollection`) from the first push on 0.7.0.
 
@@ -305,7 +307,7 @@ To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: 
 
 Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8000`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
 
-Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names, which bypasses row rules and field masking. Point it at a least-privilege role granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/my-app`.
+Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names. Row rules and field masking apply for that role exactly as they would for a request: a superuser or a role with `BYPASSRLS` (the admin role, `service_role`) skips both, any other role is held to them. Point it at a least-privilege login role that is neither, granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/<POSTGRES_DB>`. The database is the value of `POSTGRES_DB` in your `.env` (`supatype init` sets it to the project name; the stack default is `supatype`).
 
 #### 4. Serve a static app
 
@@ -776,6 +778,75 @@ Renames are recorded in `supatype/renames.json`. Commit it. Every push replays i
 
 `--yes` does not override hand-edited access rules. Only `--overwrite-drift` does. Objects that Supatype did not create are never dropped or taken over.
 
+### Server logic in a Postgres function
+
+The schema declares tables and [access rules](https://www.supatype.com/docs/schema.html#access). It has no place for your own SQL, so logic that must run as one step in the database, such as checking a price and raising it in one transaction, is a Postgres function that you create yourself and call with `supatype.rpc()`. "No raw SQL" means the access rules are typed, not that the database is closed to you.
+
+`place_bid.sql`:
+
+```sql
+CREATE FUNCTION public.place_bid(lot_id uuid, amount numeric)
+RETURNS public.lot
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $$
+DECLARE
+  current_lot public.lot;
+BEGIN
+  -- Lock the row, so two bids at once are checked one after the other.
+  SELECT * INTO current_lot FROM public.lot WHERE id = lot_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'no such lot';
+  END IF;
+  IF amount <= current_lot.price THEN
+    RAISE EXCEPTION 'bid must be above %', current_lot.price;
+  END IF;
+  UPDATE public.lot SET price = amount WHERE id = lot_id RETURNING * INTO current_lot;
+  RETURN current_lot;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.place_bid(uuid, numeric) TO authenticated;
+NOTIFY pgrst, 'reload schema';
+```
+
+- **Lock what you check.** `SELECT ... FOR UPDATE` makes a second caller wait until the first transaction ends, so the check and the update cannot interleave.
+- **`SECURITY INVOKER` or `DEFINER`.** An invoker function runs as the caller, so the [row rules](https://www.supatype.com/docs/schema.html#access) and [field masking](https://www.supatype.com/docs/schema.html#field-rules) on every table it touches apply as they would for a request. That is the default, and the one to use. A definer function runs as the role that created it, which skips both, so it must do its own checks (for example against `auth.uid()`) and should be written with great care.
+- **`SET search_path = ''`.** It stops a caller shadowing a table or function with one of their own. Name every object with its schema, as above. It matters most for a definer function.
+- **Grant it.** The API roles can call only what you grant: `GRANT EXECUTE ... TO authenticated`, or `anon` for a signed-out caller.
+- **Create it.** Run the SQL with `psql` against your database, or in Studio's [SQL runner](https://www.supatype.com/docs/studio.html#sql). `NOTIFY pgrst, 'reload schema'` makes the API pick the function up straight away.
+- **Call it.** `rpc` sends the named arguments, and a `RAISE EXCEPTION` comes back as `error`.
+
+`typescript`:
+
+```ts
+const { data: lot, error } = await supatype.rpc("place_bid", { lot_id: lotId, amount: 120 })
+```
+
+> **NOT MANAGED:** Supatype does not manage this function. A push neither applies it nor changes or drops it: it leaves a function it did not make alone. But nothing else carries it either. `supatype dev --reset-db` removes the database volume and the function with it. A new environment does not get it, so run the SQL again there, or keep it in a file your own deploy step applies. On Supatype Cloud, run it in each environment's SQL runner. It is not in the schema, so it is not in the generated types: `rpc` takes the name and arguments you give it. Managed functions are planned for after the beta.
+
+#### Run a function on a schedule
+
+The image ships `pg_cron`, so a Postgres function can run on a timer. Write the function as above (here, one that closes every lot whose end time has passed), then schedule it by hand.
+
+```sh
+$ psql "$DATABASE_URL"
+
+SELECT cron.schedule('close-lots', '* * * * *', $$SELECT public.close_ended_lots()$$);
+SELECT jobid, jobname, schedule, command, username, database FROM cron.job;
+SELECT status, return_message, start_time FROM cron.job_run_details ORDER BY runid DESC LIMIT 5;
+SELECT cron.unschedule('close-lots');
+```
+
+- **Where it runs.** In your project's database, the one named by `POSTGRES_DB`, as the role that called `cron.schedule`. With the admin URL that role is `supatype_admin`, a superuser, so the job is not held to row rules and field masking, and the function should do its own checks.
+- **Who can schedule.** The admin role can. Studio's SQL runner connects as `supatype_sql_editor`, which has no access to the `cron` schema: `cron.schedule` there fails with `permission denied for schema cron`. Use `psql` with the admin URL.
+- **List and remove.** `cron.job` lists the jobs, `cron.job_run_details` says whether each run succeeded, and `cron.unschedule('name')` removes one.
+
+> **NOT MANAGED:** The job is not in the schema. A push does not apply it, `supatype dev --reset-db` removes it with the database volume, and a new environment does not get it: schedule it in each environment by hand. Declared jobs are planned for after the beta. This was run against the `supatype/postgres` image a release pins; Supatype Cloud databases have not been checked.
+
+The same pattern serves a query the REST filters cannot express. The [geography example](https://www.supatype.com/docs/schema/fields.html) adds a `places_within` function the same way.
+
 ## Client
 
 Source: https://www.supatype.com/docs/client.html
@@ -896,6 +967,36 @@ await supatype.from("post").select("id").ilike("title", "%hello%").range(0, 19)
 
 Reads also take `order`, `limit` and `range`. Filters work on `update` and `delete` too.
 
+### Cache a read
+
+`.cache({ ttl })` keeps a read's result in the client's memory for `ttl` milliseconds. Add `server: true` to cache it on the server as well, for a model that declares a `cache`; add `public: true` to share one entry between users when the model allows it.
+
+`typescript`:
+
+```ts
+const { data, meta } = await supatype
+  .from("post")
+  .select("id, title")
+  .cache({ ttl: 30_000, server: true })  // milliseconds
+
+console.log(meta?.cacheStatus)  // "HIT", "MISS" or "BYPASS"
+```
+
+The cache status is `meta.cacheStatus`, on the result next to `data` and `error`: it is not a field of the result itself. It is `"HIT"` when the cache answered, `"MISS"` when the read went to the database and its result was stored, and `"BYPASS"` when the server cache was asked for and not used (for example, the model declares no cache, or caching is off for the project). A read that did not call `.cache()` has no `meta.cacheStatus`, and `meta` itself can be absent.
+
+### Globals
+
+A singleton model (`singleton: true`) holds one row that always exists, such as site settings. `global(name)` reads and updates it without a filter. `name` is the model's snake case name, as in `_global_site_settings`; for a model that sets its own `tableName`, use `from(tableName)` instead.
+
+`typescript`:
+
+```ts
+const { data: settings } = await supatype.global<{ title: string }>("site_settings").get()
+await supatype.global("site_settings").update({ title: "New title" })
+```
+
+`get()` returns the row, or `null`. `update(fields)` changes only the fields you name and returns the row. Both return `{ data, error }`, and the model's access rules apply as for any other read or write.
+
 ### Insert, update, delete
 
 `typescript`:
@@ -913,6 +1014,8 @@ await supatype.from("comment").delete().eq("id", commentId)
 ```
 
 A write returns no rows unless you add `.select()`: without it, `data` is `null`. Returning a row needs permission to read it, so leave `.select()` off when the access rules let the caller create a row but not read it. On a write, `single()` and `maybeSingle()` work only after `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
+
+An update or delete with no filter is refused, so `.delete()` alone returns an error instead of emptying the table. The `supatype/postgres` image loads `pg_safeupdate`, which raises `DELETE requires a WHERE clause` (or the same for `UPDATE`). To change every row, add a filter that matches all of them, such as `.not("id", "is", null)`.
 
 A `RichText` field takes a plain string on write.
 
@@ -1038,7 +1141,7 @@ await supatype.functions.invoke("stats", { method: "GET", headers: { "x-region":
 
 Inside a function, `ctx.url` is the API's internal address, for calls the function makes. `ctx.publicUrl` is the public address, for links you give to people.
 
-`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`.
+`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`. A function is not part of the schema: see [Server logic in a Postgres function](https://www.supatype.com/docs/schema.html#server-logic) for writing one and what Supatype does not manage.
 
 ### GraphQL
 
@@ -2465,10 +2568,10 @@ const room = supatype.realtime
 room.broadcast("move", { x: 120, y: 48 })
 ```
 
-- Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.
-- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`.
+- Only clients that have subscribed to the channel receive its messages. The two differ on the sender: a broadcast is not sent back to the client that sent it, but presence is. Your own `track` arrives in your `onPresence` as a join, and your own leave as a leave, so skip your own entry if you only want the others.
+- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`, so `user_id` cannot tell two anonymous clients apart, or tell you which entry is your own. Put a value you generate yourself in the `track` payload, such as `track({ clientId: crypto.randomUUID(), name })`, and key your member map on that.
 - Calling `track` again announces the new payload as a fresh join, so keep your own map of members keyed by `user_id`.
-- A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.
+- A client that joins late is sent the members already tracked on the channel as joins, then hears about joins and leaves from then on.
 - A client leaves on `untrack()`, on unsubscribe and when its socket closes.
 - Messages sent while the socket is not open are dropped, so send after `SUBSCRIBED`.
 
@@ -2757,7 +2860,7 @@ $ docker compose -p supatype-<project> -f .supatype/self-host/docker-compose.yml
 
 On an unlinked project with a self-host Compose file, `supatype functions deploy` uploads nothing. It lists the functions it found on disk and prints that restart command.
 
-The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.
+The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection is not a request through the API: model hooks do not run, and row rules and field masking apply only for the role the URL names. A superuser or `BYPASSRLS` role (the admin role, `service_role`) skips both, so point it at a login role that is neither, granted only what your functions need. The database name at the end of the URL is the value of `POSTGRES_DB` in your `.env`.
 
 The worker runs Deno 2.9.8. Postgres drivers verified against a live database on it: `npm:postgres` (latest), `npm:postgres@3.4.5` and `npm:pg`. `npm:postgres` 3.4.6 and later does not run on Deno before 2.8, where it fails with `Not implemented: LibuvStreamWrap.prototype.useUserBuffer`; a stack on an older worker image should pin `npm:postgres@3.4.5`.
 
@@ -3331,6 +3434,7 @@ The GraphQL page sends queries to `POST /graphql/v1`. Pick a model to start from
 - Statements that drop, empty or overwrite data (`DROP`, `TRUNCATE`, `DELETE`, `UPDATE`, and an `ALTER` that drops something or turns off row level security) ask first and name what they change.
 - `EXPLAIN (FORMAT JSON)` draws the plan as a tree.
 - Query History lists earlier runs in this session.
+- A `DELETE` or `UPDATE` with no `WHERE` fails with `DELETE requires a WHERE clause`. That is `pg_safeupdate`, which the image loads for every session, this runner included. Write `WHERE true` to mean every row. On a connection of your own, `SET safeupdate.enabled = 0` turns the check off for that session.
 
 > **FULL ACCESS:** Queries run as `supatype_sql_editor`, which has the rights of the role that owns your tables. Row level security does not apply and masked columns show in full. It is not a superuser. Every query is recorded. Only admins and developers can open it.
 
@@ -3615,7 +3719,7 @@ An Expo Router app has no `index.html`. Its web page is rendered from `app/+html
   <meta charSet="utf-8" />
 ```
 
-Expo renders `+html.tsx` only when `web.output` in `app.json` is `"static"` or `"server"`, as a new app's is. With `"single"`, put `<script src="/supatype-env.js"></script>` in the head of `public/index.html` instead. A `"static"` export is plain files: have Supatype host them with `supatype app add --static ./dist`. A `"server"` export, the default from SDK 58, renders each page in a Node server (`npx expo serve`); the Supatype server in front of it answers `/supatype-env.js` itself, whatever the app mode. On any other host, build with the values instead.
+Expo renders `+html.tsx` only when `web.output` in `app.json` is `"static"` or `"server"`, as a new app's is. With `"single"`, put `<script src="/supatype-env.js" vite-ignore></script>` in the head of `public/index.html` instead. A `"static"` export is plain files: have Supatype host them with `supatype app add --static ./dist`. A `"server"` export, the default from SDK 58, renders each page in a Node server (`npx expo serve`); the Supatype server in front of it answers `/supatype-env.js` itself, whatever the app mode. On any other host, build with the values instead.
 
 A native build, for iOS or Android and on EAS, has no page, so it takes its values at build time under `EXPO_PUBLIC_SUPATYPE_URL` and `EXPO_PUBLIC_SUPATYPE_ANON_KEY`. `expo export` and EAS builds run in production mode, which never reads `.env.development.local`, where `supatype dev` and `keys` put the local stack's values. Give them your deployment's: on a linked machine, build through `supatype build`; for an EAS build, set the two names in the project's EAS environment variables, with the values `supatype keys --print frontend --env production` prints.
 
@@ -4180,7 +4284,7 @@ $ supatype push
 ### What does not carry over
 
 - **Your SQL migrations.** Supatype does not replay `supabase/migrations`. It plans changes from the schema and records the migrations it applies.
-- **Your RLS policies.** They are rewritten as access rules. Rules are types, and there is no raw SQL escape hatch, so a policy the rule types cannot express needs another approach, such as a hook or a function.
+- **Your RLS policies.** They are rewritten as access rules. Rules are types: there is no raw SQL escape hatch for access rules, so a policy the rule types cannot express needs another approach, such as a hook or a Postgres function you write yourself ([Server logic in a Postgres function](https://www.supatype.com/docs/schema.html#server-logic)). Your database is still Postgres, and you can run your own SQL in it.
 - **Generated types.** Delete `database.types.ts`. The client types come from the generated `supatype/generated` files.
 - **Function entry points.** The handler shape differs, so each function's entry needs a small rewrite. The code inside, being Deno, mostly stays.
 - **Function names and bodies in the client are not typed**, unlike tables.
@@ -4404,7 +4508,7 @@ The default superuser is `supatype_admin`, set with `POSTGRES_USER`.
 | `pg_net` | Async HTTP requests from triggers and functions. |
 | `pgjwt` | JWT signing and checking in SQL. |
 | `pg_cron` | Scheduled jobs inside Postgres. |
-| `pg_safeupdate` | Stops UPDATE and DELETE with no WHERE clause. |
+| `pg_safeupdate` | Stops UPDATE and DELETE with no WHERE clause. It is in `shared_preload_libraries`, so it applies to every session: API requests, Studio's SQL runner and your own `psql`. Write `WHERE true` to mean every row, or `SET safeupdate.enabled = 0` to turn it off for the session. |
 | `pg_plan_filter` | Rejects queries over a cost limit. |
 | `wal2json` | Logical decoding as JSON, for realtime. |
 
@@ -5019,6 +5123,36 @@ All of these need Supatype Cloud, which is coming soon.
 Binaries are cached in `~/.supatype/cache/`. `cache clean --force` removes every cached binary, pinned or not.
 
 Upgrading an npm install leaves the previous version's program in `~/.supatype/cache/cli/`, since another project may still use it. Once the programs of other versions take more than 250 MB, the CLI says so when it starts, at most once a day. `cache clean` removes them, and never the running version; a project still on a removed version downloads it again on its next command.
+
+## Versions
+
+Source: https://www.supatype.com/docs/versions.html
+
+What each part of a Supatype release is at, so you can tell which versions go together.
+
+Pre-1.0: APIs and config may change between releases.
+
+### What a release is made of
+
+A release is one number for the CLI and every `@supatype/*` package. The engine, server and Postgres images it runs, and the Deno that functions run on, are pinned by that release and move with it, not with the newest image on Docker Hub.
+
+| Component | Version | What it is |
+| --- | --- | --- |
+| CLI and npm packages | `0.9.2` | The latest release, 2026-11-12. The published `@supatype/*` packages, such as `@supatype/client` and `@supatype/react`, carry the same number |
+| Schema engine | `v0.10.1` | Parses the schema, plans and applies a push (`supatype/schema-engine`) |
+| Server | `v2.5.0` | The Supatype server: the API, auth and the services behind it (`supatype/server`) |
+| Postgres | `17.2.14` | The database image, with its extensions (`supatype/postgres`) |
+| Deno | `2.2.0` | The runtime for functions and hooks |
+
+The pins come from `release/images.json` in the repository, and the page is generated from it, so it is out of date only between a pin changing and the next site sync.
+
+### There is no 0.4, 0.5 or 0.6
+
+The CLI went from 0.3.6 straight to 0.7.0, on npm and as git tags. Nothing is missing from the [changelog](https://www.supatype.com/changelog.html): those versions were never released.
+
+### Check what you run
+
+`supatype --version` prints the CLI version. A self-hosted stack pins the images in its rendered compose file; `supatype self-host compose up -d` renders it again after an upgrade.
 
 ## Licensing
 

@@ -1,5 +1,8 @@
 # Changelog
 
+There is no 0.4, 0.5 or 0.6 release: this package went from 0.3.6 straight to 0.7.0, on npm and as git tags, so
+no entries are missing from this file.
+
 ## 0.9.3
 
 ### Features
@@ -9,7 +12,7 @@
   `Any`, `All`, `Not`, comparisons and null checks over `AuthUid`, `AuthRole`, `Claim`, `Literal`
   and `Folder`, so a registered-only rule can be written on a bucket.
 
-## Unreleased
+## 0.8.0 (2026-11-02)
 
 ### Features
 

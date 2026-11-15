@@ -111,10 +111,10 @@ const room = supatype.realtime
 room.broadcast("move", { x: 120, y: 48 })
 ```
 
-- Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.
-- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`.
+- Only clients that have subscribed to the channel receive its messages. The two differ on the sender: a broadcast is not sent back to the client that sent it, but presence is. Your own `track` arrives in your `onPresence` as a join, and your own leave as a leave, so skip your own entry if you only want the others.
+- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`, so `user_id` cannot tell two anonymous clients apart, or tell you which entry is your own. Put a value you generate yourself in the `track` payload, such as `track({ clientId: crypto.randomUUID(), name })`, and key your member map on that.
 - Calling `track` again announces the new payload as a fresh join, so keep your own map of members keyed by `user_id`.
-- A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.
+- A client that joins late is sent the members already tracked on the channel as joins, then hears about joins and leaves from then on.
 - A client leaves on `untrack()`, on unsubscribe and when its socket closes.
 - Messages sent while the socket is not open are dropped, so send after `SUBSCRIBED`.
 

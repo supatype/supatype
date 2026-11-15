@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -200,6 +201,24 @@ console.log(count)</pre></div>
 <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id"</span>).ilike(<span class="s">"title"</span>, <span class="s">"%hello%"</span>).range(0, 19)</pre></div>
     <p>Reads also take <code>order</code>, <code>limit</code> and <code>range</code>. Filters work on <code>update</code> and <code>delete</code> too.</p>
 
+    <h2 id="cache">Cache a read</h2>
+    <p><code>.cache({ ttl })</code> keeps a read's result in the client's memory for <code>ttl</code> milliseconds. Add <code>server: true</code> to cache it on the server as well, for a model that declares a <code>cache</code>; add <code>public: true</code> to share one entry between users when the model allows it.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data, meta } = <span class="k">await</span> supatype
+  .from(<span class="s">"post"</span>)
+  .select(<span class="s">"id, title"</span>)
+  .cache({ ttl: <span class="k">30_000</span>, server: <span class="k">true</span> })  <span class="c">// milliseconds</span>
+
+console.log(meta?.cacheStatus)  <span class="c">// "HIT", "MISS" or "BYPASS"</span></pre></div>
+    <p>The cache status is <code>meta.cacheStatus</code>, on the result next to <code>data</code> and <code>error</code>: it is not a field of the result itself. It is <code>"HIT"</code> when the cache answered, <code>"MISS"</code> when the read went to the database and its result was stored, and <code>"BYPASS"</code> when the server cache was asked for and not used (for example, the model declares no cache, or caching is off for the project). A read that did not call <code>.cache()</code> has no <code>meta.cacheStatus</code>, and <code>meta</code> itself can be absent.</p>
+
+    <h2 id="globals">Globals</h2>
+    <p>A singleton model (<code>singleton: true</code>) holds one row that always exists, such as site settings. <code>global(name)</code> reads and updates it without a filter. <code>name</code> is the model's snake case name, as in <code>_global_site_settings</code>; for a model that sets its own <code>tableName</code>, use <code>from(tableName)</code> instead.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: settings } = <span class="k">await</span> supatype.global&lt;{ title: <span class="t">string</span> }&gt;(<span class="s">"site_settings"</span>).get()
+<span class="k">await</span> supatype.global(<span class="s">"site_settings"</span>).update({ title: <span class="s">"New title"</span> })</pre></div>
+    <p><code>get()</code> returns the row, or <code>null</code>. <code>update(fields)</code> changes only the fields you name and returns the row. Both return <code>{ data, error }</code>, and the model's access rules apply as for any other read or write.</p>
+
     <h2 id="write">Insert, update, delete</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> { data: created, error: insertError } = <span class="k">await</span> supatype
@@ -212,6 +231,7 @@ console.log(count)</pre></div>
 <span class="k">await</span> supatype.from(<span class="s">"comment"</span>).update({ body: <span class="s">"Edited"</span> }).eq(<span class="s">"id"</span>, commentId)
 <span class="k">await</span> supatype.from(<span class="s">"comment"</span>).delete().eq(<span class="s">"id"</span>, commentId)</pre></div>
     <p>A write returns no rows unless you add <code>.select()</code>: without it, <code>data</code> is <code>null</code>. Returning a row needs permission to read it, so leave <code>.select()</code> off when the access rules let the caller create a row but not read it. On a write, <code>single()</code> and <code>maybeSingle()</code> work only after <code>.select()</code>. On a delete, <code>.select()</code> returns the rows it deleted. <code>upsert</code> inserts or updates by primary key.</p>
+    <p>An update or delete with no filter is refused, so <code>.delete()</code> alone returns an error instead of emptying the table. The <code>supatype/postgres</code> image loads <code>pg_safeupdate</code>, which raises <code>DELETE requires a WHERE clause</code> (or the same for <code>UPDATE</code>). To change every row, add a filter that matches all of them, such as <code>.not("id", "is", null)</code>.</p>
     <p>A <code>RichText</code> field takes a plain string on write.</p>
     <p>Some owner columns can be left out. A <code>SupatypeAuthUserId</code> field that the <code>create</code> rule names in <code>Owner&lt;&gt;</code>, and that has no default of its own, defaults to the caller. A relation's key, such as <code>author_id</code>, is not filled in, so send it.</p>
 
@@ -294,7 +314,7 @@ console.log(reply)</pre></div>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">await</span> supatype.functions.invoke(<span class="s">"stats"</span>, { method: <span class="s">"GET"</span>, headers: { <span class="s">"x-region"</span>: <span class="s">"eu"</span> } })</pre></div>
     <p>Inside a function, <code>ctx.url</code> is the API's internal address, for calls the function makes. <code>ctx.publicUrl</code> is the public address, for links you give to people.</p>
-    <p><code>supatype.rpc(name, params, options)</code> calls a Postgres function. Its options are <code>count</code>, <code>head</code>, <code>schema</code> for a function outside the default schema, and <code>idempotent</code>.</p>
+    <p><code>supatype.rpc(name, params, options)</code> calls a Postgres function. Its options are <code>count</code>, <code>head</code>, <code>schema</code> for a function outside the default schema, and <code>idempotent</code>. A function is not part of the schema: see <a href="/docs/schema.html#server-logic">Server logic in a Postgres function</a> for writing one and what Supatype does not manage.</p>
 
     <h2 id="graphql">GraphQL</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -361,6 +381,8 @@ console.log(first?.author.name, first?.body.root.children?.[0])</pre></div>
     <a href="#types">Generated types</a>
     <a href="#read">Read rows</a>
     <a href="#filters">Filters</a>
+    <a href="#cache">Cache a read</a>
+    <a href="#globals">Globals</a>
     <a href="#write">Insert, update, delete</a>
     <a href="#drafts">Drafts and publishing</a>
     <a href="#auth">Auth</a>

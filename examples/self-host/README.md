@@ -83,8 +83,8 @@ default** (commented out in `.env.example`), and separate from `DATABASE_URL` on
 URL names the stack's `db` service, the functions worker joins the `functions-db` network to reach
 it.
 
-It is not a request through the API. It connects as whatever role the URL names and **bypasses row
-rules and field masking**, and every function is a public endpoint, so do not use the admin URL
+It is not a request through the API. It connects as whatever role the URL names. Row rules and field masking apply for that
+role; a superuser or `BYPASSRLS` role (the admin role, `service_role`) skips both. Every function is a public endpoint, so do not use the admin URL
 (`POSTGRES_USER`). Create a role granted only what the functions need:
 
 ```sql
@@ -98,6 +98,8 @@ GRANT SELECT ON public.todo TO functions_reader;
 # .env
 SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:change-me@db:5432/self_host_example
 ```
+
+The last path segment is the database, which is the `POSTGRES_DB` value in this `.env`.
 
 Then `pnpm run selfhost:up`. In a function, check
 `ctx.dbUrl !== undefined` before connecting, and never return or log the URL.

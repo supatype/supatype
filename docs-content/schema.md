@@ -344,3 +344,72 @@ Renames are recorded in `supatype/renames.json`. Commit it. Every push replays i
 | A `JSON` field changed to `Blocks` holds values that are not objects | Change or remove those values, then push again |
 
 `--yes` does not override hand-edited access rules. Only `--overwrite-drift` does. Objects that Supatype did not create are never dropped or taken over.
+
+<h2 id="server-logic">Server logic in a Postgres function</h2>
+
+The schema declares tables and [access rules](#access). It has no place for your own SQL, so logic that must run as one step in the database, such as checking a price and raising it in one transaction, is a Postgres function that you create yourself and call with `supatype.rpc()`. "No raw SQL" means the access rules are typed, not that the database is closed to you.
+
+```sql title="place_bid.sql"
+CREATE FUNCTION public.place_bid(lot_id uuid, amount numeric)
+RETURNS public.lot
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $$
+DECLARE
+  current_lot public.lot;
+BEGIN
+  -- Lock the row, so two bids at once are checked one after the other.
+  SELECT * INTO current_lot FROM public.lot WHERE id = lot_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'no such lot';
+  END IF;
+  IF amount <= current_lot.price THEN
+    RAISE EXCEPTION 'bid must be above %', current_lot.price;
+  END IF;
+  UPDATE public.lot SET price = amount WHERE id = lot_id RETURNING * INTO current_lot;
+  RETURN current_lot;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.place_bid(uuid, numeric) TO authenticated;
+NOTIFY pgrst, 'reload schema';
+```
+
+- **Lock what you check.** `SELECT ... FOR UPDATE` makes a second caller wait until the first transaction ends, so the check and the update cannot interleave.
+- **`SECURITY INVOKER` or `DEFINER`.** An invoker function runs as the caller, so the [row rules](#access) and [field masking](#field-rules) on every table it touches apply as they would for a request. That is the default, and the one to use. A definer function runs as the role that created it, which skips both, so it must do its own checks (for example against `auth.uid()`) and should be written with great care.
+- **`SET search_path = ''`.** It stops a caller shadowing a table or function with one of their own. Name every object with its schema, as above. It matters most for a definer function.
+- **Grant it.** The API roles can call only what you grant: `GRANT EXECUTE ... TO authenticated`, or `anon` for a signed-out caller.
+- **Create it.** Run the SQL with `psql` against your database, or in Studio's [SQL runner](/docs/studio.html#sql). `NOTIFY pgrst, 'reload schema'` makes the API pick the function up straight away.
+- **Call it.** `rpc` sends the named arguments, and a `RAISE EXCEPTION` comes back as `error`.
+
+```ts
+const { data: lot, error } = await supatype.rpc("place_bid", { lot_id: lotId, amount: 120 })
+```
+
+:::caution[Not managed]
+Supatype does not manage this function. A push neither applies it nor changes or drops it: it leaves a function it did not make alone. But nothing else carries it either. `supatype dev --reset-db` removes the database volume and the function with it. A new environment does not get it, so run the SQL again there, or keep it in a file your own deploy step applies. On Supatype Cloud, run it in each environment's SQL runner. It is not in the schema, so it is not in the generated types: `rpc` takes the name and arguments you give it. Managed functions are planned for after the beta.
+:::
+
+<h3 id="schedule">Run a function on a schedule</h3>
+
+The image ships `pg_cron`, so a Postgres function can run on a timer. Write the function as above (here, one that closes every lot whose end time has passed), then schedule it by hand.
+
+```sh
+$ psql "$DATABASE_URL"
+
+SELECT cron.schedule('close-lots', '* * * * *', $$SELECT public.close_ended_lots()$$);
+SELECT jobid, jobname, schedule, command, username, database FROM cron.job;
+SELECT status, return_message, start_time FROM cron.job_run_details ORDER BY runid DESC LIMIT 5;
+SELECT cron.unschedule('close-lots');
+```
+
+- **Where it runs.** In your project's database, the one named by `POSTGRES_DB`, as the role that called `cron.schedule`. With the admin URL that role is `supatype_admin`, a superuser, so the job is not held to row rules and field masking, and the function should do its own checks.
+- **Who can schedule.** The admin role can. Studio's SQL runner connects as `supatype_sql_editor`, which has no access to the `cron` schema: `cron.schedule` there fails with `permission denied for schema cron`. Use `psql` with the admin URL.
+- **List and remove.** `cron.job` lists the jobs, `cron.job_run_details` says whether each run succeeded, and `cron.unschedule('name')` removes one.
+
+:::caution[Not managed]
+The job is not in the schema. A push does not apply it, `supatype dev --reset-db` removes it with the database volume, and a new environment does not get it: schedule it in each environment by hand. Declared jobs are planned for after the beta. This was run against the `supatype/postgres` image a release pins; Supatype Cloud databases have not been checked.
+:::
+
+The same pattern serves a query the REST filters cannot express. The [geography example](/docs/schema/fields.html) adds a `places_within` function the same way.

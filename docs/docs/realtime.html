@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -199,10 +200,10 @@ sub.unsubscribe()</pre></div>
 
 room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y: <span class="s">48</span> })</pre></div>
     <ul>
-      <li>Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.</li>
-      <li>A presence entry is the payload you pass to <code>track</code>, plus <code>user_id</code> from the token. The server writes <code>user_id</code> last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the <code>user_id</code> <code>anonymous</code>.</li>
+      <li>Only clients that have subscribed to the channel receive its messages. The two differ on the sender: a broadcast is not sent back to the client that sent it, but presence is. Your own <code>track</code> arrives in your <code>onPresence</code> as a join, and your own leave as a leave, so skip your own entry if you only want the others.</li>
+      <li>A presence entry is the payload you pass to <code>track</code>, plus <code>user_id</code> from the token. The server writes <code>user_id</code> last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the <code>user_id</code> <code>anonymous</code>, so <code>user_id</code> cannot tell two anonymous clients apart, or tell you which entry is your own. Put a value you generate yourself in the <code>track</code> payload, such as <code>track({ clientId: crypto.randomUUID(), name })</code>, and key your member map on that.</li>
       <li>Calling <code>track</code> again announces the new payload as a fresh join, so keep your own map of members keyed by <code>user_id</code>.</li>
-      <li>A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.</li>
+      <li>A client that joins late is sent the members already tracked on the channel as joins, then hears about joins and leaves from then on.</li>
       <li>A client leaves on <code>untrack()</code>, on unsubscribe and when its socket closes.</li>
       <li>Messages sent while the socket is not open are dropped, so send after <code>SUBSCRIBED</code>.</li>
     </ul>

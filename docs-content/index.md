@@ -192,7 +192,7 @@ To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: 
 
 Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8000`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
 
-Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names, which bypasses row rules and field masking. Point it at a least-privilege role granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/my-app`.
+Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names. Row rules and field masking apply for that role exactly as they would for a request: a superuser or a role with `BYPASSRLS` (the admin role, `service_role`) skips both, any other role is held to them. Point it at a least-privilege login role that is neither, granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/<POSTGRES_DB>`. The database is the value of `POSTGRES_DB` in your `.env` (`supatype init` sets it to the project name; the stack default is `supatype`).
 
 ### 4. Serve a static app
 
