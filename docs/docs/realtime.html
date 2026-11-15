@@ -115,7 +115,7 @@
   <main class="doc" id="main">
     <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Realtime</nav>
     <h1>Realtime</h1>
-    <p class="intro">Subscribe to inserts, updates and deletes on your tables over a WebSocket. Each change is checked against the subscriber's read access before it is sent.</p>
+    <p class="intro">Subscribe to inserts, updates and deletes on your tables over a WebSocket. Each change is checked against the subscriber's read access before it is sent. Broadcast and presence channels can be made private, with rules in your schema.</p>
     <p class="pre-release">Pre-1.0: APIs and config may change between releases.</p>
 
     <h2 id="changes">What is sent</h2>
@@ -206,7 +206,7 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
       <li>A client leaves on <code>untrack()</code>, on unsubscribe and when its socket closes.</li>
       <li>Messages sent while the socket is not open are dropped, so send after <code>SUBSCRIBED</code>.</li>
     </ul>
-    <div class="callout warn"><span class="callout-label">WARNING</span><p>Broadcast and presence have no access rules. Anyone with your anon key who knows a channel's name can join it, read its messages and send to it. Do not put private data in a broadcast, and use a hard-to-guess channel name for anything you would not show the public.</p></div>
+    <div class="callout warn"><span class="callout-label">WARNING</span><p>A channel your schema does not declare has no access rules. Anyone with your anon key who knows its name can join it, read its messages and send to it. Do not put private data in it. Declare the channel to guard it: see <a href="#private">private channels</a>.</p></div>
 
     <h2 id="hooks">Framework hooks</h2>
     <p><code>@supatype/react</code> exports <code>useSubscription</code>. It subscribes when the component mounts, unsubscribes when it unmounts, and re-subscribes when the channel name, event, table, schema or filter changes. The callback can change between renders without re-subscribing. It returns <code>status</code>, and <code>error</code>, the server's reason while the status is <code>CHANNEL_ERROR</code> and null otherwise.</p>
@@ -240,6 +240,240 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
     <p><code>useRealtimeConnection()</code> returns only <code>isConnected</code> and <code>connectionState</code>. <code>@supatype/vue</code>, <code>@supatype/solid</code> and <code>@supatype/svelte</code> do not have <code>useChannel</code> yet.</p>
     <p><code>@supatype/vue</code> has <code>useSubscription(table, { event, filter })</code>, and <code>@supatype/svelte</code> and <code>@supatype/solid</code> have <code>createSubscription(table, { event, filter })</code>. These watch the <code>public</code> schema and return <code>data</code>, <code>error</code> and <code>status</code>, which is <code>"connecting"</code>, <code>"connected"</code>, <code>"disconnected"</code> or <code>"error"</code>. <code>data</code> starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same <code>id</code>, deletes remove it. They do not load the rows that already exist, so pair them with a query.</p>
 
+    <h2 id="private">Private channels</h2>
+    <p>A private channel is a broadcast and presence channel with access rules, written in your schema. You declare it with a <code>Channel</code> type, push, and the realtime service checks every join, broadcast and presence update against that rule, as the user who made it. Nobody can read or fake traffic on it just by knowing its name.</p>
+    <p>This is the same idea as Supabase Realtime Authorization. The difference is who decides. In Supabase the client flags a channel private and policies on <code>realtime.messages</code> do the rest. Here the schema declaration decides, whether or not the client says <code>private</code>, so a client cannot skip the rules by leaving a flag out.</p>
+
+    <h3>How it works</h3>
+    <ul>
+      <li>A channel has three operations. <code>join</code> covers subscribing, receiving broadcasts and receiving presence. <code>send</code> covers broadcasting. <code>track</code> covers appearing in presence.</li>
+      <li>An operation you leave out is denied to everyone except the service role. A declaration with no rules at all is refused when the schema is read.</li>
+      <li>Each rule is written in the same <a href="/docs/schema.html#access">access rule language</a> as a model, and runs inside Postgres as the caller. A <code>Rows</code> rule sees only the rows that caller may read.</li>
+      <li>The server asks once at join, keeps the answer, and then judges each broadcast and presence update from that answer with no database call.</li>
+      <li>The service role may do anything on any channel.</li>
+    </ul>
+
+    <h3>Example: an auction lot</h3>
+    <p>Each lot has a channel. Only a signed-in user who is watching the lot may join it and appear in its presence. Any signed-in user who has joined may send a <code>bid</code> event, and only with an amount between 1 and 1,000,000. Only the seller, or an auctioneer, may announce that the reserve is met, which is a second channel on the same lot.</p>
+    <div class="cb"><div class="cb-bar"><span>schema/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> <span class="k">type</span> {
+  <span class="t">Model</span>, <span class="t">Channel</span>, <span class="t">UUID</span>, <span class="t">Int</span>, <span class="t">LoggedIn</span>, <span class="t">Role</span>, <span class="t">In</span>, <span class="t">Exists</span>, <span class="t">Rows</span>,
+  <span class="t">Eq</span>, <span class="t">All</span>, <span class="t">Any</span>, <span class="t">AuthUid</span>, <span class="t">Param</span>, <span class="t">Event</span>, <span class="t">Payload</span>,
+} <span class="k">from</span> <span class="s">"@supatype/types"</span>
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">Lot</span> = <span class="t">Model</span>&lt;
+  { id: <span class="t">UUID</span>; seller_id: <span class="t">UUID</span>; title: string },
+  { access: { read: <span class="t">LoggedIn</span> } }
+&gt;
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">LotWatcher</span> = <span class="t">Model</span>&lt;
+  { id: <span class="t">UUID</span>; lot_id: <span class="t">UUID</span>; user_id: <span class="t">UUID</span> },
+  { access: { read: <span class="t">LoggedIn</span> } }
+&gt;
+
+<span class="k">export</span> <span class="k">type</span> <span class="t">Bid</span> = <span class="t">Model</span>&lt;
+  { id: <span class="t">UUID</span>; lot_id: <span class="t">UUID</span>; bidder_id: <span class="t">UUID</span>; amount: <span class="t">Int</span> },
+  { access: { read: <span class="t">LoggedIn</span>; create: <span class="t">LoggedIn</span> } }
+&gt;
+
+<span class="c">// Lots the signed-in user is watching.</span>
+<span class="k">type</span> <span class="t">MyLots</span> = <span class="t">Rows</span>&lt;<span class="s">"lot_watcher"</span>, <span class="s">"lot_id"</span>, <span class="t">Eq</span>&lt;<span class="s">"user_id"</span>, <span class="t">AuthUid</span>&gt;&gt;
+
+<span class="c">// True when the signed-in user is the seller of the lot named in the topic.</span>
+<span class="k">type</span> <span class="t">SellerOfThisLot</span> = <span class="t">Exists</span>&lt;
+  <span class="t">Rows</span>&lt;<span class="s">"lot"</span>, <span class="s">"id"</span>, <span class="t">All</span>&lt;[<span class="t">Eq</span>&lt;<span class="s">"id"</span>, <span class="t">Param</span>&lt;<span class="s">"id"</span>&gt;&gt;, <span class="t">Eq</span>&lt;<span class="s">"seller_id"</span>, <span class="t">AuthUid</span>&gt;]&gt;&gt;
+&gt;
+
+<span class="c">// Bids and watchers. A signed-in watcher may send a "bid" event with a sensible amount.</span>
+<span class="k">export</span> <span class="k">type</span> <span class="t">LotChannel</span> = <span class="t">Channel</span>&lt;<span class="s">"lot:{id}"</span>, {
+  params: { id: <span class="t">UUID</span> }
+  access: {
+    join: <span class="t">Any</span>&lt;[<span class="t">In</span>&lt;<span class="s">"id"</span>, <span class="t">MyLots</span>&gt;, <span class="t">Role</span>&lt;<span class="s">"auctioneer"</span>&gt;]&gt;
+    send: <span class="t">All</span>&lt;[
+      <span class="t">LoggedIn</span>,
+      <span class="t">Event</span>&lt;<span class="s">"bid"</span>&gt;,
+      <span class="t">Payload</span>&lt;<span class="s">"amount"</span>, { kind: <span class="s">"number"</span>; min: 1; max: 1000000 }&gt;,
+    ]&gt;
+    track: <span class="t">All</span>&lt;[<span class="t">LoggedIn</span>, <span class="t">In</span>&lt;<span class="s">"id"</span>, <span class="t">MyLots</span>&gt;]&gt;
+  }
+}&gt;
+
+<span class="c">// Announcements only the seller (or an auctioneer) may make about the same lot.</span>
+<span class="k">export</span> <span class="k">type</span> <span class="t">LotStatusChannel</span> = <span class="t">Channel</span>&lt;<span class="s">"lot:{id}:status"</span>, {
+  params: { id: <span class="t">UUID</span> }
+  access: {
+    join: <span class="t">Any</span>&lt;[<span class="t">In</span>&lt;<span class="s">"id"</span>, <span class="t">MyLots</span>&gt;, <span class="t">Role</span>&lt;<span class="s">"auctioneer"</span>&gt;]&gt;
+    send: <span class="t">All</span>&lt;[<span class="t">Any</span>&lt;[<span class="t">SellerOfThisLot</span>, <span class="t">Role</span>&lt;<span class="s">"auctioneer"</span>&gt;]&gt;, <span class="t">Event</span>&lt;<span class="s">"reserve_met"</span>&gt;]&gt;
+  }
+}&gt;</pre></div>
+    <p>Things to notice:</p>
+    <ul>
+      <li><code>In&lt;"id", MyLots&gt;</code> at the top of a rule: a bare string names a channel parameter, here the <code>{id}</code> in the pattern. Inside <code>Rows</code> a bare string is a column of that table, so a parameter there is written <code>Param&lt;"id"&gt;</code>.</li>
+      <li><code>Event</code> and <code>Payload</code> are checked by the realtime server on every broadcast, with no database call. They are valid only in <code>send</code> and only directly inside <code>All&lt;[...]&gt;</code>. One <code>All</code> names one event, which is why the seller's event has its own channel.</li>
+      <li><code>Payload</code> checks the shape of a field: <code>string</code> (with <code>maxLength</code>), <code>number</code> (with <code>min</code> and <code>max</code>), <code>boolean</code> or <code>required</code>. A missing field fails its check. It cannot say whether a bid is a good one. Put that in a database function (see <a href="#send-from-db">sending from the database</a>).</li>
+      <li>The channel types need no <code>export</code>, but exporting them does no harm.</li>
+    </ul>
+
+    <h3>Declaring a channel</h3>
+    <ul>
+      <li>A pattern is segments separated by <code>:</code>. A segment is a literal, a <code>{name}</code> that matches exactly one segment, or a final <code>*</code> that matches one or more remaining segments.</li>
+      <li>A literal may hold only letters, digits, <code>_</code>, <code>.</code> and <code>-</code>. A pattern may not be a bare <code>*</code>, and may not start with <code>realtime:</code> or <code>_supatype</code>.</li>
+      <li>Every <code>{name}</code> needs an entry in <code>params</code>, and every <code>params</code> key must be in the pattern. A parameter is a <code>UUID</code>, a <code>string</code> or an <code>Int</code>. A topic whose parameter has the wrong shape, such as <code>lot:abc</code> for <code>{id: UUID}</code>, is refused as not fitting. It never reaches Postgres as a bad cast.</li>
+      <li>Two declarations that could match the same topic are refused, and both are named. <code>lot:{id}</code> and <code>lot:featured</code> cannot both exist.</li>
+      <li><code>Owner</code> is refused on a channel, because a channel has no row to own.</li>
+      <li>A <code>send</code> rule made only of <code>Event</code> and <code>Payload</code> checks who is sending nothing, so anon may send. <code>supatype diff</code> and <code>supatype push</code> warn about it every time, as long as the rule stands. Add a caller test such as <code>LoggedIn</code>. Writing <code>Public</code> in the rule says anyone may send, and silences the warning.</li>
+      <li><code>supatype diff</code> and <code>supatype push</code> list channels added, removed and changed, and which operation's rule changed.</li>
+      <li>The engine must be new enough to emit the access functions. The CLI refuses a push that declares a channel, or sets <code>realtime.channels</code>, to an engine that does not list <code>private_channels</code> in its capabilities. See <a href="#upgrading">moving from 0.9.2</a>.</li>
+      <li>After <code>supatype generate</code>, the declared patterns type the channel names in the client, so editors suggest <code>lot:${string}</code>. Any other string is still accepted.</li>
+    </ul>
+    <p>A declaration is enforced as soon as it is pushed, for every client, including ones built before channels existed.</p>
+
+    <h3>The realtime.channels switch</h3>
+    <p>The switch decides what happens to a topic that no declaration matches. It lives in <code>supatype.config.ts</code> and push carries it into the database, so self-host and Cloud need nothing else.</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">"@supatype/cli"</span>
+<span class="k">export</span> <span class="k">default</span> defineConfig({
+  project: { name: <span class="s">"gavel"</span> },
+  database: { provider: <span class="s">"docker"</span> },
+  server: { mode: <span class="s">"dev"</span> },
+  app: { mode: <span class="s">"none"</span> },
+  realtime: { channels: <span class="s">"declared"</span> },
+})</pre></div>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Value</th><th scope="col">An undeclared topic</th></tr></thead>
+      <tbody>
+        <tr><td><code>"open"</code></td><td>Broadcast and presence work as they always did. This is the default when the key is absent.</td></tr>
+        <tr><td><code>"declared"</code></td><td>The join is allowed, so <code>from(table).subscribe()</code> still works, but broadcast and presence on it are refused. A broadcast from the database to it is dropped. <code>supatype init</code> writes this for new projects.</td></tr>
+      </tbody>
+    </table></div>
+    <p>The <code>REALTIME_CHANNELS</code> environment variable on the realtime service can only tighten this. Set to <code>declared</code>, it makes the service behave as declared even when the database says <code>open</code>. It can never loosen a database that says <code>declared</code>. Any other value stops the service from starting.</p>
+
+    <h3>Using a private channel from the client</h3>
+    <p>Pass <code>private: true</code> when you open the channel. The server enforces declarations without it. What the flag adds is an assertion: a name that no declaration matches is refused at once, so a typo fails loudly, and a server too old to enforce channels is never asked.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { isRealtimeChannelError } <span class="k">from</span> <span class="s">"@supatype/client"</span>
+
+<span class="k">const</span> lot = supatype.realtime
+  .channel(<span class="s">`lot:${lotId}`</span>, { private: true })
+  .onBroadcast(<span class="s">"bid"</span>, (bid) =&gt; showBid(bid))
+  .onPresence(({ joins, leaves }) =&gt; updateWatchers(joins, leaves))
+  .onRefused((refusal) =&gt; {
+    <span class="c">// The channel is still joined. This one send went nowhere.</span>
+    <span class="k">if</span> (refusal.code === <span class="s">"payload_refused"</span>) tellUser(<span class="s">"That bid was not accepted."</span>)
+  })
+  .subscribe((status, err) =&gt; {
+    <span class="k">if</span> (status === <span class="s">"SUBSCRIBED"</span>) lot.track({ name: displayName })
+    <span class="k">if</span> (status === <span class="s">"CHANNEL_ERROR"</span> &amp;&amp; isRealtimeChannelError(err)) {
+      <span class="k">if</span> (err.retryable) retryLater()
+      <span class="k">else</span> showRefusal(err.reason)
+    }
+  })
+
+lot.broadcast(<span class="s">"bid"</span>, { amount: 120 })</pre></div>
+    <p>In React, <code>useChannel</code> takes the options as its fourth argument, and returns <code>error</code> for a refused or withdrawn join and <code>refusal</code> for a refused send. The Vue, Solid and Svelte channel bindings take the same options and return <code>refusal</code> too.</p>
+    <div class="cb"><div class="cb-bar"><span>tsx</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { useChannel } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import</span> { isRealtimeChannelError } <span class="k">from</span> <span class="s">"@supatype/client"</span>
+
+<span class="k">function</span> <span class="t">Lot</span>({ id }: { id: string }) {
+  <span class="k">const</span> { status, error, refusal } = useChannel(
+    <span class="s">`lot:${id}`</span>,
+    (channel) =&gt; {
+      channel.onBroadcast(<span class="s">"bid"</span>, (bid) =&gt; showBid(bid))
+    },
+    [id],
+    { private: true },
+  )
+
+  <span class="k">if</span> (status === <span class="s">"CHANNEL_ERROR"</span>) {
+    <span class="k">return</span> &lt;p&gt;{isRealtimeChannelError(error) ? error.reason : <span class="s">"error"</span>}: {error?.message}&lt;/p&gt;
+  }
+  <span class="k">return</span> &lt;p&gt;{status}{refusal ? <span class="s">` (${refusal.code})`</span> : <span class="s">""</span>}&lt;/p&gt;
+}</pre></div>
+
+    <h3>Refusals and withdrawal</h3>
+    <p>Every refusal carries a fixed code. Your app acts on the code, and may show the message. Codes are listed in <a href="#refusal-codes">refusal codes</a>.</p>
+    <ul>
+      <li>A refused join arrives as <code>CHANNEL_ERROR</code>, with a <code>RealtimeChannelError</code> as the second argument. Its <code>reason</code> is the code, <code>channel</code> names the topic, and <code>retryable</code> is true only when the server could not reach the database. <code>isRealtimeChannelError(value)</code> tells one from any other error.</li>
+      <li>A refused broadcast, presence track or payload does not change the channel's status. The channel is still joined. It goes to <code>onRefused</code> as <code>{ channel, code, message }</code>, with <code>code</code> one of <code>send_denied</code>, <code>track_denied</code> or <code>payload_refused</code>.</li>
+      <li>Withdrawal is access taken back from a channel you held. It reaches every handle on that channel as <code>CHANNEL_ERROR</code> with reason <code>withdrawn</code>, and you also leave the channel's presence. The client does not rejoin by itself. Subscribe again once the user's access is restored.</li>
+      <li>A message never contains the rule or the data it read. It names the declaration.</li>
+    </ul>
+
+    <h3 id="send-from-db">Sending from the database</h3>
+    <p>A broadcast is not a transaction, so data that matters, such as a bid, should be written by a database function. That function can then tell the watchers itself with <code>_supatype.realtime_send(topic, event, payload)</code>. It works from any SQL: an RPC function, a trigger, a hook or a migration.</p>
+    <div class="cb"><div class="cb-bar"><span>place_bid.sql</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">create</span> <span class="k">or</span> <span class="k">replace</span> <span class="k">function</span> place_bid(p_lot uuid, p_amount integer)
+<span class="k">returns</span> <span class="k">void</span>
+<span class="k">language</span> plpgsql
+<span class="k">security</span> <span class="k">invoker</span>
+<span class="k">as</span> $$
+<span class="k">begin</span>
+  <span class="k">insert</span> <span class="k">into</span> bid (id, lot_id, bidder_id, amount)
+  <span class="k">values</span> (gen_random_uuid(), p_lot, auth.uid(), p_amount);
+
+  <span class="c">-- Tell everyone watching the lot. The send rule of lot:{id} is checked as the caller.</span>
+  <span class="k">perform</span> _supatype.realtime_send(
+    <span class="s">'lot:'</span> || p_lot,
+    <span class="s">'bid'</span>,
+    jsonb_build_object(<span class="s">'amount'</span>, p_amount)
+  );
+<span class="k">end</span>;
+$$;</pre></div>
+    <p>The client calls it like any function, and listeners get the broadcast through <code>onBroadcast</code> as usual.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { error } = <span class="k">await</span> supatype.rpc(<span class="s">"place_bid"</span>, { p_lot: id, p_amount: 120 })
+<span class="k">if</span> (error) console.error(error.code, error.message)</pre></div>
+    <ul>
+      <li>Receivers are every member the channel's <code>join</code> rule admitted. There is no new access path.</li>
+      <li><code>realtime_send</code> checks the caller's <code>send</code> rule, including the event and payload checks, and raises error <code>42501</code> with the same sentence a refused broadcast gets. Only signed-in users sending as themselves pass. Anon is refused. The service role may send anything.</li>
+      <li>It writes one row to <code>_supatype.realtime_outbox</code>, which the realtime service reads from the replication slot. A trigger deletes each row as it is written, so the table never fills. Inserting into the outbox directly is judged by the same rule.</li>
+      <li>Under <code>declared</code>, a database send to a topic no declaration matches is dropped, and the service logs it once per topic.</li>
+    </ul>
+    <div class="callout warn"><span class="callout-label">SECURITY DEFINER</span><p>Keep the function <code>SECURITY INVOKER</code>, as above, so the send rule judges the user. A <code>SECURITY DEFINER</code> function owned by a superuser counts as the service role, and its sends skip every check. Do the checks inside such a function yourself.</p></div>
+
+    <h3>Token changes, re-checks and outages</h3>
+    <ul>
+      <li><strong>New token.</strong> When a socket gets a new token, for example after sign-in, sign-out or a role change, every channel it holds is judged again as the new identity. A channel whose <code>join</code> rule no longer admits the user is withdrawn, with a presence leave. Changed <code>send</code> and <code>track</code> answers replace the old ones.</li>
+      <li><strong>Revocation.</strong> If a user is removed from a table a rule reads, such as <code>lot_watcher</code>, the held channels of that declaration are judged again, in one batch a second. They are also judged again after a schema push, and every 300 seconds as a backstop. Set <code>REALTIME_CHANNEL_RECHECK_S</code> to change that interval.</li>
+      <li><strong>Expiry.</strong> A token that expires closes the socket with 4401, as before.</li>
+      <li><strong>Database down at join.</strong> The service fails closed. It refuses every join, open channels included, with code <code>unavailable</code> and <code>retryable</code> set, because without the database it cannot tell whether a topic is declared. Retry with a delay.</li>
+      <li><strong>Database down at a re-check.</strong> Nobody loses a channel because a check could not run. Held channels keep their access and the check is tried again at the next interval. A new token that cannot be checked still withdraws the channels, since the old answer no longer applies.</li>
+      <li><strong>Shared instance.</strong> A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says <code>private</code>, with code <code>shared_instance</code>. The Cloud beta runs one realtime service per project.</li>
+    </ul>
+
+    <h2 id="refusal-codes">Refusal codes</h2>
+    <p>The set is closed. A client that meets a code it does not know should treat it as <code>refused</code>.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Code</th><th scope="col">Arrives as</th><th scope="col">Meaning</th><th scope="col">What the app should do</th></tr></thead>
+      <tbody>
+        <tr><td><code>join_denied</code></td><td><code>CHANNEL_ERROR</code></td><td>The channel's <code>join</code> rule said no, or the channel declares none.</td><td>Tell the user they may not open this. Do not retry. Ask them to sign in if they are not.</td></tr>
+        <tr><td><code>not_declared</code></td><td><code>CHANNEL_ERROR</code></td><td>You opened it with <code>private: true</code> and no declaration matches the name.</td><td>A bug: fix the name, or push the declaration.</td></tr>
+        <tr><td><code>does_not_fit</code></td><td><code>CHANNEL_ERROR</code></td><td>A declaration matches the start of the name, but a parameter has the wrong shape, such as a non-UUID.</td><td>A bug: build the topic from a valid value.</td></tr>
+        <tr><td><code>unavailable</code></td><td><code>CHANNEL_ERROR</code>, <code>retryable</code></td><td>The server could not reach the database to check.</td><td>Retry after a delay. This is the only retryable code.</td></tr>
+        <tr><td><code>shared_instance</code></td><td><code>CHANNEL_ERROR</code></td><td>The realtime service is shared, and private channels are not available there.</td><td>Use a project with its own realtime service.</td></tr>
+        <tr><td><code>withdrawn</code></td><td><code>CHANNEL_ERROR</code></td><td>A re-check took back access to a channel you held.</td><td>Stop showing the channel's data. Join again only when the user's access changes.</td></tr>
+        <tr><td><code>send_denied</code></td><td><code>onRefused</code></td><td>A broadcast was refused: the <code>send</code> rule said no, there is none, or the topic is undeclared under <code>declared</code>.</td><td>Show that the send failed. The channel is still joined.</td></tr>
+        <tr><td><code>track_denied</code></td><td><code>onRefused</code></td><td>A presence track was refused.</td><td>Show that the user is not shown as present. The channel is still joined.</td></tr>
+        <tr><td><code>payload_refused</code></td><td><code>onRefused</code></td><td>The event name or payload failed the send rule's checks.</td><td>Fix the message, or tell the user their input was not accepted.</td></tr>
+        <tr><td><code>refused</code></td><td><code>CHANNEL_ERROR</code></td><td>Any other refusal, such as a bad filter, a missing table or no token.</td><td>Read the message. Do not retry blindly.</td></tr>
+        <tr><td><code>unsupported_server</code></td><td><code>CHANNEL_ERROR</code></td><td>The client's own: the server did not announce private channel support, so a <code>private: true</code> join was never sent. The message says to upgrade the server.</td><td>Upgrade the realtime service. Do not fall back to an open channel.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="upgrading">Moving from 0.9.2</h2>
+    <p>Nothing changes until you declare a channel or set <code>realtime.channels</code>. A project with no <code>realtime</code> key stays <code>"open"</code>, so broadcast and presence behave as they did. <code>supatype init</code> writes <code>"declared"</code> for new projects only.</p>
+    <p>Before 0.9.3, anyone with your anon key could join any channel, read its broadcasts, send on it and appear in its presence. To close that:</p>
+    <ul>
+      <li>Step 1: Upgrade the realtime service and the engine. The engine must list <code>private_channels</code> in its capabilities. The CLI checks this and refuses the push if it does not, because an older engine would drop the channels and report success while enforcing nothing. On self-host, raise the engine pin in <code>versions.engine</code>. On Cloud, a push that declares channels is refused until the platform's engine lists the capability.</li>
+      <li>Step 2: Declare a <code>Channel</code> for each topic your app uses, with the rules you want. Declaring one enforces its pattern at once, for every client, in either mode.</li>
+      <li>Step 3: Set <code>realtime: { channels: "declared" }</code> and run <code>supatype dev</code>. Fix the refusals you see. <code>supatype diff</code> warns when the mode goes from <code>open</code> to <code>declared</code>, and when you remove a declaration under <code>declared</code>.</li>
+      <li>Step 4: Push.</li>
+      <li>Step 5: Add <code>private: true</code> to the channels the client opens, so a mistyped name is refused instead of left open.</li>
+    </ul>
+    <p>A channel named after a table, which <code>from(table).subscribe()</code> opens, keeps working under <code>declared</code> with no declaration, because it only carries row changes. Row changes are still guarded by the table's access rules.</p>
+    <p>A client that sends <code>private: true</code> to a 0.9.2 realtime service fails with <code>unsupported_server</code> and the message "this realtime server does not enforce private channels; upgrade it".</p>
+
     <h2 id="connection">Connection and auth</h2>
     <p>The client opens the socket at <code>/realtime/v1</code> on your project URL when the first channel subscribes, and closes it when the last one unsubscribes. It sends the current session's token, or the anon key when nobody is signed in.</p>
     <p><code>supatype.realtime.removeChannel(name)</code> leaves a channel by name. <code>supatype.realtime.disconnect()</code> closes the socket whatever is still subscribed, and reports <code>CLOSED</code> to every channel still registered.</p>
@@ -260,6 +494,8 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
         <tr><td><code>PORT</code></td><td>4000</td><td>The port the service listens on</td></tr>
         <tr><td><code>REPLICATION_POLL_INTERVAL</code></td><td>100</td><td>How often, in milliseconds, the slot is read</td></tr>
         <tr><td><code>SECURE_CHANNELS</code></td><td><code>true</code></td><td>When <code>true</code>, a client must present a valid token before it can join a channel</td></tr>
+        <tr><td><code>REALTIME_CHANNELS</code></td><td>unset</td><td>Set to <code>declared</code> to refuse broadcast and presence on undeclared channels whatever the database says. It can only tighten <code>realtime.channels</code></td></tr>
+        <tr><td><code>REALTIME_CHANNEL_RECHECK_S</code></td><td>300</td><td>Seconds between re-checks of every channel a socket holds, as a backstop to the checks made on a new token, a push and a change to a table a rule reads</td></tr>
       </tbody>
     </table></div>
 
@@ -269,6 +505,7 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
       <li>While <code>supatype push</code> is changing the schema, the slot is not read. Changes made during the push are held in the slot and sent once it finishes.</li>
       <li>Each change costs one database query per subscriber, to check that subscriber's access. Many subscribers to a busy table means many queries.</li>
       <li>The replication slot keeps WAL until the service reads it. If the service is stopped for a long time while the database keeps writing, WAL builds up on disk.</li>
+      <li>Each private channel a socket holds costs one query at join, one more every re-check interval, and a batch a second while a table its rules read is changing.</li>
       <li>Subscriptions live in the service's memory. A restart drops every socket, and clients reconnect and join again.</li>
     </ul>
 
@@ -285,6 +522,9 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
     <a href="#subscribe">Subscribe</a>
     <a href="#broadcast">Broadcast and presence</a>
     <a href="#hooks">Framework hooks</a>
+    <a href="#private">Private channels</a>
+    <a href="#refusal-codes">Refusal codes</a>
+    <a href="#upgrading">Moving from 0.9.2</a>
     <a href="#connection">Connection and auth</a>
     <a href="#config">Config and requirements</a>
     <a href="#limits">Limits</a>
