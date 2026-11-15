@@ -271,7 +271,7 @@
     <div class="tbl"><table>
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
-        <tr><td><code>login</code></td><td>Sign in to Supatype Cloud (stores refreshable session for push/deploy)</td><td><code>--email &lt;email&gt;</code>, <code>--password &lt;password&gt;</code> (prefer <code>SUPATYPE_PASSWORD</code>)</td></tr>
+        <tr><td><code>login</code></td><td>Sign in to Supatype Cloud in your browser. It opens the accounts site, you approve, and type the code shown there into the terminal; the CLI stores a personal access token (<code>spt_...</code>) for push and deploy. The URL is always printed. The accounts site is derived from the API URL (<code>api.</code> becomes <code>accounts.</code>), or set <code>SUPATYPE_ACCOUNTS_URL</code></td><td><code>--api-url &lt;url&gt;</code>, <code>--name &lt;name&gt;</code> (the token's name, default <code>cli_&lt;hostname&gt;_&lt;time&gt;</code>), <code>--no-browser</code>, <code>--token &lt;spt_...&gt;</code> (store a token made in your account instead of signing in, for CI; <code>SUPATYPE_ACCESS_TOKEN</code> takes one too)</td></tr>
         <tr><td><code>logout</code></td><td>Clear stored Supatype Cloud credentials</td><td></td></tr>
         <tr><td><code>whoami</code></td><td>Show the current Supatype Cloud session</td><td></td></tr>
         <tr><td><code>link --project &lt;slug&gt;</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json)</td><td><code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>

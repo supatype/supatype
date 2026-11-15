@@ -1,5 +1,6 @@
 /**
- * Cloud session credentials (access + refresh) for CLI ↔ control plane.
+ * Cloud credentials for the CLI and the control plane: the personal access token `supatype login`
+ * stores, or the session (access + refresh) an older CLI stored.
  * Self-host links keep using long-lived SERVICE_ROLE_KEY and ignore this store.
  */
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
@@ -10,8 +11,9 @@ import {
   saveProjectLink,
   type ProjectLink,
 } from "./link.js"
-import { isOneOf, isShape, isString, optional } from "@supatype/shared"
-import { readAuthAnswer } from "./auth-answer.js"
+import { isJsonObject, isOneOf, isShape, isString, optional } from "@supatype/shared"
+import { responseFailureText } from "./error-message.js"
+import { isPersonalAccessToken } from "./personal-access-token.js"
 import { readJsonFile } from "./json-file.js"
 
 export const CREDENTIALS_VERSION = 1 as const
@@ -103,16 +105,16 @@ export function persistCloudSession(
 ): void {
   const apiUrl = params.apiUrl.replace(/\/$/, "")
   const existing = loadCloudCredentials()
+  // A personal access token replaces the session whole: the old refresh token belongs to a session
+  // that no longer signs anything in, and a token that cannot be renewed must not be offered one.
+  const pat = isPersonalAccessToken(params.accessToken)
+  const refreshToken = pat ? undefined : (params.refreshToken ?? existing?.refreshToken)
   saveCloudCredentials({
     version: CREDENTIALS_VERSION,
     apiUrl,
     accessToken: params.accessToken,
     updatedAt: new Date().toISOString(),
-    ...(params.refreshToken !== undefined
-      ? { refreshToken: params.refreshToken }
-      : existing?.refreshToken !== undefined
-        ? { refreshToken: existing.refreshToken }
-        : {}),
+    ...(refreshToken !== undefined ? { refreshToken } : {}),
     ...(params.email !== undefined
       ? { email: params.email }
       : existing?.email !== undefined
@@ -123,60 +125,29 @@ export function persistCloudSession(
   const link = loadProjectLink(cwd)
   if (!link || link.kind !== "cloud") return
   link.token = params.accessToken
-  if (params.refreshToken !== undefined) {
+  if (pat) {
+    delete link.refreshToken
+  } else if (params.refreshToken !== undefined) {
     link.refreshToken = params.refreshToken
   }
   saveProjectLink(cwd, link)
 }
 
-export interface CloudLoginResult {
-  accessToken: string
-  refreshToken?: string
-  expiresIn?: number
-  email?: string
-}
+/** How long asking who a token belongs to may take. */
+const WHOAMI_TIMEOUT_MS = 10_000
 
-/** Password login against control-plane `/auth/login` (not `/api/v1`). */
-export async function cloudPasswordLogin(
-  apiUrl: string,
-  email: string,
-  password: string,
-): Promise<CloudLoginResult> {
-  const base = apiUrl.replace(/\/$/, "")
-  const res = await fetch(`${base}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: email.toLowerCase(), password }),
+/** The email `accessToken` signs in as, from the control plane's `/auth/me`; throws when it is refused or unreachable. */
+export async function fetchCloudEmail(apiUrl: string, accessToken: string): Promise<string> {
+  const res = await fetch(`${apiUrl.replace(/\/$/, "")}/auth/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(WHOAMI_TIMEOUT_MS),
   })
-  const answer = readAuthAnswer(await res.json().catch(() => ({})))
-  if (!res.ok || !answer.accessToken) {
-    throw new Error(answer.failure ?? `Login failed (${res.status})`)
-  }
-  const { accessToken, refreshToken, expiresIn } = answer
-  return {
-    accessToken,
-    ...(refreshToken !== undefined && { refreshToken }),
-    ...(expiresIn !== undefined && { expiresIn }),
-    email: answer.email ?? email.toLowerCase(),
-  }
-}
-
-export async function cloudRefreshSession(
-  apiUrl: string,
-  refreshToken: string,
-): Promise<CloudLoginResult> {
-  const base = apiUrl.replace(/\/$/, "")
-  const res = await fetch(`${base}/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  })
-  const answer = readAuthAnswer(await res.json().catch(() => ({})))
-  if (!res.ok || !answer.accessToken) {
-    throw new Error(answer.failure ?? `Token refresh failed (${res.status})`)
-  }
-  const { accessToken, refreshToken: next, expiresIn } = answer
-  return { accessToken, ...(next !== undefined && { refreshToken: next }), ...(expiresIn !== undefined && { expiresIn }) }
+  if (!res.ok) throw new Error(`The control plane did not accept the token: ${await responseFailureText(res)}`)
+  const body: unknown = await res.json().catch(() => ({}))
+  const user = isJsonObject(body) ? body["user"] : undefined
+  const email = isJsonObject(user) ? user["email"] : undefined
+  if (!isString(email)) throw new Error("The control plane did not say whose token this is.")
+  return email
 }
 
 /**

@@ -1,6 +1,7 @@
 import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
 import { readAuthAnswer } from "./auth-answer.js"
 import { fetchWithin } from "./fetch-within.js"
+import { isPersonalAccessToken } from "./personal-access-token.js"
 import { bodyReason, httpFailureText, isConnectionRefused, redact } from "./error-message.js"
 
 export interface TargetFetchOptions {
@@ -55,7 +56,7 @@ function isAuthExpiry(status: number, code?: string, message?: string): boolean 
   if (status !== 401) return false
   if (code === "TOKEN_EXPIRED" || code === "NO_SESSION" || code === "INVALID_TOKEN") return true
   const m = (message ?? "").toLowerCase()
-  return m.includes("token expired") || m.includes("authentication required")
+  return m.includes("token expired") || m.includes("authentication required") || m.includes("invalid_token")
 }
 
 /** How long renewing a Cloud session may take, apart from the request it was renewed for. */
@@ -168,14 +169,23 @@ async function acceptedResponse(url: string, opts: TargetFetchOptions, signal?: 
   let res = await send(url, opts, opts.token, signal ?? budgetSignal(opts.timeoutMs))
   if (res.ok) return res
   let answer = await answerOf(res)
-  if (opts.authRefresh && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
+  const renewal = renewalOf(opts)
+  if (renewal && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
     const spent = Date.now() - started
-    const token = await refreshAccessToken(opts.authRefresh)
+    const token = await refreshAccessToken(renewal)
     res = await send(url, opts, token, signal ?? budgetSignal(opts.timeoutMs === undefined ? undefined : opts.timeoutMs - spent))
     if (res.ok) return res
     answer = await answerOf(res)
   }
   throw refusal(answer, url, opts)
+}
+
+/**
+ * How to renew the session `opts.token` belongs to, when it can be. A personal access token has no
+ * session to renew: it is sent as it is, and a refusal of it is final.
+ */
+function renewalOf(opts: TargetFetchOptions): TargetFetchOptions["authRefresh"] {
+  return isPersonalAccessToken(opts.token) ? undefined : opts.authRefresh
 }
 
 /** A signal that aborts after `ms` (at least 1), or none without a limit. */
@@ -193,8 +203,9 @@ function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): Ta
   const code = bodyString(result.json, "code")
   const said = httpFailureText(result.status, result.statusText, result.text)
   const message = bodyReason(result.json) === undefined ? `${said} (${url})` : said
-  if (isAuthExpiry(result.status, code, message) && !opts.authRefresh) {
-    return new TargetApiError(`${message}. Session expired, run: supatype login`, result.status, code)
+  if (isAuthExpiry(result.status, code, message) && !renewalOf(opts)) {
+    const ended = isPersonalAccessToken(opts.token) ? "Access token revoked or expired" : "Session expired"
+    return new TargetApiError(`${message}. ${ended}, run: supatype login`, result.status, code)
   }
   return new TargetApiError(message, result.status, code, isJsonObject(result.json) ? result.json : undefined)
 }
