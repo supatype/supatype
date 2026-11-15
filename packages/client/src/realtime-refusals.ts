@@ -10,33 +10,88 @@ export const UNSUPPORTED_SERVER_MESSAGE = "this realtime server does not enforce
 export const PRIVATE_CHANNELS_FEATURE = "private_channels"
 
 /**
- * The sentences the realtime server refuses with (packages/realtime `refusals`), each as the
- * reason it means. The wire carries the sentence and no code, so this is read from the sentence;
- * one the client does not know is `refused`, with the server's own words as the message.
- *
- * Order matters only where a sentence could match two: none do, but `withdrawn` is tested first as
- * it is the one a channel already held can receive.
+ * The refusals of something sent on a channel that is itself fine: a broadcast, a presence track,
+ * or a payload the channel's send rule rejects. They are not a failed join, so they never move the
+ * channel's status; the app hears of them through `onRefused`.
  */
-const REFUSAL_READINGS: ReadonlyArray<readonly [RegExp, RealtimeChannelErrorReason]> = [
+export type ChannelActionRefusalCode = "send_denied" | "track_denied" | "payload_refused"
+
+/** What `onRefused` hands its callback: which channel, why (the server's fixed code), and in words. */
+export interface ChannelActionRefusal {
+  channel: string
+  code: ChannelActionRefusalCode
+  message: string
+}
+
+/** What a refusal frame turned out to be: a reason for the channel's error, or an action refusal. */
+export type RefusalKind = Exclude<RealtimeChannelErrorReason, "unsupported_server"> | ChannelActionRefusalCode
+
+/**
+ * Every code the server sends (packages/realtime `refusal-codes.ts`). `unsupported_server` is the
+ * client's own and is not on the wire.
+ */
+const KNOWN_KINDS: ReadonlyMap<string, RefusalKind> = new Map<string, RefusalKind>(
+  (
+    [
+      "join_denied",
+      "not_declared",
+      "does_not_fit",
+      "unavailable",
+      "shared_instance",
+      "withdrawn",
+      "send_denied",
+      "track_denied",
+      "payload_refused",
+      "refused",
+    ] as const
+  ).map((code) => [code, code]),
+)
+
+/** Whether `kind` is a refusal of an action on a healthy channel rather than of the channel. */
+export function isActionRefusal(kind: RefusalKind): kind is ChannelActionRefusalCode {
+  return kind === "send_denied" || kind === "track_denied" || kind === "payload_refused"
+}
+
+/**
+ * The sentences the realtime server refused with before it sent codes (packages/realtime
+ * `refusals`), each as the code it now carries. A fallback for an older server only: a frame with a
+ * `code` is never read by its sentence, which may be reworded. Dropped once no supported server
+ * predates codes.
+ */
+const LEGACY_SENTENCES: ReadonlyArray<readonly [RegExp, RefusalKind]> = [
   [/^access to .+ was withdrawn: /, "withdrawn"],
   [/^not allowed to join /, "join_denied"],
   [/ was opened as private, but no Channel declaration matches it$/, "not_declared"],
   [/ does not fit /, "does_not_fit"],
   [/^could not check access to .+ because the database did not answer; retry$/, "unavailable"],
   [/^private channels are not available on a shared realtime instance$/, "shared_instance"],
+  [/^not allowed to broadcast .+: the send rule of .+ refused the payload$/, "payload_refused"],
+  [/^not allowed to broadcast on /, "send_denied"],
+  [/ declares no send rule, so only the service role may /, "send_denied"],
+  [/^not allowed to track presence on /, "track_denied"],
+  [/ declares no track rule, so only the service role may /, "track_denied"],
 ]
 
-/** Why the server refused or withdrew a channel, read from its message. */
-export function refusalReason(message: string): RealtimeChannelErrorReason {
-  for (const [pattern, reason] of REFUSAL_READINGS) {
-    if (pattern.test(message)) return reason
+function readSentence(message: string): RefusalKind {
+  for (const [pattern, kind] of LEGACY_SENTENCES) {
+    if (pattern.test(message)) return kind
   }
   return "refused"
 }
 
-/** The typed error for a channel-scoped refusal frame. */
-export function channelRefusal(channel: string, message: string): RealtimeChannelError {
-  return new RealtimeChannelError(message, channel, refusalReason(message))
+/**
+ * What a channel-scoped refusal frame is. The server's `code` decides; a code this client does not
+ * know is `refused` (a newer server, with the server's own words as the message). Only a frame with
+ * no code at all, from an older server, is read from its sentence.
+ */
+export function classifyRefusal(code: string | undefined, message: string): RefusalKind {
+  if (code === undefined) return readSentence(message)
+  return KNOWN_KINDS.get(code) ?? "refused"
+}
+
+/** The typed error for a channel-scoped refusal frame that fails or ends a channel's join. */
+export function channelRefusal(channel: string, message: string, kind: RefusalKind): RealtimeChannelError {
+  return new RealtimeChannelError(message, channel, isActionRefusal(kind) ? "refused" : kind)
 }
 
 /** The error a private join gets from a server that does not announce `private_channels`. */
