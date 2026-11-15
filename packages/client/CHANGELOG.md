@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.9.3
+
+### Features
+
+* **realtime:** `channel(name, { private: true })` asserts that a channel is guarded by a schema
+  `Channel` declaration. The join carries `private: true`. The server enforces declarations whether
+  or not it is set; the option makes a name no declaration matches a refused join (a typo fails at
+  once) and makes the client refuse to join at all when the server does not announce
+  `private_channels` on its first frame, since an older server would ignore the flag and admit an
+  open channel. A private join waits for that first frame before it is sent.
+* **realtime:** `RealtimeChannelError` (a `RealtimeError`) is what a channel's status callback gets
+  with `CHANNEL_ERROR` for any channel-scoped refusal. `reason` is `unsupported_server`,
+  `join_denied`, `not_declared`, `does_not_fit`, `unavailable`, `shared_instance`, `withdrawn` or
+  `refused`; `channel` names it and `retryable` is true for `unavailable`. It was a plain `Error`
+  with the server's message, which `message` still carries.
+* **realtime:** access the server takes away from a channel you hold (token change, periodic
+  re-check, declaration removed) reaches every handle as `CHANNEL_ERROR` with reason `withdrawn`.
+  It was swallowed for a handle with no row listener. The client does not rejoin by itself;
+  subscribing again does.
+* **realtime:** `ChannelOptions` is exported. A broadcast sent from the database with
+  `_supatype.realtime_send` reaches `onBroadcast` listeners like any other; the README says so.
+
 ## Unreleased
 
 ### Breaking Changes

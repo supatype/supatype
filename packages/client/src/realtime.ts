@@ -1,6 +1,7 @@
 import { asHeadersProvider, bearerToken, type HeadersProvider } from "./query.js"
 import { settle, type Deferred } from "./runtime-env.js"
 import { coerceRecordKinds, type ExactFields } from "./exact-values.js"
+import { PRIVATE_CHANNELS_FEATURE, channelRefusal, refusalReason, unsupportedServer } from "./realtime-refusals.js"
 import { isArrayOf, isJsonObject, isOneOf, isRecordOf, isShape, isString, nullable, optional, type Guard } from "./json.js"
 
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "*"
@@ -24,6 +25,23 @@ export type ChannelStatus = "SUBSCRIBED" | "SUBSCRIBING" | "CLOSED" | "CHANNEL_E
  * `(status, err)` shape Supabase's client uses, so a callback taking only the status is unaffected.
  */
 export type ChannelStatusCallback = (status: ChannelStatus, err?: Error | undefined) => void
+
+/** What a channel can be opened with. */
+export interface ChannelOptions {
+  /**
+   * Assert that this channel is private: guarded by a `Channel` declaration in the schema.
+   *
+   * The server enforces every declared channel whether or not this is set, so it never loosens
+   * anything. What it adds is two refusals instead of two silent open channels. A name no
+   * declaration matches is refused (`RealtimeChannelError` reason `not_declared`), which catches a
+   * typo at once. And a server that does not announce private channel support is not asked at all
+   * (reason `unsupported_server`), since an older server would ignore the flag and admit an open
+   * channel. Both arrive as `CHANNEL_ERROR` on the status callback.
+   *
+   * Handles on one channel name share one join: if any handle says `private: true`, the join does.
+   */
+  private?: boolean | undefined
+}
 
 interface ChannelSubscription<TRow> {
   on(
@@ -169,6 +187,8 @@ interface ServerSystemMessage {
   channel?: string
   /** The `ref` of the join this answers. A server that predates refs sends none. */
   ref?: string
+  /** What the server can do beyond the base protocol, on the first frame of a socket. */
+  features?: string[]
 }
 
 type ServerMessage = ServerChangeMessage | ServerPresenceMessage | ServerBroadcastMessage | ServerSystemMessage
@@ -206,6 +226,7 @@ const isSystemMessage: Guard<ServerSystemMessage> = isShape({
   message: isString,
   channel: optional(isString),
   ref: optional(isString),
+  features: optional(isArrayOf(isString)),
 })
 
 /** A frame from the realtime service (packages/realtime/src/types.ts) in one of the four shapes. */
@@ -241,6 +262,11 @@ export class RealtimeClient {
   private attempt: Promise<void> | null = null
   /** The last `ref` a join was sent with. Unique for the life of the client, across sockets. */
   private lastRef = 0
+  /**
+   * What the server on the live socket announced on its first frame: undefined until that frame
+   * arrives, an empty set for a server that announces nothing (one that predates private channels).
+   */
+  private serverFeatures: ReadonlySet<string> | undefined
 
   /**
    * `auth` is either a headers provider or a fixed set of headers: the same pair `QueryBuilder` and
@@ -321,6 +347,7 @@ export class RealtimeClient {
     const old = this.ws
     this.ws = null
     this.currentToken = undefined
+    this.serverFeatures = undefined
     if (old !== null) {
       old.onopen = null
       old.onmessage = null
@@ -348,6 +375,7 @@ export class RealtimeClient {
       state.joined = undefined
       state.joining = undefined
       state.joinRef = undefined
+      state.joinedPrivate = false
       forgetMembers(state)
     }
   }
@@ -361,13 +389,14 @@ export class RealtimeClient {
    * `useSubscription` hooks with one channel name broke each other when either unmounted. The join
    * is now left only when the last handle on the name unsubscribes.
    */
-  channel<TRow = Record<string, unknown>>(name: string): ChannelSubscription<TRow> {
+  channel<TRow = Record<string, unknown>>(name: string, opts: ChannelOptions = {}): ChannelSubscription<TRow> {
     const state = this.getOrCreateChannel(name)
     const handle: ChannelHandle = {
       pgListeners: [],
       presenceListeners: [],
       broadcastListeners: new Map(),
       statusCallback: null,
+      private: opts.private === true,
     }
     state.handles.add(handle)
 
@@ -406,6 +435,12 @@ export class RealtimeClient {
         // A join already acknowledged will not be acknowledged again, so say so here or the new
         // callback waits for a SUBSCRIBED that is never coming.
         if (state.subscribed && serves(state.joined, handle)) callback?.("SUBSCRIBED")
+        // An app subscribing again after a withdrawal is asking to try the join again.
+        if (state.withdrawn) {
+          state.withdrawn = false
+          state.joinSent = false
+        }
+        this.rejoinForPrivacy(state)
         this.ensureConnection()
         this.sendSubscribe(state)
         return sub
@@ -488,6 +523,9 @@ export class RealtimeClient {
         joined: undefined,
         joining: undefined,
         joinRef: undefined,
+        joinedPrivate: false,
+        withdrawn: false,
+        unsupported: false,
         members: [],
       }
       this.channels.set(name, state)
@@ -553,6 +591,7 @@ export class RealtimeClient {
     if (!isCurrent()) return
 
     this.currentToken = token
+    this.serverFeatures = undefined
     const wsUrl = token ? `${url}?token=${encodeURIComponent(token)}` : url
     const ws = new WebSocket(wsUrl)
     this.ws = ws
@@ -625,6 +664,10 @@ export class RealtimeClient {
   }
 
   private handleSystem(msg: ServerSystemMessage): void {
+    if (this.serverFeatures === undefined && msg.status === "ok" && !msg.message.startsWith(SUBSCRIBED_TO)) {
+      this.serverFeatures = new Set(msg.features ?? [])
+      this.joinWaitingChannels()
+    }
     if (msg.status === "ok" && msg.message.startsWith(SUBSCRIBED_TO)) {
       const state = this.answeredJoin(msg.message.slice(SUBSCRIBED_TO.length), msg.ref)
       if (state !== undefined) acknowledgeJoin(state)
@@ -656,8 +699,10 @@ export class RealtimeClient {
     const affected = msg.channel === undefined ? [...this.channels.values()] : [this.answeredJoin(msg.channel, msg.ref)]
     for (const state of affected) {
       if (state === undefined) continue
+      const refusal = msg.channel === undefined ? new Error(msg.message) : channelRefusal(msg.channel, msg.message)
       if (msg.channel !== undefined && state.subscribed) {
-        refuseRejoin(state, new Error(msg.message))
+        if (refusalReason(msg.message) === "withdrawn") withdrawJoin(state, refusal)
+        else refuseRejoin(state, refusal)
         continue
       }
       // A refused join registered nothing on the server, so a channel not yet confirmed may
@@ -666,7 +711,7 @@ export class RealtimeClient {
       if (msg.ref !== undefined) state.joinRef = undefined
       // The server's reason goes to the callback (N-FF5): "table public.notes does not exist"
       // tells the developer what to fix, and a bare CHANNEL_ERROR did not.
-      notifyHandles(state, "CHANNEL_ERROR", new Error(msg.message))
+      notifyHandles(state, "CHANNEL_ERROR", refusal)
     }
   }
 
@@ -728,7 +773,10 @@ export class RealtimeClient {
   private sendSubscribe(state: ChannelState): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
     if (state.joinSent) return
+    const asPrivate = isPrivate(state)
+    if (asPrivate && !this.mayJoinPrivately(state)) return
     state.joinSent = true
+    state.joinedPrivate = asPrivate
 
     const target = joinTargetOf(state)
     state.joining = target
@@ -736,7 +784,43 @@ export class RealtimeClient {
     // the server delivers for until it acknowledges this one, so the old target stays until then.
     state.joined ??= target
     state.joinRef = String(++this.lastRef)
-    this.sendMessage(subscribeFrame(state.name, target, state.joinRef))
+    this.sendMessage(subscribeFrame(state.name, target, state.joinRef, asPrivate))
+  }
+
+  /**
+   * Whether a private join may be sent on this socket now.
+   *
+   * Not before the server's first frame says what it can do: the join waits for it. And not at all
+   * to a server that does not announce `private_channels`: it would ignore the flag and admit an
+   * open channel, so the join is failed here instead and never sent.
+   */
+  private mayJoinPrivately(state: ChannelState): boolean {
+    if (this.serverFeatures === undefined) return false
+    if (this.serverFeatures.has(PRIVATE_CHANNELS_FEATURE)) return true
+    if (!state.unsupported) {
+      state.unsupported = true
+      notifyHandles(state, "CHANNEL_ERROR", unsupportedServer(state.name))
+    }
+    return false
+  }
+
+  /** The server's first frame has arrived: send the joins that were waiting for it. */
+  private joinWaitingChannels(): void {
+    for (const state of this.channels.values()) {
+      state.unsupported = false
+      if (!state.subscribed) this.sendSubscribe(state)
+    }
+  }
+
+  /**
+   * A handle asking for `private: true` on a name already joined as open joins again as private,
+   * in place, as `rejoinIfUnheard` does: the open join stands until the server takes the new one.
+   */
+  private rejoinForPrivacy(state: ChannelState): void {
+    if (state.joinSent && !state.joinedPrivate && isPrivate(state)) {
+      state.joinSent = false
+      if (state.subscribed) notifyUnserved(state, "SUBSCRIBING")
+    }
   }
 
   /**
@@ -793,6 +877,8 @@ interface ChannelHandle {
   presenceListeners: Array<(event: { joins: PresenceEntry[]; leaves: PresenceEntry[] }) => void>
   broadcastListeners: Map<string, Array<(payload: Record<string, unknown>) => void>>
   statusCallback: ChannelStatusCallback | null
+  /** Whether this handle asked for `private: true`. */
+  private: boolean
 }
 
 /** One channel name's join on the socket, shared by every handle on that name. */
@@ -823,6 +909,12 @@ interface ChannelState {
    * reply carrying any other ref answers a join since replaced or left, and is not this one's.
    */
   joinRef: string | undefined
+  /** The join sent on the current socket asked for `private: true`. */
+  joinedPrivate: boolean
+  /** The server took this channel back, and the client does not join it again until the app asks. */
+  withdrawn: boolean
+  /** The channel's private join was failed on this socket for want of server support. */
+  unsupported: boolean
   /** Who the current socket has said is tracked on this channel, one entry per tracking socket. */
   members: PresenceEntry[]
 }
@@ -878,7 +970,7 @@ function pgListenersOf(state: ChannelState): PgListener[] {
  * `changes` says whether the join has a row listener. Only a row join has its table checked and is
  * sent row changes: broadcast and presence on `room:x` were refused as a join for room.x (R2-RB2).
  */
-function subscribeFrame(channel: string, target: JoinTarget, ref: string): Record<string, unknown> {
+function subscribeFrame(channel: string, target: JoinTarget, ref: string, asPrivate: boolean): Record<string, unknown> {
   return {
     type: "subscribe",
     channel,
@@ -887,6 +979,7 @@ function subscribeFrame(channel: string, target: JoinTarget, ref: string): Recor
     schema: target.schema,
     changes: target.rows,
     filter: filterFrame(target.filter),
+    ...(asPrivate && { private: true }),
     ref,
   }
 }
@@ -941,6 +1034,29 @@ function serves(join: JoinTarget | undefined, handle: ChannelHandle): boolean {
   return handle.pgListeners.every(
     (listener) => join?.rows === true && listener.schema === join.schema && listener.table === join.table,
   )
+}
+
+/** Whether any handle on the channel asked for `private: true`: the shared join then does. */
+function isPrivate(state: ChannelState): boolean {
+  for (const handle of state.handles) if (handle.private) return true
+  return false
+}
+
+/**
+ * The server removed this client from a channel it held: the token changed, a re-check ran, or the
+ * declaration went. Every handle is told, and the client does not join again by itself, since the
+ * server would refuse it again. The app joins again by subscribing again.
+ */
+function withdrawJoin(state: ChannelState, refusal: Error): void {
+  state.subscribed = false
+  state.joinSent = true
+  state.withdrawn = true
+  state.joined = undefined
+  state.joining = undefined
+  state.joinRef = undefined
+  state.joinedPrivate = false
+  forgetMembers(state)
+  notifyHandles(state, "CHANNEL_ERROR", refusal)
 }
 
 /** Tell each handle on a channel its status. */
