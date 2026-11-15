@@ -52,6 +52,9 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **dev (native):** functions get `ctx.dbUrl` only from `SUPATYPE_FUNCTIONS_DB_URL`, as on Docker. Native
+  dev handed every function the auth service's admin `DATABASE_URL`, a connection that skips row rules
+  and masking, and ignored `SUPATYPE_FUNCTIONS_DB_URL`.
 * **self-host, dev:** the compose file passes `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED`, `REALTIME_CHANNELS`
   and `REALTIME_CHANNEL_RECHECK_S` from `.env`. The docs turn anonymous sign-in on and tune channel
   re-checks with them, and none reached a container, so `signInAnonymously()` stayed refused.

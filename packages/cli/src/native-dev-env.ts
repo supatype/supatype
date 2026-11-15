@@ -165,6 +165,10 @@ export function nativeServerDotEnvLayer({ dotEnv, config, denoPort }: NativeDotE
     // agree. A dev stack confirms sign-ups at once when the config does not say.
     [MAILER_AUTOCONFIRM_ENV]: dotEnv[MAILER_AUTOCONFIRM_ENV]?.trim() || configMailerAutoconfirm(config, "dev"),
     [EMAIL_ENABLED_ENV]: dotEnv[EMAIL_ENABLED_ENV]?.trim() || configEmailEnabled(config),
+    // `ctx.dbUrl`, as the compose file gives the worker image: SUPATYPE_FUNCTIONS_DB_URL or nothing.
+    // Deno inherits the server's environment, and a worker with no SUPATYPE_DB_URL falls back to
+    // DATABASE_URL, which here is the auth service's admin URL.
+    SUPATYPE_DB_URL: dotEnv["SUPATYPE_FUNCTIONS_DB_URL"]?.trim() ?? "",
     // Last, so the port dev checked is the port Deno gets: a value in .env or .env.local, blank
     // included, would otherwise replace it.
     [DENO_PORT_ENV]: String(denoPort),
