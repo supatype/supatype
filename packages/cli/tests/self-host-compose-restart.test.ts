@@ -68,6 +68,10 @@ import { devSessionLockFor, writeDevSessionLock } from "../src/dev-session-lock.
 import { selfHostComposePaths } from "../src/self-host-compose.js"
 import { exitThrows } from "./support/process-exit.js"
 
+// A running stack: restarting one that has no containers is refused (stack-running.ts), and this
+// file is about what restart runs once it goes ahead.
+vi.mock("../src/stack-running.js", () => ({ restartRefusal: () => null }))
+
 /**
  * SA3: the way to pick up a changed `.env` for one service was to type a compose command by hand,
  * and a hand-typed one mounted the wrong folders. `supatype self-host compose restart <service>`

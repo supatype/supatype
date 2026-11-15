@@ -52,6 +52,9 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **self-host:** `compose restart <service>` refuses a stack that is not running and names `compose up`.
+  It recreated the one service alone, with a database volume and networks for a stack that did not
+  exist, so a folder sharing a stopped stack's name got a stray container holding its own mount.
 * **push (native):** no Studio link after a push or `admin create-user` on a native project. Native dev
   runs no Studio, and the printed `/studio/` link answered 404.
 * **dev (native):** functions get `ctx.dbUrl` only from `SUPATYPE_FUNCTIONS_DB_URL`, as on Docker. Native

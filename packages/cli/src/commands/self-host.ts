@@ -27,6 +27,7 @@ import {
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { enterLocalStack, localStackComposeProject } from "../dev-session-lock.js"
 import { recordStackFolder } from "../stack-folder.js"
+import { restartRefusal } from "../stack-running.js"
 import { composeStackWatch, ESSENTIAL_SERVICES, printExitedService, watchForFailure } from "../stack-exit-watch.js"
 import { warnBucketsLeft } from "../storage-provision.js"
 import { syncConfigMailerEnv } from "../config-mailer-env.js"
@@ -134,6 +135,9 @@ export function registerSelfHost(program: Command): void {
     .command("restart <service>")
     .description("Recreate one service with the current config and .env, leaving the others running")
     .action(async (service: string) => {
+      const cwd = process.cwd()
+      const refusal = restartRefusal(service, enterLocalStack(cwd, loadConfig(cwd, { local: false }).project.name))
+      if (refusal !== null) fatalError(refusal)
       const status = renderAndRunCompose(["up", "-d", "--force-recreate", "--no-deps", service])
       if (status !== 0) {
         exitComposeFailed(status, `Could not restart ${service}.`, SELF_HOST_BRAND)
