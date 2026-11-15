@@ -52,6 +52,8 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **downloads:** a retried download says each failure in one sentence. The line read
+  `...; try again.. Retrying in 1s...`, a doubled full stop after every CDN message.
 * **storage:** a bucket rule that cannot be rendered on `storage.objects` (one naming a model
   column, `In`, `Exists`, `Matches`) is refused at push, naming the bucket and the operation. It
   used to become `FALSE` with nothing said, so a documented registered-only rule on a bucket denied

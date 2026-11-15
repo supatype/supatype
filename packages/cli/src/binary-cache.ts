@@ -932,13 +932,18 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<
       if (i === attempts || err instanceof ReleaseVerificationError) throw err
       const delay = Math.pow(3, i - 1) * retryBaseMs() // 1 s, 3 s, 9 s
       console.error(
-        `[supatype] Download attempt ${i}/${attempts} failed: ${errorMessage(err)}. ` +
+        `[supatype] Download attempt ${i}/${attempts} failed: ${asSentence(errorMessage(err))} ` +
           `Retrying in ${delay / 1_000}s...`,
       )
       await sleep(delay)
     }
   }
   throw new Error("unreachable")
+}
+
+/** `text` ending in one full stop: download errors already end in one ("...; try again."). */
+function asSentence(text: string): string {
+  return text.endsWith(".") ? text : `${text}.`
 }
 
 // ---------------------------------------------------------------------------

@@ -131,3 +131,18 @@ describe("small files use the same rule", () => {
     expect(resp.text()).toBe("line\n".repeat(10))
   })
 })
+
+describe("the retry line", () => {
+  it("says each failure as one sentence, with no doubled full stop before the wait", async () => {
+    const lines: string[] = []
+    vi.spyOn(console, "error").mockImplementation((line: string) => { lines.push(line) })
+    let calls = 0
+    await withRetry(async () => {
+      if (++calls === 1) throw new Error("Could not fetch x: no data for 1s. This is usually a blip; try again.")
+      return "ok"
+    })
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).not.toContain("again..")
+    expect(lines[0]).toContain("try again. Retrying in")
+  })
+})
