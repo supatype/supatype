@@ -1,7 +1,14 @@
 import { asHeadersProvider, bearerToken, type HeadersProvider } from "./query.js"
 import { settle, type Deferred } from "./runtime-env.js"
 import { coerceRecordKinds, type ExactFields } from "./exact-values.js"
-import { PRIVATE_CHANNELS_FEATURE, channelRefusal, refusalReason, unsupportedServer } from "./realtime-refusals.js"
+import {
+  PRIVATE_CHANNELS_FEATURE,
+  channelRefusal,
+  classifyRefusal,
+  isActionRefusal,
+  unsupportedServer,
+  type ChannelActionRefusal,
+} from "./realtime-refusals.js"
 import { isArrayOf, isJsonObject, isOneOf, isRecordOf, isShape, isString, nullable, optional, type Guard } from "./json.js"
 
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "*"
@@ -75,6 +82,12 @@ export interface ChannelSubscription<TRow> {
     event: string,
     callback: (payload: Record<string, unknown>) => void,
   ): ChannelSubscription<TRow>
+  /**
+   * Listen for a broadcast, presence track or payload the server refused on this channel (a
+   * `ChannelActionRefusal`: `send_denied`, `track_denied` or `payload_refused`). The channel is
+   * still joined, so its status does not change; this is where the app learns its send went nowhere.
+   */
+  onRefused(callback: (refusal: ChannelActionRefusal) => void): ChannelSubscription<TRow>
   /** Subscribe to the channel, opening the WebSocket if needed. */
   subscribe(callback?: ChannelStatusCallback | undefined): ChannelSubscription<TRow>
   /** Unsubscribe and clean up. */
@@ -197,6 +210,8 @@ interface ServerSystemMessage {
   message: string
   /** The channel a refusal is about; an error without one is about the socket. */
   channel?: string
+  /** Why, as a fixed code (packages/realtime `refusal-codes.ts`). A server that predates codes sends none. */
+  code?: string
   /** The `ref` of the join this answers. A server that predates refs sends none. */
   ref?: string
   /** What the server can do beyond the base protocol, on the first frame of a socket. */
@@ -237,6 +252,7 @@ const isSystemMessage: Guard<ServerSystemMessage> = isShape({
   status: isOneOf(["ok", "error"]),
   message: isString,
   channel: optional(isString),
+  code: optional(isString),
   ref: optional(isString),
   features: optional(isArrayOf(isString)),
 })
@@ -445,6 +461,7 @@ export class RealtimeClient {
       pgListeners: [],
       presenceListeners: [],
       broadcastListeners: new Map(),
+      refusalListeners: [],
       statusCallback: null,
       private: opts.private === true,
     }
@@ -475,6 +492,11 @@ export class RealtimeClient {
         const listeners = handle.broadcastListeners.get(event) ?? []
         listeners.push(callback)
         handle.broadcastListeners.set(event, listeners)
+        return sub
+      },
+
+      onRefused(callback) {
+        handle.refusalListeners.push(callback)
         return sub
       },
 
@@ -753,12 +775,21 @@ export class RealtimeClient {
    * whose refused join it has since replaced, is told nothing.
    */
   private handleRefusal(msg: ServerSystemMessage): void {
+    const kind = msg.channel === undefined ? undefined : classifyRefusal(msg.code, msg.message)
+    // A refused send is not a failed channel: it goes to `onRefused` and the status stays as it was.
+    if (msg.channel !== undefined && kind !== undefined && isActionRefusal(kind)) {
+      refuseAction(this.channels.get(msg.channel), { channel: msg.channel, code: kind, message: msg.message })
+      return
+    }
     const affected = msg.channel === undefined ? [...this.channels.values()] : [this.answeredJoin(msg.channel, msg.ref)]
     for (const state of affected) {
       if (state === undefined) continue
-      const refusal = msg.channel === undefined ? new Error(msg.message) : channelRefusal(msg.channel, msg.message)
+      const refusal =
+        msg.channel === undefined || kind === undefined
+          ? new Error(msg.message)
+          : channelRefusal(msg.channel, msg.message, kind)
       if (msg.channel !== undefined && state.subscribed) {
-        if (refusalReason(msg.message) === "withdrawn") withdrawJoin(state, refusal)
+        if (kind === "withdrawn") withdrawJoin(state, refusal)
         else refuseRejoin(state, refusal)
         continue
       }
@@ -933,6 +964,7 @@ interface ChannelHandle {
   pgListeners: PgListener[]
   presenceListeners: Array<(event: { joins: PresenceEntry[]; leaves: PresenceEntry[] }) => void>
   broadcastListeners: Map<string, Array<(payload: Record<string, unknown>) => void>>
+  refusalListeners: Array<(refusal: ChannelActionRefusal) => void>
   statusCallback: ChannelStatusCallback | null
   /** Whether this handle asked for `private: true`. */
   private: boolean
@@ -1114,6 +1146,14 @@ function withdrawJoin(state: ChannelState, refusal: Error): void {
   state.joinedPrivate = false
   forgetMembers(state)
   notifyHandles(state, "CHANNEL_ERROR", refusal)
+}
+
+/** Hand a refused send, track or payload to the `onRefused` listeners of every handle on the channel. */
+function refuseAction(state: ChannelState | undefined, refusal: ChannelActionRefusal): void {
+  if (state === undefined) return
+  for (const handle of state.handles) {
+    for (const listener of handle.refusalListeners) listener(refusal)
+  }
 }
 
 /** Tell each handle on a channel its status. */

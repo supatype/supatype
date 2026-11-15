@@ -39,6 +39,14 @@
   re-check, declaration removed) reaches every handle as `CHANNEL_ERROR` with reason `withdrawn`.
   It was swallowed for a handle with no row listener. The client does not rejoin by itself;
   subscribing again does.
+* **realtime:** a refusal is read from the `code` the server sends, not from its sentence, so a reworded
+  message cannot change what the client does. A server that sends no code is still read by its
+  sentence, and a code the client does not know is `refused`.
+* **realtime:** a broadcast, presence track or payload the server refuses on a channel that is
+  joined no longer moves the channel to `CHANNEL_ERROR`. `onRefused((refusal) => ...)` on a channel
+  handle receives `{ channel, code, message }` with `code` one of `send_denied`, `track_denied` or
+  `payload_refused`; the status stays `SUBSCRIBED`. `ChannelActionRefusal` and
+  `ChannelActionRefusalCode` are exported.
 * **realtime:** `ChannelOptions` is exported. A broadcast sent from the database with
   `_supatype.realtime_send` reaches `onBroadcast` listeners like any other; the README says so.
 * **bindings:** `watchChannel` and `channelSlot` take `ChannelOptions` as a last argument, and a binding's

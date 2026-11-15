@@ -228,3 +228,150 @@ describe("isRealtimeChannelError", () => {
     expect(isRealtimeChannelError(undefined)).toBe(false)
   })
 })
+
+describe("a refusal's code, not its sentence, says what it is", () => {
+  const codes: Array<[string, RealtimeChannelError["reason"], boolean]> = [
+    ["join_denied", "join_denied", false],
+    ["not_declared", "not_declared", false],
+    ["does_not_fit", "does_not_fit", false],
+    ["unavailable", "unavailable", true],
+    ["shared_instance", "shared_instance", false],
+    ["refused", "refused", false],
+  ]
+  for (const [code, reason, retryable] of codes) {
+    it(`reads code ${code} as reason ${reason} whatever the sentence says`, async () => {
+      harness = createSocketSwapHarness()
+      const seen = watch("lot:42", { private: true })
+      await harness.settle()
+      greet(["private_channels"])
+      const ref = subscribeFrames(harness.socket(), "lot:42").at(-1)?.["ref"]
+      simulateServerMessage(harness.socket(), { type: "system", status: "error", code, message: "worded some new way", channel: "lot:42", ref })
+      expect(lastError(seen).reason).toBe(reason)
+      expect(lastError(seen).retryable).toBe(retryable)
+      expect(lastError(seen).message).toBe("worded some new way")
+    })
+  }
+
+  it("reads a code over a sentence that says something else", async () => {
+    harness = createSocketSwapHarness()
+    const seen = watch("lot:42", { private: true })
+    await harness.settle()
+    greet(["private_channels"])
+    const ref = subscribeFrames(harness.socket(), "lot:42").at(-1)?.["ref"]
+    simulateServerMessage(harness.socket(), {
+      type: "system",
+      status: "error",
+      code: "unavailable",
+      message: "not allowed to join lot:42: the join rule of LotChannel denied it",
+      channel: "lot:42",
+      ref,
+    })
+    expect(lastError(seen).reason).toBe("unavailable")
+  })
+
+  it("reads a code this client does not know as refused, never by the sentence", async () => {
+    harness = createSocketSwapHarness()
+    const seen = watch("lot:42", { private: true })
+    await harness.settle()
+    greet(["private_channels"])
+    const ref = subscribeFrames(harness.socket(), "lot:42").at(-1)?.["ref"]
+    simulateServerMessage(harness.socket(), {
+      type: "system",
+      status: "error",
+      code: "from_the_future",
+      message: "not allowed to join lot:42: the join rule of LotChannel denied it",
+      channel: "lot:42",
+      ref,
+    })
+    expect(lastError(seen).reason).toBe("refused")
+  })
+
+  it("reads a withdrawal by its code", async () => {
+    harness = createSocketSwapHarness()
+    const seen = watch("lot:42", { private: true })
+    await harness.settle()
+    greet(["private_channels"])
+    ackNewestJoin(harness.socket(), "lot:42")
+    simulateServerMessage(harness.socket(), { type: "system", status: "error", code: "withdrawn", message: "gone", channel: "lot:42" })
+    expect(seen.map((s) => s.status)).toEqual(["SUBSCRIBED", "CHANNEL_ERROR"])
+    expect(lastError(seen).reason).toBe("withdrawn")
+  })
+})
+
+describe("a send, track or payload refused on a healthy channel", () => {
+  interface Refused {
+    channel: string
+    code: string
+    message: string
+  }
+
+  async function healthy(): Promise<{ seen: Seen[]; refused: Refused[] }> {
+    harness = createSocketSwapHarness()
+    const seen: Seen[] = []
+    const refused: Refused[] = []
+    harness.realtime
+      .channel("lot:42", { private: true })
+      .onBroadcast("bid", () => {})
+      .onRefused((event) => refused.push(event))
+      .subscribe((status, err) => seen.push({ status, err }))
+    await harness.settle()
+    greet(["private_channels"])
+    ackNewestJoin(harness.socket(), "lot:42")
+    return { seen, refused }
+  }
+
+  const cases: Array<[string, string]> = [
+    ["send_denied", "not allowed to broadcast on lot:42: the send rule of LotChannel denied it"],
+    ["track_denied", "not allowed to track presence on lot:42: the track rule of LotChannel denied it"],
+    ["payload_refused", "not allowed to broadcast bid on lot:42: the send rule of LotChannel refused the payload"],
+  ]
+  for (const [code, message] of cases) {
+    it(`reports ${code} as an event and leaves the channel SUBSCRIBED`, async () => {
+      const { seen, refused } = await healthy()
+      simulateServerMessage(harness.socket(), { type: "system", status: "error", code, message, channel: "lot:42" })
+      expect(refused).toEqual([{ channel: "lot:42", code, message }])
+      expect(seen.map((s) => s.status)).toEqual(["SUBSCRIBED"])
+    })
+  }
+
+  it("tells every handle on the channel that listens", async () => {
+    const { refused } = await healthy()
+    const second: Refused[] = []
+    harness.realtime.channel("lot:42", { private: true }).onRefused((event) => second.push(event)).subscribe()
+    harness.realtime.channel("lot:42", { private: true }).subscribe()
+    simulateServerMessage(harness.socket(), { type: "system", status: "error", code: "send_denied", message: "no", channel: "lot:42" })
+    expect(refused).toHaveLength(1)
+    expect(second).toHaveLength(1)
+  })
+
+  it("keeps the join intact", async () => {
+    const { seen } = await healthy()
+    simulateServerMessage(harness.socket(), { type: "system", status: "error", code: "send_denied", message: "no", channel: "lot:42" })
+    simulateServerMessage(harness.socket(), { type: "broadcast", channel: "lot:42", event: "bid", payload: { amount: 1 } })
+    expect(seen.map((s) => s.status)).toEqual(["SUBSCRIBED"])
+    expect(subscribeFrames(harness.socket(), "lot:42")).toHaveLength(1)
+  })
+
+  it("reads the sentence of an older server that sends no code", async () => {
+    const { seen, refused } = await healthy()
+    simulateServerMessage(harness.socket(), {
+      type: "system",
+      status: "error",
+      message: "not allowed to broadcast on lot:42: the send rule of LotChannel denied it",
+      channel: "lot:42",
+    })
+    expect(refused.map((r) => r.code)).toEqual(["send_denied"])
+    expect(seen.map((s) => s.status)).toEqual(["SUBSCRIBED"])
+  })
+})
+
+describe("an older server that sends no code", () => {
+  it("still classifies a refused join by its sentence", async () => {
+    harness = createSocketSwapHarness()
+    const seen = watch("lot:42", { private: true })
+    await harness.settle()
+    greet(["private_channels"])
+    refuse("lot:42", "not allowed to join lot:42: the join rule of LotChannel denied it")
+    expect(lastError(seen).reason).toBe("join_denied")
+  })
+})
