@@ -11,6 +11,8 @@
 
 ### Features
 
+* **bindings:** `watchChannel` and `channelSlot` take a `ChannelName`, as `channel()` does, so the Vue, Solid
+  and Svelte channel bindings accept a declared topic or any other string.
 * **client:** `client.anonKey`, beside `client.url`: the anon key as given, else as the page set it,
   read each time and an empty string while neither has one.
 * **realtime:** `client.realtime.isConnected`, `client.realtime.connectionState` and
