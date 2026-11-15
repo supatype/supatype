@@ -5,7 +5,7 @@ import { isJsonObject } from "../../src/json.js"
 /**
  * An in-memory stand-in for the database side of private channels: the four functions of the
  * build contract (14.2), answering for the plan's LotChannel and Lobby examples, as the SQL in
- * `channel-functions.sql` does against a real Postgres.
+ * the engine's functions do in `private-channels.integration.test.ts`, against a real Postgres.
  *
  * It exists so the server's behaviour (what it asks, how often, and what it does with the answer)
  * can be tested without a database, and so every query is counted: "one database call per join and
