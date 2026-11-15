@@ -69,10 +69,12 @@ const INSUFFICIENT_PRIVILEGE = "42501"
 /**
  * What a rule that the database refused to run is read as: a denial of everything.
  *
- * A rule reading a table the caller has no privilege on raises `insufficient_privilege` instead of
- * returning false, which is what the anon role meets on any rule that reads a table anon cannot see.
- * That is the database saying no, so it is read as no (and as a denial, not as "the database did
- * not answer", which would tell the client to retry something that will never succeed).
+ * The engine's access function answers a rule that reads a table the caller has no privilege on as
+ * `FALSE` for that one operation, so the other operations keep their own verdicts. This is the
+ * fallback for the database refusing the call itself with `insufficient_privilege` (an engine
+ * without that handling, or no right to run the function): that is the database saying no, so it
+ * is read as no for everything (and as a denial, not as "the database did not answer", which would
+ * tell the client to retry something that will never succeed).
  */
 export const DENIED_BY_DATABASE: AccessRow = {
   channel: "this channel's declaration",

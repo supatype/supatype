@@ -250,6 +250,7 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
       <li>A channel has three operations. <code>join</code> covers subscribing, receiving broadcasts and receiving presence. <code>send</code> covers broadcasting. <code>track</code> covers appearing in presence.</li>
       <li>An operation you leave out is denied to everyone except the service role. A declaration with no rules at all is refused when the schema is read.</li>
       <li>Each rule is written in the same <a href="/docs/schema.html#access">access rule language</a> as a model, and runs inside Postgres as the caller. A <code>Rows</code> rule sees only the rows that caller may read.</li>
+      <li>Each operation is judged on its own. A rule that reads a table the caller has no privilege on denies that operation and no other, so a channel with <code>join: Public</code> and a <code>track</code> rule over a private table still admits anon to join, and refuses it presence.</li>
       <li>The server asks once at join, keeps the answer, and then judges each broadcast and presence update from that answer with no database call.</li>
       <li>The service role may do anything on any channel.</li>
     </ul>

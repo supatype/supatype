@@ -2654,6 +2654,7 @@ This is the same idea as Supabase Realtime Authorization. The difference is who 
 - A channel has three operations. `join` covers subscribing, receiving broadcasts and receiving presence. `send` covers broadcasting. `track` covers appearing in presence.
 - An operation you leave out is denied to everyone except the service role. A declaration with no rules at all is refused when the schema is read.
 - Each rule is written in the same [access rule language](https://www.supatype.com/docs/schema.html#access) as a model, and runs inside Postgres as the caller. A `Rows` rule sees only the rows that caller may read.
+- Each operation is judged on its own. A rule that reads a table the caller has no privilege on denies that operation and no other, so a channel with `join: Public` and a `track` rule over a private table still admits anon to join, and refuses it presence.
 - The server asks once at join, keeps the answer, and then judges each broadcast and presence update from that answer with no database call.
 - The service role may do anything on any channel.
 
