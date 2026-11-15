@@ -64,9 +64,9 @@ Then run `supatype self-host compose up -d` (it renders the file again), or rest
 `supatype dev`. In the function, treat the URL as a credential: never return it or log it.
 
 Drivers verified against a live Postgres on this image's Deno (2.9.8): `npm:postgres` (latest),
-`npm:postgres@3.4.5` and `npm:pg`. `npm:postgres` 3.4.6 and later fails on Deno before 2.8 with
-`Not implemented: LibuvStreamWrap.prototype.useUserBuffer`, so an older image needs
-`npm:postgres@3.4.5`.
+`npm:postgres@3.4.5` and `npm:pg`. `npm:postgres` 4.0 and later fails on Deno before 2.8 with
+`Not implemented: LibuvStreamWrap.prototype.useUserBuffer` (or `socket._handle.useUserBuffer is not a
+function`), and every 3.4 release runs there, so an older image needs `npm:postgres@3.4.5`.
 
 ```ts
 import postgres from "npm:postgres@3.4.5"
