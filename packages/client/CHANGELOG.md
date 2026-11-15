@@ -14,7 +14,7 @@
   with `CHANNEL_ERROR` for any channel-scoped refusal. `reason` is `unsupported_server`,
   `join_denied`, `not_declared`, `does_not_fit`, `unavailable`, `shared_instance`, `withdrawn` or
   `refused`; `channel` names it and `retryable` is true for `unavailable`. It was a plain `Error`
-  with the server's message, which `message` still carries.
+  with the server's message, which `message` still carries. `isRealtimeChannelError(value)` tells one from any other error, across copies of the package.
 * **realtime:** access the server takes away from a channel you hold (token change, periodic
   re-check, declaration removed) reaches every handle as `CHANNEL_ERROR` with reason `withdrawn`.
   It was swallowed for a handle with no row listener. The client does not rejoin by itself;

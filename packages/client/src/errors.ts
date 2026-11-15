@@ -240,6 +240,16 @@ export class RealtimeChannelError extends RealtimeError {
 nameErrors(RealtimeChannelError, "RealtimeChannelError")
 
 /**
+ * Whether `value` is a `RealtimeChannelError`.
+ *
+ * By name rather than `instanceof`, so it holds across two copies of this package in one bundle,
+ * which a framework binding and an app can easily have.
+ */
+export function isRealtimeChannelError(value: unknown): value is RealtimeChannelError {
+  return value instanceof Error && value.name === "RealtimeChannelError" && "reason" in value && "channel" in value
+}
+
+/**
  * Network errors (connection failures, timeouts, DNS).
  */
 export class NetworkError extends SupatypeCodedError {
