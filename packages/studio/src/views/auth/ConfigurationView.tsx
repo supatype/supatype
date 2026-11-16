@@ -3,6 +3,8 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useAuthSettings, type AuthSettings } from "../../hooks/useAuthSettings.js"
 import { usePlatform } from "../../hooks/usePlatform.js"
+import { CloudConfiguration } from "./CloudConfiguration.js"
+import { useCloudEnvironment } from "./CloudAuthParts.js"
 import { enabled, providerRows, SettingsLoading, SettingsTable, type SettingRow } from "./AuthSettingsTable.js"
 
 /**
@@ -55,7 +57,13 @@ function howToChange(cloud: boolean): string {
     : "These come from the auth server's environment when it starts. Change them in the project's .env (or the auth server's environment in your compose file) and restart the stack. Studio cannot change them."
 }
 
+/** Cloud with a known environment edits through the control plane; everything else reads what the auth server reports. */
 export function ConfigurationView(): React.ReactElement {
+  const environment = useCloudEnvironment()
+  return environment !== null ? <CloudConfiguration environment={environment} /> : <ReadOnlyConfiguration />
+}
+
+function ReadOnlyConfiguration(): React.ReactElement {
   const { settings, error, loading } = useAuthSettings()
   const cloud = usePlatform().platformUrl !== undefined
 
