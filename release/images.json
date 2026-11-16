@@ -11,7 +11,7 @@
   },
   "postgres": {
     "image": "supatype/postgres",
-    "tag": "17.2.14",
-    "commit": "f00cb569fbf8ee2d6b99743dfe2d2b9843552389"
+    "tag": "17.2.15",
+    "commit": "b10f77e32ef8e8e3030279e898434c904f5c18d7"
   }
 }
