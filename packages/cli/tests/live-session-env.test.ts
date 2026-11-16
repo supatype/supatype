@@ -7,10 +7,6 @@ import { readEnvFile } from "../src/env-file.js"
 import { interpolated } from "./support/live-session.js"
 import { projectConfig as configWith } from "./support/project-config.js"
 
-// A running stack: restarting one with no containers is refused (stack-running.ts), and this file
-// is about which environment restart takes once it goes ahead.
-vi.mock("../src/stack-running.js", () => ({ restartRefusal: () => null, functionsNetworkNote: () => null, dbContainerNetworks: () => null }))
-
 /**
  * 0.9.2 release test FF-7: `supatype dev` given SUPATYPE_KONG_PORT=18780 and SUPATYPE_DEV_DB_PORT=54780
  * by its shell keeps them, and the URLs built from them, out of `.env` (DR9). A command from a shell
@@ -69,6 +65,7 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => {
 vi.mock("../src/stack-running.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/stack-running.js")>()),
   restartRefusal: () => null,
+  functionsNetworkNote: () => null,
   dbContainerNetworks: () => null,
 }))
 

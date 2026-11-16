@@ -164,9 +164,32 @@ export async function settleRenames(
     written: 0,
     hint: [
       "If any of these was a rename, record it and push again:",
-      ...candidates.map((candidate) => `  ${renameCommandHint(candidate)}`),
+      ...renameHintLines(candidates),
     ],
   }
+}
+
+/** A source with more than this many possible new names gets one line with a placeholder. */
+const MAX_NAMED_RENAMES = 3
+
+/**
+ * One `supatype rename` line per candidate, except for a dropped table or column with more than
+ * {@link MAX_NAMED_RENAMES} possible new names: one table dropped beside eight added printed eight
+ * lines naming it eight ways (0.9.3 Docker run), so that source is one line with a placeholder.
+ */
+function renameHintLines(candidates: readonly RenameCandidate[]): string[] {
+  const bySource = new Map<string, RenameCandidate[]>()
+  for (const candidate of candidates) {
+    const key = `${candidate.kind}:${candidate.table}:${candidate.from}`
+    bySource.set(key, [...(bySource.get(key) ?? []), candidate])
+  }
+  return [...bySource.values()].flatMap((group) => {
+    if (group.length <= MAX_NAMED_RENAMES) return group.map((candidate) => `  ${renameCommandHint(candidate)}`)
+    const first = group[0]!
+    const what = first.kind === "table" ? "tables" : "columns"
+    const command = renameCommandHint({ ...first, to: "<new name>" })
+    return [`  ${command}   (${group.length} new ${what} could be it)`]
+  })
 }
 
 /** A destructive push that was not applied: declined, or nobody there to ask. */
