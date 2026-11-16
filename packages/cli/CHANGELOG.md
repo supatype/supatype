@@ -49,9 +49,6 @@ no entries are missing from this file.
   database, so `send: Event<"bid">` admits every caller, anon included. The warning names the channel
   and suggests `send: All<[LoggedIn, Event<"bid">]>`. It is a warning, not an error, and is carried
   to the engine in the schema's `warnings`.
-
-### Features
-
 * **login:** `supatype login` signs in through the browser. It opens the accounts site (which the
   control plane names at `/api/v1/cli/login/config`, or `SUPATYPE_ACCOUNTS_URL`) and always prints the URL; after you approve, type the
   code the page shows into the terminal and the CLI stores the personal access token (`spt_...`)
