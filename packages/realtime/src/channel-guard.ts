@@ -186,7 +186,7 @@ export class ChannelGuard {
       const state = await this.catalog.current()
       if (this.catalog.effectiveMode(state) !== "declared") return true
       if (holders.some((grant) => grant !== undefined && grant.declaration !== null)) return true
-      const row = state.supported ? await this.db.asService((q) => fetchAccess(q, topic)) : null
+      const row = state.supported ? await this.db.asCatalog((q) => fetchAccess(q, topic)) : null
       if (row !== null && row.fits) return true
       this.noteUndeclaredDrop(topic)
       return false

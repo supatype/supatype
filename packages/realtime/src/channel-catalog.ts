@@ -83,7 +83,7 @@ async function readReaders(q: Queryable): Promise<Map<string, Set<string>>> {
 }
 
 async function loadState(db: ChannelDatabase): Promise<ChannelCatalogState> {
-  return db.asService(async (q) => {
+  return db.asCatalog(async (q) => {
     const mode = await readMode(q)
     if (mode === null) return UNSUPPORTED
     return { supported: true, mode, sendChecks: await readSendChecks(q), readers: await readReaders(q) }
