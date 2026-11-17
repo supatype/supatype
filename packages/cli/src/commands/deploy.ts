@@ -22,7 +22,7 @@ import { deploySchemaToLinkedProject, pushSchemaToLinkedProject } from "./cloud.
 import { loadProjectLink, type ProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
-import { isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
+import { isNumber, isShape, isString, nullable, optional, readJson, type Guard } from "@supatype/shared"
 import { enginePush, type DiffResult } from "../engine-client.js"
 import { engineRequestIn, requireEngineFeaturesIn, stackEngine } from "../stack-engine.js"
 import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
@@ -40,7 +40,7 @@ import { installCommand, type InstallCommand } from "../init-setup-steps.js"
 import { fatalError } from "../ui/fatal.js"
 import { frontendEnv } from "../frontend-env.js"
 import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
-import { deploySite } from "../site-deploy.js"
+import { deploySite, megabytes, overPlanLines } from "../site-deploy.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
 import { responseFailureText } from "../error-message.js"
@@ -354,10 +354,11 @@ export function registerDeploy(program: Command): void {
           orgId: target.orgId,
           environment: target.mode === "cloud" ? target.environment : undefined,
         },
-        isShape({ version: optional(nullable(isString)) }),
+        isShape({ version: optional(nullable(isString)), url: optional(nullable(isString)) }),
       )
 
       info(`Rolled back to deployment ${data.version ?? "previous"}.`)
+      if (data.url) info(`URL: ${data.url}`)
     })
 
   // supatype deploy status
@@ -392,14 +393,7 @@ export function registerDeploy(program: Command): void {
         return
       }
 
-      info(`Deployment: ${data.version ?? data.id ?? "unknown"}`)
-      info(`Status: ${data.status ?? "live"}`)
-      if (data.timestamp ?? data.createdAt) {
-        info(`Deployed: ${data.timestamp ?? data.createdAt}`)
-      }
-      if (data.size) info(`Size: ${(data.size / (1024 * 1024)).toFixed(1)}MB`)
-      if (data.buildDuration) info(`Build duration: ${data.buildDuration}s`)
-      if (data.url) info(`URL: ${data.url}`)
+      printDeploymentStatus(data)
     })
 
   // supatype deploy logs <version>
@@ -444,7 +438,30 @@ const isCurrentDeployment = isShape({
   buildDuration: optional(nullable(isNumber)),
   url: optional(nullable(isString)),
   status: optional(nullable(isString)),
+  planBytes: optional(nullable(isNumber)),
+  overSince: optional(nullable(isString)),
+  goodwillEndsAt: optional(nullable(isString)),
 })
+
+type CurrentDeployment = typeof isCurrentDeployment extends Guard<infer T> ? T : never
+
+/** The size line: against the plan when the server says what the plan is. */
+function sizeLine(size: number, planBytes: number | null | undefined): string {
+  if (planBytes) return `Size: ${megabytes(size)} MB of ${megabytes(planBytes)} MB plan`
+  return `Size: ${(size / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function printDeploymentStatus(data: CurrentDeployment): void {
+  if (data.url) info(`URL: ${data.url}`)
+  info(`Deployment: ${data.version ?? data.id ?? "unknown"}`)
+  info(`Status: ${data.status ?? "live"}`)
+  if (data.timestamp ?? data.createdAt) info(`Deployed: ${data.timestamp ?? data.createdAt}`)
+  if (data.size) info(sizeLine(data.size, data.planBytes))
+  if (data.buildDuration) info(`Build duration: ${data.buildDuration}s`)
+  if (data.size && data.planBytes && data.goodwillEndsAt) {
+    for (const line of overPlanLines(data.size, data.planBytes, data.goodwillEndsAt)) warn(line)
+  }
+}
 
 async function deployStaticSite(
   cwd: string,

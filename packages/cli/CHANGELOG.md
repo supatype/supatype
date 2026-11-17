@@ -77,6 +77,10 @@ no entries are missing from this file.
   and "Upgrade your plan before <date> to avoid overage charges", on every deploy while over. Other
   warning codes print their message. Only a site over the tier's hard cap is refused (413
   `site_too_large`, with the server's reason).
+* **deploy:** `deploy status` prints the site's address first, then the live version, when it went
+  live, and the size against the plan ("80 MB of 50 MB plan"); when Cloud says the site is over
+  plan it adds the date to upgrade before. `deploy rollback` prints the address as well as the
+  version it went back to. Each line appears only when the server sends the field.
 
 ### Bug Fixes
 

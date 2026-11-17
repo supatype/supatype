@@ -79,17 +79,24 @@ const isOverPlan = isShape({
 const BYTES_PER_MB = 1024 * 1024
 
 /** Whole MB, rounded up so a site just over the plan never reads as equal to it. */
-const megabytes = (bytes: number): number => Math.ceil(bytes / BYTES_PER_MB)
+export const megabytes = (bytes: number): number => Math.ceil(bytes / BYTES_PER_MB)
 
 /** The date part of an ISO timestamp; anything else is shown as the server sent it. */
 const dateOf = (iso: string): string => (/^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : iso)
+
+/** The two lines that tell a person their site is over the plan and when to upgrade by. */
+export function overPlanLines(siteBytes: number, planBytes: number, goodwillEndsAt: string): string[] {
+  return [
+    `This site is ${megabytes(siteBytes)} MB and your plan includes ${megabytes(planBytes)} MB. It is live, but over your plan.`,
+    `Upgrade your plan before ${dateOf(goodwillEndsAt)} to avoid overage charges. Plans are managed in the Supatype Cloud dashboard.`,
+  ]
+}
 
 /** Print what Cloud warned about: the plan overage in full, any other code as its message. */
 function printWarnings(warnings: readonly unknown[]): void {
   for (const w of warnings) {
     if (isOverPlan(w) && w.code === "site_over_plan") {
-      warn(`This site is ${megabytes(w.siteBytes)} MB and your plan includes ${megabytes(w.planBytes)} MB. It is live, but over your plan.`)
-      warn(`Upgrade your plan before ${dateOf(w.goodwillEndsAt)} to avoid overage charges. Plans are managed in the Supatype Cloud dashboard.`)
+      for (const line of overPlanLines(w.siteBytes, w.planBytes, w.goodwillEndsAt)) warn(line)
     } else if (isShape({ message: isString })(w)) {
       warn(w.message)
     }
