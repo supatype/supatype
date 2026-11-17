@@ -193,9 +193,10 @@ export function validateStaticMode(framework: AppFramework, appDir: string): str
 }
 
 /**
- * Validate the build output.
+ * Validate the build output. `maxSizeMb` is a limit this machine knows of; with none given the size is
+ * not checked, as when a server applies its own tier limit.
  */
-export function validateBuildOutput(outputDir: string, maxSizeMb: number): string | null {
+export function validateBuildOutput(outputDir: string, maxSizeMb?: number): string | null {
   if (!existsSync(outputDir)) {
     return `Build output directory not found: ${outputDir}`
   }
@@ -208,7 +209,7 @@ export function validateBuildOutput(outputDir: string, maxSizeMb: number): strin
 
   // Check total size
   const sizeMb = getDirSizeMb(outputDir)
-  if (sizeMb > maxSizeMb) {
+  if (maxSizeMb !== undefined && sizeMb > maxSizeMb) {
     return `Build output ${sizeMb.toFixed(1)}MB exceeds limit of ${maxSizeMb}MB`
   }
 
