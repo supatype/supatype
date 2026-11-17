@@ -72,6 +72,11 @@ no entries are missing from this file.
 * **deploy:** `deploy --preview` against a Cloud link is refused before the config is read or anything
   is built: "Previews are not available on Supatype Cloud yet". Deploy without `--preview` to publish to
   production. `--schema-only`, `--local` and self-hosted links are unchanged.
+* **deploy:** a site over its plan's size is a soft limit and still goes live. When Cloud's create
+  answer carries a `site_over_plan` warning, the deploy prints the site's size and the plan's in MB
+  and "Upgrade your plan before <date> to avoid overage charges", on every deploy while over. Other
+  warning codes print their message. Only a site over the tier's hard cap is refused (413
+  `site_too_large`, with the server's reason).
 
 ### Bug Fixes
 
