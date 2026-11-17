@@ -292,8 +292,9 @@ export function registerDeploy(program: Command): void {
         }
 
         // Deploy (--local never uploads to cloud, even if linked)
+        let url: string | undefined
         if (link && !opts.local) {
-          await deployStaticSite(cwd, appConfig.outputDirectory, {
+          url = await deployStaticSite(cwd, appConfig.outputDirectory, {
             preview: opts.preview ?? false,
             env: envName,
             spa: appConfig.spa,
@@ -303,13 +304,7 @@ export function registerDeploy(program: Command): void {
         }
 
         info("Deployment complete!")
-        if (link && !opts.local) {
-          const target = resolveTarget(cwd, { env: envName })
-          const url = opts.preview
-            ? `${target.apiBaseUrl}/preview`
-            : target.apiBaseUrl
-          info(`URL: ${url}`)
-        }
+        if (url !== undefined) info(`URL: ${url}`)
       }
     })
 
@@ -436,7 +431,7 @@ async function deployStaticSite(
   cwd: string,
   outputDir: string,
   opts: { preview?: boolean; env?: string; spa: boolean },
-): Promise<void> {
+): Promise<string> {
   const target = resolveTarget(cwd, { env: opts.env })
   const token = target.token
   if (!token) {
@@ -477,14 +472,15 @@ async function deployStaticSite(
         orgId: target.orgId,
       },
     )
-    return
+    return opts.preview ? `${target.apiBaseUrl}/preview` : target.apiBaseUrl
   }
 
-  await deploySite(
+  const deployed = await deploySite(
     { apiBaseUrl: target.apiBaseUrl, projectRef: target.projectRef, token, orgId: target.orgId, environment: target.environment },
     outputDir,
     { spa: opts.spa, preview: opts.preview ?? false },
   )
+  return deployed.url
 }
 
 function deploySelfHost(outputDir: string, cwd: string): void {

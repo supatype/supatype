@@ -59,6 +59,11 @@ no entries are missing from this file.
   `Authorization`, `X-Org-Id` and `X-Supatype-Environment`, every upload's status is checked, and a 5xx
   or a dropped connection is retried three times. Any other refusal stops the deploy, naming the file
   and the server's reason, before finalize. Uploads used to go by path and their answers were never read.
+* **deploy:** a Cloud deploy checks finalize and prints the site's own address (`https://<ref>.<domain>`)
+  from its answer, not the control plane's API URL. A 502 `pointer_not_pushed` (the version is recorded
+  but the project's server was not told) is retried three times, since finalize is idempotent, and then
+  reported as "uploaded but not live". Any other refusal, such as `blobs_missing`, stops with the
+  server's reason. Finalize's answer was never read before, so a failed finalize looked like success.
 
 ### Bug Fixes
 
