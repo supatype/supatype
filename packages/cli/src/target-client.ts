@@ -189,8 +189,20 @@ function budgetSignal(ms: number | undefined): AbortSignal | undefined {
  * was empty: a plain-text or empty refusal used to show only `API error: 500 <url>`. The URL is
  * added when the body names no reason of its own, so an anonymous failure says where it came from.
  */
+/**
+ * A refusal's machine code. Self-host names it in `code`; Supatype Cloud names it in `error`
+ * (`{ error: "pointer_not_pushed", message, statusCode }`), where `error` is a snake_case slug, never
+ * a sentence, so only a slug there counts as a code.
+ */
+function refusalCode(json: unknown): string | undefined {
+  const code = bodyString(json, "code")
+  if (code !== undefined) return code
+  const error = bodyString(json, "error")
+  return error !== undefined && /^[a-z][a-z0-9_]*$/.test(error) ? error : undefined
+}
+
 function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): TargetApiError {
-  const code = bodyString(result.json, "code")
+  const code = refusalCode(result.json)
   const said = httpFailureText(result.status, result.statusText, result.text)
   const message = bodyReason(result.json) === undefined ? `${said} (${url})` : said
   if (isAuthExpiry(result.status, code, message) && !opts.authRefresh) {
