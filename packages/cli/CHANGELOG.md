@@ -49,6 +49,11 @@ no entries are missing from this file.
   database, so `send: Event<"bid">` admits every caller, anon included. The warning names the channel
   and suggests `send: All<[LoggedIn, Event<"bid">]>`. It is a warning, not an error, and is carried
   to the engine in the schema's `warnings`.
+* **deploy:** a Cloud deploy's create call sends the site's manifest, each file's NFC path, size and
+  sha256, and the app's `spa` flag (`build.spa`, or the framework's default), so the server can say
+  which files it already holds. This is the first of four steps toward hosting the site on the
+  project's own domain; until the server side lands, `deploy --app-only` against Cloud still ends
+  without a live site.
 
 ### Bug Fixes
 
