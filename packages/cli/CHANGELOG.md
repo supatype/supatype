@@ -35,13 +35,13 @@ no entries are missing from this file.
   when removing a declaration or turning `declared` on takes broadcast and presence away. The lines
   appear once the engine reports them; an older engine says nothing.
 * **push:** refuses a schema that declares channels, or sets `realtime.channels`, against a pinned
-  engine older than `ENGINE_MIN_FOR_CHANNELS`. The engine drops both keys, so the push would succeed
-  with nothing enforcing the channels. The constant is a placeholder until the engine release is
-  known.
+  engine older than 0.11.0 (`ENGINE_MIN_FOR_CHANNELS`). An older engine drops both keys, so the push
+  would succeed with nothing enforcing the channels.
 * **push, diff, doctor, adopt, dev, deploy:** a schema that declares channels or sets
   `realtime.channels` is sent only to an engine or server that lists `private_channels` in its
-  capabilities, as identity columns already are with `identity_columns`. This holds even while the
-  version floor above is a placeholder, so an older engine can never drop the channels in silence.
+  capabilities, as identity columns already are with `identity_columns`. This is checked on its
+  own, apart from the version floor above, so an older engine can never drop the channels in
+  silence.
 * **dev:** runs the same engine floor check as `supatype push` before applying a schema, native and
   Docker alike. It skipped it, so a pinned older engine took channels and enforced nothing.
 * **push, diff:** warn when a channel's `send` rule tests only `Event<>` or `Payload<>` and nothing
