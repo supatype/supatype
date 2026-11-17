@@ -35,7 +35,7 @@ import {
   detectPackageManager,
   type ResolvedAppConfig,
 } from "../app/framework.js"
-import { commandSpawn } from "../build-spawn.js"
+import { commandSpawn, withProjectBins } from "../build-spawn.js"
 import { installCommand, type InstallCommand } from "../init-setup-steps.js"
 import { fatalError } from "../ui/fatal.js"
 import { frontendEnv } from "../frontend-env.js"
@@ -125,8 +125,17 @@ async function installAndBuild(
   info(`Installing dependencies (${pm})...`)
   runDeployStep(appConfig.directory, installCommand(pm), buildEnv, { timeoutMs: 5 * 60 * 1000, failure: "Dependency installation failed." })
   plain("\nBuilding...")
+  runAppBuild(appConfig, buildEnv)
+}
+
+/**
+ * Run the app's build command in its directory. The framework defaults (`vite build`, `astro build`)
+ * name binaries that live in `node_modules/.bin`, which only a package manager puts on PATH, so the
+ * app's own `.bin` and every one above it (a monorepo root's) are put there, as `npm run` does.
+ */
+export function runAppBuild(appConfig: Pick<ResolvedAppConfig, "directory" | "buildCommand">, env: NodeJS.ProcessEnv): void {
   const argv = appConfig.buildCommand.split(" ").filter((part) => part !== "")
-  runDeployStep(appConfig.directory, commandSpawn(argv), buildEnv, { timeoutMs: 10 * 60 * 1000, failure: "Build failed." })
+  runDeployStep(appConfig.directory, commandSpawn(argv), withProjectBins(env, appConfig.directory), { timeoutMs: 10 * 60 * 1000, failure: "Build failed." })
 }
 
 export function registerDeploy(program: Command): void {

@@ -448,11 +448,14 @@ export interface SupatypeProjectConfig {
   build?: {
     /** Framework name. Auto-detected from package.json when omitted. */
     framework?: "nextjs" | "astro" | "vite" | "remix-spa" | "sveltekit" | "nuxt" | "static"
-    /** Path to the app directory. Defaults to cwd. */
+    /** Path to the app directory, relative to the project root. Defaults to cwd. */
     directory?: string
     /** Build command. Inferred from framework when omitted. */
     buildCommand?: string
-    /** Build output directory. Inferred from framework when omitted. */
+    /**
+     * Build output directory, relative to `directory` (not the project root): with `directory: "web"`,
+     * write `"dist"`, not `"web/dist"`. Inferred from framework when omitted.
+     */
     outputDirectory?: string
     /** Enable SPA fallback routing. */
     spa?: boolean
