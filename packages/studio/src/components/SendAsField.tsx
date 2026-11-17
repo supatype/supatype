@@ -1,11 +1,14 @@
 import React from "react"
 import type { SendAsState } from "../hooks/useSendAs.js"
 import { isSendAs, SEND_AS_LABELS } from "../lib/send-as.js"
+import { LinkAccountForm } from "./LinkAccountPrompt.js"
 import { Input, Select } from "./ui.js"
 
 /**
  * Who a request being built is sent as (`send-as.ts`): the signed-in user by default, anonymous,
  * the service role for a role that may have it, or a pasted token, which starts as the user's own.
+ * On Cloud, sending as yourself needs a linked project login, so the link form shows here until
+ * there is one.
  */
 export function SendAsField({ sendAs }: { sendAs: SendAsState }): React.ReactElement {
   return (
@@ -31,6 +34,7 @@ export function SendAsField({ sendAs }: { sendAs: SendAsState }): React.ReactEle
           className="font-mono text-xs"
         />
       ) : null}
+      {sendAs.needsLink ? <LinkAccountForm heading="Link your account to send as yourself" /> : null}
     </div>
   )
 }
