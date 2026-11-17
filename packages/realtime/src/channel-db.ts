@@ -20,4 +20,11 @@ export interface ChannelDatabase {
   asCaller<T>(claims: JwtClaims, run: (q: Queryable) => Promise<T>): Promise<T>
   /** Run `run` on one connection as the service's own role. */
   asService<T>(run: (q: Queryable) => Promise<T>): Promise<T>
+  /**
+   * Run `run` for the catalog reads (`_supatype.realtime_channel_mode`, `_send_checks`,
+   * `_dependencies`): as the `authenticated` role, in one transaction that is always rolled back.
+   * The service's own login holds no EXECUTE on them on Cloud (it is NOINHERIT); it is a member of
+   * `authenticated`, which the engine grants them to, so it switches to it for the read.
+   */
+  asCatalog<T>(run: (q: Queryable) => Promise<T>): Promise<T>
 }
