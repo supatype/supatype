@@ -76,6 +76,8 @@ export async function discoverRoutes(root: string, single?: string): Promise<Dis
       // Hidden entries include the `..data` and `..<timestamp>` a ConfigMap mount adds beside the
       // links; both hold the same functions the links already reach, so loading them doubles every one.
       if (entry.name.startsWith("_") || entry.name.startsWith(".")) continue
+      // A worker pinned to one route reads the filesystem for that entry only: `<name>` or `<name>.ts`.
+      if (single && entry.name !== single && entry.name !== `${single}.ts`) continue
       const route = await routeFor(realRoot, root, entry.name)
       if (route !== undefined && (!single || route.name === single)) out.push(route)
     }

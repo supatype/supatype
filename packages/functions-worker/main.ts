@@ -310,12 +310,13 @@ function jsonError(code: string, message: string, status: number, extra: Record<
   })
 }
 
-const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
-// Order matters: withhold, then import. See withholdServiceRoleKey.
+/** The one route a pinned worker serves (a per-function or per-hook pod), or undefined. */
 function singleFunction(): string | undefined {
   return Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
 }
 
+const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
+// Order matters: withhold, then import. See withholdServiceRoleKey.
 const serviceRoleKey = await withholdServiceRoleKey()
 const root = functionsRoot()
 const routes = root ? await discoverRoutes(root, singleFunction()) : []
