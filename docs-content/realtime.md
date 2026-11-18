@@ -149,6 +149,7 @@ It needs `SupatypeProvider` above it, which takes your client as `client`. Give 
 
 ```tsx
 import { useChannel } from "@supatype/react"
+import { addBid, notify } from "./app"
 
 function Auction({ id }: { id: string }) {
   const { status, isConnected } = useChannel(`auction:${id}`, (channel) => {
@@ -284,6 +285,8 @@ Pass `private: true` when you open the channel. The server enforces declarations
 
 ```ts
 import { isRealtimeChannelError } from "@supatype/client"
+import { supatype } from "./supatype"
+import { displayName, lotId, retryLater, showBid, showRefusal, tellUser, updateWatchers } from "./app"
 
 const lot = supatype.realtime
   .channel(`lot:${lotId}`, { private: true })
@@ -309,6 +312,7 @@ In React, `useChannel` takes the options as its fourth argument, and returns `er
 ```tsx
 import { useChannel } from "@supatype/react"
 import { isRealtimeChannelError } from "@supatype/client"
+import { showBid } from "./app"
 
 function Lot({ id }: { id: string }) {
   const { status, error, refusal } = useChannel(
