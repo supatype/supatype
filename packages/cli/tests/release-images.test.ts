@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PINNED_IMAGES } from "../src/generated/release-images.js"
-import { defaultComponentVersion, isReleaseVersion, RELEASE_IMAGES, releaseImages } from "../src/release-images.js"
+import { defaultComponentVersion, isReleaseVersion, KONG_IMAGE, RELEASE_IMAGES, releaseImages, VALKEY_IMAGE } from "../src/release-images.js"
 import { renderSelfHostCompose, schemaEngineImageForPush } from "../src/self-host-compose.js"
 import { resolveVersionFor } from "../src/binary-cache.js"
 import * as engineFloors from "../src/engine-floor.js"
@@ -80,6 +80,31 @@ describe("the compose file", () => {
 
   it("defaults the server to the pinned release, under both of its variables", () => {
     expect(compose).toContain(`\${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-${RELEASE_IMAGES.server}}}`)
+  })
+
+  it("runs no image without an exact version: a tag with its digest, or a release's own", () => {
+    const withValkey = renderSelfHostCompose(
+      projectConfig({ project: { name: "pins" }, database: { provider: "docker" }, cache: { provider: "valkey" } }),
+    )
+    const pinnedByRelease = new Set<string>([RELEASE_IMAGES.engine, RELEASE_IMAGES.server, RELEASE_IMAGES.postgres])
+    const inRepo = new Set<string>(
+      (["studio", "storage", "realtime", "functions-worker", "control-plane"] as const).map((name) => RELEASE_IMAGES[name]),
+    )
+    const refs = [...withValkey.matchAll(/^\s+image: (.+)$/gm)].map((match) =>
+      (match[1]?.split(":-").pop() ?? "").replace(/\}+$/, ""),
+    )
+    expect(refs).toEqual(expect.arrayContaining([KONG_IMAGE, VALKEY_IMAGE]))
+    // The in-repo images are `:latest` in an unstamped source build, and nothing else is.
+    const loose = refs.filter(
+      (ref) => !/^\S+:v?\d\S*@sha256:[0-9a-f]{64}$/.test(ref) && !pinnedByRelease.has(ref) && !inRepo.has(ref),
+    )
+    expect(loose).toEqual([])
+  })
+
+  it("pins Kong and Valkey by version and digest, each overridable from .env", () => {
+    expect(KONG_IMAGE).toMatch(/^kong:3\.6\.\d+@sha256:[0-9a-f]{64}$/)
+    expect(VALKEY_IMAGE).toMatch(/^valkey\/valkey:8\.\d+\.\d+-alpine@sha256:[0-9a-f]{64}$/)
+    expect(compose).toContain(`image: \${SUPATYPE_KONG_IMAGE:-${KONG_IMAGE}}`)
   })
 
   it("never runs the engine, server or Postgres at :latest", () => {

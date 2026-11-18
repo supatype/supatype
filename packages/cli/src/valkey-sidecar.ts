@@ -11,11 +11,12 @@ import { pushStartUndo } from "./dev-shutdown.js"
 import { askDocker, DOCKER_PULL_TIMEOUT_MS, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { readDotEnvFiles } from "./env-file.js"
 import { spawnFailureText, type SpawnOutcome } from "./error-message.js"
+import { VALKEY_IMAGE } from "./release-images.js"
 import { firstFreePort, KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN } from "./postgres-ctl.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const VALKEY_ADDR_ENV = "SUPATYPE_VALKEY_ADDR"
-const IMAGE = "valkey/valkey:8-alpine"
+const IMAGE = VALKEY_IMAGE
 
 function containerName(projectName: string): string {
   const safe = projectName.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 48)
