@@ -4,7 +4,7 @@
  * CI. Self-host uses SERVICE_ROLE_KEY via `supatype link --url`, not this command.
  */
 import type { Command } from "commander"
-import { DEFAULT_API_URL, trimApiUrl } from "../api-url.js"
+import { pickApiUrl } from "../api-url.js"
 import {
   accountsUrl,
   defaultTokenName,
@@ -40,12 +40,8 @@ interface LoginOptions {
 }
 
 function defaultApiUrl(cwd: string, flag?: string): string {
-  if (flag?.trim()) return trimApiUrl(flag.trim())
   const link = loadProjectLink(cwd)
-  if (link?.kind === "cloud" && link.cloudApiUrl) {
-    return trimApiUrl(link.cloudApiUrl)
-  }
-  return trimApiUrl(process.env["SUPATYPE_API_URL"] ?? DEFAULT_API_URL)
+  return pickApiUrl(flag, link?.kind === "cloud" ? link.cloudApiUrl : undefined, process.env["SUPATYPE_API_URL"])
 }
 
 /** Show the URL to open, and open it unless `--no-browser`; the URL is always printed, for a box with no browser. */
