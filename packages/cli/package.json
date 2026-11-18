@@ -47,11 +47,11 @@
   },
   "dependencies": {
     "@supatype/shared": "workspace:*",
+    "@supatype/types": "workspace:*",
     "pg": "^8.13.0",
     "typescript": "^5"
   },
   "devDependencies": {
-    "@supatype/types": "workspace:*",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22",
     "@types/pg": "^8",

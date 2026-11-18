@@ -7,8 +7,10 @@ ENV VITE_BASE_PATH=$VITE_BASE_PATH
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY packages/studio/ packages/studio/
 COPY packages/client/ packages/client/
-RUN corepack enable pnpm && pnpm install --frozen-lockfile --filter @supatype/client --filter @supatype/studio
-RUN pnpm --filter @supatype/client build && pnpm --filter @supatype/studio build
+# Studio imports values from @supatype/types (the auth provider names), so it is built first too.
+COPY packages/types/ packages/types/
+RUN corepack enable pnpm && pnpm install --frozen-lockfile --filter @supatype/types --filter @supatype/client --filter @supatype/studio
+RUN pnpm --filter @supatype/types build && pnpm --filter @supatype/client build && pnpm --filter @supatype/studio build
 
 FROM nginx:alpine
 RUN echo "worker_processes 1;" > /etc/nginx/nginx.conf.d_worker \

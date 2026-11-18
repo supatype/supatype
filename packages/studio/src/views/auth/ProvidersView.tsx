@@ -3,6 +3,8 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useAuthSettings } from "../../hooks/useAuthSettings.js"
 import { usePlatform } from "../../hooks/usePlatform.js"
+import { CloudProviders } from "./CloudProviders.js"
+import { useCloudEnvironment } from "./CloudAuthParts.js"
 import { oauthProviderRows, SettingsLoading, SettingsTable } from "./AuthSettingsTable.js"
 
 /**
@@ -21,7 +23,13 @@ function howToChange(cloud: boolean): string {
     : "OAuth providers come from auth.providers in supatype.config.ts, or SUPATYPE_EXTERNAL_<PROVIDER>_* in the project's .env, which wins. Change them there and restart the stack. Studio cannot change them."
 }
 
+/** Cloud with a known environment edits through the control plane; everything else reads what the auth server reports. */
 export function ProvidersView(): React.ReactElement {
+  const environment = useCloudEnvironment()
+  return environment !== null ? <CloudProviders environment={environment} /> : <ReadOnlyProviders />
+}
+
+function ReadOnlyProviders(): React.ReactElement {
   const { settings, error, loading } = useAuthSettings()
   const cloud = usePlatform().platformUrl !== undefined
   const rows = settings ? oauthProviderRows(settings) : []
