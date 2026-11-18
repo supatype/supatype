@@ -210,7 +210,7 @@ All of these need Supatype Cloud, which is in closed beta ([request access](/#cl
 | Command | Description | Useful flags |
 | --- | --- | --- |
 | `self-update` | Update the supatype CLI (npm or standalone CDN binary) | `--force` |
-| `update` | Download the latest component binaries and update versions in supatype.config.ts | `--check` |
+| `update` | Download the latest component binaries and update versions in supatype.config.ts. On a Docker project it checks for a newer CLI release first and says to upgrade the CLI when one exists, because the image pins come from the CLI version, then pulls the images this CLI pins. `--check` reports the running CLI, the latest release and whether an upgrade would move the pins, and pulls nothing | `--check` |
 | `engine status` | Run the host engine binary's `--version` and show which binary answered |  |
 | `cache list` | List cached component binaries and their sizes | `--project <path>` |
 | `cache clean [component] [version]` | Remove cached binaries not pinned by local project configs, and CLI programs of other versions (`cache clean cli` for those alone) | `--dry-run`, `--force`, `--project <path>` |

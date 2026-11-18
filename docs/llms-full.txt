@@ -384,7 +384,7 @@ $ supatype self-host compose up -d      # run them
 $ supatype push                         # apply the schema they expect
 ```
 
-`supatype update` never updates the CLI itself, so update it first. Under Docker, `update` renders the compose file and pulls the images. It does not restart anything, which is why `compose up -d` follows.
+`supatype update` never updates the CLI itself, so update it first. The image pins come from the CLI version, so under Docker it looks up the latest CLI release and, when yours is behind, prints the upgrade command for how you installed it before carrying on. `supatype update --check` reports the running and latest versions without pulling, and the check is skipped with a warning when offline or on a CLI built from source. Under Docker, `update` renders the compose file and pulls the images. It does not restart anything, which is why `compose up -d` follows.
 
 The push is the step that is easy to miss. Grants, policies, functions and buckets are generated from your schema and only reach the database through `push`, so new images on an older database can refuse rules until it runs. The upgrade is finished after the push, not before.
 
@@ -5412,7 +5412,7 @@ All of these need Supatype Cloud, which is in closed beta ([request access](http
 | Command | Description | Useful flags |
 | --- | --- | --- |
 | `self-update` | Update the supatype CLI (npm or standalone CDN binary) | `--force` |
-| `update` | Download the latest component binaries and update versions in supatype.config.ts | `--check` |
+| `update` | Download the latest component binaries and update versions in supatype.config.ts. On a Docker project it checks for a newer CLI release first and says to upgrade the CLI when one exists, because the image pins come from the CLI version, then pulls the images this CLI pins. `--check` reports the running CLI, the latest release and whether an upgrade would move the pins, and pulls nothing | `--check` |
 | `engine status` | Run the host engine binary's `--version` and show which binary answered |  |
 | `cache list` | List cached component binaries and their sizes | `--project <path>` |
 | `cache clean [component] [version]` | Remove cached binaries not pinned by local project configs, and CLI programs of other versions (`cache clean cli` for those alone) | `--dry-run`, `--force`, `--project <path>` |
