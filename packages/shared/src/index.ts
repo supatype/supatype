@@ -54,6 +54,7 @@ export {
   ADAPTER_NAME,
   HOOK_FILES_FEATURE,
   HOOK_KEEP_FEATURE,
+  MIGRATE_SQL_FEATURE,
   isHookDeployAnswer,
   type HookDeployAnswer,
   FLATTENED_ADAPTER_IMPORT,

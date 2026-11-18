@@ -70,6 +70,9 @@ if (cmd === "migrations" && args.includes("--name")) {
       status: "applied",
     },
   ]))
+} else if (cmd === "migrate" && process.env["MOCK_ENGINE_REFUSE"] === undefined) {
+  // The engine prints the SQL and applies nothing; the arguments are echoed so a test sees them.
+  console.log(`-- migrate ${args.join(" ")}\nCREATE TABLE "note" ();`)
 } else if (cmd === "rollback") {
   console.log(JSON.stringify({
     status: "rolled_back",

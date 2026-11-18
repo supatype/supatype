@@ -3,7 +3,8 @@ import { plannedChanges } from "./diff-output.js"
 import type { DiffResult } from "./engine-client.js"
 import { resolveHostDatabaseUrl } from "./host-database.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
-import type { DeployTarget } from "./resolve-target.js"
+import { OwnershipUnsupportedError } from "./engine-ownership-gate.js"
+import { targetSchemaMigrateSql, type DeployTarget } from "./resolve-target.js"
 import { plain, warn } from "./ui/messages.js"
 import { withSpinner } from "./ui/progress.js"
 
@@ -11,7 +12,7 @@ import { withSpinner } from "./ui/progress.js"
 export interface PlanSqlSource {
   cwd: string
   config: SupatypeProjectConfig
-  target: Pick<DeployTarget, "mode" | "environment" | "databaseUrl">
+  target: DeployTarget | Pick<DeployTarget, "mode" | "environment" | "databaseUrl">
   ast: unknown
   schema: string
   /** `--connection`, when one was named. */
@@ -29,20 +30,33 @@ function remoteName(target: Pick<DeployTarget, "mode" | "environment">): string 
   return target.mode === "cloud" ? `Supatype Cloud (${target.environment})` : `the self-hosted server (${target.environment})`
 }
 
-/**
- * The SQL a push to `source.target` would apply. A database this machine reaches is asked of the
- * engine, as `supatype migrate` does. A linked self-host server and Supatype Cloud have no endpoint
- * that writes SQL without applying it, so they answer with why instead.
- */
-export async function planSqlOrReason(source: PlanSqlSource): Promise<PlanSql> {
-  const { target } = source
-  if (target.mode === "cloud" || target.mode === "self-host") {
+/** A linked self-host server or Supatype Cloud: the whole target, which a request to it needs. */
+function isLinked(target: PlanSqlSource["target"]): target is DeployTarget {
+  return "apiBaseUrl" in target && (target.mode === "cloud" || target.mode === "self-host")
+}
+
+/** The SQL a linked server writes, or why it cannot: a server from before the route is told to update. */
+async function linkedPlanSql(target: DeployTarget, source: PlanSqlSource): Promise<PlanSql> {
+  try {
+    return { sql: await targetSchemaMigrateSql(target, source.ast, { schema: source.schema }) }
+  } catch (err: unknown) {
+    if (!(err instanceof OwnershipUnsupportedError)) throw err
     return {
       reason:
-        `${remoteName(target)} cannot print the SQL: its API has no endpoint that writes it without applying it. ` +
+        `${remoteName(target)} cannot print the SQL: ${err.message}. ` +
         "The change list above is what it reports. Run `supatype migrate` against a local database to see the SQL.",
     }
   }
+}
+
+/**
+ * The SQL a push to `source.target` would apply. A database this machine reaches is asked of the
+ * engine, as `supatype migrate` does. A linked self-host server or Supatype Cloud writes it itself
+ * (`POST /schema/migrate`); one that has no such route answers with why instead.
+ */
+export async function planSqlOrReason(source: PlanSqlSource): Promise<PlanSql> {
+  const { target } = source
+  if (isLinked(target)) return linkedPlanSql(target, source)
   const dsn =
     target.databaseUrl ?? resolveHostDatabaseUrl(source.cwd, source.config, { connection: source.connection, allowDerived: true }).dsn
   const sql = await engineMigrationSql(source.cwd, source.config, {

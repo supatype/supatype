@@ -51,6 +51,9 @@ export const OWNERSHIP_FEATURES = [
   // A schema's `Channel<>` declarations and `realtime.channels`. An engine without it drops both and
   // pushes the rest, so declared channels would have no access function and nothing would enforce them.
   "private_channels",
+  // A server's own: `POST /schema/migrate`, the SQL of a push written and applied to nothing. A linked
+  // target without it answers `push --dry-run` and `diff --sql` with a 404, so it is asked first.
+  "migrate_sql",
 ] as const
 
 export type OwnershipFeature = (typeof OWNERSHIP_FEATURES)[number]
@@ -95,6 +98,12 @@ export const OVERWRITE_DRIFT_NEED: FeatureNeed = { feature: "overwrite_drift", f
 
 /** What firing after-hooks for a push's own data migrations needs (`push --run-hooks`). */
 export const RUN_HOOKS_NEED: FeatureNeed = { feature: "run_hooks", flag: "--run-hooks" }
+
+/** What printing the SQL of a push from a linked server needs (`push --dry-run`, `diff --sql`). */
+export const MIGRATE_SQL_NEED: FeatureNeed = {
+  feature: "migrate_sql",
+  flag: "printing the SQL of a push (push --dry-run, diff --sql)",
+}
 
 /**
  * What a rebaseline needs to record only the drift its preview showed. An engine or server without
