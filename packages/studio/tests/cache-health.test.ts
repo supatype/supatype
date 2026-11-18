@@ -144,7 +144,7 @@ describe("the staleness window, in words", () => {
 describe("a percentage nobody has measured yet", () => {
   it("renders as a dash, never as zero", () => {
     // A fresh cache showing 0% looks broken and is not.
-    expect(formatPct(null)).toBe("—")
+    expect(formatPct(null)).toBe("n/a")
     expect(formatPct(0)).toBe("0%")
     expect(formatPct(93.4)).toBe("93.4%")
   })

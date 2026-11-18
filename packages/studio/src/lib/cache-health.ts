@@ -6,12 +6,12 @@
  *
  *  1. The counters are cumulative and are not reset by reading. A hit rate computed from the
  *     totals shows 94% on a cache that has been broken for an hour, because the good first hour
- *     is still in the numerator. Rates come from a delta between two samples — `hitRateOver`.
+ *     is still in the numerator. Rates come from a delta between two samples: `hitRateOver`.
  *  2. A switched-off feature returns no rows, not zeroes. The server renders that as a state
  *     rather than a struct of zeroes, and `rowCacheHeadline` keeps "off" and "healthy and idle"
  *     apart.
  *  3. `stale_after_ms` is a promise to a user, not an ops metric. Mode B is eventual with a
- *     bound, so it is said in words wherever the row cache is reported — and read live, because it
+ *     bound, so it is said in words wherever the row cache is reported, and read live, because it
  *     grows with the number of participating databases. There is no control to put it next to:
  *     Mode B is declared in the schema and not switched on in Studio (§13.3), so the sentence
  *     rides the row-cache line in `cache-declaration.ts`.
@@ -90,7 +90,7 @@ export interface WindowedRate {
  * The hit rate between two samples of the cumulative counters.
  *
  * Returns null for `pct` whenever it cannot honestly answer: no second sample yet, no requests in
- * the window, or counters that went backwards — which they do, legitimately, when the server
+ * the window, or counters that went backwards, which they do, legitimately, when the server
  * restarts and the segment starts again from zero. Showing 0% for any of those invents an outage.
  */
 export function hitRateOver(prev: Sample | null, next: Sample): WindowedRate {
@@ -151,7 +151,7 @@ export function rowCacheHeadline(status: RowCacheStatus | null): Headline {
         tone: "bad",
         detail: status.slot_lost
           ? "The server released this database's replication slot for holding too much WAL, so an unknown " +
-            "set of invalidations was never delivered. Reads have stopped using the cache — answers are " +
+            "set of invalidations was never delivered. Reads have stopped using the cache. Answers are " +
             "still correct, they are just no longer faster."
           : "Invalidations are arriving later than the staleness window allows, so reads have stopped using " +
             "the cache. Answers are still correct; they are no longer faster.",
@@ -172,7 +172,7 @@ export function rowCacheHeadline(status: RowCacheStatus | null): Headline {
  *
  * Mode B is eventual with a bound, not read-your-writes. The number has to come from the view
  * rather than the 200ms default, because it grows to the cycle time once participating databases
- * outnumber the invalidation workers — a database waiting its turn is behind by design.
+ * outnumber the invalidation workers, since a database waiting its turn is behind by design.
  */
 export function describeStaleness(staleAfterMs: number): string {
   const window =
@@ -185,9 +185,9 @@ export function describeStaleness(staleAfterMs: number): string {
   )
 }
 
-/** Rule 4 at the point of rendering: null is "—", zero is "0%". */
+/** Rule 4 at the point of rendering: null is "n/a", zero is "0%". */
 export function formatPct(pct: number | null): string {
-  return pct === null ? "—" : `${pct}%`
+  return pct === null ? "n/a" : `${pct}%`
 }
 
 export function formatBytes(b: number): string {
@@ -208,8 +208,8 @@ export function arenaFillPct(used: number, capacity: number): number | null {
  *
  * §12.2 chose one switch for both caches, so enabling a table in the REST
  * allowlist also registers it for the row cache. The two are still different
- * things — the response cache takes any table, the row cache needs a primary
- * key — and this is where the difference reaches a user.
+ * things: the response cache takes any table, the row cache needs a primary
+ * key, and this is where the difference reaches a user.
  */
 export interface RowCacheReconcile {
   registered?: string[]
