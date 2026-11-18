@@ -11,6 +11,8 @@ import type { TargetCall } from "./support/engine-mocks.js"
 const targetSchemaPush = vi.hoisted(() => vi.fn<TargetCall<{ overwriteDrift?: boolean }>>())
 const askMock = vi.hoisted(() => vi.fn(async () => true))
 const interactive = vi.hoisted(() => ({ value: true }))
+// The operations the pre-push diff plans; none unless a test says otherwise.
+const planned = vi.hoisted(() => ({ operations: [] as Array<{ type: string; description: string; risk: string }> }))
 
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
 vi.mock("../src/model-versioning.js", () => ({ withPublishing: (ast: unknown) => ast }))
@@ -70,7 +72,7 @@ vi.mock("../src/resolve-target.js", async (importOriginal) => ({
     apiBaseUrl: "https://app.example.test",
     link: null,
   }),
-  targetSchemaDiff: async () => ({ operations: [], reconcile: [] }),
+  targetSchemaDiff: async () => ({ operations: planned.operations, reconcile: [] }),
   targetSchemaPush,
   targetSchemaAdopt: vi.fn(),
   requireTargetFeatures: async () => undefined,
@@ -108,6 +110,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void printed.push(a.join(" ")))
   process.exitCode = undefined
   hooksDeploy.fails = false
+  planned.operations = []
 })
 afterEach(() => {
   vi.restoreAllMocks()
@@ -167,6 +170,20 @@ describe("a push whose hook deploy fails after the schema is applied", () => {
     expect(text).toContain("Route not found")
     expect(text).not.toContain("Pushed to self-host")
     expect(text).toContain("The push to the self-hosted server (prod) did not finish")
+    expect(process.exitCode).toBe(1)
+  })
+})
+
+// A destructive change refused off a terminal printed "Aborted." and exited 0, so CI read a blocked
+// migration as a successful push.
+describe("a risky change without a terminal or --yes", () => {
+  it("applies nothing and exits 1", async () => {
+    interactive.value = false
+    planned.operations = [{ type: "drop_column", description: "drop_column post.title", risk: "destructive" }]
+    await push()
+    expect(targetSchemaPush).not.toHaveBeenCalled()
+    expect(askMock).not.toHaveBeenCalled()
+    expect(printed).toContain("Aborted.")
     expect(process.exitCode).toBe(1)
   })
 })
