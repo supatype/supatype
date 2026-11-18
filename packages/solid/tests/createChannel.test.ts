@@ -6,6 +6,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { describeStatusAcrossSignIn, createSocketSwapHarness, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
+import { closeEvent } from "../../client/tests/helpers/mock-websocket.js"
 
 const lifecycle = vi.hoisted(() => ({ cleanup: [] as Array<() => void>, harness: null as SocketSwapHarness | null }))
 
@@ -50,7 +51,7 @@ describe("createChannel's connection", () => {
     expect(connectionState()).toBe("connected")
     expect(isConnected()).toBe(true)
 
-    harness.socket().onclose?.(new Event("close") as CloseEvent)
+    harness.socket().onclose?.(closeEvent())
     expect(connectionState()).toBe("connecting")
     expect(isConnected()).toBe(false)
 

@@ -4,7 +4,8 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { runSchemaPush } from "../src/commands/dev.js"
 import { ENGINE_MIN_FOR_CHANNELS } from "../src/engine-floor.js"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
+import { selfHostComposePaths } from "../src/self-host-compose.js"
 
 /**
  * `supatype push` refuses a schema the pinned engine would silently drop part of. `supatype dev`
@@ -29,13 +30,13 @@ function project(engine: string): { cwd: string; schemaPath: string; config: Sup
   mkdirSync(join(cwd, ".supatype"), { recursive: true })
   const schemaPath = join(cwd, "schema.ts")
   writeFileSync(schemaPath, SCHEMA, "utf8")
-  const config = {
+  const config = validateProjectConfig({
     project: { name: "p" },
     database: { provider: "native" },
     server: { mode: "dev" },
     app: { mode: "none" },
     versions: { engine },
-  } as unknown as SupatypeProjectConfig
+  }, "supatype.config.ts")
   return { cwd, schemaPath, config }
 }
 
@@ -52,7 +53,7 @@ describe("docker dev's schema push", () => {
   it("refuses channels on a pinned engine older than the floor, before the AST file or any compose call", async () => {
     const { runComposeSchemaPush } = await import("../src/dev-compose.js")
     const { cwd, schemaPath, config } = project("0.1.9")
-    const paths = {} as Parameters<typeof runComposeSchemaPush>[2]
+    const paths = selfHostComposePaths(cwd)
     await expect(runComposeSchemaPush(cwd, config, paths, schemaPath, "p")).rejects.toThrow(
       /realtime channels, which needs schema-engine .* or newer, and this project pins 0\.1\.9/,
     )

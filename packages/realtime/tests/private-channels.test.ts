@@ -179,7 +179,9 @@ describe("an anon-key socket on a declared channel (the Gavel finding)", () => {
     expect(refusalOf(member, long)).toMatchObject({ code: "refused", message: "channel name is too long: 304 characters, the limit is 255" })
     expect(db.callerSessions + db.serviceSessions).toBe(before)
     const ok = `lot:${"a".repeat(251)}`
-    expect(await join(member, ok)).toMatchObject({ status: "error", message: expect.not.stringContaining("too long") })
+    const joined = await join(member, ok)
+    expect(joined).toMatchObject({ status: "error" })
+    expect(JSON.stringify(joined)).not.toContain("too long")
   })
 
   it("says so when a declaration has no rule for the operation, and a rule that said no is worded differently", async () => {

@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http"
-import type { AddressInfo } from "node:net"
+import { portOf } from "./helpers/listen.js"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -37,7 +37,7 @@ beforeEach(async () => {
     res.end(Buffer.alloc(2_000_000, 1))
   })
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok))
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  base = `http://127.0.0.1:${portOf(server)}`
   vi.spyOn(process.stdout, "write").mockImplementation((c: string | Uint8Array) => { written.push(String(c)); return true })
   vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { written.push(a.join(" ")) })
 })

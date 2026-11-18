@@ -5,8 +5,15 @@ import { execFileSync } from "node:child_process"
 import { pathToFileURL } from "node:url"
 import ts from "typescript"
 import { afterEach, describe, expect, it } from "vitest"
+import { isJsonObject } from "@supatype/shared"
 import { generateHooksModule } from "../src/hooks-generator.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
+
+type HookFactory = (h: (ctx: Record<string, unknown>) => unknown) => (req: Request, fn?: unknown) => Promise<Response>
+
+function isHookFactory(value: unknown): value is HookFactory {
+  return typeof value === "function"
+}
 
 /** What `tsc -p <dir>/tsconfig.json` printed: nothing when the project compiles. */
 function tscOutput(dir: string): string {
@@ -231,9 +238,9 @@ export default hook(moderate)
     dirs.push(dir)
     const source = generateHooksModule(astFor(HOOKED_SCHEMA)) ?? ""
     writeFileSync(join(dir, "hooks.mjs"), ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText, "utf8")
-    const { hook } = await import(pathToFileURL(join(dir, "hooks.mjs")).href) as {
-      hook: (h: (ctx: Record<string, unknown>) => unknown) => (req: Request, fn?: unknown) => Promise<Response>
-    }
+    const mod: unknown = await import(pathToFileURL(join(dir, "hooks.mjs")).href)
+    const hook = isJsonObject(mod) ? mod["hook"] : undefined
+    if (!isHookFactory(hook)) throw new Error("the generated module exports no hook()")
     let seen: Record<string, unknown> = {}
     const run = hook((ctx) => { seen = ctx; return {} })
     const req = new Request("http://worker/hook", { method: "POST", body: JSON.stringify({ table: "posts", operation: "insert", rows: [] }) })

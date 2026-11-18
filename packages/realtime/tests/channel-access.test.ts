@@ -84,13 +84,12 @@ describe("a join, by the database's answer and the project's mode", () => {
 
   it("is admitted with no row, and in declared mode only listens", () => {
     expect(decide(null, "open")).toMatchObject({ admitted: true, grant: { send: null, track: null } })
-    expect(decide(null, "declared")).toMatchObject({
+    const declared = decide(null, "declared")
+    expect(declared).toMatchObject({
       admitted: true,
-      grant: {
-        send: { code: "send_denied", message: expect.stringContaining("matches no declared channel") },
-        track: { code: "track_denied", message: expect.stringContaining("matches no declared channel") },
-      },
+      grant: { send: { code: "send_denied" }, track: { code: "track_denied" } },
     })
+    expect(JSON.stringify(declared)).toMatch(/matches no declared channel.*matches no declared channel/)
   })
 
   it("remembers that it was opened as private, so a removed declaration takes the channel away", () => {

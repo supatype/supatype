@@ -1,10 +1,11 @@
 import { createServer, type Server } from "node:http"
-import type { AddressInfo } from "node:net"
+import { portOf } from "./helpers/listen.js"
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { cacheSeedingNotes } from "../src/api-config-cache.js"
+import { isJsonObject } from "@supatype/shared"
 
 /**
  * A model's cache block is a ceiling; the runtime allowlist is what is on. These run `push`'s and
@@ -13,6 +14,12 @@ import { cacheSeedingNotes } from "../src/api-config-cache.js"
 const ast = { models: [{ name: "Post", annotations: { db: { tableName: "posts" }, platform: { cache: { enabled: true } } } }] }
 
 interface Fake { server: Server; url: string; patches: unknown[] }
+/** The JSON object a PATCH carried; anything else merges nothing. */
+function patchBody(body: string): Record<string, unknown> {
+  const parsed = JSON.parse(body)
+  return isJsonObject(parsed) ? parsed : {}
+}
+
 const servers: Server[] = []
 const dirs: string[] = []
 
@@ -25,7 +32,7 @@ async function fakeAdmin(rest: Record<string, unknown>, patchStatus = 200): Prom
       res.setHeader("content-type", "application/json")
       if (req.method === "PATCH") {
         patches.push(JSON.parse(body))
-        const merged = { ...rest, ...(JSON.parse(body) as Record<string, unknown>) }
+        const merged = { ...rest, ...patchBody(body) }
         res.writeHead(patchStatus).end(JSON.stringify(patchStatus === 200 ? merged : { error: "rest_cache_not_available" }))
         return
       }
@@ -34,7 +41,7 @@ async function fakeAdmin(rest: Record<string, unknown>, patchStatus = 200): Prom
   })
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok))
   servers.push(server)
-  return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, patches }
+  return { server, url: `http://127.0.0.1:${portOf(server)}`, patches }
 }
 
 function project(url: string): string {

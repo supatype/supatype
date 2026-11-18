@@ -1,5 +1,10 @@
 import type { AnyClient } from "../../src/index.js"
 import type { SocketSwapHarness } from "./socket-swap.js"
+import { isJsonObject } from "../../src/json.js"
+
+function isAnyClient(value: unknown): value is AnyClient {
+  return isJsonObject(value) && isJsonObject(value["realtime"]) && typeof value["from"] === "function"
+}
 
 /**
  * A client for `watchTable`: the harness's realtime client, and a `from(table)` whose reads answer
@@ -27,6 +32,8 @@ export function fakeClient<TRow>(
     }
     return query
   }
-  // The stand-in has only what `watchTable` touches, so it is typed as the client at this one place.
-  return { client: { realtime: harness.realtime, from } as unknown as AnyClient, filters }
+  // The stand-in has only what `watchTable` touches, so that is what the guard below checks for.
+  const client: unknown = { realtime: harness.realtime, from }
+  if (!isAnyClient(client)) throw new Error("the fake client is missing what watchTable touches")
+  return { client, filters }
 }
