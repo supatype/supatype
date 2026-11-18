@@ -397,7 +397,7 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
         message: "Where will this run in production?",
         initialValue: defaultTarget,
         options: [
-          { value: "cloud", label: "Supatype Cloud", hint: "managed; deploy via supatype link" },
+          { value: "cloud", label: "Supatype Cloud", hint: "managed, closed beta: request access at supatype.com" },
           { value: "self-host", label: "Self-host", hint: "your own server with TLS" },
           { value: "later", label: "Decide later", hint: "local development only for now" },
         ],

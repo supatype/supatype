@@ -45,7 +45,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 Commands that use Docker first check that it answers. A Docker that says it cannot be reached fails the command at once. A Docker that is running but slow to answer, as on a machine carrying many containers, is waited for, with a line saying so, for up to 60 seconds in all; set `SUPATYPE_DOCKER_TIMEOUT` to a whole number of seconds to wait longer or shorter.
 
 :::note[Cloud]
-Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.
+Commands marked **Cloud** need Supatype Cloud, which is in closed beta ([request access](/#cloud)). Everything else works locally and on a self-hosted stack.
 :::
 
 <h2 id="project">Project and local development</h2>
@@ -188,7 +188,7 @@ For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token
 
 <h2 id="cloud">Supatype Cloud</h2>
 
-All of these need Supatype Cloud, which is coming soon.
+All of these need Supatype Cloud, which is in closed beta ([request access](/#cloud)).
 
 | Command | Description | Useful flags |
 | --- | --- | --- |

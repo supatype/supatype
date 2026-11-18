@@ -220,7 +220,7 @@ Set `API_EXTERNAL_URL` and `SITE_URL` in `.env` to `https://example.com`: values
 `supatype dev` never turns HTTPS on, so the same committed config still runs on `http://localhost`.
 
 :::note[Rather not run it yourself?]
-Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](/#cloud), or [book a call](/#contact) about self-hosting with support.
+Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](/#cloud), or [book a call](/#contact) about self-hosting with support.
 :::
 
 <h2 id="deploy-changes">Deploy changes</h2>
