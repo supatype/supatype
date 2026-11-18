@@ -445,7 +445,7 @@ $$;</pre></div>
       <li><strong>Expiry.</strong> A token that expires closes the socket with 4401, as before.</li>
       <li><strong>Database down at join.</strong> The service fails closed. It refuses every join, open channels included, with code <code>unavailable</code> and <code>retryable</code> set, because without the database it cannot tell whether a topic is declared. Retry with a delay.</li>
       <li><strong>Database down at a re-check.</strong> Nobody loses a channel because a check could not run. Held channels keep their access and the check is tried again at the next interval. A new token that cannot be checked still withdraws the channels, since the old answer no longer applies.</li>
-      <li><strong>Shared instance.</strong> A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says <code>private</code>, with code <code>shared_instance</code>. The Cloud beta runs one realtime service per project.</li>
+      <li><strong>Shared instance.</strong> A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says <code>private</code>, with code <code>shared_instance</code>. Supatype Cloud (closed beta) runs one realtime service per project.</li>
     </ul>
 
     <h2 id="refusal-codes">Refusal codes</h2>

@@ -334,7 +334,7 @@ Set `API_EXTERNAL_URL` and `SITE_URL` in `.env` to `https://example.com`: values
 
 `supatype dev` never turns HTTPS on, so the same committed config still runs on `http://localhost`.
 
-> **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
+> **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
 
 ### Deploy changes
 
@@ -2877,7 +2877,7 @@ if (error) console.error(error.code, error.message)
 - **Expiry.** A token that expires closes the socket with 4401, as before.
 - **Database down at join.** The service fails closed. It refuses every join, open channels included, with code `unavailable` and `retryable` set, because without the database it cannot tell whether a topic is declared. Retry with a delay.
 - **Database down at a re-check.** Nobody loses a channel because a check could not run. Held channels keep their access and the check is tried again at the next interval. A new token that cannot be checked still withdraws the channels, since the old answer no longer applies.
-- **Shared instance.** A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says `private`, with code `shared_instance`. The Cloud beta runs one realtime service per project.
+- **Shared instance.** A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says `private`, with code `shared_instance`. Supatype Cloud (closed beta) runs one realtime service per project.
 
 ### Refusal codes
 
@@ -4419,7 +4419,7 @@ Watch the run under **Actions** on GitHub. When it succeeds, load your gateway U
 | Site unchanged | `supatype build` writes to the directory in `app.static_dir`, then re-run `supatype self-host compose up -d`. |
 | `supatype build` fails | It lists each source it tried for the API URL and anon key. On the VM both come from `.env`: `API_EXTERNAL_URL` must be the public address, not `localhost`, and `ANON_KEY` must be set. See [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html#missing). |
 
-> **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
+> **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
 
 ## Coming from Supabase
 
@@ -4885,7 +4885,7 @@ psql "$DATABASE_URL" -c "SELECT * FROM supacache.pg_stat_keyspace;"
 | Backups | A separate artefact on a separate schedule with a separate restore. | Persisted keys are Postgres tables, so base backups and point-in-time recovery include them. |
 | Monitoring | A Redis exporter to deploy and wire up. | pg_stat_keyspace views, granted to pg_monitor. Existing Postgres collectors read them. |
 | Command and type surface | Wider. Adds streams, scripting, HyperLogLog and geo. | Strings, hashes, lists, sets, sorted sets, bitmaps, Bloom and Cuckoo filters, pub/sub and transactions. |
-| Maturity | Mature and battle-tested, with a large ecosystem. | New, with a focused feature set. |
+| Maturity | Mature, with a large ecosystem. | New, with a focused feature set. |
 
 ### What it does not do
 
@@ -5250,7 +5250,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 
 Commands that use Docker first check that it answers. A Docker that says it cannot be reached fails the command at once. A Docker that is running but slow to answer, as on a machine carrying many containers, is waited for, with a line saying so, for up to 60 seconds in all; set `SUPATYPE_DOCKER_TIMEOUT` to a whole number of seconds to wait longer or shorter.
 
-> **CLOUD:** Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.
+> **CLOUD:** Commands marked **Cloud** need Supatype Cloud, which is in closed beta ([request access](https://www.supatype.com/#cloud)). Everything else works locally and on a self-hosted stack.
 
 ### Project and local development
 
@@ -5390,7 +5390,7 @@ For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token
 
 ### Supatype Cloud
 
-All of these need Supatype Cloud, which is coming soon.
+All of these need Supatype Cloud, which is in closed beta ([request access](https://www.supatype.com/#cloud)).
 
 | Command | Description | Useful flags |
 | --- | --- | --- |

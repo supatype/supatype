@@ -27,7 +27,7 @@ function defaultApiUrl(cwd: string, flag?: string): string {
 export function registerLogin(program: Command): void {
   program
     .command("login")
-    .description("Sign in to Supatype Cloud (stores refreshable session for push/deploy)")
+    .description("Sign in to Supatype Cloud (closed beta: request access at https://www.supatype.com/#cloud)")
     .option("--api-url <url>", "Cloud control plane API URL")
     .option("--email <email>", "Account email (non-interactive)")
     .option("--password <password>", "Account password (prefer SUPATYPE_PASSWORD)")

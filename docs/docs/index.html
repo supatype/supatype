@@ -261,7 +261,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
     <p>Set <code>API_EXTERNAL_URL</code> and <code>SITE_URL</code> in <code>.env</code> to <code>https://example.com</code>: values in <code>.env</code> win over the HTTPS default. Certificates are kept in the stack's key-value store (the <code>valkey-data</code> volume, or the database when the cache is <code>pg_keyspace</code>), so they survive restarts. Port 80 also still answers plain HTTP: nothing redirects it to HTTPS.</p>
     <p><code>supatype dev</code> never turns HTTPS on, so the same committed config still runs on <code>http://localhost</code>.</p>
 
-    <div class="callout"><span class="callout-label">RATHER NOT RUN IT YOURSELF?</span><p>Supatype Cloud runs the same stack for you, and it is coming soon. <a href="/#cloud">Join the waiting list</a>, or <a href="/#contact">book a call</a> about self-hosting with support.</p></div>
+    <div class="callout"><span class="callout-label">RATHER NOT RUN IT YOURSELF?</span><p>Supatype Cloud runs the same stack for you, and it is in closed beta. <a href="/#cloud">Request access</a>, or <a href="/#contact">book a call</a> about self-hosting with support.</p></div>
 
     <h2 id="deploy-changes">Deploy changes</h2>
     <p>Local and self-hosted environments read the same committed config. What differs between machines lives in files you do not commit.</p>

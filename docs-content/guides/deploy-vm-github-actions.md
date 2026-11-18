@@ -211,5 +211,5 @@ Watch the run under **Actions** on GitHub. When it succeeds, load your gateway U
 | `supatype build` fails | It lists each source it tried for the API URL and anon key. On the VM both come from `.env`: `API_EXTERNAL_URL` must be the public address, not `localhost`, and `ANON_KEY` must be set. See [Deploy your frontend](/docs/deploying-your-frontend.html#missing). |
 
 :::note[Rather not run it yourself?]
-Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](/#cloud), or [book a call](/#contact) about self-hosting with support.
+Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](/#cloud), or [book a call](/#contact) about self-hosting with support.
 :::
