@@ -109,14 +109,3 @@ describe("supatype diff --sql", () => {
     expect(endpoints()).toEqual(["/diff"])
   })
 })
-
-describe("plan SQL on a target with no SQL endpoint", () => {
-  it("says a linked server cannot print it, rather than printing none", async () => {
-    const { planSqlOrReason } = await import("../src/plan-sql.js")
-    const cloud = { ...directTarget(""), mode: "cloud" as const, databaseUrl: undefined }
-    const answer = await planSqlOrReason({ cwd, config: projectConfig(), target: cloud, ast: {}, schema: "public" })
-    expect(answer.sql).toBeUndefined()
-    expect(answer.reason).toMatch(/Supatype Cloud.*cannot print/)
-    expect(endpoints()).toEqual([])
-  })
-})

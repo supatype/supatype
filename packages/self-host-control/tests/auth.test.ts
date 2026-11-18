@@ -21,6 +21,7 @@ const ROUTES: Array<[string, string]> = [
   ["GET", `/projects/${PROJECT}/status`],
   ["GET", `/projects/${PROJECT}/schema/capabilities`],
   ["POST", `/projects/${PROJECT}/schema/diff`],
+  ["POST", `/projects/${PROJECT}/schema/migrate`],
   ["POST", `/projects/${PROJECT}/schema/push`],
   ["POST", `/projects/${PROJECT}/schema/rollback`],
   ["GET", `/projects/${PROJECT}/schema/migrations`],

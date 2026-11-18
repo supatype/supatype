@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http"
-import { HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, MIGRATE_SQL_FEATURE, isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
@@ -14,6 +14,7 @@ import {
   runEngineDoctor,
   runEngineIntrospect,
   runEngineListMigrations,
+  runEngineMigrateSql,
   runEngineMigrationSources,
   runEnginePush,
   runEngineRollback,
@@ -95,6 +96,18 @@ export function registerSchemaRoutes(
     sendJson(ctx.res, 200, { data })
   })
 
+  // The SQL a push would apply, applied to nothing: `push --dry-run` and `diff --sql` on a linked target.
+  route(routes, "POST", "/projects/:ref/schema/migrate", async (ctx) => {
+    assertProject(ctx.params["ref"]!)
+    const body = bodyOf(ctx.body, isDiffBody)
+    if (!body.ast) {
+      sendJson(ctx.res, 400, { error: "validation_error", message: "ast required" })
+      return
+    }
+    const db = databaseUrlFromEnv()
+    await answering(ctx.res, async () => ({ sql: await runEngineMigrateSql(db, body.ast, body.schema ?? "public") }))
+  })
+
   // What the engine behind this control plane supports, so a CLI refuses a flag it would drop, and
   // what the control plane itself takes: a hook of several files (HOOK_FILES_FEATURE), and a hooks
   // deploy hook by hook, with `keep` (HOOK_KEEP_FEATURE).
@@ -109,7 +122,7 @@ export function registerSchemaRoutes(
         return []
       },
     )
-    sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE] } })
+    sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, MIGRATE_SQL_FEATURE] } })
   })
 
   route(routes, "POST", "/projects/:ref/schema/push", async (ctx) => {

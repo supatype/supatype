@@ -68,7 +68,7 @@ describe("schema routes (mock engine)", () => {
     try {
       const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
       assert.equal(res.status, 200, JSON.stringify(res.json))
-      assert.deepEqual(res.json.data, { features: ["hook_files", "hook_keep"] })
+      assert.deepEqual(res.json.data, { features: ["hook_files", "hook_keep", "migrate_sql"] })
     } finally {
       process.env["SUPATYPE_ENGINE_MOCK"] = MOCK_ENGINE
       if (bin === undefined) delete process.env["SUPATYPE_ENGINE_BIN"]
@@ -93,7 +93,7 @@ describe("schema routes (mock engine)", () => {
       const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
       assert.equal(res.status, 200)
       // The engine lists nothing; the control plane's own features are still there.
-      assert.deepEqual(res.json.data, { features: ["hook_files", "hook_keep"] })
+      assert.deepEqual(res.json.data, { features: ["hook_files", "hook_keep", "migrate_sql"] })
     } finally {
       delete process.env["MOCK_ENGINE_NO_CAPABILITIES"]
       resetEngineCapabilities()
@@ -257,6 +257,42 @@ describe("schema routes (mock engine)", () => {
     } finally {
       delete process.env["MOCK_ENGINE_REFUSE"]
     }
+  })
+
+  // The plan-only route: the SQL a push would apply, written by the engine's `migrate`, applied to nothing.
+  test("POST /schema/migrate answers the SQL, asking the engine to plan with force and applying nothing", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/migrate`, { ast: {}, schema: "app" })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    const sql = dataString(res.json, "sql")
+    assert.match(sql, /^-- migrate /)
+    assert.match(sql, /CREATE TABLE "note"/)
+    assert.match(sql, / --force/)
+    assert.match(sql, / --schema app/)
+    assert.ok(!sql.includes("push"), sql)
+    assert.ok(!sql.includes("--record"), sql)
+  })
+
+  test("POST /schema/migrate without an ast is a 400", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/migrate`, {})
+    assert.equal(res.status, 400)
+    assert.equal(res.json["error"], "validation_error")
+  })
+
+  test("POST /schema/migrate is a 409 naming the reason when the engine refuses", async () => {
+    process.env["MOCK_ENGINE_REFUSE"] = "engine_busy"
+    try {
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/migrate`, { ast: {} })
+      assert.equal(res.status, 409)
+      assert.equal(res.json["reason"], "engine_busy")
+    } finally {
+      delete process.env["MOCK_ENGINE_REFUSE"]
+    }
+  })
+
+  test("GET /schema/capabilities lists migrate_sql, which this control plane serves", async () => {
+    resetEngineCapabilities()
+    const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
+    assert.ok(dataStrings(res.json, "features").includes("migrate_sql"))
   })
 
   test("POST /schema/rollback applies rollback", async () => {
