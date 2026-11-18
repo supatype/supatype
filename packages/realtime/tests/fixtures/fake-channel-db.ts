@@ -63,6 +63,8 @@ export class FakeChannelDb implements ChannelDatabase {
   anonLacksPrivilege = false
   /** When true the four functions do not exist, as on a project pushed by an engine before them. */
   noFunctions = false
+  /** When true the functions exist and the project has declared no channel, as after a push of a config with none. */
+  nothingDeclared = false
 
   /**
    * When set, the channel functions (mode, send checks, dependencies, access) raise `insufficient_privilege`
@@ -118,6 +120,7 @@ export class FakeChannelDb implements ChannelDatabase {
       }
     }
     if (sql.includes("realtime_channel_mode")) return [{ mode: this.mode }]
+    if (this.nothingDeclared && /realtime_channel_(send_checks|dependencies|access)/.test(sql)) return []
     if (sql.includes("realtime_channel_send_checks")) {
       return [{ channel: "LotChannel", checks: this.sendChecks }, { channel: "Lobby", checks: null }]
     }
@@ -175,10 +178,14 @@ export class FakeChannelDb implements ChannelDatabase {
   }
 }
 
-/** A database that answers every question with "nothing declared": what the suites that predate private channels run on. */
+/**
+ * A database that has been pushed with no channel declared and the open mode: what the suites that
+ * predate private channels run on. It is not a database before its first push, which has no functions
+ * and is held to "declared".
+ */
 export function undeclaredChannels(): FakeChannelDb {
   const db = new FakeChannelDb()
   db.mode = "open"
-  db.noFunctions = true
+  db.nothingDeclared = true
   return db
 }
