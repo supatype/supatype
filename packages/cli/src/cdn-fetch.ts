@@ -13,6 +13,34 @@ import { getActiveFlowApi } from "./ui/runtime/flow-session.js"
 /** How long a request may go without receiving a byte. */
 export const STALL_WINDOW_MS = 60_000
 
+/** The server answered, with a status that is not a success. `status` is what it said. */
+export class CdnHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = "CdnHttpError"
+  }
+}
+
+/** No answer came: the connection failed or dropped, or went quiet for the stall window. */
+export class CdnNetworkError extends Error {
+  constructor(message: string, options: { cause: unknown }) {
+    super(message, options)
+    this.name = "CdnNetworkError"
+  }
+}
+
+/**
+ * Whether a request failed for a reason another host may not share: a 5xx, or no answer at all.
+ * A 4xx (a missing file is a 404 on every host) and anything the caller finds wrong with bytes it
+ * did receive, a checksum mismatch included, are not.
+ */
+export function isHostUnavailable(err: unknown): boolean {
+  return err instanceof CdnNetworkError || (err instanceof CdnHttpError && err.status >= 500)
+}
+
 /** SUPATYPE_FETCH_TIMEOUT_MS, when set, is the stall window (tests, very slow links). */
 function stallWindowMs(): number {
   const raw = Number(process.env["SUPATYPE_FETCH_TIMEOUT_MS"])
@@ -40,7 +68,11 @@ async function withStall<T>(url: string, run: (signal: AbortSignal, touch: () =>
     return await run(controller.signal, touch)
   } catch (err) {
     const reason = stalled ? `no data for ${windowMs / 1000}s` : err instanceof Error ? err.message : String(err)
-    throw new Error(`Could not fetch ${url}: ${reason}. This is usually a network or CDN blip; try again.`, { cause: err })
+    const message = `Could not fetch ${url}: ${reason}. This is usually a network or CDN blip; try again.`
+    if (err instanceof CdnHttpError) throw new CdnHttpError(message, err.status)
+    // fetch rejects with a TypeError when the connection fails or drops, mid-body included.
+    if (stalled || err instanceof TypeError) throw new CdnNetworkError(message, { cause: err })
+    throw new Error(message, { cause: err })
   } finally {
     clearTimeout(timer)
   }
@@ -142,7 +174,7 @@ export async function downloadToFile(
     touch()
     // 416: the file on disk is not a prefix of what the server holds. Start again on the retry.
     if (resp.status === 416) rmSync(destPath, { force: true })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    if (!resp.ok) throw new CdnHttpError(`HTTP ${resp.status}`, resp.status)
     await writeBody(resp, url, destPath, label, have, touch)
   })
 }

@@ -19,7 +19,7 @@
 import { setTimeout as sleep } from "node:timers/promises"
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
 import { isJsonObject } from "@supatype/shared"
-import { cdnGet, downloadToFile } from "./cdn-fetch.js"
+import { CdnHttpError, cdnGet, downloadToFile } from "./cdn-fetch.js"
 import { errorMessage } from "./error-message.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { progress } from "./ui/messages.js"
@@ -623,7 +623,10 @@ export class ReleaseVerificationError extends Error {
 async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string): Promise<string> {
   const csResp = await cdnGet(checksumsUrl)
   if (!csResp.ok) {
-    throw new Error(`Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}. Try again in a moment.`)
+    throw new CdnHttpError(
+      `Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}. Try again in a moment.`,
+      csResp.status,
+    )
   }
   const checksumsText = csResp.text()
 
@@ -651,9 +654,10 @@ async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string):
   // Minisign signature is mandatory when a public key is configured.
   const sigResp = await cdnGet(minisigUrl)
   if (!sigResp.ok) {
-    throw new Error(
+    throw new CdnHttpError(
       `Failed to fetch checksum signature from ${minisigUrl}: HTTP ${sigResp.status}\n` +
         "Cannot verify release integrity. Aborting download.",
+      sigResp.status,
     )
   }
   const sigText = sigResp.text()
