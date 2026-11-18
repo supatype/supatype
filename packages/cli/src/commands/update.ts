@@ -31,6 +31,7 @@ import { error, info, plain } from "../ui/messages.js"
 import { fatalError } from "../ui/fatal.js"
 import { pinState, withPinnedVersion, type PinEdit } from "../config-version-pin.js"
 import { compareVersions } from "../engine-floor.js"
+import { checkCliRelease, reportCliRelease } from "../cli-release-check.js"
 
 /**
  * New images alone are not a finished upgrade.
@@ -60,12 +61,10 @@ export function registerUpdate(program: Command): void {
       const provider = resolveRuntimeProvider(config)
 
       if (provider === "docker") {
-        if (opts.check) {
-          // There is no `self-host compose pull` subcommand; the earlier text named one and a reader
-          // following it got "unknown command". `update` is what pulls.
-          info("Docker provider: run `supatype update` without --check to pull the compose images.")
-          return
-        }
+        // The pins come from this CLI, so a newer release is what moves them. --check stops here:
+        // it pulls nothing and writes nothing.
+        reportCliRelease(await checkCliRelease(), opts.check)
+        if (opts.check) return
         await updateComposeImages(cwd, config)
         return
       }
