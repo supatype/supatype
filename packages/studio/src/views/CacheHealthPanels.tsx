@@ -115,7 +115,7 @@ export function CacheHealthPanels(): React.ReactElement | null {
                 value={keyspace.evictions_total.toLocaleString()}
                 hint={
                   keyspace.evictions_total > 0
-                    ? "entries dropped to make room — the working set is larger than the cache"
+                    ? "entries dropped to make room: the working set is larger than the cache"
                     : "nothing has been dropped to make room"
                 }
               />
