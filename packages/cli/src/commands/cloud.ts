@@ -11,11 +11,9 @@ import { registerEnvs, registerLinkOptions, runLinkAction } from "./link-helpers
 import { resolveTarget, targetSchemaPush, schemaPgSchema } from "../resolve-target.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
-import { pushPlatformSettings } from "../platform-settings-push.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
-import { pushCorsOrigins } from "../cors-origins-push.js"
-import { deployHooksToTarget } from "./push.js"
+import { runPostApplySteps } from "./push.js"
 
 interface CloudConfig {
   apiUrl: string
@@ -139,15 +137,8 @@ export async function pushSchemaToLinkedProject(
   })
 
   info((result as { message?: string }).message ?? "Schema push completed.")
-
-  // What `supatype push` sends after the schema, sent by a deploy too. A deploy used to stop at the
-  // schema, so a project deployed and never pushed ran without its hooks and field validators, and
-  // a hook changed since the last push kept running its old code. Each step reports its own failure
-  // and ends the command non-zero (post-apply.ts).
-  await deployHooksToTarget(cwd, config, target, ast)
-  await pushCorsOrigins(target, config)
-  // The project's services, realtime and own-bucket settings.
-  await pushPlatformSettings(cwd, config, target)
+  // What `supatype push` sends after the schema, sent by a deploy too.
+  await runPostApplySteps(cwd, config, target, ast)
 }
 
 export async function deploySchemaToLinkedProject(

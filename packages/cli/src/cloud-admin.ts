@@ -23,6 +23,9 @@ const isOrgMember = isShape({ userId: isString, email: isString, role: isString,
 /** A project's Studio grant as `GET /projects/:slug/studio-members` lists one. */
 const isProjectGrant = isShape({ id: isString, role: isString, platformAccount: isUnknown, email: nullable(isString) })
 
+/** An organisation member, as the members list gives one. */
+type OrgMember = { userId: string; email: string; role: string; createdAt: unknown }
+
 /** One Studio user of a Cloud project: who, the role that applies here, and where it comes from. */
 export interface CloudStudioUser {
   id: string
@@ -46,14 +49,14 @@ function orgIdOf(target: DeployTarget): string {
 }
 
 /** The organisation's members, as the control plane lists them. */
-async function orgMembers(target: DeployTarget): Promise<Array<{ userId: string; email: string; role: string; createdAt: unknown }>> {
+async function orgMembers(target: DeployTarget): Promise<Array<OrgMember>> {
   const path = `/organisations/${orgIdOf(target)}/members`
   return targetFetch(target.apiBaseUrl, target.apiPrefix, apiFetchOpts(target, "GET", path), isArrayOf(isOrgMember))
 }
 
 /** Every org member with the role that applies on this project: a project row narrows the org role. */
 export function effectiveStudioUsers(
-  members: ReadonlyArray<{ userId: string; email: string; role: string; createdAt: unknown }>,
+  members: ReadonlyArray<OrgMember>,
   grants: ReadonlyArray<{ id: string; role: string }>,
 ): CloudStudioUser[] {
   const narrowed = new Map(grants.map((grant) => [grant.id, grant.role]))

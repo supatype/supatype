@@ -12,7 +12,7 @@
  * Switching to a different bucket does not move the files already stored, and the push says so.
  */
 import { readDotEnvFiles } from "./env-file.js"
-import { errorMessage } from "./error-message.js"
+import { errorMessage, redactSecrets } from "./error-message.js"
 import { storageBucketPlan, platformSettingsBody, type StorageBucketBody } from "./platform-settings.js"
 import { postApplyFailed } from "./post-apply.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
@@ -33,10 +33,6 @@ export const FILES_NOT_MOVED =
   "Files already stored are not moved. New files go to the new bucket; the ones stored before stay where they were, and stop being served."
 
 /** An error's text with every secret value taken out, whatever the server echoed. */
-function withoutSecrets(text: string, secrets: readonly string[]): string {
-  return secrets.filter((value) => value !== "").reduce((out, value) => out.split(value).join("***"), text)
-}
-
 async function putSettings(target: DeployTarget, body: NonNullable<ReturnType<typeof platformSettingsBody>>): Promise<boolean> {
   const request = targetRequest(target, { method: "PUT", subpath: "/platform-settings", body })
   try {
@@ -72,7 +68,7 @@ async function putBucket(target: DeployTarget, body: StorageBucketBody): Promise
     return false
   } catch (err) {
     const refused = err instanceof TargetApiError && err.status === 403
-    const why = withoutSecrets(errorMessage(err), [body.accessKey, body.secretKey])
+    const why = redactSecrets(errorMessage(err), [body.accessKey, body.secretKey])
     postApplyFailed(
       `the storage bucket was not set: ${why}`,
       refused ? "Only the organisation's owners and admins can change where a project keeps its files." : undefined,
@@ -94,7 +90,10 @@ export async function pushPlatformSettings(
 ): Promise<boolean> {
   if (target.mode !== "cloud") return false
   const settings = platformSettingsBody(config)
-  const bucket = storageBucketPlan(config, opts.environment ?? { ...readDotEnvFiles(cwd), ...process.env })
+  // .env is read only for a bucket's keys, so a push with no storage.s3 reads nothing.
+  const bucket = config.storage?.s3 === undefined
+    ? { kind: "none" as const }
+    : storageBucketPlan(config, opts.environment ?? { ...readDotEnvFiles(cwd), ...process.env })
   if (settings === undefined && bucket.kind === "none") return false
   if (target.environment !== "production") {
     warn(`Platform settings (services, realtime, storage.s3) apply to production only: not sent to ${target.environment}.`)
