@@ -317,6 +317,11 @@ export function ssoApiBaseUrl(cwd: string): { baseUrl: string; linked: boolean }
   return { baseUrl: resolveProjectApiUrl(cwd), linked: false }
 }
 
+/** Whether the project is linked to Supatype Cloud, whose SAML keys the control plane holds. */
+export function linkedToCloud(cwd: string): boolean {
+  return loadProjectLink(cwd)?.kind === "cloud"
+}
+
 /** Whether the project is linked to a deployment other than this machine, for `rotate-key`. */
 export function linkedToDeployment(cwd: string): boolean {
   const link = loadProjectLink(cwd)

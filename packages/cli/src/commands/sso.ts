@@ -8,7 +8,6 @@
  */
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
-import { loadProjectLink } from "../link.js"
 import { rotateCloudSamlKey } from "../cloud-saml-key.js"
 import { errorMessage } from "../error-message.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
@@ -20,6 +19,7 @@ import {
   assertProviderName,
   createSsoProvider,
   getSsoProvider,
+  linkedToCloud,
   linkedToDeployment,
   listSsoProviders,
   removeSsoProvider,
@@ -449,9 +449,4 @@ function dnsAnswerLines(result: DomainVerification): string[] {
   const found = result.found ?? []
   if (found.length === 0) return [`No TXT record was found at ${result.challenge.name}.`]
   return [`DNS answered ${found.map((value) => JSON.stringify(value)).join(", ")} at ${result.challenge.name}, not the token.`]
-}
-
-/** Whether the project in `cwd` is linked to Supatype Cloud. */
-function linkedToCloud(cwd: string): boolean {
-  return loadProjectLink(cwd)?.kind === "cloud"
 }
