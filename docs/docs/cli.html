@@ -276,9 +276,9 @@
         <tr><td><code>whoami</code></td><td>Show the current Supatype Cloud session</td><td></td></tr>
         <tr><td><code>link --project &lt;slug&gt;</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json). A cloud link asks the Cloud you signed in to with <code>login</code>, unless <code>--api-url</code> or <code>SUPATYPE_API_URL</code> names another</td><td><code>--api-url &lt;url&gt;</code>, <code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>projects list</code></td><td>List your projects. In a linked project it lists that project's organisation; before a link it lists every organisation you belong to (just the one, if you have one)</td><td><code>--org &lt;slug&gt;</code> (one organisation only)</td></tr>
-        <tr><td><code>projects create &lt;name&gt;</code></td><td>Create a new project</td><td><code>--tier &lt;tier&gt;</code>, <code>--region &lt;region&gt;</code></td></tr>
-        <tr><td><code>projects pause &lt;slug&gt;</code></td><td>Pause a project</td><td></td></tr>
-        <tr><td><code>projects resume &lt;slug&gt;</code></td><td>Resume a paused project</td><td></td></tr>
+        <tr><td><code>projects create &lt;name&gt;</code></td><td>Create a new project, in your only organisation, or the one <code>--org</code> names (required when you belong to several and nothing is linked)</td><td><code>--tier &lt;tier&gt;</code>, <code>--region &lt;region&gt;</code>, <code>--org &lt;slug&gt;</code></td></tr>
+        <tr><td><code>projects pause &lt;slug&gt;</code></td><td>Pause a project</td><td><code>--org &lt;slug&gt;</code></td></tr>
+        <tr><td><code>projects resume &lt;slug&gt;</code></td><td>Resume a paused project</td><td><code>--org &lt;slug&gt;</code></td></tr>
         <tr><td><code>domains list</code>, <code>add &lt;domain&gt;</code>, <code>remove &lt;domainId&gt;</code>, <code>verify &lt;domainId&gt;</code></td><td>Manage custom domains for a project</td><td></td></tr>
         <tr><td><code>envs create &lt;name&gt;</code></td><td>Create a cloud environment (staging/preview)</td><td></td></tr>
         <tr><td><code>db connection-string</code></td><td>Show the database connection string for the linked project</td><td><code>--transaction</code>, <code>--env &lt;name&gt;</code></td></tr>

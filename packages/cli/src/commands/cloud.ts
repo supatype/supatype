@@ -188,8 +188,9 @@ export function registerCloud(program: Command): void {
     .description("Create a new project")
     .option("--tier <tier>", "Project tier (free, pro, team)", "free")
     .option("--region <region>", "Region (eu-fsn, eu-nbg, eu-hel)", "eu-fsn")
-    .action(async (name: string, opts: { tier: string; region: string }) => {
-      const config = getCloudConfigOrExit()
+    .option("--org <slug>", "Organisation to create it in (its slug or id)")
+    .action(async (name: string, opts: { tier: string; region: string; org?: string }) => {
+      const config = await scopedToOrg(getCloudConfigOrExit(), opts.org, true)
 
       info(`Creating project "${name}" (${opts.tier}, ${opts.region})...`)
 
@@ -207,8 +208,9 @@ export function registerCloud(program: Command): void {
   projectsCmd
     .command("pause <slug>")
     .description("Pause a project")
-    .action(async (slug: string) => {
-      const config = getCloudConfigOrExit()
+    .option("--org <slug>", "The project's organisation (its slug or id)")
+    .action(async (slug: string, opts: { org?: string }) => {
+      const config = await scopedToOrg(getCloudConfigOrExit(), opts.org, false)
       await cloudFetch(config, "POST", `/projects/${slug}/pause`, isUnknown)
       info(`Project ${slug} paused.`)
     })
@@ -216,8 +218,9 @@ export function registerCloud(program: Command): void {
   projectsCmd
     .command("resume <slug>")
     .description("Resume a paused project")
-    .action(async (slug: string) => {
-      const config = getCloudConfigOrExit()
+    .option("--org <slug>", "The project's organisation (its slug or id)")
+    .action(async (slug: string, opts: { org?: string }) => {
+      const config = await scopedToOrg(getCloudConfigOrExit(), opts.org, false)
       await cloudFetch(config, "POST", `/projects/${slug}/resume`, isUnknown)
       info(`Project ${slug} resumed.`)
     })
@@ -331,6 +334,26 @@ async function orgsToList(config: CloudConfig, wanted: string | undefined): Prom
     process.exit(1)
   }
   return found
+}
+
+/**
+ * `config` with the one organisation a project command acts in, for `create`, `pause` and `resume`
+ * (as `projects list` resolves them): the linked one, else `--org`, else the account's only one.
+ * With several and no `--org`, `required` commands (create) refuse and name them; the others go on
+ * without, since a project's slug names it whatever organisation is sent.
+ */
+async function scopedToOrg(config: CloudConfig, wanted: string | undefined, required: boolean): Promise<CloudConfig> {
+  if (config.orgId !== undefined && wanted === undefined) return config
+  const orgs = await orgsToList(config, wanted)
+  const only = orgs.length === 1 ? orgs[0] : undefined
+  if (only !== undefined) return { ...config, orgId: only.id }
+  if (!required) return config
+  error(
+    orgs.length === 0
+      ? "You are not in any organisation yet. Create one in your account on Supatype Cloud."
+      : `You are in several organisations (${orgs.map((org) => org.slug).join(", ")}). Pass --org <slug>.`,
+  )
+  process.exit(1)
 }
 
 function printProjects(projects: ReadonlyArray<{ name: string; slug: string; tier: string; region: string; status: string }>): void {

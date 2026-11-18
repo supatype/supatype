@@ -4965,9 +4965,9 @@ All of these need Supatype Cloud, which is coming soon.
 | `whoami` | Show the current Supatype Cloud session |  |
 | `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json). A cloud link asks the Cloud you signed in to with `login`, unless `--api-url` or `SUPATYPE_API_URL` names another | `--api-url <url>`, `--token <token>`, `--env <name>` |
 | `projects list` | List your projects. In a linked project it lists that project's organisation; before a link it lists every organisation you belong to (just the one, if you have one) | `--org <slug>` (one organisation only) |
-| `projects create <name>` | Create a new project | `--tier <tier>`, `--region <region>` |
-| `projects pause <slug>` | Pause a project |  |
-| `projects resume <slug>` | Resume a paused project |  |
+| `projects create <name>` | Create a new project, in your only organisation, or the one `--org` names (required when you belong to several and nothing is linked) | `--tier <tier>`, `--region <region>`, `--org <slug>` |
+| `projects pause <slug>` | Pause a project | `--org <slug>` |
+| `projects resume <slug>` | Resume a paused project | `--org <slug>` |
 | `domains list`, `add <domain>`, `remove <domainId>`, `verify <domainId>` | Manage custom domains for a project |  |
 | `envs create <name>` | Create a cloud environment (staging/preview) |  |
 | `db connection-string` | Show the database connection string for the linked project | `--transaction`, `--env <name>` |
