@@ -412,8 +412,8 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
   // A mode an earlier Studio remembered is no longer read; forgetting it once keeps no stale choice.
   useEffect(() => forgetStoredActingModes(), [])
 
-  const extensionRoutes = extensions?.routes ?? []
-  const served = useMemo(() => new Set((extensions?.routes ?? []).map((r) => routePathOf(r.path))), [extensions?.routes])
+  const extensionRoutes = useMemo(() => extensions?.routes ?? [], [extensions?.routes])
+  const served = useMemo(() => new Set(extensionRoutes.map((r) => routePathOf(r.path))), [extensionRoutes])
 
   let content = (
     <CloudUrlContext.Provider value={cloudUrl}>
