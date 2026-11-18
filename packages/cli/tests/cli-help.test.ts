@@ -175,6 +175,11 @@ describe("CLI binary (requires built dist/)", () => {
     expect(stdout).toContain("--run-hooks")
   })
 
+  it("push --help shows --dry-run and diff --help shows --sql", () => {
+    expect(runCli(["push", "--help"]).stdout).toContain("--dry-run")
+    expect(runCli(["diff", "--help"]).stdout).toContain("--sql")
+  })
+
   it("self-host compose --help shows compose subcommands", () => {
     const { stdout, exitCode } = runCli(["self-host", "compose", "--help"])
     expect(exitCode).toBe(0)
