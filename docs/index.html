@@ -478,14 +478,15 @@
         </div>
         <div class="panel shadow-accent-sm">
           <div class="panel-bar small"><span>2. INIT</span></div>
-          <pre class="code"><span class="pr">$</span> supatype init</pre>
+          <pre class="code"><span class="pr">$</span> mkdir my-app &amp;&amp; cd my-app
+<span class="pr">$</span> supatype init</pre>
         </div>
         <div class="panel shadow-accent-sm">
           <div class="panel-bar small"><span>3. DEV</span></div>
           <pre class="code"><span class="pr">$</span> supatype dev</pre>
         </div>
       </div>
-      <p class="body-sm measure"><code class="inline-code">supatype dev</code> applies your types, watches for changes, migrates the database and regenerates the client. <code class="inline-code">supatype push</code> applies them to staging or production. You need Node 18 or newer for the CLI (20.19 or newer for a Vite 8 app), and Docker running for the default mode. <a href="/docs/#local-dev" class="link">Local development</a> covers native mode, ports and the frontend proxy.</p>
+      <p class="body-sm measure"><code class="inline-code">supatype dev</code> applies your types, watches for changes, migrates the database and regenerates the client. <code class="inline-code">supatype push</code> applies them to staging or production. You need Node 18 or newer for the CLI (20.19 or newer, or 22.12 or newer on Node 22, for a Vite 8 app), and Docker running for the default mode. <a href="/docs/#local-dev" class="link">Local development</a> covers native mode, ports and the frontend proxy.</p>
       <p class="body-sm measure">On Linux and macOS you can install the CLI with <code class="inline-code">curl -fsSL https://supatype.com/install.sh | bash</code> or <code class="inline-code">brew install supatype/tap/supatype</code> instead. On Windows, use npm.</p>
     </div>
   </section>
