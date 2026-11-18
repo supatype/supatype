@@ -211,7 +211,10 @@ async function provisionAfterUp(cwd: string, config: SupatypeProjectConfig, proj
     const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", composeKongHostPort(cwd))
     const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
     const stack = { composePath: selfHostComposePaths(cwd).composePath, project, gatewayPort }
-    warnBucketsLeft(await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey))
+    const keys = devApiKeys(cwd)
+    warnBucketsLeft(await provisionStartedStack(cwd, config, stack, ast, keys.serviceRoleKey))
+    const { noteRestAwaitsFirstPush } = await import("../rest-ready.js")
+    await noteRestAwaitsFirstPush(`http://localhost:${gatewayPort}`, keys.anonKey)
   } catch (err) {
     if (!(err instanceof StackNotServing)) {
       warn(`The stack is up, but its storage buckets or first admin user could not be created: ${errorMessage(err)}`)
