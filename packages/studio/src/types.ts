@@ -64,6 +64,13 @@ export interface StudioCoreProps {
    * When set, cloud-upsell screens show a CTA button linking here.
    */
   cloudUrl?: string
+  /**
+   * The project's public API URL and anon key, which the Connect panel prints into an app's env
+   * file. Cloud passes them because its `client.url` is the control-plane proxy path, not the
+   * address an app calls. Both are public. Never a service role key. When absent, a self-host
+   * Studio falls back to the values injected into its page.
+   */
+  connection?: ProjectConnection
 }
 
 // Re-export config types for convenience
@@ -72,4 +79,6 @@ export type { AdminConfig, ModelConfig, GlobalConfig, FieldConfig, WidgetType } 
 // Forward-declare the client type so consumers don't need @supatype/client
 import type { SupatypeClient } from "@supatype/client"
 import type { AdminConfig } from "./config.js"
+import type { ProjectConnection } from "./hooks/useConnection.js"
+export type { ProjectConnection }
 export type { SupatypeClient }

@@ -5,6 +5,8 @@ import { Badge, Button, Select, Tabs, type TabItem } from "./ui.js"
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard.js"
 import { ConnectionStringPanel } from "./database/ConnectionStringPanel.js"
 import { IconCheck, IconCopy } from "./icons.js"
+import { useConnection, type ProjectConnection } from "../hooks/useConnection.js"
+import { injectedRuntimeConfig } from "../lib/runtime-config.js"
 
 type Tab = "sdk" | "direct" | "mcp"
 type Framework = "nextjs" | "react" | "vue" | "svelte" | "solid" | "vanilla"
@@ -19,6 +21,41 @@ const NEXT_VARIANTS: Array<{ id: NextVariant; label: string }> = [
 
 function isSSR(v: NextVariant): boolean {
   return v === "app-router-ssr" || v === "pages-router-ssr"
+}
+
+/**
+ * What the snippets print for the API URL and anon key. A value the page does not have is a
+ * placeholder, and `resolved` is false so the env file says so rather than passing it off as real.
+ */
+interface ResolvedConnection {
+  url: string
+  anonKey: string
+  resolved: boolean
+}
+
+const URL_PLACEHOLDER = "YOUR_SUPATYPE_URL"
+const KEY_PLACEHOLDER = "YOUR_SUPATYPE_ANON_KEY"
+
+/**
+ * The host's connection first, then what a self-host Studio was injected with, then placeholders.
+ * The injected service role key is read only to be refused: a key equal to it is never printed.
+ */
+function resolveConnection(given: ProjectConnection | undefined): ResolvedConnection {
+  const injected = injectedRuntimeConfig()
+  const pick = (value: string | undefined): string | undefined =>
+    value !== undefined && value !== "" && value !== injected.serviceRoleKey ? value : undefined
+  const url = pick(given?.apiUrl) ?? pick(injected.url)
+  const anonKey = pick(given?.anonKey) ?? pick(injected.anonKey)
+  return {
+    url: url ?? URL_PLACEHOLDER,
+    anonKey: anonKey ?? KEY_PLACEHOLDER,
+    resolved: url !== undefined && anonKey !== undefined,
+  }
+}
+
+/** A value as a single-quoted JS string. */
+function quoted(value: string): string {
+  return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`
 }
 
 interface ConnectModalProps {
@@ -140,7 +177,7 @@ const FRAMEWORKS: Array<{ id: Framework; label: string }> = [
 
 // ── Snippet generators ────────────────────────────────────────────────────────
 
-function getClientFile(fw: Framework, variant: NextVariant): { filename: string; code: string } {
+function getClientFile(fw: Framework, variant: NextVariant, conn: ResolvedConnection): { filename: string; code: string } {
   const ssr = fw === "nextjs" && isSSR(variant)
   const isAppRouter = variant === "app-router-ssr"
 
@@ -210,8 +247,8 @@ export function createSupatypeClient(req: IncomingMessage, res: ServerResponse) 
     : (fw === "vue" || fw === "svelte" || fw === "solid") ? "import.meta.env.VITE_"
     : fw === "nextjs" ? "process.env.NEXT_PUBLIC_"
     : ""
-  const urlEnv = fw === "vanilla" ? "'YOUR_SUPATYPE_URL'"     : `${envPrefix}SUPATYPE_URL!`
-  const keyEnv = fw === "vanilla" ? "'YOUR_SUPATYPE_ANON_KEY'" : `${envPrefix}SUPATYPE_ANON_KEY!`
+  const urlEnv = fw === "vanilla" ? quoted(conn.url)     : `${envPrefix}SUPATYPE_URL!`
+  const keyEnv = fw === "vanilla" ? quoted(conn.anonKey) : `${envPrefix}SUPATYPE_ANON_KEY!`
 
   // The createClient the CLI generates, which knows the project's types and which models keep
   // drafts. The bare one from @supatype/client does not, so drafts and RPC names lose their types.
@@ -227,14 +264,15 @@ export const supatype = createClient({
   }
 }
 
-function getEnvFile(fw: Framework, variant: NextVariant): string {
+function getEnvFile(fw: Framework, variant: NextVariant, conn: ResolvedConnection): string {
   const ssr = fw === "nextjs" && isSSR(variant)
   const prefix = fw === "react" ? "NEXT_PUBLIC_"
     : (fw === "vue" || fw === "svelte" || fw === "solid") ? "VITE_"
     : fw === "vanilla" ? ""
     : fw === "nextjs" && ssr ? ""
     : "NEXT_PUBLIC_"
-  return `${prefix}SUPATYPE_URL=your-project-url\n${prefix}SUPATYPE_ANON_KEY=your-anon-key`
+  const lines = `${prefix}SUPATYPE_URL=${conn.url}\n${prefix}SUPATYPE_ANON_KEY=${conn.anonKey}`
+  return conn.resolved ? lines : `# Replace the YOUR_ values with your project's API URL and anon key.\n${lines}`
 }
 
 function getProviderSetup(fw: Framework, variant: NextVariant): { filename: string; code: string } | null {
@@ -289,7 +327,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   return null
 }
 
-function getUsageSnippet(fw: Framework, variant: NextVariant): { filename: string; code: string } {
+function getUsageSnippet(fw: Framework, variant: NextVariant, conn: ResolvedConnection): { filename: string; code: string } {
   if (fw === "nextjs" && variant === "app-router") {
     return {
       filename: "app/page.tsx",
@@ -455,8 +493,8 @@ export function Posts() {
     code: `import { createClient } from './supatype/generated/client'
 
 const supatype = createClient({
-  url: 'YOUR_SUPATYPE_URL',
-  anonKey: 'YOUR_SUPATYPE_ANON_KEY',
+  url: ${quoted(conn.url)},
+  anonKey: ${quoted(conn.anonKey)},
 })
 
 const { data } = await supatype.from('posts').select()
@@ -464,7 +502,7 @@ console.log(data)`,
   }
 }
 
-function getAgentPrompt(fw: Framework, variant: NextVariant): string {
+function getAgentPrompt(fw: Framework, variant: NextVariant, conn: ResolvedConnection): string {
   const ssr = fw === "nextjs" && isSSR(variant)
   const useHooks = (fw === "nextjs" || fw === "react") && !ssr
   const variantLabel = fw === "nextjs"
@@ -476,10 +514,10 @@ Install packages:
 npm install @supatype/client${useHooks ? " @supatype/react" : ""}
 
 Set env vars in .env.local:
-${getEnvFile(fw, variant)}
+${getEnvFile(fw, variant, conn)}
 
-Create ${getClientFile(fw, variant).filename}:
-${getClientFile(fw, variant).code}
+Create ${getClientFile(fw, variant, conn).filename}:
+${getClientFile(fw, variant, conn).code}
 
 ${useHooks ? "Wrap the app in <SupatypeProvider client={supatype}> from @supatype/react.\n\nUse useQuery / useMutation hooks for data access." : ssr ? "Create a server client per-request using createSupatypeClient(). Fetch data directly in server components or getServerSideProps." : "Use the client directly: supatype.from('table').select()"}`
 }
@@ -487,19 +525,20 @@ ${useHooks ? "Wrap the app in <SupatypeProvider client={supatype}> from @supatyp
 // ── Tab content panels ────────────────────────────────────────────────────────
 
 interface SdkContentProps {
+  connection: ResolvedConnection
   framework: Framework
   setFramework: (f: Framework) => void
   variant: NextVariant
   setVariant: (v: NextVariant) => void
 }
 
-function SdkContent({ framework, setFramework, variant, setVariant }: SdkContentProps) {
+function SdkContent({ connection, framework, setFramework, variant, setVariant }: SdkContentProps) {
   const ssr         = framework === "nextjs" && isSSR(variant)
   const useHooks    = (framework === "nextjs" || framework === "react") && !ssr
   const installCmd  = `npm install @supatype/client${ssr ? " @supatype/ssr" : useHooks ? " @supatype/react" : ""}`
-  const { filename: clientFilename, code: clientFileCode } = getClientFile(framework, variant)
+  const { filename: clientFilename, code: clientFileCode } = getClientFile(framework, variant, connection)
   const providerSetup = getProviderSetup(framework, variant)
-  const usage         = getUsageSnippet(framework, variant)
+  const usage         = getUsageSnippet(framework, variant, connection)
   const lastStep      = providerSetup ? 5 : 4
 
   return (
@@ -539,7 +578,7 @@ function SdkContent({ framework, setFramework, variant, setVariant }: SdkContent
       {/* Agent prompt */}
       <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/20 px-3 py-2.5">
         <span className="text-xs font-medium text-foreground">Give your agent everything it needs</span>
-        <CopyButton text={getAgentPrompt(framework, variant)} label="Copy prompt" />
+        <CopyButton text={getAgentPrompt(framework, variant, connection)} label="Copy prompt" />
       </div>
 
       {/* Steps */}
@@ -548,7 +587,7 @@ function SdkContent({ framework, setFramework, variant, setVariant }: SdkContent
           <CodeBlock code={installCmd} filename="terminal" />
         </Step>
         <Step n={2} title="Add environment variables">
-          <CodeBlock code={getEnvFile(framework, variant)} filename=".env.local" />
+          <CodeBlock code={getEnvFile(framework, variant, connection)} filename=".env.local" />
         </Step>
         <Step n={3} title={ssr ? "Create your server client" : "Create your Supatype client"}>
           <CodeBlock code={clientFileCode} filename={clientFilename} />
@@ -656,6 +695,7 @@ export function ConnectModal({ open, onClose }: ConnectModalProps): React.ReactE
   const [tab, setTab]           = useState<Tab>("sdk")
   const [framework, setFramework] = useState<Framework>("nextjs")
   const [variant, setVariant]     = useState<NextVariant>("app-router")
+  const connection = resolveConnection(useConnection())
 
   return (
     <SlidePanel
@@ -671,7 +711,7 @@ export function ConnectModal({ open, onClose }: ConnectModalProps): React.ReactE
       </div>
 
       {/* Content */}
-      {tab === "sdk"    && <SdkContent framework={framework} setFramework={setFramework} variant={variant} setVariant={setVariant} />}
+      {tab === "sdk"    && <SdkContent connection={connection} framework={framework} setFramework={setFramework} variant={variant} setVariant={setVariant} />}
       {tab === "direct" && <DirectContent />}
       {tab === "mcp"    && <McpContent />}
     </SlidePanel>

@@ -19,6 +19,7 @@ export type {
   FieldConfig,
   WidgetType,
   SupatypeClient,
+  ProjectConnection,
 } from "./types.js"
 
 export type {
