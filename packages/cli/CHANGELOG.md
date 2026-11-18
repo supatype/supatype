@@ -52,6 +52,10 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **deploy:** the build step puts the app directory's `node_modules/.bin`, and every one above it, on PATH,
+  as `npm run` does, so the framework defaults (`vite build`, `astro build`, `next build`) and a bare
+  `buildCommand` find their binary. They failed with "'vite' is not recognized" before. The
+  `build.outputDirectory` doc now says it is relative to `build.directory` (`"dist"`, not `"web/dist"`).
 * **dev (native):** a Valkey named in `SUPATYPE_VALKEY_ADDR` logs in with `SUPATYPE_VALKEY_PASSWORD` (and
   `SUPATYPE_VALKEY_USERNAME`), or with no password, never the keyspace's. `init` writes a keyspace password
   into every `.env`, and a Valkey with no password refused the server with WRONGPASS. A named Valkey that
