@@ -5281,10 +5281,10 @@ Commands that use Docker first check that it answers. A Docker that says it cann
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift`, `--run-hooks` |
-| `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>`, `--direct` |
+| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types. With `--dry-run` it prints the change list and the full SQL the push would apply, then stops: nothing is applied, asked or recorded, and no `--yes` is needed. Supatype Cloud and a linked self-host server cannot write SQL without applying it, so there it prints the change list and says so | `--yes`, `--dry-run`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift`, `--run-hooks` |
+| `diff` | Show planned schema changes without applying them (dry run). With `--sql` it then prints the SQL a push would apply, as `migrate` writes it | `--sql`, `--connection <url>`, `--env <name>`, `--direct` |
 | `generate` | Regenerate TypeScript types without running a migration |  |
-| `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
+| `migrate` | Write the SQL a push would apply, without applying it (to preview it on screen, `supatype diff --sql` or `supatype push --dry-run` print the same SQL after the change list). Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
 | `migrations list` | List applied migrations with schema snapshot metadata | `--connection <url>`, `--env <name>` |
 | `rollback` | Roll back the last applied migration | `--sync-schema`, `--no-sync-schema` |
 | `reset` | Drop every managed table and its rows, apply the schema again, then run the seeds (destructive) | `--yes`, `--no-seed`, `--connection <url>` |
