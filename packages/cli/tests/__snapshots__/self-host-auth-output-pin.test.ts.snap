@@ -98,6 +98,8 @@ exports[`self-host auth output is pinned > compose server environment 1`] = `
       SUPATYPE_RESEND_FROM: \${SUPATYPE_RESEND_FROM:-}
       SUPATYPE_SES_FROM: \${SUPATYPE_SES_FROM:-}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
+      # Anonymous sign-in, off unless .env turns it on (docs/auth/anonymous.mdx).
+      SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED: \${SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED:-false}
       # auth.providers from supatype.config.ts. A value in .env wins over each default, and a
       # secret is only ever the name of the variable that holds it.
       SUPATYPE_EXTERNAL_GITHUB_ENABLED: "\${SUPATYPE_EXTERNAL_GITHUB_ENABLED:-true}"
