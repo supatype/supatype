@@ -187,8 +187,8 @@ All of these need Supatype Cloud, which is coming soon.
 | `login` | Sign in to Supatype Cloud in your browser. It opens the accounts site, you approve, and type the code shown there into the terminal; the CLI stores a personal access token (`spt_...`) for push and deploy. The URL is always printed. The CLI asks the control plane where the accounts site is (`GET /api/v1/cli/login/config`), or you set `SUPATYPE_ACCOUNTS_URL`; if neither gives an address, login stops and says so. A Cloud behind a bot check refuses the CLI with `captcha_failed`; login then says that sign-in works only through the browser and points to `--token` for CI. Any other refusal prints the control plane's own message and exits 1. A new Cloud account cannot create a project until it is approved (closed beta) | `--api-url <url>` (a Cloud other than supatype.com; `SUPATYPE_API_URL` sets it too),`--name <name>` (the token's name, default `cli_<hostname>_<time>`), `--no-browser`, `--token <spt_...>` (store a token made in your account instead of signing in, for CI; `SUPATYPE_ACCESS_TOKEN` takes one too) |
 | `logout` | Clear stored Supatype Cloud credentials |  |
 | `whoami` | Show the current Supatype Cloud session |  |
-| `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json) | `--token <token>`, `--env <name>` |
-| `projects list` | List all projects in your organisation |  |
+| `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json). A cloud link asks the Cloud you signed in to with `login`, unless `--api-url` or `SUPATYPE_API_URL` names another | `--api-url <url>`, `--token <token>`, `--env <name>` |
+| `projects list` | List your projects. In a linked project it lists that project's organisation; before a link it lists every organisation you belong to (just the one, if you have one) | `--org <slug>` (one organisation only) |
 | `projects create <name>` | Create a new project | `--tier <tier>`, `--region <region>` |
 | `projects pause <slug>` | Pause a project |  |
 | `projects resume <slug>` | Resume a paused project |  |

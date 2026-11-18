@@ -2,7 +2,7 @@ import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { DEFAULT_API_URL, trimApiUrl } from "../api-url.js"
+import { DEFAULT_API_URL, pickApiUrl } from "../api-url.js"
 import { envAccessToken, loadCloudCredentials, persistCloudSession } from "../cloud-credentials.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "../link.js"
 import { targetFetch } from "../target-client.js"
@@ -162,7 +162,7 @@ export function registerCloud(program: Command): void {
   linkCmd.action(async (opts: {
     project?: string
     url?: string
-    apiUrl: string
+    apiUrl?: string
     token?: string
     serviceRoleKey?: string
     env?: string
@@ -177,25 +177,10 @@ export function registerCloud(program: Command): void {
 
   projectsCmd
     .command("list")
-    .description("List all projects in your organisation")
-    .action(async () => {
-      const config = getCloudConfigOrExit()
-
-      const projects = await cloudFetch(config, "GET", "/projects", isArrayOf(isListedProject))
-
-      if (projects.length === 0) {
-        info("No projects. Create one with: supatype projects create <name>")
-        return
-      }
-
-      plain("\n  Name                    Slug                     Tier    Region    Status")
-      plain("  " + "─".repeat(80))
-      for (const p of projects) {
-        plain(
-          `  ${p.name.padEnd(24)}${p.slug.padEnd(25)}${p.tier.padEnd(8)}${p.region.padEnd(10)}${p.status}`,
-        )
-      }
-      plain()
+    .description("List your projects: the linked project's organisation, else every organisation you belong to")
+    .option("--org <slug>", "List the projects of one organisation (its slug or id)")
+    .action(async (opts: { org?: string }) => {
+      await listProjects(getCloudConfigOrExit(), opts.org)
     })
 
   projectsCmd
@@ -322,19 +307,75 @@ export function registerCloud(program: Command): void {
     })
 }
 
+/** An organisation as `GET /organisations` lists those the account belongs to. */
+interface CloudOrg {
+  id: string
+  name: string
+  slug: string
+}
+
+const isCloudOrg: Guard<CloudOrg> = isShape({ id: isString, name: isString, slug: isString })
+
+/**
+ * The organisations `projects list` covers. The control plane scopes projects to the organisation in
+ * `X-Org-Id`, and before a link there is none to send, so the account's own are asked: `--org` picks
+ * one by slug or id, else all of them (an account with one organisation lists that one).
+ */
+async function orgsToList(config: CloudConfig, wanted: string | undefined): Promise<CloudOrg[]> {
+  const orgs = await cloudFetch(config, "GET", "/organisations", isArrayOf(isCloudOrg))
+  if (wanted === undefined) return orgs
+  const found = orgs.filter((org) => org.slug === wanted || org.id === wanted)
+  if (found.length === 0) {
+    const have = orgs.map((org) => org.slug).join(", ")
+    error(`You are not in an organisation "${wanted}".${have === "" ? "" : ` Yours: ${have}.`}`)
+    process.exit(1)
+  }
+  return found
+}
+
+function printProjects(projects: ReadonlyArray<{ name: string; slug: string; tier: string; region: string; status: string }>): void {
+  plain("\n  Name                    Slug                     Tier    Region    Status")
+  plain("  " + "─".repeat(80))
+  for (const p of projects) {
+    plain(`  ${p.name.padEnd(24)}${p.slug.padEnd(25)}${p.tier.padEnd(8)}${p.region.padEnd(10)}${p.status}`)
+  }
+  plain()
+}
+
+/** `projects list`: the linked project's organisation, or those of the account when nothing is linked. */
+async function listProjects(config: CloudConfig, org: string | undefined): Promise<void> {
+  const orgs: CloudOrg[] | undefined =
+    config.orgId !== undefined && org === undefined ? undefined : await orgsToList(config, org)
+  if (orgs?.length === 0) {
+    info("You are not in any organisation yet. Create one in your account on Supatype Cloud.")
+    return
+  }
+  const scopes = orgs ?? [undefined]
+  let listed = 0
+  for (const scope of scopes) {
+    const projects = await cloudFetch(
+      scope === undefined ? config : { ...config, orgId: scope.id },
+      "GET", "/projects", isArrayOf(isListedProject),
+    )
+    listed += projects.length
+    if (projects.length === 0) continue
+    if (scopes.length > 1 && scope !== undefined) plain(`\n  ${scope.name} (${scope.slug})`)
+    printProjects(projects)
+  }
+  if (listed === 0) info("No projects. Create one with: supatype projects create <name>")
+}
+
 function getCloudConfigOrExit(): CloudConfig {
   const cwd = process.cwd()
   let config = loadCloudConfig(cwd)
   if (!config) {
     const creds = loadCloudCredentials()
     const token = envAccessToken() ?? creds?.accessToken
-    const apiUrl =
-      process.env["SUPATYPE_API_URL"] ?? creds?.apiUrl ?? DEFAULT_API_URL
     if (!token) {
       error("Not connected to Supatype Cloud. Run: supatype login (then supatype link), or set SUPATYPE_ACCESS_TOKEN.")
       process.exit(1)
     }
-    config = { apiUrl: trimApiUrl(apiUrl), token }
+    config = { apiUrl: pickApiUrl(process.env["SUPATYPE_API_URL"], creds?.apiUrl), token }
   }
   return config
 }
