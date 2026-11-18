@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
-import type { AddressInfo } from "node:net"
+import { portOf } from "./helpers/listen.js"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -29,7 +29,7 @@ async function serve(handler: (req: IncomingMessage, res: ServerResponse, attemp
     handler(req, res, ++attempt)
   })
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok))
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  base = `http://127.0.0.1:${portOf(server)}`
 }
 
 beforeEach(() => {

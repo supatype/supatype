@@ -52,31 +52,31 @@ describe("Channel", () => {
   it("refuses a params key the pattern does not name", () => {
     // @ts-expect-error `nope` is not a parameter of the pattern
     type Bad = Channel<"lot:{id}", { params: { id: UUID; nope: UUID }; access: { join: LoggedIn } }>
-    void (undefined as unknown as Bad)
+    expectTypeOf<Bad>().not.toBeAny()
   })
 
   it("refuses a parameter the pattern names but params leaves out", () => {
     // @ts-expect-error `id` has no type
     type Bad = Channel<"lot:{id}", { params: {}; access: { join: LoggedIn } }>
-    void (undefined as unknown as Bad)
+    expectTypeOf<Bad>().not.toBeAny()
   })
 
   it("refuses a parameter of any other type", () => {
     // @ts-expect-error a boolean cannot sit in a channel name
     type Bad = Channel<"lot:{id}", { params: { id: boolean }; access: { join: LoggedIn } }>
-    void (undefined as unknown as Bad)
+    expectTypeOf<Bad>().not.toBeAny()
   })
 
   it("refuses a config with no access", () => {
     // @ts-expect-error access is required
     type Bad = Channel<"lobby", {}>
-    void (undefined as unknown as Bad)
+    expectTypeOf<Bad>().not.toBeAny()
   })
 
   it("refuses Event<> in join and track, where it means nothing", () => {
     // @ts-expect-error Event is only valid inside send
     type Bad = Channel<"lobby", { access: { join: Event<"x"> } }>
-    void (undefined as unknown as Bad)
+    expectTypeOf<Bad>().not.toBeAny()
   })
 })
 

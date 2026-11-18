@@ -131,10 +131,60 @@ export interface HookTables {
   }
 }
 
+export interface FunctionContext {
+  /** Unique to this invocation. Every log line it writes carries the same value. */
+  readonly executionId: string
+  /** The function or hook route being served. */
+  readonly functionName: string
+  /**
+   * The project's API base URL, reachable from inside the function: for calling the API. Under
+   * Docker it is an in-stack name (http://kong:8000) that a browser cannot open.
+   */
+  readonly url: string
+  /**
+   * For links you give to people, such as one in an email, a redirect or a response: the project's
+   * public address, the gateway URL a browser or an app uses. Falls back to url when the deployment
+   * did not set it.
+   */
+  readonly publicUrl: string
+  readonly anonKey: string
+  /** Present only when the project granted this route the service role. */
+  readonly serviceRoleKey?: string
+  /**
+   * A raw Postgres connection URL. Off by default: present only when the operator sets
+   * SUPATYPE_FUNCTIONS_DB_URL in .env. It connects as whatever role that URL names and is not a
+   * request through the API, so model hooks do not run. Row rules and field masking apply for
+   * the role the URL names: a superuser or BYPASSRLS role (the admin role, service_role) skips
+   * both, any other role is held to them. Set it to a least-privilege login role that is
+   * neither, granted only what the functions need, never the admin URL, and treat it as a
+   * credential: never return it or log it.
+   */
+  readonly dbUrl?: string
+  readonly region: string
+  /**
+   * Values from the functions directory's .env.local (or SUPATYPE_SHARED_ENV_FILE), then those
+   * "supatype functions env set" gave a self-hosted project, then .env.<function>.local, which
+   * wins. The project's own .env is not read for these. They are read again on every call.
+   *
+   * They are here, never in Deno.env: that is the worker's one process environment, shared by every
+   * call running at once, so a value put there for one function would reach every other.
+   */
+  readonly env: Readonly<Record<string, string>>
+}
+
 /** Only the tables that declare a hook, so `BeforeChange<"unhooked">` is a compile error. */
 export type HookedTable = keyof HookTables & string
 
-interface HookBase {
+/**
+ * What a hook is told, on top of the function context the worker gives every handler.
+ *
+ * The function context is flat on `ctx`: `ctx.serviceRoleKey`, `ctx.url`, `ctx.anonKey`, `ctx.dbUrl`
+ * and `ctx.env` are what a function gets, so a hook that has to write back can. A write a hook makes
+ * through the API fires hooks again, and the worker carries the hook-depth header onto calls to the
+ * stack so the server stops a loop at its depth limit. `serviceRoleKey` is present only when the
+ * project granted this hook's function the service role.
+ */
+interface HookBase extends FunctionContext {
   readonly table: string
   /**
    * Claims from the JWT the server already verified. `null` for an anonymous caller, and for an
@@ -362,11 +412,17 @@ type AnyHandler = (ctx: never) => unknown
  * does not know its own in-network address, while this worker is already told how to reach the stack.
  * `old` and `deliveryId` come only to an after-hook.
  */
-function hookContext(wire: Record<string, unknown>, signature: string | null): Record<string, unknown> {
+function hookContext(
+  wire: Record<string, unknown>,
+  signature: string | null,
+  fn: FunctionContext | undefined,
+): Record<string, unknown> {
   const filter = text(wire, "filter")
   const previousPath = text(wire, "previousPath")
   const deliveryId = text(wire, "deliveryId")
   return {
+    // First, so nothing in the function context can overwrite a field of the hook's own.
+    ...(fn !== undefined && fn),
     table: text(wire, "table") ?? "",
     operation: text(wire, "operation") ?? "",
     user: wire["user"] ?? null,
@@ -400,8 +456,8 @@ function rejectionResponse(rejection: unknown): Response {
  * contract in the transport rather than in a second envelope inside the body, so a hook written by
  * hand: or in another language, needs to know nothing about this file.
  */
-export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
-  return async (req: Request): Promise<Response> => {
+export function hook(handler: AnyHandler): (req: Request, fn?: FunctionContext) => Promise<Response> {
+  return async (req: Request, fn?: FunctionContext): Promise<Response> => {
     if (req.method !== "POST") {
       return json({ message: "A hook is invoked with POST" }, 405)
     }
@@ -410,7 +466,7 @@ export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
     const wire = await payload(req)
     if (wire === null) return json({ message: "Hook payload was not JSON" }, 400)
 
-    const ctx = hookContext(wire, req.headers.get("webhook-signature"))
+    const ctx = hookContext(wire, req.headers.get("webhook-signature"), fn)
     if (!isHandlerContext(ctx)) return json({ message: "Hook context was not built" }, 500)
 
     let verdict: unknown
@@ -442,12 +498,14 @@ export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
  * step for one deploy, and failing a write because the *other* half has not shipped yet would be the
  * wrong way round.
  */
-export function hooks(handlers: Record<string, AnyHandler | undefined>): (req: Request) => Promise<Response> {
-  return async (req: Request): Promise<Response> => {
+export function hooks(
+  handlers: Record<string, AnyHandler | undefined>,
+): (req: Request, fn?: FunctionContext) => Promise<Response> {
+  return async (req: Request, fn?: FunctionContext): Promise<Response> => {
     const event = req.headers.get("x-supatype-hook") ?? ""
     const handler = handlers[event]
     if (handler === undefined) return json({}, 200)
-    return hook(handler)(req)
+    return hook(handler)(req, fn)
   }
 }
 

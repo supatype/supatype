@@ -123,3 +123,8 @@ export function deliverInsert(ws: MockWebSocketInstance, channel: string, id: nu
     timestamp: "2026-11-11T00:00:00Z",
   })
 }
+
+/** Node has no CloseEvent, and the client never reads the event; this has the fields the type names. */
+export function closeEvent(): CloseEvent {
+  return Object.assign(new Event("close"), { code: 1006, reason: "", wasClean: false })
+}

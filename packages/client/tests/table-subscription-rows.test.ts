@@ -11,19 +11,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { applyRowChange, watchTable } from "../src/bindings.js"
 import type { RealtimePayload } from "../src/index.js"
-import { simulateServerMessage, subscribedChannels } from "./helpers/mock-websocket.js"
+import { closeEvent, simulateServerMessage, subscribedChannels } from "./helpers/mock-websocket.js"
 import { fakeClient } from "./helpers/fake-client.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "./helpers/socket-swap.js"
 
 interface Row {
   id: number
-  v: string
+  /** Absent on an old row when the table only replicates its key. */
+  v?: string
 }
 
-const change = (eventType: RealtimePayload<Row>["eventType"], row: Row | null, old: Partial<Row> | null = null): RealtimePayload<Row> => ({
+const change = (eventType: RealtimePayload<Row>["eventType"], row: Row | null, old: Row | null = null): RealtimePayload<Row> => ({
   eventType,
   new: row,
-  old: old as Row | null,
+  old,
   schema: "public",
   table: "task",
   commitTimestamp: "2024-01-01T00:00:00Z",
@@ -123,7 +124,7 @@ describe("watchTable after a drop", () => {
     await tick()
     expect(seen[seen.length - 1]).toEqual([{ id: 1, v: "a" }])
 
-    harness.socket().onclose?.(new Event("close") as CloseEvent)
+    harness.socket().onclose?.(closeEvent())
     const before = harness.sockets.length
     await new Promise((resolve) => setTimeout(resolve, 1200))
     expect(harness.sockets.length).toBe(before + 1)

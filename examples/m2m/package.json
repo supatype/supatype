@@ -16,6 +16,7 @@
     "@supatype/types": "workspace:*"
   },
   "devDependencies": {
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

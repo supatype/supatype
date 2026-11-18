@@ -13,6 +13,14 @@ import { parseWal2json } from "../src/replication.js"
 import { exactColumnsOf, valueForColumn } from "../src/exact-columns.js"
 import { matchesFilter } from "../src/filter-match.js"
 import type { WalChange } from "../src/types.js"
+import { isJsonObject } from "../src/json.js"
+
+/** The one change a statement produced; a test that parsed none has nothing to assert about. */
+function onlyChange(wal: string): WalChange {
+  const [change] = parseWal2json(wal)
+  if (change === undefined) throw new Error("the statement produced no change")
+  return change
+}
 
 function insert(columns: Record<string, [string, unknown]>): string {
   return JSON.stringify({
@@ -209,9 +217,9 @@ describe("arrays of every other type", () => {
 
 describe("a filter on an array column", () => {
   it("still matches the literal the filter is written as", () => {
-    const [change] = parseWal2json(insert({ tags: ["text[]", "{a,b}"] }))
-    expect(matchesFilter(change as WalChange, { tags: "eq.{a,b}" })).toBe(true)
-    expect(matchesFilter(change as WalChange, { tags: "eq.{a,c}" })).toBe(false)
+    const change = onlyChange(insert({ tags: ["text[]", "{a,b}"] }))
+    expect(matchesFilter(change, { tags: "eq.{a,b}" })).toBe(true)
+    expect(matchesFilter(change, { tags: "eq.{a,c}" })).toBe(false)
   })
 })
 
@@ -221,8 +229,8 @@ describe("array columns are not exact columns", () => {
   })
 
   it("quotes an element that needs it when matching a filter", () => {
-    const [change] = parseWal2json(insert({ tags: ["text[]", '{"b c",d}'] }))
-    expect(matchesFilter(change as WalChange, { tags: 'eq.{"b c",d}' })).toBe(true)
+    const change = onlyChange(insert({ tags: ["text[]", '{"b c",d}'] }))
+    expect(matchesFilter(change, { tags: 'eq.{"b c",d}' })).toBe(true)
   })
 })
 
@@ -231,7 +239,8 @@ describe("array columns are not exact columns", () => {
 // Invalid Date, as they did the columns before.
 describe("the commit timestamp", () => {
   it("is ISO 8601, like the row's timestamptz columns", () => {
-    const row = JSON.parse(insert({ id: ["integer", 1] })) as Record<string, unknown>
+    const parsed = JSON.parse(insert({ id: ["integer", 1] }))
+    const row = isJsonObject(parsed) ? parsed : {}
     const [change] = parseWal2json(JSON.stringify({ ...row, timestamp: "2026-11-15 20:11:03.607447+00" }))
     expect(change?.commitTimestamp).toBe("2026-11-15T20:11:03.607447+00:00")
   })

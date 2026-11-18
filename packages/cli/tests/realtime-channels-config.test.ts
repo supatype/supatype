@@ -20,9 +20,9 @@ const BASE = {
   app: { mode: "none" },
 }
 
-const AST = { astVersion: 2, models: [] } as unknown as ExtractedSchemaAstV2
+const AST: ExtractedSchemaAstV2 = { astVersion: 2, models: [] }
 const config = (realtime?: unknown): SupatypeProjectConfig =>
-  ({ ...BASE, ...(realtime !== undefined && { realtime }) }) as unknown as SupatypeProjectConfig
+  validateProjectConfig({ ...BASE, ...(realtime !== undefined && { realtime }) }, "supatype.config.ts")
 
 describe("validating realtime.channels", () => {
   it.each(["open", "declared"])("accepts %s", (mode) => {

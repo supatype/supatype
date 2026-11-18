@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { isArrayOf, isJsonObject } from "@supatype/shared"
 import { errorMessage } from "../src/error-message.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
 
@@ -70,8 +71,9 @@ describe("extracting a Channel", () => {
   })
 
   it("keeps a bare string at the top level as the parameter's column", () => {
-    const join = extract(LOT)?.channels?.[0]?.access.join as { rules: Array<Record<string, unknown>> }
-    expect(join.rules[0]).toMatchObject({ type: "in", column: "id" })
+    const join = extract(LOT)?.channels?.[0]?.access.join
+    const rules = isJsonObject(join) ? join["rules"] : undefined
+    expect(isArrayOf(isJsonObject)(rules) ? rules[0] : undefined).toMatchObject({ type: "in", column: "id" })
   })
 
   it("emits null for an operation left out", () => {

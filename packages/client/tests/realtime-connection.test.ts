@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RealtimeClient, type RealtimeConnectionState } from "../src/realtime.js"
-import { createMockWebSocketClass, type MockWebSocketInstance } from "./helpers/mock-websocket.js"
+import { closeEvent, createMockWebSocketClass, type MockWebSocketInstance } from "./helpers/mock-websocket.js"
 
 let instances: MockWebSocketInstance[]
 let realtime: RealtimeClient
@@ -25,10 +25,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** Node has no CloseEvent; the client never reads the event. */
-const dropEvent = (): CloseEvent => new Event("close") as CloseEvent
+const dropEvent = closeEvent
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10))
-const newest = (): MockWebSocketInstance => instances[instances.length - 1] as MockWebSocketInstance
+const newest = (): MockWebSocketInstance => {
+  const socket = instances.at(-1)
+  if (socket === undefined) throw new Error("no socket has been created yet")
+  return socket
+}
 
 function record(): RealtimeConnectionState[] {
   const seen: RealtimeConnectionState[] = []
