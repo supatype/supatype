@@ -35,6 +35,8 @@ export class FakeCliLoginServer {
   configStatus = 200
   /** How many times the config was asked for. */
   configAsks = 0
+  /** When set, the code exchange answers with this instead of the real answer, as a refusing gateway or captcha would. */
+  exchangeReply: { status: number; body: unknown } | undefined
   private readonly logins = new Map<string, StoredLogin>()
   private server: Server | undefined
 
@@ -69,7 +71,8 @@ export class FakeCliLoginServer {
     )
     this.server = server
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-    const address = server.address() as AddressInfo
+    const address: AddressInfo | string | null = server.address()
+    if (address === null || typeof address === "string") throw new Error("the fake login server has no port")
     return `http://127.0.0.1:${address.port}`
   }
 
@@ -95,6 +98,7 @@ export class FakeCliLoginServer {
     if (match?.[1] === undefined) return reply(404, { error: "not_found" })
     const code = url.searchParams.get("device_code") ?? ""
     this.codesTried.push(code)
+    if (this.exchangeReply !== undefined) return reply(this.exchangeReply.status, this.exchangeReply.body)
     const stored = this.logins.get(match[1])
     if (stored === undefined || code.replace(/[\s-]/g, "").toUpperCase() !== stored.deviceCode) {
       return reply(404, { error: "not_found" })
