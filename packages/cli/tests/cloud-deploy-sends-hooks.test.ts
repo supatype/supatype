@@ -36,6 +36,12 @@ vi.mock("../src/cors-origins-push.js", () => ({
     return false
   },
 }))
+vi.mock("../src/platform-settings-push.js", () => ({
+  pushPlatformSettings: async () => {
+    steps.push("platform")
+    return false
+  },
+}))
 
 const { pushSchemaToLinkedProject } = await import("../src/commands/cloud.js")
 
@@ -50,9 +56,9 @@ afterEach(() => {
 })
 
 describe("a deploy to a linked Cloud project", () => {
-  it("sends the hooks and the allowed origins after the schema, in that order", async () => {
+  it("sends the hooks, the allowed origins and the platform settings after the schema, in that order", async () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined)
     await pushSchemaToLinkedProject(process.cwd(), { force: true, env: "production" })
-    expect(steps).toEqual(["schema", "hooks", "cors"])
+    expect(steps).toEqual(["schema", "hooks", "cors", "platform"])
   })
 })

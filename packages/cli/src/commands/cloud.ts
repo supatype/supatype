@@ -11,6 +11,7 @@ import { registerEnvs, registerLinkOptions, runLinkAction } from "./link-helpers
 import { resolveTarget, targetSchemaPush, schemaPgSchema } from "../resolve-target.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
+import { pushPlatformSettings } from "../platform-settings-push.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { pushCorsOrigins } from "../cors-origins-push.js"
@@ -145,6 +146,8 @@ export async function pushSchemaToLinkedProject(
   // and ends the command non-zero (post-apply.ts).
   await deployHooksToTarget(cwd, config, target, ast)
   await pushCorsOrigins(target, config)
+  // The project's services, realtime and own-bucket settings.
+  await pushPlatformSettings(cwd, config, target)
 }
 
 export async function deploySchemaToLinkedProject(
