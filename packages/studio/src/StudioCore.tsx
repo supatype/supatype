@@ -5,6 +5,7 @@ import { Routes, Route, Navigate, Outlet, useNavigate, useLocation, useParams } 
 import type { StudioCoreProps, StudioExtension } from "./types.js"
 import type { AdminConfig } from "./config.js"
 import { AdminConfigContext, useAdminConfig } from "./hooks/useAdminConfig.js"
+import { ExtensionRoutesContext, routePathOf } from "./hooks/useExtensionRoutes.js"
 import { useMobileNav, type MobileNav } from "./hooks/useMobileNav.js"
 import { AdminClientContext, useAdminClient } from "./hooks/useAdminClient.js"
 import { LocaleContext, useLocaleState } from "./hooks/useLocale.js"
@@ -411,14 +412,23 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
   // A mode an earlier Studio remembered is no longer read; forgetting it once keeps no stale choice.
   useEffect(() => forgetStoredActingModes(), [])
 
+  const extensionRoutes = useMemo(() => extensions?.routes ?? [], [extensions?.routes])
+  const served = useMemo(() => new Set(extensionRoutes.map((r) => routePathOf(r.path))), [extensionRoutes])
+
   let content = (
     <CloudUrlContext.Provider value={cloudUrl}>
     <PlatformCtx.Provider value={{ platformUrl, projectRef }}>
     <AdminConfigContext.Provider value={config}>
+    <ExtensionRoutesContext.Provider value={served}>
       <AdminClientContext.Provider value={client}>
         <LocaleContext.Provider value={localeState}>
           <Routes>
             <Route element={<StudioLayout extensions={extensions} demoMode={demoMode} />}>
+              {/* Extension routes first: React Router ranks two routes for one path by the order
+                  they are declared, so a page a host builds (Cloud's backups) wins over the core
+                  placeholder at the same path. See ExtensionRoutesContext. */}
+              {extensionRoutes.map((r) => <Route key={r.path} path={r.path} element={r.element} />)}
+
               {/* CMS */}
               <Route index element={<Dashboard />} />
               <Route path="media" element={<MediaLibrary />} />
@@ -585,15 +595,13 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="dev/data"           element={<Navigate to="/data"                replace />} />
               <Route path="dev/migrations"     element={<Navigate to="/database/migrations" replace />} />
 
-              {/* Extension routes */}
-              {extensions?.routes?.map((r) => <Route key={r.path} path={r.path} element={r.element} />)}
-
               {/* 404 */}
               <Route path="*" element={<PageError>Page not found</PageError>} />
             </Route>
           </Routes>
         </LocaleContext.Provider>
       </AdminClientContext.Provider>
+    </ExtensionRoutesContext.Provider>
     </AdminConfigContext.Provider>
     </PlatformCtx.Provider>
     </CloudUrlContext.Provider>
