@@ -8,16 +8,16 @@ never called still counts here: proving an example *runs* is what the live-stack
 
 | Package | Exports | Imported by an example | Note |
 |---|---:|---:|---|
-| `@supatype/types` | 133 | 58 | 75 not imported |
-| `@supatype/client` | 28 | 5 | 23 not imported |
-| `@supatype/react` | 12 | 9 | 3 not imported |
+| `@supatype/types` | 142 | 59 | 83 not imported |
+| `@supatype/client` | 37 | 5 | 32 not imported |
+| `@supatype/react` | 14 | 9 | 5 not imported |
 | `@supatype/ssr` | 1 | 0 | 1 not imported |
 | `@supatype/react-auth` | 10 | 8 | 2 not imported |
 | `@supatype/react-native` | 2 | 2 | covered by examples/expo-auth, which imports a subset |
 | `@supatype/react-native-auth` | 10 | 7 | covered by examples/expo-auth, which imports a subset |
-| `@supatype/vue` | 8 | 6 | 2 not imported |
-| `@supatype/svelte` | 11 | 5 | 6 not imported |
-| `@supatype/solid` | 8 | 6 | 2 not imported |
+| `@supatype/vue` | 10 | 6 | 4 not imported |
+| `@supatype/svelte` | 15 | 5 | 10 not imported |
+| `@supatype/solid` | 10 | 6 | 4 not imported |
 | `@supatype/plugin-sdk` | 18 | 0 | no example: schema-side plugin registration needs a spike first |
 
 ## Names no example imports
@@ -26,11 +26,11 @@ Ancillary types (`…Options`, `…Result`), client-owned classes and test-only 
 excluded, because you receive those rather than reaching for them. What is left is vocabulary: each
 either deserves an example or deserves saying why not.
 
-**`@supatype/types`**: `AccessRuleFor`, `After`, `AfterModelHook`, `Ago`, `All`, `Asset`, `AuthRole`, `AuthUid`, `AuthUserOnDelete`, `AutoIncrement`, `Before`, `BeforeModelHook`, `BigInt`, `BucketAccessMode`, `BucketRule`, `BucketStorageAccess`, `ButtonTarget`, `ButtonValue`, `Bytea`, `Claim`, `Code`, `Computed`, `DateTime`, `Default`, `EditorReadOnly`, `ExactInterval`, `Exists`, `FieldValidation`, `Float`, `FromNow`, `Generated`, `Geo`, `GeoShape`, `Gt`, `HasOne`, `IPAddress`, `Identity`, `IdentityMode`, `In`, `IndexMethod`, `IsNull`, `Like`, `LocalizedModel`, `Lt`, `MacAddress`, `ManyToMany`, `ModelHook`, `ModelIndex`, `Money`, `Neq`, `Not`, `OffsetBase`, `OnDelete`, `OnUpdate`, `OwnerKey`, `OwnerOf`, `PrimaryKey`, `Private`, `Publishable`, `RelationTarget`, `Rows`, `ServerDefault`, `SmallInt`, `SoftDelete`, `StartOf`, `TSQuery`, `TSVector`, `TimeInterval`, `TimeUnit`, `Timestamps`, `TruncUnit`, `Values`, `VectorDistance`, `WithPublishable`, `WithSoftDelete`
+**`@supatype/types`**: `AccessRuleFor`, `After`, `AfterModelHook`, `Ago`, `All`, `Asset`, `AuthRole`, `AuthUid`, `AuthUserOnDelete`, `AutoIncrement`, `Before`, `BeforeModelHook`, `BigInt`, `BucketAccessMode`, `BucketRule`, `BucketStorageAccess`, `ButtonTarget`, `ButtonValue`, `Bytea`, `Channel`, `ChannelAccess`, `ChannelParamNames`, `ChannelRule`, `ChannelSendRule`, `Claim`, `Code`, `Computed`, `DateTime`, `Default`, `EditorReadOnly`, `ExactInterval`, `Exists`, `FieldValidation`, `Float`, `Folder`, `FromNow`, `Generated`, `Geo`, `GeoShape`, `Gt`, `HasOne`, `IPAddress`, `Identity`, `IdentityMode`, `In`, `IndexMethod`, `IsNull`, `Like`, `LocalizedModel`, `Lt`, `MacAddress`, `ModelHook`, `ModelIndex`, `Money`, `Neq`, `Not`, `OffsetBase`, `OnDelete`, `OnUpdate`, `OwnerKey`, `OwnerOf`, `Param`, `Payload`, `PayloadCheck`, `PrimaryKey`, `Private`, `Publishable`, `RelationTarget`, `Rows`, `ServerDefault`, `SmallInt`, `SoftDelete`, `StartOf`, `TSQuery`, `TSVector`, `TimeInterval`, `TimeUnit`, `Timestamps`, `TruncUnit`, `Values`, `VectorDistance`, `WithPublishable`, `WithSoftDelete`
 
-**`@supatype/client`**: `ChannelStatusCallback`, `RemovedObject`, `SelectRow`, `Session`, `SignInWithSSOCredentials`, `StorageFolder`, `StorageObject`, `StorageReference`, `SupatypeBuckets`, `SupatypeFunctions`, `SupatypeModels`, `TableRelationship`, `TableSubscription`, `TableUpdate`, `createGraphqlRunner`, `fieldKindsAreRegistered`, `forgetRegisteredDraftModels`, `forgetRegisteredFieldKinds`, `onIdentityChange`, `readGraphqlSchema`, `registerDraftModels`, `registerFieldKinds`, `ssoDomain`
+**`@supatype/client`**: `ChannelActionRefusal`, `ChannelActionRefusalCode`, `ChannelName`, `ChannelStatusCallback`, `ChannelSubscription`, `DeclaredTopic`, `DeclaredTopics`, `RealtimeConnectionListener`, `RealtimeConnectionState`, `RemovedObject`, `SelectRow`, `Session`, `SignInWithSSOCredentials`, `StorageFolder`, `StorageObject`, `StorageReference`, `SupatypeBuckets`, `SupatypeChannels`, `SupatypeFunctions`, `SupatypeModels`, `TableRelationship`, `TableSubscription`, `TableUpdate`, `createGraphqlRunner`, `fieldKindsAreRegistered`, `forgetRegisteredDraftModels`, `forgetRegisteredFieldKinds`, `onIdentityChange`, `readGraphqlSchema`, `registerDraftModels`, `registerFieldKinds`, `ssoDomain`
 
-**`@supatype/react`**: `MutationOperation`, `StudioOrigins`, `SupatypeContext`
+**`@supatype/react`**: `MutationOperation`, `StudioOrigins`, `SupatypeContext`, `useChannel`, `useRealtimeConnection`
 
 **`@supatype/ssr`**: `CookieToSet`
 
@@ -38,11 +38,11 @@ either deserves an example or deserves saying why not.
 
 **`@supatype/react-native-auth`**: `AuthThemeTokens`, `defaultAuthTheme`, `useAuthTheme`
 
-**`@supatype/vue`**: `MutationOperation`, `useSupatype`
+**`@supatype/vue`**: `MutationOperation`, `useChannel`, `useRealtimeConnection`, `useSupatype`
 
-**`@supatype/svelte`**: `AuthStore`, `FunctionStore`, `MutationOperation`, `MutationStore`, `QueryStore`, `SubscriptionStore`
+**`@supatype/svelte`**: `AuthStore`, `ChannelStore`, `FunctionStore`, `MutationOperation`, `MutationStore`, `QueryStore`, `RealtimeConnectionStore`, `SubscriptionStore`, `createChannel`, `createRealtimeConnection`
 
-**`@supatype/solid`**: `MutationOperation`, `useSupatype`
+**`@supatype/solid`**: `MutationOperation`, `createChannel`, `createRealtimeConnection`, `useSupatype`
 
 **`@supatype/plugin-sdk`**: `checkPluginApiVersion`, `clearPluginRegistry`, `defineComposite`, `defineProvider`, `defineWidget`, `detectConflicts`, `expandPluginComposites`, `generatePluginDocs`, `getFieldTypePlugin`, `getPluginFieldPgTypeMap`, `getPluginFieldTypeMap`, `getProviderPlugin`, `getRegisteredPlugins`, `isPluginDefinition`, `isSupatypePlugin`, `registerPlugin`, `sortByLoadOrder`, `validateProviders`
 
