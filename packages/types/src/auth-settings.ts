@@ -10,6 +10,18 @@
  * Pure types and pure functions: no I/O, no Node imports.
  */
 
+import {
+  GROUP_LEAF_PATHS,
+  GROUP_OWNED_KEYS,
+  GROUP_SECRET_KEYS,
+  AUTH_HOOK_NAMES,
+  groupProblems,
+  groupSecretInUse,
+  groupSecretRefs,
+  groupsEnv,
+  type AuthGroupSettings,
+} from "./auth-settings-groups.js"
+
 /** Every OAuth provider the auth server has, by the name `/auth/v1/authorize?provider=` takes. */
 export const AUTH_PROVIDER_NAMES = [
   "apple",
@@ -78,10 +90,16 @@ export interface AuthMailSettings {
   resend_api_key?: string
   resend_from?: string
   ses_from?: string
+  /** The project's own SES access key, `env("NAME")`. With the secret below, replaces the ambient AWS credentials. */
+  ses_access_key_id?: string
+  /** `env("NAME")`. */
+  ses_secret_access_key?: string
+  /** The SES region, e.g. `eu-west-2`. */
+  ses_region?: string
 }
 
 export interface AuthSettings {
-  auth?: {
+  auth?: AuthGroupSettings & {
     email?: { enabled?: boolean; enableConfirmations?: boolean }
     providers?: AuthProvidersSettings
     /** Where emailed links and OAuth land when no `redirectTo` is given. */
@@ -116,6 +134,8 @@ export interface AuthRenderContext {
   platformRedirectUrls: readonly string[]
   /** The platform sender, used when `email.provider` is unset or "console". Absent: console. */
   platformMail?: PlatformMailSettings
+  /** Where the SAML service provider is served: the API's public origin plus `/auth/v1`. Absent: left to the server. */
+  samlExternalUrl?: string
   /** Plain secret values by secret key ({@link AuthSecretRef.key}). A missing one renders empty. */
   secrets: Readonly<Record<string, string>>
 }
@@ -159,6 +179,9 @@ const FIXED_KEYS = [
   "SUPATYPE_RESEND_API_KEY",
   "SUPATYPE_RESEND_FROM",
   "SUPATYPE_SES_FROM",
+  "SUPATYPE_SES_ACCESS_KEY_ID",
+  "SUPATYPE_SES_SECRET_ACCESS_KEY",
+  "SUPATYPE_SES_REGION",
 ]
 
 /**
@@ -168,6 +191,7 @@ const FIXED_KEYS = [
  */
 export const AUTH_OWNED_KEYS: readonly string[] = [
   ...FIXED_KEYS,
+  ...GROUP_OWNED_KEYS,
   ...AUTH_PROVIDER_NAMES.flatMap((name) => [
     ...PROVIDER_FLAG_SUFFIXES.map((s) => `${providerPrefix(name)}${s}`),
     ...PROVIDER_STRING_SUFFIXES.map((s) => `${providerPrefix(name)}${s}`),
@@ -209,6 +233,9 @@ function emptyMailEnv(): Record<string, string> {
     SUPATYPE_RESEND_API_KEY: "",
     SUPATYPE_RESEND_FROM: "",
     SUPATYPE_SES_FROM: "",
+    SUPATYPE_SES_ACCESS_KEY_ID: "",
+    SUPATYPE_SES_SECRET_ACCESS_KEY: "",
+    SUPATYPE_SES_REGION: "",
   }
 }
 
@@ -240,7 +267,12 @@ function projectMailEnv(mail: AuthMailSettings, ctx: AuthRenderContext): Record<
       SUPATYPE_RESEND_API_KEY: ctx.secrets["email.resend_api_key"] ?? "",
       SUPATYPE_RESEND_FROM: mail.resend_from?.trim() ?? "",
     }),
-    ...(mail.provider === "ses" && { SUPATYPE_SES_FROM: mail.ses_from?.trim() ?? "" }),
+    ...(mail.provider === "ses" && {
+      SUPATYPE_SES_FROM: mail.ses_from?.trim() ?? "",
+      SUPATYPE_SES_ACCESS_KEY_ID: ctx.secrets["email.ses_access_key_id"] ?? "",
+      SUPATYPE_SES_SECRET_ACCESS_KEY: ctx.secrets["email.ses_secret_access_key"] ?? "",
+      SUPATYPE_SES_REGION: mail.ses_region?.trim() ?? "",
+    }),
   }
 }
 
@@ -270,6 +302,7 @@ export function authSettingsToEnv(settings: AuthSettings, ctx: AuthRenderContext
     SUPATYPE_SITE_URL: auth?.siteUrl?.trim() ?? ctx.siteUrl,
     SUPATYPE_URI_ALLOW_LIST: allowList(settings, ctx),
     ...mailEnv(settings, ctx),
+    ...groupsEnv(settings, ctx),
     ...Object.assign({}, ...AUTH_PROVIDER_NAMES.map((name) => providerEnv(name, settings, ctx))),
   }
 }
@@ -284,7 +317,24 @@ export function authSecretRefs(settings: AuthSettings): AuthSecretRef[] {
   for (const name of AUTH_PROVIDER_NAMES) push(`providers.${name}.secret`, settings.auth?.providers?.[name]?.secret)
   push("email.smtp.pass", settings.email?.smtp?.pass)
   push("email.resend_api_key", settings.email?.resend_api_key)
+  push("email.ses_access_key_id", settings.email?.ses_access_key_id)
+  push("email.ses_secret_access_key", settings.email?.ses_secret_access_key)
+  for (const { key, value } of groupSecretRefs(settings)) push(key, value)
   return refs
+}
+
+/**
+ * Whether the settings use the secret `key`. A stored secret that nothing uses (a removed provider's,
+ * a disabled CAPTCHA's) is not rendered. The platform's SAML key is in use while SAML is on.
+ */
+export function authSecretInUse(settings: AuthSettings, key: string): boolean {
+  const grouped = groupSecretInUse(settings, key)
+  if (grouped !== undefined) return grouped
+  if (key === "email.smtp.pass") return settings.email?.provider === "smtp"
+  if (key === "email.resend_api_key") return settings.email?.provider === "resend"
+  if (key === "email.ses_access_key_id" || key === "email.ses_secret_access_key") return settings.email?.provider === "ses"
+  const name = /^providers\.(.+)\.secret$/.exec(key)?.[1]
+  return name !== undefined && Object.keys(settings.auth?.providers ?? {}).includes(name)
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +408,7 @@ function providerProblems(name: string, provider: unknown): string[] {
   return found.filter((p): p is string => p !== undefined)
 }
 
-function authProblems(auth: unknown): string[] {
+function authProblems(auth: unknown, target: AuthTarget): string[] {
   if (auth === undefined) return []
   if (!isObject(auth)) return ["auth must be an object"]
   const problems: string[] = []
@@ -377,7 +427,7 @@ function authProblems(auth: unknown): string[] {
   if (auth["disableSignup"] !== undefined && typeof auth["disableSignup"] !== "boolean") {
     problems.push("auth.disableSignup must be true or false")
   }
-  return problems
+  return [...problems, ...groupProblems(auth, target)]
 }
 
 function smtpProblems(smtp: unknown, target: AuthTarget): string[] {
@@ -399,23 +449,25 @@ function mailProblems(email: unknown, target: AuthTarget): string[] {
     provider !== undefined && !MAIL_PROVIDERS.includes(String(provider))
       ? `email.provider must be one of ${MAIL_PROVIDERS.join(", ")}`
       : undefined,
-    provider === "ses" && target === "cloud"
-      ? "email.provider ses is not available on Cloud (no ambient AWS credentials); use smtp or resend"
+    provider === "ses" && target === "cloud" && (email["ses_access_key_id"] === undefined || email["ses_secret_access_key"] === undefined)
+      ? "email.provider ses on Cloud needs email.ses_access_key_id and email.ses_secret_access_key: a hosted project has no ambient AWS credentials"
       : undefined,
     secretProblem(email["resend_api_key"], "email.resend_api_key", target, true),
-    ...(["resend_from", "ses_from"] as const).map((f) => stringProblem(email[f], `email.${f}`)),
+    secretProblem(email["ses_access_key_id"], "email.ses_access_key_id", target, true),
+    secretProblem(email["ses_secret_access_key"], "email.ses_secret_access_key", target, true),
+    ...(["resend_from", "ses_from", "ses_region"] as const).map((f) => stringProblem(email[f], `email.${f}`)),
   ]
   return [...found.filter((p): p is string => p !== undefined), ...smtpProblems(email["smtp"], target)]
 }
 
 /**
  * Every problem with the settings, none when they are fine. Cloud refuses a literal where a secret
- * belongs (self-host kept accepting a literal SMTP password and Resend key, so it still does) and
- * refuses SES, which needs ambient AWS credentials.
+ * belongs (self-host kept accepting a literal SMTP password and Resend key, so it still does), and
+ * SES there without the project's own key, since a hosted project has no ambient AWS credentials.
  */
 export function validateAuthSettings(settings: unknown, target: AuthTarget): string[] {
   if (!isObject(settings)) return ["settings must be an object"]
-  return [...authProblems(settings["auth"]), ...mailProblems(settings["email"], target)]
+  return [...authProblems(settings["auth"], target), ...mailProblems(settings["email"], target)]
 }
 
 // ---------------------------------------------------------------------------
@@ -463,7 +515,9 @@ const GLOBAL_LEAF_PATHS = [
   "email.provider",
   "email.resend_from",
   "email.ses_from",
+  "email.ses_region",
   ...SMTP_LEAF_FIELDS.map((f) => `email.smtp.${f}`),
+  ...GROUP_LEAF_PATHS,
 ]
 
 const PROVIDER_LEAF_PATHS = AUTH_PROVIDER_NAMES.flatMap((name) =>
@@ -472,11 +526,14 @@ const PROVIDER_LEAF_PATHS = AUTH_PROVIDER_NAMES.flatMap((name) =>
 
 const LEAF_PATHS: ReadonlySet<string> = new Set([...GLOBAL_LEAF_PATHS, ...PROVIDER_LEAF_PATHS])
 
-/** The secret keys: each provider's secret, the SMTP password and the Resend key. */
+/** The secret keys: each provider's secret, the SMTP password, the Resend key, hook, CAPTCHA and SMS secrets. */
 const SECRET_KEYS: ReadonlySet<string> = new Set([
   ...AUTH_PROVIDER_NAMES.map((name) => `providers.${name}.secret`),
   "email.smtp.pass",
   "email.resend_api_key",
+  "email.ses_access_key_id",
+  "email.ses_secret_access_key",
+  ...GROUP_SECRET_KEYS,
 ])
 
 /** Whether `path` is a setting that can be saved: not a secret, not a platform-owned value. */
@@ -520,6 +577,10 @@ export function flattenAuthSettings(settings: AuthSettings): FlatAuthSettings {
   for (const name of AUTH_PROVIDER_NAMES) {
     const provider = settings.auth?.providers?.[name]
     if (provider !== undefined) out[`auth.providers.${name}.enabled`] = provider.enabled ?? true
+  }
+  for (const name of AUTH_HOOK_NAMES) {
+    const hook = settings.auth?.hooks?.[name]
+    if (hook !== undefined) out[`auth.hooks.${name}.enabled`] = hook.enabled ?? true
   }
   return out
 }

@@ -12,6 +12,11 @@ export interface TargetFetchOptions {
   orgId?: string | undefined
   environment?: string | undefined
   /**
+   * Cloud-only: the acting mode a request through the control plane's project proxy asks for. The
+   * control plane decides whether the caller may have it (`elevated` is for owners and admins).
+   */
+  actingMode?: "elevated" | undefined
+  /**
    * Give up after this many milliseconds, with an error saying so. None when unset: a push can run
    * for minutes, and a stream ({@link targetStream}) until it is stopped. Both sends of a request
    * whose session is renewed share it; the renewal has its own limit.
@@ -122,6 +127,7 @@ function send(url: string, opts: TargetFetchOptions, token: string | undefined, 
   if (token !== undefined && token !== "") headers["Authorization"] = `Bearer ${token}`
   if (opts.orgId) headers["X-Org-Id"] = opts.orgId
   if (opts.environment) headers["X-Supatype-Environment"] = opts.environment
+  if (opts.actingMode) headers["X-Supatype-Acting-Mode"] = opts.actingMode
   return fetch(url, {
     method: opts.method,
     headers,

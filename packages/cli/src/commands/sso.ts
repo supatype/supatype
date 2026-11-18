@@ -8,6 +8,8 @@
  */
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
+import { loadProjectLink } from "../link.js"
+import { rotateCloudSamlKey } from "../cloud-saml-key.js"
 import { errorMessage } from "../error-message.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import { AUTH_ROUTES_PATH, SAML_NEXT_PRIVATE_KEY_ENV, SAML_PRIVATE_KEY_ENV, samlEnabled } from "../saml-config.js"
@@ -192,7 +194,7 @@ async function printServiceProviderInfo(): Promise<void> {
   const samlUrl = samlServiceProviderUrl(config, ssoApiBaseUrl(cwd).baseUrl)
   for (const line of serviceProviderInfo(samlUrl)) plain(line)
   const metadata = spMetadataUrl(samlUrl)
-  const off = samlOffWarning(config)
+  const off = samlOffWarning(config, linkedToCloud(cwd))
   if (off !== undefined) {
     warn(
       `${off} Until then these values are not served: ${metadata} answers 404, ` +
@@ -252,13 +254,17 @@ export function serviceProviderInfo(samlUrl: string): string[] {
   ]
 }
 
-/** What to say when the project has not turned SAML on, or nothing when it has. */
-export function samlOffWarning(config: SupatypeProjectConfig): string | undefined {
+/**
+ * What to say when the project's config has not turned SAML on, or nothing when it has. On Cloud the
+ * config reaches the project on the next push, and Studio can switch it on too, so "restart the stack"
+ * would be the wrong way out there.
+ */
+export function samlOffWarning(config: SupatypeProjectConfig, onCloud = false): string | undefined {
   if (samlEnabled(config)) return undefined
-  return (
-    "SAML is off for this project: set auth.sso.saml.enabled to true in supatype.config.ts and restart the " +
-    "stack. Providers can be set up first, but nobody can sign in through them until then."
-  )
+  const how = onCloud
+    ? "set auth.sso.saml.enabled to true in supatype.config.ts and run supatype push, or switch it on in Studio"
+    : "set auth.sso.saml.enabled to true in supatype.config.ts and restart the stack"
+  return `SAML is off for this project: ${how}. Providers can be set up first, but nobody can sign in through them until then.`
 }
 
 /** {@link samlOffWarning} for the project in `cwd`, when its config can be read. Every subcommand but `info` runs it. */
@@ -269,7 +275,7 @@ function warnIfSamlOff(cwd: string): void {
   } catch {
     return
   }
-  const off = samlOffWarning(config)
+  const off = samlOffWarning(config, linkedToCloud(cwd))
   if (off !== undefined) warn(off)
 }
 
@@ -287,6 +293,13 @@ function registerRotateKey(sso: Command): void {
 
 async function rotateKey(opts: { promote?: boolean; yes?: boolean }): Promise<void> {
   const cwd = process.cwd()
+  if (linkedToCloud(cwd)) {
+    // The control plane holds this project's SAML keys and takes the step; no key is ever shown.
+    const promote = opts.promote === true
+    if (promote && !(await promoteConsented("Make the next SAML key the current one?", opts.yes === true))) return
+    plain(await rotateCloudSamlKey(cwd, promote))
+    return
+  }
   if (linkedToDeployment(cwd)) {
     for (const line of serverRotationSteps()) plain(line)
     return
@@ -311,18 +324,24 @@ function overlapSteps(): string[] {
   ]
 }
 
-async function promoteKey(cwd: string, yes: boolean): Promise<void> {
+/**
+ * Warn what a promotion breaks for an identity provider still on the old certificate, and ask. True
+ * when the promotion may go ahead; a refusal says nothing changed.
+ */
+async function promoteConsented(question: string, yes: boolean): Promise<boolean> {
   warn(
     "Identity providers that have not taken the new certificate stop working with this SP: a request signed " +
       "with the new key fails their signature check, and an assertion they encrypt to the old certificate " +
       "can no longer be decrypted.",
   )
-  const consent = await askConsent(`Make ${SAML_NEXT_PRIVATE_KEY_ENV} the current SAML key?`, yes)
+  const consent = await askConsent(question, yes)
   if (consent === "needs-yes") throw new Error("sso rotate-key --promote needs --yes when not interactive")
-  if (consent === "declined") {
-    plain("Nothing changed.")
-    return
-  }
+  if (consent === "declined") plain("Nothing changed.")
+  return consent !== "declined"
+}
+
+async function promoteKey(cwd: string, yes: boolean): Promise<void> {
+  if (!(await promoteConsented(`Make ${SAML_NEXT_PRIVATE_KEY_ENV} the current SAML key?`, yes))) return
   if (promoteNextSamlKey(cwd) === "no-next-key") {
     throw new Error(`There is no ${SAML_NEXT_PRIVATE_KEY_ENV} in .env to promote. Create one first: supatype sso rotate-key`)
   }
@@ -430,4 +449,9 @@ function dnsAnswerLines(result: DomainVerification): string[] {
   const found = result.found ?? []
   if (found.length === 0) return [`No TXT record was found at ${result.challenge.name}.`]
   return [`DNS answered ${found.map((value) => JSON.stringify(value)).join(", ")} at ${result.challenge.name}, not the token.`]
+}
+
+/** Whether the project in `cwd` is linked to Supatype Cloud. */
+function linkedToCloud(cwd: string): boolean {
+  return loadProjectLink(cwd)?.kind === "cloud"
 }

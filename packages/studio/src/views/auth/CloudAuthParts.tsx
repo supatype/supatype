@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react"
 import type { AuthSettingValue } from "@supatype/types"
-import { Badge, Button, Input, Select, Switch, Td, Textarea } from "../../components/ui.js"
+import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { Badge, Button, Card, Checkbox, Input, Select, Switch, Table, Td, Textarea, Th } from "../../components/ui.js"
 import {
   useCloudAuthSettings,
   type AuthFieldView,
@@ -10,6 +11,7 @@ import {
 import { usePlatform } from "../../hooks/usePlatform.js"
 import { useStudioCapability } from "../../hooks/useStudioCapability.js"
 import { offers } from "../../lib/capability-offers.js"
+import { SettingsLoading } from "./AuthSettingsTable.js"
 
 /**
  * The pieces the Cloud Configuration and Providers pages share: one editor over the environment's
@@ -86,7 +88,8 @@ export function AppliedBadge({ view }: { view: AuthSettingsView }): React.ReactE
   return <Badge variant={applied ? "green" : "yellow"}>{applied ? "applied" : "written, not yet applied"}</Badge>
 }
 
-export type SettingKind = "text" | "number" | "bool" | "list" | "select"
+/** "multi" is a choice of any number of the options, kept in the options' order. */
+export type SettingKind = "text" | "number" | "bool" | "list" | "select" | "multi"
 
 export interface SettingSpec {
   path: string
@@ -95,6 +98,15 @@ export interface SettingSpec {
   options?: readonly string[]
   /** List entries that are always present and cannot be removed. */
   fixed?: readonly string[]
+  /** A switch's state while nothing sets it, for a setting that is on by default. */
+  defaultOn?: boolean
+  /**
+   * A switch nothing sets is on exactly when this other setting has a value, as the server reads it:
+   * a hook is on once its URI is set. Without it, every unset hook showed as on.
+   */
+  onWhenSet?: string
+  /** An older control plane may not know this setting: when it leaves the path out, the row is read-only and says so. */
+  reported?: boolean
 }
 
 function draftText(value: AuthSettingValue | null): string {
@@ -153,12 +165,36 @@ function ChoiceEditor({ spec, field, editor }: RowProps): React.ReactElement {
   )
 }
 
+function MultiEditor({ spec, field, editor }: RowProps): React.ReactElement {
+  const chosen = Array.isArray(field.value) ? field.value : []
+  const toggle = (option: string, on: boolean): void => {
+    const next = (spec.options ?? []).filter((o) => (o === option ? on : chosen.includes(o)))
+    void editor.save({ set: { [spec.path]: next } })
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {(spec.options ?? []).map((option) => (
+        <Checkbox key={option} label={option} aria-label={`${spec.label} ${option}`} checked={chosen.includes(option)} disabled={editor.busy} onChange={(e) => { toggle(option, e.target.checked) }} />
+      ))}
+    </div>
+  )
+}
+
+/** What a switch reads: the value in force, else the setting's own default. */
+function switchOn(spec: SettingSpec, field: AuthFieldView, view: AuthSettingsView | null): boolean {
+  if (typeof field.value === "boolean") return field.value
+  if (spec.onWhenSet === undefined) return spec.defaultOn === true
+  const other = view?.fields[spec.onWhenSet]?.value ?? null
+  return other !== null && other !== ""
+}
+
 function ValueCell({ spec, field, editor }: RowProps): React.ReactElement {
-  if (!editor.canEdit) return <>{shown(field.value)}</>
+  if (!editor.canEdit) return <>{spec.kind === "bool" ? shown(switchOn(spec, field, editor.view)) : shown(field.value)}</>
   if (spec.kind === "bool") {
-    return <Switch label={spec.label} checked={field.value === true} disabled={editor.busy} onChange={(on) => { void editor.save({ set: { [spec.path]: on } }) }} />
+    return <Switch label={spec.label} checked={switchOn(spec, field, editor.view)} disabled={editor.busy} onChange={(on) => { void editor.save({ set: { [spec.path]: on } }) }} />
   }
   if (spec.kind === "select") return <ChoiceEditor spec={spec} field={field} editor={editor} />
+  if (spec.kind === "multi") return <MultiEditor spec={spec} field={field} editor={editor} />
   return <TextEditor key={draftText(field.value)} spec={spec} field={field} editor={editor} />
 }
 
@@ -181,6 +217,7 @@ function SourceCell({ spec, field, editor }: RowProps): React.ReactElement {
 
 /** One setting: its label, an editor (or the value, for a role that cannot write), and its source. */
 export function SettingRow({ spec, field, editor }: RowProps): React.ReactElement {
+  if (spec.reported === true && editor.view !== null && editor.view.fields[spec.path] === undefined) return <UnavailableRow label={spec.label} />
   return (
     <tr className="border-b border-border last:border-0 align-top">
       <Td className="px-4 py-3 whitespace-nowrap">{spec.label}</Td>
@@ -193,6 +230,17 @@ export function SettingRow({ spec, field, editor }: RowProps): React.ReactElemen
         ))}
       </Td>
       <Td className="px-4 py-3 text-xs"><SourceCell spec={spec} field={field} editor={editor} /></Td>
+    </tr>
+  )
+}
+
+/** A setting the control plane did not report: shown, never editable. */
+function UnavailableRow({ label }: { label: string }): React.ReactElement {
+  return (
+    <tr className="border-b border-border last:border-0 align-top">
+      <Td className="px-4 py-3 whitespace-nowrap">{label}</Td>
+      <Td className="px-4 py-3 text-muted-foreground">Not available</Td>
+      <Td className="px-4 py-3 text-xs text-muted-foreground">This environment's control plane does not report this setting yet</Td>
     </tr>
   )
 }
@@ -226,8 +274,9 @@ function SecretControls({ secretKey, label, isSet, editor }: { secretKey: string
  * One write-only secret: its status, and for a role that may write, a password input that is never
  * pre-filled and is cleared the moment it is sent.
  */
-export function SecretRow({ secretKey, label, editor }: { secretKey: string; label: string; editor: CloudAuthEditor }): React.ReactElement | null {
+export function SecretRow({ secretKey, label, editor, reported = false }: { secretKey: string; label: string; editor: CloudAuthEditor; reported?: boolean }): React.ReactElement | null {
   if (editor.view === null) return null
+  if (reported && editor.view.secrets[secretKey] === undefined) return <UnavailableRow label={`${label} secret`} />
   const isSet = editor.view.secrets[secretKey]?.set === true
   return (
     <tr className="border-b border-border last:border-0 align-top">
@@ -237,5 +286,66 @@ export function SecretRow({ secretKey, label, editor }: { secretKey: string; lab
         {editor.canEdit ? <SecretControls secretKey={secretKey} label={label} isSet={isSet} editor={editor} /> : null}
       </Td>
     </tr>
+  )
+}
+
+/** The platform's SAML signing key: only ever "managed by Supatype", never a value or an input. */
+export function SamlKeyRow(): React.ReactElement {
+  return (
+    <tr className="border-b border-border last:border-0 align-top">
+      <Td className="px-4 py-3 whitespace-nowrap">SAML signing key</Td>
+      <Td className="px-4 py-3"><Badge variant="outline">platform</Badge></Td>
+      <Td className="px-4 py-3 text-xs text-muted-foreground">
+        Managed by Supatype
+      </Td>
+    </tr>
+  )
+}
+
+/** A titled table of settings, with the secret rows (or any other rows) that belong under them. */
+export function SpecTable({ title, specs, editor, note, children }: { title: string; specs: SettingSpec[]; editor: CloudAuthEditor; note?: string; children?: React.ReactNode }): React.ReactElement | null {
+  const { view } = editor
+  if (view === null) return null
+  return (
+    <Card>
+      <h3 className="text-sm font-medium text-foreground px-4 pt-4 pb-2">{title}</h3>
+      {note !== undefined ? <p className="px-4 pb-2 text-xs text-muted-foreground">{note}</p> : null}
+      <div className="overflow-x-auto">
+        <Table>
+          <thead>
+            <tr className="border-b border-border bg-muted/40">
+              <Th className="px-4 py-2.5">Setting</Th>
+              <Th className="px-4 py-2.5">Value</Th>
+              <Th className="px-4 py-2.5">Source</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {specs.map((spec) => <SettingRow key={spec.path} spec={spec} field={fieldOf(view, spec.path)} editor={editor} />)}
+            {children}
+          </tbody>
+        </Table>
+      </div>
+    </Card>
+  )
+}
+
+/** The frame every Cloud auth page shares: title, environment, applied state, intro, errors and loading. */
+export function CloudAuthPage({ title, environment, intro, editor, children }: { title: string; environment: string; intro: string; editor: CloudAuthEditor; children: React.ReactNode }): React.ReactElement {
+  const { view } = editor
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+        <Badge variant="outline">{environment}</Badge>
+        {view !== null ? <AppliedBadge view={view} /> : null}
+      </div>
+      <p className="text-sm text-muted-foreground">
+        {intro}
+        {editor.canEdit ? "" : " Your role can read these settings but not change them."}
+      </p>
+      {editor.error !== null ? <ErrorBanner message={editor.error} /> : null}
+      {editor.loading && view === null ? <SettingsLoading /> : null}
+      {view !== null ? children : null}
+    </div>
   )
 }

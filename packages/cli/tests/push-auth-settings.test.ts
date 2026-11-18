@@ -227,3 +227,40 @@ describe("what the step does not do", () => {
     expect(text()).not.toContain("smtp-secret-value")
   })
 })
+
+describe("the settings groups go to Cloud", () => {
+  const HOOK_SECRET = "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567"
+  const withGroups = (): SupatypeProjectConfig =>
+    config({
+      auth: {
+        hooks: { sendEmail: { uri: "https://hooks.example.com/email", secrets: "env(EMAIL_HOOK_SECRETS)" } },
+        captcha: { enabled: true, provider: "hcaptcha", secret: "env(CAPTCHA_SECRET)" },
+        password: { minLength: 12 },
+        rateLimits: { otp: 40 },
+        sso: { saml: { enabled: true, relayStateValidity: 300 } },
+      },
+    })
+
+  it("sends the groups, and the hook and captcha secrets under their secret keys", async () => {
+    const environment = env({ EMAIL_HOOK_SECRETS: HOOK_SECRET, CAPTCHA_SECRET: "captcha-key" })
+    expect(await pushAuthSettings(cwd, withGroups(), cloud, { environment })).toBe(false)
+    const body = calls[0]?.body as { settings: { auth: Record<string, unknown> }; secrets: Record<string, string> }
+    expect(body.settings.auth["password"]).toEqual({ minLength: 12 })
+    expect(body.settings.auth["rateLimits"]).toEqual({ otp: 40 })
+    expect(body.settings.auth["hooks"]).toEqual({ sendEmail: { uri: "https://hooks.example.com/email", secrets: "env(EMAIL_HOOK_SECRETS)" } })
+    expect(body.secrets["hooks.sendEmail.secrets"]).toBe(HOOK_SECRET)
+    expect(body.secrets["captcha.secret"]).toBe("captcha-key")
+  })
+
+  it("sends only the SAML settings Cloud takes", async () => {
+    await pushAuthSettings(cwd, withGroups(), cloud, { environment: env({ EMAIL_HOOK_SECRETS: HOOK_SECRET, CAPTCHA_SECRET: "k" }) })
+    const body = calls[0]?.body as { settings: { auth: { sso: unknown } } }
+    expect(body.settings.auth.sso).toEqual({ saml: { enabled: true, relayStateValidity: 300 } })
+  })
+
+  it("refuses auth.sso.saml.externalUrl for Cloud, which owns that URL", async () => {
+    const cfg = config({ auth: { sso: { saml: { enabled: true, externalUrl: "https://sso.example.com/auth/v1" } } } })
+    expect(() => assertCloudAuthSettings(cfg, cloud)).toThrow(/auth\.sso\.saml\.externalUrl/)
+    expect(() => assertCloudAuthSettings(cfg, selfHost)).not.toThrow()
+  })
+})

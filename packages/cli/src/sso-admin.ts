@@ -22,8 +22,8 @@ import { errorMessage } from "./error-message.js"
 import { loadProjectLink } from "./link.js"
 import { requireLocalStackApi } from "./local-stack-guard.js"
 import { resolveProjectApiUrl } from "./resolve-api-url.js"
-import { resolveTarget, type DeployTarget } from "./resolve-target.js"
-import { targetFetch } from "./target-client.js"
+import { cloudAuthRefresh, resolveTarget, type DeployTarget } from "./resolve-target.js"
+import { targetFetch, type TargetFetchOptions } from "./target-client.js"
 
 /** Where the admin API is, the key it is called with, and how to name it in what the CLI says. */
 export interface SsoEndpoint {
@@ -32,6 +32,11 @@ export interface SsoEndpoint {
   where: string
   /** What to do when nothing answers at `baseUrl`. */
   unreachableHint?: string
+  /**
+   * A Cloud project, reached through the control plane's project proxy with the caller's own
+   * session, acting elevated (owners and admins): the CLI holds no service-role key for it.
+   */
+  cloud?: Pick<TargetFetchOptions, "orgId" | "environment" | "authRefresh">
 }
 
 /** The NameID formats the server accepts, by the short names the CLI takes. */
@@ -219,6 +224,7 @@ function adminCall<T>(endpoint: SsoEndpoint, method: string, path: string, guard
     timeoutMs: 30_000,
     ...(body !== undefined && { body }),
     ...(endpoint.unreachableHint !== undefined && { unreachableHint: endpoint.unreachableHint }),
+    ...(endpoint.cloud !== undefined && { ...endpoint.cloud, actingMode: "elevated" as const }),
   }
   return targetFetch(endpoint.baseUrl, "/auth/v1", options, guard)
 }
@@ -256,19 +262,31 @@ export async function removeSsoProvider(endpoint: SsoEndpoint, name: string): Pr
 // Where the admin API is
 // ---------------------------------------------------------------------------
 
-/** Cloud's per-environment server does not run SAML yet (a Cloud launch item). */
-const CLOUD_NOT_YET =
-  "SAML single sign-on is not available on Supatype Cloud yet. `supatype sso` works against the " +
-  "local stack and self-hosted deployments."
-
 const LOCAL_STACK_DOWN = "The local stack is not running: start it with `supatype dev`, then run this again."
 
-/** The linked deployment's target, or undefined for a project that is not linked. Cloud is refused. */
+/** The linked deployment's target, or undefined for a project that is not linked. */
 function linkedSsoTarget(cwd: string, tokenOptional: boolean): DeployTarget | undefined {
-  const link = loadProjectLink(cwd)
-  if (link === null) return undefined
-  if (link.kind === "cloud") throw new Error(CLOUD_NOT_YET)
+  if (loadProjectLink(cwd) === null) return undefined
   return resolveTarget(cwd, { tokenOptional })
+}
+
+/**
+ * A Cloud project's auth admin API: the control plane's proxy for the project, which forwards
+ * `/auth/v1/...` to the project's server as the service role for a caller allowed to act elevated.
+ * The CLI used to refuse Cloud here, because it holds no service-role key for a Cloud project.
+ */
+export function cloudSsoEndpoint(target: DeployTarget, where: string): SsoEndpoint {
+  const authRefresh = cloudAuthRefresh(target)
+  return {
+    baseUrl: `${target.apiBaseUrl}${target.apiPrefix}/projects/${encodeURIComponent(target.projectRef)}/proxy`,
+    token: target.token ?? "",
+    where,
+    cloud: {
+      environment: target.environment,
+      ...(target.orgId !== undefined && { orgId: target.orgId }),
+      ...(authRefresh !== undefined && { authRefresh }),
+    },
+  }
 }
 
 /**
@@ -280,6 +298,7 @@ export function resolveSsoEndpoint(cwd: string, command: string): SsoEndpoint {
   if (target !== undefined) {
     if (!target.token) throw new Error(`No token for environment "${target.environment}". Re-run supatype link --token ...`)
     const where = `${target.mode} project ${target.projectRef} (${target.environment})`
+    if (target.mode === "cloud") return cloudSsoEndpoint(target, where)
     return { baseUrl: target.apiBaseUrl, token: target.token, where }
   }
   requireLocalStackApi(cwd, `sso ${command}`)
@@ -291,6 +310,9 @@ export function resolveSsoEndpoint(cwd: string, command: string): SsoEndpoint {
 /** The project's public API URL for `sso info`: the linked deployment's or the local stack's. */
 export function ssoApiBaseUrl(cwd: string): { baseUrl: string; linked: boolean } {
   const target = linkedSsoTarget(cwd, true)
+  // A Cloud target's apiBaseUrl is the control plane; the identity provider talks to the project's own API.
+  const projectUrl = target?.mode === "cloud" ? target.link?.environments?.[target.environment]?.apiUrl : undefined
+  if (projectUrl !== undefined) return { baseUrl: projectUrl.replace(/\/$/, ""), linked: true }
   if (target !== undefined) return { baseUrl: target.apiBaseUrl, linked: target.mode !== "local" }
   return { baseUrl: resolveProjectApiUrl(cwd), linked: false }
 }

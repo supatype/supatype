@@ -1626,3 +1626,4 @@ export type LocalizedModel<
 > = Model<ApplyAutoLocalizedFields<TFields>, TMeta>
 
 export * from "./auth-settings.js"
+export * from "./auth-settings-groups.js"

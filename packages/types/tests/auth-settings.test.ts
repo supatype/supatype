@@ -165,6 +165,19 @@ describe("validateAuthSettings", () => {
     expect(validateAuthSettings({ email: { provider: "ses" } }, "self-host")).toEqual([])
   })
 
+  it("takes SES on Cloud with the project's own key, and renders it for the server", () => {
+    // SES was refused on Cloud outright: the server only read ambient AWS credentials, which a
+    // hosted project does not have. It now reads SUPATYPE_SES_ACCESS_KEY_ID and its secret.
+    const ses = { email: { provider: "ses" as const, ses_from: "hi@acme.dev", ses_region: "eu-west-2", ses_access_key_id: 'env(SES_KEY)', ses_secret_access_key: 'env(SES_SECRET)' } }
+    expect(validateAuthSettings(ses, "cloud")).toEqual([])
+    expect(validateAuthSettings({ email: { ...ses.email, ses_secret_access_key: "literal" } }, "cloud")[0]).toContain("ses_secret_access_key")
+    expect(authSecretRefs(ses).map((r) => r.key)).toEqual(["email.ses_access_key_id", "email.ses_secret_access_key"])
+    const env = authSettingsToEnv(ses, { ...ctx, secrets: { "email.ses_access_key_id": "AKIA1", "email.ses_secret_access_key": "s3" } })
+    expect([env["SUPATYPE_SES_FROM"], env["SUPATYPE_SES_REGION"], env["SUPATYPE_SES_ACCESS_KEY_ID"], env["SUPATYPE_SES_SECRET_ACCESS_KEY"]]).toEqual(["hi@acme.dev", "eu-west-2", "AKIA1", "s3"])
+    // Every owned key is always written, so a project that leaves SES clears the stored key.
+    expect(authSettingsToEnv({}, ctx)["SUPATYPE_SES_SECRET_ACCESS_KEY"]).toBe("")
+  })
+
   it("refuses unknown providers, unknown fields and bad URLs", () => {
     expect(validateAuthSettings({ auth: { providers: { nope: {} } } }, "cloud")[0]).toContain("nope")
     expect(validateAuthSettings({ auth: { providers: { github: { bogus: 1 } } } }, "cloud")[0]).toContain("bogus")
