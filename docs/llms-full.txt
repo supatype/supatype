@@ -140,7 +140,7 @@ Install the CLI, scaffold a project, and run the full stack on your machine. Sup
 $ npm install -g @supatype/cli
 ```
 
-The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later. For a machine without Node, the [CLI](https://www.supatype.com/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
+The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later, or 22.12 or later on Node 22. For a machine without Node, the [CLI](https://www.supatype.com/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
 
 On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.
 
@@ -269,7 +269,7 @@ Run the whole platform on a server you own with Docker Compose. The project layo
 
 #### 1. Prepare the server
 
-Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later to build a Vite 8 app), and the CLI:
+Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later, or 22.12 or later on Node 22, to build a Vite 8 app), and the CLI:
 
 ```sh
 $ npm install -g @supatype/cli
@@ -4234,7 +4234,7 @@ Pre-1.0: APIs and config may change between releases.
 
 ### Create the project locally
 
-On your machine, with Node.js 20.19 or later: the CLI needs 18, and the Vite 8 app it sets up needs 20.19.
+On your machine, with Node.js 20.19 or later, or 22.12 or later on Node 22: the CLI needs 18, and the Vite 8 app it sets up needs one of those.
 
 #### 1. Scaffold
 
@@ -4291,7 +4291,7 @@ A one-time setup on Ubuntu 22.04 or similar, with SSH access.
 
 ```sh
 # Docker: https://docs.docker.com/engine/install/ubuntu/
-# Node.js 20.19 or later, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
+# Node.js 20.19 or later, or 22.12 or later on Node 22, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
 $ sudo apt update && sudo apt install -y git
 $ sudo npm install -g @supatype/cli
 
