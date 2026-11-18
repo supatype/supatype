@@ -49,6 +49,7 @@ import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.
 import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
 import { postApplyFailed } from "../post-apply.js"
+import { pushCorsOrigins } from "../cors-origins-push.js"
 import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
@@ -341,6 +342,8 @@ async function pushViaTarget(
   const hooksFailed = target.mode === "cloud" || target.mode === "self-host"
     ? await deployHooksToTarget(cwd, config, target, ast)
     : false
+  // Self-host reads api.corsOrigins from its environment; a Cloud project is told here.
+  const corsFailed = await pushCorsOrigins(target, config)
   // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
   if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
 
@@ -349,7 +352,7 @@ async function pushViaTarget(
     return
   }
 
-  reportTargetPush(target, pushResult, hooksFailed)
+  reportTargetPush(target, pushResult, hooksFailed || corsFailed)
 }
 
 /**

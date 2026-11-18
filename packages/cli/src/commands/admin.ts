@@ -4,6 +4,7 @@
 // auth.users table. First admin is ensured on `supatype dev` or `supatype push`.
 
 import { requireLocalStack } from "../local-stack-guard.js"
+import { cloudAdminTarget, inviteCloudStudioUser, listCloudStudioUsers, setCloudStudioRole } from "../cloud-admin.js"
 import type { Command } from "commander"
 import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -146,12 +147,24 @@ export function registerAdmin(program: Command): void {
       }) => {
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = resolveAdminConnection(cwd, config, "admin create-user", opts.connection)
+        const cloud = cloudAdminTarget(cwd, opts.connection)
+        const connection = cloud === null ? resolveAdminConnection(cwd, config, "admin create-user", opts.connection) : ""
 
         const email = opts.email ?? (await promptText("Admin email"))
         if (!email || !email.includes("@")) {
           error("A valid email address is required.")
           process.exit(1)
+        }
+
+        if (cloud !== null) {
+          assertStudioRole(opts.role)
+          await runCloudAdmin("invite", async () => {
+            await inviteCloudStudioUser(cloud, email, opts.role, opts.password)
+            info(`Invited ${email.toLowerCase()} to the organisation as ${opts.role}.`)
+            plain("  An organisation role applies to every project in it. Once they have joined,")
+            plain("  narrow it for this project with: supatype admin set-role --email <email> --role <role>")
+          })
+          return
         }
 
         const password =
@@ -207,6 +220,17 @@ export function registerAdmin(program: Command): void {
         assertStudioRole(opts.role)
         const cwd = process.cwd()
         const config = loadConfig(cwd)
+        const cloud = cloudAdminTarget(cwd, opts.connection)
+        if (cloud !== null) {
+          await runCloudAdmin("update role", async () => {
+            const userId = await setCloudStudioRole(cloud, opts.email, opts.role)
+            info("Role updated successfully.")
+            plain(`  ID:    ${userId}`)
+            plain(`  Email: ${opts.email.toLowerCase()}`)
+            plain(`  Role:  ${opts.role} (on this project)`)
+          })
+          return
+        }
         const connection = resolveAdminConnection(cwd, config, "admin set-role", opts.connection)
 
         const pg = await importPg()
@@ -241,6 +265,18 @@ export function registerAdmin(program: Command): void {
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      const cloud = cloudAdminTarget(cwd, opts.connection)
+      if (cloud !== null) {
+        await runCloudAdmin("list admin users", async () => {
+          printMembers((await listCloudStudioUsers(cloud)).map((user) => ({
+            id: user.id,
+            email: user.email,
+            role: user.source === "project" ? `${user.role} (project)` : user.role,
+            created_at: user.createdAt,
+          })))
+        })
+        return
+      }
       const connection = resolveAdminConnection(cwd, config, "admin list-users", opts.connection)
 
       const pg = await importPg()
@@ -261,18 +297,7 @@ export function registerAdmin(program: Command): void {
             ORDER BY m.created_at ASC`,
         )
 
-        if (rows.length === 0) {
-          info("No admin users found.")
-          info("Create one with: supatype admin create-user --email admin@example.com --role admin")
-          return
-        }
-
-        plain(
-          "\n  ID                                     Email                          Role         Created",
-        )
-        plain("  " + "-".repeat(100))
-        for (const row of rows) plain(memberLine(row))
-        plain()
+        printMembers(rows)
       } catch (err) {
         error(`Failed to list admin users: ${errorMessage(err)}`)
         process.exit(1)
@@ -280,6 +305,29 @@ export function registerAdmin(program: Command): void {
         await pool.end()
       }
     })
+}
+
+/** The `list-users` table, or how to add the first user when there is none. */
+function printMembers(rows: readonly UnknownRow[]): void {
+  if (rows.length === 0) {
+    info("No admin users found.")
+    info("Create one with: supatype admin create-user --email admin@example.com --role admin")
+    return
+  }
+  plain("\n  ID                                     Email                          Role         Created")
+  plain("  " + "-".repeat(100))
+  for (const row of rows) plain(memberLine(row))
+  plain()
+}
+
+/** Runs one Cloud admin step, ending the command with what failed when it throws. */
+async function runCloudAdmin(what: string, work: () => Promise<void>): Promise<void> {
+  try {
+    await work()
+  } catch (err) {
+    error(`Failed to ${what}: ${errorMessage(err)}`)
+    process.exit(1)
+  }
 }
 
 const isMemberRow = isShape({ id: isString, email: isString, role: isString, created_at: isUnknown })
