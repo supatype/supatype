@@ -9,8 +9,8 @@
  */
 import { createDecipheriv, createECDH, hkdfSync, randomUUID, type ECDH } from "node:crypto"
 import { hostname } from "node:os"
-import { isShape, isString } from "@supatype/shared"
-import { errorMessage } from "./error-message.js"
+import { isShape, isString, parseJsonObject } from "@supatype/shared"
+import { errorMessage, httpFailureText, responseFailureText } from "./error-message.js"
 import { trimApiUrl } from "./api-url.js"
 import { fetchWithin } from "./fetch-within.js"
 
@@ -72,7 +72,7 @@ export async function accountsUrl(apiUrl: string, env: NodeJS.ProcessEnv = proce
   const res = await fetchWithin(`${trimApiUrl(apiUrl)}/api/v1/cli/login/config`, FETCH_TIMEOUT_MS).catch((err: unknown) => {
     throw accountsUnknown(apiUrl, `it did not answer (${errorMessage(err)})`)
   })
-  if (!res.ok) throw accountsUnknown(apiUrl, `it answered ${res.status}`)
+  if (!res.ok) throw accountsUnknown(apiUrl, `it answered ${await responseFailureText(res)}`)
   const body: unknown = await res.json().catch(() => undefined)
   const found = isLoginConfig(body) ? webUrl(body.accounts_url) : undefined
   if (found === undefined) throw accountsUnknown(apiUrl, "it did not give an http(s) accounts_url")
@@ -90,6 +90,23 @@ export function loginUrl(accounts: string, session: LoginSession): string {
 }
 
 /**
+ * Why the control plane refused a login request, in its own words. A `captcha_failed` refusal means a
+ * bot check this CLI cannot pass, so it says to sign in through the browser, or to use a token in CI.
+ */
+async function refusedLogin(res: Response, where: string): Promise<Error> {
+  const text = await res.text().catch(() => "")
+  const parsed = parseJsonObject(text)
+  if (parsed.ok && parsed.value["error_code"] === "captcha_failed") {
+    return new Error(
+      "This Supatype Cloud only accepts sign-in through the browser, because it is protected by a bot check the CLI cannot pass. " +
+        "Run: supatype login (and sign in on the page it opens). In CI, create a personal access token in your account and pass it with " +
+        "--token <spt_...> or SUPATYPE_ACCESS_TOKEN.",
+    )
+  }
+  return new Error(`Login failed at ${where}: ${httpFailureText(res.status, res.statusText, text)}`)
+}
+
+/**
  * Exchange the device code for the sealed token. Undefined when the control plane does not accept
  * the code (404: not approved, wrong, used or expired, which it deliberately does not tell apart).
  */
@@ -97,7 +114,7 @@ export async function fetchSealedToken(apiUrl: string, sessionId: string, device
   const url = `${trimApiUrl(apiUrl)}/api/v1/cli/login/${encodeURIComponent(sessionId)}?device_code=${encodeURIComponent(deviceCode)}`
   const res = await fetchWithin(url, FETCH_TIMEOUT_MS)
   if (res.status === 404) return undefined
-  if (!res.ok) throw new Error(`Login failed (${res.status}) at ${url.split("?")[0] ?? url}`)
+  if (!res.ok) throw await refusedLogin(res, url.split("?")[0] ?? url)
   const body: unknown = await res.json().catch(() => undefined)
   if (!isSealedToken(body)) throw new Error("The control plane's login answer was not what this CLI expects. Update the CLI.")
   return body
