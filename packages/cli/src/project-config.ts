@@ -12,6 +12,7 @@ import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 import { isJsonObject, isString } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
+import { validatePlatformSettings, type ServicesConfig, type StorageS3Config } from "./platform-settings.js"
 
 // ---------------------------------------------------------------------------
 // Config schema (single canonical shape; loaded from supatype.config.ts)
@@ -350,6 +351,14 @@ export interface SupatypeProjectConfig {
      * `self-host compose up` stops when S3_BUCKET is blank. The Docker dev stack keeps SeaweedFS either way.
      */
     production?: "local" | "s3"
+    /**
+     * Where a Supatype Cloud project keeps its files when `production` is "s3": its own bucket,
+     * its keys as `env("NAME")`. Sent by `supatype push` and `deploy` to a Cloud target (owners and
+     * admins only), stored encrypted and write-only. Switching buckets does NOT move files already
+     * stored: new files go to the new bucket, the old ones stay where they were. Self-host reads
+     * its bucket from S3_* in .env and ignores this.
+     */
+    s3?: StorageS3Config
   }
   schema?: {
     /** Path (or glob) to the schema entry point. Defaults to "schema/index.ts". */
@@ -530,8 +539,19 @@ export interface SupatypeProjectConfig {
    *
    * Carried to the database by push, so Cloud and self-host need nothing else. The realtime
    * service's `REALTIME_CHANNELS=declared` can tighten it but never loosen it.
+   *
+   * `recheckSeconds` sets `REALTIME_CHANNEL_RECHECK_S`: how often every held channel is judged again.
+   * Self-host renders both as the realtime service's defaults; a push to Cloud sets them on the
+   * project's realtime pod.
    */
   realtime?: RealtimeConfig
+  /**
+   * Switch a service off: `services: { storage: false }` answers `/storage/v1` with 503,
+   * `graphql: false` answers `/graphql/v1` with 501. Absent leaves it on. Self-host renders
+   * `SUPATYPE_STORAGE_DISABLED` / `SUPATYPE_GRAPHQL_DISABLED` into the server; a push to Cloud sets
+   * the same switch on the project's tenant config.
+   */
+  services?: ServicesConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +561,8 @@ export interface SupatypeProjectConfig {
 /** `realtime` in the project config. */
 export interface RealtimeConfig {
   channels?: RealtimeChannelMode
+  /** Seconds between re-checks of every held channel (`REALTIME_CHANNEL_RECHECK_S`), 1 to 86400. Default 300. */
+  recheckSeconds?: number
 }
 
 type ConfigKey = keyof SupatypeProjectConfig
@@ -628,6 +650,7 @@ const MERGE_RULES: { [K in ConfigKey]: MergeFn } = {
   admin: shallow,
   studio: nested("auth"),
   realtime: shallow,
+  services: shallow,
 }
 
 /**
@@ -699,6 +722,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateStudioAuth(cfg, filename)
   validatePublicEnv(cfg, filename)
   validateRealtime(cfg, filename)
+  validatePlatformSettings(cfg, filename)
 
   if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)
   return cfg

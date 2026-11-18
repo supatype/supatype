@@ -450,6 +450,8 @@ The service reads these environment variables. The self-host compose file sets t
 | `REALTIME_CHANNELS` | unset | Set to `declared` to refuse broadcast and presence on undeclared channels whatever the database says. It can only tighten `realtime.channels` |
 | `REALTIME_CHANNEL_RECHECK_S` | 300 | Seconds between re-checks of every channel a socket holds, as a backstop to the checks made on a new token, a push and a change to a table a rule reads |
 
+To set these from `supatype.config.ts` rather than the environment, use `realtime: { channels: "declared", recheckSeconds: 120 }`. Self-host renders them as the realtime service's defaults, which a value in `.env` overrides. A push to Supatype Cloud sets them on the project's realtime service (production only), and a setting you take out of the config stops applying on the next push that still sets another one.
+
 <h2 id="limits">Limits</h2>
 
 - Changes are picked up by reading the replication slot every 100 ms, so expect that much delay on top of the network.

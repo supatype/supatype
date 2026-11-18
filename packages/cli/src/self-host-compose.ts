@@ -67,6 +67,7 @@ import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV } from "./mailer-autoconfirm.js"
 import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
+import { realtimeServiceDefaults, serviceSwitchServerEnv } from "./platform-settings.js"
 import { switchServices, type ServiceSwitches } from "./route-manifest.js"
 
 /**
@@ -582,6 +583,16 @@ function publicEnvForCompose(config: SupatypeProjectConfig): string {
   return `      # server.public_env: no /supatype-env.json or /supatype-env.js.\n      SUPATYPE_PUBLIC_ENV: "${value}"\n`
 }
 
+/**
+ * The server's `SUPATYPE_STORAGE_DISABLED` and `SUPATYPE_GRAPHQL_DISABLED` lines, each ending in a
+ * newline, for a service `services` switches off; empty otherwise, leaving the server's default.
+ */
+function serviceSwitchesForCompose(config: SupatypeProjectConfig): string {
+  return Object.entries(serviceSwitchServerEnv(config))
+    .map(([name, value]) => `      # services in supatype.config.ts switches this service off.\n      ${name}: "${value}"\n`)
+    .join("")
+}
+
 function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean): string {
   const mode = config.app.mode ?? "none"
   const lines = [`      SUPATYPE_APP_MODE: ${mode}`]
@@ -916,6 +927,8 @@ ${dbDependencyClause}      seaweedfs:
   // container that can only report that. The server then has no realtime URL, which is what makes
   // subscription requests fail with a clear route error instead of hanging against a dead upstream.
   const realtime = realtimeEnabled(config)
+  // realtime.channels and realtime.recheckSeconds in the config, as the defaults a .env value overrides.
+  const realtimeDefaults = realtimeServiceDefaults(config)
   const realtimeBlock = realtime
     ? `  realtime:
     image: ${inRepoImage("realtime")}
@@ -940,8 +953,8 @@ ${SERVICE_DEFAULTS}
       REALTIME_LOG_LEVEL: \${REALTIME_LOG_LEVEL:-info}
       # docs/realtime.md: declared can only tighten realtime.channels; the re-check interval in
       # seconds. Empty, the service's own defaults apply.
-      REALTIME_CHANNELS: \${REALTIME_CHANNELS:-}
-      REALTIME_CHANNEL_RECHECK_S: \${REALTIME_CHANNEL_RECHECK_S:-}
+      REALTIME_CHANNELS: \${REALTIME_CHANNELS:-${realtimeDefaults.REALTIME_CHANNELS ?? ""}}
+      REALTIME_CHANNEL_RECHECK_S: \${REALTIME_CHANNEL_RECHECK_S:-${realtimeDefaults.REALTIME_CHANNEL_RECHECK_S ?? ""}}
 ${dbDependency}`
     : `  # No \`realtime\` service: database.external.realtime is false. Subscriptions are
   # unavailable; REST, storage, auth and functions are unaffected.
@@ -1262,7 +1275,7 @@ ${keyspaceMount}    working_dir: /project
       SUPATYPE_STORAGE_URL: http://storage:5000
       SUPATYPE_URL: ${publicApiUrl}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
-${publicEnvForCompose(config)}      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
+${publicEnvForCompose(config)}${serviceSwitchesForCompose(config)}      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SQL_DATABASE_URL: "${ownerUrl}"
       # The SQL editor's own login, not a superuser. The owner URL above stays: the server falls
       # back to it and uses it for role membership.

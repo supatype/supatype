@@ -50,6 +50,7 @@ import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
 import { postApplyFailed } from "../post-apply.js"
 import { pushCorsOrigins } from "../cors-origins-push.js"
+import { pushPlatformSettings } from "../platform-settings-push.js"
 import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
@@ -339,11 +340,7 @@ async function pushViaTarget(
   // The diff's were printed before applying; what is left is what the push found once applied.
   printPushWarnings(pushResult, diff.warnings ?? [])
 
-  const hooksFailed = target.mode === "cloud" || target.mode === "self-host"
-    ? await deployHooksToTarget(cwd, config, target, ast)
-    : false
-  // Self-host reads api.corsOrigins from its environment; a Cloud project is told here.
-  const corsFailed = await pushCorsOrigins(target, config)
+  const stepFailed = await runPostApplySteps(cwd, config, target, ast)
   // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
   if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
 
@@ -352,7 +349,22 @@ async function pushViaTarget(
     return
   }
 
-  reportTargetPush(target, pushResult, hooksFailed || corsFailed)
+  reportTargetPush(target, pushResult, stepFailed)
+}
+
+/**
+ * What a push and a deploy send after the schema, in order: the hooks (to a linked server), the
+ * allowed origins and the platform settings (to Cloud). One list for both commands: deploy used to
+ * stop at the schema, so a project only ever deployed ran without its hooks. Each step reports its own
+ * failure and the rest still run; true when any failed (post-apply.ts).
+ */
+export async function runPostApplySteps(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<boolean> {
+  const hooksFailed = target.mode === "cloud" || target.mode === "self-host"
+    ? await deployHooksToTarget(cwd, config, target, ast)
+    : false
+  const corsFailed = await pushCorsOrigins(target, config)
+  const platformFailed = await pushPlatformSettings(cwd, config, target)
+  return hooksFailed || corsFailed || platformFailed
 }
 
 /**
