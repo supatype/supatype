@@ -57,9 +57,15 @@ export async function isRoleRefusal(res: Response): Promise<boolean> {
   return text !== null && ROLE_REFUSALS.some((pattern) => pattern.test(text))
 }
 
-/** The error for a failed response: a role refusal reads as `refused`; anything else names its status. */
+/**
+ * The error for a failed response: a role refusal reads as `refused`; anything else carries the
+ * reason the server gave in its JSON body, with the status after it, or the status alone when the
+ * body says nothing readable.
+ */
 export async function proxyFailure(res: Response, refused: string): Promise<Error> {
-  return new Error((await isRoleRefusal(res)) ? refused : `The request failed (HTTP ${res.status}).`)
+  if (await isRoleRefusal(res)) return new Error(refused)
+  const reason = refusalMessage(await res.clone().json().catch(() => null))
+  return new Error(reason ? `${reason} (HTTP ${res.status})` : `The request failed (HTTP ${res.status}).`)
 }
 
 /** `res` itself, unless it is a role refusal, which throws `refused`. */

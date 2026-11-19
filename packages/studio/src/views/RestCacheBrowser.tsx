@@ -9,7 +9,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { useRoleRefusalText } from "../components/RoleGate.js"
-import { proxyFailure, unlessRoleRefused } from "../lib/role-refusal.js"
+import { proxyFailure } from "../lib/role-refusal.js"
 import { CacheHealthPanels } from "./CacheHealthPanels.js"
 import { useCacheHealth } from "../hooks/useCacheHealth.js"
 import { describeStaleness, reconcileNoteFor } from "../lib/cache-health.js"
@@ -21,6 +21,7 @@ import {
   type Guard,
   isArrayOf,
   isBoolean,
+  isJsonObject,
   isNumber,
   isRecordOf,
   isShape,
@@ -108,6 +109,23 @@ const isRestConfigSaved = isShape({
   row_cache: optional(isRowCacheReconcile),
   adjusted: optional(isArrayOf(isShape({ table: isString, reason: isString }))),
 })
+
+/** What the gateway says when the cache has no keyspace behind it, as its own sentence. */
+const NO_KEYSPACE =
+  "The response cache has nowhere to store entries on this project yet, so nothing is cached. " +
+  "Cached reads go straight to the database until it is available."
+
+/**
+ * The error for a refused cache request: the server's own reason, except for the one refusal with
+ * a known meaning, a gateway with no keyspace configured, which is said in plain words.
+ */
+async function cacheFailure(res: Response, refused: string): Promise<Error> {
+  if (res.status === 503) {
+    const body: unknown = await res.clone().json().catch(() => null)
+    if (isJsonObject(body) && body["error"] === "keyspace not configured") return new Error(NO_KEYSPACE)
+  }
+  return proxyFailure(res, refused)
+}
 
 function encodeCacheKey(key: string): string {
   const bytes = new TextEncoder().encode(key)
@@ -233,7 +251,7 @@ export function RestCacheBrowser({
   const { data, loading, error, refetch } = useApiQuery(
     () =>
       fetch(listUrl, { headers: studioAuthHeaders(client), credentials: "include" }).then(async (r) => {
-        if (!r.ok) throw await proxyFailure(r, refused)
+        if (!r.ok) throw await cacheFailure(r, refused)
         return readJson(r, isCacheListing)
       }),
     [client, listUrl, refused],
@@ -257,7 +275,7 @@ export function RestCacheBrowser({
       headers: studioAuthHeaders(client),
       credentials: "include",
     })
-    if (!(await unlessRoleRefused(r, refused)).ok) return
+    if (!r.ok) throw await cacheFailure(r, refused)
     const json = await readJson(r, isRestConfig)
     setCacheMaxTTL(json.cache_max_ttl ?? 0)
     setDeclared(json.declared ?? {})
@@ -279,7 +297,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw await proxyFailure(r, refused)
+      if (!r.ok) throw await cacheFailure(r, refused)
       setDetail(await readJson(r, isRestCacheDetail))
     } catch (e) {
       setDetailError(e instanceof Error ? e.message : "Failed to load entry")
@@ -296,7 +314,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw await proxyFailure(r, refused)
+      if (!r.ok) throw await cacheFailure(r, refused)
       setSelectedKey(null)
       setDetail(null)
       refetch()
@@ -314,7 +332,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw await proxyFailure(r, refused)
+      if (!r.ok) throw await cacheFailure(r, refused)
       refetch()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Flush failed")
@@ -330,7 +348,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!cfgRes.ok) throw await proxyFailure(cfgRes, refused)
+      if (!cfgRes.ok) throw await cacheFailure(cfgRes, refused)
       const current = await readJson(cfgRes, isRestConfig)
       const cache_tables = { ...(current.cache_tables ?? {}) }
       cache_tables[tableFilter] = { ...tableCfg }
@@ -343,7 +361,7 @@ export function RestCacheBrowser({
           cache_max_ttl: cacheMaxTTL > 0 ? cacheMaxTTL : current.cache_max_ttl,
         }),
       })
-      if (!r.ok) throw await proxyFailure(r, refused)
+      if (!r.ok) throw await cacheFailure(r, refused)
       // The save succeeded; what the row cache made of it comes back in the
       // same body and is a note, never an error. The response cache is already
       // live either way.
