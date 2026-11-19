@@ -29,6 +29,44 @@ export const PUBLIC_ENV_NAME = /^[A-Z][A-Z0-9_]*$/
 /** `build.publicEnv`: a value for every environment, or a map of environment name to value. */
 export type PublicEnvDeclaration = Readonly<Record<string, string | Readonly<Record<string, string>>>>
 
+/** An environment name as Cloud accepts it. */
+export const ENVIRONMENT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
+
+/** Whether `value` is a `build.publicEnv`: each name one string, or a map of environment name to string. */
+export function isPublicEnvDeclaration(value: unknown): value is PublicEnvDeclaration {
+  if (!isObject(value)) return false
+  return Object.values(value).every(
+    (entry) =>
+      typeof entry === "string" ||
+      (isObject(entry) && Object.entries(entry).every(([environment, text]) => ENVIRONMENT_NAME.test(environment) && typeof text === "string")),
+  )
+}
+
+/** Where a value is set: the config's build.publicEnv (read-only in Studio), or Studio. */
+export const PUBLIC_ENV_SOURCES = ["config", "studio"] as const
+export type PublicEnvSource = (typeof PUBLIC_ENV_SOURCES)[number]
+
+/** How each source is said to a person. */
+export const PUBLIC_ENV_SOURCE_LABELS: Readonly<Record<PublicEnvSource, string>> = {
+  config: "set in supatype.config.ts",
+  studio: "set in Studio",
+}
+
+/** One value in effect on an environment, with where it is set. */
+export interface PublicEnvEntry {
+  name: string
+  value: string
+  source: PublicEnvSource
+}
+
+/** Whether `value` is a {@link PublicEnvEntry}. */
+export function isPublicEnvEntry(value: unknown): value is PublicEnvEntry {
+  if (!isObject(value)) return false
+  return typeof value["name"] === "string" && typeof value["value"] === "string" && PUBLIC_ENV_SOURCES.some((source) => source === value["source"])
+}
+
 /** One refusal. `name` is the value's name, or empty for a problem with the set as a whole. */
 export interface PublicEnvProblem {
   name: string

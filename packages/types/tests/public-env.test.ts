@@ -7,6 +7,11 @@ import {
   publicEnvProblems,
   secretLookingReason,
   publicEnvRefusal,
+  ENVIRONMENT_NAME,
+  PUBLIC_ENV_SOURCES,
+  PUBLIC_ENV_SOURCE_LABELS,
+  isPublicEnvDeclaration,
+  isPublicEnvEntry,
 } from "../src/index.js"
 
 const jwt = (claims: Record<string, unknown>): string =>
@@ -138,5 +143,37 @@ describe("publicEnvRefusal", () => {
   })
   it("joins with the separator it is given", () => {
     expect(publicEnvRefusal(problems, " | ")).toBe("A is bad | The public values: too many")
+  })
+})
+
+describe("where a value is set", () => {
+  it("is the config or Studio, each with its label", () => {
+    expect(PUBLIC_ENV_SOURCES).toEqual(["config", "studio"])
+    expect(PUBLIC_ENV_SOURCE_LABELS).toEqual({ config: "set in supatype.config.ts", studio: "set in Studio" })
+  })
+})
+
+describe("isPublicEnvEntry", () => {
+  it("accepts a name, a value and a source", () => {
+    expect(isPublicEnvEntry({ name: "A", value: "1", source: "config" })).toBe(true)
+    expect(isPublicEnvEntry({ name: "A", value: "1", source: "studio" })).toBe(true)
+  })
+  it.each([null, "A", [], {}, { name: "A", value: "1" }, { name: "A", value: 1, source: "config" }, { name: "A", value: "1", source: "env" }])("refuses %j", (value) => {
+    expect(isPublicEnvEntry(value)).toBe(false)
+  })
+})
+
+describe("ENVIRONMENT_NAME", () => {
+  it.each(["production", "staging", "a", "qa-1", "x_y"])("accepts %s", (name) => expect(ENVIRONMENT_NAME.test(name)).toBe(true))
+  it.each(["", "Prod", "-a", "a b", "a".repeat(64)])("refuses %j", (name) => expect(ENVIRONMENT_NAME.test(name)).toBe(false))
+})
+
+describe("isPublicEnvDeclaration", () => {
+  it("accepts a string for every environment and a map of environment to string", () => {
+    expect(isPublicEnvDeclaration({ A: "1", B: { production: "p", staging: "s" } })).toBe(true)
+    expect(isPublicEnvDeclaration({})).toBe(true)
+  })
+  it.each([null, "A=1", [], { A: 1 }, { A: null }, { A: { production: 1 } }, { A: { "Not Valid": "x" } }, { A: ["x"] }])("refuses %j", (value) => {
+    expect(isPublicEnvDeclaration(value)).toBe(false)
   })
 })
