@@ -54,15 +54,19 @@ describe("finalize", () => {
     expect(finalizesOf(s)[0]?.headers["x-supatype-environment"]).toBe("production")
   })
 
+  // Cloud's refusals name their code in `error` and their reason in `message` (`sendJson` in
+  // supatype-cloud), so the retry is tested against that shape.
+  const NOT_PUSHED = { error: "pointer_not_pushed", message: "the live pointer was not pushed", statusCode: 502 }
+
   it("sends finalize again after a 502 pointer_not_pushed", async () => {
-    const s = await server((n, res) => (n <= 2 ? sendJson(res, 502, { code: "pointer_not_pushed", error: "the live pointer was not pushed" }) : sendJson(res, 200, live)))
+    const s = await server((n, res) => (n <= 2 ? sendJson(res, 502, NOT_PUSHED) : sendJson(res, 200, live)))
     const deployed = await deploySite(s.target, project.dir, FAST)
     expect(finalizesOf(s)).toHaveLength(3)
     expect(deployed.url).toBe("https://demo.tenant.example.test")
   })
 
   it("stops after three retries, saying the site is uploaded and finalize can be run again", async () => {
-    const s = await server((_n, res) => sendJson(res, 502, { code: "pointer_not_pushed", error: "the live pointer was not pushed" }))
+    const s = await server((_n, res) => sendJson(res, 502, NOT_PUSHED))
     await expect(deploySite(s.target, project.dir, FAST)).rejects.toThrow(/not live.*pointer was not pushed/s)
     expect(finalizesOf(s)).toHaveLength(4)
   })

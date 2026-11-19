@@ -64,6 +64,14 @@ no entries are missing from this file.
   but the project's server was not told) is retried three times, since finalize is idempotent, and then
   reported as "uploaded but not live". Any other refusal, such as `blobs_missing`, stops with the
   server's reason. Finalize's answer was never read before, so a failed finalize looked like success.
+* **deploy:** Cloud's own tier limit decides how large a site may be. The CLI no longer stops a Cloud
+  deploy at a fixed 500 MB; the server answers 413 and the deploy prints its reason (the site's size,
+  and the limit for the project's tier). `deploy --local` and a self-hosted link keep the 500 MB check,
+  since no server applies a limit there. The unused `commands/deploy-types.ts` tier table, which had no
+  `growth` tier and was never read, is deleted.
+* **deploy:** `deploy --preview` against a Cloud link is refused before the config is read or anything
+  is built: "Previews are not available on Supatype Cloud yet". Deploy without `--preview` to publish to
+  production. `--schema-only`, `--local` and self-hosted links are unchanged.
 
 ### Bug Fixes
 

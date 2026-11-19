@@ -5,7 +5,7 @@
  *   supatype deploy --app-only: only build & deploy the static site
  *   supatype deploy --schema-only: only push schema changes
  *   supatype deploy --skip-build: deploy existing build output (no build step)
- *   supatype deploy --preview: deploy to a preview URL
+ *   supatype deploy --preview: deploy to a preview URL (self-hosted links only; Cloud refuses it for now)
  *   supatype deploy rollback: roll back to previous deployment
  *   supatype deploy status: show current deployment info
  *   supatype deploy logs <version>, show build logs
@@ -19,7 +19,7 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { deploySchemaToLinkedProject, pushSchemaToLinkedProject } from "./cloud.js"
-import { loadProjectLink } from "../link.js"
+import { loadProjectLink, type ProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
 import { isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
@@ -40,7 +40,6 @@ import { installCommand, type InstallCommand } from "../init-setup-steps.js"
 import { fatalError } from "../ui/fatal.js"
 import { frontendEnv } from "../frontend-env.js"
 import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
-import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { deploySite } from "../site-deploy.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
@@ -139,6 +138,21 @@ export function runAppBuild(appConfig: Pick<ResolvedAppConfig, "directory" | "bu
   runDeployStep(appConfig.directory, commandSpawn(argv), withProjectBins(env, appConfig.directory), { timeoutMs: 10 * 60 * 1000, failure: "Build failed." })
 }
 
+/** The largest site `deploy --local` or a self-hosted link copies, which no server checks. */
+const SELF_HOST_MAX_SITE_MB = 500
+
+/**
+ * Cloud does not host previews yet, so `deploy --preview` against a Cloud link is refused, before
+ * the config is read or anything is built. Undefined when the deploy may go ahead.
+ */
+export function cloudPreviewRefusal(
+  link: Pick<ProjectLink, "kind"> | null,
+  opts: { preview?: boolean | undefined; local?: boolean | undefined; schemaOnly?: boolean | undefined },
+): string | undefined {
+  if (opts.preview !== true || opts.local === true || opts.schemaOnly === true || link?.kind !== "cloud") return undefined
+  return "Previews are not available on Supatype Cloud yet. Run `supatype deploy` without --preview to deploy to production."
+}
+
 export function registerDeploy(program: Command): void {
   const deploy = program
     .command("deploy")
@@ -171,8 +185,13 @@ export function registerDeploy(program: Command): void {
       allowLocal?: boolean
     }) => {
       const cwd = process.cwd()
-      const config = loadConfig(cwd, { local: false })
       const link = loadProjectLink(cwd)
+      const previewRefused = cloudPreviewRefusal(link, opts)
+      if (previewRefused) {
+        error(previewRefused)
+        process.exit(1)
+      }
+      const config = loadConfig(cwd, { local: false })
       const envName = opts.env ?? opts.environment ?? "production"
       // A linked deploy is checked against the server it pushes to (`targetSchemaPush`), a local one
       // against the engine binary, before either sends the flag.
@@ -283,9 +302,9 @@ export function registerDeploy(program: Command): void {
           await installAndBuild(cwd, appConfig, { env: envName, allowLocal: opts.allowLocal === true })
         }
 
-        // Validate build output
-        const maxSizeMb = 500 // Default, should be tier-aware in cloud
-        const validationError = validateBuildOutput(appConfig.outputDirectory, maxSizeMb)
+        // Validate build output. Cloud applies its own tier limit and answers 413 when a site is over it.
+        const toCloud = link?.kind === "cloud" && !opts.local
+        const validationError = validateBuildOutput(appConfig.outputDirectory, toCloud ? undefined : SELF_HOST_MAX_SITE_MB)
         if (validationError) {
           error(validationError)
           process.exit(1)
