@@ -1,5 +1,54 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`self-host auth output is pinned > compose and native settings groups, when the config sets them 1`] = `
+"      # auth hooks, captcha, password, session, MFA, phone and rate limit settings from
+      # supatype.config.ts. A value in .env wins over each default, and a secret is only ever the
+      # name of the variable that holds it.
+      SUPATYPE_HOOK_SEND_EMAIL_URI: "\${SUPATYPE_HOOK_SEND_EMAIL_URI:-https://hooks.example.com/email}"
+      SUPATYPE_SECURITY_CAPTCHA_ENABLED: "\${SUPATYPE_SECURITY_CAPTCHA_ENABLED:-true}"
+      SUPATYPE_SECURITY_CAPTCHA_PROVIDER: "\${SUPATYPE_SECURITY_CAPTCHA_PROVIDER:-turnstile}"
+      SUPATYPE_PASSWORD_MIN_LENGTH: "\${SUPATYPE_PASSWORD_MIN_LENGTH:-10}"
+      SUPATYPE_PASSWORD_REQUIRED_CHARACTERS: "\${SUPATYPE_PASSWORD_REQUIRED_CHARACTERS:-abcdefghijklmnopqrstuvwxyz:0123456789}"
+      SUPATYPE_PASSWORD_HIBP_ENABLED: "\${SUPATYPE_PASSWORD_HIBP_ENABLED:-true}"
+      SUPATYPE_SESSIONS_TIMEBOX: "\${SUPATYPE_SESSIONS_TIMEBOX:-86400s}"
+      SUPATYPE_SESSIONS_SINGLE_PER_USER: "\${SUPATYPE_SESSIONS_SINGLE_PER_USER:-true}"
+      SUPATYPE_MFA_TOTP_ENROLL_ENABLED: "\${SUPATYPE_MFA_TOTP_ENROLL_ENABLED:-true}"
+      SUPATYPE_MFA_MAX_ENROLLED_FACTORS: "\${SUPATYPE_MFA_MAX_ENROLLED_FACTORS:-5}"
+      SUPATYPE_EXTERNAL_PHONE_ENABLED: "\${SUPATYPE_EXTERNAL_PHONE_ENABLED:-true}"
+      SUPATYPE_SMS_PROVIDER: "\${SUPATYPE_SMS_PROVIDER:-twilio}"
+      SUPATYPE_SMS_TWILIO_ACCOUNT_SID: "\${SUPATYPE_SMS_TWILIO_ACCOUNT_SID:-AC123}"
+      SUPATYPE_RATE_LIMIT_OTP: "\${SUPATYPE_RATE_LIMIT_OTP:-50}"
+      SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY: "\${SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY:-20}"
+      SUPATYPE_HOOK_SEND_EMAIL_ENABLED: "\${SUPATYPE_HOOK_SEND_EMAIL_ENABLED:-true}"
+      SUPATYPE_HOOK_SEND_EMAIL_SECRETS: "\${SUPATYPE_HOOK_SEND_EMAIL_SECRETS:-\${EMAIL_HOOK_SECRETS:-}}"
+      SUPATYPE_SECURITY_CAPTCHA_SECRET: "\${SUPATYPE_SECURITY_CAPTCHA_SECRET:-\${CAPTCHA_SECRET:-}}"
+      SUPATYPE_SMS_TWILIO_AUTH_TOKEN: "\${SUPATYPE_SMS_TWILIO_AUTH_TOKEN:-\${TWILIO_TOKEN:-}}"
+"
+`;
+
+exports[`self-host auth output is pinned > compose and native settings groups, when the config sets them 2`] = `
+{
+  "SUPATYPE_EXTERNAL_PHONE_ENABLED": "true",
+  "SUPATYPE_HOOK_SEND_EMAIL_ENABLED": "true",
+  "SUPATYPE_HOOK_SEND_EMAIL_SECRETS": "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567",
+  "SUPATYPE_HOOK_SEND_EMAIL_URI": "https://hooks.example.com/email",
+  "SUPATYPE_MFA_MAX_ENROLLED_FACTORS": "5",
+  "SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY": "20",
+  "SUPATYPE_MFA_TOTP_ENROLL_ENABLED": "true",
+  "SUPATYPE_PASSWORD_HIBP_ENABLED": "true",
+  "SUPATYPE_PASSWORD_MIN_LENGTH": "10",
+  "SUPATYPE_PASSWORD_REQUIRED_CHARACTERS": "abcdefghijklmnopqrstuvwxyz:0123456789",
+  "SUPATYPE_RATE_LIMIT_OTP": "50",
+  "SUPATYPE_SECURITY_CAPTCHA_ENABLED": "true",
+  "SUPATYPE_SECURITY_CAPTCHA_PROVIDER": "turnstile",
+  "SUPATYPE_SECURITY_CAPTCHA_SECRET": "cap",
+  "SUPATYPE_SESSIONS_SINGLE_PER_USER": "true",
+  "SUPATYPE_SESSIONS_TIMEBOX": "86400s",
+  "SUPATYPE_SMS_PROVIDER": "twilio",
+  "SUPATYPE_SMS_TWILIO_ACCOUNT_SID": "AC123",
+}
+`;
+
 exports[`self-host auth output is pinned > compose provider lines 1`] = `
 "      # auth.providers from supatype.config.ts. A value in .env wins over each default, and a
       # secret is only ever the name of the variable that holds it.

@@ -28,11 +28,13 @@ function secretValue(value: string | undefined, environment: MailerEnvironment |
   return resolved === undefined || resolved === "" ? undefined : resolved
 }
 
-/** The variable names `email.smtp.pass` and `email.resend_api_key` point at, by the name the server reads. */
+/** The variable names the mail secrets point at (SMTP password, Resend key, SES key), by the name the server reads. */
 export function mailerSecretReferences(email: EmailConfig): Record<string, string> {
   const candidates: [string, string | undefined][] = [
     ["SUPATYPE_SMTP_PASS", email?.smtp?.pass],
     ["SUPATYPE_RESEND_API_KEY", email?.resend_api_key],
+    ["SUPATYPE_SES_ACCESS_KEY_ID", email?.ses_access_key_id],
+    ["SUPATYPE_SES_SECRET_ACCESS_KEY", email?.ses_secret_access_key],
   ]
   const refs: Record<string, string> = {}
   for (const [serverName, value] of candidates) {
@@ -112,6 +114,12 @@ function apiProviderEnv(email: NonNullable<EmailConfig>, environment: MailerEnvi
   } else if (email.provider === "ses") {
     const from = present(email.ses_from)
     if (from !== undefined) out.SUPATYPE_SES_FROM = from
+    const keyId = present(secretValue(email.ses_access_key_id, environment))
+    if (keyId !== undefined) out.SUPATYPE_SES_ACCESS_KEY_ID = keyId
+    const secret = present(secretValue(email.ses_secret_access_key, environment))
+    if (secret !== undefined) out.SUPATYPE_SES_SECRET_ACCESS_KEY = secret
+    const region = present(email.ses_region)
+    if (region !== undefined) out.SUPATYPE_SES_REGION = region
   }
   return out
 }

@@ -29,7 +29,8 @@ export interface AuthFieldView {
 export interface AuthSecretView {
   set: boolean
   fingerprint: string | null
-  source: "code" | "studio" | null
+  /** "platform": generated and held by the platform, never settable or shown. */
+  source: "code" | "studio" | "platform" | null
   updatedAt: string | null
   updatedBy: string | null
 }
@@ -40,6 +41,7 @@ export interface AuthSettingsView {
   /** Null until the running server was seen to match. */
   appliedVersion: number | null
   appliedAt: string | null
+  /** An older control plane omits the settings it does not know, so a path may be missing. */
   fields: Record<string, AuthFieldView>
   secrets: Record<string, AuthSecretView>
   /** Provider name to the callback URL to register with it. */
@@ -76,7 +78,7 @@ const isFieldView: Guard<AuthFieldView> = isShape({
 const isSecretView: Guard<AuthSecretView> = isShape({
   set: isBoolean,
   fingerprint: nullable(isString),
-  source: nullable(isOneOf(["code", "studio"] as const)),
+  source: nullable(isOneOf(["code", "studio", "platform"] as const)),
   updatedAt: nullable(isString),
   updatedBy: nullable(isString),
 })

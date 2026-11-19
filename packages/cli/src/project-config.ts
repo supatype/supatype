@@ -12,6 +12,7 @@ import { validateAuthConfigFields } from "./auth-config-validate.js"
 import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 import { isJsonObject, isString } from "@supatype/shared"
+import type { AuthGroupSettings } from "@supatype/types"
 import { objectAt } from "./ast-read.js"
 
 // ---------------------------------------------------------------------------
@@ -245,7 +246,7 @@ export interface SupatypeProjectConfig {
      * "console" = log to stdout (default for dev)
      * "smtp"    = SMTP (set `smtp` below and/or SUPATYPE_SMTP_* in `.env`)
      * "resend"  = Resend API (requires SUPATYPE_RESEND_API_KEY, SUPATYPE_RESEND_FROM)
-     * "ses"     = AWS SES v2 (ambient credentials, requires SUPATYPE_SES_FROM)
+     * "ses"     = AWS SES v2 (requires SUPATYPE_SES_FROM; the ambient AWS credentials, or ses_access_key_id and ses_secret_access_key, which Cloud requires)
      */
     provider: "console" | "smtp" | "resend" | "ses"
     /**
@@ -266,6 +267,12 @@ export interface SupatypeProjectConfig {
     resend_from?: string
     /** From address for SES (provider=ses, or set SUPATYPE_SES_FROM in `.env`). */
     ses_from?: string
+    /** The project's own SES access key, `env("NAME")` (or SUPATYPE_SES_ACCESS_KEY_ID in `.env`). Required on Cloud. */
+    ses_access_key_id?: string
+    /** `env("NAME")` (or SUPATYPE_SES_SECRET_ACCESS_KEY in `.env`). Required on Cloud. */
+    ses_secret_access_key?: string
+    /** The SES region, e.g. `eu-west-2` (or SUPATYPE_SES_REGION in `.env`). */
+    ses_region?: string
     /**
      * When true, `supatype dev` enables the send-email HTTP hook pointing at this
      * server's POST `/internal/v0hooks/send-email` (signed delivery, dev-only secret).
@@ -283,8 +290,15 @@ export interface SupatypeProjectConfig {
      */
     send_email_hook_secrets?: string
   }
-  /** The auth server's sign-in options. Email delivery itself is `email` above. */
-  auth?: {
+  /**
+   * The auth server's sign-in options. Email delivery itself is `email` above.
+   *
+   * `hooks`, `captcha`, `password`, `sessions`, `security`, `mfa`, `anonymous`, `phone` and
+   * `rateLimits` are the shared auth settings from `@supatype/types`, the same shape Cloud takes. On
+   * self-host they render as the `SUPATYPE_*` variables the server reads; a secret is `env("NAME")`,
+   * and a value in `.env` wins over the config. `sso` is declared below, with the self-host-only URL.
+   */
+  auth?: Omit<AuthGroupSettings, "sso"> & {
     email?: {
       /**
        * Email-and-password sign-up and sign-in. Default true. `false` turns them off at the auth

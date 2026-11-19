@@ -12,6 +12,7 @@ import {
 } from "../src/sso-admin.js"
 import { samlOffWarning, serviceProviderInfo } from "../src/commands/sso.js"
 import { createNextSamlKey, promoteNextSamlKey } from "../src/saml-key-rotation.js"
+import { samlEnabled } from "../src/saml-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 /**
@@ -178,8 +179,8 @@ describe("sso info", () => {
       server: { mode: "dev" },
       app: { mode: "none" },
     }
-    expect(samlOffWarning(config)).toMatch(/auth\.sso\.saml\.enabled/)
-    expect(samlOffWarning({ ...config, auth: { sso: { saml: { enabled: true } } } })).toBeUndefined()
+    expect(samlOffWarning(samlEnabled(config))).toMatch(/auth\.sso\.saml\.enabled/)
+    expect(samlOffWarning(samlEnabled({ ...config, auth: { sso: { saml: { enabled: true } } } }))).toBeUndefined()
   })
 })
 

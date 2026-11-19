@@ -43,6 +43,7 @@ import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.
 import { upKeepingKongCurrent, upKeepingKongCurrentAsync } from "./compose-kong.js"
 import { addressPoolExhaustionHint } from "./docker-address-pool.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
+import { composeAuthGroupsEnv } from "./auth-groups-env.js"
 import { composeSamlEnv, ensureSamlPrivateKey } from "./saml-config.js"
 import {
   BUNDLED_DB_USER,
@@ -146,6 +147,15 @@ const SEAWEEDFS_IMAGE =
  * durable, and a response-cache key beside them did not.
  */
 const ACME_KEY_PREFIX = "kong_acme:"
+
+/**
+ * Anonymous sign-in from `.env`, off unless it turns it on (docs/auth/anonymous.mdx). Written only
+ * when the config does not set `auth.anonymous.enabled`: then the auth settings carry the key, with
+ * the config's value as its default, and a second line would be a duplicate key in the service.
+ */
+const ANONYMOUS_SIGN_IN_FROM_ENV =
+  "      # Anonymous sign-in, off unless .env turns it on (docs/auth/anonymous.mdx).\n" +
+  "      SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED:-false}\n"
 
 /**
  * The project's object store login as compose reads it from `.env` (issue 71: every stack used to
@@ -750,6 +760,8 @@ export function renderSelfHostCompose(
   const authProviderEnv = composeAuthProviderEnv(config, publicApiUrl)
   // SAML's service provider sits under the same public URL, at /auth/v1 like the OAuth callback.
   const samlEnv = composeSamlEnv(config, publicApiUrl)
+  // Hooks, captcha, password, session, MFA, phone and rate limit settings: only what the config states.
+  const authGroupsEnv = composeAuthGroupsEnv(config)
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
   const staticDir = appStaticDir(config)
@@ -1324,9 +1336,7 @@ ${composeEnvLines(mailerUrlPathsEnv())}
       # to get them and a resend or ses provider fell back to the noop mailer.
 ${composeEnvLines(composeMailerPassthrough(config))}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-${composeDisableSignupFallback(config)}}
-      # Anonymous sign-in, off unless .env turns it on (docs/auth/anonymous.mdx).
-      SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED: \${SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED:-false}
-${composeAllowListLine(config)}${authProviderEnv}${samlEnv}
+${config.auth?.anonymous?.enabled === undefined ? ANONYMOUS_SIGN_IN_FROM_ENV : ""}${composeAllowListLine(config)}${authProviderEnv}${authGroupsEnv}${samlEnv}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started

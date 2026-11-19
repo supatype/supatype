@@ -5,6 +5,8 @@ import { useAuthSettings, type AuthSettings } from "../../hooks/useAuthSettings.
 import { usePlatform } from "../../hooks/usePlatform.js"
 import { CloudConfiguration } from "./CloudConfiguration.js"
 import { useCloudEnvironment } from "./CloudAuthParts.js"
+import { ConfigOnlyTable } from "./ConfigOnlyTable.js"
+import { MFA_SPECS, PHONE_COMMON_SPECS, SAML_SPECS, SESSION_SPECS } from "./authGroupSpecs.js"
 import { enabled, providerRows, SettingsLoading, SettingsTable, type SettingRow } from "./AuthSettingsTable.js"
 
 /**
@@ -51,6 +53,21 @@ function settingRows(s: AuthSettings): SettingRow[] {
   ]
 }
 
+/**
+ * Sections the auth server does not report: each row names its config key. Phone sign-in and the
+ * SMS provider, anonymous sign-in and SAML enablement are already rows above, so only the rest show.
+ */
+function ConfigOnlySections({ cloud }: { cloud: boolean }): React.ReactElement {
+  return (
+    <>
+      <ConfigOnlyTable title="Sessions and security" specs={SESSION_SPECS} cloud={cloud} />
+      <ConfigOnlyTable title="Multi-factor authentication" specs={MFA_SPECS} cloud={cloud} />
+      <ConfigOnlyTable title="Phone codes" specs={PHONE_COMMON_SPECS.slice(2)} cloud={cloud} />
+      <ConfigOnlyTable title="SAML options" specs={SAML_SPECS.slice(1)} cloud={cloud} />
+    </>
+  )
+}
+
 function howToChange(cloud: boolean): string {
   return cloud
     ? "These are managed by Supatype Cloud for this project and cannot be changed from Studio."
@@ -76,6 +93,7 @@ function ReadOnlyConfiguration(): React.ReactElement {
       {loading && <SettingsLoading />}
 
       {settings && <SettingsTable title="Sign-up and confirmation" rows={settingRows(settings)} cloud={cloud} />}
+      {settings && <ConfigOnlySections cloud={cloud} />}
       {settings &&
         (Object.keys(settings.external).length > 0 ? (
           <SettingsTable title="Sign-in methods" rows={providerRows(settings)} cloud={cloud} />

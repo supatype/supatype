@@ -132,6 +132,7 @@ import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
+import { nativeAuthGroupsEnv } from "../auth-groups-env.js"
 import { warnSmtpWithoutHost } from "../config-mailer-env.js"
 import { nativeSamlEnv } from "../saml-config.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
@@ -711,6 +712,9 @@ export function registerDev(program: Command): void {
         ...serverStorageEnv(nativeStorage, config),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
+        // auth hooks, captcha, password, sessions, MFA, phone and rate limits. After the mailer, so
+        // auth.hooks.sendEmail wins over email.send_email_hook.
+        ...nativeAuthGroupsEnv(config, providerEnvironment),
         // auth.sso.saml, with the signing key from .env (generated there the first time SAML is on).
         ...nativeSamlEnv(cwd, config),
         ...nativeServerDotEnvLayer({ dotEnv, config, denoPort, environment: providerEnvironment }),

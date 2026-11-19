@@ -77,6 +77,8 @@ import { PoliciesView } from "./views/auth/PoliciesView.js"
 import { ProvidersView } from "./views/auth/ProvidersView.js"
 import { ConfigurationView } from "./views/auth/ConfigurationView.js"
 import { SsoView } from "./views/auth/SsoView.js"
+import { AuthHooksView } from "./views/auth/AuthHooksView.js"
+import { AttackProtectionView } from "./views/auth/AttackProtectionView.js"
 import { EmailTemplatesView } from "./views/auth/EmailTemplatesView.js"
 
 // Storage sub-pages
@@ -481,9 +483,9 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="authentication/providers"       element={gated(PROJECT_USERS, <ProvidersView />)} />
               <Route path="authentication/configuration"   element={gated(PROJECT_USERS, <ConfigurationView />)} />
               <Route path="authentication/email-templates" element={gated(PROJECT_USERS, <EmailTemplatesView />)} />
-              <Route path="authentication/hooks"    element={<ComingSoon title="Auth Hooks" description="Configure pre/post hooks for auth events. Coming soon." />} />
+              <Route path="authentication/hooks"           element={gated(PROJECT_USERS, <AuthHooksView />)} />
               <Route path="authentication/sso"             element={gated(SSO_PROVIDERS, <SsoView />)} />
-              <Route path="authentication/security" element={<ComingSoon title="Attack Protection" description="CAPTCHA, IP blocking, leaked password detection, rate limits. Coming soon." />} />
+              <Route path="authentication/security"        element={gated(PROJECT_USERS, <AttackProtectionView />)} />
 
               {/* Observability (Logs + Metrics + Advisors) */}
               <Route path="observability">

@@ -31,6 +31,17 @@ describe("mailerProviderEnv", () => {
     })
   })
 
+  it("sends a project's own SES key and region when the config names them", () => {
+    const env = { SES_KEY: "AKIA1", SES_SECRET: "s3" }
+    expect(mailerProviderEnv({ provider: "ses", ses_from: "hi@acme.dev", ses_region: "eu-west-2", ses_access_key_id: 'env(SES_KEY)', ses_secret_access_key: 'env(SES_SECRET)' }, env)).toEqual({
+      SUPATYPE_MAILER_MAILER_PROVIDER: "ses",
+      SUPATYPE_SES_FROM: "hi@acme.dev",
+      SUPATYPE_SES_ACCESS_KEY_ID: "AKIA1",
+      SUPATYPE_SES_SECRET_ACCESS_KEY: "s3",
+      SUPATYPE_SES_REGION: "eu-west-2",
+    })
+  })
+
   it("leaves out what the config does not set, so .env can supply it", () => {
     expect(mailerProviderEnv({ provider: "resend", resend_from: "  " })).toEqual({
       SUPATYPE_MAILER_MAILER_PROVIDER: "resend",

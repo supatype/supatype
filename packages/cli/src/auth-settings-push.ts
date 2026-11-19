@@ -7,10 +7,11 @@
  * refuses with `missing_secret` when it has none. A setting someone saved in Studio masks the pushed
  * value until it is reset, and the push says so. A self-host target never reaches any of this.
  */
-import { authSecretRefs, validateAuthSettings, type AuthSettings } from "@supatype/types"
+import { authSecretRefs, groupRequiredSecretKeys, validateAuthSettings, type AuthGroupSettings, type AuthSettings } from "@supatype/types"
 import { readDotEnvFiles } from "./env-file.js"
 import { errorMessage } from "./error-message.js"
 import { postApplyFailed } from "./post-apply.js"
+import type { AuthSamlConfig } from "./saml-config.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import type { DeployTarget } from "./resolve-target.js"
 import { TargetApiError, targetFetch } from "./target-client.js"
@@ -25,6 +26,8 @@ export interface AuthPushOptions {
   environment?: Readonly<Record<string, string | undefined>>
 }
 
+type CloudSaml = NonNullable<NonNullable<AuthGroupSettings["sso"]>["saml"]>
+
 type MaskedField = { path: string; studioValue: unknown; codeValue: unknown }
 
 interface AuthPushAnswer {
@@ -33,25 +36,43 @@ interface AuthPushAnswer {
   applied: boolean
 }
 
+/** `auth.sso.saml` without `externalUrl`, which is the platform's on Cloud. */
+function samlForCloud(saml: AuthSamlConfig): CloudSaml {
+  const { enabled, allowEncryptedAssertions, relayStateValidity, rateLimitAssertion } = saml
+  return {
+    enabled,
+    ...(allowEncryptedAssertions !== undefined && { allowEncryptedAssertions }),
+    ...(relayStateValidity !== undefined && { relayStateValidity }),
+    ...(rateLimitAssertion !== undefined && { rateLimitAssertion }),
+  }
+}
+
 /** The config's `auth` and `email` sections as the shared settings, or undefined when it has neither. */
 export function authSettingsFromConfig(config: SupatypeProjectConfig): AuthSettings | undefined {
   const { auth, email } = config
   if (auth === undefined && email === undefined) return undefined
-  const { email: signIn, providers, siteUrl, redirectUrls, disableSignup } = auth ?? {}
-  const authPart = {
+  const { email: signIn, providers, siteUrl, redirectUrls, disableSignup, sso, ...groups } = auth ?? {}
+  // Cloud owns the SAML external URL, so only the settings it takes are sent.
+  const saml = sso?.saml === undefined ? undefined : samlForCloud(sso.saml)
+  const authPart: NonNullable<AuthSettings["auth"]> = {
+    ...groups,
+    ...(saml !== undefined && { sso: { saml } }),
     ...(signIn !== undefined && { email: signIn }),
     ...(providers !== undefined && { providers }),
     ...(siteUrl !== undefined && { siteUrl }),
     ...(redirectUrls !== undefined && { redirectUrls }),
     ...(disableSignup !== undefined && { disableSignup }),
   }
-  const { provider, smtp, resend_api_key, resend_from, ses_from } = email ?? {}
+  const { provider, smtp, resend_api_key, resend_from, ses_from, ses_access_key_id, ses_secret_access_key, ses_region } = email ?? {}
   const emailPart = {
     ...(provider !== undefined && { provider }),
     ...(smtp !== undefined && { smtp }),
     ...(resend_api_key !== undefined && { resend_api_key }),
     ...(resend_from !== undefined && { resend_from }),
     ...(ses_from !== undefined && { ses_from }),
+    ...(ses_access_key_id !== undefined && { ses_access_key_id }),
+    ...(ses_secret_access_key !== undefined && { ses_secret_access_key }),
+    ...(ses_region !== undefined && { ses_region }),
   }
   return {
     ...(auth !== undefined && { auth: authPart }),
@@ -59,11 +80,32 @@ export function authSettingsFromConfig(config: SupatypeProjectConfig): AuthSetti
   }
 }
 
+/**
+ * The mail secrets the chosen provider needs that the config does not point at with `env("NAME")`.
+ * A hosted project has no ambient AWS credentials, so SES without its keys cannot send. Other
+ * required secrets (CAPTCHA, SMS) may already be held from Studio, so only a missing reference to a
+ * mail secret is refused here.
+ */
+function missingMailReferences(settings: AuthSettings): string[] {
+  const referenced = new Set(authSecretRefs(settings).map((ref) => ref.key))
+  return groupRequiredSecretKeys(settings)
+    .filter((key) => key.startsWith("email.") && !referenced.has(key))
+    .map((key) => `${key} must be set to env("NAME"): a hosted project has no ambient credentials for ${settings.email?.provider ?? "its mail provider"}`)
+}
+
+/** Every reason Cloud cannot take these settings: invalid values, or a mail secret with no reference. */
+function cloudProblems(settings: AuthSettings): string[] {
+  return [...validateAuthSettings(settings, "cloud"), ...missingMailReferences(settings)]
+}
+
 /** Refuse a config Cloud cannot take (a literal secret, SES), before the schema or anything else is sent. */
 export function assertCloudAuthSettings(config: SupatypeProjectConfig, target: Pick<DeployTarget, "mode">): void {
   if (target.mode !== "cloud") return
   const settings = authSettingsFromConfig(config)
-  const problems = settings === undefined ? [] : validateAuthSettings(settings, "cloud")
+  const problems = settings === undefined ? [] : cloudProblems(settings)
+  if (config.auth?.sso?.saml?.externalUrl !== undefined) {
+    problems.push("auth.sso.saml.externalUrl cannot be set for Supatype Cloud: the platform owns the SAML URL. Remove it, or push to a self-hosted target")
+  }
   if (problems.length === 0) return
   throw new Error(`supatype.config.ts cannot be pushed to Supatype Cloud:\n  ${problems.join("\n  ")}`)
 }
@@ -148,7 +190,7 @@ export async function pushAuthSettings(
 ): Promise<boolean> {
   const settings = target.mode === "cloud" ? authSettingsFromConfig(config) : undefined
   if (settings === undefined) return false
-  const problems = validateAuthSettings(settings, "cloud")
+  const problems = cloudProblems(settings)
   if (problems.length > 0) {
     postApplyFailed(`the auth settings are not valid for Supatype Cloud: ${problems.join("; ")}`)
     return true

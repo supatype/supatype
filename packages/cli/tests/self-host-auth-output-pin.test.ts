@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { renderSelfHostCompose } from "../src/self-host-compose.js"
 import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 import { composeAuthProviderEnv, nativeAuthProviderEnv } from "../src/auth-providers.js"
+import { composeAuthGroupsEnv, nativeAuthGroupsEnv } from "../src/auth-groups-env.js"
 import { nativeAuthMailerEnv } from "../src/native-dev-env.js"
 import { configMailerEnv } from "../src/config-mailer-env.js"
 import { env } from "../src/config.js"
@@ -61,5 +62,31 @@ describe("self-host auth output is pinned", () => {
     expect(nativeAuthProviderEnv(config(), "http://localhost:3001", environment)).toMatchSnapshot()
     expect(nativeAuthMailerEnv(config().email, "3001")).toMatchSnapshot()
     expect(configMailerEnv(config())).toMatchSnapshot()
+  })
+
+  it("compose and native settings groups, when the config sets them", () => {
+    const withGroups = validateProjectConfig(
+      {
+        ...config(),
+        auth: {
+          hooks: { sendEmail: { uri: "https://hooks.example.com/email", secrets: env("EMAIL_HOOK_SECRETS") } },
+          captcha: { enabled: true, provider: "turnstile" as const, secret: env("CAPTCHA_SECRET") },
+          password: { minLength: 10, requiredCharacters: ["lower" as const, "digit" as const], leakedPasswordCheck: true },
+          sessions: { timebox: 86400, singlePerUser: true },
+          mfa: { totp: { enroll: true }, maxEnrolledFactors: 5 },
+          phone: { enabled: true, provider: "twilio" as const, twilio: { accountSid: "AC123", authToken: env("TWILIO_TOKEN") } },
+          rateLimits: { otp: 50, mfa: 20 },
+        },
+      },
+      "supatype.config.ts",
+    )
+    expect(composeAuthGroupsEnv(withGroups)).toMatchSnapshot()
+    const environment = { EMAIL_HOOK_SECRETS: "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567", CAPTCHA_SECRET: "cap" }
+    expect(nativeAuthGroupsEnv(withGroups, environment)).toMatchSnapshot()
+  })
+
+  it("renders no settings groups for a config that sets none", () => {
+    expect(composeAuthGroupsEnv(config())).toBe("")
+    expect(nativeAuthGroupsEnv(config(), {})).toEqual({})
   })
 })
