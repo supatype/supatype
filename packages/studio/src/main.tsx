@@ -10,6 +10,7 @@ import { StudioAccessGate } from "./components/StudioAccessGate.js"
 import type { AdminConfig } from "./config.js"
 import "./globals.css"
 import { fetchStudioConfig } from "./lib/studio-config-fetch.js"
+import { selfHostStaticSite } from "./lib/self-host-static-site.js"
 import { injectedRuntimeConfig } from "./lib/runtime-config.js"
 import { ConfigRefreshOnNavigate, useStudioConfig, type StudioConfigState } from "./hooks/useStudioConfig.js"
 
@@ -123,7 +124,8 @@ function StudioShell({ client, apiBaseUrl, demoMode, onEnterDemo }: StudioShellP
     <BrowserRouter {...(basename !== undefined ? { basename } : {})}>
       {/* A schema pushed while Studio is open shows up on the next click, not the next reload. */}
       <ConfigRefreshOnNavigate refresh={live.refresh} />
-      <StudioCore config={state.config} client={client} demoMode={demoMode} />
+      {/* Sample data has no gateway to ask, so a demo shows no Static site group. */}
+      <StudioCore config={state.config} client={client} demoMode={demoMode} {...(!demoMode && { staticSite: selfHostStaticSite })} />
     </BrowserRouter>
   )
 }

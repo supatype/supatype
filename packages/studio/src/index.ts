@@ -19,7 +19,20 @@ export type {
   FieldConfig,
   WidgetType,
   SupatypeClient,
+  ProjectConnection,
 } from "./types.js"
+
+// The Static site group's host interface: what a host gives StudioCore as `staticSite`.
+export type {
+  StaticSiteHost,
+  StaticSiteOverview,
+  StaticSiteSettings,
+  StaticSiteMode,
+  StaticSiteSettingKey,
+  SiteHeader,
+  LiveSite,
+  HostRead,
+} from "./lib/static-site-host.js"
 
 export type {
   BlockTypeConfig,

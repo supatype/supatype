@@ -79,8 +79,11 @@ function pageBlocks({ file, text }, skipped) {
 
 /** Writes every checked block under `out`; returns how many files it wrote and which it skipped. */
 function writeBlocks(pages, out) {
-  // Examples import the reader's own client module as `./supatype`, so it sits beside them.
-  writeFileSync(join(out, "supatype.ts"), readFileSync(join(HOME, "fixtures", "supatype.ts"), "utf8"))
+  // Examples import the reader's own client module as `./supatype`, and the app code they call
+  // but do not show as `./app`, so both sit beside them.
+  for (const fixture of ["supatype.ts", "app.ts"]) {
+    writeFileSync(join(out, fixture), readFileSync(join(HOME, "fixtures", fixture), "utf8"))
+  }
   let written = 0
   const skipped = []
   for (const page of pages) {
@@ -154,7 +157,9 @@ function reportTypeErrors(output) {
 function main() {
   const missing = PACKAGES.filter((pkg) => !existsSync(dist(pkg)))
   if (missing.length > 0) throw new Error(`build these packages first: ${missing.map((p) => `@supatype/${p}`).join(", ")}`)
-  const pages = walk(DOCS).map((file) => ({ file, text: readFileSync(file, "utf8") }))
+  // A Windows checkout has CRLF line ends, which the fence pattern never matches, so a local run
+  // used to check almost nothing and pass while CI failed. Read every page with LF line ends.
+  const pages = walk(DOCS).map((file) => ({ file, text: readFileSync(file, "utf8").replace(/\r\n/g, "\n") }))
   const out = BLOCKS
   rmSync(out, { recursive: true, force: true })
   mkdirSync(out, { recursive: true })

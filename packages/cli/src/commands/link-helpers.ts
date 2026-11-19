@@ -220,7 +220,7 @@ export async function runLinkAction(opts: {
         await p.select<"cloud" | "self-host">({
           message: "Link target",
           options: [
-            { value: "cloud", label: "Supatype Cloud", hint: "managed project on supatype.com" },
+            { value: "cloud", label: "Supatype Cloud", hint: "managed, closed beta: request access at supatype.com" },
             { value: "self-host", label: "Self-host", hint: "your Kong gateway URL" },
           ],
         }),

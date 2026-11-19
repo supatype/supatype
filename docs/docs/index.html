@@ -125,7 +125,7 @@
     <div class="step"><span class="step-num">1</span><h3>Install the CLI</h3></div>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> npm install -g @supatype/cli</pre></div>
-    <p>The CLI needs Node.js 18 or later. Vite 8, which <code>supatype init</code> sets up for a Vite app, needs Node.js 20.19 or later. For a machine without Node, the <a href="/docs/cli.html#usage">CLI</a> page has a standalone binary. The first run downloads the binaries it needs into <code>~/.supatype/cache/</code>.</p>
+    <p>The CLI needs Node.js 18 or later. Vite 8, which <code>supatype init</code> sets up for a Vite app, needs Node.js 20.19 or later, or 22.12 or later on Node 22. For a machine without Node, the <a href="/docs/cli.html#usage">CLI</a> page has a standalone binary. The first run downloads the binaries it needs into <code>~/.supatype/cache/</code>.</p>
     <p>On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> curl -fsSL https://supatype.com/install.sh | bash
@@ -210,7 +210,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
     <p>Run the whole platform on a server you own with Docker Compose. The project layout is the same one you use locally, so the repository you develop in is the one you deploy.</p>
 
     <div class="step"><span class="step-num">1</span><h3>Prepare the server</h3></div>
-    <p>Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later to build a Vite 8 app), and the CLI:</p>
+    <p>Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later, or 22.12 or later on Node 22, to build a Vite 8 app), and the CLI:</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> npm install -g @supatype/cli</pre></div>
 
@@ -261,7 +261,7 @@ kill <span class="s">"$DEV_PID"</span>; wait <span class="s">"$DEV_PID"</span></
     <p>Set <code>API_EXTERNAL_URL</code> and <code>SITE_URL</code> in <code>.env</code> to <code>https://example.com</code>: values in <code>.env</code> win over the HTTPS default. Certificates are kept in the stack's key-value store (the <code>valkey-data</code> volume, or the database when the cache is <code>pg_keyspace</code>), so they survive restarts. Port 80 also still answers plain HTTP: nothing redirects it to HTTPS.</p>
     <p><code>supatype dev</code> never turns HTTPS on, so the same committed config still runs on <code>http://localhost</code>.</p>
 
-    <div class="callout"><span class="callout-label">RATHER NOT RUN IT YOURSELF?</span><p>Supatype Cloud runs the same stack for you, and it is coming soon. <a href="/#cloud">Join the waiting list</a>, or <a href="/#contact">book a call</a> about self-hosting with support.</p></div>
+    <div class="callout"><span class="callout-label">RATHER NOT RUN IT YOURSELF?</span><p>Supatype Cloud runs the same stack for you, and it is in closed beta. <a href="/#cloud">Request access</a>, or <a href="/#contact">book a call</a> about self-hosting with support.</p></div>
 
     <h2 id="deploy-changes">Deploy changes</h2>
     <p>Local and self-hosted environments read the same committed config. What differs between machines lives in files you do not commit.</p>

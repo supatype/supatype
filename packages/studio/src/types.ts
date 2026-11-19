@@ -13,6 +13,7 @@ export interface NavItem {
 }
 
 export interface SidebarSection {
+  /** Identifies the section (its React key). It is not displayed: a section is set apart by a divider. */
   title: string
   /** Which sidebar mode shows this section. */
   mode: StudioMode
@@ -64,6 +65,19 @@ export interface StudioCoreProps {
    * When set, cloud-upsell screens show a CTA button linking here.
    */
   cloudUrl?: string
+  /**
+   * The project's public API URL and anon key, which the Connect panel prints into an app's env
+   * file. Cloud passes them because its `client.url` is the control-plane proxy path, not the
+   * address an app calls. Both are public. Never a service role key. When absent, a self-host
+   * Studio falls back to the values injected into its page.
+   */
+  connection?: ProjectConnection
+  /**
+   * Who answers the Static site pages (see {@link StaticSiteHost}). Self-host Studio passes the
+   * gateway's; Cloud passes the control plane's, with its Deployments page. Without it Studio shows
+   * no Static site group: a group claims a site this host has told Studio nothing about.
+   */
+  staticSite?: StaticSiteHost
 }
 
 // Re-export config types for convenience
@@ -72,4 +86,7 @@ export type { AdminConfig, ModelConfig, GlobalConfig, FieldConfig, WidgetType } 
 // Forward-declare the client type so consumers don't need @supatype/client
 import type { SupatypeClient } from "@supatype/client"
 import type { AdminConfig } from "./config.js"
+import type { ProjectConnection } from "./hooks/useConnection.js"
+import type { StaticSiteHost } from "./lib/static-site-host.js"
+export type { ProjectConnection }
 export type { SupatypeClient }

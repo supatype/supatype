@@ -53,7 +53,7 @@ export class FakeChannelDb implements ChannelDatabase {
   }
   /** Sessions opened as a caller: one per join, one per socket per re-check. */
   callerSessions = 0
-  /** Sessions opened as the service, for the catalog. */
+  /** Sessions opened for the catalog and the database-sent broadcast check. */
   serviceSessions = 0
   /** Every access question asked, with who asked it. */
   readonly accessCalls: Array<{ topic: string; sub: string | undefined; role: string | undefined }> = []
@@ -63,6 +63,13 @@ export class FakeChannelDb implements ChannelDatabase {
   anonLacksPrivilege = false
   /** When true the four functions do not exist, as on a project pushed by an engine before them. */
   noFunctions = false
+
+  /**
+   * When set, the channel functions (mode, send checks, dependencies, access) raise `insufficient_privilege`
+   * for any session whose role is not in the set, as Postgres does for a login holding no EXECUTE.
+   * A service session has no role of its own here, which is the NOINHERIT login on Cloud.
+   */
+  executeGrantedTo: ReadonlySet<string> | null = null
 
   watch(lot: string, user: string): void {
     const set = this.watchers.get(lot) ?? new Set<string>()
@@ -86,6 +93,12 @@ export class FakeChannelDb implements ChannelDatabase {
     return run(this.queryable(null))
   }
 
+  async asCatalog<T>(run: (q: Queryable) => Promise<T>): Promise<T> {
+    this.serviceSessions++
+    if (this.fault !== null) throw this.fault
+    return run(this.queryable({ role: "authenticated" }))
+  }
+
   private queryable(claims: JwtClaims | null): Queryable {
     return {
       query: async (sql, params) => {
@@ -98,6 +111,12 @@ export class FakeChannelDb implements ChannelDatabase {
 
   private answer(sql: string, params: readonly unknown[], claims: JwtClaims | null): unknown[] {
     if (sql.includes("SAVEPOINT")) return []
+    if (this.executeGrantedTo !== null && /realtime_channel_(mode|send_checks|dependencies|access)/.test(sql)) {
+      const role = claims?.role
+      if (role === undefined || !this.executeGrantedTo.has(role)) {
+        throw Object.assign(new Error("permission denied for function realtime_channel_mode"), { code: "42501" })
+      }
+    }
     if (sql.includes("realtime_channel_mode")) return [{ mode: this.mode }]
     if (sql.includes("realtime_channel_send_checks")) {
       return [{ channel: "LotChannel", checks: this.sendChecks }, { channel: "Lobby", checks: null }]

@@ -276,6 +276,8 @@ async function confirmRiskyChanges(changes: readonly PlannedChange[], run: PushR
   if (risky.length === 0 || run.yes) return true
   if (!isInteractive()) {
     logSkippedConfirm(`${risky.length} risky change(s) require confirmation`)
+    // A refusal in CI is a failed push, not a successful one that happened to apply nothing.
+    process.exitCode = 1
     return false
   }
   return confirm(`${risky.length} risky change(s) above. Proceed?`, { default: false })

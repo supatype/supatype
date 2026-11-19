@@ -279,16 +279,16 @@
       <div class="tile soon" id="cloud">
         <div class="split">
           <div class="stack tight">
-            <div class="tile-head"><h3 class="h-card">Supatype Cloud</h3><span class="tag">COMING SOON</span></div>
-            <p class="body-sm">The same stack, hosted for you. A free tier to start, paid plans when you grow.</p>
+            <div class="tile-head"><h3 class="h-card">Supatype Cloud</h3><span class="tag">CLOSED BETA</span></div>
+            <p class="body-sm">The same stack, hosted for you. Closed beta: request access. A free tier to start, paid plans when you grow.</p>
           </div>
-          <form class="signup stack tight" data-submit-event="waitlist_joined" data-done="You're on the list. We'll email {email} when Cloud opens.">
+          <form class="signup stack tight" data-submit-event="waitlist_joined" data-done="Request received. We'll email {email} when your access is ready.">
             <label for="waitlist-email" class="label">YOUR EMAIL</label>
             <div class="actions signup-row">
               <input type="email" id="waitlist-email" name="email" class="input" required autocomplete="email" placeholder="you@company.com" />
-              <button type="submit" class="btn btn-primary btn-sm">Join the waiting list</button>
+              <button type="submit" class="btn btn-primary btn-sm">Request access</button>
             </div>
-            <p class="meta" role="status" aria-live="polite">Only Cloud news. <a href="/privacy.html" class="link">Privacy</a></p>
+            <p class="meta" role="status" aria-live="polite">Only Cloud access updates. <a href="/privacy.html" class="link">Privacy</a></p>
             <template class="signup-blocked">The sign-up did not go through. It may be blocked in your browser. Ask in <a href="https://discord.gg/TzMtynufEH" class="link">Discord</a> and we'll add you.</template>
           </form>
         </div>
@@ -478,14 +478,15 @@
         </div>
         <div class="panel shadow-accent-sm">
           <div class="panel-bar small"><span>2. INIT</span></div>
-          <pre class="code"><span class="pr">$</span> supatype init</pre>
+          <pre class="code"><span class="pr">$</span> mkdir my-app &amp;&amp; cd my-app
+<span class="pr">$</span> supatype init</pre>
         </div>
         <div class="panel shadow-accent-sm">
           <div class="panel-bar small"><span>3. DEV</span></div>
           <pre class="code"><span class="pr">$</span> supatype dev</pre>
         </div>
       </div>
-      <p class="body-sm measure"><code class="inline-code">supatype dev</code> applies your types, watches for changes, migrates the database and regenerates the client. <code class="inline-code">supatype push</code> applies them to staging or production. You need Node 18 or newer for the CLI (20.19 or newer for a Vite 8 app), and Docker running for the default mode. <a href="/docs/#local-dev" class="link">Local development</a> covers native mode, ports and the frontend proxy.</p>
+      <p class="body-sm measure"><code class="inline-code">supatype dev</code> applies your types, watches for changes, migrates the database and regenerates the client. <code class="inline-code">supatype push</code> applies them to staging or production. You need Node 18 or newer for the CLI (20.19 or newer, or 22.12 or newer on Node 22, for a Vite 8 app), and Docker running for the default mode. <a href="/docs/#local-dev" class="link">Local development</a> covers native mode, ports and the frontend proxy.</p>
       <p class="body-sm measure">On Linux and macOS you can install the CLI with <code class="inline-code">curl -fsSL https://supatype.com/install.sh | bash</code> or <code class="inline-code">brew install supatype/tap/supatype</code> instead. On Windows, use npm.</p>
     </div>
   </section>
@@ -520,7 +521,7 @@
           <div class="stack tight">
             <div class="eyebrow">TALK TO US</div>
             <h2 class="h-sub">Running it for a team?</h2>
-            <p class="body-sm">Book a call. We can talk through your stack, self-hosting with support, and what Cloud will offer.</p>
+            <p class="body-sm">Book a call. We can talk through your stack, self-hosting with support, and Supatype Cloud, which is in closed beta.</p>
           </div>
           <form class="signup stack tight" data-submit-event="call_requested" data-done="Thanks. We'll email {email} to find a time.">
             <label for="contact-email" class="label">YOUR EMAIL</label>

@@ -71,17 +71,15 @@ export const ENGINE_MIN_FOR_GENERATED_COLUMNS = "0.7.0"
  * First engine release that reads `channels` and `realtime` and emits the realtime channel access
  * functions (the realtime private channels plan, section 14.2).
  *
- * **PLACEHOLDER, to be set when the engine release carrying the work is cut.** It is `0.10.1`, the
- * engine this CLI pins today, so it refuses nothing yet, and it must be raised to the release that
- * carries stage A of the plan *in the same change that raises the engine pin in release/images.json*.
- * The release-images test holds the pin at or above every `ENGINE_MIN_` floor, so the two cannot
- * drift apart once this is raised.
+ * Engine 0.11.0 is the release that carries stage A of the plan, and it was raised in the same
+ * change that raised the engine pin in release/images.json. The release-images test holds the pin
+ * at or above every `ENGINE_MIN_` floor, so the two cannot drift apart.
  *
  * Silent, like `versions`: an older engine does not reject the two keys, it drops them. The push
  * succeeds, no access function exists, and a project that declared its channels private has
  * channels nothing enforces.
  */
-export const ENGINE_MIN_FOR_CHANNELS = "0.10.1"
+export const ENGINE_MIN_FOR_CHANNELS = "0.11.0"
 
 /**
  * The oldest engine this CLI runs at all (decision D3, local test round 3, N9). A bucket that names

@@ -230,6 +230,7 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
     <p><code>useChannel(name, setup, deps)</code> is for a channel that needs more than one listener, such as rows, presence and a broadcast together. <code>setup</code> receives the channel and adds its listeners; the hook subscribes, unsubscribes when the component unmounts or <code>name</code> or <code>deps</code> change, and runs <code>setup</code> again only when <code>deps</code> change, as <code>useEffect</code> does. It returns <code>status</code> and <code>error</code> as <code>useSubscription</code> does, and <code>isConnected</code> and <code>connectionState</code> for the socket itself.</p>
     <div class="cb"><div class="cb-bar"><span>tsx</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { useChannel } <span class="k">from</span> <span class="s">"@supatype/react"</span>
+<span class="k">import</span> { addBid, notify } <span class="k">from</span> <span class="s">"./app"</span>
 
 <span class="k">function</span> <span class="t">Auction</span>({ id }: { id: string }) {
   <span class="k">const</span> { status, isConnected } = useChannel(<span class="s">`auction:${id}`</span>, (channel) =&gt; {
@@ -354,6 +355,8 @@ room.broadcast(<span class="s">"move"</span>, { x: <span class="s">120</span>, y
     <p>Pass <code>private: true</code> when you open the channel. The server enforces declarations without it. What the flag adds is an assertion: a name that no declaration matches is refused at once, so a typo fails loudly, and a server too old to enforce channels is never asked.</p>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { isRealtimeChannelError } <span class="k">from</span> <span class="s">"@supatype/client"</span>
+<span class="k">import</span> { supatype } <span class="k">from</span> <span class="s">"./supatype"</span>
+<span class="k">import</span> { displayName, lotId, retryLater, showBid, showRefusal, tellUser, updateWatchers } <span class="k">from</span> <span class="s">"./app"</span>
 
 <span class="k">const</span> lot = supatype.realtime
   .channel(<span class="s">`lot:${lotId}`</span>, { private: true })
@@ -376,6 +379,7 @@ lot.broadcast(<span class="s">"bid"</span>, { amount: 120 })</pre></div>
     <div class="cb"><div class="cb-bar"><span>tsx</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">import</span> { useChannel } <span class="k">from</span> <span class="s">"@supatype/react"</span>
 <span class="k">import</span> { isRealtimeChannelError } <span class="k">from</span> <span class="s">"@supatype/client"</span>
+<span class="k">import</span> { showBid } <span class="k">from</span> <span class="s">"./app"</span>
 
 <span class="k">function</span> <span class="t">Lot</span>({ id }: { id: string }) {
   <span class="k">const</span> { status, error, refusal } = useChannel(
@@ -441,7 +445,7 @@ $$;</pre></div>
       <li><strong>Expiry.</strong> A token that expires closes the socket with 4401, as before.</li>
       <li><strong>Database down at join.</strong> The service fails closed. It refuses every join, open channels included, with code <code>unavailable</code> and <code>retryable</code> set, because without the database it cannot tell whether a topic is declared. Retry with a delay.</li>
       <li><strong>Database down at a re-check.</strong> Nobody loses a channel because a check could not run. Held channels keep their access and the check is tried again at the next interval. A new token that cannot be checked still withdraws the channels, since the old answer no longer applies.</li>
-      <li><strong>Shared instance.</strong> A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says <code>private</code>, with code <code>shared_instance</code>. The Cloud beta runs one realtime service per project.</li>
+      <li><strong>Shared instance.</strong> A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says <code>private</code>, with code <code>shared_instance</code>. Supatype Cloud (closed beta) runs one realtime service per project.</li>
     </ul>
 
     <h2 id="refusal-codes">Refusal codes</h2>

@@ -1,0 +1,126 @@
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from "vitest"
+import React from "react"
+import { MemoryRouter } from "react-router-dom"
+import { StudioCore } from "../src/StudioCore.js"
+import type { StudioExtension } from "../src/types.js"
+import type { HostRead, StaticSiteHost, StaticSiteOverview, StaticSiteSettings } from "../src/lib/static-site-host.js"
+import { act, isolateEachTest, mount, settle, testClient, testConfig } from "./support.js"
+
+const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
+
+function backend(url: string): Promise<Response> {
+  if (url.endsWith("/studio/auth/verify")) {
+    return Promise.resolve(Response.json({ role: "admin", sub: "u1", permissions: { administer: true } }))
+  }
+  return new Promise<Response>(() => {})
+}
+
+function read<T>(data: T): HostRead<T> {
+  return { data, loading: false, error: null }
+}
+
+const NONE_OVERVIEW: StaticSiteOverview = {
+  address: null,
+  mode: "none",
+  staticDir: null,
+  upstream: null,
+  serving: false,
+  fileCount: null,
+  totalBytes: null,
+}
+
+const SETTINGS: StaticSiteSettings = { mode: "static", spaFallback: true, headers: [], fromConfig: [] }
+
+const host: StaticSiteHost = {
+  useOverview: () => read(NONE_OVERVIEW),
+  useSettings: () => read(SETTINGS),
+}
+
+isolateEachTest()
+
+async function studioAt(path: string, opts: { host?: StaticSiteHost; extensions?: StudioExtension }): Promise<HTMLElement> {
+  vi.stubGlobal("fetch", backend)
+  const { container } = await mount(
+    <MemoryRouter initialEntries={[path]}>
+      <StudioCore
+        config={testConfig()}
+        client={CLIENT}
+        {...(opts.host !== undefined && { staticSite: opts.host })}
+        {...(opts.extensions !== undefined && { extensions: opts.extensions })}
+      />
+    </MemoryRouter>,
+  )
+  await settle()
+  return container
+}
+
+function mainText(container: HTMLElement): string {
+  return container.querySelector("main")?.textContent ?? ""
+}
+
+const RAIL = 'aside[aria-label="Studio navigation"]'
+
+const EXTENSION: StudioExtension = {
+  sidebarSections: [
+    { title: "Cloud", mode: "developer", items: [{ href: "/foo", label: "Foo" }, { href: "/foo/bar", label: "Foo bar" }] },
+  ],
+}
+
+describe("extension sidebar sections", () => {
+  it("show no heading text", async () => {
+    const container = await studioAt("/", { extensions: EXTENSION })
+    // The rail shows labels while hovered, which is when a heading would appear.
+    const panel = container.querySelector(`${RAIL} > div`)
+    await act(() => panel?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })))
+    expect(container.querySelector(RAIL)?.textContent ?? "").toContain("Foo bar")
+    expect(container.querySelector(RAIL)?.textContent ?? "").not.toContain("Cloud")
+  })
+
+  it("are set apart by a divider each", async () => {
+    const two: StudioExtension = {
+      sidebarSections: [
+        { title: "A", mode: "developer", items: [{ href: "/a", label: "Item A" }] },
+        { title: "B", mode: "developer", items: [{ href: "/b", label: "Item B" }] },
+      ],
+    }
+    const rail = (await studioAt("/", { extensions: two })).querySelector(RAIL)
+    const dividers = (el: Element | null): number => Array.from(el?.querySelectorAll("div.border-t") ?? []).filter((d) => d.className.includes("mx-3")).length
+    const without = dividers((await studioAt("/", {})).querySelector(RAIL))
+    expect(dividers(rail)).toBe(without + 2)
+  })
+
+  it("mark only the longest matching href as current", async () => {
+    const container = await studioAt("/foo/bar", { extensions: EXTENSION })
+    const current = Array.from(container.querySelectorAll(`${RAIL} button[aria-current=page]`)).map((b) => b.getAttribute("aria-label") ?? b.textContent ?? "")
+    expect(current.filter((c) => c.startsWith("Foo"))).toEqual(["Foo bar"])
+  })
+})
+
+describe("the Settings Public values slot", () => {
+  it("renders the host's PublicValues card", async () => {
+    const withCard: StaticSiteHost = { ...host, PublicValues: () => <div>Public values card</div> }
+    expect(mainText(await studioAt("/static-site/settings", { host: withCard }))).toContain("Public values card")
+  })
+
+  it("renders nothing without one", async () => {
+    expect(mainText(await studioAt("/static-site/settings", { host }))).not.toContain("Public values")
+  })
+})
+
+describe("the Overview empty state", () => {
+  it("shows no site address link and tells self-host how to get a site", async () => {
+    const container = await studioAt("/static-site", { host })
+    const text = mainText(container)
+    expect(container.querySelector("main a")).toBeNull()
+    expect(text).toContain("set app in supatype.config.ts")
+    expect(text).toContain("supatype dev")
+    expect(text).not.toContain("supatype deploy")
+  })
+
+  it("tells Cloud to run supatype deploy", async () => {
+    const cloud: StaticSiteHost = { ...host, Deployments: () => <div>d</div> }
+    const text = mainText(await studioAt("/static-site", { host: cloud }))
+    expect(text).toContain("Run supatype deploy to put your first version live.")
+  })
+})

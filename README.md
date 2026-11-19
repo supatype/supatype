@@ -18,7 +18,7 @@ User guides: [docs](https://www.supatype.com/docs/) · [local dev](https://www.s
 
 ## Quick start
 
-You need Node.js 18 or later for the CLI (20.19 or later for the Vite 8 app `supatype init` sets up), and Docker for the default local stack.
+You need Node.js 18 or later for the CLI (20.19 or later, or 22.12 or later on Node 22, for the Vite 8 app `supatype init` sets up), and Docker for the default local stack.
 
 ```bash
 npm install -g @supatype/cli
@@ -54,7 +54,7 @@ Upgrading from 0.6.0? Read [UPGRADING.md](UPGRADING.md) first.
 |------|---------|----------|-----------------|
 | **Dev** | `supatype dev` | **Docker** (`provider: "docker"`, what `init` writes) or native (`provider: "native"`) | **Docker Compose** with the self-host images, or native **engine** + **supatype-server** binaries |
 | **Self-host** | `supatype self-host compose up` | Docker (`supatype/postgres`) | **Docker Compose**, on the exact images each CLI release was tested with (override with `SUPATYPE_*_IMAGE` in `.env`) |
-| **Cloud** | `supatype login`, `supatype link`, `supatype deploy` | Managed | Supatype Cloud (early access) |
+| **Cloud** | `supatype login`, `supatype link`, `supatype deploy` | Managed | Supatype Cloud (closed beta: [request access](https://www.supatype.com/#cloud)) |
 
 ---
 

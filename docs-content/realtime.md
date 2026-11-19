@@ -149,6 +149,7 @@ It needs `SupatypeProvider` above it, which takes your client as `client`. Give 
 
 ```tsx
 import { useChannel } from "@supatype/react"
+import { addBid, notify } from "./app"
 
 function Auction({ id }: { id: string }) {
   const { status, isConnected } = useChannel(`auction:${id}`, (channel) => {
@@ -284,6 +285,8 @@ Pass `private: true` when you open the channel. The server enforces declarations
 
 ```ts
 import { isRealtimeChannelError } from "@supatype/client"
+import { supatype } from "./supatype"
+import { displayName, lotId, retryLater, showBid, showRefusal, tellUser, updateWatchers } from "./app"
 
 const lot = supatype.realtime
   .channel(`lot:${lotId}`, { private: true })
@@ -309,6 +312,7 @@ In React, `useChannel` takes the options as its fourth argument, and returns `er
 ```tsx
 import { useChannel } from "@supatype/react"
 import { isRealtimeChannelError } from "@supatype/client"
+import { showBid } from "./app"
 
 function Lot({ id }: { id: string }) {
   const { status, error, refusal } = useChannel(
@@ -383,7 +387,7 @@ Keep the function `SECURITY INVOKER`, as above, so the send rule judges the user
 - **Expiry.** A token that expires closes the socket with 4401, as before.
 - **Database down at join.** The service fails closed. It refuses every join, open channels included, with code `unavailable` and `retryable` set, because without the database it cannot tell whether a topic is declared. Retry with a delay.
 - **Database down at a re-check.** Nobody loses a channel because a check could not run. Held channels keep their access and the check is tried again at the next interval. A new token that cannot be checked still withdraws the channels, since the old answer no longer applies.
-- **Shared instance.** A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says `private`, with code `shared_instance`. The Cloud beta runs one realtime service per project.
+- **Shared instance.** A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says `private`, with code `shared_instance`. Supatype Cloud (closed beta) runs one realtime service per project.
 
 <h2 id="refusal-codes">Refusal codes</h2>
 

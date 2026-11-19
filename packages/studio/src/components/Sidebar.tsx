@@ -33,6 +33,7 @@ const SECONDARY_NAV_ENTRIES: NavEntry[] = [
   { id: "email",         label: "Email",             icon: "mail",      href: "/email" },
   "separator",
   { id: "functions",     label: "Edge Functions",    icon: "zap",       href: "/edge-functions" },
+  { id: "static-site",   label: "Static site",       icon: "globe",     href: "/static-site" },
   { id: "realtime",      label: "Realtime",          icon: "radio",     href: "/realtime" },
   { id: "webhooks",      label: "Webhooks",          icon: "globe",     href: "/webhooks" },
   { id: "jobs",          label: "Scheduled Jobs",    icon: "clock",     href: "/jobs" },
@@ -56,8 +57,10 @@ const SECONDARY_NAV_ENTRIES: NavEntry[] = [
  * Only what the server has refused is hidden: before the capability resolves, and on a deployment
  * that does not report it, everything stays, and the destination says what it can.
  */
-export function hiddenNavItems(capability: OfferedCapability): ReadonlySet<string> {
+export function hiddenNavItems(capability: OfferedCapability, hasStaticSite = true): ReadonlySet<string> {
   const hidden = new Set<string>()
+  // The Static site group speaks for a site only a host can describe; with no host there is nothing to show.
+  if (!hasStaticSite) hidden.add("static-site")
   if (!offers(capability, "realtimeInspect")) hidden.add("realtime")
   // The project's users are administered by admins and developers; editors and viewers work with content.
   if (!userAdministrationOffered(capability)) hidden.add("auth")
@@ -169,22 +172,24 @@ function BuiltInEntries({ hiddenItems, path, ctx }: { hiddenItems: ReadonlySet<s
   )
 }
 
+/** The extension item a path belongs to: the longest matching href, so /foo and /foo/bar are never both current. */
+function activeExtraHref(sections: SidebarSection[], path: string): string | null {
+  const hrefs = sections.flatMap((s) => s.items).map((i) => i.href).filter((href) => path === href || path.startsWith(`${href}/`))
+  return hrefs.reduce<string | null>((best, href) => (best === null || href.length > best.length ? href : best), null)
+}
+
 function ExtraSections({ sections, path, ctx }: { sections: SidebarSection[] | undefined; path: string; ctx: ItemContext }): React.ReactElement | null {
   if (!sections || sections.length === 0) return null
+  const activeHref = activeExtraHref(sections, path)
   return (
     <>
-      <div className="my-1 mx-3 border-t border-border/50" />
       {sections.map((section) => (
-        <div key={section.title}>
-          {ctx.expanded && (
-            <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-              {section.title}
-            </div>
-          )}
+        <React.Fragment key={section.title}>
+          <div className="my-1 mx-3 border-t border-border/50" />
           {section.items.map((item) => (
-            <SidebarItem key={item.href} {...ctx} icon={<Icon name={item.icon} size={16} />} label={item.label} href={item.href} active={path === item.href || path.startsWith(`${item.href}/`)} />
+            <SidebarItem key={item.href} {...ctx} icon={<Icon name={item.icon} size={16} />} label={item.label} href={item.href} active={item.href === activeHref} />
           ))}
-        </div>
+        </React.Fragment>
       ))}
     </>
   )
@@ -273,6 +278,9 @@ export function getPageTitle(path: string, config: AdminConfig): string {
     "/authentication":       "Authentication",
     "/email":                "Email",
     "/edge-functions":       "Edge Functions",
+    "/static-site":          "Static site",
+    "/static-site/settings": "Static site settings",
+    "/static-site/deployments": "Static site deployments",
     "/realtime":             "Realtime",
     "/plugins":              "Plugins",
     "/observability":              "Observability",
@@ -337,6 +345,9 @@ export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] 
     "/authentication":       ["Authentication"],
     "/email":                ["Email"],
     "/edge-functions":       ["Edge Functions"],
+    "/static-site":          ["Static site", "Overview"],
+    "/static-site/settings": ["Static site", "Settings"],
+    "/static-site/deployments": ["Static site", "Deployments"],
     "/realtime":             ["Realtime"],
     "/plugins":              ["Plugins"],
     "/observability":                  ["Observability"],

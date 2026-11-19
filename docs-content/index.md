@@ -25,7 +25,7 @@ Install the CLI, scaffold a project, and run the full stack on your machine. Sup
 $ npm install -g @supatype/cli
 ```
 
-The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later. For a machine without Node, the [CLI](/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
+The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later, or 22.12 or later on Node 22. For a machine without Node, the [CLI](/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
 
 On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.
 
@@ -146,7 +146,7 @@ Run the whole platform on a server you own with Docker Compose. The project layo
 
 ### 1. Prepare the server
 
-Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later to build a Vite 8 app), and the CLI:
+Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later, or 22.12 or later on Node 22, to build a Vite 8 app), and the CLI:
 
 ```sh
 $ npm install -g @supatype/cli
@@ -220,7 +220,7 @@ Set `API_EXTERNAL_URL` and `SITE_URL` in `.env` to `https://example.com`: values
 `supatype dev` never turns HTTPS on, so the same committed config still runs on `http://localhost`.
 
 :::note[Rather not run it yourself?]
-Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](/#cloud), or [book a call](/#contact) about self-hosting with support.
+Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](/#cloud), or [book a call](/#contact) about self-hosting with support.
 :::
 
 <h2 id="deploy-changes">Deploy changes</h2>

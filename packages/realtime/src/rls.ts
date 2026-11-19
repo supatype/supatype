@@ -49,6 +49,9 @@ const NOTHING_REDACTED: RedactedColumns = { old: [], new: [] }
 /** How long a channel rule may run, in milliseconds, as the text `set_config` takes. */
 const CHANNEL_CHECK_TIMEOUT_MS = "5000"
 
+/** The role the catalog reads run as: the one the engine grants the channel functions to, and the login can SET ROLE to. */
+const CATALOG_ROLE = "authenticated"
+
 /** At most this many connections judge changes for inspectors, so they never crowd out subscribers. */
 const INSPECT_POOL_MAX = 2
 
@@ -313,6 +316,15 @@ export class RlsFilter implements ChannelDatabase {
       await client.query("ROLLBACK").catch(() => {})
       client.release()
     }
+  }
+
+  /**
+   * Run the catalog reads as `authenticated`. Same transaction, role switch and rollback as
+   * `asCaller`, so the role never outlives the read and the connection returns to the pool clean,
+   * on an error too.
+   */
+  asCatalog<T>(run: (q: Queryable) => Promise<T>): Promise<T> {
+    return this.asCaller({ role: CATALOG_ROLE }, run)
   }
 
   /** Run `run` on one pooled connection as the service's own role: for questions about the project, not a caller. */

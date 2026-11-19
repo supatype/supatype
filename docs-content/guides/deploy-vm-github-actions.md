@@ -27,7 +27,7 @@ This guide covers self-hosting only. Supatype Cloud is a separate product.
 
 <h2 id="local">Create the project locally</h2>
 
-On your machine, with Node.js 20.19 or later: the CLI needs 18, and the Vite 8 app it sets up needs 20.19.
+On your machine, with Node.js 20.19 or later, or 22.12 or later on Node 22: the CLI needs 18, and the Vite 8 app it sets up needs one of those.
 
 ### 1. Scaffold
 
@@ -82,7 +82,7 @@ A one-time setup on Ubuntu 22.04 or similar, with SSH access.
 
 ```sh title="vm"
 # Docker: https://docs.docker.com/engine/install/ubuntu/
-# Node.js 20.19 or later, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
+# Node.js 20.19 or later, or 22.12 or later on Node 22, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
 $ sudo apt update && sudo apt install -y git
 $ sudo npm install -g @supatype/cli
 
@@ -211,5 +211,5 @@ Watch the run under **Actions** on GitHub. When it succeeds, load your gateway U
 | `supatype build` fails | It lists each source it tried for the API URL and anon key. On the VM both come from `.env`: `API_EXTERNAL_URL` must be the public address, not `localhost`, and `ANON_KEY` must be set. See [Deploy your frontend](/docs/deploying-your-frontend.html#missing). |
 
 :::note[Rather not run it yourself?]
-Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](/#cloud), or [book a call](/#contact) about self-hosting with support.
+Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](/#cloud), or [book a call](/#contact) about self-hosting with support.
 :::

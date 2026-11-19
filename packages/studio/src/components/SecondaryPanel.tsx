@@ -15,6 +15,8 @@ import { useInspectorAvailability, type InspectorAvailability } from "../hooks/u
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
 import { bucketManagementOffered } from "../lib/capability-offers.js"
+import { useStaticSiteHost, type StaticSiteHost } from "../lib/static-site-host.js"
+import { staticSitePages } from "../lib/static-site.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -226,6 +228,7 @@ function getSectionId(path: string): string | null {
   if (path.startsWith("/observability")) return "observability"
   if (path.startsWith("/ai")) return "ai"
   if (path.startsWith("/edge-functions")) return "functions"
+  if (path === "/static-site" || path.startsWith("/static-site/")) return "static-site"
   if (path === "/realtime" || path.startsWith("/realtime/")) return "realtime"
   return null
 }
@@ -253,6 +256,26 @@ export function SectionPanelToggle({ open, onToggle }: { open: boolean; onToggle
       <IconList size={16} />
     </Button>
   )
+}
+
+function matchesHref(href: string, path: string): boolean {
+  return path === href || path.startsWith(href + "/") || path.startsWith(href + "?")
+}
+
+/**
+ * The href of the item a path belongs to, among items with no rule of their own: the longest one
+ * that matches. A section whose root item (/static-site) is a prefix of its other pages must not
+ * mark the root as current on all of them.
+ */
+export function longestMatchingHref(section: SectionDef, path: string): string | null {
+  const hrefs = section.groups.flatMap((g) => g.items).filter((i) => i.activeWhen === undefined && matchesHref(i.href, path)).map((i) => i.href)
+  return hrefs.reduce<string | null>((best, href) => (best === null || href.length > best.length ? href : best), null)
+}
+
+/** The Static site group's pages: Deployments only where the host provides it (Cloud). */
+export function buildStaticSiteSection(host: StaticSiteHost | undefined): SectionDef {
+  const items = host === undefined ? [] : staticSitePages(host).map((page) => ({ ...page }))
+  return { title: "Static site", groups: [{ items }] }
 }
 
 function buildSettingsSection(): SectionDef {
@@ -333,6 +356,7 @@ export function SecondaryPanel({
   const sectionId = getSectionId(path)
   const { availability: realtimeAvailability } = useInspectorAvailability({ enabled: sectionId === "realtime" })
   const capability = useStudioCapability()
+  const staticSiteHost = useStaticSiteHost()
 
   const adminFetch = React.useCallback(
     (adminPath: string, init?: RequestInit) => functionsAdminFetch(client, adminPath, init),
@@ -427,9 +451,13 @@ export function SecondaryPanel({
     section = buildSettingsSection()
   } else if (sectionId === "realtime") {
     section = buildRealtimeSection(realtimeAvailability)
+  } else if (sectionId === "static-site") {
+    section = buildStaticSiteSection(staticSiteHost)
   } else {
     section = sectionId === "database" ? databaseSectionFor(capability) : (STATIC_SECTIONS[sectionId] ?? { title: "", groups: [] })
   }
+
+  const claimedHref = longestMatchingHref(section, path)
 
   return (
     <>
@@ -472,11 +500,7 @@ export function SecondaryPanel({
               // the Editor tab (not Schema tab) stays highlighted here.
               const active = item.activeWhen
                 ? item.activeWhen(path, search)
-                : (
-                  path === item.href ||
-                  path.startsWith(item.href + "/") ||
-                  path.startsWith(item.href + "?")
-                )
+                : item.href === claimedHref
 
               if (item.unavailable !== undefined) {
                 return (
