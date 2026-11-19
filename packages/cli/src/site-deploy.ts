@@ -8,7 +8,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import { isArrayOf, isShape, isString } from "@supatype/shared"
 import { errorMessage, responseFailureText } from "./error-message.js"
-import { targetFetch } from "./target-client.js"
+import { TargetApiError, targetFetch } from "./target-client.js"
 import { info } from "./ui/messages.js"
 
 /** Where a site goes: the control plane, the project and the caller's credentials. */
@@ -71,12 +71,14 @@ export function manifestOf(files: readonly SiteFile[]): ManifestEntry[] {
 const UPLOAD_CONCURRENCY = 6
 /** How many times a blob upload that failed with a 5xx, or never got an answer, is sent again. */
 const UPLOAD_RETRIES = 3
+/** How many times finalize is sent again after a 502 `pointer_not_pushed`. */
+const FINALIZE_RETRIES = 3
 const DEFAULT_RETRY_DELAY_MS = 500
 
 export interface DeploySiteOptions {
   spa: boolean
   preview: boolean
-  /** Base wait before a blob upload is retried, multiplied by the attempt number. Tests set 0. */
+  /** Base wait before an upload or finalize is retried, multiplied by the attempt number. Tests set 0. */
   retryDelayMs?: number
 }
 
@@ -150,16 +152,62 @@ async function inPool<T>(items: readonly T[], limit: number, work: (item: T) => 
   if (failed !== undefined) throw failed
 }
 
-/** Create a deployment for the files under `outputDir`, upload the ones the server lacks, and finalize. */
-export async function deploySite(target: SiteTarget, outputDir: string, opts: DeploySiteOptions): Promise<void> {
+/** A site that is live: the deployment's version and the address it is served at. */
+export interface SiteDeployed {
+  version: string
+  url: string
+}
+
+const isFinalized = isShape({ version: isString, status: isString, url: isString })
+
+/** Whether finalize failed only because the live pointer was not pushed, which finalizing again fixes. */
+function isPointerNotPushed(err: unknown): boolean {
+  return err instanceof TargetApiError && err.status === 502 && err.code === "pointer_not_pushed"
+}
+
+/**
+ * Finalize the deployment and read its answer. A 502 `pointer_not_pushed` means the version is
+ * recorded but the project's server was not told, and finalize is idempotent, so it is sent again.
+ */
+async function finalizeSite(target: SiteTarget, deploymentId: string, retryDelayMs: number): Promise<SiteDeployed> {
+  const request = {
+    token: target.token,
+    orgId: target.orgId,
+    environment: target.environment,
+    method: "POST",
+    path: `/projects/${target.projectRef}/deployments/${deploymentId}/finalize`,
+  }
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const answer = await targetFetch(target.apiBaseUrl, "/api/v1", request, isFinalized)
+      if (answer.status !== "live") throw new Error(`The site is not live after finalizing: its status is ${answer.status}.`)
+      return { version: answer.version, url: answer.url }
+    } catch (err) {
+      if (isPointerNotPushed(err) && attempt < FINALIZE_RETRIES) {
+        await sleep(retryDelayMs * (attempt + 1))
+        continue
+      }
+      if (isPointerNotPushed(err)) {
+        throw new Error(`The files are uploaded but the site is not live: ${errorMessage(err)}. Run the deploy again to finalize it.`, { cause: err })
+      }
+      if (err instanceof TargetApiError) throw new Error(`Finalizing failed: ${errorMessage(err)}`, { cause: err })
+      throw err
+    }
+  }
+}
+
+/** Create a deployment for the files under `outputDir`, upload the ones the server lacks, and make it live. */
+export async function deploySite(target: SiteTarget, outputDir: string, opts: DeploySiteOptions): Promise<SiteDeployed> {
   const files = collectSiteFiles(outputDir)
-  const call = { token: target.token, orgId: target.orgId, environment: target.environment }
+  const retryDelayMs = opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
 
   const created = await targetFetch(
     target.apiBaseUrl,
     "/api/v1",
     {
-      ...call,
+      token: target.token,
+      orgId: target.orgId,
+      environment: target.environment,
       method: "POST",
       path: `/projects/${target.projectRef}/deployments`,
       body: { preview: opts.preview, spa: opts.spa, files: manifestOf(files) },
@@ -169,13 +217,7 @@ export async function deploySite(target: SiteTarget, outputDir: string, opts: De
 
   const upload = filesToUpload(files, created.missing)
   info(`${upload.length} of ${files.length} files to upload, ${files.length - upload.length} already on the server`)
-  await inPool(upload, UPLOAD_CONCURRENCY, (file) =>
-    uploadBlob(target, created.uploadUrl, file, opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS),
-  )
+  await inPool(upload, UPLOAD_CONCURRENCY, (file) => uploadBlob(target, created.uploadUrl, file, retryDelayMs))
 
-  await targetFetch(target.apiBaseUrl, "/api/v1", {
-    ...call,
-    method: "POST",
-    path: `/projects/${target.projectRef}/deployments/${created.deploymentId}/finalize`,
-  })
+  return finalizeSite(target, created.deploymentId, retryDelayMs)
 }

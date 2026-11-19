@@ -60,7 +60,7 @@ describe("deploySite create call", () => {
         sendJson(res, 201, { data: { deploymentId: "d1", version: "v1", uploadUrl: `${site?.base ?? ""}/blobs`, missing: [], limits: {} } })
         return
       }
-      sendJson(res, 200, { data: {} })
+      sendJson(res, 200, { data: { version: "v1", status: "live", url: "https://demo.example.test" } })
     })
     await deploySite(site.target, project.dir, { spa: true, preview: false })
     const create = site.seen[0]
