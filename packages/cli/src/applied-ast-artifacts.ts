@@ -8,6 +8,7 @@
  */
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { syncRowCacheEnv } from "./model-cache.js"
+import { PUBLIC_ENV_WRITTEN, syncManifestPublicEnv } from "./build-public-env.js"
 import { HOOK_MAPS_WRITTEN, syncManifestHooks, writeHooksModule } from "./model-hooks.js"
 import { hooksPathFromProject, type SupatypeProjectConfig } from "./project-config.js"
 
@@ -42,5 +43,6 @@ export function writeAppliedAstArtifacts(
   // The server watches the manifest, so a hook or validator added to the schema takes effect
   // without a restart.
   if (syncManifestHooks(cwd, ast)) lines.push(HOOK_MAPS_WRITTEN)
+  if (syncManifestPublicEnv(cwd, config)) lines.push(PUBLIC_ENV_WRITTEN)
   return { lines, rowCache: rowCacheEnv ? syncRowCacheEnv(cwd, ast) : null }
 }
