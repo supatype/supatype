@@ -11,6 +11,9 @@ import { LocaleContext, useLocaleState } from "./hooks/useLocale.js"
 import { CloudUrlContext } from "./hooks/useCloudUrl.js"
 import { PlatformCtx } from "./hooks/usePlatform.js"
 import { ConnectionCtx } from "./hooks/useConnection.js"
+import { StaticSiteCtx, useStaticSiteHost, type StaticSiteHost } from "./lib/static-site-host.js"
+import { StaticSiteOverview } from "./views/static-site/StaticSiteOverview.js"
+import { StaticSiteSettings } from "./views/static-site/StaticSiteSettings.js"
 import { Sidebar, getPageBreadcrumbs, hiddenNavItems } from "./components/Sidebar.js"
 import { PageError } from "./components/ui.js"
 import { useStudioCapability } from "./hooks/useStudioCapability.js"
@@ -117,7 +120,8 @@ const PRIMARY_MENU_ID = "studio-primary-menu"
  */
 function StudioNav({ config, extensions, mobileNav }: StudioNavProps): React.ReactElement {
   const capability = useStudioCapability()
-  const hiddenNav = useMemo(() => hiddenNavItems(capability), [capability])
+  const hasStaticSite = useStaticSiteHost() !== undefined
+  const hiddenNav = useMemo(() => hiddenNavItems(capability, hasStaticSite), [capability, hasStaticSite])
   const sidebarProps = { config, extraSections: extensions?.sidebarSections, hiddenItems: hiddenNav }
   return (
     <>
@@ -217,10 +221,27 @@ const API_SETTINGS: RoleRequirement = { needs: "administer", activity: "change t
 const FUNCTIONS: RoleRequirement = { needs: "administer", activity: "manage functions" }
 const REALTIME: RoleRequirement = { needs: "realtimeInspect", activity: "use the Realtime Inspector" }
 const LOGS: RoleRequirement = { needs: "viewLogs", activity: "view logs" }
+const STATIC_SITE: RoleRequirement = { needs: "administer", activity: "see the static site" }
 
 /** `element`, for a role that holds what `requirement` needs. */
 function gated(requirement: RoleRequirement, element: React.ReactElement): React.ReactElement {
   return <RoleGate {...requirement}>{element}</RoleGate>
+}
+
+/**
+ * The Static site group's routes, or none when the host gave Studio no host for it. The Deployments
+ * route exists only when the host provides the page, so self-host has no such address at all.
+ */
+function staticSiteRoutes(host: StaticSiteHost | undefined): React.ReactElement[] {
+  if (host === undefined) return []
+  const Deployments = host.Deployments
+  return [
+    <Route key="static-site" path="static-site" element={gated(STATIC_SITE, <StaticSiteOverview />)} />,
+    <Route key="static-site-settings" path="static-site/settings" element={gated(STATIC_SITE, <StaticSiteSettings />)} />,
+    ...(Deployments !== undefined
+      ? [<Route key="static-site-deployments" path="static-site/deployments" element={gated(STATIC_SITE, <Deployments />)} />]
+      : []),
+  ]
 }
 
 function ModelsOverview(): React.ReactElement {
@@ -407,7 +428,7 @@ function GlobalGraphQLRoute(): React.ReactElement {
 
 // ─── StudioCore ────────────────────────────────────────────────────────────────
 
-export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef, connection }: StudioCoreProps): React.ReactElement {
+export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef, connection, staticSite }: StudioCoreProps): React.ReactElement {
   const localeState = useLocaleState(config)
   // A mode an earlier Studio remembered is no longer read; forgetting it once keeps no stale choice.
   useEffect(() => forgetStoredActingModes(), [])
@@ -416,6 +437,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
     <CloudUrlContext.Provider value={cloudUrl}>
     <PlatformCtx.Provider value={{ platformUrl, projectRef }}>
     <ConnectionCtx.Provider value={connection}>
+    <StaticSiteCtx.Provider value={staticSite}>
     <AdminConfigContext.Provider value={config}>
       <AdminClientContext.Provider value={client}>
         <LocaleContext.Provider value={localeState}>
@@ -524,6 +546,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="edge-functions" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               <Route path="edge-functions/:functionSlug" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               <Route path="edge-functions/:functionSlug/:tab" element={gated(FUNCTIONS, <EdgeFunctions />)} />
+              {staticSiteRoutes(staticSite)}
               {/* The Inspector where this deployment's control plane serves it, "coming soon" where it
                   does not (Phase-08 Appendix A). Settings and metrics are a later release. */}
               <Route path="realtime"          element={gated(REALTIME, <RealtimeInspector demoMode={demoMode ?? false} />)} />
@@ -597,6 +620,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
         </LocaleContext.Provider>
       </AdminClientContext.Provider>
     </AdminConfigContext.Provider>
+    </StaticSiteCtx.Provider>
     </ConnectionCtx.Provider>
     </PlatformCtx.Provider>
     </CloudUrlContext.Provider>
