@@ -55,7 +55,8 @@ import {
   type FileSnapshot,
   type WriteRoot,
 } from "../deploy-files.js"
-import { answerWithWorkerCurrent, childDir, hooksRoot, manifestPath } from "../worker.js"
+import { manifestFile, readManifest } from "../manifest.js"
+import { answerWithWorkerCurrent, childDir, hooksRoot } from "../worker.js"
 
 /** Where a project keeps the generated adapter under its hooks root. */
 const ADAPTER_PATH = "_supatype/hooks.ts"
@@ -92,16 +93,6 @@ function unresolved(names: ReadonlySet<string>, maps: ReadonlyArray<HookMap | un
     }
   }
   return [...missing].sort()
-}
-
-/** The stack's manifest, which has to be there and be a JSON object before anything is written. */
-export function readManifest(): Record<string, unknown> {
-  if (!existsSync(manifestPath())) {
-    throw new HttpError(409, "conflict", "The stack has no .supatype/manifest.json; run `supatype self-host compose up` first")
-  }
-  const parsed = parseJsonObject(readFileSync(manifestPath(), "utf8"))
-  if (!parsed.ok) throw new HttpError(409, "conflict", ".supatype/manifest.json is not a JSON object")
-  return parsed.value
 }
 
 /** One handler as the body sends it. */
@@ -219,15 +210,6 @@ async function writeHooks(root: WriteRoot, writes: readonly HookWrite[]): Promis
 /** Whether the worker has a route for the hook `name` on disk: `<name>/index.ts` or `<name>.ts`. */
 function servedNow(root: WriteRoot, name: string): boolean {
   return existsSync(join(root.path, name, FUNCTION_ENTRY_FILE)) || existsSync(join(root.path, `${name}.ts`))
-}
-
-/**
- * The manifest as the file the deploy writes, checked like every other (deploy-files.ts), and written
- * whole: the worker and the server read it while a deploy may be rewriting it.
- */
-export function manifestFile(manifest: Record<string, unknown>): DeployFile {
-  const root = writeRoot(dirname(manifestPath()), "The stack's .supatype", { mayBeLink: true })
-  return { atomic: true, ...fileUnder(root, basename(manifestPath()), `${JSON.stringify(manifest, null, 2)}\n`) }
 }
 
 /**
