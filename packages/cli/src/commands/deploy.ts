@@ -38,9 +38,10 @@ import {
 import { commandSpawn, withProjectBins } from "../build-spawn.js"
 import { installCommand, type InstallCommand } from "../init-setup-steps.js"
 import { fatalError } from "../ui/fatal.js"
-import { frontendEnv } from "../frontend-env.js"
-import { PublicEnvUnavailable, buildPublicVars, resolveBuildPublicEnv } from "../site-public-env.js"
-import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
+import { BuildRefused } from "../build-refused.js"
+import { siteBuildEnv } from "../site-build-env.js"
+import { publicValueCount } from "../site-public-env.js"
+import { describeFrontendSources } from "../frontend-values.js"
 import { deploySite, megabytes, overPlanLines } from "../site-deploy.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
@@ -73,8 +74,8 @@ export function deploySecurityDriftRefusal(
  * The environment `deploy` builds the app in: this process's, the app's own `build.env`, and the
  * deployment's API URL and anon key under every front-end name, through the resolver `supatype
  * build` uses (frontend-values.ts), which reads `build.env` first. Never the service role key.
- * Throws {@link FrontendValuesRefused} when either value is missing, and {@link PublicEnvUnavailable}
- * when Cloud holds public values set in Studio and cannot hand them over. The site's public values
+ * Throws a {@link BuildRefused} when either value is missing, or when Cloud holds public values set
+ * in Studio and cannot hand them over. The site's public values
  * (`build.publicEnv`, and what Studio set) go in under every prefix too.
  *
  * It used to set the URL copies only, from the control plane's address rather than the project's,
@@ -85,18 +86,10 @@ export async function deployBuildEnv(
   opts: { env: string; appEnv: Record<string, string>; allowLocal?: boolean },
 ): Promise<NodeJS.ProcessEnv> {
   const buildEnv: NodeJS.ProcessEnv = { ...process.env, ...opts.appEnv }
-  const values = await resolveFrontendValues({
-    cwd,
-    env: opts.env,
-    allowLocal: opts.allowLocal === true,
-    processEnv: buildEnv,
-    command: "supatype deploy",
-  })
-  info(`Building with the ${describeFrontendSources(values)}`)
-  const publicValues = await resolveBuildPublicEnv(cwd, { env: opts.env })
-  const publicCount = Object.keys(publicValues.config).length + Object.keys(publicValues.studio).length
-  if (publicCount > 0) info(`Building with ${publicCount} public value(s)`)
-  return { ...buildEnv, ...buildPublicVars(publicValues, buildEnv), ...frontendEnv(values) }
+  const built = await siteBuildEnv(cwd, { env: opts.env, allowLocal: opts.allowLocal, shell: buildEnv, command: "supatype deploy" })
+  info(`Building with the ${describeFrontendSources(built.frontend)}`)
+  if (built.publicCount > 0) info(`Building with ${publicValueCount(built.publicCount)}`)
+  return { ...buildEnv, ...built.vars }
 }
 
 /**
@@ -124,7 +117,7 @@ async function installAndBuild(
   try {
     buildEnv = await deployBuildEnv(cwd, { ...opts, appEnv: appConfig.env })
   } catch (err) {
-    if (!(err instanceof FrontendValuesRefused || err instanceof PublicEnvUnavailable)) throw err
+    if (!(err instanceof BuildRefused)) throw err
     fatalError(err.message)
   }
   const pm = detectPackageManager(appConfig.directory)

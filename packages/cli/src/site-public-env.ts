@@ -3,12 +3,21 @@
  * lists, sets and unsets. The routes are the same on Supatype Cloud and a self-host stack for the
  * push (`PUT /site/env/config`); the rest are Cloud's, where Studio can set values too.
  *
- * A value is checked here before any request, by the rules the server repeats (`@supatype/shared`),
- * so a refusal names the value without a round trip.
+ * A value is checked here before any request, by the rules the server repeats (`@supatype/types`,
+ * public-env.ts), so a refusal names the value without a round trip.
  */
 
-import { isArrayOf, isOneOf, isShape, isString } from "@supatype/shared"
-import { prefixedPublicEnv, publicEnvFor, publicEnvProblems, publicEnvRefusal } from "@supatype/types"
+import { isArrayOf, isShape } from "@supatype/shared"
+import {
+  isPublicEnvEntry,
+  prefixedPublicEnv,
+  publicEnvFor,
+  publicEnvProblems,
+  publicEnvRefusal,
+  type PublicEnvDeclaration,
+  type PublicEnvEntry,
+} from "@supatype/types"
+import { BuildRefused } from "./build-refused.js"
 import { loadConfig, mainConfigFile } from "./config.js"
 import { errorMessage } from "./error-message.js"
 import { loadProjectLink } from "./link.js"
@@ -16,22 +25,16 @@ import { resolveTarget, type DeployTarget } from "./resolve-target.js"
 import { targetRequest } from "./target-request.js"
 import { TargetApiError, targetFetch } from "./target-client.js"
 
-/** Where a value is set: the config's `build.publicEnv` (read-only in Studio), or Studio. */
-export type PublicEnvSource = "config" | "studio"
+const isEntries = isShape({ entries: isArrayOf(isPublicEnvEntry) })
 
-/** One value in effect on an environment. */
-export interface PublicEnvEntry {
-  name: string
-  value: string
-  source: PublicEnvSource
+/** How many values, said the same way by push, deploy and `site env pull`. */
+export function publicValueCount(count: number): string {
+  return `${count} public value(s)`
 }
-
-const isEntry = isShape({ name: isString, value: isString, source: isOneOf(["config", "studio"]) })
-const isEntries = isShape({ entries: isArrayOf(isEntry) })
 
 function assertAllowed(values: Readonly<Record<string, string>>): void {
   const problems = publicEnvProblems(values)
-  if (problems.length > 0) throw new Error(publicEnvRefusal(problems, String.fromCharCode(10)))
+  if (problems.length > 0) throw new Error(publicEnvRefusal(problems, "\n"))
 }
 
 /** A server from before public values answers its router's 404, not a project's. */
@@ -74,56 +77,80 @@ export async function deletePublicEnv(target: DeployTarget, name: string): Promi
 }
 
 /** The values a build cannot be given: Cloud holds some set in Studio and did not hand them over. */
-export class PublicEnvUnavailable extends Error {
+export class PublicEnvUnavailable extends BuildRefused {
   constructor(environment: string, reason: string) {
     super(`Could not read the public values set in Studio for "${environment}": ${reason}. A build without them would ship a site that reads none of them.`)
     this.name = "PublicEnvUnavailable"
   }
 }
 
-export interface BuildPublicEnvOptions {
-  /** The linked environment to build for (`--env`), else the link's default; production with no link. */
-  env?: string | undefined
+/** `build.publicEnv` as the project's config declares it, or undefined: an app folder with no config of its own declares none. */
+export function declaredPublicEnv(cwd: string): PublicEnvDeclaration | undefined {
+  return mainConfigFile(cwd) === undefined ? undefined : loadConfig(cwd).build?.publicEnv
 }
 
-/** The public values a build is given, by where each is set. The config's win; see {@link buildPublicVars}. */
-export interface BuildPublicValues {
-  /** `build.publicEnv` for the environment. */
+/** The environment a command is about, the Cloud target when the project is linked to Cloud, and the config's values for it. */
+export interface SiteScope {
+  environment: string
+  /** Set only on a Cloud link. */
+  cloud: DeployTarget | undefined
+  /** `build.publicEnv` for {@link SiteScope.environment}. */
   config: Record<string, string>
-  /** What was set in Studio, for the names the config does not set. Only on a Cloud link. */
-  studio: Record<string, string>
+}
+
+export interface SiteScopeOptions {
+  /** The linked environment (`--env`), else the link's default; production with no link. */
+  env?: string | undefined
+  /** Resolve a Cloud link that has no session yet, for a build that fails later with its own words. */
+  tokenOptional?: boolean
 }
 
 /**
- * The public values a build of the site is given: `build.publicEnv` for the environment, and on a
- * Cloud link the ones set in Studio. A project with no link takes the config's alone. A Cloud that
- * cannot say what Studio set refuses the build rather than ship without them; one that predates
- * public values has none.
+ * Read the link and the config once, for every command about the site's public values: which
+ * environment, whether it is Cloud's, and the values the config gives it. An app folder with no
+ * config of its own has none, and can still build with what Studio set.
  */
-export async function resolveBuildPublicEnv(cwd: string, opts: BuildPublicEnvOptions): Promise<BuildPublicValues> {
-  // An app folder with no config of its own can still build with what Studio set.
-  const declared = mainConfigFile(cwd) === undefined ? undefined : loadConfig(cwd).build?.publicEnv
-  if (loadProjectLink(cwd) === null) return { config: publicEnvFor(declared, opts.env ?? "production"), studio: {} }
-  const target = resolveTarget(cwd, { env: opts.env, tokenOptional: true })
-  const fromConfig = publicEnvFor(declared, target.environment)
-  if (target.mode !== "cloud") return { config: fromConfig, studio: {} }
+export function siteScope(cwd: string, opts: SiteScopeOptions): SiteScope {
+  const declared = declaredPublicEnv(cwd)
+  if (loadProjectLink(cwd) === null) {
+    const environment = opts.env ?? "production"
+    return { environment, cloud: undefined, config: publicEnvFor(declared, environment) }
+  }
+  const target = resolveTarget(cwd, { env: opts.env, ...(opts.tokenOptional === true && { tokenOptional: true }) })
+  return { environment: target.environment, cloud: target.mode === "cloud" ? target : undefined, config: publicEnvFor(declared, target.environment) }
+}
+
+function configEntries(config: Readonly<Record<string, string>>): PublicEnvEntry[] {
+  return Object.entries(config).map(([name, value]) => ({ name, value, source: "config" }))
+}
+
+/**
+ * The public values a build of the site is given: the config's for the environment, and on a Cloud
+ * link the ones set in Studio for the names the config does not set. A Cloud that cannot say what
+ * Studio set refuses the build rather than ship without them; one that predates public values has
+ * none.
+ */
+export async function resolveBuildPublicEnv(scope: SiteScope): Promise<PublicEnvEntry[]> {
+  const fromConfig = configEntries(scope.config)
+  if (scope.cloud === undefined) return fromConfig
   try {
-    const entries = await listPublicEnv(target)
-    const studio = Object.fromEntries(entries.filter((entry) => entry.source === "studio" && !(entry.name in fromConfig)).map((entry) => [entry.name, entry.value]))
-    return { config: fromConfig, studio }
+    const entries = await listPublicEnv(scope.cloud)
+    return [...fromConfig, ...entries.filter((entry) => entry.source === "studio" && !(entry.name in scope.config))]
   } catch (err) {
-    if (predatesPublicValues(err)) return { config: fromConfig, studio: {} }
-    throw new PublicEnvUnavailable(target.environment, errorMessage(err))
+    if (predatesPublicValues(err)) return fromConfig
+    throw new PublicEnvUnavailable(scope.environment, errorMessage(err))
   }
 }
 
 /**
  * The variables that give a build the site's public values, under every framework's prefix, to be
  * laid over its environment. The config's values win; then a variable the shell already sets (so a
- * CI host's own setting beats Studio's, name for name); then Studio's. Studio's value is left out of
- * the result for a name the shell sets, so the shell's stays.
+ * CI host's own setting beats Studio's, name for name); then Studio's, which is left out of the
+ * result for a name the shell sets so the shell's stays.
  */
-export function buildPublicVars(values: BuildPublicValues, shell: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  const studio = Object.fromEntries(Object.entries(prefixedPublicEnv(values.studio)).filter(([name]) => shell[name] === undefined))
-  return { ...studio, ...prefixedPublicEnv(values.config) }
+export function buildPublicVars(entries: readonly PublicEnvEntry[], shell: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const valuesOf = (source: PublicEnvEntry["source"]): Record<string, string> =>
+    Object.fromEntries(entries.filter((entry) => entry.source === source).map((entry) => [entry.name, entry.value]))
+  const studio = Object.entries(prefixedPublicEnv(valuesOf("studio"))).filter(([name]) => shell[name] === undefined)
+  return { ...Object.fromEntries(studio), ...prefixedPublicEnv(valuesOf("config")) }
 }

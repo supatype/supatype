@@ -51,7 +51,7 @@ import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type Pa
 import { postApplyFailed } from "../post-apply.js"
 import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
 import { publicEnvFor } from "@supatype/types"
-import { pushPublicEnv } from "../site-public-env.js"
+import { publicValueCount, pushPublicEnv } from "../site-public-env.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
@@ -567,7 +567,7 @@ export async function deployPublicEnvToTarget(config: SupatypeProjectConfig, tar
     return true
   }
   const count = Object.keys(values).length
-  if (count > 0) info(`Sent ${count} public value(s) for ${target.environment}`)
+  if (count > 0) info(`Sent ${publicValueCount(count)} for ${target.environment}`)
   return false
 }
 

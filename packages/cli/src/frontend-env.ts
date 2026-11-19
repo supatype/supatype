@@ -10,6 +10,7 @@
  * values go to `.env`, which a production build reads.
  */
 
+import { FRONTEND_PUBLIC_PREFIXES } from "@supatype/types"
 import { LOCAL_HOSTS } from "./db-port.js"
 import { readEnvFile, upsertEnvFile } from "./env-file.js"
 import { info } from "./ui/messages.js"
@@ -17,14 +18,11 @@ import { info } from "./ui/messages.js"
 /** Read in development only by Vite (and what is built on it), Next.js and Expo. Gitignored. */
 export const DEV_FRONTEND_ENV_FILE = ".env.development.local"
 
-/** Each framework's public prefix: Vite, SvelteKit and Astro (`PUBLIC_`), Next.js, Expo. */
-const PREFIXES = ["VITE_", "PUBLIC_", "NEXT_PUBLIC_", "EXPO_PUBLIC_"] as const
-
 /** The front end's names for the API address. */
-export const FRONTEND_URL_KEYS: readonly string[] = PREFIXES.map((prefix) => `${prefix}SUPATYPE_URL`)
+export const FRONTEND_URL_KEYS: readonly string[] = FRONTEND_PUBLIC_PREFIXES.map((prefix) => `${prefix}SUPATYPE_URL`)
 
 /** The front end's names for the anon key. */
-export const FRONTEND_ANON_KEYS: readonly string[] = PREFIXES.map((prefix) => `${prefix}SUPATYPE_ANON_KEY`)
+export const FRONTEND_ANON_KEYS: readonly string[] = FRONTEND_PUBLIC_PREFIXES.map((prefix) => `${prefix}SUPATYPE_ANON_KEY`)
 
 /** The files the CLI used to write a local stack's front-end values to. */
 const FORMER_FILES = [".env", ".env.local"] as const

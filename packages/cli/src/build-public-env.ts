@@ -1,34 +1,44 @@
 /**
  * `build.publicEnv` in supatype.config.ts: the public, non-secret values a static site reads, each
  * one string for every environment or a map of environment name to string. What a value may be is
- * decided in `@supatype/shared` (public-env.ts); this checks the config's shape and applies it, so a
+ * decided in `@supatype/types` (public-env.ts); this checks the config's shape and applies it, so a
  * bad value stops at `supatype push` and never reaches a deployment.
  */
 
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { isJsonObject, isString } from "@supatype/shared"
-import { publicEnvFor, publicEnvProblems, type PublicEnvDeclaration } from "@supatype/types"
+import {
+  ENVIRONMENT_NAME,
+  isPublicEnvDeclaration,
+  publicEnvFor,
+  publicEnvProblems,
+  type PublicEnvDeclaration,
+} from "@supatype/types"
 import { objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { patchRouteManifest } from "./route-manifest.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
-/** An environment name as Cloud accepts it. */
-const ENVIRONMENT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/
-
-/** One value's shape: a string, or a map of environment name to string. Throws naming the key. */
-function checkedEntry(name: string, value: unknown, filename: string): string | Record<string, string> {
+/** Why one value is not a string or a map of environment name to string, said by config key. */
+function shapeProblem(name: string, value: unknown, filename: string): string | undefined {
   const at = `${filename}: build.publicEnv.${name}`
-  if (isString(value)) return value
-  if (!isJsonObject(value)) throw new Error(`${at} must be a string, or a map of environment name to string`)
-  const perEnvironment: Record<string, string> = {}
+  if (isString(value)) return undefined
+  if (!isJsonObject(value)) return `${at} must be a string, or a map of environment name to string`
   for (const [environment, entry] of Object.entries(value)) {
-    if (!ENVIRONMENT_NAME.test(environment)) throw new Error(`${at}: "${environment}" is not an environment name (lower case letters, digits, "-" and "_")`)
-    if (!isString(entry)) throw new Error(`${at}.${environment} must be a string`)
-    perEnvironment[environment] = entry
+    if (!ENVIRONMENT_NAME.test(environment)) return `${at}: "${environment}" is not an environment name (lower case letters, digits, "-" and "_")`
+    if (!isString(entry)) return `${at}.${environment} must be a string`
   }
-  return perEnvironment
+  return undefined
+}
+
+/** Throws the first reason `section` is not a `build.publicEnv`, for a section {@link isPublicEnvDeclaration} refused. */
+function refuseShape(section: Record<string, unknown>, filename: string): never {
+  for (const [name, value] of Object.entries(section)) {
+    const problem = shapeProblem(name, value, filename)
+    if (problem !== undefined) throw new Error(problem)
+  }
+  throw new Error(`${filename}: build.publicEnv is not a map of name to value`)
 }
 
 /** The environments a declaration names in its maps; production when it names none, so a plain value is still checked. */
@@ -47,8 +57,8 @@ export function validateBuildPublicEnv(cfg: Readonly<Record<string, unknown>>, f
   const section = objectAt(cfg, "build")?.["publicEnv"]
   if (section === undefined) return
   if (!isJsonObject(section)) throw new Error(`${filename}: build.publicEnv must be an object of name to value, as in { MAPS_KEY: "abc" }`)
-  const declared: Record<string, string | Record<string, string>> = {}
-  for (const [name, value] of Object.entries(section)) declared[name] = checkedEntry(name, value, filename)
+  if (!isPublicEnvDeclaration(section)) refuseShape(section, filename)
+  const declared = section
   const lines = new Set<string>()
   for (const environment of namedEnvironments(declared)) {
     for (const problem of publicEnvProblems(publicEnvFor(declared, environment))) {

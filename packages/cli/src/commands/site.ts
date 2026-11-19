@@ -5,17 +5,21 @@
  * on Supatype Cloud, in Studio. The config wins a name both set, and Studio shows it read-only. Only
  * Cloud holds values Studio set, so `set` and `unset` are Cloud's; anywhere else the config's values
  * are all there are, and the config is where to change them.
+ *
+ * A failure is thrown, and the CLI's top level prints it and exits 1.
  */
 
 import type { Command } from "commander"
-import { prefixedPublicEnv, publicEnvFor } from "@supatype/types"
-import { loadConfig, mainConfigFile } from "../config.js"
+import { PUBLIC_ENV_SOURCE_LABELS, prefixedPublicEnv, type PublicEnvEntry } from "@supatype/types"
 import { upsertEnvFile } from "../env-file.js"
-import { errorMessage } from "../error-message.js"
-import { loadProjectLink } from "../link.js"
-import { resolveTarget, type DeployTarget } from "../resolve-target.js"
-import { deletePublicEnv, listPublicEnv, setPublicEnv, type PublicEnvEntry } from "../site-public-env.js"
-import { fatalError } from "../ui/fatal.js"
+import {
+  deletePublicEnv,
+  listPublicEnv,
+  publicValueCount,
+  setPublicEnv,
+  siteScope,
+  type SiteScope,
+} from "../site-public-env.js"
 import { info, plain, warn } from "../ui/messages.js"
 
 /** What every `site env` command takes. */
@@ -28,49 +32,22 @@ export interface PullOptions extends SiteEnvOptions {
   includeConfig?: boolean | undefined
 }
 
-/** The Cloud target the project is linked to, or undefined: no link, or a self-host or local one. */
-function cloudTarget(cwd: string, env: string | undefined): DeployTarget | undefined {
-  if (loadProjectLink(cwd) === null) return undefined
-  const target = resolveTarget(cwd, { env })
-  return target.mode === "cloud" ? target : undefined
-}
-
-/** `build.publicEnv` for `environment`, as entries. A folder with no config has none. */
-function configEntries(cwd: string, environment: string): PublicEnvEntry[] {
-  if (mainConfigFile(cwd) === undefined) return []
-  const values = publicEnvFor(loadConfig(cwd).build?.publicEnv, environment)
-  return Object.entries(values).map(([name, value]) => ({ name, value, source: "config" }))
-}
-
-/** The environment a project without a Cloud link answers for: `--env`, else the link's, else production. */
-function environmentOf(cwd: string, env: string | undefined): string {
-  if (env !== undefined) return env
-  return loadProjectLink(cwd) === null ? "production" : resolveTarget(cwd, {}).environment
-}
-
-/** The values in effect for the environment, and the environment: Cloud's, else the config's. */
-async function effective(cwd: string, opts: SiteEnvOptions): Promise<{ environment: string; entries: PublicEnvEntry[] }> {
-  const target = cloudTarget(cwd, opts.env)
-  if (target !== undefined) return { environment: target.environment, entries: await listPublicEnv(target) }
-  const environment = environmentOf(cwd, opts.env)
-  return { environment, entries: configEntries(cwd, environment) }
+/** The values in effect for the scope's environment: Cloud's, else the config's. */
+async function effective(scope: SiteScope): Promise<PublicEnvEntry[]> {
+  if (scope.cloud !== undefined) return listPublicEnv(scope.cloud)
+  return Object.entries(scope.config).map(([name, value]) => ({ name, value, source: "config" }))
 }
 
 /** The values in effect for the environment, each with where it is set. */
 export async function listSiteEnv(cwd: string, opts: SiteEnvOptions): Promise<PublicEnvEntry[]> {
-  return (await effective(cwd, opts)).entries
-}
-
-const SOURCE_TEXT: Record<PublicEnvEntry["source"], string> = {
-  config: "set in supatype.config.ts",
-  studio: "set in Studio",
+  return effective(siteScope(cwd, opts))
 }
 
 /** One aligned line per value: name, value, where it is set. */
 export function siteEnvLines(entries: readonly PublicEnvEntry[]): string[] {
   const nameWidth = Math.max(0, ...entries.map((entry) => entry.name.length))
   const valueWidth = Math.max(0, ...entries.map((entry) => entry.value.length))
-  return entries.map((entry) => `${entry.name.padEnd(nameWidth)}  ${entry.value.padEnd(valueWidth)}  ${SOURCE_TEXT[entry.source]}`)
+  return entries.map((entry) => `${entry.name.padEnd(nameWidth)}  ${entry.value.padEnd(valueWidth)}  ${PUBLIC_ENV_SOURCE_LABELS[entry.source]}`)
 }
 
 /** The file a pull writes: `.env.<environment>.local`, with anything not fit for a file name made a dash. */
@@ -85,23 +62,22 @@ export function pullFileName(environment: string): string {
  * file are updated and the rest of it kept. No file is written when there is nothing to write.
  */
 export async function pullSiteEnv(cwd: string, opts: PullOptions): Promise<{ file: string; names: string[] }> {
-  const { environment, entries } = await effective(cwd, opts)
-  const chosen = entries.filter((entry) => opts.includeConfig === true || entry.source !== "config")
-  const file = pullFileName(environment)
+  const scope = siteScope(cwd, opts)
+  const chosen = (await effective(scope)).filter((entry) => opts.includeConfig === true || entry.source !== "config")
+  const file = pullFileName(scope.environment)
   if (chosen.length === 0) return { file, names: [] }
-  const values = prefixedPublicEnv(Object.fromEntries(chosen.map((entry) => [entry.name, entry.value])))
-  upsertEnvFile(cwd, values, { file })
+  upsertEnvFile(cwd, prefixedPublicEnv(Object.fromEntries(chosen.map((entry) => [entry.name, entry.value]))), { file })
   return { file, names: chosen.map((entry) => entry.name).sort() }
 }
 
-function requireCloud(cwd: string, opts: SiteEnvOptions, verb: string): DeployTarget {
-  const target = cloudTarget(cwd, opts.env)
-  if (target === undefined) {
+function requireCloud(cwd: string, opts: SiteEnvOptions, verb: string): NonNullable<SiteScope["cloud"]> {
+  const { cloud } = siteScope(cwd, opts)
+  if (cloud === undefined) {
     throw new Error(
       `${verb} is for a project linked to Supatype Cloud. Anywhere else the public values are the ones in build.publicEnv of supatype.config.ts: change them there and run supatype push.`,
     )
   }
-  return target
+  return cloud
 }
 
 /** Set one value on the Cloud environment, as Studio would. Refused for a name the config sets. */
@@ -114,13 +90,9 @@ export async function unsetSiteEnv(cwd: string, name: string, opts: SiteEnvOptio
   await deletePublicEnv(requireCloud(cwd, opts, "supatype site env unset"), name)
 }
 
-/** Runs `work`, ending the command with its error's message instead of a stack. */
-async function reporting(work: () => Promise<void>): Promise<void> {
-  try {
-    await work()
-  } catch (err) {
-    fatalError(errorMessage(err))
-  }
+/** Adds the `--env` option every `site env` command takes. */
+function withEnv(command: Command): Command {
+  return command.option("--env <name>", "Environment (default: the link's default)")
 }
 
 export function registerSite(program: Command): void {
@@ -129,50 +101,29 @@ export function registerSite(program: Command): void {
     .command("env")
     .description("The site's public values: non-secret settings every visitor can read, set per environment")
 
-  env
-    .command("list")
-    .description("List the values in effect, and where each is set")
-    .option("--env <name>", "Environment (default: the link's default)")
-    .action((opts: SiteEnvOptions) =>
-      reporting(async () => {
-        const entries = await listSiteEnv(process.cwd(), opts)
-        if (entries.length === 0) info("No public values set.")
-        else for (const line of siteEnvLines(entries)) plain(line)
-      }),
-    )
+  withEnv(env.command("list").description("List the values in effect, and where each is set")).action(async (opts: SiteEnvOptions) => {
+    const entries = await listSiteEnv(process.cwd(), opts)
+    if (entries.length === 0) info("No public values set.")
+    else for (const line of siteEnvLines(entries)) plain(line)
+  })
 
-  env
-    .command("pull")
-    .description("Write the values set in Studio to .env.<env>.local under every framework's prefix")
-    .option("--env <name>", "Environment (default: the link's default)")
+  withEnv(env.command("pull").description("Write the values set in Studio to .env.<env>.local under every framework's prefix"))
     .option("--include-config", "Write the values supatype.config.ts sets too (a build reads those from the config)")
-    .action((opts: PullOptions) =>
-      reporting(async () => {
-        const { file, names } = await pullSiteEnv(process.cwd(), opts)
-        if (names.length === 0) warn("Nothing to pull: no value is set in Studio for this environment.")
-        else info(`Wrote ${names.length} public value(s) to ${file}: ${names.join(", ")}`)
-      }),
-    )
+    .action(async (opts: PullOptions) => {
+      const { file, names } = await pullSiteEnv(process.cwd(), opts)
+      if (names.length === 0) warn("Nothing to pull: no value is set in Studio for this environment.")
+      else info(`Wrote ${publicValueCount(names.length)} to ${file}: ${names.join(", ")}`)
+    })
 
-  env
-    .command("set <name> <value>")
-    .description("Set a public value on Supatype Cloud. Every visitor can read it, so never a secret")
-    .option("--env <name>", "Environment (default: the link's default)")
-    .action((name: string, value: string, opts: SiteEnvOptions) =>
-      reporting(async () => {
-        await setSiteEnv(process.cwd(), name, value, opts)
-        info(`Set ${name}.`)
-      }),
-    )
+  withEnv(env.command("set <name> <value>").description("Set a public value on Supatype Cloud. Every visitor can read it, so never a secret")).action(
+    async (name: string, value: string, opts: SiteEnvOptions) => {
+      await setSiteEnv(process.cwd(), name, value, opts)
+      info(`Set ${name}.`)
+    },
+  )
 
-  env
-    .command("unset <name>")
-    .description("Remove a public value set on Supatype Cloud")
-    .option("--env <name>", "Environment (default: the link's default)")
-    .action((name: string, opts: SiteEnvOptions) =>
-      reporting(async () => {
-        await unsetSiteEnv(process.cwd(), name, opts)
-        info(`Removed ${name}.`)
-      }),
-    )
+  withEnv(env.command("unset <name>").description("Remove a public value set on Supatype Cloud")).action(async (name: string, opts: SiteEnvOptions) => {
+    await unsetSiteEnv(process.cwd(), name, opts)
+    info(`Removed ${name}.`)
+  })
 }

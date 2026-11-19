@@ -5,8 +5,8 @@ import {
   listPublicEnv,
   pushPublicEnv,
   setPublicEnv,
-  type PublicEnvEntry,
 } from "../src/site-public-env.js"
+import type { PublicEnvEntry } from "@supatype/types"
 import type { DeployTarget } from "../src/resolve-target.js"
 import { portOf } from "./support/ports.js"
 
