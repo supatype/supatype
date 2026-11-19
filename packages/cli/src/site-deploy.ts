@@ -6,10 +6,10 @@
 import { createHash } from "node:crypto"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
-import { isArrayOf, isShape, isString } from "@supatype/shared"
+import { isArrayOf, isNumber, isShape, isString, optional } from "@supatype/shared"
 import { errorMessage, responseFailureText } from "./error-message.js"
 import { TargetApiError, targetFetch } from "./target-client.js"
-import { info } from "./ui/messages.js"
+import { info, warn } from "./ui/messages.js"
 
 /** Where a site goes: the control plane, the project and the caller's credentials. */
 export interface SiteTarget {
@@ -60,7 +60,41 @@ function listFiles(dir: string, baseDir: string): SiteFile[] {
 }
 
 /** The create call's answer: the deployment, where its blobs go, and which hashes the server lacks. */
-const isCreatedDeployment = isShape({ deploymentId: isString, uploadUrl: isString, missing: isArrayOf(isString) })
+const isCreatedDeployment = isShape({
+  deploymentId: isString,
+  uploadUrl: isString,
+  missing: isArrayOf(isString),
+  warnings: optional(isArrayOf(isShape({ code: isString, message: isString }))),
+})
+
+/** The warning Cloud attaches to a deploy that went live over the plan's size. */
+const isOverPlan = isShape({
+  code: isString,
+  message: isString,
+  planBytes: isNumber,
+  siteBytes: isNumber,
+  goodwillEndsAt: isString,
+})
+
+const BYTES_PER_MB = 1024 * 1024
+
+/** Whole MB, rounded up so a site just over the plan never reads as equal to it. */
+const megabytes = (bytes: number): number => Math.ceil(bytes / BYTES_PER_MB)
+
+/** The date part of an ISO timestamp; anything else is shown as the server sent it. */
+const dateOf = (iso: string): string => (/^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : iso)
+
+/** Print what Cloud warned about: the plan overage in full, any other code as its message. */
+function printWarnings(warnings: readonly unknown[]): void {
+  for (const w of warnings) {
+    if (isOverPlan(w) && w.code === "site_over_plan") {
+      warn(`This site is ${megabytes(w.siteBytes)} MB and your plan includes ${megabytes(w.planBytes)} MB. It is live, but over your plan.`)
+      warn(`Upgrade your plan before ${dateOf(w.goodwillEndsAt)} to avoid overage charges. Plans are managed in the Supatype Cloud dashboard.`)
+    } else if (isShape({ message: isString })(w)) {
+      warn(w.message)
+    }
+  }
+}
 
 /** The manifest the create call sends for `files`. */
 export function manifestOf(files: readonly SiteFile[]): ManifestEntry[] {
@@ -219,5 +253,7 @@ export async function deploySite(target: SiteTarget, outputDir: string, opts: De
   info(`${upload.length} of ${files.length} files to upload, ${files.length - upload.length} already on the server`)
   await inPool(upload, UPLOAD_CONCURRENCY, (file) => uploadBlob(target, created.uploadUrl, file, retryDelayMs))
 
-  return finalizeSite(target, created.deploymentId, retryDelayMs)
+  const deployed = await finalizeSite(target, created.deploymentId, retryDelayMs)
+  printWarnings(created.warnings ?? [])
+  return deployed
 }
