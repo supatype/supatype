@@ -7,8 +7,11 @@
  * so a refusal names the value without a round trip.
  */
 
-import { isArrayOf, isOneOf, isShape, isString, publicEnvProblems, type PublicEnvProblem } from "@supatype/shared"
-import type { DeployTarget } from "./resolve-target.js"
+import { isArrayOf, isOneOf, isShape, isString, publicEnvFor, publicEnvProblems, type PublicEnvProblem } from "@supatype/shared"
+import { loadConfig, mainConfigFile } from "./config.js"
+import { errorMessage } from "./error-message.js"
+import { loadProjectLink } from "./link.js"
+import { resolveTarget, type DeployTarget } from "./resolve-target.js"
 import { targetRequest } from "./target-request.js"
 import { TargetApiError, targetFetch } from "./target-client.js"
 
@@ -72,4 +75,41 @@ export async function setPublicEnv(target: DeployTarget, name: string, value: st
 /** Remove one value set on the target's environment. The server refuses a name the config sets. */
 export async function deletePublicEnv(target: DeployTarget, name: string): Promise<void> {
   await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, { method: "DELETE", subpath: `/site/env/${encodeURIComponent(name)}` }))
+}
+
+/** The values a build cannot be given: Cloud holds some set in Studio and did not hand them over. */
+export class PublicEnvUnavailable extends Error {
+  constructor(environment: string, reason: string) {
+    super(`Could not read the public values set in Studio for "${environment}": ${reason}. A build without them would ship a site that reads none of them.`)
+    this.name = "PublicEnvUnavailable"
+  }
+}
+
+export interface BuildPublicEnvOptions {
+  /** The linked environment to build for (`--env`), else the link's default; production with no link. */
+  env?: string | undefined
+}
+
+/**
+ * The public values a build of the site is given, name to value (the build passes them under every
+ * framework's prefix): `build.publicEnv` for the environment, and on a Cloud link the ones set in
+ * Studio, which the config wins for a name both set. A project with no link takes the config's alone.
+ * A Cloud that cannot say what Studio set refuses the build rather than ship without them; one that
+ * predates public values has none.
+ */
+export async function resolveBuildPublicEnv(cwd: string, opts: BuildPublicEnvOptions): Promise<Record<string, string>> {
+  // An app folder with no config of its own can still build with what Studio set.
+  const declared = mainConfigFile(cwd) === undefined ? undefined : loadConfig(cwd).build?.publicEnv
+  if (loadProjectLink(cwd) === null) return publicEnvFor(declared, opts.env ?? "production")
+  const target = resolveTarget(cwd, { env: opts.env, tokenOptional: true })
+  const fromConfig = publicEnvFor(declared, target.environment)
+  if (target.mode !== "cloud") return fromConfig
+  try {
+    const entries = await listPublicEnv(target)
+    const fromStudio = Object.fromEntries(entries.filter((entry) => entry.source === "studio").map((entry) => [entry.name, entry.value]))
+    return { ...fromStudio, ...fromConfig }
+  } catch (err) {
+    if (predatesPublicValues(err)) return fromConfig
+    throw new PublicEnvUnavailable(target.environment, errorMessage(err))
+  }
 }

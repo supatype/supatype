@@ -22,7 +22,7 @@ import { deploySchemaToLinkedProject, pushSchemaToLinkedProject } from "./cloud.
 import { loadProjectLink, type ProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
-import { isNumber, isShape, isString, nullable, optional, readJson, type Guard } from "@supatype/shared"
+import { isNumber, isShape, isString, nullable, optional, prefixedPublicEnv, readJson, type Guard } from "@supatype/shared"
 import { enginePush, type DiffResult } from "../engine-client.js"
 import { engineRequestIn, requireEngineFeaturesIn, stackEngine } from "../stack-engine.js"
 import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
@@ -39,6 +39,7 @@ import { commandSpawn, withProjectBins } from "../build-spawn.js"
 import { installCommand, type InstallCommand } from "../init-setup-steps.js"
 import { fatalError } from "../ui/fatal.js"
 import { frontendEnv } from "../frontend-env.js"
+import { PublicEnvUnavailable, resolveBuildPublicEnv } from "../site-public-env.js"
 import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
 import { deploySite, megabytes, overPlanLines } from "../site-deploy.js"
 import { spawnSync } from "node:child_process"
@@ -72,7 +73,9 @@ export function deploySecurityDriftRefusal(
  * The environment `deploy` builds the app in: this process's, the app's own `build.env`, and the
  * deployment's API URL and anon key under every front-end name, through the resolver `supatype
  * build` uses (frontend-values.ts), which reads `build.env` first. Never the service role key.
- * Throws {@link FrontendValuesRefused} when either value is missing.
+ * Throws {@link FrontendValuesRefused} when either value is missing, and {@link PublicEnvUnavailable}
+ * when Cloud holds public values set in Studio and cannot hand them over. The site's public values
+ * (`build.publicEnv`, and what Studio set) go in under every prefix too.
  *
  * It used to set the URL copies only, from the control plane's address rather than the project's,
  * and no anon key, so a deployed app rendered a blank page.
@@ -90,7 +93,9 @@ export async function deployBuildEnv(
     command: "supatype deploy",
   })
   info(`Building with the ${describeFrontendSources(values)}`)
-  return { ...buildEnv, ...frontendEnv(values) }
+  const publicValues = await resolveBuildPublicEnv(cwd, { env: opts.env })
+  if (Object.keys(publicValues).length > 0) info(`Building with ${Object.keys(publicValues).length} public value(s)`)
+  return { ...buildEnv, ...prefixedPublicEnv(publicValues), ...frontendEnv(values) }
 }
 
 /**
@@ -118,7 +123,7 @@ async function installAndBuild(
   try {
     buildEnv = await deployBuildEnv(cwd, { ...opts, appEnv: appConfig.env })
   } catch (err) {
-    if (!(err instanceof FrontendValuesRefused)) throw err
+    if (!(err instanceof FrontendValuesRefused || err instanceof PublicEnvUnavailable)) throw err
     fatalError(err.message)
   }
   const pm = detectPackageManager(appConfig.directory)

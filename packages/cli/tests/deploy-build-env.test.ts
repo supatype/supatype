@@ -11,7 +11,8 @@ import { projectConfig } from "./support/project-config.js"
  * uploaded rendered a blank page (issue 29). Its build now gets both through the same resolver as
  * `supatype build`, and the service role key never.
  */
-const loadConfig = vi.fn((): SupatypeProjectConfig => projectConfig({ project: { name: "acme" } }))
+let config: SupatypeProjectConfig = projectConfig({ project: { name: "acme" } })
+const loadConfig = vi.fn((): SupatypeProjectConfig => config)
 vi.mock("../src/config.js", async (importOriginal) => ({ ...(await importOriginal<object>()), loadConfig }))
 
 const { deployBuildEnv } = await import("../src/commands/deploy.js")
@@ -24,6 +25,7 @@ let project: { dir: string; remove: () => void }
 
 beforeEach(() => {
   project = tempProject("deploy-build-env")
+  config = projectConfig({ project: { name: "acme" } })
   mkdirSync(join(project.dir, ".supatype"), { recursive: true })
   writeFileSync(join(project.dir, ".supatype", "link.json"), JSON.stringify({
     version: 1, kind: "cloud", projectRef: "acme", defaultEnvironment: "production", token: "user-jwt",
@@ -31,7 +33,10 @@ beforeEach(() => {
     environments: { production: { name: "production", apiUrl: "https://acme.supatype.dev", linkedAt: "2026-01-01T00:00:00Z" } },
   }))
   fetchMock.mockReset()
-  fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: { anonKey: ANON, serviceRoleKey: SERVICE } }), { status: 200 }))
+  // The keys route, and the site's public values, which this project has none of.
+  fetchMock.mockImplementation(async (url: string) =>
+    new Response(JSON.stringify(url.endsWith("/site/env") ? { data: { entries: [] } } : { data: { anonKey: ANON, serviceRoleKey: SERVICE } }), { status: 200 }),
+  )
   vi.stubGlobal("fetch", fetchMock)
   for (const name of Object.keys(process.env)) if (/SUPATYPE_(URL|ANON_KEY|ACCESS_TOKEN|TOKEN)$/.test(name)) vi.stubEnv(name, "")
 })
@@ -40,6 +45,29 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
   project.remove()
+})
+
+describe("deployBuildEnv: the site's public values", () => {
+  it("passes build.publicEnv for the environment, and what Studio set, under every prefix", async () => {
+    writeFileSync(join(project.dir, "supatype.config.ts"), "export default {}\n")
+    config = projectConfig({ project: { name: "acme" }, build: { publicEnv: { MAPS_KEY: "from-config", STRIPE: { production: "pk_prod", staging: "pk_stage" } } } })
+    fetchMock.mockImplementation(async (url: string) =>
+      new Response(
+        JSON.stringify(
+          url.endsWith("/site/env")
+            ? { data: { entries: [{ name: "MAPS_KEY", value: "studio-loses", source: "studio" }, { name: "ANALYTICS", value: "a1", source: "studio" }] } }
+            : { data: { anonKey: ANON, serviceRoleKey: SERVICE } },
+        ),
+        { status: 200 },
+      ),
+    )
+    const env = await deployBuildEnv(project.dir, { env: "production", appEnv: {} })
+    for (const prefix of ["VITE_", "PUBLIC_", "NEXT_PUBLIC_", "EXPO_PUBLIC_"]) {
+      expect(env[`${prefix}MAPS_KEY`], `${prefix}MAPS_KEY`).toBe("from-config")
+      expect(env[`${prefix}STRIPE`], `${prefix}STRIPE`).toBe("pk_prod")
+      expect(env[`${prefix}ANALYTICS`], `${prefix}ANALYTICS`).toBe("a1")
+    }
+  })
 })
 
 describe("deployBuildEnv", () => {
@@ -59,6 +87,7 @@ describe("deployBuildEnv", () => {
     })
     expect(env["NEXT_PUBLIC_SUPATYPE_URL"]).toBe("https://custom.example")
     expect(env["OTHER"]).toBe("x")
-    expect(fetchMock).not.toHaveBeenCalled()
+    // The keys are not asked for; only the site's public values are.
+    expect(fetchMock.mock.calls.map(([url]) => url).filter((url) => !url.endsWith("/site/env"))).toEqual([])
   })
 })

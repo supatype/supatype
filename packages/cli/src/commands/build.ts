@@ -11,6 +11,8 @@ import type { Command } from "commander"
 import { buildSpawn, NoBuildCommand, runBuildProcess, withProjectBins, type BuildSpawn } from "../build-spawn.js"
 import { frontendEnv } from "../frontend-env.js"
 import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
+import { PublicEnvUnavailable, resolveBuildPublicEnv } from "../site-public-env.js"
+import { prefixedPublicEnv } from "@supatype/shared"
 import { error, info } from "../ui/messages.js"
 
 export interface FrontendBuildOptions {
@@ -41,7 +43,7 @@ async function buildOrRefuse(command: string[], opts: FrontendBuildOptions): Pro
   try {
     return await runFrontendBuild(process.cwd(), command, opts)
   } catch (err) {
-    if (!(err instanceof FrontendValuesRefused || err instanceof NoBuildCommand)) throw err
+    if (!(err instanceof FrontendValuesRefused || err instanceof NoBuildCommand || err instanceof PublicEnvUnavailable)) throw err
     error(err.message)
     return 1
   }
@@ -63,8 +65,10 @@ function buildProgram(cwd: string, command: readonly string[], env: NodeJS.Proce
 
 /**
  * Run `command` (else the package.json build script) in `cwd` with the deployment's front-end
- * values, resolving with its exit code. Throws {@link FrontendValuesRefused} before anything starts
- * when either value is missing, and {@link NoBuildCommand} when there is nothing to run, or a bare
+ * values and the site's public values (`build.publicEnv`, and what Studio set) under every prefix,
+ * resolving with its exit code. Throws {@link FrontendValuesRefused} before anything starts
+ * when either value is missing, {@link PublicEnvUnavailable} when Cloud cannot give the values Studio
+ * set, and {@link NoBuildCommand} when there is nothing to run, or a bare
  * build is asked for from inside one.
  */
 export async function runFrontendBuild(cwd: string, command: readonly string[], opts: FrontendBuildOptions = {}): Promise<number> {
@@ -77,6 +81,7 @@ export async function runFrontendBuild(cwd: string, command: readonly string[], 
     processEnv,
   })
   info(`Building with the ${describeFrontendSources(values)}: ${program.describe}`)
-  const env = { ...withProjectBins(processEnv, cwd), ...frontendEnv(values), [BUILD_ACTIVE_ENV]: "1" }
+  const publicValues = await resolveBuildPublicEnv(cwd, { env: opts.env })
+  const env = { ...withProjectBins(processEnv, cwd), ...prefixedPublicEnv(publicValues), ...frontendEnv(values), [BUILD_ACTIVE_ENV]: "1" }
   return runBuildProcess(program, cwd, env)
 }
