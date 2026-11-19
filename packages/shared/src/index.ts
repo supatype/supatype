@@ -74,3 +74,14 @@ export {
   type TableMap,
   type AfterHookColumns,
 } from "./manifest-maps.js"
+export {
+  FRONTEND_PUBLIC_PREFIXES,
+  PUBLIC_ENV_LIMITS,
+  PUBLIC_ENV_NAME,
+  prefixedPublicEnv,
+  publicEnvFor,
+  publicEnvProblems,
+  secretLookingReason,
+  type PublicEnvDeclaration,
+  type PublicEnvProblem,
+} from "./public-env.js"

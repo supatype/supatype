@@ -1,0 +1,131 @@
+import { describe, expect, it } from "vitest"
+import {
+  FRONTEND_PUBLIC_PREFIXES,
+  PUBLIC_ENV_LIMITS,
+  prefixedPublicEnv,
+  publicEnvFor,
+  publicEnvProblems,
+  secretLookingReason,
+} from "../src/index.js"
+
+const jwt = (claims: Record<string, unknown>): string =>
+  ["e30", Buffer.from(JSON.stringify(claims)).toString("base64url"), "sig"].join(".")
+
+describe("publicEnvProblems: names", () => {
+  it("accepts upper-case names with digits and underscores", () => {
+    expect(publicEnvProblems({ STRIPE_PUBLISHABLE_KEY: "pk_live_1", MAPS_2: "x" })).toEqual([])
+  })
+
+  it.each(["stripe_key", "1KEY", "KEY-NAME", "KEY NAME", "", "KEY.X"])("refuses the name %j", (name) => {
+    const problems = publicEnvProblems({ [name]: "x" })
+    expect(problems).toHaveLength(1)
+    expect(problems[0]?.name).toBe(name)
+  })
+
+  it("refuses a name longer than the limit", () => {
+    expect(publicEnvProblems({ ["A".repeat(PUBLIC_ENV_LIMITS.nameBytes + 1)]: "x" })).toHaveLength(1)
+    expect(publicEnvProblems({ ["A".repeat(PUBLIC_ENV_LIMITS.nameBytes)]: "x" })).toEqual([])
+  })
+
+  it("refuses a name that already carries a framework prefix, and the names Supatype's own values use", () => {
+    for (const name of ["VITE_X", "PUBLIC_X", "NEXT_PUBLIC_X", "EXPO_PUBLIC_X", "SUPATYPE_URL", "SUPATYPE_ANON_KEY", "SUPATYPE_ANYTHING"]) {
+      expect(publicEnvProblems({ [name]: "x" }), name).toHaveLength(1)
+    }
+  })
+})
+
+describe("publicEnvProblems: sizes", () => {
+  it("refuses a value over the limit, counted in bytes", () => {
+    expect(publicEnvProblems({ A: "x".repeat(PUBLIC_ENV_LIMITS.valueBytes) })).toEqual([])
+    expect(publicEnvProblems({ A: "x".repeat(PUBLIC_ENV_LIMITS.valueBytes + 1) })).toHaveLength(1)
+    expect(publicEnvProblems({ A: "é".repeat(PUBLIC_ENV_LIMITS.valueBytes / 2 + 1) })).toHaveLength(1)
+  })
+
+  it("refuses more names than the limit", () => {
+    const many = Object.fromEntries(Array.from({ length: PUBLIC_ENV_LIMITS.names + 1 }, (_, i) => [`K${i}`, "x"]))
+    const problems = publicEnvProblems(many)
+    expect(problems.some((p) => p.name === "")).toBe(true)
+  })
+
+  it("refuses a total over the limit", () => {
+    const big = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`K${i}`, "x".repeat(PUBLIC_ENV_LIMITS.valueBytes)]))
+    expect(PUBLIC_ENV_LIMITS.valueBytes * 10).toBeGreaterThan(PUBLIC_ENV_LIMITS.totalBytes)
+    expect(publicEnvProblems(big).some((p) => p.name === "")).toBe(true)
+  })
+})
+
+describe("secretLookingReason", () => {
+  it.each([
+    ["a Stripe secret key", "sk_live_51Habcdefghijkl"],
+    ["a Stripe test secret key", "sk_test_51Habcdefghijkl"],
+    ["a restricted key", "rk_live_51Habcdefghijkl"],
+    ["a PEM private key", "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----"],
+    ["an RSA private key", "-----BEGIN RSA PRIVATE KEY-----\nMIIE"],
+    ["an OpenSSH private key", "-----BEGIN OPENSSH PRIVATE KEY-----"],
+    ["a service role token", jwt({ role: "service_role" })],
+  ])("refuses %s", (_label, value) => {
+    expect(secretLookingReason(value)).toBeDefined()
+  })
+
+  it.each([
+    ["a publishable key", "pk_live_51Habcdefghijkl"],
+    ["an anon token", jwt({ role: "anon" })],
+    ["an address", "https://api.example.com"],
+    ["a word that only contains sk_", "risk_factor_high"],
+    ["a public key block", "-----BEGIN PUBLIC KEY-----\nMIIB"],
+  ])("accepts %s", (_label, value) => {
+    expect(secretLookingReason(value)).toBeUndefined()
+  })
+
+  it("refuses a value equal to a secret it was told about", () => {
+    expect(secretLookingReason("abc123secret", ["abc123secret"])).toBeDefined()
+    expect(secretLookingReason("abc123secret", ["other"])).toBeUndefined()
+  })
+
+  it("never echoes the value in the reason", () => {
+    const reason = secretLookingReason("sk_live_51Habcdefghijkl")
+    expect(reason).not.toContain("51Habcdefghijkl")
+  })
+})
+
+describe("publicEnvProblems: secrets", () => {
+  it("names the key, never the value", () => {
+    const problems = publicEnvProblems({ STRIPE: "sk_live_51Habcdefghijkl" })
+    expect(problems).toHaveLength(1)
+    expect(problems[0]?.name).toBe("STRIPE")
+    expect(JSON.stringify(problems)).not.toContain("51Habcdefghijkl")
+  })
+
+  it("reports every problem at once", () => {
+    expect(publicEnvProblems({ bad: "x", STRIPE: "sk_live_51Habcdefghijkl" })).toHaveLength(2)
+  })
+})
+
+describe("publicEnvFor", () => {
+  it("gives a plain string to every environment", () => {
+    expect(publicEnvFor({ A: "1" }, "production")).toEqual({ A: "1" })
+    expect(publicEnvFor({ A: "1" }, "staging")).toEqual({ A: "1" })
+  })
+
+  it("picks the environment's entry from a map", () => {
+    const declared = { A: { production: "p", staging: "s" }, B: "all" }
+    expect(publicEnvFor(declared, "production")).toEqual({ A: "p", B: "all" })
+    expect(publicEnvFor(declared, "staging")).toEqual({ A: "s", B: "all" })
+  })
+
+  it("leaves a name out of an environment its map does not name", () => {
+    expect(publicEnvFor({ A: { production: "p" } }, "staging")).toEqual({})
+  })
+
+  it("is empty for no declaration", () => {
+    expect(publicEnvFor(undefined, "production")).toEqual({})
+  })
+})
+
+describe("prefixedPublicEnv", () => {
+  it("puts each value under every framework's prefix", () => {
+    const out = prefixedPublicEnv({ MAPS_KEY: "m" })
+    for (const prefix of FRONTEND_PUBLIC_PREFIXES) expect(out[`${prefix}MAPS_KEY`]).toBe("m")
+    expect(Object.keys(out)).toHaveLength(FRONTEND_PUBLIC_PREFIXES.length)
+  })
+})
