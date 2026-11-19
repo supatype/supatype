@@ -13,7 +13,7 @@
 
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
-import { existsSync, readdirSync, statSync, createReadStream, mkdirSync, cpSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, cpSync } from "node:fs"
 import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { pgSchema, schemaPathFromProject } from "../project-config.js"
@@ -41,6 +41,7 @@ import { fatalError } from "../ui/fatal.js"
 import { frontendEnv } from "../frontend-env.js"
 import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
+import { deploySite } from "../site-deploy.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
 import { responseFailureText } from "../error-message.js"
@@ -295,6 +296,7 @@ export function registerDeploy(program: Command): void {
           await deployStaticSite(cwd, appConfig.outputDirectory, {
             preview: opts.preview ?? false,
             env: envName,
+            spa: appConfig.spa,
           })
         } else {
           deploySelfHost(appConfig.outputDirectory, cwd)
@@ -430,13 +432,10 @@ const isCurrentDeployment = isShape({
   status: optional(nullable(isString)),
 })
 
-/** A deployment created for upload: where its files go, and its id. */
-const isCreatedUpload = isShape({ data: isShape({ deploymentId: isString, uploadUrl: isString }) })
-
 async function deployStaticSite(
   cwd: string,
   outputDir: string,
-  opts: { preview?: boolean; env?: string },
+  opts: { preview?: boolean; env?: string; spa: boolean },
 ): Promise<void> {
   const target = resolveTarget(cwd, { env: opts.env })
   const token = target.token
@@ -445,12 +444,10 @@ async function deployStaticSite(
   }
 
   info("Uploading build artifacts...")
-  const files = collectFiles(outputDir, outputDir)
-  info(`${files.length} files to upload (${formatSize(files.reduce((s, f) => s + f.size, 0))})`)
-
-  const { readFileSync } = await import("node:fs")
 
   if (target.apiPrefix === "/platform/v1") {
+    const files = collectFiles(outputDir, outputDir)
+    info(`${files.length} files to upload (${formatSize(files.reduce((s, f) => s + f.size, 0))})`)
     const filePayload = files.map((f) => ({
       path: f.relativePath,
       content: readFileSync(f.absolutePath).toString("base64"),
@@ -483,50 +480,10 @@ async function deployStaticSite(
     return
   }
 
-  const createRes = await fetch(`${target.apiBaseUrl}/api/v1/projects/${target.projectRef}/deployments`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(target.orgId ? { "X-Org-Id": target.orgId } : {}),
-      ...(target.environment ? { "X-Supatype-Environment": target.environment } : {}),
-    },
-    body: JSON.stringify({
-      preview: opts.preview ?? false,
-      fileCount: files.length,
-      totalSize: files.reduce((s, f) => s + f.size, 0),
-      files: files.map((f) => ({ path: f.relativePath, size: f.size })),
-    }),
-  })
-
-  if (!createRes.ok) {
-    throw new Error(`Failed to create deployment: ${await responseFailureText(createRes)}`)
-  }
-
-  const { data } = await readJson(createRes, isCreatedUpload)
-
-  for (const file of files) {
-    const content = readFileSync(file.absolutePath)
-    await fetch(`${data.uploadUrl}/${file.relativePath}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/octet-stream",
-        "X-Deployment-Id": data.deploymentId,
-      },
-      body: content,
-    })
-  }
-
-  await fetch(
-    `${target.apiBaseUrl}/api/v1/projects/${target.projectRef}/deployments/${data.deploymentId}/finalize`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(target.orgId ? { "X-Org-Id": target.orgId } : {}),
-      },
-    },
+  await deploySite(
+    { apiBaseUrl: target.apiBaseUrl, projectRef: target.projectRef, token, orgId: target.orgId, environment: target.environment },
+    outputDir,
+    { spa: opts.spa, preview: opts.preview ?? false },
   )
 }
 
