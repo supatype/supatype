@@ -109,6 +109,7 @@ export type { ChannelActionRefusal, ChannelActionRefusalCode } from "./realtime-
 export type { TableSubscribeOptions, TableSubscription } from "./table-subscription.js"
 export * from "./errors.js"
 export { MissingClientValuesError, type ClientValue } from "./setup-fault.js"
+export { publicEnv } from "./public-env.js"
 
 // Called by the generated `supatype/generated/client.ts`, which is how a project tells the client which
 // columns hold values a JSON parser would destroy. Exported because generated code imports it;
