@@ -6,7 +6,7 @@ import * as studio from "../src/index.js"
  * host app (Supatype Cloud's Studio) draws its tables from them instead of its own markup.
  */
 describe("the package's table primitives", () => {
-  it.each(["Table", "TableCard", "Th", "Td"])("exports %s", (name) => {
+  it.each(["Table", "TableCard", "Th", "Td", "tableRowClass"])("exports %s", (name) => {
     expect(typeof Reflect.get(studio, name)).toBe("function")
   })
 })
