@@ -6,7 +6,8 @@
 import { createHash } from "node:crypto"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
-import { isShape, isString } from "@supatype/shared"
+import { isArrayOf, isShape, isString } from "@supatype/shared"
+import { errorMessage, responseFailureText } from "./error-message.js"
 import { targetFetch } from "./target-client.js"
 import { info } from "./ui/messages.js"
 
@@ -59,25 +60,100 @@ function listFiles(dir: string, baseDir: string): SiteFile[] {
 }
 
 /** The create call's answer: the deployment, where its blobs go, and which hashes the server lacks. */
-const isCreatedDeployment = isShape({ deploymentId: isString, uploadUrl: isString })
+const isCreatedDeployment = isShape({ deploymentId: isString, uploadUrl: isString, missing: isArrayOf(isString) })
 
 /** The manifest the create call sends for `files`. */
 export function manifestOf(files: readonly SiteFile[]): ManifestEntry[] {
   return files.map((f) => ({ path: f.path, size: f.size, sha256: f.sha256 }))
 }
 
-/** Create a deployment for `files` and upload them. */
-export async function deploySite(
-  target: SiteTarget,
-  outputDir: string,
-  opts: { spa: boolean; preview: boolean },
-): Promise<void> {
-  const files = collectSiteFiles(outputDir)
-  const call = {
-    token: target.token,
-    orgId: target.orgId,
-    environment: target.environment,
+/** How many blob uploads run at once. */
+const UPLOAD_CONCURRENCY = 6
+/** How many times a blob upload that failed with a 5xx, or never got an answer, is sent again. */
+const UPLOAD_RETRIES = 3
+const DEFAULT_RETRY_DELAY_MS = 500
+
+export interface DeploySiteOptions {
+  spa: boolean
+  preview: boolean
+  /** Base wait before a blob upload is retried, multiplied by the attempt number. Tests set 0. */
+  retryDelayMs?: number
+}
+
+/** The files to upload: one per missing hash. A hash with no local file is the server's mistake. */
+function filesToUpload(files: readonly SiteFile[], missing: readonly string[]): SiteFile[] {
+  const byHash = new Map<string, SiteFile>()
+  for (const file of files) if (!byHash.has(file.sha256)) byHash.set(file.sha256, file)
+  return [...new Set(missing)].map((hash) => {
+    const file = byHash.get(hash)
+    if (file === undefined) throw new Error(`The server asked for a file the build does not have (sha256 ${hash}).`)
+    return file
+  })
+}
+
+function callHeaders(target: SiteTarget): Record<string, string> {
+  return {
+    Authorization: `Bearer ${target.token}`,
+    ...(target.orgId ? { "X-Org-Id": target.orgId } : {}),
+    ...(target.environment ? { "X-Supatype-Environment": target.environment } : {}),
   }
+}
+
+/** One blob PUT: its body is the file, so Content-Length is the manifest's size. */
+async function putBlob(target: SiteTarget, uploadUrl: string, file: SiteFile): Promise<Response> {
+  return fetch(`${uploadUrl.replace(/\/$/, "")}/${file.sha256}`, {
+    method: "PUT",
+    headers: { ...callHeaders(target), "Content-Type": "application/octet-stream" },
+    body: readFileSync(file.absolutePath),
+  })
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms))
+
+/** Upload one file, sending it again after a 5xx or a dropped connection; any other refusal stops the deploy. */
+async function uploadBlob(target: SiteTarget, uploadUrl: string, file: SiteFile, retryDelayMs: number): Promise<void> {
+  let failure = ""
+  for (let attempt = 0; attempt <= UPLOAD_RETRIES; attempt++) {
+    if (attempt > 0) await sleep(retryDelayMs * attempt)
+    let res: Response
+    try {
+      res = await putBlob(target, uploadUrl, file)
+    } catch (err) {
+      failure = errorMessage(err)
+      continue
+    }
+    if (res.ok) {
+      await res.body?.cancel()
+      return
+    }
+    failure = await responseFailureText(res)
+    if (res.status < 500) break
+  }
+  throw new Error(`Uploading ${file.path} failed: ${failure}`)
+}
+
+/** Run `work` over `items`, at most `limit` at a time; the first failure stops new work and is thrown. */
+async function inPool<T>(items: readonly T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
+  let next = 0
+  let failed: unknown
+  const worker = async (): Promise<void> => {
+    while (failed === undefined && next < items.length) {
+      const item = items[next++] as T
+      try {
+        await work(item)
+      } catch (err) {
+        failed = err
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  if (failed !== undefined) throw failed
+}
+
+/** Create a deployment for the files under `outputDir`, upload the ones the server lacks, and finalize. */
+export async function deploySite(target: SiteTarget, outputDir: string, opts: DeploySiteOptions): Promise<void> {
+  const files = collectSiteFiles(outputDir)
+  const call = { token: target.token, orgId: target.orgId, environment: target.environment }
 
   const created = await targetFetch(
     target.apiBaseUrl,
@@ -91,22 +167,15 @@ export async function deploySite(
     isCreatedDeployment,
   )
 
-  for (const file of files) {
-    await fetch(`${created.uploadUrl}/${file.path}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${target.token}`,
-        "Content-Type": "application/octet-stream",
-        "X-Deployment-Id": created.deploymentId,
-      },
-      body: readFileSync(file.absolutePath),
-    })
-  }
+  const upload = filesToUpload(files, created.missing)
+  info(`${upload.length} of ${files.length} files to upload, ${files.length - upload.length} already on the server`)
+  await inPool(upload, UPLOAD_CONCURRENCY, (file) =>
+    uploadBlob(target, created.uploadUrl, file, opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS),
+  )
 
   await targetFetch(target.apiBaseUrl, "/api/v1", {
     ...call,
     method: "POST",
     path: `/projects/${target.projectRef}/deployments/${created.deploymentId}/finalize`,
   })
-  info(`Uploaded ${files.length} files.`)
 }

@@ -54,6 +54,11 @@ no entries are missing from this file.
   which files it already holds. This is the first of four steps toward hosting the site on the
   project's own domain; until the server side lands, `deploy --app-only` against Cloud still ends
   without a live site.
+* **deploy:** a Cloud deploy uploads only the files the server says it lacks (`missing`), each to
+  `<uploadUrl>/<sha256>`, six at a time, so an unchanged build uploads nothing. Every call carries
+  `Authorization`, `X-Org-Id` and `X-Supatype-Environment`, every upload's status is checked, and a 5xx
+  or a dropped connection is retried three times. Any other refusal stops the deploy, naming the file
+  and the server's reason, before finalize. Uploads used to go by path and their answers were never read.
 
 ### Bug Fixes
 
