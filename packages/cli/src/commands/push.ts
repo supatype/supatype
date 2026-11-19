@@ -50,6 +50,8 @@ import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
 import { postApplyFailed } from "../post-apply.js"
 import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
+import { publicEnvFor } from "@supatype/types"
+import { publicValueCount, pushPublicEnv } from "../site-public-env.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
@@ -338,9 +340,10 @@ async function pushViaTarget(
   // The diff's were printed before applying; what is left is what the push found once applied.
   printPushWarnings(pushResult, diff.warnings ?? [])
 
-  const hooksFailed = target.mode === "cloud" || target.mode === "self-host"
-    ? await deployHooksToTarget(cwd, config, target, ast)
-    : false
+  const linked = target.mode === "cloud" || target.mode === "self-host"
+  const hooksFailed = linked ? await deployHooksToTarget(cwd, config, target, ast) : false
+  // After the hooks, which restart the worker, and whatever they did: neither needs the other.
+  const publicEnvFailed = linked ? await deployPublicEnvToTarget(config, target) : false
   // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
   if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
 
@@ -349,7 +352,7 @@ async function pushViaTarget(
     return
   }
 
-  reportTargetPush(target, pushResult, hooksFailed)
+  reportTargetPush(target, pushResult, hooksFailed || publicEnvFailed)
 }
 
 /**
@@ -548,6 +551,24 @@ export async function deployHooksToTarget(
   const { hooks, validators, cache, tables } = manifestMaps(ast)
   const keep = failed.length > 0 ? { keep: failed.map((hook) => hook.name) } : {}
   return uploadHooks(target, { handlers, map: hooks, validators, cache, tables, ...keep }, named.length, failed)
+}
+
+/**
+ * Send the target the public values `build.publicEnv` gives its environment, on every push (empty
+ * when the config names none, which clears what an earlier push sent). A refusal comes after the
+ * schema was applied, so it says that and ends the push non-zero (post-apply.ts). True when it failed.
+ */
+export async function deployPublicEnvToTarget(config: SupatypeProjectConfig, target: DeployTarget): Promise<boolean> {
+  const values = publicEnvFor(config.build?.publicEnv, target.environment)
+  try {
+    await pushPublicEnv(target, values)
+  } catch (err) {
+    postApplyFailed(`its public values were not sent to ${target.apiBaseUrl}: ${errorMessage(err)}`, "The values sent before, if any, are still the ones the site reads.")
+    return true
+  }
+  const count = Object.keys(values).length
+  if (count > 0) info(`Sent ${publicValueCount(count)} for ${target.environment}`)
+  return false
 }
 
 /**

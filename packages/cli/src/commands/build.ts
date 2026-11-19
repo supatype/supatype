@@ -9,8 +9,9 @@
 
 import type { Command } from "commander"
 import { buildSpawn, NoBuildCommand, runBuildProcess, withProjectBins, type BuildSpawn } from "../build-spawn.js"
-import { frontendEnv } from "../frontend-env.js"
-import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
+import { BuildRefused } from "../build-refused.js"
+import { describeFrontendSources } from "../frontend-values.js"
+import { siteBuildEnv } from "../site-build-env.js"
 import { error, info } from "../ui/messages.js"
 
 export interface FrontendBuildOptions {
@@ -41,7 +42,7 @@ async function buildOrRefuse(command: string[], opts: FrontendBuildOptions): Pro
   try {
     return await runFrontendBuild(process.cwd(), command, opts)
   } catch (err) {
-    if (!(err instanceof FrontendValuesRefused || err instanceof NoBuildCommand)) throw err
+    if (!(err instanceof BuildRefused || err instanceof NoBuildCommand)) throw err
     error(err.message)
     return 1
   }
@@ -63,20 +64,16 @@ function buildProgram(cwd: string, command: readonly string[], env: NodeJS.Proce
 
 /**
  * Run `command` (else the package.json build script) in `cwd` with the deployment's front-end
- * values, resolving with its exit code. Throws {@link FrontendValuesRefused} before anything starts
- * when either value is missing, and {@link NoBuildCommand} when there is nothing to run, or a bare
+ * values and the site's public values (`build.publicEnv`, and what Studio set) under every prefix,
+ * resolving with its exit code. Throws a {@link BuildRefused} before anything starts when either
+ * value is missing or Cloud cannot give the values Studio set, and {@link NoBuildCommand} when there is nothing to run, or a bare
  * build is asked for from inside one.
  */
 export async function runFrontendBuild(cwd: string, command: readonly string[], opts: FrontendBuildOptions = {}): Promise<number> {
   const processEnv = { ...process.env, ...opts.processEnv }
   const program = buildProgram(cwd, command, processEnv)
-  const values = await resolveFrontendValues({
-    cwd,
-    env: opts.env,
-    allowLocal: opts.allowLocal === true,
-    processEnv,
-  })
-  info(`Building with the ${describeFrontendSources(values)}: ${program.describe}`)
-  const env = { ...withProjectBins(processEnv, cwd), ...frontendEnv(values), [BUILD_ACTIVE_ENV]: "1" }
+  const built = await siteBuildEnv(cwd, { env: opts.env, allowLocal: opts.allowLocal, shell: processEnv })
+  info(`Building with the ${describeFrontendSources(built.frontend)}: ${program.describe}`)
+  const env = { ...withProjectBins(processEnv, cwd), ...built.vars, [BUILD_ACTIVE_ENV]: "1" }
   return runBuildProcess(program, cwd, env)
 }

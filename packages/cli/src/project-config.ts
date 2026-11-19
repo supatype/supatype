@@ -11,7 +11,9 @@ import { validateAuthEmail } from "./mailer-autoconfirm.js"
 import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 import { isJsonObject, isString } from "@supatype/shared"
+import type { PublicEnvDeclaration } from "@supatype/types"
 import { objectAt } from "./ast-read.js"
+import { validateBuildPublicEnv } from "./build-public-env.js"
 
 // ---------------------------------------------------------------------------
 // Config schema (single canonical shape; loaded from supatype.config.ts)
@@ -463,6 +465,15 @@ export interface SupatypeProjectConfig {
     env?: Record<string, string>
     /** Custom response headers for the deployed static site. */
     headers?: Record<string, string>
+    /**
+     * Public, non-secret values the site reads, set per environment: one string for every
+     * environment, or a map of environment name to string. `supatype push` sends them to the
+     * environment it targets, and the site reads them at page load from `/supatype-env.js` with
+     * `publicEnv("NAME")`. `supatype build` and `deploy` also pass each under every framework's
+     * prefix (`VITE_`, `NEXT_PUBLIC_`, ...). Every visitor can read them: a value that looks secret
+     * is refused. A name set here shows read-only in Studio.
+     */
+    publicEnv?: PublicEnvDeclaration
   }
   /**
    * Persistent environment defaults for `resolveTarget()` when `--env` is omitted.
@@ -701,6 +712,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateCorsOrigins(cfg, filename)
   validateStudioAuth(cfg, filename)
   validatePublicEnv(cfg, filename)
+  validateBuildPublicEnv(cfg, filename)
   validateRealtime(cfg, filename)
 
   if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)

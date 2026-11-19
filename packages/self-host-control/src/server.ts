@@ -3,6 +3,7 @@ import { HttpError, readBody, sendJson, matchRoute, type RouteHandler } from "./
 import { registerSchemaRoutes } from "./routes/schema.js"
 import { registerFunctionRoutes } from "./routes/functions.js"
 import { registerHookRoutes } from "./routes/hooks.js"
+import { registerSiteEnvRoutes } from "./routes/site-env.js"
 import { registerDeploymentRoutes } from "./routes/deployments.js"
 import { registerStatusRoute } from "./routes/status.js"
 import { registerRealtimeRoutes } from "./routes/realtime.js"
@@ -14,6 +15,7 @@ const routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }> 
 registerSchemaRoutes(routes)
 registerFunctionRoutes(routes)
 registerHookRoutes(routes)
+registerSiteEnvRoutes(routes)
 registerDeploymentRoutes(routes)
 registerStatusRoute(routes)
 registerRealtimeRoutes(routes)

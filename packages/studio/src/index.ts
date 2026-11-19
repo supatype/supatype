@@ -64,7 +64,7 @@ export { SupatypeIcon, SupatypeWordmark } from "./components/SupatypeLogo.js"
 //
 // Removing them drops CardHeader/CardTitle/CardDescription/CardContent, which have no equivalent
 // here and no caller anywhere.
-export { Badge, Button, Card, Input } from "./components/ui.js"
+export { Badge, Button, Card, Input, Table, TableCard, Td, Th, tableRowClass } from "./components/ui.js"
 
 // Widgets
 export { FieldWidget } from "./widgets/FieldWidget.js"

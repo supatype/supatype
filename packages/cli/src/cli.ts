@@ -24,6 +24,7 @@ import { registerEngine } from "./commands/engine.js"
 import { registerDb } from "./commands/db.js"
 import { registerDeploy } from "./commands/deploy.js"
 import { registerBuild } from "./commands/build.js"
+import { registerSite } from "./commands/site.js"
 import { registerStatus } from "./commands/status.js"
 import { registerLogs } from "./commands/logs.js"
 import { registerAdmin } from "./commands/admin.js"
@@ -84,6 +85,7 @@ export async function run(): Promise<void> {
   registerDeploy(program)
   registerBuild(program)
   registerStatus(program)
+  registerSite(program)
   registerLogs(program)
   registerAdmin(program)
   registerFunctions(program)
