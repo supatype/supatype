@@ -93,6 +93,11 @@ export interface StaticSiteHost {
    * entry and its route to the group, and an absent one means none of the three exist.
    */
   Deployments?: React.ComponentType
+  /**
+   * The Public values card: Cloud provides the card that sets the values a deployed site reads at
+   * runtime. Absent on self-host, where nothing renders.
+   */
+  PublicValues?: React.ComponentType
 }
 
 export const StaticSiteCtx = createContext<StaticSiteHost | undefined>(undefined)

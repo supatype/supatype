@@ -172,22 +172,24 @@ function BuiltInEntries({ hiddenItems, path, ctx }: { hiddenItems: ReadonlySet<s
   )
 }
 
+/** The extension item a path belongs to: the longest matching href, so /foo and /foo/bar are never both current. */
+function activeExtraHref(sections: SidebarSection[], path: string): string | null {
+  const hrefs = sections.flatMap((s) => s.items).map((i) => i.href).filter((href) => path === href || path.startsWith(`${href}/`))
+  return hrefs.reduce<string | null>((best, href) => (best === null || href.length > best.length ? href : best), null)
+}
+
 function ExtraSections({ sections, path, ctx }: { sections: SidebarSection[] | undefined; path: string; ctx: ItemContext }): React.ReactElement | null {
   if (!sections || sections.length === 0) return null
+  const activeHref = activeExtraHref(sections, path)
   return (
     <>
-      <div className="my-1 mx-3 border-t border-border/50" />
       {sections.map((section) => (
-        <div key={section.title}>
-          {ctx.expanded && (
-            <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-              {section.title}
-            </div>
-          )}
+        <React.Fragment key={section.title}>
+          <div className="my-1 mx-3 border-t border-border/50" />
           {section.items.map((item) => (
-            <SidebarItem key={item.href} {...ctx} icon={<Icon name={item.icon} size={16} />} label={item.label} href={item.href} active={path === item.href || path.startsWith(`${item.href}/`)} />
+            <SidebarItem key={item.href} {...ctx} icon={<Icon name={item.icon} size={16} />} label={item.label} href={item.href} active={item.href === activeHref} />
           ))}
-        </div>
+        </React.Fragment>
       ))}
     </>
   )

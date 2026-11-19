@@ -7,6 +7,9 @@ import { formatBytes } from "../../lib/cache-health.js"
 import { modeLabel, sizeText } from "../../lib/static-site.js"
 import { useRequiredStaticSiteHost, type LiveSite, type StaticSiteOverview as Overview } from "../../lib/static-site-host.js"
 
+const SELF_HOST_EMPTY = "Nothing answers requests to the site address yet. To serve a site, set app in supatype.config.ts and run supatype dev."
+const CLOUD_EMPTY = "Nothing answers requests to the site address yet. Run supatype deploy to put your first version live."
+
 function Mono({ children }: { children: string }): React.ReactElement {
   return <code className="font-mono text-xs text-foreground">{children}</code>
 }
@@ -56,7 +59,8 @@ function liveFacts(live: LiveSite): Fact[] {
 
 /** The site address, how it is served, and what is being served. The same page on self-host and Cloud. */
 export function StaticSiteOverview(): React.ReactElement {
-  const { data, loading, error } = useRequiredStaticSiteHost().useOverview()
+  const host = useRequiredStaticSiteHost()
+  const { data, loading, error } = host.useOverview()
   return (
     <div className="space-y-5 max-w-3xl">
       <PageHeader title="Static site" />
@@ -65,7 +69,7 @@ export function StaticSiteOverview(): React.ReactElement {
       {data !== null && data.mode === "none" && (
         <EmptyState
           title="No site is being served"
-          description="Nothing answers requests to the site address yet. Set app in supatype.config.ts and run supatype dev, or on Cloud run supatype deploy."
+          description={host.Deployments !== undefined ? CLOUD_EMPTY : SELF_HOST_EMPTY}
         />
       )}
       {data !== null && data.mode !== "none" && <FactsCard title="Site" facts={siteFacts(data)} />}
