@@ -71,6 +71,12 @@ export interface StudioCoreProps {
    * Studio falls back to the values injected into its page.
    */
   connection?: ProjectConnection
+  /**
+   * Who answers the Static site pages (see {@link StaticSiteHost}). Self-host Studio passes the
+   * gateway's; Cloud passes the control plane's, with its Deployments page. Without it Studio shows
+   * no Static site group: a group claims a site this host has told Studio nothing about.
+   */
+  staticSite?: StaticSiteHost
 }
 
 // Re-export config types for convenience
@@ -80,5 +86,6 @@ export type { AdminConfig, ModelConfig, GlobalConfig, FieldConfig, WidgetType } 
 import type { SupatypeClient } from "@supatype/client"
 import type { AdminConfig } from "./config.js"
 import type { ProjectConnection } from "./hooks/useConnection.js"
+import type { StaticSiteHost } from "./lib/static-site-host.js"
 export type { ProjectConnection }
 export type { SupatypeClient }
