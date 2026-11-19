@@ -3,7 +3,7 @@
  * taken by the control plane, which holds the keys and never hands them out.
  */
 
-import { isBoolean, isOneOf, isShape } from "@supatype/shared"
+import { isBoolean, isOneOf, isRecordOf, isShape, isUnknown, type Guard } from "@supatype/shared"
 import { resolveTarget } from "./resolve-target.js"
 import { targetFetch } from "./target-client.js"
 import { targetRequest } from "./target-request.js"
@@ -23,19 +23,34 @@ const SAID: Record<"created" | "exists" | "promoted" | "no-next-key", string> = 
   "no-next-key": "There is no next SAML signing key to promote. Run `supatype sso rotate-key` first.",
 }
 
+const isAuthView = isShape({ fields: isRecordOf(isShape({ value: isUnknown })) })
+
+/** The SAML check only feeds a warning, so a slow control plane must not hold up the command for long. */
+const SAML_CHECK_TIMEOUT_MS = 3_000
+
+/** One call to the linked Cloud environment's auth route, at `/environments/<env>/auth<suffix>`. */
+async function environmentAuthCall<T>(
+  cwd: string,
+  call: { method: string; suffix: string; body?: unknown; timeoutMs?: number },
+  guard: Guard<T>,
+): Promise<T> {
+  const target = resolveTarget(cwd)
+  const subpath = `/environments/${encodeURIComponent(target.environment)}/auth${call.suffix}`
+  const request = targetRequest(target, { method: call.method, subpath, ...(call.body !== undefined && { body: call.body }) })
+  const options = call.timeoutMs === undefined ? request : { ...request, timeoutMs: call.timeoutMs }
+  return targetFetch(target.apiBaseUrl, target.apiPrefix, options, guard)
+}
+
+/** Whether SAML is on for the linked Cloud project, as the control plane has it from code and Studio together. */
+export async function cloudSamlEnabled(cwd: string): Promise<boolean> {
+  const view = await environmentAuthCall(cwd, { method: "GET", suffix: "", timeoutMs: SAML_CHECK_TIMEOUT_MS }, isAuthView)
+  return view.fields["auth.sso.saml.enabled"]?.value === true
+}
+
 /** Take one rotation step on the linked Cloud project, and say what happened. */
 export async function rotateCloudSamlKey(cwd: string, promote: boolean): Promise<string> {
-  const target = resolveTarget(cwd)
-  const answer = await targetFetch(
-    target.apiBaseUrl,
-    target.apiPrefix,
-    targetRequest(target, {
-      method: "POST",
-      subpath: `/environments/${encodeURIComponent(target.environment)}/auth/saml-key`,
-      body: { step: promote ? "promote" : "next" },
-    }),
-    isRotationAnswer,
-  )
+  const body = { step: promote ? "promote" : "next" }
+  const answer = await environmentAuthCall(cwd, { method: "POST", suffix: "/saml-key", body }, isRotationAnswer)
   const pending = answer.applied ? "" : " The project's auth server picks it up within a minute."
   return SAID[answer.outcome] + pending
 }

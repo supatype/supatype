@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import { samlOffWarning } from "../src/commands/sso.js"
-import { projectConfig } from "./support/project-config.js"
 
 /**
  * `supatype sso` warns when the config has SAML off. It said to restart the stack, which is no way
@@ -8,13 +7,13 @@ import { projectConfig } from "./support/project-config.js"
  */
 describe("the SAML-off warning", () => {
   it("names push and Studio for a Cloud project", () => {
-    const text = samlOffWarning(projectConfig(), true) ?? ""
+    const text = samlOffWarning(false, true) ?? ""
     expect(text).toContain("supatype push")
     expect(text).toContain("Studio")
     expect(text).not.toContain("restart the stack")
   })
 
   it("still names a restart elsewhere", () => {
-    expect(samlOffWarning(projectConfig()) ?? "").toContain("restart the stack")
+    expect(samlOffWarning(false) ?? "").toContain("restart the stack")
   })
 })
