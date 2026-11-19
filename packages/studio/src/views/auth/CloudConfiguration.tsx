@@ -1,4 +1,5 @@
 import React from "react"
+import { groupRequiredSecretKeys } from "@supatype/types"
 import type { AuthSettingsView } from "../../hooks/useCloudAuthSettings.js"
 import {
   CloudAuthPage,
@@ -6,7 +7,9 @@ import {
   SecretRow,
   SpecTable,
   useCloudAuthEditor,
+  usePendingChoice,
   type CloudAuthEditor,
+  type PendingChoiceSpec,
   type SettingSpec,
 } from "./CloudAuthParts.js"
 import { CloudAuthSections } from "./CloudAuthSections.js"
@@ -74,14 +77,28 @@ function PlatformSenderNotice({ view }: { view: AuthSettingsView }): React.React
   )
 }
 
-function Mail({ view, editor }: { view: AuthSettingsView; editor: CloudAuthEditor }): React.ReactElement {
-  const chosen = fieldOf(view, "email.provider").value
+/** SES is refused until both its keys exist, so choosing it waits for them (see usePendingChoice). */
+const MAIL_CHOICE: PendingChoiceSpec = {
+  path: "email.provider",
+  secretKeys: (choice) => {
+    const provider = MAIL_PROVIDERS.find((name) => name === choice)
+    return provider === undefined ? [] : groupRequiredSecretKeys({ email: { provider } })
+  },
+}
+
+const SES_NOTE = "Enter both keys: they are saved together with the provider."
+
+function Mail({ editor }: { editor: CloudAuthEditor }): React.ReactElement | null {
+  const mail = usePendingChoice(editor, MAIL_CHOICE)
+  const { view } = mail
+  if (view === null) return null
+  const chosen = fieldOf(view, MAIL_CHOICE.path).value
   const provider = typeof chosen === "string" ? chosen : null
   return (
     <div className="space-y-3">
       {view.platformSender ? <PlatformSenderNotice view={view} /> : null}
-      <SpecTable title="Email delivery" specs={mailSpecs(provider)} editor={editor}>
-        {mailSecretRow(provider, editor)}
+      <SpecTable title="Email delivery" specs={mailSpecs(provider)} editor={mail} {...(provider === "ses" && { note: SES_NOTE })}>
+        {mailSecretRow(provider, mail)}
       </SpecTable>
     </div>
   )
@@ -95,7 +112,7 @@ export function CloudConfiguration({ environment }: { environment: string }): Re
   return (
     <CloudAuthPage title="Configuration" environment={environment} intro={INTRO} editor={editor}>
       {view !== null ? <SpecTable title="Sign-up and sign-in" specs={accessSpecs(view)} editor={editor} /> : null}
-      {view !== null ? <Mail view={view} editor={editor} /> : null}
+      {view !== null ? <Mail editor={editor} /> : null}
       <CloudAuthSections editor={editor} />
     </CloudAuthPage>
   )

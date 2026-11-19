@@ -200,6 +200,16 @@ describe("what the step does not do", () => {
     expect(text()).not.toContain("literal-password")
   })
 
+  it("refuses SES on Cloud unless both AWS keys are env references", async () => {
+    const ses = (extra: Record<string, unknown>): SupatypeProjectConfig => config({ email: { provider: "ses", ses_from: "hi@acme.dev", ...extra } })
+    expect(() => assertCloudAuthSettings(ses({}), cloud)).toThrow(/ses_access_key_id[^]*ses_secret_access_key/)
+    expect(() => assertCloudAuthSettings(ses({ ses_access_key_id: "env(SES_KEY)" }), cloud)).toThrow(/email.ses_secret_access_key/)
+    expect(await pushAuthSettings(cwd, ses({}), cloud, { environment: env() })).toBe(true)
+    expect(calls).toHaveLength(0)
+    const both = ses({ ses_access_key_id: "env(SES_KEY)", ses_secret_access_key: "env(SES_SECRET)" })
+    expect(() => assertCloudAuthSettings(both, cloud)).not.toThrow()
+  })
+
   it("checks nothing and sends nothing for a self-host target", async () => {
     expect(() => assertCloudAuthSettings(literalPass(), selfHost)).not.toThrow()
     expect(await pushAuthSettings(cwd, withGithub(), selfHost, { environment: env() })).toBe(false)

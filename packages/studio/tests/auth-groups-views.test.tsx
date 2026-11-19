@@ -7,7 +7,11 @@ import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
 import { isAuthSettingsView } from "../src/hooks/useCloudAuthSettings.js"
 import { AttackProtectionView } from "../src/views/auth/AttackProtectionView.js"
 import { AuthHooksView } from "../src/views/auth/AuthHooksView.js"
+import { usePendingChoice, type CloudAuthEditor, type PendingChoiceSpec } from "../src/views/auth/CloudAuthParts.js"
+import type { AuthSettingsEdit, AuthSettingsView } from "../src/hooks/useCloudAuthSettings.js"
 import { ConfigurationView } from "../src/views/auth/ConfigurationView.js"
+import { groupRequiredSecretKeys, SMS_PROVIDERS } from "@supatype/types"
+import { ANONYMOUS_SPECS, CAPTCHA_SPECS, MFA_SPECS, PASSWORD_SPECS, PHONE_COMMON_SPECS, RATE_LIMIT_SPECS, SAML_SPECS, SESSION_SPECS, smsProviderFields } from "../src/views/auth/authGroupSpecs.js"
 import { testClient } from "./support.js"
 
 /**
@@ -250,16 +254,99 @@ describe("the Cloud Configuration page, new sections", () => {
     expect(puts()[0]?.body).toEqual({ secrets: { "phone.twilio.authToken": "tw-token" } })
   })
 
-  it("shows the control plane's refusal when a provider is chosen without its secret", async () => {
+  it("shows the control plane's refusal of the combined provider and secret save", async () => {
     const refuse = (): Response => Response.json({ message: "phone.twilio.authToken is required for the twilio provider" }, { status: 400 })
-    await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.phone.provider": field(null) }), put: refuse })
+    await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.phone.provider": field(null) }, { "phone.twilio.authToken": unset }), put: refuse })
     await act(async () => {
       const select = byLabel("SMS provider") as HTMLSelectElement
       const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
       set?.call(select, "twilio")
       select.dispatchEvent(new Event("change", { bubbles: true }))
     })
+    await type(byLabel("Twilio auth token secret") as HTMLInputElement, "x")
+    await act(async () => { button("Set Twilio auth token secret")!.click() })
     expect(container.textContent).toContain("phone.twilio.authToken is required for the twilio provider")
+  })
+
+  it("resets a Studio value that has no pushed counterpart", async () => {
+    const studioOnly = field(7200, { source: "studio", codeValue: null, differsFromCode: false })
+    await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.sessions.timebox": studioOnly }) })
+    expect(container.textContent).not.toContain("Differs from config")
+    await act(async () => { button("Reset Session time limit (seconds)")!.click() })
+    expect(puts()[0]?.body).toEqual({ reset: ["auth.sessions.timebox"] })
+  })
+
+  it("offers no Reset on a row nothing in Studio set", async () => {
+    await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.sessions.timebox": field(null) }) })
+    expect(button("Reset Session time limit (seconds)")).toBeUndefined()
+  })
+
+  it("reveals a chosen SMS provider's fields and secret without saving, then saves both together", async () => {
+    await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.phone.provider": field(null), "auth.phone.twilio.accountSid": field(null) }, { "phone.twilio.authToken": unset }) })
+    expect(byLabel("Twilio auth token secret")).toBeNull()
+    await act(async () => {
+      const select = byLabel("SMS provider") as HTMLSelectElement
+      const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      set?.call(select, "twilio")
+      select.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    expect(puts()).toHaveLength(0)
+    expect(byLabel("Twilio account SID")).not.toBeNull()
+    await type(byLabel("Twilio auth token secret") as HTMLInputElement, "tw-token")
+    await act(async () => { button("Set Twilio auth token secret")!.click() })
+    expect(puts()).toHaveLength(1)
+    expect(puts()[0]?.body).toEqual({ set: { "auth.phone.provider": "twilio" }, secrets: { "phone.twilio.authToken": "tw-token" } })
+  })
+
+  it("reveals a chosen SES provider's two key rows without saving, then saves provider and both keys together", async () => {
+    const unsetKeys = { "email.ses_access_key_id": unset, "email.ses_secret_access_key": unset }
+    await render(CLOUD, <ConfigurationView />, { body: viewBody({ "email.provider": field(null) }, unsetKeys) })
+    expect(byLabel("SES access key ID secret")).toBeNull()
+    await act(async () => {
+      const select = byLabel("Mail provider") as HTMLSelectElement
+      const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      set?.call(select, "ses")
+      select.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    expect(puts()).toHaveLength(0)
+    await type(byLabel("SES access key ID secret") as HTMLInputElement, "AKIA1")
+    await act(async () => { button("Set SES access key ID secret")!.click() })
+    expect(puts()).toHaveLength(0)
+    await type(byLabel("SES secret access key secret") as HTMLInputElement, "s3cret")
+    await act(async () => { button("Set SES secret access key secret")!.click() })
+    expect(puts()).toHaveLength(1)
+    expect(puts()[0]?.body).toEqual({
+      set: { "email.provider": "ses" },
+      secrets: { "email.ses_access_key_id": "AKIA1", "email.ses_secret_access_key": "s3cret" },
+    })
+  })
+
+  it("never sends a removal of a held key along with a pending provider choice", async () => {
+    const held = { set: true, fingerprint: "ab12", source: "studio", updatedAt: null, updatedBy: null }
+    const secrets = { "email.ses_access_key_id": held, "email.ses_secret_access_key": unset }
+    await render(CLOUD, <ConfigurationView />, { body: viewBody({ "email.provider": field(null) }, secrets) })
+    await act(async () => {
+      const select = byLabel("Mail provider") as HTMLSelectElement
+      const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      set?.call(select, "ses")
+      select.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    await type(byLabel("SES secret access key secret") as HTMLInputElement, "s3cret")
+    await act(async () => { button("Set SES secret access key secret")!.click() })
+    expect(puts()).toHaveLength(1)
+    expect(puts()[0]?.body).toEqual({ set: { "email.provider": "ses" }, secrets: { "email.ses_secret_access_key": "s3cret" } })
+  })
+
+  it("saves SES straight away when both keys are already held", async () => {
+    const held = { set: true, fingerprint: "ab12", source: "studio", updatedAt: null, updatedBy: null }
+    await render(CLOUD, <ConfigurationView />, { body: viewBody({ "email.provider": field(null) }, { "email.ses_access_key_id": held, "email.ses_secret_access_key": held }) })
+    await act(async () => {
+      const select = byLabel("Mail provider") as HTMLSelectElement
+      const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      set?.call(select, "ses")
+      select.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    expect(puts()[0]?.body).toEqual({ set: { "email.provider": "ses" } })
   })
 
   it("reads settings an older control plane left out as not available", async () => {
@@ -296,5 +383,123 @@ describe("self-host", () => {
     expect(text).toContain("auth.mfa.totp.enroll")
     expect(text).toContain("auth.sso.saml.relayStateValidity")
     expect(container.querySelector("input, textarea")).toBeNull()
+  })
+})
+
+describe("defaults on rows nothing sets", () => {
+  const ALL_FIELDS = [...CAPTCHA_SPECS, ...PASSWORD_SPECS, ...RATE_LIMIT_SPECS, ...SESSION_SPECS, ...MFA_SPECS, ...ANONYMOUS_SPECS, ...PHONE_COMMON_SPECS, ...SAML_SPECS]
+  const unsetBody = (): Record<string, unknown> => viewBody(Object.fromEntries(ALL_FIELDS.map((s) => [s.path, field(null)])))
+
+  const rowOf = (label: string): HTMLTableRowElement => {
+    const row = Array.from(container.querySelectorAll("tr")).find((tr) => tr.querySelector("td")?.textContent === label)
+    if (row === undefined) throw new Error(`no row labelled ${label}`)
+    return row
+  }
+  const sourceOf = (label: string): string => rowOf(label).querySelectorAll("td")[2]?.textContent ?? ""
+
+  it("shows the effective default as the placeholder and in the source of every Attack Protection row", async () => {
+    await render(CLOUD, <AttackProtectionView />, { body: unsetBody() })
+    expect((byLabel("OTP requests per 5 minutes") as HTMLInputElement).placeholder).toBe("30")
+    expect(sourceOf("OTP requests per 5 minutes")).toBe("default: 30")
+    expect((byLabel("Token refreshes per 5 minutes") as HTMLInputElement).placeholder).toBe("150")
+    expect((byLabel("MFA challenges and verifies per minute") as HTMLInputElement).placeholder).toBe("15")
+    // The fallback sent is 0 and the server raises it to 6, so 6 is what applies.
+    expect((byLabel("Minimum password length") as HTMLInputElement).placeholder).toBe("6")
+    expect(sourceOf("Minimum password length")).toBe("default: 6")
+    expect(sourceOf("CAPTCHA enabled")).toBe("default: off")
+    expect(sourceOf("Leaked password check")).toBe("default: off")
+    expect(sourceOf("CAPTCHA provider")).toBe("default: hcaptcha")
+    expect(sourceOf("Required characters")).toBe("default: none")
+    for (const spec of [...CAPTCHA_SPECS, ...PASSWORD_SPECS, ...RATE_LIMIT_SPECS]) expect(sourceOf(spec.label)).toMatch(/^default: /)
+  })
+
+  it("shows the effective default on every Configuration row that has one", async () => {
+    await render(CLOUD, <ConfigurationView />, { body: unsetBody() })
+    expect((byLabel("Assertion rate limit per 5 minutes") as HTMLInputElement).placeholder).toBe("15")
+    expect(sourceOf("Relay state validity (seconds)")).toBe("default: 120")
+    expect(sourceOf("Code length (digits)")).toBe("default: 6")
+    expect(sourceOf("Code lifetime (seconds)")).toBe("default: 60")
+    expect(sourceOf("Minimum seconds between codes")).toBe("default: 60")
+    expect(sourceOf("Session time limit (seconds)")).toBe("default: none")
+    expect(sourceOf("Refresh token rotation")).toBe("default: on")
+    expect(sourceOf("Authenticator app enrol")).toBe("default: on")
+    expect(sourceOf("Maximum enrolled factors")).toBe("default: 10")
+    for (const spec of [...SESSION_SPECS, ...MFA_SPECS, ...ANONYMOUS_SPECS, ...PHONE_COMMON_SPECS, ...SAML_SPECS]) expect(sourceOf(spec.label)).toMatch(/^default: /)
+  })
+
+  it("keeps the source a layer names once a layer sets the value", async () => {
+    await render(CLOUD, <AttackProtectionView />, { body: viewBody({ "auth.rateLimits.otp": field(45, { source: "studio" }) }) })
+    expect(sourceOf("OTP requests per 5 minutes")).toContain("Studio edit")
+    expect(sourceOf("OTP requests per 5 minutes")).not.toContain("default")
+  })
+
+  it("shows the default to a role that can only read", async () => {
+    await render(CLOUD, <AttackProtectionView />, { body: unsetBody(), administer: false })
+    expect(rowOf("OTP requests per 5 minutes").querySelectorAll("td")[1]?.textContent).toContain("default: 30")
+    expect(rowOf("OTP requests per 5 minutes").textContent).not.toContain("Not set")
+  })
+
+  it("labels each rate limit with the window the auth server counts it in", async () => {
+    await render(CLOUD, <AttackProtectionView />, { body: unsetBody() })
+    expect(byLabel("Anonymous sign-ins per hour")).not.toBeNull()
+    expect(byLabel("MFA challenges and verifies per minute")).not.toBeNull()
+    expect(byLabel("SMS sent per hour")).not.toBeNull()
+    expect(byLabel("Anonymous sign-ins per 5 minutes")).toBeNull()
+    expect(byLabel("MFA challenges and verifies per 5 minutes")).toBeNull()
+  })
+
+  it("shows the same defaults on the self-host read-only page", async () => {
+    await render(SELF_HOST, <AttackProtectionView />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("default: 30")
+    expect(text).toContain("default: 150")
+    expect(text).toContain("default: 6")
+    expect(text).toContain("default: hcaptcha")
+    expect(text).toContain("Set in supatype.config.ts")
+  })
+})
+
+describe("a pending provider choice", () => {
+  const KEYS = ["k.a", "k.b"]
+  const SPEC: PendingChoiceSpec = { path: "choice", secretKeys: (choice) => (choice === "two" ? KEYS : []) }
+  const held = { set: true, fingerprint: "ab12", source: "studio", updatedAt: null, updatedBy: null }
+
+  /** The editor the hook wraps: key a is held, key b is not. Every edit it is finally given is recorded. */
+  async function harness(): Promise<{ editor: () => CloudAuthEditor; saved: AuthSettingsEdit[] }> {
+    const saved: AuthSettingsEdit[] = []
+    const view = { ...viewBody({ choice: field(null) }, { "k.a": held, "k.b": unset }) } as unknown as AuthSettingsView
+    const inner: CloudAuthEditor = { view, loading: false, error: null, canEdit: true, busy: false, save: async (edit) => { saved.push(edit); return true } }
+    let current: CloudAuthEditor = inner
+    function Probe(): null {
+      current = usePendingChoice(inner, SPEC)
+      return null
+    }
+    container = document.createElement("div")
+    root = createRoot(container)
+    await act(async () => { root!.render(<Probe />) })
+    return { editor: () => current, saved }
+  }
+
+  it("never sends a removal of a held key together with the choice", async () => {
+    const { editor, saved } = await harness()
+    await act(async () => { await editor().save({ set: { choice: "two" } }) })
+    await act(async () => { await editor().save({ secrets: { "k.a": null, "k.b": "typed" } }) })
+    expect(saved.flatMap((edit) => Object.values(edit.secrets ?? {}))).not.toContain(null)
+    expect(saved).toHaveLength(0)
+  })
+
+  it("sends the choice with both secrets once each is held or typed", async () => {
+    const { editor, saved } = await harness()
+    await act(async () => { await editor().save({ set: { choice: "two" } }) })
+    await act(async () => { await editor().save({ secrets: { "k.b": "typed" } }) })
+    expect(saved).toEqual([{ set: { choice: "two" }, secrets: { "k.b": "typed" } }])
+  })
+})
+
+describe("the SMS provider fields", () => {
+  it("name the same secret the shared settings table requires, for every provider", () => {
+    for (const provider of SMS_PROVIDERS) {
+      expect(groupRequiredSecretKeys({ auth: { phone: { provider } } })).toEqual([smsProviderFields(provider)?.secret.key])
+    }
   })
 })

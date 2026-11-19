@@ -332,7 +332,6 @@ export function authSecretInUse(settings: AuthSettings, key: string): boolean {
   if (grouped !== undefined) return grouped
   if (key === "email.smtp.pass") return settings.email?.provider === "smtp"
   if (key === "email.resend_api_key") return settings.email?.provider === "resend"
-  if (key === "email.ses_access_key_id" || key === "email.ses_secret_access_key") return settings.email?.provider === "ses"
   const name = /^providers\.(.+)\.secret$/.exec(key)?.[1]
   return name !== undefined && Object.keys(settings.auth?.providers ?? {}).includes(name)
 }
@@ -449,9 +448,6 @@ function mailProblems(email: unknown, target: AuthTarget): string[] {
     provider !== undefined && !MAIL_PROVIDERS.includes(String(provider))
       ? `email.provider must be one of ${MAIL_PROVIDERS.join(", ")}`
       : undefined,
-    provider === "ses" && target === "cloud" && (email["ses_access_key_id"] === undefined || email["ses_secret_access_key"] === undefined)
-      ? "email.provider ses on Cloud needs email.ses_access_key_id and email.ses_secret_access_key: a hosted project has no ambient AWS credentials"
-      : undefined,
     secretProblem(email["resend_api_key"], "email.resend_api_key", target, true),
     secretProblem(email["ses_access_key_id"], "email.ses_access_key_id", target, true),
     secretProblem(email["ses_secret_access_key"], "email.ses_secret_access_key", target, true),
@@ -462,8 +458,10 @@ function mailProblems(email: unknown, target: AuthTarget): string[] {
 
 /**
  * Every problem with the settings, none when they are fine. Cloud refuses a literal where a secret
- * belongs (self-host kept accepting a literal SMTP password and Resend key, so it still does), and
- * SES there without the project's own key, since a hosted project has no ambient AWS credentials.
+ * belongs (self-host kept accepting a literal SMTP password and Resend key, so it still does).
+ * Whether a secret a choice needs is present is not judged here: {@link groupRequiredSecretKeys} names
+ * what each choice needs, and the caller checks it against what it holds (the control plane against
+ * its held secrets, the CLI push against the references in the config).
  */
 export function validateAuthSettings(settings: unknown, target: AuthTarget): string[] {
   if (!isObject(settings)) return ["settings must be an object"]

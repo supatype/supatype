@@ -1,10 +1,11 @@
 import React, { useCallback, useState } from "react"
-import type { AuthSettingValue } from "@supatype/types"
+import { groupDefault, type AuthSettingValue } from "@supatype/types"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { Badge, Button, Card, Checkbox, Input, Select, Switch, Table, Td, Textarea, Th } from "../../components/ui.js"
 import {
   useCloudAuthSettings,
   type AuthFieldView,
+  type AuthSecretView,
   type AuthSettingsEdit,
   type AuthSettingsView,
 } from "../../hooks/useCloudAuthSettings.js"
@@ -75,11 +76,28 @@ function stamp(field: AuthFieldView): string {
   return `${at}${by}`
 }
 
+/**
+ * What applies to a setting nothing sets, as a person reads it: "on", "off", a number or a name, or
+ * "none". Undefined for a path the shared settings table does not hold.
+ */
+export function defaultText(path: string): string | undefined {
+  const value = groupDefault(path)
+  if (value === undefined) return undefined
+  if (typeof value === "boolean") return value ? "on" : "off"
+  return value === null ? "none" : String(value)
+}
+
+/** "default: 30" for a setting nothing sets, or `fallback` for a path the shared table does not hold. */
+export function defaultLabel(path: string, fallback: string): string {
+  const text = defaultText(path)
+  return text === undefined ? fallback : `default: ${text}`
+}
+
 /** Where a value comes from, in the words the design note gives each layer. */
-export function sourceText(field: AuthFieldView): string {
+export function sourceText(field: AuthFieldView, path: string): string {
   if (field.source === "code") return `supatype.config.ts, pushed${stamp(field)}`
   if (field.source === "studio") return `Studio edit${stamp(field)}`
-  return "default"
+  return defaultLabel(path, "default")
 }
 
 /** Whether the running auth server has this version, or the write is still waiting. */
@@ -98,8 +116,6 @@ export interface SettingSpec {
   options?: readonly string[]
   /** List entries that are always present and cannot be removed. */
   fixed?: readonly string[]
-  /** A switch's state while nothing sets it, for a setting that is on by default. */
-  defaultOn?: boolean
   /**
    * A switch nothing sets is on exactly when this other setting has a value, as the server reads it:
    * a hook is on once its URI is set. Without it, every unset hook showed as on.
@@ -122,9 +138,9 @@ function draftValue(kind: SettingKind, draft: string): AuthSettingValue | null {
   return draft.trim() === "" || Number.isNaN(n) ? null : n
 }
 
-function shown(value: AuthSettingValue | null): React.ReactNode {
+function shown(value: AuthSettingValue | null, path: string): React.ReactNode {
   if (typeof value === "boolean") return <Badge variant={value ? "green" : "outline"}>{value ? "On" : "Off"}</Badge>
-  if (value === null) return <span className="text-muted-foreground">Not set</span>
+  if (value === null) return <span className="text-muted-foreground">{defaultLabel(path, "Not set")}</span>
   return <span className="break-all">{Array.isArray(value) ? value.join(", ") : String(value)}</span>
 }
 
@@ -138,7 +154,7 @@ function TextEditor({ spec, field, editor }: RowProps): React.ReactElement {
   const [draft, setDraft] = useState<string | null>(null)
   const text = draft ?? draftText(field.value)
   const next = draft === null ? null : draftValue(spec.kind, draft)
-  const common = { "aria-label": spec.label, value: text, disabled: editor.busy }
+  const common = { "aria-label": spec.label, value: text, disabled: editor.busy, placeholder: defaultText(spec.path) }
   const save = async (): Promise<void> => {
     if (next !== null && (await editor.save({ set: { [spec.path]: next } }))) setDraft(null)
   }
@@ -159,7 +175,7 @@ function TextEditor({ spec, field, editor }: RowProps): React.ReactElement {
 function ChoiceEditor({ spec, field, editor }: RowProps): React.ReactElement {
   return (
     <Select aria-label={spec.label} value={draftText(field.value)} disabled={editor.busy} onChange={(e) => { void editor.save({ set: { [spec.path]: e.target.value } }) }}>
-      <option value="" disabled>Not set</option>
+      <option value="" disabled>{defaultLabel(spec.path, "Not set")}</option>
       {(spec.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}
     </Select>
   )
@@ -183,15 +199,16 @@ function MultiEditor({ spec, field, editor }: RowProps): React.ReactElement {
 /** What a switch reads: the value in force, else the setting's own default. */
 function switchOn(spec: SettingSpec, field: AuthFieldView, view: AuthSettingsView | null): boolean {
   if (typeof field.value === "boolean") return field.value
-  if (spec.onWhenSet === undefined) return spec.defaultOn === true
+  if (spec.onWhenSet === undefined) return groupDefault(spec.path) === true
   const other = view?.fields[spec.onWhenSet]?.value ?? null
   return other !== null && other !== ""
 }
 
 function ValueCell({ spec, field, editor }: RowProps): React.ReactElement {
-  if (!editor.canEdit) return <>{spec.kind === "bool" ? shown(switchOn(spec, field, editor.view)) : shown(field.value)}</>
-  if (spec.kind === "bool") {
-    return <Switch label={spec.label} checked={switchOn(spec, field, editor.view)} disabled={editor.busy} onChange={(on) => { void editor.save({ set: { [spec.path]: on } }) }} />
+  const on = spec.kind === "bool" ? switchOn(spec, field, editor.view) : null
+  if (!editor.canEdit) return <>{shown(on ?? field.value, spec.path)}</>
+  if (on !== null) {
+    return <Switch label={spec.label} checked={on} disabled={editor.busy} onChange={(next) => { void editor.save({ set: { [spec.path]: next } }) }} />
   }
   if (spec.kind === "select") return <ChoiceEditor spec={spec} field={field} editor={editor} />
   if (spec.kind === "multi") return <MultiEditor spec={spec} field={field} editor={editor} />
@@ -199,14 +216,15 @@ function ValueCell({ spec, field, editor }: RowProps): React.ReactElement {
 }
 
 function SourceCell({ spec, field, editor }: RowProps): React.ReactElement {
+  const canReset = editor.canEdit && (field.differsFromCode || field.source === "studio")
   return (
     <div className="space-y-1">
-      <div className="text-muted-foreground">{sourceText(field)}</div>
-      {field.differsFromCode ? (
+      <div className="text-muted-foreground">{sourceText(field, spec.path)}</div>
+      {canReset || field.differsFromCode ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="yellow">Differs from config</Badge>
-          <span className="text-xs text-muted-foreground">Config says {draftText(field.codeValue) || "nothing"}</span>
-          {editor.canEdit ? (
+          {field.differsFromCode ? <Badge variant="yellow">Differs from config</Badge> : null}
+          {field.differsFromCode ? <span className="text-xs text-muted-foreground">Config says {draftText(field.codeValue) || "nothing"}</span> : null}
+          {canReset ? (
             <Button size="xs" variant="secondary" disabled={editor.busy} aria-label={`Reset ${spec.label}`} onClick={() => { void editor.save({ reset: [spec.path] }) }}>Reset</Button>
           ) : null}
         </div>
@@ -348,4 +366,84 @@ export function CloudAuthPage({ title, environment, intro, editor, children }: {
       {view !== null ? children : null}
     </div>
   )
+}
+
+/** A choice the control plane refuses until its secrets exist: the setting's path, and the secrets a choice needs. */
+export interface PendingChoiceSpec {
+  path: string
+  secretKeys: (choice: string) => readonly string[]
+}
+
+interface PendingChoice {
+  choice: string
+  /** What was typed for the choice's secrets so far; null is a removal, which counts as missing. */
+  secrets: Record<string, string | null>
+}
+
+/** What a pending-choice step decided: the state to hold, and the edit to send (null: nothing yet). */
+interface PendingStep {
+  pending: PendingChoice | null
+  send: AuthSettingsEdit | null
+}
+
+const ENTERED: AuthSecretView = { set: true, fingerprint: null, source: "studio", updatedAt: null, updatedBy: null }
+const REMOVED: AuthSecretView = { set: false, fingerprint: null, source: null, updatedAt: null, updatedBy: null }
+
+/** The choice's secrets that are neither held nor typed. A typed-then-cleared or removed one is missing. */
+function missingSecrets(pending: PendingChoice, spec: PendingChoiceSpec, view: AuthSettingsView): string[] {
+  return spec.secretKeys(pending.choice).filter((key) => {
+    const typed = pending.secrets[key]
+    return typed === undefined ? view.secrets[key]?.set !== true : typed === null
+  })
+}
+
+/**
+ * Decide what an edit does while a choice may be pending: hold it until its secrets are all there,
+ * send it together with the choice once they are, or pass it through when it is about neither.
+ */
+export function nextPending(pending: PendingChoice | null, edit: AuthSettingsEdit, spec: PendingChoiceSpec, view: AuthSettingsView): PendingStep {
+  const chosen = edit.set?.[spec.path]
+  const base: PendingChoice | null = typeof chosen === "string" ? { choice: chosen, secrets: {} } : pending
+  if (base === null) return { pending: null, send: edit }
+  const relevant = spec.secretKeys(base.choice)
+  const entries = Object.entries(edit.secrets ?? {}).filter(([key]) => relevant.includes(key))
+  if (base === pending && entries.length === 0) return { pending, send: edit }
+  const next: PendingChoice = { choice: base.choice, secrets: { ...base.secrets, ...Object.fromEntries(entries) } }
+  if (missingSecrets(next, spec, view).length > 0) return { pending: next, send: null }
+  const secrets = { ...edit.secrets, ...next.secrets }
+  const send: AuthSettingsEdit = { ...edit, set: { ...edit.set, [spec.path]: next.choice }, ...(Object.keys(secrets).length > 0 && { secrets }) }
+  return { pending: null, send }
+}
+
+/** The view with the pending choice and its typed secrets shown as if saved. */
+function withPending(view: AuthSettingsView, pending: PendingChoice, spec: PendingChoiceSpec): AuthSettingsView {
+  const typed = Object.entries(pending.secrets).map(([key, value]) => [key, value === null ? REMOVED : ENTERED] as const)
+  return {
+    ...view,
+    fields: { ...view.fields, [spec.path]: { ...fieldOf(view, spec.path), value: pending.choice } },
+    secrets: { ...view.secrets, ...Object.fromEntries(typed) },
+  }
+}
+
+/**
+ * The editor a table sees while a choice (a provider) is picked but not saved. The control plane
+ * refuses a provider without its secrets, so the choice and what is typed for its secrets wait here
+ * and go in one request once every secret is held or entered. A choice whose secrets are all held
+ * saves straight away.
+ */
+export function usePendingChoice(editor: CloudAuthEditor, spec: PendingChoiceSpec): CloudAuthEditor {
+  const [pending, setPending] = useState<PendingChoice | null>(null)
+  const { view } = editor
+  if (view === null) return editor
+  const save = async (edit: AuthSettingsEdit): Promise<boolean> => {
+    const step = nextPending(pending, edit, spec, view)
+    if (step.send === null) {
+      setPending(step.pending)
+      return true
+    }
+    const done = await editor.save(step.send)
+    if (done) setPending(step.pending)
+    return done
+  }
+  return { ...editor, view: pending === null ? view : withPending(view, pending, spec), save }
 }

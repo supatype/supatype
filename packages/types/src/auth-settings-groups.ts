@@ -121,8 +121,9 @@ export interface AuthGroupSettings {
     vonage?: { apiKey?: string; apiSecret?: EnvReference; from?: string }
   }
   /**
-   * Requests one client may make per 5 minutes (an hour for `smsSent`). The email limit is the
-   * platform's on Cloud and is not here.
+   * Requests one client may make in a window that depends on the limit: 5 minutes for `otp`,
+   * `tokenRefresh`, `verify` and `sso`, an hour for `smsSent` and `anonymousUsers`, and a minute for
+   * `mfa` (challenges and verifies together). The email limit is the platform's on Cloud and is not here.
    */
   rateLimits?: {
     otp?: number
@@ -152,6 +153,12 @@ interface Spec {
   kind: SpecKind
   /** What the server runs with when the setting is not set, as the variable's text. */
   fallback: string
+  /**
+   * What the server actually runs with when the fallback it is sent is a 0 that means "use your own
+   * default". The values mirror supatype-auth internal/conf (configuration.go and saml.go), which
+   * replace those zeros at load. In the setting's own unit (seconds for a duration).
+   */
+  effective?: string
   min?: number
   max?: number
   choices?: readonly string[]
@@ -190,7 +197,7 @@ const SPECS: readonly Spec[] = [
   ...HOOK_SPECS,
   flag("captcha.enabled", "SUPATYPE_SECURITY_CAPTCHA_ENABLED", false),
   { path: "captcha.provider", env: "SUPATYPE_SECURITY_CAPTCHA_PROVIDER", kind: "choice", fallback: "hcaptcha", choices: CAPTCHA_PROVIDERS },
-  count("password.minLength", "SUPATYPE_PASSWORD_MIN_LENGTH", "0", 6, 72),
+  { ...count("password.minLength", "SUPATYPE_PASSWORD_MIN_LENGTH", "0", 6, 72), effective: "6" },
   { path: "password.requiredCharacters", env: "SUPATYPE_PASSWORD_REQUIRED_CHARACTERS", kind: "list", fallback: "" },
   flag("password.leakedPasswordCheck", "SUPATYPE_PASSWORD_HIBP_ENABLED", false),
   { path: "sessions.timebox", env: "SUPATYPE_SESSIONS_TIMEBOX", kind: "seconds", fallback: NO_SESSION_LIMIT, min: 60 },
@@ -210,9 +217,9 @@ const SPECS: readonly Spec[] = [
   flag("anonymous.enabled", "SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED", false),
   flag("phone.enabled", "SUPATYPE_EXTERNAL_PHONE_ENABLED", false),
   { path: "phone.provider", env: "SUPATYPE_SMS_PROVIDER", kind: "choice", fallback: "", choices: SMS_PROVIDERS },
-  count("phone.otpLength", "SUPATYPE_SMS_OTP_LENGTH", "0", 6, 10),
-  count("phone.otpExpiry", "SUPATYPE_SMS_OTP_EXP", "0", 1, 86400),
-  { path: "phone.maxFrequency", env: "SUPATYPE_SMS_MAX_FREQUENCY", kind: "seconds", fallback: "0s", min: 1 },
+  { ...count("phone.otpLength", "SUPATYPE_SMS_OTP_LENGTH", "0", 6, 10), effective: "6" },
+  { ...count("phone.otpExpiry", "SUPATYPE_SMS_OTP_EXP", "0", 1, 86400), effective: "60" },
+  { path: "phone.maxFrequency", env: "SUPATYPE_SMS_MAX_FREQUENCY", kind: "seconds", fallback: "0s", effective: "60", min: 1 },
   text("phone.twilio.accountSid", "SUPATYPE_SMS_TWILIO_ACCOUNT_SID"),
   text("phone.twilio.messageServiceSid", "SUPATYPE_SMS_TWILIO_MESSAGE_SERVICE_SID"),
   text("phone.twilio.contentSid", "SUPATYPE_SMS_TWILIO_CONTENT_SID"),
@@ -231,9 +238,41 @@ const SPECS: readonly Spec[] = [
   count("rateLimits.mfa", "SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY", "15", 1, 100000),
   { ...flag("sso.saml.enabled", "SUPATYPE_SAML_ENABLED", false), selfHost: false },
   { ...flag("sso.saml.allowEncryptedAssertions", "SUPATYPE_SAML_ALLOW_ENCRYPTED_ASSERTIONS", false), selfHost: false },
-  { path: "sso.saml.relayStateValidity", env: "SUPATYPE_SAML_RELAY_STATE_VALIDITY_PERIOD", kind: "seconds", fallback: "0s", min: 1, selfHost: false },
+  { path: "sso.saml.relayStateValidity", env: "SUPATYPE_SAML_RELAY_STATE_VALIDITY_PERIOD", kind: "seconds", fallback: "0s", effective: "120", min: 1, selfHost: false },
   { ...count("sso.saml.rateLimitAssertion", "SUPATYPE_SAML_RATE_LIMIT_ASSERTION", "15", 1, 100000), selfHost: false },
 ]
+
+/** What a setting's default looks like to a person: a number, a switch, a choice, or null for none. */
+export type GroupDefault = string | number | boolean | null
+
+/**
+ * What the server runs with for a setting nothing sets, by its saved path (`auth.rateLimits.otp`):
+ * a number for a count or a duration in seconds, a boolean for a switch, the name of a choice, or
+ * null when there is none (no session limit, no provider, no hook). Undefined for a path this table
+ * does not hold. This is the value in force, so a fallback the server raises (a minimum length of 0
+ * becomes 6) reports what it is raised to.
+ */
+export function groupDefault(path: string): GroupDefault | undefined {
+  const spec = SPEC_BY_PATH.get(path.startsWith("auth.") ? path.slice("auth.".length) : path)
+  if (spec === undefined) return undefined
+  const text = spec.effective ?? spec.fallback
+  switch (spec.kind) {
+    case "flag":
+      return text === "true"
+    case "count":
+      return Number(text)
+    case "seconds":
+      return text === NO_SESSION_LIMIT ? null : Number.parseInt(text, 10)
+    case "choice":
+    case "text":
+    case "list":
+      return text === "" ? null : text
+    default: {
+      const unhandled: never = spec.kind
+      return unhandled
+    }
+  }
+}
 
 /** A setting that is a secret: the config holds `env("NAME")`, the platform holds the value. */
 interface SecretSpec {
@@ -241,12 +280,19 @@ interface SecretSpec {
   key: string
   /** Under `auth`, where the `env("NAME")` sits. */
   path: string
-  env: string
+  /**
+   * The variable the group renderers write. Absent for a held secret: one the settings never state as
+   * a reference under `auth` (the mail section's) and whose variable the mail renderer writes.
+   */
+  env?: string
   /** Whether the settings use the secret: a stored one that nothing uses is not rendered. */
-  active: (auth: Record<string, unknown>) => boolean
+  active: (settings: AuthSettings) => boolean
   /** True when the feature cannot work without it. */
-  required: (auth: Record<string, unknown>) => boolean
+  required: (settings: AuthSettings) => boolean
 }
+
+/** A secret the group renderers own: it has a variable of its own. */
+type OwnedSecretSpec = SecretSpec & { env: string }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -259,14 +305,24 @@ function at(node: unknown, path: string): unknown {
 
 const providerIs =
   (name: SmsProviderName) =>
-  (auth: Record<string, unknown>): boolean =>
-    at(auth, "phone.provider") === name
+  (settings: AuthSettings): boolean =>
+    at(settings.auth, "phone.provider") === name
+
+const mailProviderIs =
+  (name: string) =>
+  (settings: AuthSettings): boolean =>
+    settings.email?.provider === name
+
+/** A mail secret the platform holds: never a stored reference, and rendered by the mail variables. */
+function sesSecret(key: string): SecretSpec {
+  return { key, path: key, active: mailProviderIs("ses"), required: mailProviderIs("ses") }
+}
 
 const HOOK_SECRETS: readonly SecretSpec[] = AUTH_HOOK_NAMES.map((name) => ({
   key: `hooks.${name}.secrets`,
   path: `hooks.${name}.secrets`,
   env: `SUPATYPE_HOOK_${HOOK_ENV_SEGMENT[name]}_SECRETS`,
-  active: (auth) => isObject(at(auth, `hooks.${name}`)),
+  active: (settings) => isObject(at(settings.auth, `hooks.${name}`)),
   required: () => false,
 }))
 
@@ -276,15 +332,20 @@ const SECRET_SPECS: readonly SecretSpec[] = [
     key: "captcha.secret",
     path: "captcha.secret",
     env: "SUPATYPE_SECURITY_CAPTCHA_SECRET",
-    active: (auth) => at(auth, "captcha.enabled") === true,
-    required: (auth) => at(auth, "captcha.enabled") === true,
+    active: (settings) => at(settings.auth, "captcha.enabled") === true,
+    required: (settings) => at(settings.auth, "captcha.enabled") === true,
   },
   smsSecret("phone.twilio.authToken", "SUPATYPE_SMS_TWILIO_AUTH_TOKEN", "twilio"),
   smsSecret("phone.twilioVerify.authToken", "SUPATYPE_SMS_TWILIO_VERIFY_AUTH_TOKEN", "twilio_verify"),
   smsSecret("phone.messagebird.accessKey", "SUPATYPE_SMS_MESSAGEBIRD_ACCESS_KEY", "messagebird"),
   smsSecret("phone.textlocal.apiKey", "SUPATYPE_SMS_TEXTLOCAL_API_KEY", "textlocal"),
   smsSecret("phone.vonage.apiSecret", "SUPATYPE_SMS_VONAGE_API_SECRET", "vonage"),
+  sesSecret("email.ses_access_key_id"),
+  sesSecret("email.ses_secret_access_key"),
 ]
+
+/** The secrets with a variable of their own, which the group renderers and validation handle. */
+const OWNED_SECRET_SPECS: readonly OwnedSecretSpec[] = SECRET_SPECS.filter((s): s is OwnedSecretSpec => s.env !== undefined)
 
 function smsSecret(key: string, env: string, provider: SmsProviderName): SecretSpec {
   return { key, path: key, env, active: providerIs(provider), required: providerIs(provider) }
@@ -310,7 +371,7 @@ const SAML_EXTERNAL_URL_ENV = "SUPATYPE_SAML_EXTERNAL_URL"
 export const GROUP_OWNED_KEYS: readonly string[] = [
   ...SPECS.map((s) => s.env),
   ...AUTH_HOOK_NAMES.map((name) => `SUPATYPE_HOOK_${HOOK_ENV_SEGMENT[name]}_ENABLED`),
-  ...SECRET_SPECS.map((s) => s.env),
+  ...OWNED_SECRET_SPECS.map((s) => s.env),
   SAML_PRIVATE_KEY_ENV,
   SAML_NEXT_PRIVATE_KEY_ENV,
   SAML_EXTERNAL_URL_ENV,
@@ -335,7 +396,7 @@ export const GROUP_SECRET_KEYS: readonly string[] = SECRET_SPECS.map((s) => s.ke
 
 /** The secrets the settings point at with `env("NAME")`: `[key, name]`. */
 export function groupSecretRefs(settings: AuthSettings): { key: string; value: string | undefined }[] {
-  return SECRET_SPECS.map((s) => {
+  return OWNED_SECRET_SPECS.map((s) => {
     const value = at(settings.auth, s.path)
     return { key: s.key, value: typeof value === "string" ? value : undefined }
   })
@@ -345,13 +406,15 @@ export function groupSecretRefs(settings: AuthSettings): { key: string; value: s
 export function groupSecretInUse(settings: AuthSettings, key: string): boolean | undefined {
   if (key === SAML_PRIVATE_KEY_SECRET || key === SAML_NEXT_PRIVATE_KEY_SECRET) return at(settings.auth, "sso.saml.enabled") === true
   const spec = SECRET_SPECS.find((s) => s.key === key)
-  return spec === undefined ? undefined : spec.active(isObject(settings.auth) ? settings.auth : {})
+  return spec === undefined ? undefined : spec.active(settings)
 }
 
-/** Secrets the settings cannot work without, by key: an enabled CAPTCHA's key, the chosen SMS provider's credential. */
+/**
+ * Secrets the settings cannot work without, by key: an enabled CAPTCHA's key, the chosen SMS
+ * provider's credential, and the project's own AWS keys when SES sends the mail.
+ */
 export function groupRequiredSecretKeys(settings: AuthSettings): string[] {
-  const auth = isObject(settings.auth) ? settings.auth : {}
-  return SECRET_SPECS.filter((s) => s.required(auth)).map((s) => s.key)
+  return SECRET_SPECS.filter((s) => s.required(settings)).map((s) => s.key)
 }
 
 /** A rule on a secret's value beyond non-empty, or undefined when it holds. Hook secrets are Standard Webhooks keys. */
@@ -405,8 +468,7 @@ export function groupsEnv(settings: AuthSettings, ctx: AuthRenderContext): Recor
   const env: Record<string, string> = {}
   for (const spec of SPECS) env[spec.env] = stated(auth, spec) ?? spec.fallback
   for (const name of AUTH_HOOK_NAMES) env[`SUPATYPE_HOOK_${HOOK_ENV_SEGMENT[name]}_ENABLED`] = hookEnabled(auth, name)
-  const authObject = isObject(auth) ? auth : {}
-  for (const secret of SECRET_SPECS) env[secret.env] = secret.active(authObject) ? (ctx.secrets[secret.key] ?? "") : ""
+  for (const secret of OWNED_SECRET_SPECS) env[secret.env] = secret.active(settings) ? (ctx.secrets[secret.key] ?? "") : ""
   const key = ctx.secrets[SAML_PRIVATE_KEY_SECRET] ?? ""
   const samlOn = at(auth, "sso.saml.enabled") === true && key !== ""
   env["SUPATYPE_SAML_ENABLED"] = String(samlOn)
@@ -433,7 +495,7 @@ export function groupsSelfHostVars(settings: AuthSettings): SelfHostVar[] {
   for (const name of AUTH_HOOK_NAMES) {
     if (hookConfigured(auth, name)) out.push({ key: `SUPATYPE_HOOK_${HOOK_ENV_SEGMENT[name]}_ENABLED`, value: hookEnabled(auth, name) })
   }
-  for (const secret of SECRET_SPECS) {
+  for (const secret of OWNED_SECRET_SPECS) {
     const value = at(auth, secret.path)
     const name = typeof value === "string" ? /^env\(([A-Za-z_][A-Za-z0-9_]*)\)$/.exec(value.trim())?.[1] : undefined
     if (name !== undefined) out.push({ key: secret.env, fromEnv: name })
@@ -451,7 +513,7 @@ const GROUP_KEYS = ["hooks", "captcha", "password", "sessions", "security", "mfa
 const UNSAFE_TEXT = /[$"'{}\\\u0000-\u001f\u007f]/
 
 const SPEC_BY_PATH: ReadonlyMap<string, Spec> = new Map(SPECS.map((s) => [s.path, s]))
-const SECRET_BY_PATH: ReadonlyMap<string, SecretSpec> = new Map(SECRET_SPECS.map((s) => [s.path, s]))
+const SECRET_BY_PATH: ReadonlyMap<string, SecretSpec> = new Map(OWNED_SECRET_SPECS.map((s) => [s.path, s]))
 const HOOK_ENABLED_PATHS: ReadonlySet<string> = new Set(AUTH_HOOK_NAMES.map((name) => `hooks.${name}.enabled`))
 
 /** The names a node at `prefix` may hold, from every path in the table that starts with it. */

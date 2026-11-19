@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   AUTH_OWNED_KEYS,
   AUTH_PROVIDER_NAMES,
+  authSecretInUse,
   authSecretRefs,
   authSettingPaths,
   authSettingsToEnv,
@@ -157,12 +158,19 @@ describe("validateAuthSettings", () => {
     expect(validateAuthSettings(literal, "cloud")[0]).toContain("email.smtp.pass")
   })
 
-  it("refuses a literal resend key on Cloud, and ses on Cloud", () => {
-    expect(validateAuthSettings({ email: { provider: "resend", resend_api_key: "re_x" } }, "cloud")[0]).toContain(
-      "resend_api_key",
-    )
-    expect(validateAuthSettings({ email: { provider: "ses" } }, "cloud")[0]).toContain("ses")
+  it("refuses a literal resend key on Cloud", () => {
+    expect(validateAuthSettings({ email: { provider: "resend", resend_api_key: "re_x" } }, "cloud")[0]).toContain("resend_api_key")
+  })
+
+  it("leaves SES key presence to the caller, but still refuses a literal where a reference belongs", () => {
+    expect(validateAuthSettings({ email: { provider: "ses" } }, "cloud")).toEqual([])
     expect(validateAuthSettings({ email: { provider: "ses" } }, "self-host")).toEqual([])
+    expect(validateAuthSettings({ email: { provider: "ses", ses_access_key_id: "literal" } }, "cloud")[0]).toContain("ses_access_key_id")
+  })
+
+  it("uses the SES keys only while SES is the provider", () => {
+    expect(authSecretInUse({ email: { provider: "ses" } }, "email.ses_access_key_id")).toBe(true)
+    expect(authSecretInUse({ email: { provider: "resend" } }, "email.ses_secret_access_key")).toBe(false)
   })
 
   it("takes SES on Cloud with the project's own key, and renders it for the server", () => {

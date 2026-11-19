@@ -11,7 +11,7 @@ function spec(path: string, label: string, kind: SettingKind, extra: Partial<Set
   return { path: `auth.${path}`, label, kind, reported: true, ...extra }
 }
 
-const bool = (path: string, label: string, defaultOn = false): SettingSpec => spec(path, label, "bool", { defaultOn })
+const bool = (path: string, label: string): SettingSpec => spec(path, label, "bool")
 const num = (path: string, label: string): SettingSpec => spec(path, label, "number")
 const text = (path: string, label: string): SettingSpec => spec(path, label, "text")
 
@@ -52,16 +52,16 @@ export const RATE_LIMIT_SPECS: SettingSpec[] = [
   num("rateLimits.tokenRefresh", "Token refreshes per 5 minutes"),
   num("rateLimits.verify", "Verify requests per 5 minutes"),
   num("rateLimits.smsSent", "SMS sent per hour"),
-  num("rateLimits.anonymousUsers", "Anonymous sign-ins per 5 minutes"),
+  num("rateLimits.anonymousUsers", "Anonymous sign-ins per hour"),
   num("rateLimits.sso", "SSO requests per 5 minutes"),
-  num("rateLimits.mfa", "MFA challenges and verifies per 5 minutes"),
+  num("rateLimits.mfa", "MFA challenges and verifies per minute"),
 ]
 
 export const SESSION_SPECS: SettingSpec[] = [
   num("sessions.timebox", "Session time limit (seconds)"),
   num("sessions.inactivityTimeout", "Inactivity timeout (seconds)"),
   bool("sessions.singlePerUser", "Single session per user"),
-  bool("security.refreshTokenRotation", "Refresh token rotation", true),
+  bool("security.refreshTokenRotation", "Refresh token rotation"),
   num("security.refreshTokenReuseInterval", "Refresh token reuse interval (seconds)"),
   bool("security.updatePasswordRequireReauthentication", "Password change requires reauthentication"),
   bool("security.updatePasswordRequireCurrentPassword", "Password change requires current password"),
@@ -69,8 +69,8 @@ export const SESSION_SPECS: SettingSpec[] = [
 ]
 
 export const MFA_SPECS: SettingSpec[] = [
-  bool("mfa.totp.enroll", "Authenticator app enrol", true),
-  bool("mfa.totp.verify", "Authenticator app verify", true),
+  bool("mfa.totp.enroll", "Authenticator app enrol"),
+  bool("mfa.totp.verify", "Authenticator app verify"),
   bool("mfa.phone.enroll", "Phone enrol"),
   bool("mfa.phone.verify", "Phone verify"),
   num("mfa.maxEnrolledFactors", "Maximum enrolled factors"),

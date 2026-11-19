@@ -15,8 +15,14 @@ import {
 import {
   SAML_NEXT_PRIVATE_KEY_SECRET,
   SAML_PRIVATE_KEY_SECRET,
+  GROUP_LEAF_PATHS,
+  GROUP_OWNED_KEYS,
+  GROUP_SECRET_KEYS,
+  groupDefault,
   groupRequiredSecretKeys,
   groupSecretFormatProblem,
+  groupSecretRefs,
+  groupsEnv,
   groupsSelfHostVars,
 } from "../src/auth-settings-groups.js"
 
@@ -213,6 +219,21 @@ describe("group secrets", () => {
     expect(groupRequiredSecretKeys({ auth: { captcha: { enabled: false } } })).toEqual([])
   })
 
+  it("names SES's two keys as required while SES is the mail provider", () => {
+    expect(groupRequiredSecretKeys({ email: { provider: "ses" } }).sort()).toEqual(["email.ses_access_key_id", "email.ses_secret_access_key"])
+    expect(groupRequiredSecretKeys({ email: { provider: "resend" } })).toEqual([])
+  })
+
+  it("holds the SES keys without giving the group renderers a variable or a reference for them", () => {
+    const ses = { email: { provider: "ses" as const, ses_access_key_id: "env(K)", ses_secret_access_key: "env(S)" } }
+    expect(GROUP_SECRET_KEYS).toEqual(expect.arrayContaining(["email.ses_access_key_id", "email.ses_secret_access_key"]))
+    expect(groupSecretRefs(ses).map((r) => r.key)).not.toContain("email.ses_access_key_id")
+    expect(GROUP_OWNED_KEYS.every((key) => typeof key === "string" && key.startsWith("SUPATYPE_"))).toBe(true)
+    expect(GROUP_OWNED_KEYS.some((key) => key.startsWith("SUPATYPE_SES_"))).toBe(false)
+    expect(Object.keys(groupsEnv(ses, ctx)).some((key) => key.startsWith("SUPATYPE_SES_"))).toBe(false)
+    expect(groupsSelfHostVars(ses).some((v) => v.key.startsWith("SUPATYPE_SES_"))).toBe(false)
+  })
+
   it("accepts a Standard Webhooks hook secret and refuses anything else", () => {
     expect(groupSecretFormatProblem("hooks.sendEmail.secrets", GOOD_SECRET)).toBeUndefined()
     expect(groupSecretFormatProblem("hooks.sendEmail.secrets", `${GOOD_SECRET}|${GOOD_SECRET}`)).toBeUndefined()
@@ -274,5 +295,42 @@ describe("groupsSelfHostVars", () => {
     expect(vars).toContainEqual({ key: "SUPATYPE_HOOK_SEND_EMAIL_URI", value: "https://x.example.com" })
     expect(vars.some((v) => v.key.startsWith("SUPATYPE_SAML"))).toBe(false)
     expect(vars.some((v) => v.key === "SUPATYPE_SESSIONS_TIMEBOX")).toBe(false)
+  })
+})
+
+describe("groupDefault", () => {
+  it("reports what the server runs with, not the raw fallback it is sent", () => {
+    expect(groupDefault("auth.rateLimits.otp")).toBe(30)
+    expect(groupDefault("auth.rateLimits.tokenRefresh")).toBe(150)
+    expect(groupDefault("auth.rateLimits.mfa")).toBe(15)
+    expect(groupDefault("auth.sso.saml.rateLimitAssertion")).toBe(15)
+    // The fallback sent is 0; the server raises anything below 6 to 6.
+    expect(groupDefault("auth.password.minLength")).toBe(6)
+    expect(groupDefault("auth.phone.otpLength")).toBe(6)
+    expect(groupDefault("auth.phone.otpExpiry")).toBe(60)
+    expect(groupDefault("auth.phone.maxFrequency")).toBe(60)
+    expect(groupDefault("auth.sso.saml.relayStateValidity")).toBe(120)
+  })
+
+  it("reports switches, choices and settings that have no value", () => {
+    expect(groupDefault("auth.captcha.enabled")).toBe(false)
+    expect(groupDefault("auth.security.refreshTokenRotation")).toBe(true)
+    expect(groupDefault("auth.mfa.totp.enroll")).toBe(true)
+    expect(groupDefault("auth.captcha.provider")).toBe("hcaptcha")
+    expect(groupDefault("auth.phone.provider")).toBeNull()
+    expect(groupDefault("auth.password.requiredCharacters")).toBeNull()
+    expect(groupDefault("auth.hooks.sendEmail.uri")).toBeNull()
+    // No limit is a hundred years in the file, but the default the user sees is none.
+    expect(groupDefault("auth.sessions.timebox")).toBeNull()
+    expect(groupDefault("auth.sessions.inactivityTimeout")).toBeNull()
+  })
+
+  it("is undefined for a path the table does not hold", () => {
+    expect(groupDefault("auth.siteUrl")).toBeUndefined()
+  })
+
+  it("has an answer for every table setting", () => {
+    const missing = GROUP_LEAF_PATHS.filter((p) => !/^auth.hooks.[A-Za-z]+.enabled$/.test(p) && groupDefault(p) === undefined)
+    expect(missing).toEqual([])
   })
 })
