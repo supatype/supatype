@@ -79,6 +79,25 @@ describe("deploy status", () => {
     expect(run.output).toMatch(/10 MB of 50 MB/)
     expect(run.output).not.toMatch(/overage/)
   })
+
+  it("shows a tiny site in bytes, not rounded up to 1 MB", async () => {
+    await serve(200, { ...live, size: 985 })
+    const run = await runCommand(registerDeploy, ["deploy", "status"], project.dir)
+    expect(run.output).toMatch(/Size: 985 B of 50 MB plan/)
+    expect(run.output).not.toMatch(/Size: 1 MB/)
+  })
+
+  it("shows a small site in KB with one decimal at most", async () => {
+    await serve(200, { ...live, size: 1536 })
+    const run = await runCommand(registerDeploy, ["deploy", "status"], project.dir)
+    expect(run.output).toMatch(/Size: 1\.5 KB of 50 MB plan/)
+  })
+
+  it("without a plan, shows the same units", async () => {
+    await serve(200, { ...live, size: 2 * MB + MB / 2, planBytes: null })
+    const run = await runCommand(registerDeploy, ["deploy", "status"], project.dir)
+    expect(run.output).toMatch(/Size: 2\.5 MB$/m)
+  })
 })
 
 describe("deploy rollback", () => {
