@@ -20,10 +20,15 @@ export interface ChannelCatalogState {
   readers: ReadonlyMap<string, ReadonlySet<string>>
 }
 
-/** No functions, so no declarations and nothing to enforce: a project that never opted in. */
+/**
+ * No functions, so no declarations: a database that has not had its first push. Until a push writes
+ * `realtime_channel_mode()` from the project's config, a brand-new database is "declared", so nothing
+ * may broadcast or track presence on a channel no declaration allows. The first push replaces this
+ * with the project's own mode, so a project that says "open" (or says nothing) is open from then on.
+ */
 const UNSUPPORTED: ChannelCatalogState = {
   supported: false,
-  mode: "open",
+  mode: "declared",
   sendChecks: new Map(),
   readers: new Map(),
 }
