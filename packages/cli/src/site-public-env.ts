@@ -7,7 +7,8 @@
  * so a refusal names the value without a round trip.
  */
 
-import { isArrayOf, isOneOf, isShape, isString, publicEnvFor, publicEnvProblems, type PublicEnvProblem } from "@supatype/shared"
+import { isArrayOf, isOneOf, isShape, isString } from "@supatype/shared"
+import { prefixedPublicEnv, publicEnvFor, publicEnvProblems, publicEnvRefusal } from "@supatype/types"
 import { loadConfig, mainConfigFile } from "./config.js"
 import { errorMessage } from "./error-message.js"
 import { loadProjectLink } from "./link.js"
@@ -28,14 +29,9 @@ export interface PublicEnvEntry {
 const isEntry = isShape({ name: isString, value: isString, source: isOneOf(["config", "studio"]) })
 const isEntries = isShape({ entries: isArrayOf(isEntry) })
 
-/** The refusals as one message, naming each value and never repeating it. */
-export function refusalMessage(problems: readonly PublicEnvProblem[]): string {
-  return problems.map((p) => (p.name === "" ? `The public values: ${p.reason}` : `${p.name} ${p.reason}`)).join("\n")
-}
-
 function assertAllowed(values: Readonly<Record<string, string>>): void {
   const problems = publicEnvProblems(values)
-  if (problems.length > 0) throw new Error(refusalMessage(problems))
+  if (problems.length > 0) throw new Error(publicEnvRefusal(problems, String.fromCharCode(10)))
 }
 
 /** A server from before public values answers its router's 404, not a project's. */
@@ -90,26 +86,44 @@ export interface BuildPublicEnvOptions {
   env?: string | undefined
 }
 
+/** The public values a build is given, by where each is set. The config's win; see {@link buildPublicVars}. */
+export interface BuildPublicValues {
+  /** `build.publicEnv` for the environment. */
+  config: Record<string, string>
+  /** What was set in Studio, for the names the config does not set. Only on a Cloud link. */
+  studio: Record<string, string>
+}
+
 /**
- * The public values a build of the site is given, name to value (the build passes them under every
- * framework's prefix): `build.publicEnv` for the environment, and on a Cloud link the ones set in
- * Studio, which the config wins for a name both set. A project with no link takes the config's alone.
- * A Cloud that cannot say what Studio set refuses the build rather than ship without them; one that
- * predates public values has none.
+ * The public values a build of the site is given: `build.publicEnv` for the environment, and on a
+ * Cloud link the ones set in Studio. A project with no link takes the config's alone. A Cloud that
+ * cannot say what Studio set refuses the build rather than ship without them; one that predates
+ * public values has none.
  */
-export async function resolveBuildPublicEnv(cwd: string, opts: BuildPublicEnvOptions): Promise<Record<string, string>> {
+export async function resolveBuildPublicEnv(cwd: string, opts: BuildPublicEnvOptions): Promise<BuildPublicValues> {
   // An app folder with no config of its own can still build with what Studio set.
   const declared = mainConfigFile(cwd) === undefined ? undefined : loadConfig(cwd).build?.publicEnv
-  if (loadProjectLink(cwd) === null) return publicEnvFor(declared, opts.env ?? "production")
+  if (loadProjectLink(cwd) === null) return { config: publicEnvFor(declared, opts.env ?? "production"), studio: {} }
   const target = resolveTarget(cwd, { env: opts.env, tokenOptional: true })
   const fromConfig = publicEnvFor(declared, target.environment)
-  if (target.mode !== "cloud") return fromConfig
+  if (target.mode !== "cloud") return { config: fromConfig, studio: {} }
   try {
     const entries = await listPublicEnv(target)
-    const fromStudio = Object.fromEntries(entries.filter((entry) => entry.source === "studio").map((entry) => [entry.name, entry.value]))
-    return { ...fromStudio, ...fromConfig }
+    const studio = Object.fromEntries(entries.filter((entry) => entry.source === "studio" && !(entry.name in fromConfig)).map((entry) => [entry.name, entry.value]))
+    return { config: fromConfig, studio }
   } catch (err) {
-    if (predatesPublicValues(err)) return fromConfig
+    if (predatesPublicValues(err)) return { config: fromConfig, studio: {} }
     throw new PublicEnvUnavailable(target.environment, errorMessage(err))
   }
+}
+
+/**
+ * The variables that give a build the site's public values, under every framework's prefix, to be
+ * laid over its environment. The config's values win; then a variable the shell already sets (so a
+ * CI host's own setting beats Studio's, name for name); then Studio's. Studio's value is left out of
+ * the result for a name the shell sets, so the shell's stays.
+ */
+export function buildPublicVars(values: BuildPublicValues, shell: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const studio = Object.fromEntries(Object.entries(prefixedPublicEnv(values.studio)).filter(([name]) => shell[name] === undefined))
+  return { ...studio, ...prefixedPublicEnv(values.config) }
 }

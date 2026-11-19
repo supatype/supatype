@@ -12,7 +12,7 @@ import { projectConfig } from "./support/project-config.js"
 let config: SupatypeProjectConfig = projectConfig()
 vi.mock("../src/config.js", async (importOriginal) => ({ ...(await importOriginal<object>()), loadConfig: () => config }))
 
-const { resolveBuildPublicEnv, PublicEnvUnavailable } = await import("../src/site-public-env.js")
+const { buildPublicVars, resolveBuildPublicEnv, PublicEnvUnavailable } = await import("../src/site-public-env.js")
 
 let project: { dir: string; remove: () => void }
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>()
@@ -47,28 +47,28 @@ function linkToCloud(): void {
 describe("resolveBuildPublicEnv", () => {
   it("takes the config of a project that has none to be empty, so an app folder can build", async () => {
     rmSync(join(project.dir, "supatype.config.ts"))
-    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({})
+    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({ config: {}, studio: {} })
   })
 
   it("has nothing for a project that sets none, and asks no server", async () => {
-    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({})
+    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({ config: {}, studio: {} })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("gives the config's values for the environment named, with no link", async () => {
     config = projectConfig({ build: { publicEnv: { A: "1", B: { production: "p", staging: "s" } } } })
-    expect(await resolveBuildPublicEnv(project.dir, { env: "staging" })).toEqual({ A: "1", B: "s" })
-    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({ A: "1", B: "p" })
+    expect(await resolveBuildPublicEnv(project.dir, { env: "staging" })).toMatchObject({ config: { A: "1", B: "s" } })
+    expect(await resolveBuildPublicEnv(project.dir, {})).toMatchObject({ config: { A: "1", B: "p" } })
   })
 
-  it("adds what is set in Studio on a Cloud link, and the config wins a name both set", async () => {
+  it("keeps what is set in Studio apart from the config's, a name both set left to the config", async () => {
     linkToCloud()
     config = projectConfig({ build: { publicEnv: { A: "config" } } })
     fetchMock.mockResolvedValue(json({ data: { entries: [
       { name: "A", value: "config", source: "config" },
       { name: "S", value: "studio", source: "studio" },
     ] } }))
-    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({ A: "config", S: "studio" })
+    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({ config: { A: "config" }, studio: { S: "studio" } })
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe("https://cp.example/api/v1/projects/acme/site/env")
     expect(new Headers(init?.headers).get("X-Supatype-Environment")).toBe("production")
@@ -93,6 +93,29 @@ describe("resolveBuildPublicEnv", () => {
     linkToCloud()
     config = projectConfig({ build: { publicEnv: { A: "1" } } })
     fetchMock.mockResolvedValue(json({ error: "not_found", message: "Route not found" }, 404))
-    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({ A: "1" })
+    expect(await resolveBuildPublicEnv(project.dir, {})).toEqual({ config: { A: "1" }, studio: {} })
+  })
+})
+
+describe("buildPublicVars: config, then the shell, then Studio", () => {
+  const values = { config: { MAPS: "from-config" }, studio: { MAPS: "from-studio", ANALYTICS: "studio-a", FLAG: "studio-f" } }
+
+  it("gives each value under every prefix", () => {
+    expect(buildPublicVars({ config: { A: "1" }, studio: {} }, {})).toEqual({ VITE_A: "1", PUBLIC_A: "1", NEXT_PUBLIC_A: "1", EXPO_PUBLIC_A: "1" })
+  })
+
+  it("lets the config beat the shell, name for name", () => {
+    expect(buildPublicVars(values, { VITE_MAPS: "from-shell" })["VITE_MAPS"]).toBe("from-config")
+  })
+
+  it("lets a same-named shell value beat Studio's, and only for that name", () => {
+    const vars = buildPublicVars(values, { VITE_ANALYTICS: "from-shell" })
+    expect(vars["VITE_ANALYTICS"]).toBeUndefined()
+    expect(vars["PUBLIC_ANALYTICS"]).toBe("studio-a")
+    expect(vars["VITE_FLAG"]).toBe("studio-f")
+  })
+
+  it("gives Studio's value when the shell sets none", () => {
+    expect(buildPublicVars(values, {})["NEXT_PUBLIC_ANALYTICS"]).toBe("studio-a")
   })
 })

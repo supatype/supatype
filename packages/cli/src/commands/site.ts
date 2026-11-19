@@ -8,7 +8,7 @@
  */
 
 import type { Command } from "commander"
-import { prefixedPublicEnv, publicEnvFor } from "@supatype/shared"
+import { prefixedPublicEnv, publicEnvFor } from "@supatype/types"
 import { loadConfig, mainConfigFile } from "../config.js"
 import { upsertEnvFile } from "../env-file.js"
 import { errorMessage } from "../error-message.js"

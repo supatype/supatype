@@ -7,7 +7,8 @@
 
 import { existsSync } from "node:fs"
 import { join } from "node:path"
-import { isJsonObject, isString, publicEnvFor, publicEnvProblems, type PublicEnvDeclaration } from "@supatype/shared"
+import { isJsonObject, isString } from "@supatype/shared"
+import { publicEnvFor, publicEnvProblems, type PublicEnvDeclaration } from "@supatype/types"
 import { objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { patchRouteManifest } from "./route-manifest.js"

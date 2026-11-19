@@ -22,7 +22,7 @@ import { deploySchemaToLinkedProject, pushSchemaToLinkedProject } from "./cloud.
 import { loadProjectLink, type ProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
-import { isNumber, isShape, isString, nullable, optional, prefixedPublicEnv, readJson, type Guard } from "@supatype/shared"
+import { isNumber, isShape, isString, nullable, optional, readJson, type Guard } from "@supatype/shared"
 import { enginePush, type DiffResult } from "../engine-client.js"
 import { engineRequestIn, requireEngineFeaturesIn, stackEngine } from "../stack-engine.js"
 import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
@@ -39,7 +39,7 @@ import { commandSpawn, withProjectBins } from "../build-spawn.js"
 import { installCommand, type InstallCommand } from "../init-setup-steps.js"
 import { fatalError } from "../ui/fatal.js"
 import { frontendEnv } from "../frontend-env.js"
-import { PublicEnvUnavailable, resolveBuildPublicEnv } from "../site-public-env.js"
+import { PublicEnvUnavailable, buildPublicVars, resolveBuildPublicEnv } from "../site-public-env.js"
 import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
 import { deploySite, megabytes, overPlanLines } from "../site-deploy.js"
 import { spawnSync } from "node:child_process"
@@ -94,8 +94,9 @@ export async function deployBuildEnv(
   })
   info(`Building with the ${describeFrontendSources(values)}`)
   const publicValues = await resolveBuildPublicEnv(cwd, { env: opts.env })
-  if (Object.keys(publicValues).length > 0) info(`Building with ${Object.keys(publicValues).length} public value(s)`)
-  return { ...buildEnv, ...prefixedPublicEnv(publicValues), ...frontendEnv(values) }
+  const publicCount = Object.keys(publicValues.config).length + Object.keys(publicValues.studio).length
+  if (publicCount > 0) info(`Building with ${publicCount} public value(s)`)
+  return { ...buildEnv, ...buildPublicVars(publicValues, buildEnv), ...frontendEnv(values) }
 }
 
 /**

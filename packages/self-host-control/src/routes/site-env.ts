@@ -10,7 +10,8 @@
  * CLI checks it (`@supatype/shared`), so a stack never serves one a request put there that the CLI
  * would have refused.
  */
-import { isRecordOf, isString, publicEnvProblems } from "@supatype/shared"
+import { isRecordOf, isString } from "@supatype/shared"
+import { publicEnvProblems, publicEnvRefusal } from "@supatype/types"
 import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
@@ -20,17 +21,12 @@ import { manifestFile, readManifest } from "./hooks.js"
 const isValuesBody = (value: unknown): value is { values: Record<string, string> } =>
   typeof value === "object" && value !== null && "values" in value && isRecordOf(isString)(value.values)
 
-/** The refusals, said by name and never with the value. */
-function refusalText(problems: ReadonlyArray<{ name: string; reason: string }>): string {
-  return problems.map((p) => (p.name === "" ? `The public values: ${p.reason}` : `${p.name} ${p.reason}`)).join("; ")
-}
-
 export function registerSiteEnvRoutes(routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }>): void {
   route(routes, "PUT", "/projects/:ref/site/env/config", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const { values } = bodyOf(ctx.body, isValuesBody)
     const problems = publicEnvProblems(values)
-    if (problems.length > 0) throw badRequest(refusalText(problems))
+    if (problems.length > 0) throw badRequest(publicEnvRefusal(problems))
     const manifest = readManifest()
     const same = JSON.stringify(values) === JSON.stringify(manifest["public_env"] ?? {})
     if (!same) {

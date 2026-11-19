@@ -11,8 +11,7 @@ import type { Command } from "commander"
 import { buildSpawn, NoBuildCommand, runBuildProcess, withProjectBins, type BuildSpawn } from "../build-spawn.js"
 import { frontendEnv } from "../frontend-env.js"
 import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
-import { PublicEnvUnavailable, resolveBuildPublicEnv } from "../site-public-env.js"
-import { prefixedPublicEnv } from "@supatype/shared"
+import { PublicEnvUnavailable, buildPublicVars, resolveBuildPublicEnv } from "../site-public-env.js"
 import { error, info } from "../ui/messages.js"
 
 export interface FrontendBuildOptions {
@@ -82,6 +81,6 @@ export async function runFrontendBuild(cwd: string, command: readonly string[], 
   })
   info(`Building with the ${describeFrontendSources(values)}: ${program.describe}`)
   const publicValues = await resolveBuildPublicEnv(cwd, { env: opts.env })
-  const env = { ...withProjectBins(processEnv, cwd), ...prefixedPublicEnv(publicValues), ...frontendEnv(values), [BUILD_ACTIVE_ENV]: "1" }
+  const env = { ...withProjectBins(processEnv, cwd), ...buildPublicVars(publicValues, processEnv), ...frontendEnv(values), [BUILD_ACTIVE_ENV]: "1" }
   return runBuildProcess(program, cwd, env)
 }

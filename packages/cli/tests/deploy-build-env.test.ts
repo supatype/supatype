@@ -70,6 +70,29 @@ describe("deployBuildEnv: the site's public values", () => {
   })
 })
 
+describe("deployBuildEnv: the shell between the config and Studio", () => {
+  it("keeps a shell value over Studio's, and the config's over the shell's", async () => {
+    writeFileSync(join(project.dir, "supatype.config.ts"), "export default {}")
+    config = projectConfig({ project: { name: "acme" }, build: { publicEnv: { FROM_CONFIG: "config" } } })
+    fetchMock.mockImplementation(async (url: string) =>
+      new Response(
+        JSON.stringify(
+          url.endsWith("/site/env")
+            ? { data: { entries: [{ name: "FROM_STUDIO", value: "studio", source: "studio" }] } }
+            : { data: { anonKey: ANON, serviceRoleKey: SERVICE } },
+        ),
+        { status: 200 },
+      ),
+    )
+    vi.stubEnv("VITE_FROM_STUDIO", "shell")
+    vi.stubEnv("VITE_FROM_CONFIG", "shell")
+    const env = await deployBuildEnv(project.dir, { env: "production", appEnv: {} })
+    expect(env["VITE_FROM_STUDIO"]).toBe("shell")
+    expect(env["NEXT_PUBLIC_FROM_STUDIO"]).toBe("studio")
+    expect(env["VITE_FROM_CONFIG"]).toBe("config")
+  })
+})
+
 describe("deployBuildEnv", () => {
   it("gives a linked Cloud project's build the environment's address and anon key under every prefix", async () => {
     const env = await deployBuildEnv(project.dir, { env: "production", appEnv: {} })

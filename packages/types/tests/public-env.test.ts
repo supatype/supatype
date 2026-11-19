@@ -6,6 +6,7 @@ import {
   publicEnvFor,
   publicEnvProblems,
   secretLookingReason,
+  publicEnvRefusal,
 } from "../src/index.js"
 
 const jwt = (claims: Record<string, unknown>): string =>
@@ -127,5 +128,15 @@ describe("prefixedPublicEnv", () => {
     const out = prefixedPublicEnv({ MAPS_KEY: "m" })
     for (const prefix of FRONTEND_PUBLIC_PREFIXES) expect(out[`${prefix}MAPS_KEY`]).toBe("m")
     expect(Object.keys(out)).toHaveLength(FRONTEND_PUBLIC_PREFIXES.length)
+  })
+})
+
+describe("publicEnvRefusal", () => {
+  const problems = [{ name: "A", reason: "is bad" }, { name: "", reason: "too many" }]
+  it("says each problem by name, and the set's own as such", () => {
+    expect(publicEnvRefusal(problems)).toBe("A is bad; The public values: too many")
+  })
+  it("joins with the separator it is given", () => {
+    expect(publicEnvRefusal(problems, " | ")).toBe("A is bad | The public values: too many")
   })
 })

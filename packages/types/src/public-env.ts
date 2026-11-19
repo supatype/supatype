@@ -116,3 +116,11 @@ export function prefixedPublicEnv(values: Readonly<Record<string, string>>): Rec
     Object.entries(values).flatMap(([name, value]) => FRONTEND_PUBLIC_PREFIXES.map((prefix) => [`${prefix}${name}`, value] as const)),
   )
 }
+
+/**
+ * The refusals as one message, naming each value and never repeating it. A problem with the set as
+ * a whole has no name and is said as the public values'.
+ */
+export function publicEnvRefusal(problems: readonly PublicEnvProblem[], separator = "; "): string {
+  return problems.map((p) => (p.name === "" ? `The public values: ${p.reason}` : `${p.name} ${p.reason}`)).join(separator)
+}
