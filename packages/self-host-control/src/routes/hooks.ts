@@ -95,7 +95,7 @@ function unresolved(names: ReadonlySet<string>, maps: ReadonlyArray<HookMap | un
 }
 
 /** The stack's manifest, which has to be there and be a JSON object before anything is written. */
-function readManifest(): Record<string, unknown> {
+export function readManifest(): Record<string, unknown> {
   if (!existsSync(manifestPath())) {
     throw new HttpError(409, "conflict", "The stack has no .supatype/manifest.json; run `supatype self-host compose up` first")
   }
@@ -225,7 +225,7 @@ function servedNow(root: WriteRoot, name: string): boolean {
  * The manifest as the file the deploy writes, checked like every other (deploy-files.ts), and written
  * whole: the worker and the server read it while a deploy may be rewriting it.
  */
-function manifestFile(manifest: Record<string, unknown>): DeployFile {
+export function manifestFile(manifest: Record<string, unknown>): DeployFile {
   const root = writeRoot(dirname(manifestPath()), "The stack's .supatype", { mayBeLink: true })
   return { atomic: true, ...fileUnder(root, basename(manifestPath()), `${JSON.stringify(manifest, null, 2)}\n`) }
 }
