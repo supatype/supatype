@@ -296,7 +296,7 @@ machine instead.
 - **`schema_not_pushed` (409).** The server runs the engine's diff first and refuses when the database
   lacks the schema the seed was built against. Run `supatype push`, then seed. Other refusals are
   `validation_error`, `environment_mismatch`, `production_confirmation_required`, `seed_busy` (one seed per
-  environment at a time) and `payload_too_large` (10 MiB, 100 files per request).
+  environment at a time) and `payload_too_large` (default caps: 10 MiB and 100 files per request).
 - **Permissions.** On Cloud, applying needs `schema.push` and `--status` needs only `schema.view`. A self-host
   server takes the service-role key the link holds.
 - A server too old to list the `seed` feature, or running an engine too old to seed, is refused with the remedy.
