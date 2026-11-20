@@ -89,7 +89,7 @@ describe("seed routes (mock engine)", () => {
   after(() => {
     server.close()
     rmSync(dir, { recursive: true, force: true })
-    for (const key of ["SUPATYPE_ENGINE_MOCK", "DATABASE_URL", "SUPATYPE_PROJECT_REF", "MOCK_SEED_RECORD", "MOCK_SEED_MODE", "MOCK_SEED_SLEEP_MS", "SUPATYPE_SEED_TIMEOUT_MS", "MOCK_DIFF_OPS", "MOCK_DIFF_RECORD"]) {
+    for (const key of ["SUPATYPE_ENGINE_MOCK", "DATABASE_URL", "SUPATYPE_PROJECT_REF", "MOCK_SEED_RECORD", "MOCK_SEED_MODE", "MOCK_SEED_SLEEP_MS", "SUPATYPE_SEED_TIMEOUT_MS", "MOCK_ENGINE_DIFF_OPS", "MOCK_DIFF_RECORD"]) {
       delete process.env[key]
     }
   })
@@ -99,7 +99,7 @@ describe("seed routes (mock engine)", () => {
     process.env["MOCK_SEED_RECORD"] = recordPath
     delete process.env["MOCK_SEED_MODE"]
     delete process.env["SUPATYPE_SEED_TIMEOUT_MS"]
-    delete process.env["MOCK_DIFF_OPS"]
+    delete process.env["MOCK_ENGINE_DIFF_OPS"]
     delete process.env["MOCK_DIFF_RECORD"]
     audits = []
     setAuditWriter({ record: async (entry) => { audits.push(entry) } })
@@ -152,7 +152,7 @@ describe("seed routes (mock engine)", () => {
   })
 
   test("a schema the database does not have yet is refused with schema_not_pushed, and nothing is seeded", async () => {
-    process.env["MOCK_DIFF_OPS"] = JSON.stringify([{ type: "add_column", table: "post", column: "subtitle" }])
+    process.env["MOCK_ENGINE_DIFF_OPS"] = JSON.stringify([{ type: "add_column", table: "post", column: "subtitle" }])
     const res = await seed(seedBody())
     assert.equal(res.status, 409, res.text)
     assert.equal(res.json["error"], "schema_not_pushed")

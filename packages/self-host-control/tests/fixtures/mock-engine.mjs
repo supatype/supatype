@@ -51,7 +51,7 @@ if (refusal !== undefined) {
 }
 
 /**
- * `diff`: no changes, or the operations `MOCK_DIFF_OPS` holds as JSON. What it was given (argv and
+ * `diff`: no changes, or the operations `MOCK_ENGINE_DIFF_OPS` holds as JSON. What it was given (argv and
  * `DATABASE_URL`) goes to the file `MOCK_DIFF_RECORD` names, so a test can see where the DSN went.
  */
 if (cmd === "diff") {
@@ -60,7 +60,7 @@ if (cmd === "diff") {
     const { writeFileSync } = await import("node:fs")
     writeFileSync(record, JSON.stringify({ argv: args, databaseUrl: process.env["DATABASE_URL"] }))
   }
-  console.log(JSON.stringify({ operations: JSON.parse(process.env["MOCK_DIFF_OPS"] ?? "[]"), warnings: [] }))
+  console.log(JSON.stringify({ operations: JSON.parse(process.env["MOCK_ENGINE_DIFF_OPS"] ?? "[]"), warnings: [] }))
   process.exit(0)
 }
 
