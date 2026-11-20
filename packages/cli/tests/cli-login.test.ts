@@ -164,6 +164,40 @@ describe("supatype login when the accounts site cannot be found", () => {
   })
 })
 
+describe("supatype login when the control plane refuses the code exchange", () => {
+  it("explains a captcha_failed refusal: browser only, with the --token route for CI, and exits 1", async () => {
+    server.exchangeReply = {
+      status: 400,
+      body: { code: 400, error_code: "captcha_failed", msg: "captcha protection: request disallowed (no captcha_token found)" },
+    }
+    terminal.answers = ["ABCD-2345"]
+    const run = await login([])
+    expect(run.exitCode).toBe(1)
+    expect(run.output).toMatch(/only accepts sign-in through the browser/i)
+    expect(run.output).toContain("supatype login")
+    expect(run.output).toContain("--token")
+    expect(run.output).toContain("SUPATYPE_ACCESS_TOKEN")
+    expect(existsSync(credentialsPath())).toBe(false)
+  })
+
+  it("prints the server's own message for any other refusal, and exits 1", async () => {
+    server.exchangeReply = { status: 500, body: { error: "login store unavailable" } }
+    terminal.answers = ["ABCD-2345"]
+    const run = await login([])
+    expect(run.exitCode).toBe(1)
+    expect(run.output).toContain("500")
+    expect(run.output).toContain("login store unavailable")
+    expect(existsSync(credentialsPath())).toBe(false)
+  })
+
+  it("prints the server's message when the accounts site lookup is refused", async () => {
+    server.configStatus = 503
+    const run = await login([])
+    expect(run.exitCode).toBe(1)
+    expect(run.output).toContain("nope")
+  })
+})
+
 describe("supatype login --token", () => {
   it("saves a personal access token without opening a browser or asking for a code", async () => {
     const run = await login(["--token", server.pat])
