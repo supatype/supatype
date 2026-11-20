@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
-import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input, LoadingSettingsCard, TextLink } from "../components/ui.js"
@@ -35,7 +34,6 @@ export function RestApiSettings(): React.ReactElement {
   const config = useAdminConfig()
   const client = useStudioClient()
   const refused = useRoleRefusalText()
-  const serverCacheOffered = useServerRestCacheOffered()
 
   const apiBase = `${client.url.replace(/\/+$/, "")}/rest/v1`
 
@@ -83,7 +81,7 @@ export function RestApiSettings(): React.ReactElement {
   const isDirty =
     schema !== committed.schema ||
     maxRows !== committed.maxRows ||
-    (serverCacheOffered && cacheMaxTTL !== committed.cacheMaxTTL)
+    cacheMaxTTL !== committed.cacheMaxTTL
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -100,7 +98,7 @@ export function RestApiSettings(): React.ReactElement {
         body: JSON.stringify({
           schema,
           max_rows: parseInt(maxRows, 10),
-          ...(serverCacheOffered && { cache_max_ttl: parseInt(cacheMaxTTL, 10) || 0 }),
+          cache_max_ttl: parseInt(cacheMaxTTL, 10) || 0,
         }),
       })
       if (!res.ok) {
@@ -173,40 +171,37 @@ export function RestApiSettings(): React.ReactElement {
               <span className="text-xs text-muted-foreground">per request</span>
             </div>
           </Row>
-          {serverCacheOffered ? (
-            <Row label="Cache max TTL">
-              <div className="flex flex-col items-end gap-1">
-                <div className="flex items-center gap-2">
-                  <Input
-                    className="w-24 text-sm font-mono"
-                    type="number"
-                    min={0}
-                    {...(ttlCeiling !== null && { max: ttlCeiling })}
-                    value={cacheMaxTTL}
-                    onChange={(e) => { setCacheMaxTTL(e.target.value); setSaveError(null) }}
-                  />
-                  <span className="text-xs text-muted-foreground">seconds (0 = off)</span>
-                </div>
-                {/*
-                  The project-wide number is capped at the *highest* per-table cap the schema
-                  declares, because the lowest would let one model with a five-second cap drag
-                  every other table down with it. Each table is held to its own cap on the read
-                  path, where the table being served is known, so this ceiling is the loosest of
-                  them and not the effective TTL of anything in particular.
-                */}
-                {ttlCeiling !== null && (
-                  <span className="text-xs text-muted-foreground">
-                    Capped at {ttlCeiling}s by the highest <code className="font-mono">cache.maxTtl</code>{" "}
-                    your schema declares.
-                  </span>
-                )}
+          <Row label="Cache max TTL">
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <Input
+                  className="w-24 text-sm font-mono"
+                  type="number"
+                  min={0}
+                  {...(ttlCeiling !== null && { max: ttlCeiling })}
+                  value={cacheMaxTTL}
+                  onChange={(e) => { setCacheMaxTTL(e.target.value); setSaveError(null) }}
+                />
+                <span className="text-xs text-muted-foreground">seconds (0 = off)</span>
               </div>
-            </Row>
-          ) : null}
+              {/*
+                The project-wide number is capped at the *highest* per-table cap the schema
+                declares, because the lowest would let one model with a five-second cap drag
+                every other table down with it. Each table is held to its own cap on the read
+                path, where the table being served is known, so this ceiling is the loosest of
+                them and not the effective TTL of anything in particular.
+              */}
+              {ttlCeiling !== null && (
+                <span className="text-xs text-muted-foreground">
+                  Capped at {ttlCeiling}s by the highest <code className="font-mono">cache.maxTtl</code>{" "}
+                  your schema declares.
+                </span>
+              )}
+            </div>
+          </Row>
         </div>
       </Card>
 
-      {serverCacheOffered ? (
       <Card>
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-sm font-semibold">Response cache</h2>
@@ -242,19 +237,6 @@ export function RestApiSettings(): React.ReactElement {
           </p>
         </div>
       </Card>
-      ) : (
-      <Card className="border-amber-500/30 bg-amber-500/5">
-        <div className="px-4 py-3 space-y-2">
-          <h2 className="text-sm font-semibold">Server-side cache not on Free</h2>
-          <p className="text-xs text-muted-foreground">
-            On the Cloud free tier every request reaches PostgREST: responses are not cached on the
-            server, so <code className="font-mono">.cache(&#123; server: true &#125;)</code> is ignored.
-            Client-only <code className="font-mono">.cache(&#123; ttl &#125;)</code> still works in your app.
-            Pro serves those reads from memory instead.
-          </p>
-        </div>
-      </Card>
-      )}
 
       {/* Tables */}
       <Card>
