@@ -196,14 +196,14 @@
     <div class="tbl"><table>
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
-        <tr><td><code>seed [file]</code></td><td>Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts</td><td><code>--status</code>, <code>--atomic</code>, <code>--connection &lt;dsn&gt;</code>, <code>--environment &lt;name&gt;</code></td></tr>
+        <tr><td><code>seed [file]</code></td><td>Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts</td><td><code>--status</code>, <code>--atomic</code>, <code>--connection &lt;dsn&gt;</code>, <code>--environment &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--local</code>, <code>--confirm-production</code></td></tr>
         <tr><td><code>cache rest list</code></td><td>List cached REST GET entries</td><td><code>--table &lt;name&gt;</code>, <code>--json</code></td></tr>
         <tr><td><code>cache rest get &lt;key&gt;</code></td><td>Show one cache entry (full key)</td><td><code>--json</code></td></tr>
         <tr><td><code>cache rest delete &lt;key&gt;</code></td><td>Delete one cache entry</td><td></td></tr>
         <tr><td><code>cache rest flush</code></td><td>Flush REST cache entries</td><td><code>--table &lt;name&gt;</code>, <code>--yes</code></td></tr>
       </tbody>
     </table></div>
-    <p><code>seed</code> refuses to run against a project linked to Supatype Cloud unless you pass <code>--force</code>. See <a href="/docs/seeding.html">Seeding</a>.</p>
+    <p><code>seed</code> on a linked project (Supatype Cloud, or a server linked with <code>supatype link</code>) sends the seeds to that server instead of connecting to the database. <code>--local</code> seeds the local stack instead, and <code>--force</code> is refused. See <a href="/docs/seeding.html">Seeding</a>.</p>
     <h3 id="server-cache">Switching the server cache on</h3>
     <p>A model's <code>cache</code> block says which tables may be cached. It does not switch anything on: the running stack keeps its own allowlist, <code>cache_tables</code>, and a table is served from the cache only when both agree. <code>push</code> and <code>dev</code> add each newly declared table to that allowlist through the running stack and never change an entry that already exists. If the stack is not answering they create <code>.supatype/api-config.json</code> from the server's default shape and write the entry there.</p>
     <p>Both print a note while <code>cache_max_ttl</code> is 0, which it is until you set it: with a TTL of 0 nothing is cached. Set it under API, REST, Settings in Studio, or with the admin API, which is what the CLI calls:</p>

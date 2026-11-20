@@ -8,6 +8,7 @@ import { registerDeploymentRoutes } from "./routes/deployments.js"
 import { registerStatusRoute } from "./routes/status.js"
 import { registerRealtimeRoutes } from "./routes/realtime.js"
 import { registerProjectRoute } from "./routes/project.js"
+import { registerSeedRoutes } from "./routes/seed.js"
 import { secretCheck } from "./auth.js"
 
 const routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }> = []
@@ -20,6 +21,7 @@ registerDeploymentRoutes(routes)
 registerStatusRoute(routes)
 registerRealtimeRoutes(routes)
 registerProjectRoute(routes)
+registerSeedRoutes(routes)
 
 /**
  * The control plane's HTTP server, answering only requests that present `secret`.
@@ -39,7 +41,7 @@ export function createControlPlaneServer(secret: string): ReturnType<typeof crea
       res.writeHead(204, {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Supatype-Environment",
       })
       res.end()
       return
@@ -59,7 +61,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void
   }
 
   try {
-    const body = await readBody(req)
+    const body = await readBody(req, matched.maxBodyBytes)
     await matched.handler({
       req,
       res,

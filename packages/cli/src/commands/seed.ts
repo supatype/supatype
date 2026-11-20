@@ -1,69 +1,59 @@
 /**
  * `supatype seed`: find the seed files, collect what they describe, hand it to the engine.
  *
- * Discovery and the Cloud guard are what this command already did. The rest is new only in
- * that it collects rather than executes: no connection handling, no SQL, no transaction, no
- * error mapping, because those are the engine's now and six more language runners should not
- * each reimplement them and disagree.
+ * Discovery and collection are what this command already did. The rest is new only in that it
+ * collects rather than executes: no connection handling, no SQL, no transaction, no error mapping,
+ * because those are the engine's now and six more language runners should not each reimplement
+ * them and disagree.
  *
- * Both module shapes are supported. A default-exported function is the new contract and is
+ * Where the documents go depends on the target. A project linked to Supatype Cloud or a self-hosted
+ * server sends them to its control plane (`seed-remote.ts`), which runs the engine as the
+ * environment's role. Any other project, `--local`, and `--connection` run the engine here against a
+ * database this machine can reach.
+ *
+ * Both module shapes are supported locally. A default-exported function is the new contract and is
  * handed a context; a module with no default export is the old one, which does its work on
- * import and is told so by name. Nothing here removes the old shape.
+ * import and is told so by name. A linked project accepts only the new one.
  */
 
 import type { Command } from "commander"
-import { existsSync, readdirSync } from "node:fs"
-import { join, relative, resolve } from "node:path"
 import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import type { ComposeEngine } from "../engine-client.js"
 import { engineRequestIn, stackEngine } from "../stack-engine.js"
-import {
-  isArrayOf,
-  isBoolean,
-  isNumber,
-  isRecordOf,
-  isShape,
-  isString,
-  nullable,
-  optional,
-  toPosixPath,
-  type Guard,
-} from "@supatype/shared"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
-import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
+import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import { redact, resolveHostDatabaseUrl } from "../host-database.js"
 import { requireLocalStack } from "../local-stack-guard.js"
-import { collectSeed } from "../seed-runner.js"
 import { errorMessage } from "../error-message.js"
-import { connectAuthUsersByKey } from "../seed-auth-connect.js"
-import { seedBuilderPathWithDefaults } from "../type-generation.js"
-import type { SeedConfig, SeedIr } from "../seed.js"
-import { error, info, success, warn } from "../ui/messages.js"
+import {
+  collectPrepared,
+  existingSeedPaths,
+  locateBuilder,
+  runOnceForAll,
+  seedDocuments,
+  type Prepared,
+} from "../seed-prepare.js"
+import { isSeedResult, isSeedStatus, report, reportSeedStatus } from "../seed-report.js"
+import { linkedTarget, runRemoteSeed } from "../seed-remote.js"
+import { error, info, warn } from "../ui/messages.js"
 
-const SEED_EXT = /\.(ts|mts|tsx)$/
-
-/** Seed entries under `seeds/`, sorted by filename. */
-export function discoverSeedsDir(cwd: string, seedsDir: string): string[] {
-  if (!existsSync(seedsDir)) return []
-  const names = readdirSync(seedsDir).filter((n) => SEED_EXT.test(n))
-  names.sort((a, b) => a.localeCompare(b))
-  return names.map((n) => join(seedsDir, n))
-}
-
-/** One file's worth of collected IR, with what that file asked for. */
-interface Prepared {
-  file: string
-  document: SeedIr
-  config: SeedConfig
-}
+export { discoverSeedsDir, seedPaths } from "../seed-prepare.js"
+export { reportSeedStatus, seedFailureText } from "../seed-report.js"
 
 export interface SeedFlags {
+  /** Refused on a linked project (see `--confirm-production`); has no other meaning. */
   force: boolean
   atomic: boolean
   status: boolean
   connection?: string
   environment?: string
+  /** The linked environment to seed. */
+  env?: string
+  /** Seed the stack on this machine even when the project is linked. */
+  local?: boolean
+  /** Confirms a seed of a linked project's production environment without the prompt. */
+  confirmProduction?: boolean
 }
 
 export function registerSeed(program: Command): void {
@@ -74,13 +64,19 @@ export function registerSeed(program: Command): void {
     )
     .option(
       "--force",
-      "Allow running when the project is linked to Supatype Cloud (dangerous)",
+      "Refused on a linked project: use --confirm-production for production, --local for the local stack",
       false,
     )
     .option("--atomic", "Run every seed file in one transaction", false)
     .option("--status", "Show what has been applied, and what has changed since", false)
-    .option("--connection <dsn>", "Database to seed, instead of the resolved one")
-    .option("--environment <name>", "Environment name, for an `environment` condition")
+    .option("--connection <dsn>", "Database to seed with the engine on this machine, instead of the resolved one")
+    .option(
+      "--environment <name>",
+      "Name an `environment` condition reads. On a linked project it is the target environment, and must match it",
+    )
+    .option("--env <name>", "Environment to seed on a linked project (default: the linked default)")
+    .option("--local", "Seed the local stack even when the project is linked", false)
+    .option("--confirm-production", "Seed a linked project's production environment without the prompt", false)
     .action(async (file: string | undefined, opts: SeedFlags) => {
       const code = await runSeed(file, opts)
       if (code !== 0) process.exit(code)
@@ -97,14 +93,40 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
   const cwd = process.cwd()
   const config = loadConfig(cwd)
 
-  if (isLinkedToCloudProject(cwd, config) && !opts.force) {
-    error(
-      "This project is linked to Supatype Cloud. Refusing to run seeds locally.\n" +
-        "  Pass --force only if you intend to target this linked project (advanced).",
-    )
+  if (opts.local !== true && opts.connection === undefined) {
+    const linked = linkedProject(cwd, config, opts)
+    if (typeof linked === "number") return linked
+    if (linked !== undefined) return await runRemoteSeed(file, opts, linked, config)
+  }
+  return await runLocalSeed(file, opts, cwd, config)
+}
+
+/**
+ * The linked control plane to seed through, or undefined for the engine here, or an exit code when
+ * the project is marked as linked in a way that has no control plane to ask.
+ */
+function linkedProject(cwd: string, config: SupatypeConfig, opts: SeedFlags): ReturnType<typeof linkedTarget> | number {
+  try {
+    const target = linkedTarget(cwd, opts.env)
+    if (target !== undefined || !isLinkedToCloudProject(cwd, config)) return target
+  } catch (e) {
+    error(errorMessage(e))
     return 2
   }
+  error(
+    "This project is marked as linked to Supatype Cloud (project.ref), but has no link to seed through.\n" +
+      "  Run `supatype link`, or pass --local to seed the stack on this machine.",
+  )
+  return 2
+}
 
+/** The engine here, against the local stack or the database `--connection` names. */
+async function runLocalSeed(
+  file: string | undefined,
+  opts: SeedFlags,
+  cwd: string,
+  config: SupatypeConfig,
+): Promise<number> {
   // Before the connection is resolved and before a builder is looked for: an engine that cannot
   // seed makes both of those pointless, and the pin is the cheapest thing here to read.
   const tooOld = seedUnsupportedByPinnedEngine(pinnedVersion("engine", config))
@@ -113,100 +135,50 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
     return 2
   }
 
-  let dsn: string
-  try {
-    // A stack that is not running is the environment not set up, so 2 as for any other.
-    requireLocalStack(cwd, config, "seed", { connection: opts.connection, direct: true })
-    dsn = resolveHostDatabaseUrl(cwd, config, {
-      connection: opts.connection,
-      allowDerived: true,
-    }).dsn
-  } catch (e) {
-    // DsnNotFound and NoStackRunning say what to do in their message; the class name adds nothing.
-    error(errorMessage(e))
-    return 2
-  }
-
+  const dsn = localDatabaseUrl(cwd, config, opts)
+  if (dsn === undefined) return 2
   const engine = await stackEngine(cwd, config, opts.connection, dsn)
   if (opts.status) return await reportStatus(dsn, engine)
 
-  const paths = seedPaths(file, cwd, config)
-  const missing = paths.filter((p) => !existsSync(p))
-  if (missing.length > 0) {
-    error(`Seed file(s) not found:\n  ${missing.join("\n  ")}`)
-    return 2
-  }
-
-  const builderPath = locateBuilder(cwd, config)
-  if (builderPath === undefined) return 2
-
-  const prepared: Prepared[] = []
-  for (const path of paths) {
-    const label = toPosixPath(relative(cwd, path))
-    let collected
-    try {
-      collected = collectSeed(path, {
-        cwd,
-        builderPath,
-        environment: opts.environment,
-      })
-    } catch (e) {
-      error(errorMessage(e))
-      return 1
-    }
-
-    if (collected.stdout.trim().length > 0) {
-      for (const line of collected.stdout.trimEnd().split(/\r?\n/)) info(`  ${label}: ${line}`)
-    }
-    if (collected.result.shape === "legacy") {
-      warn(
-        `${label} has no default export, so it ran on import.\n` +
-          "  Export a default function to have its writes collected, ordered and applied in one transaction.",
-      )
-      continue
-    }
-    prepared.push({
-      file: label,
-      document: collected.result.ir,
-      config: collected.result.config,
-    })
-  }
-
-  if (prepared.length === 0) {
+  const collected = collectLocal(file, opts, cwd, config)
+  if (typeof collected === "number") return collected
+  if (collected.length === 0) {
     info("No seed operations to apply.")
     return 0
   }
-
-  return await apply(prepared, { cwd, config, dsn, opts, engine })
+  return await apply(collected, { cwd, config, dsn, opts, engine })
 }
 
-// --- Discovery ---
-
-/** The seed files a run uses: `file` when given, else every `seeds/*.ts`, else `seed.ts`. */
-export function seedPaths(file: string | undefined, cwd: string, config: SupatypeConfig): string[] {
-  if (file !== undefined && file.trim() !== "") return [resolve(cwd, file)]
-  const root = projectRootFromConfig(config, cwd)
-  const fromDir = discoverSeedsDir(cwd, join(root, "seeds"))
-  return fromDir.length > 0 ? fromDir : [resolve(root, "seed.ts")]
-}
-
-/**
- * The generated builder, which the runtime needs for the manifest and the fingerprint.
- *
- * Absent is a setup problem with a one-line remedy rather than a crash: the builder is
- * gitignored by design, so a fresh clone that has not run `generate` is the ordinary case.
- */
-function locateBuilder(cwd: string, config: SupatypeConfig): string | undefined {
-  const relativePath = seedBuilderPathWithDefaults(config.output)
-  const path = resolve(cwd, relativePath)
-  if (!existsSync(path)) {
-    error(
-      `The generated seed builder is missing: ${toPosixPath(relativePath)}\n` +
-        "  Run `supatype generate`. It needs no database and no running stack.",
-    )
+/** The database the engine here seeds, or undefined after saying why there is none. */
+function localDatabaseUrl(cwd: string, config: SupatypeConfig, opts: SeedFlags): string | undefined {
+  try {
+    // A stack that is not running is the environment not set up, so 2 as for any other.
+    requireLocalStack(cwd, config, "seed", { connection: opts.connection, direct: true })
+    return resolveHostDatabaseUrl(cwd, config, { connection: opts.connection, allowDerived: true }).dsn
+  } catch (e) {
+    // DsnNotFound and NoStackRunning say what to do in their message; the class name adds nothing.
+    error(errorMessage(e))
     return undefined
   }
-  return path
+}
+
+/** The files' collected documents, or the exit code of a run that could not collect them. */
+function collectLocal(file: string | undefined, opts: SeedFlags, cwd: string, config: SupatypeConfig): Prepared[] | number {
+  const paths = existingSeedPaths(file, cwd, config)
+  if (paths === undefined) return 2
+  const builderPath = locateBuilder(cwd, config)
+  if (builderPath === undefined) return 2
+
+  const collection = collectPrepared(paths, { cwd, builderPath, environment: opts.environment })
+  if ("failed" in collection) return collection.failed
+  for (const label of collection.legacy) {
+    warn(
+      `${label} has no default export, so it ran on import.
+` +
+        "  Export a default function to have its writes collected, ordered and applied in one transaction.",
+    )
+  }
+  return collection.prepared
 }
 
 // --- Applying ---
@@ -225,7 +197,7 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
   const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
   let documents: string[]
   try {
-    documents = prepared.map((one) => JSON.stringify({ ...connectAuthUsersByKey(one.document, ast), file: one.file }))
+    documents = seedDocuments(prepared, ast)
   } catch (e) {
     error(errorMessage(e))
     return 1
@@ -241,169 +213,9 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
     ...(opts.environment !== undefined ? { environment: opts.environment } : {}),
   }, isSeedResult)
 
-  return report(result, prepared.length, dsn)
-}
-
-/**
- * The engine takes one `--run-once` for the run, so a file asking for it decides for all of them.
- * Said out loud rather than generalised silently, because the difference is whether work someone
- * expected to happen happens.
- */
-function runOnceForAll(prepared: Prepared[]): boolean {
-  const askedRunOnce = prepared.filter((one) => one.config.runOnce === true)
-  if (askedRunOnce.length > 0 && askedRunOnce.length !== prepared.length) {
-    warn(
-      "Some seed files declare `runOnce` and others do not, and the run takes one setting.\n" +
-        `  Applying it to all of them, because ${askedRunOnce
-          .map((one) => one.file)
-          .join(", ")} asked for it.`,
-    )
-  }
-  return askedRunOnce.length > 0
-}
-
-interface SeedResult {
-  ok: boolean
-  atomic?: boolean
-  files?: Array<{
-    file: string
-    status: string
-    written?: Record<string, number>
-    skippedGroups?: string[]
-  }>
-  error?: SeedFailure
-}
-
-/** Why the engine could not seed, or could not read what was seeded. */
-interface SeedFailure {
-  kind: string
-  message?: string
-  remedy?: string | null
-  file?: string
-  path?: string
-}
-
-const isSeedFailure: Guard<SeedFailure> = isShape({
-  kind: isString,
-  message: optional(isString),
-  remedy: optional(nullable(isString)),
-  file: optional(isString),
-  path: optional(isString),
-})
-
-/**
- * Print what happened to every file, then the outcome.
- *
- * Every file, not just the one that failed: without `--atomic` a failure in the third of
- * five leaves the first two committed, and a report that mentioned only the failure would
- * leave the reader to guess at the rest.
- */
-/** The engine's seed result document (schema-engine `seed_command`). */
-const isSeedResult: Guard<SeedResult> = isShape({
-  ok: isBoolean,
-  atomic: optional(isBoolean),
-  files: optional(
-    isArrayOf(
-      isShape({
-        file: isString,
-        status: isString,
-        written: optional(isRecordOf(isNumber)),
-        skippedGroups: optional(isArrayOf(isString)),
-      }),
-    ),
-  ),
-  error: optional(isSeedFailure),
-})
-
-/**
- * `seed --status`: the latest run of each file, and whether it has changed since. `error` when the
- * engine could not read them, a database it could not reach included.
- */
-interface SeedStatus {
-  files?: Array<{ file: string; appliedAt: string; status: string; durationMs: number; drifted: boolean }>
-  error?: SeedFailure
-}
-
-const isSeedStatus: Guard<SeedStatus> = isShape({
-  error: optional(isSeedFailure),
-  files: optional(
-    isArrayOf(
-      isShape({ file: isString, appliedAt: isString, status: isString, durationMs: isNumber, drifted: isBoolean }),
-    ),
-  ),
-})
-
-function report(result: SeedResult, count: number, dsn: string): number {
-  for (const file of result.files ?? []) {
-    const rows = Object.entries(file.written ?? {})
-      .map(([model, written]) => `${model} ${written}`)
-      .join(", ")
-    info(`  ${file.file.padEnd(32)} ${file.status}${rows.length > 0 ? `  (${rows})` : ""}`)
-    for (const skipped of file.skippedGroups ?? []) {
-      info(`    condition was false, skipped: ${skipped}`)
-    }
-  }
-
-  if (result.ok) {
-    success(`Seeded ${count} file(s) into ${redact(dsn)}.`)
-    return 0
-  }
-
-  const failure = result.error
-  if (failure === undefined) {
-    error("The seed failed, and the engine said nothing about why.")
-    return 1
-  }
-
-  return reportSeedFailure(failure)
-}
-
-/** Print the engine's failure; its exit code. */
-function reportSeedFailure(failure: SeedFailure): number {
-  error(seedFailureText(failure))
-  // Nothing ran because nothing could: the environment, not the seed.
-  return failure.kind === "connection" || failure.kind === "document" ? 2 : 1
-}
-
-/**
- * The engine's error as one message: what failed, where, and the remedy. The engine already writes
- * the remedy into the message of some failures (a column the database does not have), so it is
- * added only when the message does not carry it, or it printed twice.
- */
-export function seedFailureText(failure: SeedFailure): string {
-  const message = failure.message ?? failure.kind
-  const where = [failure.file, failure.path].filter((part) => part !== undefined && part !== "")
-  const remedy = failure.remedy ?? undefined
-  return (
-    message +
-    (where.length > 0 ? `\n  at ${where.join(" ")}` : "") +
-    (remedy !== undefined && !message.includes(remedy) ? `\n  ${remedy}` : "")
-  )
+  return report(result, prepared.length, redact(dsn))
 }
 
 async function reportStatus(dsn: string, engine: ComposeEngine | undefined): Promise<number> {
   return reportSeedStatus(await engineRequestIn(engine, "/seed", { database_url: dsn, status: true }, isSeedStatus), dsn)
 }
-
-/**
- * Print what `seed --status` found; its exit code. An engine that could not reach the database
- * answers with an error beside an empty list, which this used to read as "No seeds have been
- * applied", exit 0, for a database it never connected to.
- */
-export function reportSeedStatus(result: SeedStatus, dsn: string): number {
-  if (result.error !== undefined) return reportSeedFailure(result.error)
-  const files = result.files ?? []
-  if (files.length === 0) {
-    info(`No seeds have been applied to ${redact(dsn)}.`)
-    return 0
-  }
-
-  for (const entry of files) {
-    info(
-      `  ${entry.file.padEnd(32)} ${entry.status.padEnd(12)} ${entry.appliedAt}  ` +
-        `${entry.durationMs}ms${entry.drifted ? "  changed since it was applied" : ""}`,
-    )
-  }
-  return 0
-}
-

@@ -303,14 +303,27 @@ db.$sql(
 <span class="pr">$</span> supatype seed seeds/02-posts.ts  <span class="c"># one file</span>
 <span class="pr">$</span> supatype seed --atomic           <span class="c"># all files in one transaction</span>
 <span class="pr">$</span> supatype seed --status           <span class="c"># what ran, when, and what changed since</span>
-<span class="pr">$</span> supatype seed --connection &lt;dsn&gt; <span class="c"># another database</span>
+<span class="pr">$</span> supatype seed --connection &lt;dsn&gt; <span class="c"># another database, from this machine</span>
+<span class="pr">$</span> supatype seed --env staging       <span class="c"># a linked project's environment</span>
+<span class="pr">$</span> supatype seed --local             <span class="c"># the local stack, even when linked</span>
 <span class="pr">$</span> supatype seed --environment staging</pre></div>
     <p><code>--status</code> lists each applied file with its status, when it ran, how long it took, and whether the file has changed since. <code>--environment</code> names the environment for an <code>{ environment }</code> condition.</p>
     <p>A Docker project's local stack has to be running: with it stopped, <code>supatype seed</code> starts nothing and exits 2, saying to start it with <code>supatype dev</code>, or <code>supatype self-host compose up -d</code> on a server. <code>--connection</code> seeds the database it names either way.</p>
-    <p>A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass <code>--force</code> only when you mean to seed the linked project.</p>
     <p>Each file is one transaction. Without <code>--atomic</code>, a failure in the third file leaves the first two applied, and the report says so.</p>
     <p>Errors name your schema, such as <code>Tag.name is already taken</code>, with the file and position. Exit code <code>1</code> means a seed failed. Exit code <code>2</code> means the run could not start.</p>
     <p>A seed writes the model's own table, so rows on a drafts model are seeded as published.</p>
+
+    <h3 id="linked">A linked project</h3>
+    <p>A project linked with <code>supatype link</code>, to Supatype Cloud or to a self-hosted server, seeds through that server. The CLI collects your files as it does locally and sends the result to the server, which applies it as the environment's own database role. The CLI never holds the database credential. <code>--env &lt;name&gt;</code> picks the environment, and the link's default is used without it.</p>
+    <ul>
+      <li>Seeding production asks you to type the project ref. In a script, or with no terminal, pass <code>--confirm-production</code>. A self-hosted server's one environment is production.</li>
+      <li><code>--force</code> is refused on a linked project. Use <code>--confirm-production</code> to skip the prompt, or <code>--local</code> to seed the stack on this machine instead.</li>
+      <li><code>--environment</code> must match the environment being seeded, because that is what an <code>{ environment }</code> condition reads. Drop it, or pass <code>--env</code> with the same name.</li>
+      <li>Every file must <code>export default</code> a function. A file without one would run its writes when it is read, so it is refused before anything is sent.</li>
+      <li>The server refuses with <code>schema_not_pushed</code> when the database lacks the schema the seed was built against. Run <code>supatype push</code> first.</li>
+      <li><code>--status</code> needs only permission to view the project. Applying a seed needs permission to push the schema.</li>
+      <li><code>--connection</code> and <code>--local</code> skip the link and seed the database or stack on this machine.</li>
+    </ul>
 
     <nav class="pn" aria-label="More pages">
       <a href="/docs/functions.html"><small>PREVIOUS</small><span>Functions</span></a>

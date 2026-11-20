@@ -44,7 +44,26 @@ export class EngineRunError extends Error {
   }
 }
 
-function runEngine(subcommand: string, args: string[], opts?: { inputPath?: string }): Promise<string> {
+/** The engine was killed for running past its time limit. */
+export class EngineTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`The engine timed out after ${Math.round(timeoutMs / 1000)}s and was stopped`)
+    this.name = "EngineTimeoutError"
+  }
+}
+
+/** How an engine run differs from the default: its environment, and a time limit to kill it at. */
+export interface EngineRunOptions {
+  inputPath?: string
+  /**
+   * The database the engine connects to, passed as `DATABASE_URL` in its environment (which every
+   * subcommand that connects reads) and never on its command line, where `ps` shows it to the host.
+   */
+  databaseUrl?: string
+  timeoutMs?: number
+}
+
+export function runEngine(subcommand: string, args: string[], opts?: EngineRunOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     const mockScript = process.env["SUPATYPE_ENGINE_MOCK"]
     const bin = mockScript ? process.execPath : engineBin()
@@ -52,13 +71,27 @@ function runEngine(subcommand: string, args: string[], opts?: { inputPath?: stri
     if (opts?.inputPath) cmdArgs.push("--input", opts.inputPath)
     cmdArgs.push(subcommand, ...args)
 
-    const proc = spawn(bin, cmdArgs, { stdio: ["ignore", "pipe", "pipe"] })
+    const proc = spawn(bin, cmdArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(opts?.databaseUrl !== undefined && { env: { ...process.env, DATABASE_URL: opts.databaseUrl } }),
+    })
     let stdout = ""
     let stderr = ""
+    const timer =
+      opts?.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            proc.kill("SIGKILL")
+            reject(new EngineTimeoutError(opts.timeoutMs ?? 0))
+          }, opts.timeoutMs)
     proc.stdout.on("data", (c: Buffer) => { stdout += c.toString() })
     proc.stderr.on("data", (c: Buffer) => { stderr += c.toString() })
-    proc.on("error", (err) => reject(new Error(`Failed to spawn engine: ${err.message}`)))
+    proc.on("error", (err) => {
+      clearTimeout(timer)
+      reject(new Error(`Failed to spawn engine: ${err.message}`))
+    })
     proc.on("close", (code) => {
+      clearTimeout(timer)
       if (code === 0) resolve(stdout)
       else reject(new EngineRunError(`Engine exit ${code}: ${stderr.trim()}`, code, stdout, stderr))
     })
@@ -78,10 +111,7 @@ const isDiffResult = isShape(DIFF_RESULT)
 export async function runEngineDiff(databaseUrl: string, ast: unknown, schema = "public"): Promise<DiffResult> {
   const astPath = await writeTempJson(ast)
   try {
-    const out = await runEngine("diff", [
-      "--database-url", databaseUrl,
-      "--schema", schema,
-    ], { inputPath: astPath })
+    const out = await runEngine("diff", ["--schema", schema], { inputPath: astPath, databaseUrl })
     const diff = JSON.parse(out)
     if (!isDiffResult(diff)) throw new Error("Engine diff printed something other than a diff")
     return diff
@@ -127,11 +157,7 @@ export async function runEnginePush(
   const astPath = await writeTempJson(ast)
   const tempFiles: string[] = [astPath]
   try {
-    const args = [
-      "--database-url", databaseUrl,
-      "--schema", opts?.schema ?? "public",
-      "--non-interactive",
-    ]
+    const args = ["--schema", opts?.schema ?? "public", "--non-interactive"]
     if (opts?.force) args.push("--force")
     if (opts?.overwriteDrift) args.push("--overwrite-drift")
     if (opts?.schemaSourcesGzBase64) {
@@ -151,7 +177,7 @@ export async function runEnginePush(
     if (opts?.audit && (await runEngineCapabilities()).features.includes("push_audit")) {
       args.push(...auditArgs(opts.audit))
     }
-    const out = await runEngine("push", args, { inputPath: astPath })
+    const out = await runEngine("push", args, { inputPath: astPath, databaseUrl })
     try {
       return JSON.parse(out)
     } catch {
@@ -166,15 +192,12 @@ export async function runEngineRollback(
   databaseUrl: string,
   schema = "public",
 ): Promise<unknown> {
-  const out = await runEngine("rollback", [
-    "--database-url", databaseUrl,
-    "--schema", schema,
-  ])
+  const out = await runEngine("rollback", ["--schema", schema], { databaseUrl })
   return JSON.parse(out)
 }
 
 export async function runEngineListMigrations(databaseUrl: string): Promise<unknown> {
-  const out = await runEngine("migrations", ["--database-url", databaseUrl])
+  const out = await runEngine("migrations", [], { databaseUrl })
   return JSON.parse(out)
 }
 
@@ -182,10 +205,7 @@ export async function runEngineMigrationSources(
   databaseUrl: string,
   name: string,
 ): Promise<unknown> {
-  const out = await runEngine("migrations", [
-    "--database-url", databaseUrl,
-    "--name", name,
-  ])
+  const out = await runEngine("migrations", ["--name", name], { databaseUrl })
   return JSON.parse(out)
 }
 
@@ -207,17 +227,14 @@ export async function runEngineDoctor(
 ): Promise<unknown> {
   const astPath = await writeTempJson(ast)
   try {
-    const args = [
-      "--database-url", databaseUrl,
-      "--schema", opts?.schema ?? "public",
-    ]
+    const args = ["--schema", opts?.schema ?? "public"]
     if (opts?.rebaseline) {
       args.push("--rebaseline")
       // Rebaseline access drift too; the engine reads it only with --rebaseline.
       if (opts.acceptAccessDrift) args.push("--accept-access-drift")
       for (const key of opts.keys ?? []) args.push("--key", key)
     }
-    const out = await runEngine("doctor", args, { inputPath: astPath })
+    const out = await runEngine("doctor", args, { inputPath: astPath, databaseUrl })
     return JSON.parse(out)
   } finally {
     await deleteTempFile(astPath)
@@ -225,10 +242,7 @@ export async function runEngineDoctor(
 }
 
 export async function runEngineIntrospect(databaseUrl: string, schema = "public"): Promise<unknown> {
-  const out = await runEngine("introspect", [
-    "--database-url", databaseUrl,
-    "--schema", schema,
-  ])
+  const out = await runEngine("introspect", ["--schema", schema], { databaseUrl })
   return JSON.parse(out)
 }
 
@@ -247,10 +261,7 @@ export async function runEngineAdoptWithAst(
 ): Promise<unknown> {
   const astPath = await writeTempJson(ast)
   try {
-    const args = [
-      "--database-url", databaseUrl,
-      "--schema", opts?.schema ?? "public",
-    ]
+    const args = ["--schema", opts?.schema ?? "public"]
     if (opts?.yes) args.push("--yes")
     if (opts?.noCache) args.push("--no-cache")
     for (const spec of opts?.release ?? []) args.push("--release", spec)
@@ -260,7 +271,7 @@ export async function runEngineAdoptWithAst(
       if (opts.keys.length === 0) args.push("--adopt-none")
       for (const key of opts.keys) args.push("--key", key)
     }
-    const out = await runEngine("adopt", args, { inputPath: astPath })
+    const out = await runEngine("adopt", args, { inputPath: astPath, databaseUrl })
     return JSON.parse(out)
   } finally {
     await deleteTempFile(astPath)

@@ -1626,3 +1626,4 @@ export type LocalizedModel<
 > = Model<ApplyAutoLocalizedFields<TFields>, TMeta>
 
 export * from "./public-env.js"
+export * from "./seed-contract.js"

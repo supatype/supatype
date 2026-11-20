@@ -51,6 +51,9 @@ export const OWNERSHIP_FEATURES = [
   // A schema's `Channel<>` declarations and `realtime.channels`. An engine without it drops both and
   // pushes the rest, so declared channels would have no access function and nothing would enforce them.
   "private_channels",
+  // Not an ownership flag: a control plane that serves the remote seed routes. This is
+  // REMOTE_SEED_FEATURE from @supatype/types, a dev dependency of this package, so named by value.
+  "seed",
 ] as const
 
 export type OwnershipFeature = (typeof OWNERSHIP_FEATURES)[number]

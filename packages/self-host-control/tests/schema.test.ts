@@ -68,7 +68,7 @@ describe("schema routes (mock engine)", () => {
     try {
       const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
       assert.equal(res.status, 200, JSON.stringify(res.json))
-      assert.deepEqual(res.json.data, { features: ["hook_files", "hook_keep"] })
+      assert.deepEqual(res.json.data, { features: ["hook_files", "hook_keep", "seed"] })
     } finally {
       process.env["SUPATYPE_ENGINE_MOCK"] = MOCK_ENGINE
       if (bin === undefined) delete process.env["SUPATYPE_ENGINE_BIN"]
@@ -93,7 +93,7 @@ describe("schema routes (mock engine)", () => {
       const res = await request(baseUrl, "GET", `/projects/${PROJECT}/schema/capabilities`)
       assert.equal(res.status, 200)
       // The engine lists nothing; the control plane's own features are still there.
-      assert.deepEqual(res.json.data, { features: ["hook_files", "hook_keep"] })
+      assert.deepEqual(res.json.data, { features: ["hook_files", "hook_keep", "seed"] })
     } finally {
       delete process.env["MOCK_ENGINE_NO_CAPABILITIES"]
       resetEngineCapabilities()

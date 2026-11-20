@@ -41,11 +41,35 @@ export function sendJson(res: ServerResponse, status: number, payload: unknown):
   res.end(JSON.stringify(payload))
 }
 
-export function readBody(req: IncomingMessage): Promise<unknown> {
+/** A 413 for a request body over the route's byte cap. */
+export function payloadTooLarge(maxBytes: number): HttpError {
+  return new HttpError(413, "payload_too_large", `The request body is over the ${maxBytes} byte limit for this route.`)
+}
+
+/**
+ * The request body, parsed. With `maxBytes` the read is bounded: a declared length over it, or a
+ * body that grows past it, is refused as soon as that is known, and nothing more is kept in memory.
+ */
+export function readBody(req: IncomingMessage, maxBytes?: number): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
-    req.on("data", (c: unknown) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))))
+    let size = 0
+    let refused = false
+    const refuse = (): void => {
+      refused = true
+      chunks.length = 0
+      reject(payloadTooLarge(maxBytes ?? 0))
+    }
+    if (maxBytes !== undefined && Number(req.headers["content-length"] ?? 0) > maxBytes) refuse()
+    req.on("data", (c: unknown) => {
+      if (refused) return
+      const chunk = Buffer.isBuffer(c) ? c : Buffer.from(String(c))
+      size += chunk.length
+      if (maxBytes !== undefined && size > maxBytes) refuse()
+      else chunks.push(chunk)
+    })
     req.on("end", () => {
+      if (refused) return
       if (chunks.length === 0) {
         resolve({})
         return
@@ -60,11 +84,14 @@ export function readBody(req: IncomingMessage): Promise<unknown> {
   })
 }
 
+/** The byte cap a route set for its body, by handler. A route with none reads any size, as before. */
+const bodyLimits = new WeakMap<RouteHandler, number>()
+
 export function matchRoute(
   routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }>,
   method: string,
   pathname: string,
-): { handler: RouteHandler; params: Record<string, string> } | null {
+): { handler: RouteHandler; params: Record<string, string>; maxBodyBytes?: number } | null {
   for (const route of routes) {
     if (route.method !== method) continue
     const m = pathname.match(route.pattern)
@@ -75,7 +102,8 @@ export function matchRoute(
         if (v !== undefined) params[k] = v
       }
     }
-    return { handler: route.handler, params }
+    const maxBodyBytes = bodyLimits.get(route.handler)
+    return { handler: route.handler, params, ...(maxBodyBytes !== undefined && { maxBodyBytes }) }
   }
   return null
 }
@@ -85,7 +113,9 @@ export function route(
   method: string,
   pathPattern: string,
   handler: RouteHandler,
+  options: { maxBodyBytes?: number } = {},
 ): void {
+  if (options.maxBodyBytes !== undefined) bodyLimits.set(handler, options.maxBodyBytes)
   const pattern = new RegExp(
     `^${pathPattern.replace(/:(\w+)/g, (_, name) => `(?<${name}>[^/]+)`)}$`,
   )
