@@ -97,6 +97,20 @@ describe("extension sidebar sections", () => {
   })
 })
 
+describe("core rail icons", () => {
+  it("draw a different icon for every item", async () => {
+    const container = await studioAt("/", { host })
+    const icons = new Map<string, string>()
+    for (const button of Array.from(container.querySelectorAll(`${RAIL} button`))) {
+      const svg = button.querySelector("svg")?.innerHTML
+      if (svg === undefined) continue
+      icons.set(button.getAttribute("aria-label") ?? button.textContent ?? "", svg)
+    }
+    expect(icons.size).toBeGreaterThan(10)
+    expect(new Set(icons.values()).size).toBe(icons.size)
+  })
+})
+
 describe("the Settings Public values slot", () => {
   it("renders the host's PublicValues card", async () => {
     const withCard: StaticSiteHost = { ...host, PublicValues: () => <div>Public values card</div> }

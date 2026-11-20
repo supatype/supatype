@@ -35,7 +35,7 @@ const SECONDARY_NAV_ENTRIES: NavEntry[] = [
   { id: "functions",     label: "Edge Functions",    icon: "zap",       href: "/edge-functions" },
   { id: "static-site",   label: "Static site",       icon: "globe",     href: "/static-site" },
   { id: "realtime",      label: "Realtime",          icon: "radio",     href: "/realtime" },
-  { id: "webhooks",      label: "Webhooks",          icon: "globe",     href: "/webhooks" },
+  { id: "webhooks",      label: "Webhooks",          icon: "webhook",   href: "/webhooks" },
   { id: "jobs",          label: "Scheduled Jobs",    icon: "clock",     href: "/jobs" },
   "separator",
   { id: "ai",            label: "Intelligence",      icon: "cpu",       href: "/ai/usage" },
