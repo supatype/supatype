@@ -50,6 +50,7 @@ import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
 import { postApplyFailed } from "../post-apply.js"
 import { assertCloudAuthSettings, pushAuthSettings } from "../auth-settings-push.js"
+import { pushCorsOrigins } from "../cors-origins-push.js"
 import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
 import { publicEnvFor } from "@supatype/types"
 import { publicValueCount, pushPublicEnv } from "../site-public-env.js"
@@ -357,6 +358,8 @@ async function pushViaTarget(
   const hooksFailed = linked ? await deployHooksToTarget(cwd, config, target, ast) : false
   // After the hooks, which restart the worker, and whatever they did: neither needs the other.
   const publicEnvFailed = linked ? await deployPublicEnvToTarget(config, target) : false
+  // Self-host reads api.corsOrigins from its environment; a Cloud project is told here.
+  const corsFailed = await pushCorsOrigins(target, config)
   const authFailed = await pushAuthSettings(cwd, config, target, { resetOverrides: run.resetAuthOverrides === true })
   // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
   if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
@@ -366,7 +369,7 @@ async function pushViaTarget(
     return
   }
 
-  reportTargetPush(target, pushResult, hooksFailed || publicEnvFailed || authFailed)
+  reportTargetPush(target, pushResult, hooksFailed || publicEnvFailed || corsFailed || authFailed)
 }
 
 /**
