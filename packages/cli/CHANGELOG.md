@@ -82,6 +82,23 @@ no entries are missing from this file.
   plan it adds the date to upgrade before. `deploy rollback` prints the address as well as the
   version it went back to. Each line appears only when the server sends the field.
 
+### Features
+
+* **login:** `supatype login` signs in through the browser. It opens the accounts site (which the
+  control plane names at `/api/v1/cli/login/config`, or `SUPATYPE_ACCOUNTS_URL`) and always prints the URL; after you approve, type the
+  code the page shows into the terminal and the CLI stores the personal access token (`spt_...`)
+  the control plane sealed to this CLI's key. `--name` names the token, `--no-browser` only prints
+  the URL, and `--token <spt_...>` (or `SUPATYPE_ACCESS_TOKEN`) stores a token made in your account,
+  for CI. A personal access token is never renewed through `/auth/refresh`, and a refusal of one
+  says it was revoked or expired.
+
+### Breaking Changes
+
+* **login:** password login is gone. Sign-in on the platform now needs a Cloudflare Turnstile token a
+  terminal cannot give, so `supatype login --email --password` failed with `Login failed (400)`.
+  `--email`, `--password`, `SUPATYPE_EMAIL` and `SUPATYPE_PASSWORD` are no longer read. A session
+  an older CLI stored keeps working until it expires.
+
 ### Bug Fixes
 
 * **deploy:** the build step puts the app directory's `node_modules/.bin`, and every one above it, on PATH,

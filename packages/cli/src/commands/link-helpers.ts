@@ -1,5 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
+import { DEFAULT_API_URL, trimApiUrl } from "../api-url.js"
 import { envAccessToken, loadCloudCredentials } from "../cloud-credentials.js"
 import { readEnvFile } from "../env-file.js"
 import {
@@ -190,7 +191,7 @@ export function registerLinkOptions(linkCmd: Command): void {
   linkCmd
     .option("--project <slug>", "Cloud project slug")
     .option("--url <url>", "Self-host or local Kong URL")
-    .option("--api-url <url>", "Cloud control plane API URL", "https://api.supatype.com")
+    .option("--api-url <url>", "Cloud control plane API URL", DEFAULT_API_URL)
     .option("--token <token>", "Access token (cloud PAT or self-host SERVICE_ROLE_KEY)")
     .option("--service-role-key <key>", "Deprecated alias for --token on self-host")
     .option("--env <name>", "Environment name (default: production)", "production")
@@ -259,7 +260,7 @@ export async function runLinkAction(opts: {
       error("Authentication required: the stack's service-role key. Pass --token $SERVICE_ROLE_KEY, or set SERVICE_ROLE_KEY in .env")
       process.exit(1)
     }
-    const apiUrl = url.replace(/\/$/, "")
+    const apiUrl = trimApiUrl(url)
     await probeSelfHostLink(apiUrl, projectRef, token)
     const link = createSelfHostLink({
       projectRef,
@@ -283,10 +284,10 @@ export async function runLinkAction(opts: {
     process.exit(1)
   }
 
-  const cloudApiUrl = opts.apiUrl.replace(/\/$/, "")
+  const cloudApiUrl = trimApiUrl(opts.apiUrl)
   const creds = loadCloudCredentials()
   const refreshToken =
-    (creds?.apiUrl.replace(/\/$/, "") === cloudApiUrl ? creds.refreshToken : undefined) ??
+    (creds !== null && trimApiUrl(creds.apiUrl) === cloudApiUrl ? creds.refreshToken : undefined) ??
     existing?.refreshToken
 
   if (project) {

@@ -192,7 +192,7 @@ All of these need Supatype Cloud, which is in closed beta ([request access](/#cl
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `login` | Sign in to Supatype Cloud (stores refreshable session for push/deploy) | `--email <email>`, `--password <password>` (prefer `SUPATYPE_PASSWORD`) |
+| `login` | Sign in to Supatype Cloud in your browser. It opens the accounts site, you approve, and type the code shown there into the terminal; the CLI stores a personal access token (`spt_...`) for push and deploy. The URL is always printed. The CLI asks the control plane where the accounts site is (`GET /api/v1/cli/login/config`), or you set `SUPATYPE_ACCOUNTS_URL`; if neither gives an address, login stops and says so | `--api-url <url>`, `--name <name>` (the token's name, default `cli_<hostname>_<time>`), `--no-browser`, `--token <spt_...>` (store a token made in your account instead of signing in, for CI; `SUPATYPE_ACCESS_TOKEN` takes one too) |
 | `logout` | Clear stored Supatype Cloud credentials |  |
 | `whoami` | Show the current Supatype Cloud session |  |
 | `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json) | `--token <token>`, `--env <name>` |
