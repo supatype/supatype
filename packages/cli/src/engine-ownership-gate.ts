@@ -48,6 +48,9 @@ export const OWNERSHIP_FEATURES = [
   // Not an ownership flag either: a push whose data migrations fire after-hooks (`push --run-hooks`).
   // An engine without it would reject the flag as an unknown argument.
   "run_hooks",
+  // Not an ownership flag: a control plane that serves the remote seed routes. This is
+  // REMOTE_SEED_FEATURE from @supatype/types, a dev dependency of this package, so named by value.
+  "seed",
 ] as const
 
 export type OwnershipFeature = (typeof OWNERSHIP_FEATURES)[number]

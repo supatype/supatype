@@ -106,13 +106,13 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `seed [file]` | Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts | `--status`, `--atomic`, `--connection <dsn>`, `--environment <name>` |
+| `seed [file]` | Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts | `--status`, `--atomic`, `--connection <dsn>`, `--environment <name>`, `--env <name>`, `--local`, `--confirm-production` |
 | `cache rest list` | List cached REST GET entries | `--table <name>`, `--json` |
 | `cache rest get <key>` | Show one cache entry (full key) | `--json` |
 | `cache rest delete <key>` | Delete one cache entry |  |
 | `cache rest flush` | Flush REST cache entries | `--table <name>`, `--yes` |
 
-`seed` refuses to run against a project linked to Supatype Cloud unless you pass `--force`. See [Seeding](/docs/seeding.html).
+`seed` on a linked project (Supatype Cloud, or a server linked with `supatype link`) sends the seeds to that server instead of connecting to the database. `--local` seeds the local stack instead, and `--force` is refused. See [Seeding](/docs/seeding.html).
 
 `reset` drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a `runOnce` seed runs again, and runs the seeds unless you pass `--no-seed`. To start the whole database again, use `supatype dev --reset-db`.
 
