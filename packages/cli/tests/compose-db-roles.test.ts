@@ -174,4 +174,28 @@ describe("reconcileSqlEditorPassword", () => {
     expect(input).toContain("WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'supatype_sql_editor')")
     expect(input).toContain("\\gexec")
   })
+
+  // Postgres 16 split SET from INHERIT on a role grant. The image grants the editor its owner
+  // with SET FALSE, but the editor hands the objects it creates to that owner with SET ROLE, so
+  // without SET every query failed with `must be able to SET ROLE "supatype_owner"`. The start
+  // re-grants, which also corrects a volume the image already made with SET FALSE.
+  it("grants the database owner to the editor with SET TRUE and INHERIT TRUE", async () => {
+    await reconcileSqlEditorPassword(paths(), cwd, "supatype-kitchen-sink")
+    const { input } = psqlCall()
+
+    expect(input).toContain("GRANT %I TO supatype_sql_editor WITH INHERIT TRUE, SET TRUE")
+    expect(input).not.toContain("SET FALSE")
+  })
+
+  it("grants only the non-superuser owner of this database, on a server that has SET", async () => {
+    await reconcileSqlEditorPassword(paths(), cwd, "supatype-kitchen-sink")
+    const { input } = psqlCall()
+
+    expect(input).toContain("pg_get_userbyid(d.datdba)")
+    expect(input).toContain("d.datname = current_database()")
+    expect(input).toContain("NOT r.rolsuper")
+    expect(input).toContain("server_version_num")
+    expect(input).not.toContain("supatype_auth_admin")
+    expect(input).not.toMatch(/GRANT\s+(CREATE|ALL)/i)
+  })
 })
