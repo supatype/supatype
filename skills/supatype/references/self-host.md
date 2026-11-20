@@ -15,6 +15,8 @@ supatype push --env staging
 supatype status --env staging
 ```
 
+`supatype seed` on a linked server sends the collected seed documents to the server's control plane (`POST /projects/:ref/seed`, status at `GET /projects/:ref/seed/status`), which runs the engine against the stack's database, so the CLI needs no database credential. The server is one environment, `production`, so `--confirm-production` is needed without a terminal, and `--environment` must be `production` or omitted. Before seeding, the server runs the engine's diff and refuses with 409 `schema_not_pushed` when the database lacks the seed's schema: run `supatype push` first. Seed files must `export default` a function. `--local` or `--connection` seed a database from this machine instead. See [seeding.md](seeding.md#linked-projects).
+
 For local dev, `supatype dev` writes `.supatype/environment.json` with the Kong URL and database connection. `supatype push` uses the control plane automatically when that file exists.
 
 ## Local dev (Docker)
