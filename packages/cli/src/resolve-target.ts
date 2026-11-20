@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process"
+import type { RemoteSeedRequest } from "@supatype/types"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
@@ -531,6 +532,32 @@ export async function targetSchemaPush(
     apiFetchOpts(target, "POST", projectPath(target, "/schema/push"), pushBody),
     isEnginePushResult,
   )
+}
+
+/** The capability a server lists when it serves the remote seed routes. */
+const SEED_NEED: FeatureNeed = { feature: "seed", flag: "seed" }
+
+/**
+ * What `target` says it can do, refused unless it serves the seed routes: an older control plane
+ * would answer a seed with a bare 404. The answer carries the engine version the seed will run on.
+ */
+export async function targetSeedCapabilities(target: DeployTarget): Promise<Capabilities> {
+  const caps = await targetCapabilities(target)
+  assertSupported(caps, [SEED_NEED])
+  return caps
+}
+
+/**
+ * Ask the control plane to apply `request`'s seed documents. The answer is the engine's seed result,
+ * whether or not it applied; a refusal (400, 403, 404, 409, 413, 502) throws {@link TargetApiError}.
+ */
+export async function targetSeed<T>(target: DeployTarget, request: RemoteSeedRequest, guard: Guard<T>): Promise<T> {
+  return targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "POST", "/seed", request), guard)
+}
+
+/** `seed --status` on the control plane: the engine's status document for the target environment. */
+export async function targetSeedStatus<T>(target: DeployTarget, guard: Guard<T>): Promise<T> {
+  return targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "GET", "/seed/status"), guard)
 }
 
 export interface SchemaRollbackResult {
