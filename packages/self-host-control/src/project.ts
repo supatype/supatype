@@ -5,6 +5,9 @@ export function projectRoot(): string {
   return process.env["SUPATYPE_PROJECT_ROOT"] ?? "/project"
 }
 
+/** The one environment a self-hosted project has, as `/status` reports it. */
+export const SELF_HOST_ENVIRONMENT = "production"
+
 /** The one project ref this control plane serves. */
 export function projectRef(): string {
   return process.env["SUPATYPE_PROJECT_REF"] ?? "project"

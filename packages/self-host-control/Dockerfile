@@ -1,7 +1,7 @@
 ARG ENGINE_IMAGE=supatype/schema-engine:latest
 FROM ${ENGINE_IMAGE} AS engine
 
-# Built from the repository root: the control plane depends on @supatype/shared, the rules it must
+# Built from the repository root: the control plane depends on @supatype/shared and @supatype/types (the remote seed contract), the rules it must
 # read the same way as the CLI (the engine's busy wording, its capability cache, the function-name
 # rule), so the workspace and its lockfile are needed to build it. Only the sources are copied, so
 # a host's node_modules and dist never reach the image.
@@ -10,6 +10,8 @@ WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/tsconfig.json packages/shared/
 COPY packages/shared/src packages/shared/src
+COPY packages/types/package.json packages/types/tsconfig.json packages/types/
+COPY packages/types/src packages/types/src
 COPY packages/self-host-control/package.json packages/self-host-control/tsconfig.json packages/self-host-control/
 COPY packages/self-host-control/src packages/self-host-control/src
 RUN corepack enable pnpm && pnpm install --frozen-lockfile --filter "@supatype/self-host-control..."
