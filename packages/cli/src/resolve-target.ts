@@ -555,9 +555,22 @@ export async function targetSeed<T>(target: DeployTarget, request: RemoteSeedReq
   return targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "POST", "/seed", request), guard)
 }
 
-/** `seed --status` on the control plane: the engine's status document for the target environment. */
+/**
+ * `seed --status` on the control plane: the engine's status document for the target environment.
+ *
+ * Capabilities are not asked first. They need the push permission and status needs only the view
+ * one, so a caller who may read the seed history would be refused for a route they never call. An
+ * older server is told apart by its answer instead: a missing route is a 404 that names no project.
+ */
 export async function targetSeedStatus<T>(target: DeployTarget, guard: Guard<T>): Promise<T> {
-  return targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "GET", "/seed/status"), guard)
+  try {
+    return await targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "GET", "/seed/status"), guard)
+  } catch (err: unknown) {
+    if (!(err instanceof TargetApiError) || err.status !== 404) throw err
+    if (isUnknownProject(err)) throw new Error(unknownProjectMessage(target, err))
+    assertSupported({ features: new Set(), source: "server" }, [SEED_NEED])
+    throw err
+  }
 }
 
 export interface SchemaRollbackResult {

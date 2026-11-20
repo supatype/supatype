@@ -64,9 +64,10 @@ export async function runRemoteSeed(
 ): Promise<number> {
   const refused = refuseFlags(opts, target)
   if (refused) return 2
+  // Status asks the server directly: capabilities need the push permission, status only the view one.
+  if (opts.status) return await remoteStatus(target)
   const unfit = await refuseUnfitServer(target)
   if (unfit) return 2
-  if (opts.status) return await remoteStatus(target)
   return await remoteApply(file, opts, target, config)
 }
 

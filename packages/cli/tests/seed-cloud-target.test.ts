@@ -232,6 +232,25 @@ describe("--status", () => {
     expect(said.infos.join("\n")).toContain("changed since it was applied")
     expect(seedPosts()).toEqual([])
   })
+
+  it("works for a caller who may view but not push, without asking for capabilities", async () => {
+    // Capabilities needs `schema.push`; the status route needs only `schema.view`.
+    answer = (call) =>
+      call.url.includes("/capabilities")
+        ? { status: 403, body: { error: "forbidden", message: 'Role "editor" does not have the "schema.push" permission' } }
+        : call.url.endsWith("/seed/status")
+          ? { status: 200, body: { data: { files: [] } } }
+          : defaultAnswer(call)
+    expect(await runSeed(undefined, flags({ env: "staging", status: true }))).toBe(0)
+    expect(said.errors.join("\n")).not.toContain("schema.push")
+  })
+
+  it("names an old server when the status route is missing", async () => {
+    answer = (call) =>
+      call.url.endsWith("/seed/status") ? { status: 404, body: { error: "not_found", message: "Not found" } } : defaultAnswer(call)
+    expect(await runSeed(undefined, flags({ env: "staging", status: true }))).toBe(2)
+    expect(said.errors.join("\n")).toMatch(/does not support seed/i)
+  })
 })
 
 describe("a file with no default export", () => {
