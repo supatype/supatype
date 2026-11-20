@@ -3,7 +3,7 @@ import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
 import { readAuthAnswer } from "./auth-answer.js"
 import { fetchWithin } from "./fetch-within.js"
 import { isPersonalAccessToken } from "./personal-access-token.js"
-import { bodyReason, httpFailureText, isConnectionRefused, redact } from "./error-message.js"
+import { bodyReason, errorMessage, httpFailureText, isConnectionRefused, redact } from "./error-message.js"
 
 export interface TargetFetchOptions {
   method: string
@@ -88,7 +88,7 @@ async function refreshAccessToken(
       return {}
     })
   } catch (err) {
-    if (!isTimeout(err)) throw err
+    if (!isTimeout(err)) throw requestFailure(url, undefined, err)
     throw new Error(`Renewing the Cloud session: ${url} did not answer within ${REFRESH_TIMEOUT_MS / 1000} s. Run: supatype login`, { cause: err })
   }
   const answer = readAuthAnswer(body)
@@ -139,9 +139,21 @@ function send(url: string, opts: TargetFetchOptions, token: string | undefined, 
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
     ...(signal !== undefined ? { signal } : {}),
   }).catch((err: unknown) => {
-    if (!isConnectionRefused(err)) throw err
-    throw new Error(unreachableText(url, opts), { cause: err })
+    throw requestFailure(url, opts.unreachableHint, err)
   })
+}
+
+/**
+ * What a request that got no answer throws. Node's fetch rejects with `TypeError: fetch failed` and
+ * the reason (a host that does not resolve, a reset, a certificate) in its `cause`, so printing the
+ * message alone said nothing of where or why. A refused connection and any other failure now say the
+ * URL and the cause's own words; a deadline or an abort passes through as it is, for its callers.
+ */
+function requestFailure(url: string, hint: string | undefined, err: unknown): unknown {
+  if (isConnectionRefused(err)) return new Error(unreachableText(url, hint), { cause: err })
+  if (!(err instanceof TypeError)) return err
+  const reason = errorMessage(err.cause ?? err)
+  return new Error(`Could not reach ${redact(url)}: ${reason}.`, { cause: err })
 }
 
 /**
@@ -149,9 +161,9 @@ function send(url: string, opts: TargetFetchOptions, token: string | undefined, 
  * knows. Bun's own words for it name neither ("Unable to connect. Is the computer able to access
  * the url?"), and Node's say only "fetch failed".
  */
-function unreachableText(url: string, opts: TargetFetchOptions): string {
+function unreachableText(url: string, hint: string | undefined): string {
   const said = `Could not connect to ${redact(url)}: connection refused.`
-  return opts.unreachableHint === undefined ? said : `${said} ${opts.unreachableHint}`
+  return hint === undefined ? said : `${said} ${hint}`
 }
 
 /** Whether `err` is the abort of a request that ran out of time. */

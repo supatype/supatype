@@ -1,6 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
-import { DEFAULT_API_URL, trimApiUrl } from "../api-url.js"
+import { pickApiUrl, trimApiUrl } from "../api-url.js"
 import { envAccessToken, loadCloudCredentials } from "../cloud-credentials.js"
 import { readEnvFile } from "../env-file.js"
 import {
@@ -191,7 +191,7 @@ export function registerLinkOptions(linkCmd: Command): void {
   linkCmd
     .option("--project <slug>", "Cloud project slug")
     .option("--url <url>", "Self-host or local Kong URL")
-    .option("--api-url <url>", "Cloud control plane API URL", DEFAULT_API_URL)
+    .option("--api-url <url>", "Cloud control plane API URL (default: SUPATYPE_API_URL, then the one you logged in to)")
     .option("--token <token>", "Access token (cloud PAT or self-host SERVICE_ROLE_KEY)")
     .option("--service-role-key <key>", "Deprecated alias for --token on self-host")
     .option("--env <name>", "Environment name (default: production)", "production")
@@ -201,7 +201,7 @@ export function registerLinkOptions(linkCmd: Command): void {
 export async function runLinkAction(opts: {
   project?: string
   url?: string
-  apiUrl: string
+  apiUrl?: string
   token?: string
   serviceRoleKey?: string
   env?: string
@@ -284,8 +284,8 @@ export async function runLinkAction(opts: {
     process.exit(1)
   }
 
-  const cloudApiUrl = trimApiUrl(opts.apiUrl)
   const creds = loadCloudCredentials()
+  const cloudApiUrl = pickApiUrl(opts.apiUrl, process.env["SUPATYPE_API_URL"], creds?.apiUrl)
   const refreshToken =
     (creds !== null && trimApiUrl(creds.apiUrl) === cloudApiUrl ? creds.refreshToken : undefined) ??
     existing?.refreshToken
