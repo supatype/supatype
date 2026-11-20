@@ -9,7 +9,7 @@ import {
   type RemoteSeedRequest,
 } from "@supatype/types"
 import { audit } from "../audit.js"
-import { databaseUrlFromEnv } from "../engine-runner.js"
+import { databaseUrlFromEnv, runEngineDiff } from "../engine-runner.js"
 import { HttpError, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { SELF_HOST_ENVIRONMENT, assertProject } from "../project.js"
@@ -81,6 +81,23 @@ function refusalFor(request: RemoteSeedRequest, environment: string): Refusal | 
   return undefined
 }
 
+/**
+ * The schema check (D6): the database must already have the schema the seed was written against.
+ * The engine's diff compares that schema with the live database, so a schema edited and not pushed
+ * is refused here, before anything is written, instead of failing part way through the run.
+ */
+async function schemaRefusal(databaseUrl: string, ast: unknown): Promise<Refusal | undefined> {
+  const { operations } = await runEngineDiff(databaseUrl, ast)
+  if (operations.length === 0) return undefined
+  return {
+    status: 409,
+    error: "schema_not_pushed",
+    message:
+      `The database does not have the schema in this seed yet (${operations.length} change(s) to push). ` +
+      "Run `supatype push` first.",
+  }
+}
+
 interface AuditedFile {
   file: string
   hash: string
@@ -139,12 +156,17 @@ async function refuse(
   sendJson(res, refusal.status, { error: refusal.error, message: refusal.message })
 }
 
-/** Run the engine and answer. Its failure to run is a 502 with credentials redacted, and is audited. */
+/**
+ * Check the schema, run the engine and answer. A failure to run either is a 502 with credentials
+ * redacted, and is audited.
+ */
 async function apply(res: ServerResponse, request: RemoteSeedRequest, environment: string): Promise<void> {
   const runId = randomUUID()
   const databaseUrl = databaseUrlFromEnv()
   const detail = runDetail(request, environment, runId)
   try {
+    const refusal = await schemaRefusal(databaseUrl, request.ast)
+    if (refusal !== undefined) return await refuse(res, request, environment, refusal)
     const data = await runEngineSeed(databaseUrl, request.ast, request.irDocuments, {
       atomic: request.atomic,
       runOnce: request.runOnce,

@@ -51,6 +51,20 @@ if (refusal !== undefined) {
 }
 
 /**
+ * `diff`: no changes, or the operations `MOCK_DIFF_OPS` holds as JSON. What it was given (argv and
+ * `DATABASE_URL`) goes to the file `MOCK_DIFF_RECORD` names, so a test can see where the DSN went.
+ */
+if (cmd === "diff") {
+  const record = process.env["MOCK_DIFF_RECORD"]
+  if (record) {
+    const { writeFileSync } = await import("node:fs")
+    writeFileSync(record, JSON.stringify({ argv: args, databaseUrl: process.env["DATABASE_URL"] }))
+  }
+  console.log(JSON.stringify({ operations: JSON.parse(process.env["MOCK_DIFF_OPS"] ?? "[]"), warnings: [] }))
+  process.exit(0)
+}
+
+/**
  * `seed`: records what it was given (argv, `DATABASE_URL`, each `--ir` file's text and path) in the
  * file `MOCK_SEED_RECORD` names, so a test can see them without the answer carrying a DSN.
  * `MOCK_SEED_MODE` picks the outcome: `fail1` and `fail2` print a JSON result and exit 1 or 2,
