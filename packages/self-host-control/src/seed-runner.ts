@@ -116,7 +116,7 @@ export async function runEngineSeed(
       ...(opts.runOnce ? ["--run-once"] : []),
     ]
     return await answerOf(
-      runEngine("seed", args, { inputPath: astPath, env: { DATABASE_URL: databaseUrl }, timeoutMs: opts.timeoutMs }),
+      runEngine("seed", args, { inputPath: astPath, databaseUrl, timeoutMs: opts.timeoutMs }),
     )
   } finally {
     await removeAll([astPath, ...irPaths])
@@ -125,5 +125,5 @@ export async function runEngineSeed(
 
 /** `seed --status`: what has been applied, and what has changed since. It needs no schema. */
 export async function runEngineSeedStatus(databaseUrl: string, timeoutMs: number): Promise<unknown> {
-  return answerOf(runEngine("seed", ["--status"], { env: { DATABASE_URL: databaseUrl }, timeoutMs }))
+  return answerOf(runEngine("seed", ["--status"], { databaseUrl, timeoutMs }))
 }
