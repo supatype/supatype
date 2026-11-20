@@ -171,7 +171,12 @@ export function registerDeploy(program: Command): void {
       "Put back policies, grants, labels and RLS changed outside Supatype; without it the deploy refuses",
     )
     .option("--allow-local", "Build the app against a local stack's address, which a deploy otherwise refuses")
+    .option(
+      "--reset-auth-overrides",
+      "Supatype Cloud: drop the auth settings saved in Studio so the config's apply in full",
+    )
     .action(async (opts: {
+      resetAuthOverrides?: boolean
       local?: boolean
       environment?: string
       env?: string
@@ -195,6 +200,7 @@ export function registerDeploy(program: Command): void {
       // A linked deploy is checked against the server it pushes to (`targetSchemaPush`), a local one
       // against the engine binary, before either sends the flag.
       const overwriteDrift = opts.overwriteDrift ?? false
+      const resetAuthOverrides = opts.resetAuthOverrides ?? false
 
       let schemaDone = false
 
@@ -204,7 +210,7 @@ export function registerDeploy(program: Command): void {
         !opts.appOnly &&
         !opts.skipBuild
       ) {
-        await explainingRefusal("supatype deploy", () => deploySchemaToLinkedProject(cwd, envName, { overwriteDrift }))
+        await explainingRefusal("supatype deploy", () => deploySchemaToLinkedProject(cwd, envName, { overwriteDrift, resetAuthOverrides }))
         schemaDone = true
         if (opts.schemaOnly) {
           return
@@ -259,7 +265,7 @@ export function registerDeploy(program: Command): void {
         } else if (link) {
           step("Schema Push (linked)")
           await explainingRefusal("supatype deploy", () =>
-            pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName, overwriteDrift }),
+            pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName, overwriteDrift, resetAuthOverrides }),
           )
         } else {
           error(

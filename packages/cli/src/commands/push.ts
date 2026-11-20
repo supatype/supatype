@@ -49,6 +49,7 @@ import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.
 import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
 import { postApplyFailed } from "../post-apply.js"
+import { assertCloudAuthSettings, pushAuthSettings } from "../auth-settings-push.js"
 import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
 import { publicEnvFor } from "@supatype/types"
 import { publicValueCount, pushPublicEnv } from "../site-public-env.js"
@@ -105,10 +106,15 @@ export function registerPush(program: Command): void {
       "--run-hooks",
       "Fire after-hooks for the rows this push's data migrations rewrite (skipped by default)",
     )
+    .option(
+      "--reset-auth-overrides",
+      "Supatype Cloud: drop the auth settings saved in Studio so the config's apply in full",
+    )
     .action(async (opts: {
       yes?: boolean
       overwriteDrift?: boolean
       runHooks?: boolean
+      resetAuthOverrides?: boolean
       connection?: string
       env?: string
       direct?: boolean
@@ -128,6 +134,7 @@ export function registerPush(program: Command): void {
         yes: opts.yes ?? false,
         overwriteDrift: opts.overwriteDrift ?? false,
         runHooks: opts.runHooks ?? false,
+        resetAuthOverrides: opts.resetAuthOverrides ?? false,
       }
       // A refusal (access changed by hand, another push running, an image Docker could not pull)
       // ends with what to do about it, whichever way the push went.
@@ -243,6 +250,8 @@ export interface PushRun {
   overwriteDrift: boolean
   /** `--run-hooks`: the push's data migrations fire after-hooks, which they skip by default. */
   runHooks?: boolean
+  /** `--reset-auth-overrides`: a push to Cloud drops the auth settings saved in Studio first. */
+  resetAuthOverrides?: boolean
 }
 
 /**
@@ -294,6 +303,8 @@ async function pushViaTarget(
   // Before anything is read or asked: a server or engine that cannot honour the flag says so now.
   if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT_NEED])
   if (run.runHooks === true) await requireTargetFeatures(target, [RUN_HOOKS_NEED])
+  // Before the schema is applied: a config Cloud cannot take is refused with nothing changed.
+  assertCloudAuthSettings(config, target)
   if (!(await databaseIsReady(cwd, config, target, ast))) return
   const plan = (schema: unknown) =>
     withSpinner("Diffing against database", () => targetSchemaDiff(target, schema, { schema: pgSchema }))
@@ -346,6 +357,7 @@ async function pushViaTarget(
   const hooksFailed = linked ? await deployHooksToTarget(cwd, config, target, ast) : false
   // After the hooks, which restart the worker, and whatever they did: neither needs the other.
   const publicEnvFailed = linked ? await deployPublicEnvToTarget(config, target) : false
+  const authFailed = await pushAuthSettings(cwd, config, target, { resetOverrides: run.resetAuthOverrides === true })
   // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
   if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
 
@@ -354,7 +366,7 @@ async function pushViaTarget(
     return
   }
 
-  reportTargetPush(target, pushResult, hooksFailed || publicEnvFailed)
+  reportTargetPush(target, pushResult, hooksFailed || publicEnvFailed || authFailed)
 }
 
 /**

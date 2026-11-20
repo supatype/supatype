@@ -503,6 +503,9 @@ importers:
       '@supatype/shared':
         specifier: workspace:*
         version: link:../shared
+      '@supatype/types':
+        specifier: workspace:*
+        version: link:../types
       pg:
         specifier: ^8.13.0
         version: 8.20.0
@@ -510,9 +513,6 @@ importers:
         specifier: ^5
         version: 5.9.3
     devDependencies:
-      '@supatype/types':
-        specifier: workspace:*
-        version: link:../types
       '@types/bcryptjs':
         specifier: ^2.4.6
         version: 2.4.6

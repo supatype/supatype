@@ -245,7 +245,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
   }
 }
 
-function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh"] | undefined {
+export function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh"] | undefined {
   if (target.mode !== "cloud" || !target.refreshToken || !target.cwd) return undefined
   const cloudApiUrl = (target.link?.cloudApiUrl ?? target.apiBaseUrl).replace(/\/$/, "")
   const cwd = target.cwd

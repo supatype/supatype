@@ -81,6 +81,8 @@ import { PoliciesView } from "./views/auth/PoliciesView.js"
 import { ProvidersView } from "./views/auth/ProvidersView.js"
 import { ConfigurationView } from "./views/auth/ConfigurationView.js"
 import { SsoView } from "./views/auth/SsoView.js"
+import { AuthHooksView } from "./views/auth/AuthHooksView.js"
+import { AttackProtectionView } from "./views/auth/AttackProtectionView.js"
 import { EmailTemplatesView } from "./views/auth/EmailTemplatesView.js"
 
 // Storage sub-pages
@@ -428,14 +430,14 @@ function GlobalGraphQLRoute(): React.ReactElement {
 
 // ─── StudioCore ────────────────────────────────────────────────────────────────
 
-export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef, connection, staticSite }: StudioCoreProps): React.ReactElement {
+export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef, environment, connection, staticSite }: StudioCoreProps): React.ReactElement {
   const localeState = useLocaleState(config)
   // A mode an earlier Studio remembered is no longer read; forgetting it once keeps no stale choice.
   useEffect(() => forgetStoredActingModes(), [])
 
   let content = (
     <CloudUrlContext.Provider value={cloudUrl}>
-    <PlatformCtx.Provider value={{ platformUrl, projectRef }}>
+    <PlatformCtx.Provider value={{ platformUrl, projectRef, environment }}>
     <ConnectionCtx.Provider value={connection}>
     <StaticSiteCtx.Provider value={staticSite}>
     <AdminConfigContext.Provider value={config}>
@@ -505,9 +507,9 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="authentication/providers"       element={gated(PROJECT_USERS, <ProvidersView />)} />
               <Route path="authentication/configuration"   element={gated(PROJECT_USERS, <ConfigurationView />)} />
               <Route path="authentication/email-templates" element={gated(PROJECT_USERS, <EmailTemplatesView />)} />
-              <Route path="authentication/hooks"    element={<ComingSoon title="Auth Hooks" description="Configure pre/post hooks for auth events. Coming soon." />} />
+              <Route path="authentication/hooks"           element={gated(PROJECT_USERS, <AuthHooksView />)} />
               <Route path="authentication/sso"             element={gated(SSO_PROVIDERS, <SsoView />)} />
-              <Route path="authentication/security" element={<ComingSoon title="Attack Protection" description="CAPTCHA, IP blocking, leaked password detection, rate limits. Coming soon." />} />
+              <Route path="authentication/security"        element={gated(PROJECT_USERS, <AttackProtectionView />)} />
 
               {/* Observability (Logs + Metrics + Advisors) */}
               <Route path="observability">

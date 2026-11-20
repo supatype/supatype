@@ -76,6 +76,14 @@ describe.each([
     },
   )
 
+  it.each(["Hooks", "Attack Protection"])("lists %s as a built page, not coming soon", (label) => {
+    const html = panel("/authentication/users", platform)
+    const tag = entryTag(html, label)
+    expect(tag).toMatch(/^<button/)
+    expect(tag).not.toContain("aria-disabled")
+    expect(html).not.toContain("not built yet")
+  })
+
   it("lists SSO as a page of its own now that it is built", () => {
     const html = panel("/authentication/users", platform)
     const tag = entryTag(html, "SSO")

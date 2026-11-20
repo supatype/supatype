@@ -13,6 +13,7 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
+import { assertCloudAuthSettings, pushAuthSettings } from "../auth-settings-push.js"
 
 interface CloudConfig {
   apiUrl: string
@@ -116,7 +117,7 @@ export function isCloudLinked(cwd: string): boolean {
 
 export async function pushSchemaToLinkedProject(
   cwd: string,
-  opts?: { force?: boolean; env?: string; overwriteDrift?: boolean },
+  opts?: { force?: boolean; env?: string; overwriteDrift?: boolean; resetAuthOverrides?: boolean },
 ): Promise<void> {
   const config = loadConfig(cwd)
   const target = resolveTarget(cwd, { env: opts?.env })
@@ -125,6 +126,8 @@ export async function pushSchemaToLinkedProject(
     process.exit(1)
   }
 
+  // Before the schema is applied: a config Cloud cannot take is refused with nothing changed.
+  assertCloudAuthSettings(config, target)
   const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
   info(`Pushing schema to ${target.mode} project ${target.projectRef} (${target.environment})...`)
 
@@ -136,16 +139,18 @@ export async function pushSchemaToLinkedProject(
   })
 
   info((result as { message?: string }).message ?? "Schema push completed.")
+  await pushAuthSettings(cwd, config, target, { resetOverrides: opts?.resetAuthOverrides === true })
 }
 
 export async function deploySchemaToLinkedProject(
   cwd: string,
   environment: string,
-  opts?: { overwriteDrift?: boolean },
+  opts?: { overwriteDrift?: boolean; resetAuthOverrides?: boolean },
 ): Promise<void> {
   await pushSchemaToLinkedProject(cwd, {
     force: true,
     env: environment,
+    ...(opts?.resetAuthOverrides !== undefined && { resetAuthOverrides: opts.resetAuthOverrides }),
     ...(opts?.overwriteDrift !== undefined && { overwriteDrift: opts.overwriteDrift }),
   })
 }
