@@ -236,6 +236,24 @@ export function Sidebar({ extraSections, hiddenItems, className, drawer = false,
 
 // ─── getPageTitle (used by TopBar) ────────────────────────────────────────────
 
+/** The first segment of a path: `/ai/usage` is `ai`. */
+function topSegment(path: string): string {
+  return path.split("/")[1] ?? ""
+}
+
+/**
+ * The label of the rail entry that owns `path`, matched by its first segment, so a page with no
+ * entry in the title tables is still named after the rail item that led to it.
+ */
+function railLabel(path: string): string | undefined {
+  const segment = topSegment(path)
+  if (segment === "") return undefined
+  const items = [...PRIMARY_NAV_ENTRIES, ...SECONDARY_NAV_ENTRIES].filter(
+    (entry): entry is NavItemDef => entry !== "separator",
+  )
+  return items.find((item) => topSegment(item.href) === segment)?.label
+}
+
 export function getPageTitle(path: string, config: AdminConfig): string {
   if (path === "/" || path === "") return "Dashboard"
 
@@ -300,7 +318,7 @@ export function getPageTitle(path: string, config: AdminConfig): string {
     "/api/graphql/settings": "GraphQL Settings",
     "/settings":             "Settings",
   }
-  return titles[path] ?? "Studio"
+  return titles[path] ?? railLabel(path) ?? "Studio"
 }
 
 export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] {
@@ -367,5 +385,6 @@ export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] 
     "/api/graphql/settings": ["API", "GraphQL", "Settings"],
     "/settings":             ["Settings"],
   }
-  return breadcrumbs[path] ?? ["Studio"]
+  const label = railLabel(path)
+  return breadcrumbs[path] ?? (label === undefined ? ["Studio"] : [label])
 }
