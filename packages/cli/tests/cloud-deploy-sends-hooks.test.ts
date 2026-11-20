@@ -25,14 +25,8 @@ vi.mock("../src/config.js", async (importOriginal) => {
   }
 })
 vi.mock("../src/commands/push.js", () => ({
-  deployHooksToTarget: async () => {
-    steps.push("hooks")
-    return false
-  },
-}))
-vi.mock("../src/cors-origins-push.js", () => ({
-  pushCorsOrigins: async () => {
-    steps.push("cors")
+  runPostApplySteps: async () => {
+    steps.push("post-apply")
     return false
   },
 }))
@@ -50,9 +44,9 @@ afterEach(() => {
 })
 
 describe("a deploy to a linked Cloud project", () => {
-  it("sends the hooks and the allowed origins after the schema, in that order", async () => {
+  it("runs push's steps after the schema: hooks, allowed origins, platform settings", async () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined)
     await pushSchemaToLinkedProject(process.cwd(), { force: true, env: "production" })
-    expect(steps).toEqual(["schema", "hooks", "cors"])
+    expect(steps).toEqual(["schema", "post-apply"])
   })
 })

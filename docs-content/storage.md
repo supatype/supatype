@@ -220,7 +220,31 @@ File metadata is a row in the `storage` schema of your project's Postgres. The b
 With the Native provider, the storage service is the same code a deployment runs, so bucket rules, `maxSize`, `accept` and transforms apply as they will once deployed. If it cannot start, storage is off: `supatype dev` prints why, `/storage/v1` answers 503 "storage service is not running", and storage comes back once you fix the cause and restart dev. There is no fallback store, because one that skipped your rules would let any caller read a private bucket.
 :::
 
+<h3 id="switch-off">Switching storage or GraphQL off</h3>
+
+`services: { storage: false }` in `supatype.config.ts` answers every `/storage/v1` request with 503, and `services: { graphql: false }` answers `/graphql/v1` with 501. Self-host renders `SUPATYPE_STORAGE_DISABLED` and `SUPATYPE_GRAPHQL_DISABLED` into the server; a push to Supatype Cloud sets the same switch for the project. A key left out leaves the service on, and `true` turns it back on.
+
 <h3 id="own-bucket">Your own S3 bucket</h3>
+
+On Supatype Cloud, name the bucket in `supatype.config.ts` and `supatype push` (or `supatype deploy`) sends it to the project's production environment. Only the organisation's owners and admins can set it, and the keys are read from your environment or `.env` with `env("NAME")`, sent once, stored encrypted and never shown again:
+
+```ts title="supatype.config.ts"
+import { defineConfig, env } from "@supatype/cli"
+export default defineConfig({
+  // ...
+  storage: {
+    provider: "s3",
+    production: "s3",
+    s3: { bucket: "acme-files", region: "eu-west-1", accessKey: env("ACME_S3_KEY"), secretKey: env("ACME_S3_SECRET") },
+  },
+})
+```
+
+Use `endpoint` (an https URL) in place of `region` for another S3-compatible store, and `forcePathStyle` to override path-style addressing. Both keys are required on Cloud, since a Cloud project has no instance role to fall back to. Leaving `storage.s3` out of the config sends nothing and keeps whatever the project has; to go back to Supatype's bucket, call `DELETE /projects/<ref>/storage-bucket`.
+
+:::caution
+Switching buckets does not move your files. New files go to the new bucket; the ones stored before stay in the old one and stop being served. Copy them across first if you need them. Self-host reads its bucket from `S3_*` in `.env` and ignores `storage.s3`.
+:::
 
 Set `S3_BUCKET` and the storage service keeps every bucket inside that one S3 bucket, the way Supabase Storage uses `GLOBAL_S3_BUCKET`. A bucket is a row in your database and a key prefix in S3: a file `avatars/me.png` is stored under `avatars/me.png/<version>`. The service never creates an S3 bucket or puts a bucket policy, so:
 
