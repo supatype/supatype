@@ -3581,7 +3581,9 @@ Signing in is not enough on its own. Every person also needs a [Studio role](htt
 
 ### Finding your way
 
-The sidebar holds the dashboard, Models, Database, Media & Storage, Authentication, Edge Functions, Realtime and Observability, plus Settings. Entries marked as coming soon open a placeholder page and do nothing yet.
+The sidebar holds the dashboard, Models, Database, Media & Storage, Authentication, Edge Functions, Static site, Realtime, Webhooks and Observability, plus Settings. Entries marked as coming soon open a placeholder page and do nothing yet.
+
+The Static site group shows the site address, whether it is served from files or proxied to an app, and what is served, with a Settings page for the serving mode, SPA fallback and response headers. A setting that `supatype.config.ts` sets is marked as such. Where a deployment can list site deployments, the group has a Deployments page. A deployment that cannot describe its site has no Static site group.
 
 **Jump to** in the top bar searches pages, users and records.
 
