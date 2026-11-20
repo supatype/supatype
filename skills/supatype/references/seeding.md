@@ -219,7 +219,7 @@ file and the position in the document that caused it.
 |-----------|---------|
 | `0` | Applied |
 | `1` | A seed failed: the data is wrong |
-| `2` | The run could not start: config, connection, Cloud guard, a missing builder, or an engine pinned too old to seed |
+| `2` | The run could not start: config, connection, a refused flag or an unconfirmed production seed, a missing builder, a file a linked project cannot take, a server that refuses the seed, or an engine pinned too old to seed |
 
 The split lets CI tell "fix the seed" from "fix the environment".
 
@@ -265,17 +265,45 @@ is a different backfill.
 | Flag | Purpose |
 |------|---------|
 | `--connection <dsn>` | Seed a specific database instead of the resolved one |
-| `--environment <name>` | Sets what an `{ environment: ... }` condition matches |
-| `--force` | Allow running against a project linked to Supatype Cloud |
+| `--environment <name>` | Sets what an `{ environment: ... }` condition matches. On a linked project it must equal the target environment |
+| `--env <name>` | The linked environment to seed (default: the link's default) |
+| `--local` | Seed the local stack even when the project is linked |
+| `--confirm-production` | Seed a linked project's production environment without the prompt |
+| `--force` | Refused on a linked project, and has no other meaning. Use `--confirm-production` or `--local` |
 
 The connection string is resolved from, in order: `--connection`, `database.external.url`,
 `connection` in `supatype.config.ts`, `DATABASE_URL` in the environment, `DATABASE_URL` in the
 project's `.env`, then the project's own local database. When none of those has one, the error
 names every source it tried and what was at each.
 
+## Linked projects
+
+A project linked with `supatype link` (Supatype Cloud, or a self-host server) does not seed through a
+database connection. The CLI collects the documents as usual and POSTs them to the control plane's
+`/projects/:ref/seed`, which applies them with its own engine as the environment's role. The CLI never
+holds the database credential. `--connection` and `--local` skip the link and run the engine on this
+machine instead.
+
+- **Production needs confirmation.** Interactive: type the project ref. Non-interactive: pass
+  `--confirm-production`. The server checks `confirmProduction` as well. A self-host server's only
+  environment is `production`.
+- **`--force` is refused.** It used to override the old Cloud guard.
+- **`--environment` must match the target environment** (`--env` picks it). An `{ environment }` condition
+  reads the environment the seed is sent to.
+- **Every file must `export default` a function.** The CLI reads the file's text, not its exports, and
+  refuses one without a default export (or one it cannot parse) before importing it, because the older
+  run-on-import form would run its writes on this machine. Convert it, or use `--local`.
+- **`schema_not_pushed` (409).** The server runs the engine's diff first and refuses when the database
+  lacks the schema the seed was built against. Run `supatype push`, then seed. Other refusals are
+  `validation_error`, `environment_mismatch`, `production_confirmation_required`, `seed_busy` (one seed per
+  environment at a time) and `payload_too_large` (10 MiB, 100 files per request).
+- **Permissions.** On Cloud, applying needs `schema.push` and `--status` needs only `schema.view`. A self-host
+  server takes the service-role key the link holds.
+- A server too old to list the `seed` feature, or running an engine too old to seed, is refused with the remedy.
+
 ## The older form still works
 
-A seed file with no default export runs on import, as it always did:
+On a local run only, a seed file with no default export runs on import, as it always did:
 
 ```ts
 import { sql } from "@supatype/cli/seed"

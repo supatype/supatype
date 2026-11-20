@@ -195,14 +195,14 @@
     <div class="tbl"><table>
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
-        <tr><td><code>seed [file]</code></td><td>Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts</td><td><code>--status</code>, <code>--atomic</code>, <code>--connection &lt;dsn&gt;</code>, <code>--environment &lt;name&gt;</code></td></tr>
+        <tr><td><code>seed [file]</code></td><td>Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts</td><td><code>--status</code>, <code>--atomic</code>, <code>--connection &lt;dsn&gt;</code>, <code>--environment &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--local</code>, <code>--confirm-production</code></td></tr>
         <tr><td><code>cache rest list</code></td><td>List cached REST GET entries</td><td><code>--table &lt;name&gt;</code>, <code>--json</code></td></tr>
         <tr><td><code>cache rest get &lt;key&gt;</code></td><td>Show one cache entry (full key)</td><td><code>--json</code></td></tr>
         <tr><td><code>cache rest delete &lt;key&gt;</code></td><td>Delete one cache entry</td><td></td></tr>
         <tr><td><code>cache rest flush</code></td><td>Flush REST cache entries</td><td><code>--table &lt;name&gt;</code>, <code>--yes</code></td></tr>
       </tbody>
     </table></div>
-    <p><code>seed</code> refuses to run against a project linked to Supatype Cloud unless you pass <code>--force</code>. See <a href="/docs/seeding.html">Seeding</a>.</p>
+    <p><code>seed</code> on a linked project (Supatype Cloud, or a server linked with <code>supatype link</code>) sends the seeds to that server instead of connecting to the database. <code>--local</code> seeds the local stack instead, and <code>--force</code> is refused. See <a href="/docs/seeding.html">Seeding</a>.</p>
     <p><code>reset</code> drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a <code>runOnce</code> seed runs again, and runs the seeds unless you pass <code>--no-seed</code>. To start the whole database again, use <code>supatype dev --reset-db</code>.</p>
 
     <h2 id="functions">Functions and hooks</h2>

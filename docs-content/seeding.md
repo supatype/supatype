@@ -247,7 +247,9 @@ $ supatype seed                    # every file in seeds/
 $ supatype seed seeds/02-posts.ts  # one file
 $ supatype seed --atomic           # all files in one transaction
 $ supatype seed --status           # what ran, when, and what changed since
-$ supatype seed --connection <dsn> # another database
+$ supatype seed --connection <dsn> # another database, from this machine
+$ supatype seed --env staging       # a linked project's environment
+$ supatype seed --local             # the local stack, even when linked
 $ supatype seed --environment staging
 ```
 
@@ -255,10 +257,20 @@ $ supatype seed --environment staging
 
 A Docker project's local stack has to be running: with it stopped, `supatype seed` starts nothing and exits 2, saying to start it with `supatype dev`, or `supatype self-host compose up -d` on a server. `--connection` seeds the database it names either way.
 
-A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass `--force` only when you mean to seed the linked project.
-
 Each file is one transaction. Without `--atomic`, a failure in the third file leaves the first two applied, and the report says so.
 
 Errors name your schema, such as `Tag.name is already taken`, with the file and position. Exit code `1` means a seed failed. Exit code `2` means the run could not start.
 
 A seed writes the model's own table, so rows on a drafts model are seeded as published.
+
+<h3 id="linked">A linked project</h3>
+
+A project linked with `supatype link`, to Supatype Cloud or to a self-hosted server, seeds through that server. The CLI collects your files as it does locally and sends the result to the server, which applies it as the environment's own database role. The CLI never holds the database credential. `--env <name>` picks the environment, and the link's default is used without it.
+
+- Seeding production asks you to type the project ref. In a script, or with no terminal, pass `--confirm-production`. A self-hosted server's one environment is production.
+- `--force` is refused on a linked project. Use `--confirm-production` to skip the prompt, or `--local` to seed the stack on this machine instead.
+- `--environment` must match the environment being seeded, because that is what an `{ environment }` condition reads. Drop it, or pass `--env` with the same name.
+- Every file must `export default` a function. A file without one would run its writes when it is read, so it is refused before anything is sent.
+- The server refuses with `schema_not_pushed` when the database lacks the schema the seed was built against. Run `supatype push` first.
+- `--status` needs only permission to view the project. Applying a seed needs permission to push the schema.
+- `--connection` and `--local` skip the link and seed the database or stack on this machine.
