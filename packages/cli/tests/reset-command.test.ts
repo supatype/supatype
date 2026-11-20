@@ -137,7 +137,7 @@ describe("reset", () => {
     writeFileSync(join(dir, "seeds", "01-demo.ts"), "export default () => {}\n")
     await reset()
     expect(seedRuns).toEqual([
-      { file: undefined, opts: { force: false, atomic: false, status: false, connection: DSN } },
+      { file: undefined, opts: { force: false, atomic: false, status: false, local: true, connection: DSN } },
     ])
   })
 
