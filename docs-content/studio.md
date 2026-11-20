@@ -74,6 +74,8 @@ Each model has tabs beside the editor:
 
 Editors do not see Schema or Rules. Cache is for admins and developers.
 
+When the cache service refuses a request, the Cache tab shows the reason the server gave, with the HTTP status after it. If the project has no keyspace behind the cache yet, it says that nothing is cached and reads go straight to the database.
+
 <h2 id="rich-text">Rich text and blocks</h2>
 
 A `RichText` field opens a rich text editor with a toolbar for bold, italic, underline, strikethrough, headings 1 to 3, paragraphs, bullet lists and numbered lists. The field stores a Lexical document.
