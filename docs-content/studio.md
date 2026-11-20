@@ -35,11 +35,11 @@ Signing in is not enough on its own. Every person also needs a [Studio role](/do
 
 <h2 id="layout">Finding your way</h2>
 
-The sidebar lists, top to bottom: Dashboard and Models; Database and Media & Storage; Authentication and Email; Edge Functions, Static site, Realtime, Webhooks and Scheduled Jobs; Intelligence, Commerce and Analytics; Plugins, Branching and Integrations; and Observability. Settings is pinned at the bottom.
+The sidebar lists, top to bottom: Dashboard and Models; Database and Media & Storage; Authentication; Edge Functions, Static site and Realtime; and Plugins. Settings is pinned at the bottom.
 
 Some entries depend on who you are or where Studio runs. Authentication is hidden from editors and viewers. Realtime is hidden when the server does not offer the Realtime inspector. Static site appears only when the host (Supatype Cloud or a self-host deployment that provides it) describes a site, and its Deployments page needs a host that can list deployments.
 
-Some entries are placeholders that open a page saying the feature is coming soon, and do nothing yet. They are Email, Webhooks, Scheduled Jobs, Intelligence, Commerce, Analytics, Branching, Integrations and Observability, plus the Database Wrappers, Read Replicas, Analytical Warehouse and Backups pages, and Auth Hooks and Attack Protection under Authentication. Models, Database, Media & Storage, Authentication, Edge Functions, Static site, Realtime and Plugins are live.
+Features that are not built yet have no sidebar entry. Some pages inside a group still say a feature is coming soon: Database Wrappers, Read Replicas and Analytical Warehouse under Database, Backups there too except on Supatype Cloud, and Auth Hooks and Attack Protection under Authentication.
 
 The Static site group shows the site address, whether it is served from files or proxied to an app, and what is served, with a Settings page for the serving mode, SPA fallback and response headers. A setting that `supatype.config.ts` sets is marked as such. Where a deployment can list site deployments, the group has a Deployments page. A deployment that cannot describe its site has no Static site group.
 

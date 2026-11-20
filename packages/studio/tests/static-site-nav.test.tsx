@@ -106,8 +106,43 @@ describe("core rail icons", () => {
       if (svg === undefined) continue
       icons.set(button.getAttribute("aria-label") ?? button.textContent ?? "", svg)
     }
-    expect(icons.size).toBeGreaterThan(10)
+    expect(icons.size).toBeGreaterThan(6)
     expect(new Set(icons.values()).size).toBe(icons.size)
+  })
+})
+
+describe("core rail placeholders", () => {
+  const PLACEHOLDERS = ["Email", "Webhooks", "Scheduled Jobs", "Intelligence", "Commerce", "Analytics", "Branching", "Integrations", "Observability"]
+  // The docked rail shows icons; each item is named by its aria-label.
+  const railText = (container: HTMLElement): string =>
+    Array.from(container.querySelectorAll(`${RAIL} button`)).map((b) => b.getAttribute("aria-label") ?? "").join("|")
+
+  it("leave out every entry whose page is not built yet", async () => {
+    const rail = railText(await studioAt("/", { host }))
+    for (const label of PLACEHOLDERS) expect(rail).not.toContain(label)
+  })
+
+  it("keep every entry that works", async () => {
+    const rail = railText(await studioAt("/", { host }))
+    for (const label of ["Models", "Database", "Media & Storage", "Edge Functions", "Static site", "Plugins"]) {
+      expect(rail).toContain(label)
+    }
+  })
+
+  it("leave no divider at either end or two in a row", async () => {
+    const container = await studioAt("/", { host })
+    // The dividers between groups; the pinned Settings block has a top border of its own.
+    const dividers = Array.from(container.querySelectorAll(`${RAIL} div.my-1.border-t`))
+    expect(dividers.length).toBeGreaterThan(0)
+    for (const divider of dividers) {
+      expect(divider.previousElementSibling).not.toBeNull()
+      expect(divider.nextElementSibling).not.toBeNull()
+      expect(divider.nextElementSibling?.classList.contains("border-t")).toBe(false)
+    }
+  })
+
+  it("still open their placeholder page by address", async () => {
+    expect(mainText(await studioAt("/webhooks", { host }))).toContain("Webhooks")
   })
 })
 
