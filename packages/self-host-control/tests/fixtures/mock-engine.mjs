@@ -50,6 +50,54 @@ if (refusal !== undefined) {
   process.exit(1)
 }
 
+/**
+ * `seed`: records what it was given (argv, `DATABASE_URL`, each `--ir` file's text and path) in the
+ * file `MOCK_SEED_RECORD` names, so a test can see them without the answer carrying a DSN.
+ * `MOCK_SEED_MODE` picks the outcome: `fail1` and `fail2` print a JSON result and exit 1 or 2,
+ * `crash` prints a DSN on stderr and exits 3, `nojson` prints no JSON, `sleep` waits
+ * `MOCK_SEED_SLEEP_MS` before a normal answer.
+ */
+if (cmd === "seed") {
+  const { readFileSync, writeFileSync } = await import("node:fs")
+  const irPaths = args.flatMap((a, i) => (a === "--ir" ? [args[i + 1]] : []))
+  const irs = irPaths.map((path) => ({ path, text: readFileSync(path, "utf8") }))
+  const inputAt = args.indexOf("--input")
+  const record = process.env["MOCK_SEED_RECORD"]
+  if (record) {
+    writeFileSync(record, JSON.stringify({
+      argv: args,
+      databaseUrl: process.env["DATABASE_URL"],
+      irs,
+      inputPath: inputAt === -1 ? null : args[inputAt + 1],
+    }))
+  }
+  const mode = process.env["MOCK_SEED_MODE"] ?? ""
+  if (mode === "sleep") await new Promise((r) => setTimeout(r, Number(process.env["MOCK_SEED_SLEEP_MS"] ?? "300")))
+  if (mode === "crash") {
+    console.error(`error: connection to ${process.env["DATABASE_URL"]} failed`)
+    process.exit(3)
+  }
+  if (mode === "nojson") {
+    console.log("seeded, trust me")
+    process.exit(0)
+  }
+  if (args.includes("--status")) {
+    console.log(JSON.stringify({ files: [{ file: "a.ts", appliedAt: "2026-01-01T00:00:00Z", status: "applied", durationMs: 3, drifted: false }] }))
+    process.exit(0)
+  }
+  if (mode === "fail1") {
+    console.log(JSON.stringify({ ok: false, error: { kind: "constraint", message: "duplicate key" } }))
+    process.exit(1)
+  }
+  if (mode === "fail2") {
+    console.log(JSON.stringify({ ok: false, error: { kind: "connection", message: "no route" } }))
+    process.exit(2)
+  }
+  const files = irs.map(({ text }) => ({ file: JSON.parse(text).file, status: "applied", written: { posts: 2 } }))
+  console.log(JSON.stringify({ ok: true, atomic: args.includes("--atomic"), files }))
+  process.exit(0)
+}
+
 if (cmd === "migrations" && args.includes("--name")) {
   const nameIdx = args.indexOf("--name")
   const name = args[nameIdx + 1] ?? "unknown"

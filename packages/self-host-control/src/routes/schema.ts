@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http"
 import { HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { REMOTE_SEED_FEATURE } from "@supatype/types"
 import { bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
@@ -109,7 +110,7 @@ export function registerSchemaRoutes(
         return []
       },
     )
-    sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE] } })
+    sendJson(ctx.res, 200, { data: { features: [...features, HOOK_FILES_FEATURE, HOOK_KEEP_FEATURE, REMOTE_SEED_FEATURE] } })
   })
 
   route(routes, "POST", "/projects/:ref/schema/push", async (ctx) => {

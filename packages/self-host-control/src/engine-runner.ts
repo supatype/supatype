@@ -44,7 +44,23 @@ export class EngineRunError extends Error {
   }
 }
 
-function runEngine(subcommand: string, args: string[], opts?: { inputPath?: string }): Promise<string> {
+/** The engine was killed for running past its time limit. */
+export class EngineTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`The engine timed out after ${Math.round(timeoutMs / 1000)}s and was stopped`)
+    this.name = "EngineTimeoutError"
+  }
+}
+
+/** How an engine run differs from the default: its environment, and a time limit to kill it at. */
+export interface EngineRunOptions {
+  inputPath?: string
+  /** Variables added to the engine's environment, so a secret need not be on its command line. */
+  env?: Record<string, string>
+  timeoutMs?: number
+}
+
+export function runEngine(subcommand: string, args: string[], opts?: EngineRunOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     const mockScript = process.env["SUPATYPE_ENGINE_MOCK"]
     const bin = mockScript ? process.execPath : engineBin()
@@ -52,13 +68,27 @@ function runEngine(subcommand: string, args: string[], opts?: { inputPath?: stri
     if (opts?.inputPath) cmdArgs.push("--input", opts.inputPath)
     cmdArgs.push(subcommand, ...args)
 
-    const proc = spawn(bin, cmdArgs, { stdio: ["ignore", "pipe", "pipe"] })
+    const proc = spawn(bin, cmdArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(opts?.env !== undefined && { env: { ...process.env, ...opts.env } }),
+    })
     let stdout = ""
     let stderr = ""
+    const timer =
+      opts?.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            proc.kill("SIGKILL")
+            reject(new EngineTimeoutError(opts.timeoutMs ?? 0))
+          }, opts.timeoutMs)
     proc.stdout.on("data", (c: Buffer) => { stdout += c.toString() })
     proc.stderr.on("data", (c: Buffer) => { stderr += c.toString() })
-    proc.on("error", (err) => reject(new Error(`Failed to spawn engine: ${err.message}`)))
+    proc.on("error", (err) => {
+      clearTimeout(timer)
+      reject(new Error(`Failed to spawn engine: ${err.message}`))
+    })
     proc.on("close", (code) => {
+      clearTimeout(timer)
       if (code === 0) resolve(stdout)
       else reject(new EngineRunError(`Engine exit ${code}: ${stderr.trim()}`, code, stdout, stderr))
     })
