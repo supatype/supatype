@@ -16,6 +16,8 @@ interface NavItemDef {
   label: string
   icon: string
   href: string
+  /** Nothing behind it is built yet: kept here so it is one line to bring back, never shown in the rail. */
+  placeholder?: true
 }
 
 type NavEntry = NavItemDef | "separator"
@@ -30,23 +32,23 @@ const SECONDARY_NAV_ENTRIES: NavEntry[] = [
   { id: "media",         label: "Media & Storage",   icon: "image",     href: "/media-storage" },
   "separator",
   { id: "auth",          label: "Authentication",    icon: "users",     href: "/authentication/users" },
-  { id: "email",         label: "Email",             icon: "mail",      href: "/email" },
+  { id: "email",         label: "Email",             icon: "mail",      href: "/email", placeholder: true },
   "separator",
   { id: "functions",     label: "Edge Functions",    icon: "zap",       href: "/edge-functions" },
   { id: "static-site",   label: "Static site",       icon: "globe",     href: "/static-site" },
   { id: "realtime",      label: "Realtime",          icon: "radio",     href: "/realtime" },
-  { id: "webhooks",      label: "Webhooks",          icon: "webhook",   href: "/webhooks" },
-  { id: "jobs",          label: "Scheduled Jobs",    icon: "clock",     href: "/jobs" },
+  { id: "webhooks",      label: "Webhooks",          icon: "webhook",   href: "/webhooks", placeholder: true },
+  { id: "jobs",          label: "Scheduled Jobs",    icon: "clock",     href: "/jobs", placeholder: true },
   "separator",
-  { id: "ai",            label: "Intelligence",      icon: "cpu",       href: "/ai/usage" },
-  { id: "commerce",      label: "Commerce",          icon: "cart",      href: "/commerce" },
-  { id: "analytics",     label: "Analytics",         icon: "barchart",  href: "/analytics" },
+  { id: "ai",            label: "Intelligence",      icon: "cpu",       href: "/ai/usage", placeholder: true },
+  { id: "commerce",      label: "Commerce",          icon: "cart",      href: "/commerce", placeholder: true },
+  { id: "analytics",     label: "Analytics",         icon: "barchart",  href: "/analytics", placeholder: true },
   "separator",
   { id: "plugins",       label: "Plugins",           icon: "plug",      href: "/plugins" },
-  { id: "branching",     label: "Branching",         icon: "branch",    href: "/branching" },
-  { id: "integrations",  label: "Integrations",      icon: "link",      href: "/integrations" },
+  { id: "branching",     label: "Branching",         icon: "branch",    href: "/branching", placeholder: true },
+  { id: "integrations",  label: "Integrations",      icon: "link",      href: "/integrations", placeholder: true },
   "separator",
-  { id: "observability", label: "Observability",     icon: "eye",       href: "/observability" },
+  { id: "observability", label: "Observability",     icon: "eye",       href: "/observability", placeholder: true },
 ]
 
 // ─── Sidebar props ────────────────────────────────────────────────────────────
@@ -159,15 +161,24 @@ function navItem(entry: NavItemDef, path: string, ctx: ItemContext): React.React
   )
 }
 
+/**
+ * The secondary entries this rail shows: placeholders and hidden items dropped, then the dividers
+ * those leave at either end or side by side, so a group that lost every item leaves no gap.
+ */
+function visibleEntries(hiddenItems: ReadonlySet<string> | undefined): NavEntry[] {
+  const kept = SECONDARY_NAV_ENTRIES.filter(
+    (entry) => entry === "separator" || (entry.placeholder !== true && hiddenItems?.has(entry.id) !== true),
+  )
+  return kept.filter((entry, i) => entry !== "separator" || (i > 0 && i < kept.length - 1 && kept[i + 1] !== "separator"))
+}
+
 function BuiltInEntries({ hiddenItems, path, ctx }: { hiddenItems: ReadonlySet<string> | undefined; path: string; ctx: ItemContext }): React.ReactElement {
   return (
     <>
       {PRIMARY_NAV_ENTRIES.map((entry) => navItem(entry, path, ctx))}
-      {SECONDARY_NAV_ENTRIES.map((entry, i) => {
-        if (entry === "separator") return <div key={`sep-${i}`} className="my-1 mx-3 border-t border-border/50" />
-        if (hiddenItems?.has(entry.id) === true) return null
-        return navItem(entry, path, ctx)
-      })}
+      {visibleEntries(hiddenItems).map((entry, i) =>
+        entry === "separator" ? <div key={`sep-${i}`} className="my-1 mx-3 border-t border-border/50" /> : navItem(entry, path, ctx),
+      )}
     </>
   )
 }
