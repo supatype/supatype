@@ -49,15 +49,6 @@ function settingFacts(settings: Settings): Fact[] {
   ]
 }
 
-/**
- * RESERVED: Public values. Another change adds the card that sets the values a deployed site reads
- * at runtime (the public environment its supatype-env.js carries). Nothing is built here on purpose.
- * Render that card from this component so its place on the page does not move.
- */
-function PublicValuesSlot(): null {
-  return null
-}
-
 function CustomDomainsLink({ path }: { path: string | undefined }): React.ReactElement | null {
   if (!CUSTOM_DOMAINS_LINK_VISIBLE || path === undefined) return null
   return <TextLink to={path} className="text-xs">Custom domains</TextLink>
@@ -65,7 +56,9 @@ function CustomDomainsLink({ path }: { path: string | undefined }): React.ReactE
 
 /** Mode, SPA fallback and response headers, and where each is set. The same page on self-host and Cloud. */
 export function StaticSiteSettings(): React.ReactElement {
-  const { data, loading, error } = useRequiredStaticSiteHost().useSettings()
+  const host = useRequiredStaticSiteHost()
+  const { data, loading, error } = host.useSettings()
+  const PublicValues = host.PublicValues
   return (
     <div className="space-y-5 max-w-3xl">
       <PageHeader title="Static site settings" action={<CustomDomainsLink path={data?.customDomainsPath} />} />
@@ -75,7 +68,7 @@ export function StaticSiteSettings(): React.ReactElement {
       {error !== null && <ErrorBanner message={error} />}
       {loading && data === null && <LoadingRows />}
       {data !== null && <FactsCard title="Serving" facts={settingFacts(data)} />}
-      <PublicValuesSlot />
+      {PublicValues !== undefined && <PublicValues />}
     </div>
   )
 }

@@ -13,6 +13,7 @@ export interface NavItem {
 }
 
 export interface SidebarSection {
+  /** Identifies the section (its React key). It is not displayed: a section is set apart by a divider. */
   title: string
   /** Which sidebar mode shows this section. */
   mode: StudioMode
