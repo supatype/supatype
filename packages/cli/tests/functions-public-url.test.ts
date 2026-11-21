@@ -108,8 +108,8 @@ describe("the functions worker's public URL in compose", () => {
       const compose = renderSelfHostCompose(config({ mode: devLocal ? "dev" : "standalone" }), process.cwd(), { devLocal })
       expect(workerPublicUrl(compose)).toBeDefined()
       expect(workerPublicUrl(compose)).not.toMatch(/kong|server:|functions-worker/)
-      // ctx.url is unchanged: the in-stack address real functions call the API on.
-      expect(serviceEnv(compose, "functions-worker").get("SUPATYPE_URL")).toBe("http://kong:8000")
+      // ctx.url is the in-stack address real functions call the API on: Kong's worker listener (D14).
+      expect(serviceEnv(compose, "functions-worker").get("SUPATYPE_URL")).toBe("http://kong:8100")
     })
   }
 })

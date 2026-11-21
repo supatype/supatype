@@ -21,6 +21,7 @@ import { generateAndWriteKeys } from "./keys.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
+  FORWARDING_SECRET_ENV,
   generateControlPlaneSecret,
   generateObjectStoreCredentials,
   givenJwtSecret,
@@ -1488,6 +1489,10 @@ SERVICE_ROLE_KEY=`)
   sections.push(`# Shared by the API server and the control plane only. The control plane refuses any
 # request without it, so code running in the functions worker cannot call it directly.
 ${CONTROL_PLANE_SECRET_ENV}=${generateControlPlaneSecret()}`)
+
+  sections.push(`# Held by the API server, the gateway and the functions worker. The server believes a client address
+# passed on in a header only on a request that carries it; code in a function never sees it.
+${FORWARDING_SECRET_ENV}=${generateControlPlaneSecret()}`)
 
   // Dev wrote it on first start, appended with no comment (0.9.2 release test round 2, R2-S14).
   sections.push(`# The cache's password when the cache runs in Postgres (pg_keyspace): the keyspace user

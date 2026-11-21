@@ -34,7 +34,7 @@ export interface FunctionContext {
   readonly functionName: string
   /**
    * The project's API base URL, reachable from inside this container: for calling the API from the
-   * function. Under compose it is `http://kong:8000`, a name nothing outside the stack resolves.
+   * function. Under compose it is `http://kong:8100`, Kong's worker listener, a name nothing outside the stack resolves.
    */
   readonly url: string
   /**
@@ -75,17 +75,23 @@ export interface FunctionContext {
   readonly env: Readonly<Record<string, string>>
 }
 
-/** The parts the worker needs internally but a handler has no use for. */
-interface InvocationStore {
-  readonly context: FunctionContext
-  /**
-   * The hook-depth header to carry onto outbound calls, when this invocation is a hook.
-   *
-   * Here rather than patched onto `globalThis.fetch` per call. That patch was the second global
-   * mutation the lock was protecting: two concurrent hooks would patch over each other, and the
-   * first to finish would restore the other's patch.
-   */
+/**
+ * What the request that started an invocation says, which its calls back into the stack carry on.
+ *
+ * Here rather than patched onto `globalThis.fetch` per call. That patch was the second global
+ * mutation the lock was protecting: two concurrent hooks would patch over each other, and the
+ * first to finish would restore the other's patch.
+ */
+export interface InboundCall {
+  /** The hook-depth header to carry onto outbound calls, when this invocation is a hook. */
   readonly hookDepth: string | null
+  /** The end user's address (`St-Forwarded-For`, else `X-Real-IP`), or null when the request had none. */
+  readonly clientAddress: string | null
+}
+
+/** The parts the worker needs internally but a handler has no use for. */
+interface InvocationStore extends InboundCall {
+  readonly context: FunctionContext
 }
 
 const store = new AsyncLocalStorage<InvocationStore>()
@@ -93,10 +99,10 @@ const store = new AsyncLocalStorage<InvocationStore>()
 /** Run an invocation with its context available to everything it calls. */
 export function runInvocation<T>(
   context: FunctionContext,
-  hookDepth: string | null,
+  inbound: InboundCall,
   run: () => Promise<T>,
 ): Promise<T> {
-  return store.run({ context, hookDepth }, run)
+  return store.run({ context, ...inbound }, run)
 }
 
 /** The invocation being served on this call stack, or undefined outside one. */
@@ -104,7 +110,8 @@ export function currentInvocation(): FunctionContext | undefined {
   return store.getStore()?.context
 }
 
-/** The hook depth to propagate, or null when this is not a hook call. */
-export function currentHookDepth(): string | null {
-  return store.getStore()?.hookDepth ?? null
+/** What the request being served says, or undefined outside an invocation. */
+export function currentCall(): InboundCall | undefined {
+  const current = store.getStore()
+  return current === undefined ? undefined : { hookDepth: current.hookDepth, clientAddress: current.clientAddress }
 }

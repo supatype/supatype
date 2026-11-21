@@ -39,6 +39,12 @@ function acmeRedisAuth(redisAuth: boolean | undefined): string {
 `
 }
 
+/**
+ * The port of Kong's second proxy listener, used only by the functions worker (D14). Compose lists
+ * it in KONG_PROXY_LISTEN and never maps it to the host.
+ */
+export const WORKER_LISTEN_PORT = 8100
+
 /** Escape a string for use inside YAML double quotes. */
 function yamlQuotedString(s: string): string {
   return JSON.stringify(s)
@@ -60,15 +66,70 @@ const STEP_PART_PATTERN = String.raw`/(?:\.|%2e){1,2}(?:/|$)|//`
  * app's own route never carries it (`servesApp`), so the app's paths reach it as they always did.
  * `get_raw_path` is the path as the client sent it, without the query string.
  */
-const RAW_PATH_GUARD = `          - name: pre-function
-            config:
-              access:
-                - |
+const RAW_PATH_GUARD = `                - |
                   local path = kong.request.get_raw_path()
                   if ngx.re.find(path, [[${STEP_PART_PATTERN}]], "joi") then
                     return kong.response.exit(400, { error = '"' .. path .. '": invalid request path' })
                   end
 `
+
+/** The Lua condition true on every listener but the functions worker's, the only one whose forwarding headers are left alone. */
+const NOT_WORKER_LISTENER = `tonumber(ngx.var.server_port) ~= ${WORKER_LISTEN_PORT}`
+
+/**
+ * D14 option 2b: the auth server believes the end-user address in `St-Forwarded-For` only on a
+ * request that carries `St-Forwarding-Secret`. So on every route, whatever a client sent under
+ * either name is removed first (the app's route included: it reaches the server too), and then, on
+ * a request to the server, the project's secret is added. The secret is read at request time from
+ * Kong's env vault (the variable compose hands Kong), so kong.yml, a file on disk, never holds it.
+ * Kong keeps writing X-Real-IP, which the server falls back to.
+ *
+ * Except on the worker listener ({@link WORKER_LISTEN_PORT}): the functions worker's own calls to
+ * the stack arrive there carrying the end user's address and the real secret, so neither header is
+ * removed and Kong adds no secret of its own. The port is never published, so only containers on
+ * the stack's network reach it, and user function code that does has no secret to send, which makes
+ * the server ignore any address it claims. Every other step, the raw path guard included, still runs.
+ */
+const FORWARDING_HEADERS_STRIPPED = `                - |
+                  if ${NOT_WORKER_LISTENER} then
+                    kong.service.request.clear_header("St-Forwarded-For")
+                    kong.service.request.clear_header("St-Forwarding-Secret")
+                  end
+`
+
+function forwardingSecretAdded(): string {
+  const vaultName = FORWARDING_SECRET_ENV.toLowerCase().replaceAll("_", "-")
+  return `                - |
+                  if ${NOT_WORKER_LISTENER} then
+                    local forwarding_secret = kong.vault.get("{vault://env/${vaultName}}")
+                    if not forwarding_secret then
+                      return kong.response.exit(500, { error = "the gateway's forwarding secret is not set" })
+                    end
+                    kong.service.request.set_header("St-Forwarding-Secret", forwarding_secret)
+                  end
+`
+}
+
+/** Whether a route sends requests to the server, the only upstream that is given the secret. */
+function reachesServer(route: RuntimeRoute): boolean {
+  return /^https?:\/\/server[:/]/.test(route.serviceUrl)
+}
+
+/**
+ * A route's `pre-function` plugin, one per route (Kong takes one of a name): the raw path check
+ * (not on the app's route), then the forwarding headers' removal and, to the server, the secret.
+ */
+function accessPlugin(route: RuntimeRoute): string {
+  const steps = [
+    ...(route.servesApp === true ? [] : [RAW_PATH_GUARD]),
+    FORWARDING_HEADERS_STRIPPED,
+    ...(reachesServer(route) ? [forwardingSecretAdded()] : []),
+  ]
+  return `          - name: pre-function
+            config:
+              access:
+${steps.join("")}`
+}
 
 /** The engine routes' key check, when the gateway has a key. */
 const ENGINE_KEY_AUTH = `          - name: key-auth
@@ -89,14 +150,14 @@ const GRAPHQL_PROFILE = `          - name: request-transformer
 /** A route's `plugins:` list, one key however many plugins it has, or nothing. */
 function routePlugins(route: RuntimeRoute, secured: boolean): string {
   const plugins = [
-    ...(route.servesApp === true ? [] : [RAW_PATH_GUARD]),
+    accessPlugin(route),
     ...(route.engineProtected === true && secured ? [ENGINE_KEY_AUTH] : []),
     ...(route.graphqlPostgrest === true ? [GRAPHQL_PROFILE] : []),
   ]
   return plugins.length === 0 ? "" : `        plugins:\n${plugins.join("")}`
 }
 
-import { KEYSPACE_PASSWORD_ENV, KEYSPACE_USERNAME } from "./local-secrets.js"
+import { FORWARDING_SECRET_ENV, KEYSPACE_PASSWORD_ENV, KEYSPACE_USERNAME } from "./local-secrets.js"
 import { runtimeRouteSpec, type RuntimeRoute } from "./runtime-routes.js"
 
 /**

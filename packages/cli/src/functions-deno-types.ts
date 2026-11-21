@@ -117,7 +117,7 @@ export const FUNCTION_CONTEXT_INTERFACE = `export interface FunctionContext {
   readonly functionName: string
   /**
    * The project's API base URL, reachable from inside the function: for calling the API. Under
-   * Docker it is an in-stack name (http://kong:8000) that a browser cannot open.
+   * Docker it is an in-stack name (http://kong:8100) that a browser cannot open.
    */
   readonly url: string
   /**
