@@ -1998,7 +1998,7 @@ auth: {
 },
 ```
 
-Each limit except `smsSent` counts requests per client IP address. The address is the one the gateway forwards: Kong writes `X-Real-IP` from the connection and replaces any value the client sent, so a client cannot pick its own. A request that reaches the server without that header counts against the address of its connection. A client over a limit gets 429 with error code `over_request_rate_limit` until the window lets it in again.
+Each limit except `smsSent` counts requests per client IP address. The address is the one the gateway forwards: Kong writes `X-Real-IP` from the connection and replaces any value the client sent, so a client cannot pick its own. The server believes a forwarded address only on a request that carries the project's forwarding secret, which Kong adds and no client holds. Any other request counts against the address of its connection, whatever `St-Forwarded-For`, `X-Real-IP` or `X-Forwarded-For` it carries, and the IP recorded in audit logs follows the same rule. A client over a limit gets 429 with error code `over_request_rate_limit` until the window lets it in again.
 
 | Key | What it counts, per client | Window | Default |
 | --- | --- | --- | --- |
@@ -2012,7 +2012,9 @@ Each limit except `smsSent` counts requests per client IP address. The address i
 
 A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. Every per-client limit works that way, over its own window: a limit of 3 lets one client make 3 requests at once, never more. A limit below 1 still lets one through. How many emails the server sends an hour is a separate limit: `SUPATYPE_RATE_LIMIT_EMAIL_SENT` on self-host, and the platform's on Cloud.
 
-On self-host each key renders as a `SUPATYPE_RATE_LIMIT_*` variable for the server (`mfa` as `SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`), and a value in `.env` wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set `SUPATYPE_RATE_LIMIT_HEADER` in `.env` to a header that proxy writes from the connection, and only if nothing else can reach the server.
+On self-host each key renders as a `SUPATYPE_RATE_LIMIT_*` variable for the server (`mfa` as `SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`), and a value in `.env` wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set `SUPATYPE_RATE_LIMIT_HEADER` in `.env` to a header that proxy writes from the connection, and only if nothing else can reach Kong.
+
+The forwarding secret is `SUPATYPE_FORWARDING_SECRET` in `.env`. `supatype init` generates it, and a project that predates it gets one on its next `dev` or `self-host` command. It is given to the server (as `SUPATYPE_SECURITY_FORWARDING_SECRET`), to Kong and to the functions worker, and to nothing else: the worker removes it from the environment before it loads your functions, so function code cannot read it. When a function calls the project's own address, the worker passes on the end user's address with it, so a function that signs a user in is counted against that user and not against the worker. Keep it out of version control like the other secrets in `.env`, and never log it. A server with no secret set believes forwarded addresses from any sender, as before, and says so once when it starts.
 
 #### Environment variables
 
