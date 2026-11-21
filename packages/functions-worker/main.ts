@@ -5,13 +5,14 @@
  */
 
 import { parseEnvText } from "./dotenv.ts"
-import { FUNCTION_ENTRY_FILE, functionRouteName, isHookName } from "./routes.ts"
+import { isHookName } from "./routes.ts"
 import { exitOnStop } from "./stop.ts"
 import {
   runInvocation,
   type FunctionContext,
 } from "./invocation.ts"
 import { endUserAddress, HOOK_DEPTH_HEADER, installStackFetch } from "./stack-fetch.ts"
+import { discoverRoutes, type DiscoveredRoute } from "./discover.ts"
 import {
   closeTails,
   installStructuredLogging,
@@ -37,11 +38,6 @@ installStackFetch({ origin: stackOrigin, forwardingSecret })
 const RESERVED_ROUTES = new Set(["_logs"])
 
 type Handler = (req: Request, ctx: FunctionContext) => Response | Promise<Response>
-
-interface DiscoveredRoute {
-  name: string
-  entrypoint: string
-}
 
 /**
  * Root for public functions, or "" when this worker serves none.
@@ -245,35 +241,6 @@ async function readServiceRoleKeyFile(path: string): Promise<string> {
   }
 }
 
-async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
-  const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
-  const out: DiscoveredRoute[] = []
-
-  // The catch has to wrap the *iteration*: `Deno.readDir` returns its iterable without touching the
-  // filesystem, so a missing directory raises NotFound on the first `next()`, not here. A root that
-  // does not exist is ordinary, a project with functions but no hooks has no hooks directory, and
-  // letting it throw would fail startup and take that project's working functions down with it.
-  try {
-    // routes.ts is the rule a self-hosted control plane lists functions by too.
-    for await (const entry of Deno.readDir(root)) {
-      const fullPath = `${root}/${entry.name}`
-      const name = entry.isDirectory || entry.isFile ? functionRouteName(entry.name, entry.isDirectory ? "directory" : "file") : undefined
-      if (name === undefined || (single && name !== single)) continue
-      const entrypoint = entry.isDirectory ? `${fullPath}/${FUNCTION_ENTRY_FILE}` : fullPath
-      try {
-        await Deno.stat(entrypoint)
-        out.push({ name, entrypoint })
-      } catch {
-        // A directory with no entry module is not a route.
-      }
-    }
-  } catch (err) {
-    if (!(err instanceof Deno.errors.NotFound)) throw err
-  }
-
-  return out.sort((a, b) => a.name.localeCompare(b.name))
-}
-
 function entrypointImportUrl(entrypoint: string): string {
   const normalized = entrypoint.replace(/\\/g, "/")
   if (normalized.startsWith("file://")) return normalized
@@ -360,11 +327,16 @@ function jsonError(code: string, message: string, status: number, extra: Record<
   })
 }
 
+/** The one route a pinned worker serves (a per-function or per-hook pod), or undefined. */
+function singleFunction(): string | undefined {
+  return Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
+}
+
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
 // Order matters: withhold, then import. See withholdServiceRoleKey.
 const serviceRoleKey = await withholdServiceRoleKey()
 const root = functionsRoot()
-const routes = root ? await discoverRoutes(root) : []
+const routes = root ? await discoverRoutes(root, singleFunction()) : []
 const handlers = await loadHandlers(routes)
 
 // Hooks are namespaced so one worker can serve both without a name in `hooks/` ever shadowing, or
@@ -376,7 +348,7 @@ if (!root && !hooksDir) {
   )
 }
 if (hooksDir) {
-  const hookRoutes = await discoverRoutes(hooksDir)
+  const hookRoutes = await discoverRoutes(hooksDir, singleFunction())
   const hookHandlers = await loadHandlers(hookRoutes)
   for (const [name, handler] of Object.entries(hookHandlers)) {
     handlers[HOOKS_ROUTE_PREFIX + name] = handler
@@ -388,7 +360,7 @@ if (hooksDir) {
 // once, after both roots, so the failure means what it says, and it stays a failure, because a pod
 // serving nothing would answer 404 to the API server, which reads as the hook refusing to answer and
 // fails every write to its table.
-const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
+const single = singleFunction()
 if (single && Object.keys(handlers).length === 0) {
   throw new Error(
     `Handler "${single}" not found under ${root}` + (hooksDir ? ` or ${hooksDir}` : ""),
