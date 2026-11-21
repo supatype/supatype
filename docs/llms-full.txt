@@ -3815,7 +3815,7 @@ The server checks every Studio request against this table.
 | Create, change and delete buckets | Yes | Yes | No | No |
 | Give and remove Studio roles | Yes | No | No | No |
 
-> **SQL EDITOR:** The SQL editor signs in as `supatype_sql_editor`. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.
+> **SQL EDITOR:** The SQL editor signs in as `supatype_sql_editor`. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded. After each statement, everything the editor created is handed to the project owner. A table, view or function you make there ends up owned by the owner, not by `supatype_sql_editor`. A `SECURITY DEFINER` function written in the editor therefore runs with the owner's rights, and the owner is not a superuser.
 
 > **BUCKET RULES:** A bucket's access rules page is part of "see the access rules". Viewers and editors see it read-only. Only admins and developers can change the rules.
 
