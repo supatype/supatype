@@ -59,7 +59,7 @@ import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
+import { cacheSeedingNotes, cloudCacheNotes } from "../api-config-cache.js"
 import { waitForRestReady } from "../rest-ready.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
@@ -389,7 +389,7 @@ export async function runPostApplySteps(cwd: string, config: SupatypeProjectConf
  * How a push to a linked target ended. One whose step after the schema failed ends with that, not
  * "Pushed to ..." and the API URL, which read as success above the failure.
  */
-function reportTargetPush(
+export function reportTargetPush(
   target: DeployTarget,
   pushResult: Awaited<ReturnType<typeof targetSchemaPush>>,
   stepFailed: boolean,
@@ -399,8 +399,7 @@ function reportTargetPush(
   // Cloud only. A self-host control plane has tiers too and they mean nothing there, so the same
   // sentence would be telling a self-hosted project to upgrade something it already has.
   if (target.mode === "cloud") {
-    const note = freeTierCacheNote((pushResult as { cache?: { tables?: string[]; honoured?: boolean } }).cache)
-    if (note) info(note)
+    for (const note of cloudCacheNotes(pushResult.cache)) info(note)
   }
   const envUrl = target.link?.environments?.[target.environment]?.apiUrl?.replace(/\/$/, "")
   if (envUrl) {

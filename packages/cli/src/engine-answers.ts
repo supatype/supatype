@@ -110,7 +110,7 @@ export const isEnginePushResult: Guard<EnginePushResult> = isShape({
   message: optional(isString),
   name: optional(isString),
   warnings: optional(isStringArray),
-  cache: optional(isShape({ tables: optional(isStringArray), honoured: optional(isBoolean) })),
+  cache: optional(isShape({ tables: optional(isStringArray), honoured: optional(isBoolean), enabled: optional(isStringArray) })),
   access: optional(isArrayOf(isRoleAccess)),
 })
 

@@ -25,6 +25,7 @@ import { dirname, join } from "node:path"
 import { manifestCache } from "./model-cache.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { isJsonObject } from "@supatype/shared"
+import type { CacheReport } from "./engine-push-output.js"
 import { seedThroughStack, tableEntryFor } from "./api-config-stack.js"
 
 /** The server's own default configuration (apiconfig.DefaultApiConfig), for a stack that has never written one. */
@@ -165,7 +166,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * a correct declaration, not a mistake (the tier decides what runs, not what a schema may say),
  * and a push that failed over it would be punishing someone for writing down their intent.
  */
-export function freeTierCacheNote(report: { tables?: string[]; honoured?: boolean } | undefined): string | null {
+export function freeTierCacheNote(report: CacheReport | undefined): string | null {
   // Absent, rather than `honoured: false`, is a control plane too old to answer. Silence is the
   // only honest response to a question that was never asked.
   if (!report || report.honoured !== false) return null
@@ -176,6 +177,18 @@ export function freeTierCacheNote(report: { tables?: string[]; honoured?: boolea
     `${listed(tables)} declare a cache in your schema. On the free tier these are served from ` +
     `PostgREST on every request; the declaration is stored and takes effect on a paid plan.`
   )
+}
+
+/**
+ * The lines a Cloud push prints about the cache: the tables the server confirmed as switched on,
+ * in the words a self-host push uses, then the free-tier note when the tier does not honour it.
+ * A control plane that predates `enabled` sends none, so it prints the free-tier note alone.
+ */
+export function cloudCacheNotes(report: CacheReport | undefined): string[] {
+  const enabled = (report?.enabled ?? []).filter((t) => t.length > 0)
+  const notes = seedNotes(enabled, report?.tables?.length ?? 0, false, "on Supatype Cloud")
+  const freeTier = freeTierCacheNote(report)
+  return freeTier === null ? notes : [...notes, freeTier]
 }
 
 /** "posts", "posts and profiles", "posts, profiles and tags". */
