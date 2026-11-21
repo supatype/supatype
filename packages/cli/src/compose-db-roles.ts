@@ -34,17 +34,9 @@ const RECONCILE_SQL_EDITOR_SQL = [
   "SELECT format('ALTER ROLE supatype_sql_editor WITH LOGIN PASSWORD %L', :'pw')",
   "WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'supatype_sql_editor')",
   "\\gexec",
-  // Postgres 16 split SET from INHERIT on a role grant, and the image grants the editor its owner
-  // with SET FALSE. The editor hands what it creates to the owner with SET ROLE, so without SET
-  // every query failed with `must be able to SET ROLE`. A fresh GRANT updates the options of one
-  // that exists, so this corrects a volume the image already made, and is a no-op after that.
-  // Only the database's own non-superuser owner is granted, and INHERIT stays on.
-  "SELECT format('GRANT %I TO supatype_sql_editor WITH INHERIT TRUE, SET TRUE', pg_get_userbyid(d.datdba))",
-  "FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba",
-  "WHERE d.datname = current_database() AND NOT r.rolsuper",
-  "  AND EXISTS (SELECT FROM pg_roles WHERE rolname = 'supatype_sql_editor')",
-  "  AND current_setting('server_version_num')::int >= 160000",
-  "\\gexec",
+  // Only the password. The image grants the editor its owner WITH INHERIT TRUE, SET FALSE so
+  // submitted SQL cannot SET ROLE into the owner, and hands what the editor creates to the owner
+  // through public.supatype_sql_editor_reassign_owned(). Nothing here widens that grant.
   "",
 ].join("\n")
 
