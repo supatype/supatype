@@ -18,8 +18,8 @@ External Deno runtime for edge functions. **supatype-server** proxies `/function
 | `SUPATYPE_FUNCTIONS_ROOT` | yes | Directory of function sources (e.g. `/project/functions`) |
 | `PORT` | no | Listen port (default `8001`) |
 | `SUPATYPE_FUNCTION_NAME` | no | Single-function mode |
-| `SUPATYPE_URL` | no | **In-compose:** `http://kong:8000` (Docker DNS). Do not inject the public/host gateway URL, `localhost` inside the container cannot reach Kong on the host. Use for server-side `fetch` / `createClient`. Handed to every function as `ctx.url`. |
-| `SUPATYPE_INTERNAL_URL` | no | Same as `SUPATYPE_URL` in Compose (`http://kong:8000`) |
+| `SUPATYPE_URL` | no | **In-compose:** `http://kong:8100` (Docker DNS, Kong's worker listener: port 8000 strips the forwarding headers the worker adds). Do not inject the public/host gateway URL, `localhost` inside the container cannot reach Kong on the host. Use for server-side `fetch` / `createClient`. Handed to every function as `ctx.url`. |
+| `SUPATYPE_INTERNAL_URL` | no | Same as `SUPATYPE_URL` in Compose (`http://kong:8100`) |
 | `SUPATYPE_PUBLIC_URL` | no | The project's public address, the gateway URL a browser or an app uses. Handed to every function as `ctx.publicUrl`, for links you give to people. Compose sets it from `API_EXTERNAL_URL`, the address the server is told is its own. Unset, `ctx.publicUrl` falls back to `ctx.url` and the worker logs one warning at start |
 | `SUPATYPE_ANON_KEY`, `SUPATYPE_SERVICE_ROLE_KEY` | no | Injected per invocation when set |
 | `SITE_URL` | no | Public site URL for browser-facing links (not the same as `SUPATYPE_URL`) |

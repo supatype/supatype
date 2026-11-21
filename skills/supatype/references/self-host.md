@@ -34,7 +34,7 @@ Use `--direct` on schema commands to bypass the control plane and invoke the loc
 ## Functions: `ctx.url` and `ctx.publicUrl`
 
 Every function is handed two addresses. `ctx.url` is for calling the API from inside the function:
-compose sets it to `http://kong:8000`, a name only the stack's own network resolves. `ctx.publicUrl`
+compose sets it to `http://kong:8100`, a name only the stack's own network resolves. `ctx.publicUrl`
 is the project's public address, for links you give to people (an email, a redirect, a URL in a
 response): compose sets it from `API_EXTERNAL_URL`, the same value the server is told is its own,
 so set that in `.env` to your domain (`supatype dev` writes the gateway's localhost address). A

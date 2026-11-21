@@ -50,7 +50,11 @@ interface Run {
   visible: string | null
 }
 
-async function run(inbound: Record<string, string>, secret: string | undefined): Promise<Run> {
+async function run(
+  inbound: Record<string, string>,
+  secret: string | undefined,
+  urlEnv: (stackOrigin: string) => Record<string, string> = (origin) => ({ SUPATYPE_URL: origin }),
+): Promise<Run> {
   const stack: Seen[] = []
   const other: Seen[] = []
   const otherServer = recorder(other)
@@ -59,7 +63,7 @@ async function run(inbound: Record<string, string>, secret: string | undefined):
   try {
     worker = await startWorker({ caller: CALLER }, {
       ...baseEnv(),
-      SUPATYPE_URL: stackServer.origin,
+      ...urlEnv(stackServer.origin),
       SUPATYPE_PUBLIC_URL: stackServer.origin,
       OTHER_ORIGIN: otherServer.origin,
       ...(secret !== undefined && { SUPATYPE_FORWARDING_SECRET: secret }),
@@ -80,6 +84,18 @@ Deno.test("a call to the stack carries the inbound St-Forwarded-For and the secr
   const direct = stack.find((s) => s.path === "/direct")
   expectEqual(direct?.forwardedFor, "203.0.113.9", "address")
   expectEqual(direct?.secret, SECRET, "secret")
+})
+
+Deno.test("the stack is the address SUPATYPE_INTERNAL_URL names, as compose sets it for Kong's worker listener", async () => {
+  // Compose gives the worker the same address, on a port other than 8000, under both names.
+  const { stack, other } = await run({ "St-Forwarded-For": "203.0.113.9" }, SECRET, (origin) => ({
+    SUPATYPE_URL: origin,
+    SUPATYPE_INTERNAL_URL: origin,
+  }))
+  const direct = stack.find((s) => s.path === "/direct")
+  expectEqual(direct?.forwardedFor, "203.0.113.9", "address")
+  expectEqual(direct?.secret, SECRET, "secret")
+  expectEqual(other.find((s) => s.path === "/other")?.secret, "forged", "another port on the same host is not the stack")
 })
 
 Deno.test("without St-Forwarded-For the inbound X-Real-IP is the address", async () => {

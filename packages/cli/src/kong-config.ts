@@ -39,6 +39,12 @@ function acmeRedisAuth(redisAuth: boolean | undefined): string {
 `
 }
 
+/**
+ * The port of Kong's second proxy listener, used only by the functions worker (D14). Compose lists
+ * it in KONG_PROXY_LISTEN and never maps it to the host.
+ */
+export const WORKER_LISTEN_PORT = 8100
+
 /** Escape a string for use inside YAML double quotes. */
 function yamlQuotedString(s: string): string {
   return JSON.stringify(s)
@@ -74,20 +80,30 @@ const RAW_PATH_GUARD = `                - |
  * a request to the server, the project's secret is added. The secret is read at request time from
  * Kong's env vault (the variable compose hands Kong), so kong.yml, a file on disk, never holds it.
  * Kong keeps writing X-Real-IP, which the server falls back to.
+ *
+ * Except on the worker listener ({@link WORKER_LISTEN_PORT}): the functions worker's own calls to
+ * the stack arrive there carrying the end user's address and the real secret, so neither header is
+ * removed and Kong adds no secret of its own. The port is never published, so only containers on
+ * the stack's network reach it, and user function code that does has no secret to send, which makes
+ * the server ignore any address it claims. Every other step, the raw path guard included, still runs.
  */
 const FORWARDING_HEADERS_STRIPPED = `                - |
-                  kong.service.request.clear_header("St-Forwarded-For")
-                  kong.service.request.clear_header("St-Forwarding-Secret")
+                  if tonumber(ngx.var.server_port) ~= ${WORKER_LISTEN_PORT} then
+                    kong.service.request.clear_header("St-Forwarded-For")
+                    kong.service.request.clear_header("St-Forwarding-Secret")
+                  end
 `
 
 function forwardingSecretAdded(): string {
   const vaultName = FORWARDING_SECRET_ENV.toLowerCase().replaceAll("_", "-")
   return `                - |
-                  local forwarding_secret = kong.vault.get("{vault://env/${vaultName}}")
-                  if not forwarding_secret then
-                    return kong.response.exit(500, { error = "the gateway's forwarding secret is not set" })
+                  if tonumber(ngx.var.server_port) ~= ${WORKER_LISTEN_PORT} then
+                    local forwarding_secret = kong.vault.get("{vault://env/${vaultName}}")
+                    if not forwarding_secret then
+                      return kong.response.exit(500, { error = "the gateway's forwarding secret is not set" })
+                    end
+                    kong.service.request.set_header("St-Forwarding-Secret", forwarding_secret)
                   end
-                  kong.service.request.set_header("St-Forwarding-Secret", forwarding_secret)
 `
 }
 

@@ -57,7 +57,7 @@ Step 4 is automated: `bash tests/integration/scripts/edge-kit-e2e.sh` (from the 
 
 ## Notes
 
-- Worker `SUPATYPE_URL` is **`http://kong:8000`** in Compose (server-side calls). Public links use `SITE_URL` / `API_EXTERNAL_URL`.
+- Worker `SUPATYPE_URL` is **`http://kong:8100`** in Compose (server-side calls, Kong's worker listener). Public links use `SITE_URL` / `API_EXTERNAL_URL`.
 - `WEBHOOK_SECRET` defaults to `edge-kit-dev-webhook-secret` in `functions/.env.local.example` (matches the UI signer).
 - Generated types under `supatype/generated/` are placeholders until `pnpm dev` (or `pnpm push`) regenerates them.
 - Ports: the gateway is on `SUPATYPE_KONG_PORT` (default 18473) and Postgres on `SUPATYPE_DEV_DB_PORT` (default 54329, the port `DATABASE_URL` names). `dev` moves either to the next free port when it is taken, and writes the one it chose into `.env`.

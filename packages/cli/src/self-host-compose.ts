@@ -28,7 +28,7 @@ import {
 } from "./project-config.js"
 import { hasStudioOverride, pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
-import { buildKongDeclarative } from "./kong-config.js"
+import { buildKongDeclarative, WORKER_LISTEN_PORT } from "./kong-config.js"
 import { keyspaceInPostgres, keyspacePasswordRequired } from "./cache-provider.js"
 import {
   checkedKeyspacePasswordFile,
@@ -852,9 +852,13 @@ ${seaweedPorts}`
   const keyspacePasswordFile = options?.keyspacePasswordFile
   const keyspaceAuthEnv = keyspacePasswordEnv(config, keyspacePasswordFile)
   const keyspaceMount = keyspacePasswordMount(config, keyspacePasswordFile)
+  // The second listener is the functions worker's (kong-config.ts, WORKER_LISTEN_PORT). It is in
+  // KONG_PROXY_LISTEN so the worker's forwarding headers survive, and in no `ports:` mapping below.
+  const kongListen = tlsEnabled
+    ? `0.0.0.0:8000, 0.0.0.0:${WORKER_LISTEN_PORT}, 0.0.0.0:8443 ssl`
+    : `0.0.0.0:8000, 0.0.0.0:${WORKER_LISTEN_PORT}`
   const kongTlsEnv = tlsEnabled
-    ? `      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
-      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
+    ? `      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_LUA_SSL_VERIFY_DEPTH: "2"
 ${keyspaceAuthEnv}`
     : ""
@@ -1173,8 +1177,10 @@ ${mounts.projectReadOnly}
       SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
       PORT: "8001"
       # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost, unreachable from this container).
-      SUPATYPE_URL: http://kong:8000
-      SUPATYPE_INTERNAL_URL: http://kong:8000
+      # Kong's worker listener, never published: it keeps the St-Forwarded-For and St-Forwarding-Secret
+      # this worker adds, where port 8000 removes them (kong-config.ts, D14).
+      SUPATYPE_URL: http://kong:${WORKER_LISTEN_PORT}
+      SUPATYPE_INTERNAL_URL: http://kong:${WORKER_LISTEN_PORT}
       # ctx.publicUrl: the address a browser or an app uses, for links a function gives to people.
       # The same value the server is told is its own, never a name only this stack resolves.
       SUPATYPE_PUBLIC_URL: ${publicApiUrl}
@@ -1399,6 +1405,7 @@ ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux 
       KONG_DNS_ORDER: "LAST,A,CNAME"
       # Read through Kong's env vault by the pre-function on every route to the server (kong-config.ts).
       ${forwardingSecretRequired()}
+      KONG_PROXY_LISTEN: "${kongListen}"
 ${kongTlsEnv}    volumes:
 ${mounts.kong}
     ports:

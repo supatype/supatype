@@ -103,6 +103,60 @@ describe("compose forwarding secret", () => {
   })
 })
 
+describe("Kong worker listener (port 8100)", () => {
+  const listenOf = (compose: string): string => /KONG_PROXY_LISTEN: "([^"]+)"/.exec(serviceBlock(compose, "kong"))?.[1] ?? ""
+
+  it.each(["standalone", "dev"] as const)("is listened on and never published (%s)", (mode) => {
+    const compose = renderSelfHostCompose(config(mode))
+    expect(listenOf(compose)).toContain("0.0.0.0:8100")
+    expect(listenOf(compose)).toContain("0.0.0.0:8000")
+    const ports = serviceBlock(compose, "kong").split("\n").filter((l) => /^\s+- "[^"]+:\d+"/.test(l))
+    expect(ports.length).toBeGreaterThan(0)
+    for (const line of ports) expect(line).not.toMatch(/8100/)
+  })
+
+  it("is listened on and never published with TLS", () => {
+    const tls = validateProjectConfig(
+      {
+        project: { name: "acme" },
+        server: { mode: "standalone", domain: "api.example.com", tls: { email: "ops@example.com" } },
+        app: { mode: "none" as const },
+        database: { provider: "docker" as const },
+        versions: { postgres: "17.2", deno: DENO_RELEASE_PIN },
+      },
+      "supatype.config.ts",
+    )
+    const compose = renderSelfHostCompose(tls)
+    expect(listenOf(compose)).toBe("0.0.0.0:8000, 0.0.0.0:8100, 0.0.0.0:8443 ssl")
+    expect(serviceBlock(compose, "kong")).not.toMatch(/"\d+:8100"/)
+  })
+
+  it.each(["standalone", "dev"] as const)("is the only address the worker is given for the stack (%s)", (mode) => {
+    const block = serviceBlock(renderSelfHostCompose(config(mode)), "functions-worker")
+    expect(block).toContain("SUPATYPE_URL: http://kong:8100")
+    expect(block).toContain("SUPATYPE_INTERNAL_URL: http://kong:8100")
+    expect(block).not.toContain("kong:8000")
+  })
+
+  it.each(LAYOUTS)("keeps the headers and adds no secret on 8100, and still strips and adds on 8000 ($name)", ({ opts }) => {
+    const routes = renderedRoutes(buildKongDeclarative(opts))
+    for (const route of routes) {
+      for (const step of route.block.split("- |").slice(1)) {
+        if (step.includes("clear_header") || step.includes("set_header(\"St-Forwarding-Secret\"")) {
+          // Both steps run only off the worker listener, so 8000 still strips and adds.
+          expect(step, route.name).toContain("if tonumber(ngx.var.server_port) ~= 8100 then")
+        }
+      }
+      expect(clears(route, "St-Forwarded-For"), route.name).toBe(true)
+      // The path guard is not behind the port check, so it runs on 8100 too.
+      if (route.block.includes("get_raw_path")) {
+        const guard = route.block.split("- |").find((s) => s.includes("get_raw_path")) ?? ""
+        expect(guard, route.name).not.toContain("server_port")
+      }
+    }
+  })
+})
+
 describe("ensureForwardingSecret", () => {
   const dirs: string[] = []
   afterEach(() => {

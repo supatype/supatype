@@ -82,7 +82,7 @@ describe("the functions worker's network", () => {
       })
 
       it("still points the worker at the gateway by a name it can resolve", () => {
-        expect(serviceBlock(compose, "functions-worker")).toContain("SUPATYPE_URL: http://kong:8000")
+        expect(serviceBlock(compose, "functions-worker")).toContain("SUPATYPE_URL: http://kong:8100")
       })
     })
   }

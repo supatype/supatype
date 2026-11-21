@@ -34,7 +34,7 @@ export interface FunctionContext {
   readonly functionName: string
   /**
    * The project's API base URL, reachable from inside this container: for calling the API from the
-   * function. Under compose it is `http://kong:8000`, a name nothing outside the stack resolves.
+   * function. Under compose it is `http://kong:8100`, Kong's worker listener, a name nothing outside the stack resolves.
    */
   readonly url: string
   /**

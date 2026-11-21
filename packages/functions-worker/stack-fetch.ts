@@ -59,8 +59,8 @@ function hasStackHeaders(call: InboundCall, secret: string): boolean {
  * Patched once, at startup, with no per-call state of its own: what a call carries comes from the
  * invocation store, so concurrent invocations cannot see each other's.
  *
- * "The stack" is an exact origin match, not a prefix: `http://kong:8000.example.com` starts with
- * `http://kong:8000` and is somebody else's host. And a redirect is followed here, a hop at a time,
+ * "The stack" is an exact origin match, not a prefix: `http://kong:8100.example.com` starts with
+ * `http://kong:8100` and is somebody else's host. And a redirect is followed here, a hop at a time,
  * rather than by `fetch`: a stack endpoint can redirect to another origin (a storage download goes
  * to a signed URL), and `fetch` keeps custom headers across origins, which would hand the secret to
  * whoever the stack redirects to. A hop that stays on the stack carries them again; one that leaves
