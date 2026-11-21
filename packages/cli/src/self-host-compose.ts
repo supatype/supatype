@@ -1278,6 +1278,11 @@ ${keyspaceServerEnv(config, keyspacePasswordFile)}${appEnv}
       SUPATYPE_API_HOST: 0.0.0.0
       SUPATYPE_API_PORT: 9999
       SUPATYPE_API_EXTERNAL_URL: ${publicApiUrl}
+      # The client address the per-client limits (verify, OTP, sign-up, recover, token refresh)
+      # count against. Kong writes X-Real-IP from the connection and replaces any the client sent;
+      # X-Forwarded-For would keep the client's own text at the front. Unset, no request through
+      # Kong was ever counted. Behind another proxy, set the header that proxy writes in .env.
+      SUPATYPE_RATE_LIMIT_HEADER: "\${SUPATYPE_RATE_LIMIT_HEADER:-X-Real-IP}"
       # Browser origins allowed besides the site URL: api.corsOrigins, then whatever .env adds.
       # A list saved in Studio replaces both until it is reset. Dev mode allows every origin.
       SUPATYPE_CORS_ALLOW_ORIGINS: "${corsOriginsEnv(config)}"
