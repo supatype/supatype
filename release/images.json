@@ -6,12 +6,12 @@
   },
   "server": {
     "image": "supatype/server",
-    "tag": "v2.5.0",
-    "commit": "8b9ecaea62c7f3086b32c25f652c1348c152ff6d"
+    "tag": "v2.5.1-e2e.d07b10d7",
+    "commit": "d07b10d7251d624870e5905e1c4ca5e290c6a46e"
   },
   "postgres": {
     "image": "supatype/postgres",
-    "tag": "17.2.15",
-    "commit": "b10f77e32ef8e8e3030279e898434c904f5c18d7"
+    "tag": "17.2.99",
+    "commit": "5a8170ce5ca01da3f03e38f28fa6bc4aa23b3f6c"
   }
 }
