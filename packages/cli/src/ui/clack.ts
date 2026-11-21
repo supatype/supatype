@@ -138,8 +138,9 @@ export const p: ClackApi = {
       start(message: string) {
         console.log(`${message}...`)
       },
-      stop(message: string) {
-        console.log(message)
+      stop(message: string, ok = true) {
+        if (ok) console.log(message)
+        else console.error(message)
       },
     }
   },

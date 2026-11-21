@@ -13,6 +13,7 @@ import {
   type StepView,
   type TimedStep,
 } from "../init-setup-steps.js"
+import { devBuildInitNote } from "../release-images.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { adminEmailProblem, answerProblem, askText, smtpHostProblem, smtpPortProblem, type SmtpServer } from "../init-answers.js"
 import { assertEnvValues } from "../env-value.js"
@@ -293,7 +294,10 @@ async function createProject(args: CreateProjectArgs): Promise<void> {
   // CLI flags override wizard / default action choices.
   const wants: SetupWants = { install: opts.install !== false && result.install, keys: opts.keys !== false && result.generateKeys }
   if (name) mkdirSync(dir, { recursive: true })
-  scaffold(dir, result, await args.deps)
+  const deps = await args.deps
+  const devNote = devBuildInitNote(deps)
+  if (devNote !== undefined) warn(devNote)
+  scaffold(dir, result, deps)
   recordScaffoldedKongPort(dir, result)
 
   const outcome = await withStepView((view) => runSetupSteps(dir, result.packageManager, wants, view))
