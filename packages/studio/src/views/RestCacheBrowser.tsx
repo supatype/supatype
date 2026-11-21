@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
-import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
 import { useInterval } from "../hooks/useTabActivity.js"
 import { Badge, Button, Card, Checkbox, ConfirmButton, Input, LoadingRows, TableCard, Td, Th, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
@@ -217,7 +216,6 @@ export function RestCacheBrowser({
   showTableSettings = false,
 }: RestCacheBrowserProps): React.ReactElement {
   const client = useStudioClient()
-  const serverCacheOffered = useServerRestCacheOffered()
   const refused = useRoleRefusalText()
   // Paged rather than appended: the list refreshes on a timer, and only the page on screen can.
   const pages = useCursorPages(tableFilter ?? "")
@@ -389,39 +387,6 @@ export function RestCacheBrowser({
     describeStaleness,
     tableHealth.error,
   )
-
-  if (!serverCacheOffered) {
-    return (
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Server-side REST caching is not available on the Cloud free tier.
-          </p>
-        </div>
-        <Card className="border-amber-500/30 bg-amber-500/5">
-          <div className="px-4 py-6 space-y-3">
-            <h2 className="text-sm font-semibold">No server-side cache on Free</h2>
-            <p className="text-sm text-muted-foreground">
-              Free projects do <strong className="font-medium text-foreground">not</strong> get server-side
-              caching. Every API request is proxied to PostgREST,
-              even when the client sends <code className="text-xs font-mono">.cache(&#123; server: true &#125;)</code>{" "}
-              (the server responds with <code className="text-xs font-mono">X-Supatype-Cache-Status: BYPASS</code>).
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Your app can still use <strong className="font-medium text-foreground">client-only</strong> caching in
-              the browser or Node process:{" "}
-              <code className="text-xs font-mono">.cache(&#123; ttl &#125;)</code> without{" "}
-              <code className="text-xs font-mono">server: true</code>.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Upgrade to Pro for a shared server-side cache, per-table allowlists, and cache management in Studio.
-            </p>
-          </div>
-        </Card>
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-4">

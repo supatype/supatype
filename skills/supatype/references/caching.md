@@ -5,9 +5,9 @@ Opt-in caching for PostgREST table reads (`GET /rest/v1/*`). Two layers:
 | Layer | Storage | Scope | Availability |
 |-------|---------|--------|--------------|
 | **Client** | In-memory (`@supatype/client`) | Same browser tab / Node process | All deployments |
-| **Server** | A RESP keyspace | All users, tabs, and replicas (when `public`) | **Self-host** + **paid Cloud**; not Cloud free tier |
+| **Server** | A RESP keyspace | All users, tabs, and replicas (when `public`) | **Self-host** + **Cloud** (every plan; Free gets a smaller cache) |
 
-Server cache needs a RESP keyspace to store responses in. Which one depends on the deployment: `pg_keyspace` inside the project's own Postgres, or a Valkey server. Nothing above this line changes with the answer. On **Cloud free tier**, server cache is disabled (`rest_cache_enabled: false`); client `.cache({ ttl })` without `server: true` still works.
+Server cache needs a RESP keyspace to store responses in. Which one depends on the deployment: `pg_keyspace` inside the project's own Postgres, or a Valkey server. Nothing above this line changes with the answer. On **Cloud**, every plan runs a keyspace in the project's own Postgres. Free gets a smaller one: 10,000 entries, values up to 1,024 bytes, no row cache (paid plans: 50,000 entries). Client `.cache({ ttl })` without `server: true` works everywhere.
 
 **Default:** nothing is cached on the server until a model [declares `cache`](#declaring-a-cache-on-a-model).
 
@@ -20,7 +20,7 @@ const { data } = await supatype
   .select("id, title")
   .cache({ ttl: 30_000 }) // milliseconds
 
-// Server-side cache (paid Cloud + self-host; the model must declare a cache)
+// Server-side cache (Cloud + self-host; the model must declare a cache)
 const { data } = await supatype
   .from("posts")
   .select()
@@ -98,7 +98,7 @@ table an operator narrowed stays narrowed:
 when it is `0` while models declare a cache, the push says so. Set it in Studio (API > REST >
 Settings) or in the file.
 
-Patch via Studio or `PATCH /admin/v1/config/rest` (returns `403 rest_cache_not_available` on Cloud free tier).
+Patch via Studio or `PATCH /admin/v1/config/rest`. Against a local or self-hosted stack, `supatype push` and `supatype dev` switch newly declared tables on for you. On Cloud, `push` stores the declaration but does not switch tables on: enable them in Studio (Models > Cache) or with the PATCH call.
 
 Effective TTL = `min(client max-age, cache_max_ttl, the model's maxTtl)`.
 
@@ -128,19 +128,17 @@ supatype cache rest flush --yes
 supatype cache rest flush --table posts --yes
 ```
 
-Admin cache API is unavailable on Cloud free tier.
+The admin cache API is available on every Cloud plan.
 
 ## Studio
 
-- **Models > Cache:** per-table entries and settings (paid Cloud + self-host)
+- **Models > Cache:** per-table entries and settings (Cloud + self-host)
 - **API > REST > Cache:** browse and flush
 - **API > REST > Settings:** global `cache_max_ttl`
 
-Cloud free projects see an upgrade notice; client-only caching remains available.
-
 ## Security
 
-- Nothing is cached on the server unless the model declares it; the client cannot force server cache past the declaration, the allowlist, the TTL cap and tier eligibility.
+- Nothing is cached on the server unless the model declares it; the client cannot force server cache past the declaration, the allowlist, the TTL cap and the project's cache size.
 - `public: true` from the client is honoured only when `allow_public` is set on the table, which in turn needs the model's `public: true`.
 - Only `GET` / `HEAD` with 2xx responses are cached.
 - **v1 invalidation:** TTL only.
@@ -149,7 +147,6 @@ Cloud free projects see an upgrade notice; client-only caching remains available
 
 - **Self-host (compose):** `pg_keyspace` inside the `db` container by default, or a `valkey` service with `cache.provider = "valkey"` (which is also what `database.external` gets, since pg_keyspace needs a Postgres this stack starts). From `supatype/postgres` 17.2.13 the keyspace requires the project's `SUPATYPE_KEYSPACE_PASSWORD`, which the CLI generates into `.env` and hands to `db`, `server` and Kong. See [self-host.md](self-host.md).
 - **Native `supatype dev`:** the keyspace in the Postgres it already starts, when the downloaded archive carries the library and is 17.2.13 or later: on 127.0.0.1 only, requiring the same `SUPATYPE_KEYSPACE_PASSWORD`. Otherwise (an older archive, and always on Windows) a Valkey container of the project's own, bound to 127.0.0.1 on the first free port from 6379. A Valkey already running is used only when `SUPATYPE_VALKEY_ADDR` names it, so two projects never share one cache. A named Valkey gets the password in `SUPATYPE_VALKEY_PASSWORD` (and `SUPATYPE_VALKEY_USERNAME` for an ACL user), none when unset, never the keyspace's.
-- **Cloud paid:** a keyspace per project; `tenant:{ref}:config.rest_cache_enabled: true`.
-- **Cloud free:** the server bypasses the cache regardless of client `server: true`.
+- **Cloud:** a keyspace per project on every plan; `tenant:{ref}:config.rest_cache_enabled: true`. Free runs a smaller one (10,000 entries, 1,024-byte values, 2 MB write ring, 1 MB row arena, no row-cache decoder); paid plans run 50,000 entries with the row cache.
 
 The response cache is ephemeral wherever it lives: restarting the store loses it, which costs a round trip to PostgREST and nothing else. If the store is unavailable entirely, server cache **bypasses** and the client in-memory cache still works.
