@@ -8,10 +8,10 @@ import { parseEnvText } from "./dotenv.ts"
 import { FUNCTION_ENTRY_FILE, functionRouteName, isHookName } from "./routes.ts"
 import { exitOnStop } from "./stop.ts"
 import {
-  currentHookDepth,
   runInvocation,
   type FunctionContext,
 } from "./invocation.ts"
+import { endUserAddress, HOOK_DEPTH_HEADER, installStackFetch } from "./stack-fetch.ts"
 import {
   closeTails,
   installStructuredLogging,
@@ -20,9 +20,12 @@ import {
 } from "./logging.ts"
 
 installStructuredLogging()
-// Once, at startup. Hook depth then comes from the invocation store rather than from a patch
-// applied and reverted around every call.
-installHookDepthPropagation()
+// The forwarding secret leaves the environment now, before any handler is imported, so user code
+// cannot read it; only the patch below holds it.
+const forwardingSecret = withholdForwardingSecret()
+// Once, at startup. Hook depth and the end user's address then come from the invocation store rather
+// than from a patch applied and reverted around every call.
+installStackFetch({ origin: stackOrigin, forwardingSecret })
 
 /**
  * Route names the worker answers itself.
@@ -207,6 +210,20 @@ async function withholdServiceRoleKey(): Promise<string> {
   if (key) Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")
   const keyFile = (Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY_FILE") ?? "").trim()
   return keyFile ? await readServiceRoleKeyFile(keyFile) : key
+}
+
+/**
+ * The forwarding secret from the environment, or "" when the project has none, taken out of it.
+ *
+ * Like the service-role key above, and for the same reason: it is what makes the auth server believe
+ * an address a request passes on, so a function able to read it could claim any address. Withheld
+ * before any handler is imported, and handed to nothing but the patch on `fetch` that adds it to
+ * calls to the stack's own address.
+ */
+function withholdForwardingSecret(): string {
+  const secret = (Deno.env.get("SUPATYPE_FORWARDING_SECRET") ?? "").trim()
+  Deno.env.delete("SUPATYPE_FORWARDING_SECRET")
+  return secret
 }
 
 /**
@@ -433,34 +450,6 @@ async function scopedEnvForFunction(fnName: string): Promise<Record<string, stri
   return { ...shared, ...managed, ...fnVars }
 }
 
-const HOOK_DEPTH_HEADER = "x-supatype-hook-depth"
-
-/**
- * Carry the hook-depth header onto calls a hook makes back into the stack.
- *
- * Patched once, at startup, rather than per invocation. The old version replaced `globalThis.fetch`
- * for the duration of a call and restored it afterwards, which is only safe while exactly one
- * invocation runs at a time: two concurrent hooks would patch over each other, and the first to
- * finish would restore the other's patch. That mutation was half the reason for the lock.
- *
- * Depth comes from the invocation store, so this closure holds no per-call state at all.
- */
-function installHookDepthPropagation(): void {
-  const original = globalThis.fetch
-  globalThis.fetch = (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
-    const depth = currentHookDepth()
-    const stack = stackOrigin()
-    if (depth === null || stack === null) return original(input, init)
-
-    const url = input instanceof Request ? input.url : String(input)
-    if (!url.startsWith(stack)) return original(input, init)
-
-    const request = new Request(input, init)
-    request.headers.set(HOOK_DEPTH_HEADER, depth)
-    return original(request)
-  }
-}
-
 /**
  * The database URL a function may use, when the deployment gave the worker one: off unless the
  * operator set SUPATYPE_FUNCTIONS_DB_URL (see `FunctionContext.dbUrl`).
@@ -566,9 +555,8 @@ const server = Deno.serve({
   const start = performance.now()
 
   try {
-    const response = await runInvocation(context, req.headers.get(HOOK_DEPTH_HEADER), async () =>
-      handlers[fnName]!(req, context),
-    )
+    const inbound = { hookDepth: req.headers.get(HOOK_DEPTH_HEADER), clientAddress: endUserAddress(req.headers) }
+    const response = await runInvocation(context, inbound, async () => handlers[fnName]!(req, context))
     log("info", `${req.method} /functions/v1/${fnName} → ${response.status}`, {
       request_id: context.executionId,
       function: fnName,

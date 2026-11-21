@@ -83,7 +83,7 @@ function renderedRoutes(yml: string): RenderedRoute[] {
 
 /** Whether a route's block carries the raw path check, in the access phase (after routing). */
 function guarded(route: RenderedRoute): boolean {
-  return /^ {10}- name: pre-function\n {12}config:\n {14}access:\n/m.test(route.block)
+  return /^ {10}- name: pre-function\n {12}config:\n {14}access:\n/m.test(route.block) && route.block.includes("kong.request.get_raw_path()")
 }
 
 function guardPattern(yml: string): RegExp {

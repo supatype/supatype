@@ -47,6 +47,8 @@ import { composeSamlEnv, ensureSamlPrivateKey } from "./saml-config.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
+  FORWARDING_SECRET_ENV,
+  ensureForwardingSecret,
   ENV_FILE_OVER_SHELL,
   SQL_EDITOR_PASSWORD_ENV,
   ensureControlPlaneSecret,
@@ -77,6 +79,16 @@ import { switchServices, type ServiceSwitches } from "./route-manifest.js"
  */
 const CONTROL_PLANE_SECRET_REQUIRED =
   `${CONTROL_PLANE_SECRET_ENV}: \${${CONTROL_PLANE_SECRET_ENV}:?${CONTROL_PLANE_SECRET_ENV} is missing from .env}`
+
+/**
+ * The forwarding secret (D14 option 2b), required like the control plane secret: writeSelfHostCompose
+ * generates it first. The server believes a forwarded end-user address only on a request carrying it,
+ * Kong adds it to requests to the server, and the functions worker adds it to its calls to the stack.
+ * `name` is what the receiving service calls it: the server reads it under its own setting name.
+ */
+function forwardingSecretRequired(name: string = FORWARDING_SECRET_ENV): string {
+  return `${name}: \${${FORWARDING_SECRET_ENV}:?${FORWARDING_SECRET_ENV} is missing from .env}`
+}
 
 /**
  * The keyspace password as the db, the server and Kong receive it, when the keyspace requires one
@@ -1194,6 +1206,9 @@ ${mounts.projectReadOnly}
       STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: \${STRIPE_WEBHOOK_SECRET:-}
       SITE_URL: \${SITE_URL:-${publicApiUrl}}
+      # Added to this worker's calls to the stack's own address, so the auth server believes the end
+      # user's address they pass on. Withheld from function code by the worker.
+      ${forwardingSecretRequired()}
 ${dbDependency}
 ${realtimeBlock}
   control-plane:
@@ -1283,6 +1298,8 @@ ${keyspaceServerEnv(config, keyspacePasswordFile)}${appEnv}
       # X-Forwarded-For would keep the client's own text at the front. Unset, no request through
       # Kong was ever counted. Behind another proxy, set the header that proxy writes in .env.
       SUPATYPE_RATE_LIMIT_HEADER: "\${SUPATYPE_RATE_LIMIT_HEADER:-X-Real-IP}"
+      # Believed only on a request carrying it: Kong adds it, a client cannot (D14).
+      ${forwardingSecretRequired("SUPATYPE_SECURITY_FORWARDING_SECRET")}
       # Browser origins allowed besides the site URL: api.corsOrigins, then whatever .env adds.
       # A list saved in Studio replaces both until it is reset. Dev mode allows every origin.
       SUPATYPE_CORS_ALLOW_ORIGINS: "${corsOriginsEnv(config)}"
@@ -1380,6 +1397,8 @@ ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux 
       # realtime subscribe often took that long. A records still come from the hosts file first, so
       # host.docker.internal above resolves as before.
       KONG_DNS_ORDER: "LAST,A,CNAME"
+      # Read through Kong's env vault by the pre-function on every route to the server (kong-config.ts).
+      ${forwardingSecretRequired()}
 ${kongTlsEnv}    volumes:
 ${mounts.kong}
     ports:
@@ -1656,6 +1675,7 @@ export function writeSelfHostCompose(
   mkdirSync(paths.dir, { recursive: true })
   // Before the file that requires it is written, so no stack is ever rendered without one.
   ensureControlPlaneSecret(cwd)
+  ensureForwardingSecret(cwd)
   // The keyspace password the same way, where the keyspace requires one (N-RB2) and the project
   // keeps it in .env. An existing project gets one on its next dev or up, and compose recreates db
   // and server with it.
