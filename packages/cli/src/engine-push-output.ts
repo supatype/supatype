@@ -39,6 +39,16 @@ export function reportAppliedPush(result: EnginePushResult, access: "changes" | 
   if (access === "changes") printRoleAccess(result, { changedOnly: true })
 }
 
+/**
+ * A control plane's answer about a schema's cache declaration. `enabled` is the tables the server
+ * confirmed as switched on by this push; a control plane that predates it leaves it out.
+ */
+export interface CacheReport {
+  tables?: string[]
+  honoured?: boolean
+  enabled?: string[]
+}
+
 export interface EnginePushResult {
   status?: string
   operations?: number
@@ -53,7 +63,7 @@ export interface EnginePushResult {
    * from a control plane too old to send it, which is why every reader of it has to treat absence
    * as "nothing to say" rather than as an empty declaration.
    */
-  cache?: { tables?: string[]; honoured?: boolean }
+  cache?: CacheReport
   /** Each API role's access before and after the push applied. Absent from older engines. */
   access?: RoleAccess[]
 }
