@@ -305,7 +305,7 @@ Images come from Docker Hub, and each CLI release runs the exact images it was t
 
 To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: { external: { url: process.env.DATABASE_URL! } }` in `supatype.config.ts`. The stack then starts no `db` service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in `supatype/postgres`. Realtime needs `wal_level = logical`, a free replication slot, the `wal2json` plugin and a role with `REPLICATION`. `supatype db check --connection "$DATABASE_URL"` reports what a database lacks, and `--emit` prints the SQL that fixes what it can.
 
-Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8000`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
+Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8100`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
 
 Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names. Row rules and field masking apply for that role exactly as they would for a request: a superuser or a role with `BYPASSRLS` (the admin role, `service_role`) skips both, any other role is held to them. Point it at a least-privilege login role that is neither, granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/<POSTGRES_DB>`. The database is the value of `POSTGRES_DB` in your `.env` (`supatype init` sets it to the project name; the stack default is `supatype`).
 
@@ -1998,7 +1998,7 @@ auth: {
 },
 ```
 
-Each limit except `smsSent` counts requests per client IP address. The address is the one the gateway forwards: Kong writes `X-Real-IP` from the connection and replaces any value the client sent, so a client cannot pick its own. A request that reaches the server without that header counts against the address of its connection. A client over a limit gets 429 with error code `over_request_rate_limit` until the window lets it in again.
+Each limit except `smsSent` counts requests per client IP address. The address is the one the gateway forwards: Kong writes `X-Real-IP` from the connection and replaces any value the client sent, so a client cannot pick its own. The server believes a forwarded address only on a request that carries the project's forwarding secret, which Kong adds and no client holds. Any other request counts against the address of its connection, whatever `St-Forwarded-For`, `X-Real-IP` or `X-Forwarded-For` it carries, and the IP recorded in audit logs follows the same rule. A client over a limit gets 429 with error code `over_request_rate_limit` until the window lets it in again.
 
 | Key | What it counts, per client | Window | Default |
 | --- | --- | --- | --- |
@@ -2012,7 +2012,9 @@ Each limit except `smsSent` counts requests per client IP address. The address i
 
 A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. Every per-client limit works that way, over its own window: a limit of 3 lets one client make 3 requests at once, never more. A limit below 1 still lets one through. How many emails the server sends an hour is a separate limit: `SUPATYPE_RATE_LIMIT_EMAIL_SENT` on self-host, and the platform's on Cloud.
 
-On self-host each key renders as a `SUPATYPE_RATE_LIMIT_*` variable for the server (`mfa` as `SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`), and a value in `.env` wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set `SUPATYPE_RATE_LIMIT_HEADER` in `.env` to a header that proxy writes from the connection, and only if nothing else can reach the server.
+On self-host each key renders as a `SUPATYPE_RATE_LIMIT_*` variable for the server (`mfa` as `SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`), and a value in `.env` wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set `SUPATYPE_RATE_LIMIT_HEADER` in `.env` to a header that proxy writes from the connection, and only if nothing else can reach Kong.
+
+The forwarding secret is `SUPATYPE_FORWARDING_SECRET` in `.env`. `supatype init` generates it, and a project that predates it gets one on its next `dev` or `self-host` command. It is given to the server (as `SUPATYPE_SECURITY_FORWARDING_SECRET`), to Kong and to the functions worker, and to nothing else: the worker removes it from the environment before it loads your functions, so function code cannot read it. When a function calls the project's own address, the worker passes on the end user's address with it, so a function that signs a user in is counted against that user and not against the worker. Under Docker the worker reaches Kong on a second port, 8100, that is never published to the host: Kong leaves the two headers alone there, where it removes them on the public port, and adds no secret of its own, so code that reaches 8100 without the secret is still counted against its own connection. Keep it out of version control like the other secrets in `.env`, and never log it. A server with no secret set believes forwarded addresses from any sender, as before, and says so once when it starts.
 
 #### Environment variables
 
