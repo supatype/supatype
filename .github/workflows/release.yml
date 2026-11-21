@@ -288,6 +288,12 @@ jobs:
       - name: Test
         run: pnpm turbo run test
 
+      # Before anything is published: the project init writes must be installable at this version
+      # (FF-32). Every package it scaffolds is published here or already out, the client has the
+      # supatype-prepare bin, the public key is embedded, and the CLI program is on the CDN.
+      - name: Check the release is fit to publish
+        run: node scripts/check-cli-release.mjs "${{ needs.prepare.outputs.version }}"
+
       - name: Publish npm packages
         shell: bash
         run: |

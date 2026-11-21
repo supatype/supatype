@@ -85,7 +85,8 @@ export interface StepView {
   live: boolean
   start(text: string): void
   update(text: string): void
-  stop(text: string): void
+  /** `ok: false` shows the line as a failure, not with the success tick. */
+  stop(text: string, ok?: boolean): void
 }
 
 /** A spinner's view of a step, for a terminal. `start` again replaces the spinner's text. */
@@ -94,7 +95,7 @@ export function spinnerStepView(spinner: ClackSpinner): StepView {
     live: true,
     start: (text) => spinner.start(text),
     update: (text) => spinner.start(text),
-    stop: (text) => spinner.stop(text),
+    stop: (text, ok) => spinner.stop(text, ok),
   }
 }
 
@@ -135,10 +136,11 @@ export async function runTimedStep<T>(view: StepView, step: TimedStep<T>, now: (
     const result = await step.run((line) => {
       detail = line
     })
-    view.stop(`${step.done(result)} (${took(started, now)})`)
+    // A step that answers false did not succeed: its done line must not wear the success tick (S-20).
+    view.stop(`${step.done(result)} (${took(started, now)})`, result !== false)
     return result
   } catch (err) {
-    view.stop(`${step.label} failed (${took(started, now)})`)
+    view.stop(`${step.label} failed (${took(started, now)})`, false)
     throw err
   } finally {
     if (timer !== undefined) clearInterval(timer)

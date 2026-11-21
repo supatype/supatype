@@ -89,6 +89,25 @@ export function unpinnedImagesNote(
   )
 }
 
+/**
+ * What `init` says when this CLI is not a release build: the project it writes pins package
+ * versions (its own, which a source build takes from package.json) that may not be published, and
+ * a published package of that version may lack the `supatype-prepare` bin its `prepare` script
+ * runs, so the new project's install can fail. undefined for a stamped release.
+ */
+export function devBuildInitNote(
+  deps: { cli: string; types: string; client: string },
+  version: string = EMBEDDED_CLI_VERSION,
+): string | undefined {
+  if (isReleaseVersion(version)) return undefined
+  return (
+    "This is a dev build of the Supatype CLI, not a release. The project it writes depends on " +
+    `@supatype/cli ^${deps.cli}, @supatype/types ^${deps.types} and @supatype/client ^${deps.client}, ` +
+    "which may not be published, so installing its dependencies can fail. Use a released CLI " +
+    "(npm i -g @supatype/cli) to create a project you intend to keep."
+  )
+}
+
 /** A pinned component's version as the CDN and `versions` spell it: the tag without its `v`. */
 export function pinnedComponentVersion(component: PinnedComponent): string {
   return PINNED_IMAGES[component].tag.replace(/^v/, "")
