@@ -312,7 +312,7 @@ Each limit except `smsSent` counts requests per client IP address. The address i
 | `anonymousUsers` | Anonymous sign-ins | 1 hour | 30 |
 | `smsSent` | SMS messages the server sends, across every client together | 1 hour | 30 |
 
-A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. `verify`, `otp` and `anonymousUsers` work exactly that way. `tokenRefresh`, `sso` and `mfa` refill at their rate too, but let at most 30 through at once whatever the limit says. How many emails the server sends an hour is a separate limit: `SUPATYPE_RATE_LIMIT_EMAIL_SENT` on self-host, and the platform's on Cloud.
+A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. Every per-client limit works that way, over its own window: a limit of 3 lets one client make 3 requests at once, never more. A limit below 1 still lets one through. How many emails the server sends an hour is a separate limit: `SUPATYPE_RATE_LIMIT_EMAIL_SENT` on self-host, and the platform's on Cloud.
 
 On self-host each key renders as a `SUPATYPE_RATE_LIMIT_*` variable for the server (`mfa` as `SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`), and a value in `.env` wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set `SUPATYPE_RATE_LIMIT_HEADER` in `.env` to a header that proxy writes from the connection, and only if nothing else can reach the server.
 
