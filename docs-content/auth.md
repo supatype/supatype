@@ -290,6 +290,32 @@ auth: {
 
 `supatype dev` and `supatype self-host compose` pass both to the auth server on every start, as `SUPATYPE_EXTERNAL_EMAIL_ENABLED` and `SUPATYPE_MAILER_AUTOCONFIRM`. Either variable set in the project's `.env` wins over the config for that stack; the CLI never writes them there. Studio shows each under **Authentication &gt; Configuration**, with the key that sets it.
 
+<h3 id="rate-limits">Rate limits</h3>
+
+`auth.rateLimits` caps how often one client may call the auth server:
+
+```ts title="supatype.config.ts"
+auth: {
+  rateLimits: { verify: 10, otp: 5 },
+},
+```
+
+Each limit except `smsSent` counts requests per client IP address. The address is the one the gateway forwards: Kong writes `X-Real-IP` from the connection and replaces any value the client sent, so a client cannot pick its own. A request that reaches the server without that header counts against the address of its connection. A client over a limit gets 429 with error code `over_request_rate_limit` until the window lets it in again.
+
+| Key | What it counts, per client | Window | Default |
+| --- | --- | --- | --- |
+| `otp` | Sign-up and sign-in requests: `/signup` (not anonymous), `/otp`, magic links, password recovery, `/resend` and updating the signed-in user. Each of these counts on its own. It counts requests, not emails | 5 minutes | 30 |
+| `verify` | Requests to `/verify`, which checks the code or link from an email or SMS, whether the code is right or not | 5 minutes | 30 |
+| `tokenRefresh` | Requests to `/token`: password sign-in, refreshing a session and the other grants | 5 minutes | 150 |
+| `sso` | Requests that start a SAML sign-in | 5 minutes | 30 |
+| `mfa` | Multi-factor challenges, and verifies, each counted on its own | 1 minute | 15 |
+| `anonymousUsers` | Anonymous sign-ins | 1 hour | 30 |
+| `smsSent` | SMS messages the server sends, across every client together | 1 hour | 30 |
+
+A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. `verify`, `otp` and `anonymousUsers` work exactly that way. `tokenRefresh`, `sso` and `mfa` refill at their rate too, but let at most 30 through at once whatever the limit says. How many emails the server sends an hour is a separate limit: `SUPATYPE_RATE_LIMIT_EMAIL_SENT` on self-host, and the platform's on Cloud.
+
+On self-host each key renders as a `SUPATYPE_RATE_LIMIT_*` variable for the server (`mfa` as `SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`), and a value in `.env` wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set `SUPATYPE_RATE_LIMIT_HEADER` in `.env` to a header that proxy writes from the connection, and only if nothing else can reach the server.
+
 ### Environment variables
 
 The server reads the project's `.env` when it starts, so `SUPATYPE_*` auth variables placed there take effect after a restart. In the Docker stacks, a few values are set by the generated Compose file and are read from the plain names shown.
