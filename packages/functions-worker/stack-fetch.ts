@@ -38,18 +38,14 @@ function originOf(url: string): string | null {
   }
 }
 
-/** What a call to the stack carries for the invocation making it. */
-function addStackHeaders(headers: Headers, call: InboundCall, secret: string): void {
-  if (call.hookDepth !== null) headers.set(HOOK_DEPTH_HEADER, call.hookDepth)
+/** What a call to the stack carries for the invocation making it: nothing, when there is nothing to say. */
+function stackHeaders(call: InboundCall, secret: string): Array<[string, string]> {
+  const carried: Array<[string, string]> = []
+  if (call.hookDepth !== null) carried.push([HOOK_DEPTH_HEADER, call.hookDepth])
   if (secret !== "" && call.clientAddress !== null) {
-    headers.set(FORWARDED_FOR_HEADER, call.clientAddress)
-    headers.set(FORWARDING_SECRET_HEADER, secret)
+    carried.push([FORWARDED_FOR_HEADER, call.clientAddress], [FORWARDING_SECRET_HEADER, secret])
   }
-}
-
-/** Whether a call from `call` has anything to add to a request to the stack. */
-function hasStackHeaders(call: InboundCall, secret: string): boolean {
-  return call.hookDepth !== null || (secret !== "" && call.clientAddress !== null)
+  return carried
 }
 
 /**
@@ -82,11 +78,10 @@ async function stackFetch(
   const call = currentCall()
   const stack = options.origin()
   const url = input instanceof Request ? input.url : String(input)
-  if (call === undefined || stack === null || originOf(url) !== stack || !hasStackHeaders(call, options.forwardingSecret)) {
-    return original(input, init)
-  }
+  const carried = call === undefined ? [] : stackHeaders(call, options.forwardingSecret)
+  if (stack === null || originOf(url) !== stack || carried.length === 0) return original(input, init)
   const request = new Request(input, init)
-  addStackHeaders(request.headers, call, options.forwardingSecret)
+  for (const [name, value] of carried) request.headers.set(name, value)
   if (request.redirect !== "follow") return original(request)
 
   const replay = request.clone()

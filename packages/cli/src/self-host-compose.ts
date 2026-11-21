@@ -854,9 +854,7 @@ ${seaweedPorts}`
   const keyspaceMount = keyspacePasswordMount(config, keyspacePasswordFile)
   // The second listener is the functions worker's (kong-config.ts, WORKER_LISTEN_PORT). It is in
   // KONG_PROXY_LISTEN so the worker's forwarding headers survive, and in no `ports:` mapping below.
-  const kongListen = tlsEnabled
-    ? `0.0.0.0:8000, 0.0.0.0:${WORKER_LISTEN_PORT}, 0.0.0.0:8443 ssl`
-    : `0.0.0.0:8000, 0.0.0.0:${WORKER_LISTEN_PORT}`
+  const kongListen = ["0.0.0.0:8000", `0.0.0.0:${WORKER_LISTEN_PORT}`, ...(tlsEnabled ? ["0.0.0.0:8443 ssl"] : [])].join(", ")
   const kongTlsEnv = tlsEnabled
     ? `      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_LUA_SSL_VERIFY_DEPTH: "2"

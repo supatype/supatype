@@ -73,6 +73,9 @@ const RAW_PATH_GUARD = `                - |
                   end
 `
 
+/** The Lua condition true on every listener but the functions worker's, the only one whose forwarding headers are left alone. */
+const NOT_WORKER_LISTENER = `tonumber(ngx.var.server_port) ~= ${WORKER_LISTEN_PORT}`
+
 /**
  * D14 option 2b: the auth server believes the end-user address in `St-Forwarded-For` only on a
  * request that carries `St-Forwarding-Secret`. So on every route, whatever a client sent under
@@ -88,7 +91,7 @@ const RAW_PATH_GUARD = `                - |
  * the server ignore any address it claims. Every other step, the raw path guard included, still runs.
  */
 const FORWARDING_HEADERS_STRIPPED = `                - |
-                  if tonumber(ngx.var.server_port) ~= ${WORKER_LISTEN_PORT} then
+                  if ${NOT_WORKER_LISTENER} then
                     kong.service.request.clear_header("St-Forwarded-For")
                     kong.service.request.clear_header("St-Forwarding-Secret")
                   end
@@ -97,7 +100,7 @@ const FORWARDING_HEADERS_STRIPPED = `                - |
 function forwardingSecretAdded(): string {
   const vaultName = FORWARDING_SECRET_ENV.toLowerCase().replaceAll("_", "-")
   return `                - |
-                  if tonumber(ngx.var.server_port) ~= ${WORKER_LISTEN_PORT} then
+                  if ${NOT_WORKER_LISTENER} then
                     local forwarding_secret = kong.vault.get("{vault://env/${vaultName}}")
                     if not forwarding_secret then
                       return kong.response.exit(500, { error = "the gateway's forwarding secret is not set" })
