@@ -335,6 +335,27 @@ window.location.assign(data.url)
       <li><code>enableConfirmations</code>: whether a new sign-up has to click a link in an email before it can sign in. Unset, a self-hosted stack (<code>supatype self-host compose</code>) sends the link and local dev, Docker or native, confirms the sign-up at once. <code>true</code> or <code>false</code> sets it for every stack.</li>
     </ul>
     <p><code>supatype dev</code> and <code>supatype self-host compose</code> pass both to the auth server on every start, as <code>SUPATYPE_EXTERNAL_EMAIL_ENABLED</code> and <code>SUPATYPE_MAILER_AUTOCONFIRM</code>. Either variable set in the project's <code>.env</code> wins over the config for that stack; the CLI never writes them there. Studio shows each under <strong>Authentication &gt; Configuration</strong>, with the key that sets it.</p>
+    <h3 id="rate-limits">Rate limits</h3>
+    <p><code>auth.rateLimits</code> caps how often one client may call the auth server:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>auth: {
+  rateLimits: { verify: <span class="t">10</span>, otp: <span class="t">5</span> },
+},</pre></div>
+    <p>Each limit except <code>smsSent</code> counts requests per client IP address. The address is the one the gateway forwards: Kong writes <code>X-Real-IP</code> from the connection and replaces any value the client sent, so a client cannot pick its own. A request that reaches the server without that header counts against the address of its connection. A client over a limit gets 429 with error code <code>over_request_rate_limit</code> until the window lets it in again.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Key</th><th scope="col">What it counts, per client</th><th scope="col">Window</th><th scope="col">Default</th></tr></thead>
+      <tbody>
+        <tr><td><code>otp</code></td><td>Sign-up and sign-in requests: <code>/signup</code> (not anonymous), <code>/otp</code>, magic links, password recovery, <code>/resend</code> and updating the signed-in user. Each of these counts on its own. It counts requests, not emails</td><td>5 minutes</td><td>30</td></tr>
+        <tr><td><code>verify</code></td><td>Requests to <code>/verify</code>, which checks the code or link from an email or SMS, whether the code is right or not</td><td>5 minutes</td><td>30</td></tr>
+        <tr><td><code>tokenRefresh</code></td><td>Requests to <code>/token</code>: password sign-in, refreshing a session and the other grants</td><td>5 minutes</td><td>150</td></tr>
+        <tr><td><code>sso</code></td><td>Requests that start a SAML sign-in</td><td>5 minutes</td><td>30</td></tr>
+        <tr><td><code>mfa</code></td><td>Multi-factor challenges, and verifies, each counted on its own</td><td>1 minute</td><td>15</td></tr>
+        <tr><td><code>anonymousUsers</code></td><td>Anonymous sign-ins</td><td>1 hour</td><td>30</td></tr>
+        <tr><td><code>smsSent</code></td><td>SMS messages the server sends, across every client together</td><td>1 hour</td><td>30</td></tr>
+      </tbody>
+    </table></div>
+    <p>A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. <code>verify</code>, <code>otp</code> and <code>anonymousUsers</code> work exactly that way. <code>tokenRefresh</code>, <code>sso</code> and <code>mfa</code> refill at their rate too, but let at most 30 through at once whatever the limit says. How many emails the server sends an hour is a separate limit: <code>SUPATYPE_RATE_LIMIT_EMAIL_SENT</code> on self-host, and the platform's on Cloud.</p>
+    <p>On self-host each key renders as a <code>SUPATYPE_RATE_LIMIT_*</code> variable for the server (<code>mfa</code> as <code>SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY</code>), and a value in <code>.env</code> wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set <code>SUPATYPE_RATE_LIMIT_HEADER</code> in <code>.env</code> to a header that proxy writes from the connection, and only if nothing else can reach the server.</p>
     <h3>Environment variables</h3>
     <p>The server reads the project's <code>.env</code> when it starts, so <code>SUPATYPE_*</code> auth variables placed there take effect after a restart. In the Docker stacks, a few values are set by the generated Compose file and are read from the plain names shown.</p>
     <div class="tbl"><table>
