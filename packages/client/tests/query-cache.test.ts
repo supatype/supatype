@@ -82,7 +82,7 @@ describe("QueryBuilder.cache", () => {
 
     const r2 = await qb
     expect(r2.data).toEqual([{ id: 1 }])
-    expect(r2.meta?.cacheStatus).toBe("HIT")
+    expect(r2.meta?.cacheStatus).toBe("CLIENT")
     expect(tableCalls()).toBe(1)
   })
 
