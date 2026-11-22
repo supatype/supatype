@@ -11,7 +11,7 @@ import { LocaleContext, useLocaleState } from "./hooks/useLocale.js"
 import { CloudUrlContext } from "./hooks/useCloudUrl.js"
 import { PlatformCtx } from "./hooks/usePlatform.js"
 import { ConnectionCtx } from "./hooks/useConnection.js"
-import { StaticSiteCtx, useStaticSiteHost, type StaticSiteHost } from "./lib/static-site-host.js"
+import { StaticSiteCtx, useOfferedStaticSiteHost, type StaticSiteHost } from "./lib/static-site-host.js"
 import { StaticSiteOverview } from "./views/static-site/StaticSiteOverview.js"
 import { StaticSiteSettings } from "./views/static-site/StaticSiteSettings.js"
 import { Sidebar, getPageBreadcrumbs, hiddenNavItems } from "./components/Sidebar.js"
@@ -120,7 +120,7 @@ const PRIMARY_MENU_ID = "studio-primary-menu"
  */
 function StudioNav({ config, extensions, mobileNav }: StudioNavProps): React.ReactElement {
   const capability = useStudioCapability()
-  const hasStaticSite = useStaticSiteHost() !== undefined
+  const hasStaticSite = useOfferedStaticSiteHost() !== undefined
   const hiddenNav = useMemo(() => hiddenNavItems(capability, hasStaticSite), [capability, hasStaticSite])
   const sidebarProps = { config, extraSections: extensions?.sidebarSections, hiddenItems: hiddenNav }
   return (
@@ -228,6 +228,11 @@ function gated(requirement: RoleRequirement, element: React.ReactElement): React
   return <RoleGate {...requirement}>{element}</RoleGate>
 }
 
+/** A Static site page, or the project's home when the host says it serves no site here. */
+function OfferedStaticSite({ children }: { children: React.ReactElement }): React.ReactElement {
+  return useOfferedStaticSiteHost() === undefined ? <Navigate to="/" replace /> : children
+}
+
 /**
  * The Static site group's routes, or none when the host gave Studio no host for it. The Deployments
  * route exists only when the host provides the page, so self-host has no such address at all.
@@ -236,10 +241,10 @@ function staticSiteRoutes(host: StaticSiteHost | undefined): React.ReactElement[
   if (host === undefined) return []
   const Deployments = host.Deployments
   return [
-    <Route key="static-site" path="static-site" element={gated(STATIC_SITE, <StaticSiteOverview />)} />,
-    <Route key="static-site-settings" path="static-site/settings" element={gated(STATIC_SITE, <StaticSiteSettings />)} />,
+    <Route key="static-site" path="static-site" element={<OfferedStaticSite>{gated(STATIC_SITE, <StaticSiteOverview />)}</OfferedStaticSite>} />,
+    <Route key="static-site-settings" path="static-site/settings" element={<OfferedStaticSite>{gated(STATIC_SITE, <StaticSiteSettings />)}</OfferedStaticSite>} />,
     ...(Deployments !== undefined
-      ? [<Route key="static-site-deployments" path="static-site/deployments" element={gated(STATIC_SITE, <Deployments />)} />]
+      ? [<Route key="static-site-deployments" path="static-site/deployments" element={<OfferedStaticSite>{gated(STATIC_SITE, <Deployments />)}</OfferedStaticSite>} />]
       : []),
   ]
 }

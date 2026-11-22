@@ -4,7 +4,7 @@ import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { StudioCore } from "../src/StudioCore.js"
 import { buildStaticSiteSection } from "../src/components/SecondaryPanel.js"
-import { siteAddress } from "../src/lib/self-host-static-site.js"
+import { selfHostStaticSite, siteAddress } from "../src/lib/self-host-static-site.js"
 import type { HostRead, StaticSiteHost, StaticSiteOverview, StaticSiteSettings } from "../src/lib/static-site-host.js"
 import { isolateEachTest, mount, settle, testClient, testConfig } from "./support.js"
 
@@ -204,5 +204,56 @@ describe("self-host's site address", () => {
   it("is the gateway's origin, whether Studio reaches it directly or through its proxy path", () => {
     expect(siteAddress("http://localhost:8000/studio/proxy", "http://localhost:3000")).toBe("http://localhost:8000")
     expect(siteAddress("/studio/proxy", "https://app.example.com")).toBe("https://app.example.com")
+  })
+})
+
+describe("a self-host gateway with no site status route", () => {
+  const SITE_STATUS = {
+    mode: "static",
+    static_dir: "/srv/app/dist",
+    spa_fallback: true,
+    serving: true,
+    file_count: 3,
+    total_bytes: 10,
+  }
+
+  /** Signs in as an admin and answers the site status route with `status`. */
+  function gateway(status: number): (url: string) => Promise<Response> {
+    return (url) => {
+      if (url.endsWith("/studio/auth/verify")) {
+        return Promise.resolve(Response.json({ role: "admin", sub: "u1", permissions: { administer: true } }))
+      }
+      if (url.endsWith("/admin/v1/site/status")) {
+        return Promise.resolve(status === 200 ? Response.json(SITE_STATUS) : Response.json({ error: "not_found" }, { status }))
+      }
+      return new Promise<Response>(() => {})
+    }
+  }
+
+  async function selfHostAt(path: string, status: number): Promise<HTMLElement> {
+    vi.stubGlobal("fetch", gateway(status))
+    const { container } = await mount(
+      <MemoryRouter initialEntries={[path]}>
+        <StudioCore config={testConfig()} client={CLIENT} staticSite={selfHostStaticSite} />
+      </MemoryRouter>,
+    )
+    await settle()
+    return container
+  }
+
+  it("hides the group when the status route answers 404", async () => {
+    expect(railLabels(await selfHostAt("/", 404))).not.toContain("Static site")
+  })
+
+  it("sends a visit to the group's address home when the route answers 404", async () => {
+    expect(mainText(await selfHostAt("/static-site", 404))).not.toContain("Static files")
+  })
+
+  it("keeps the group when the status route answers", async () => {
+    expect(railLabels(await selfHostAt("/", 200))).toContain("Static site")
+  })
+
+  it("keeps the group when the route refuses the caller, so the page can say why", async () => {
+    expect(railLabels(await selfHostAt("/", 401))).toContain("Static site")
   })
 })
