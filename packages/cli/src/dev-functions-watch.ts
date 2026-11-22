@@ -73,8 +73,8 @@ export interface ComposeWorkerTarget {
 }
 
 /** Restart the stack's functions worker, so it imports the sources on disk again. */
-export function restartComposeFunctionsWorker(target: ComposeWorkerTarget): void {
-  console.log("\n[supatype] Function source changed, restarting the functions worker...")
+export function restartComposeFunctionsWorker(target: ComposeWorkerTarget, reason = "Function source changed"): void {
+  console.log(`\n[supatype] ${reason}, restarting the functions worker...`)
   const status = runDockerCompose(target.composePath, ["restart", "functions-worker"], target.cwd, target.project, {
     quiet: true,
   })

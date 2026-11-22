@@ -16,6 +16,8 @@ export interface AppliedAstArtifacts {
   lines: string[]
   /** The row cache `.env` now asks for, when that changed; the caller says what it takes. */
   rowCache: "on" | "off" | null
+  /** Whether the hook handler types file was created or changed, which a running worker has not loaded. */
+  hooksModuleWritten: boolean
 }
 
 /**
@@ -42,5 +44,5 @@ export function writeAppliedAstArtifacts(
   // The server watches the manifest, so a hook or validator added to the schema takes effect
   // without a restart.
   if (syncManifestHooks(cwd, ast)) lines.push(HOOK_MAPS_WRITTEN)
-  return { lines, rowCache: rowCacheEnv ? syncRowCacheEnv(cwd, ast) : null }
+  return { lines, rowCache: rowCacheEnv ? syncRowCacheEnv(cwd, ast) : null, hooksModuleWritten: hooksModule !== null }
 }
