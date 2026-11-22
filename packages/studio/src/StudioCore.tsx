@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo } from "react"
 import { Routes, Route, Navigate, Outlet, useNavigate, useLocation, useParams } from "react-router-dom"
-import type { StudioCoreProps, StudioExtension } from "./types.js"
+import type { SidebarSection, StudioCoreProps, StudioExtension } from "./types.js"
 import type { AdminConfig } from "./config.js"
 import { AdminConfigContext, useAdminConfig } from "./hooks/useAdminConfig.js"
 import { useMobileNav, type MobileNav } from "./hooks/useMobileNav.js"
@@ -94,13 +94,13 @@ interface StudioLayoutProps {
 }
 
 /** Keeps the browser tab's title on the current page's breadcrumbs. */
-function useDocumentTitle(config: AdminConfig | null, pathname: string): void {
+function useDocumentTitle(config: AdminConfig | null, pathname: string, hostSections: readonly SidebarSection[] | undefined): void {
   useEffect(() => {
     if (!config) return
-    const crumbs = getPageBreadcrumbs(pathname, config)
+    const crumbs = getPageBreadcrumbs(pathname, config, hostSections)
     const appName = config.branding?.appName ?? "Supatype Studio"
     document.title = [...crumbs, appName].join(" | ")
-  }, [pathname, config])
+  }, [pathname, config, hostSections])
 }
 
 interface StudioNavProps {
@@ -167,7 +167,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
   const { pathname } = useLocation()
   const configCtx = React.useContext(AdminConfigContext)
   const mobileNav = useMobileNav()
-  useDocumentTitle(configCtx, pathname)
+  useDocumentTitle(configCtx, pathname, extensions?.sidebarSections)
 
   if (!configCtx) {
     return (
@@ -184,6 +184,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         config={configCtx}
         leftItems={extensions?.topBarLeftItems}
         extraItems={extensions?.topBarItems}
+        hostSections={extensions?.sidebarSections}
         demoMode={demoMode}
         sidebar={{ open: mobileNav.open === "primary", onToggle: () => mobileNav.toggle("primary"), controls: PRIMARY_MENU_ID }}
       />

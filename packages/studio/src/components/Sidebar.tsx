@@ -6,7 +6,7 @@ import type { AdminConfig } from "../config.js"
 import type { SidebarSection } from "../types.js"
 import { cn } from "../lib/utils.js"
 import { offers, userAdministrationOffered, type OfferedCapability } from "../lib/capability-offers.js"
-import { Icon, IconChevronRight, IconSettings } from "./icons.js"
+import { Icon, IconChevronRight } from "./icons.js"
 import { ListButton } from "./ui.js"
 
 // ─── Nav definition ───────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ const SECONDARY_NAV_ENTRIES: NavEntry[] = [
   { id: "email",         label: "Email",             icon: "mail",      href: "/email", placeholder: true },
   "separator",
   { id: "functions",     label: "Edge Functions",    icon: "zap",       href: "/edge-functions" },
-  { id: "static-site",   label: "Static site",       icon: "globe",     href: "/static-site" },
+  { id: "static-site",   label: "Static site",       icon: "layout",    href: "/static-site" },
   { id: "realtime",      label: "Realtime",          icon: "radio",     href: "/realtime" },
   { id: "webhooks",      label: "Webhooks",          icon: "webhook",   href: "/webhooks", placeholder: true },
   { id: "jobs",          label: "Scheduled Jobs",    icon: "clock",     href: "/jobs", placeholder: true },
@@ -50,6 +50,15 @@ const SECONDARY_NAV_ENTRIES: NavEntry[] = [
   "separator",
   { id: "observability", label: "Observability",     icon: "eye",       href: "/observability", placeholder: true },
 ]
+
+/** The icon the pinned Settings entry draws. */
+const SETTINGS_ICON = "settings"
+
+/** The icon of every core rail entry, Settings included: no two may share a drawing. */
+export function railIconNames(): string[] {
+  const entries = [...PRIMARY_NAV_ENTRIES, ...SECONDARY_NAV_ENTRIES]
+  return [...entries.flatMap((entry) => (entry === "separator" ? [] : [entry.icon])), SETTINGS_ICON]
+}
 
 // ─── Sidebar props ────────────────────────────────────────────────────────────
 
@@ -238,7 +247,7 @@ export function Sidebar({ extraSections, hiddenItems, className, drawer = false,
         </div>
         {/* Pinned: Settings */}
         <div className="border-t border-border shrink-0 py-2">
-          <SidebarItem {...ctx} icon={<IconSettings size={16} />} label="Settings" href="/settings" active={isSettingsActive(path)} marker={false} />
+          <SidebarItem {...ctx} icon={<Icon name={SETTINGS_ICON} size={16} />} label="Settings" href="/settings" active={isSettingsActive(path)} marker={false} />
         </div>
       </div>
     </aside>
@@ -265,7 +274,18 @@ function railLabel(path: string): string | undefined {
   return items.find((item) => topSegment(item.href) === segment)?.label
 }
 
-export function getPageTitle(path: string, config: AdminConfig): string {
+/** The label of the host's own sidebar entry for exactly `path`, so a host's page has a name too. */
+function hostLabel(path: string, sections: readonly SidebarSection[]): string | undefined {
+  return sections.flatMap((section) => section.items).find((item) => item.href === path)?.label
+}
+
+/** The name a rail entry or a host's own entry gives `path`, if either does. */
+function entryLabel(path: string, sections: readonly SidebarSection[]): string | undefined {
+  return railLabel(path) ?? hostLabel(path, sections)
+}
+
+/** `hostSections` are the sections a host adds to the rail (`StudioExtension.sidebarSections`). */
+export function getPageTitle(path: string, config: AdminConfig, hostSections: readonly SidebarSection[] = []): string {
   if (path === "/" || path === "") return "Dashboard"
 
   const collMatch = path.match(/^\/models\/([^/]+)/)
@@ -329,10 +349,10 @@ export function getPageTitle(path: string, config: AdminConfig): string {
     "/api/graphql/settings": "GraphQL Settings",
     "/settings":             "Settings",
   }
-  return titles[path] ?? railLabel(path) ?? "Studio"
+  return titles[path] ?? entryLabel(path, hostSections) ?? "Studio"
 }
 
-export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] {
+export function getPageBreadcrumbs(path: string, config: AdminConfig, hostSections: readonly SidebarSection[] = []): string[] {
   if (path === "/" || path === "") return ["Dashboard"]
 
   const collMatch = path.match(/^\/models\/([^/]+)/)
@@ -396,6 +416,6 @@ export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] 
     "/api/graphql/settings": ["API", "GraphQL", "Settings"],
     "/settings":             ["Settings"],
   }
-  const label = railLabel(path)
+  const label = entryLabel(path, hostSections)
   return breadcrumbs[path] ?? (label === undefined ? ["Studio"] : [label])
 }
