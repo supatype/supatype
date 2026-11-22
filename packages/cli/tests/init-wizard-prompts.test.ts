@@ -82,9 +82,16 @@ describe("init's wizard", () => {
     expect(result.storageProduction).toBe(result.storageLocal)
   })
 
-  it("asks for production storage for a production target", async () => {
-    await wizard(false, { "Where will this run in production?": "cloud" })
+  it("asks for production storage for a self-hosted production target", async () => {
+    await wizard(false, { "Where will this run in production?": "self-host" })
     expect(asked.messages).toContain("Production storage?")
+  })
+
+  // Cloud brings its own storage; an own bucket is set in the config later.
+  it("does not ask for production storage when production is Supatype Cloud", async () => {
+    const result = await wizard(false, { "Where will this run in production?": "cloud" })
+    expect(asked.messages).not.toContain("Production storage?")
+    expect(result.storageProduction).toBe(result.storageLocal)
   })
 
   // Issue 76: SMTP was chosen with no host, and the server then dropped every email without a word.

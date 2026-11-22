@@ -454,8 +454,9 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       }),
     )
 
-    // No production to store for yet: production storage is chosen with the production target.
-    const storageProduction = productionTarget === "later" ? storageLocal : await promptProductionStorage()
+    // Not asked when there is no production to store for yet, nor on Supatype Cloud, which brings its
+    // own storage: an own bucket is set in the config later.
+    const storageProduction = productionTarget === "self-host" ? await promptProductionStorage() : storageLocal
 
     const helloFunction = ensureNotCancelled(
       await p.confirm({
