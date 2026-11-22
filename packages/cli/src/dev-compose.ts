@@ -71,6 +71,7 @@ import {
   writeSelfHostCompose,
   composeFieldMaskingTier,
   selfHostComposePaths,
+  COMPOSE_UP_DETACHED,
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
 import { composeServiceIsRunning } from "./compose-kong.js"
@@ -1608,7 +1609,7 @@ async function bringPushedStackUp(
   keys: { anonKey: string; serviceRoleKey: string },
 ): Promise<string | null> {
   const { paths, project, gatewayPort, brand } = stack
-  const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true, brand })
+  const upGateway = runDockerCompose(paths.composePath, [...COMPOSE_UP_DETACHED], cwd, project, { quiet: true, brand })
   // Thrown, not exited: the schema is applied by now (bringUpAfterApply).
   if (upGateway !== 0) throw new Error(`docker compose up exited with status ${upGateway}`)
   const left = await provisionStartedStack(cwd, config, { composePath: paths.composePath, project, gatewayPort }, ast, keys.serviceRoleKey)
@@ -1807,7 +1808,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   console.log("[supatype] Bringing up Docker Compose services...")
   await showDevStep("Starting services (the first start downloads their images)")
-  const upStatus = await runDockerComposeQuietly(paths.composePath, ["up", "-d"], cwd, project, devBrand)
+  const upStatus = await runDockerComposeQuietly(paths.composePath, [...COMPOSE_UP_DETACHED], cwd, project, devBrand)
   if (upStatus !== 0) {
     endDevSession()
     exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)

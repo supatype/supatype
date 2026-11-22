@@ -187,6 +187,13 @@ ${OPTIONAL_OWN_BUCKET_SETTINGS.map((name) => `      ${name}: "\${${name}:-}"`).j
  */
 export const DB_VOLUME_KEY = "db-data"
 
+/**
+ * Bring the whole stack up, detached. `--remove-orphans` takes away the container of a service the
+ * compose file no longer has, as the valkey one is after `cache.provider` moves to pg_keyspace: it
+ * was left running beside the stack that replaced it (S-36). Its volume is data and is kept.
+ */
+export const COMPOSE_UP_DETACHED: readonly string[] = ["up", "-d", "--remove-orphans"]
+
 type DockerPinComponent = "engine" | "server"
 
 /**
