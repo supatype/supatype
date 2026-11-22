@@ -269,6 +269,11 @@ jobs:
       - name: Build
         run: pnpm turbo run build
 
+      # The CLI runs dist, not src. A dist built before the pin changed pins tags the CDN does not
+      # have (the e2e rerun3 CLI did), so compare the compiled pins with release/images.json.
+      - name: The CLI's built pins are release/images.json
+        run: node scripts/release-images.mjs check-dist
+
       - name: Typecheck
         run: pnpm turbo run typecheck
 

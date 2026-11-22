@@ -9,8 +9,12 @@
  *   node scripts/release-images.mjs get <engine|server|postgres> <image|tag|commit>
  *   node scripts/release-images.mjs set <engine|server|postgres> <tag> <commit>
  *   node scripts/release-images.mjs generate [--check]
+ *   node scripts/release-images.mjs check-dist [path]
  *
- * `generate --check` writes nothing and exits 1 when the CLI's copy is stale.
+ * `generate --check` writes nothing and exits 1 when the CLI's copy is stale. `check-dist` writes
+ * nothing and exits 1 when the compiled copy the CLI runs (packages/cli/dist/generated/release-images.js,
+ * or [path]) is missing or disagrees with release/images.json: a dist built before the pin changed
+ * pins tags the CDN does not have.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -19,6 +23,7 @@ import { fileURLToPath } from "node:url"
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
 const PIN_FILE = join(ROOT, "release", "images.json")
 const GENERATED = join(ROOT, "packages", "cli", "src", "generated", "release-images.ts")
+const DIST = join(ROOT, "packages", "cli", "dist", "generated", "release-images.js")
 const COMPONENTS = ["engine", "server", "postgres"]
 const FIELDS = ["image", "tag", "commit"]
 
@@ -78,6 +83,28 @@ function generate(check) {
   writeFileSync(GENERATED, text, "utf8")
 }
 
+/** The pins a compiled release-images.js declares, by component, read from its text. */
+function pinsInDist(text) {
+  return Object.fromEntries(
+    COMPONENTS.map((name) => {
+      const line = text.split(/\r?\n/).find((l) => l.trimStart().startsWith(`${name}:`)) ?? ""
+      const field = (key) => new RegExp(String.raw`${key}:\s*"([^"]*)"`).exec(line)?.[1]
+      return [name, { image: field("image"), tag: field("tag"), commit: field("commit") }]
+    }),
+  )
+}
+
+function checkDist(path) {
+  const text = readText(path)
+  if (text === "") die(`${path} is missing or empty: build the CLI (pnpm --filter @supatype/cli build)`)
+  const built = pinsInDist(text)
+  const want = readPins()
+  const stale = COMPONENTS.filter((name) => FIELDS.some((field) => built[name][field] !== want[name][field]))
+  if (stale.length === 0) return
+  const detail = stale.map((name) => `${name} is ${built[name].tag ?? "unpinned"}, release/images.json says ${want[name].tag}`)
+  die(`${path} is stale (${detail.join("; ")}): rebuild the CLI after the pin changed`)
+}
+
 function component(name) {
   if (!COMPONENTS.includes(name)) die(`unknown component '${name}', expected one of ${COMPONENTS.join(", ")}`)
   return name
@@ -99,4 +126,5 @@ const [command, ...args] = process.argv.slice(2)
 if (command === "get" && args.length === 2) get(args[0], args[1])
 else if (command === "set" && args.length === 3) set(args[0], args[1], args[2])
 else if (command === "generate") generate(args[0] === "--check")
-else die("usage: release-images.mjs get <component> <field> | set <component> <tag> <commit> | generate [--check]")
+else if (command === "check-dist") checkDist(args[0] ?? DIST)
+else die("usage: release-images.mjs get <component> <field> | set <component> <tag> <commit> | generate [--check] | check-dist [path]")
