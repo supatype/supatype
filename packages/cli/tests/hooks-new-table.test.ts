@@ -85,3 +85,29 @@ export type Note = Model<{ id: UUID; body: string }>
     expect(readFileSync(adapterPath(), "utf8")).toBe("// pushed\n")
   })
 })
+
+// S-8: a name a model gives to `validate` is a field validator, not a hook. `hooks new` scaffolded a
+// `beforeChange` for it and said no model references it, and `hooks list` left validators out.
+describe("hooks new and hooks list for a field validator", () => {
+  const validatorSchema = `import type { Model, UUID } from "@supatype/types"
+export type Product = Model<{ id: UUID; title: string }, { tableName: "product"; validate: { title: "check-title" } }>
+`
+
+  it("scaffolds a field validator typed against the table and field, and says where it is wired", async () => {
+    writeFileSync(join(project.dir, "schema", "index.ts"), validatorSchema)
+    const run = await runCommand(registerHooks, ["hooks", "new", "check-title"], project.dir)
+    expect(run.output).toContain("Wired to Product.title (validator)")
+    expect(run.output).not.toContain("No model references it yet")
+    const handler = handlerOf("check-title")
+    expect(handler).toContain(`FieldValidator<"product", "title">`)
+    expect(handler).toContain("export default fieldValidator(")
+    expect(handler).not.toContain("BeforeChange")
+  })
+
+  it("lists the validators beside the hooks", async () => {
+    writeFileSync(join(project.dir, "schema", "index.ts"), validatorSchema)
+    const run = await runCommand(registerHooks, ["hooks", "list"], project.dir)
+    expect(run.output).toContain("Product.title")
+    expect(run.output).toContain("check-title")
+  })
+})
