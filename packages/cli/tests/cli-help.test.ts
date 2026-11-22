@@ -99,7 +99,8 @@ describe("CLI binary (requires built dist/)", () => {
   it("diff --help describes the diff command", () => {
     const { stdout, exitCode } = runCli(["diff", "--help"])
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("dry run")
+    expect(stdout).toContain("without applying them")
+    expect(stdout).toContain("migrate")
   })
 
   it("pull --help describes scaffold pull command", () => {

@@ -3,7 +3,7 @@ import type { InitDependencyVersions } from "./init-dependency-versions.js"
 
 export interface MergePackageJsonOptions {
   projectName: string
-  app: { viteDevUrl?: string; mode: string }
+  app: { viteDevUrl?: string; mode: string; react?: boolean }
   helloFunction: boolean
 }
 
@@ -75,7 +75,21 @@ function toolDependencies(deps: InitDependencyVersions, opts: MergePackageJsonOp
     "@supatype/types": `^${deps.types}`,
     typescript: "^5",
     ...(opts.app.viteDevUrl ? { vite: VITE_RANGE } : {}),
+    ...(opts.app.react ? REACT_DEV_DEPENDENCIES : {}),
   }
+}
+
+/** What the React (Vite) starter builds with: the Vite plugin and the types of the two React packages. */
+const REACT_DEV_DEPENDENCIES = {
+  "@vitejs/plugin-react": "^6",
+  "@types/react": "^19",
+  "@types/react-dom": "^19",
+} as const
+
+/** What the React (Vite) starter runs: React, and the hooks that read the client, at the client's release. */
+function reactDependencies(deps: InitDependencyVersions, opts: MergePackageJsonOptions): Record<string, string> {
+  if (!opts.app.react) return {}
+  return { react: "^19", "react-dom": "^19", "@supatype/react": `^${deps.client}` }
 }
 
 /** What decides which scripts a project gets. */
@@ -97,7 +111,7 @@ export function scaffoldPackageJson(opts: MergePackageJsonOptions, deps: InitDep
     private: true,
     type: "module",
     scripts: projectScripts(opts),
-    dependencies: { [CLIENT]: clientRange(undefined, deps.client) },
+    dependencies: { [CLIENT]: clientRange(undefined, deps.client), ...reactDependencies(deps, opts) },
     devDependencies: toolDependencies(deps, opts),
   }
   return `${JSON.stringify(pkg, null, 2)}\n`
@@ -195,7 +209,7 @@ export function mergeSupatypePackageJson(
     // (FF24). Nothing init adds needs it: the CLI runs the project's TypeScript either way, and a
     // new vite.config is written as .mts in a package that is not ESM (scaffoldVite).
     scripts,
-    dependencies,
+    dependencies: { ...dependencies, ...absentFrom(reactDependencies(deps, opts), pkg.dependencies, pkg.devDependencies) },
     // A tool the project already lists in either section stays where it is.
     devDependencies: {
       ...devDependencies,

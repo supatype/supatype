@@ -434,7 +434,7 @@ the write: a value nobody checked is not a value that passed.
 ## Schema change loop
 
 ```bash
-supatype diff          # preview SQL / operations (no apply)
+supatype diff          # preview the operations (no apply); `supatype migrate` prints the SQL
 supatype push          # diff → confirm → migrate → generate types
 supatype generate      # types only, no migration
 ```

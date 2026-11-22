@@ -318,6 +318,8 @@ async function requireDevEngineSupports(
 export function registerDev(program: Command): void {
   program
     .command("dev")
+    // `dev stop` is not a command; a stray word must not start the stack it was meant to stop.
+    .allowExcessArguments(false)
     .description("Start local Postgres, apply schema, and run supatype-server")
     .option("--no-watch", "Start services but do not watch for schema changes, or (Docker) for function changes")
     .option("--stream", "Print interleaved logs instead of the interactive TUI")

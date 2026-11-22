@@ -37,6 +37,7 @@ import { requireLocalStack } from "../local-stack-guard.js"
 import { collectSeed } from "../seed-runner.js"
 import { errorMessage } from "../error-message.js"
 import { connectAuthUsersByKey } from "../seed-auth-connect.js"
+import { withPublishing } from "../model-versioning.js"
 import { seedBuilderPathWithDefaults } from "../type-generation.js"
 import type { SeedConfig, SeedIr } from "../seed.js"
 import { error, info, success, warn } from "../ui/messages.js"
@@ -52,7 +53,7 @@ export function discoverSeedsDir(cwd: string, seedsDir: string): string[] {
 }
 
 /** One file's worth of collected IR, with what that file asked for. */
-interface Prepared {
+export interface Prepared {
   file: string
   document: SeedIr
   config: SeedConfig
@@ -211,7 +212,7 @@ function locateBuilder(cwd: string, config: SupatypeConfig): string | undefined 
 
 // --- Applying ---
 
-interface ApplyOptions {
+export interface ApplyOptions {
   cwd: string
   config: SupatypeConfig
   dsn: string
@@ -220,9 +221,9 @@ interface ApplyOptions {
   engine: ComposeEngine | undefined
 }
 
-async function apply(prepared: Prepared[], options: ApplyOptions): Promise<number> {
+export async function apply(prepared: Prepared[], options: ApplyOptions): Promise<number> {
   const { cwd, config, dsn, opts, engine } = options
-  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
   let documents: string[]
   try {
     documents = prepared.map((one) => JSON.stringify({ ...connectAuthUsersByKey(one.document, ast), file: one.file }))

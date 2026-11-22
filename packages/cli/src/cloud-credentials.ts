@@ -179,6 +179,29 @@ export async function cloudRefreshSession(
   return { accessToken, ...(next !== undefined && { refreshToken: next }), ...(expiresIn !== undefined && { expiresIn }) }
 }
 
+/** What the control plane says about a stored session. */
+export type CloudSessionCheck =
+  | { state: "valid" }
+  | { state: "rejected" }
+  | { state: "unreachable"; reason: string }
+
+/**
+ * Ask the control plane (`GET /auth/me`) whether `accessToken` still opens a session. Only a 401 or
+ * 403 is a rejection: a network failure or a 5xx says nothing about the token, so it is reported as
+ * unreachable and the caller does not sign the user out on it.
+ */
+export async function checkCloudSession(apiUrl: string, accessToken: string): Promise<CloudSessionCheck> {
+  const base = apiUrl.replace(/\/$/, "")
+  try {
+    const res = await fetch(`${base}/auth/me`, { headers: { Authorization: `Bearer ${accessToken}` } })
+    if (res.ok) return { state: "valid" }
+    if (res.status === 401 || res.status === 403) return { state: "rejected" }
+    return { state: "unreachable", reason: `${base} answered ${res.status}` }
+  } catch (err) {
+    return { state: "unreachable", reason: `${base} did not answer (${err instanceof Error ? err.message : String(err)})` }
+  }
+}
+
 /**
  * A Cloud access token set in the environment, for CI: SUPATYPE_ACCESS_TOKEN, else SUPATYPE_TOKEN,
  * its older name; undefined when neither holds anything. Every command reads it here, so a linked
