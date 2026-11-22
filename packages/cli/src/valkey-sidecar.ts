@@ -11,7 +11,7 @@ import { pushStartUndo } from "./dev-shutdown.js"
 import { askDocker, DOCKER_PULL_TIMEOUT_MS, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { readDotEnvFiles } from "./env-file.js"
 import { spawnFailureText, type SpawnOutcome } from "./error-message.js"
-import { firstFreePort, KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN } from "./postgres-ctl.js"
+import { describeKeyspacePorts, firstFreeKeyspacePort, keyspacePorts } from "./keyspace-port.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const VALKEY_ADDR_ENV = "SUPATYPE_VALKEY_ADDR"
@@ -98,11 +98,7 @@ export interface ValkeySidecarDeps {
   docker: DockerCaller
 }
 
-const machine: ValkeySidecarDeps = {
-  // The keyspace's ports, since 6379 may be held by something that does not answer.
-  freePort: () => firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN),
-  docker: askDockerFor,
-}
+const machine = { docker: askDockerFor }
 
 /**
  * Ensure Valkey is reachable for native dev: the one `SUPATYPE_VALKEY_ADDR` names, else this
@@ -119,7 +115,10 @@ export async function ensureValkeySidecar(
   cwd: string,
   given: Partial<ValkeySidecarDeps> = {},
 ): Promise<ValkeySidecarResult> {
-  const deps = { ...machine, ...given }
+  // The keyspace's ports (`SUPATYPE_KEYSPACE_PORT`, else from 6379, which may be held by something
+  // that does not answer).
+  const ports = keyspacePorts(cwd)
+  const deps = { ...machine, freePort: () => firstFreeKeyspacePort(ports), ...given }
   const envAddr = namedValkeyAddr(cwd)
   if (envAddr) {
     console.log(`[supatype] Using the Valkey SUPATYPE_VALKEY_ADDR names (${envAddr}).`)
@@ -136,7 +135,7 @@ export async function ensureValkeySidecar(
   }
   const port = await deps.freePort()
   if (port === null) {
-    console.warn(`[supatype] ⚠  No free port from ${KEYSPACE_PORT_BASE} for the Valkey sidecar, REST server cache will bypass.`)
+    console.warn(`[supatype] ⚠  No free port in ${describeKeyspacePorts(ports)} for the Valkey sidecar, REST server cache will bypass.`)
     return NO_VALKEY
   }
   return (await startContainer(name, port, deps)) ? awaitReachable(name, port) : NO_VALKEY

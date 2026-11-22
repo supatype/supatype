@@ -19,7 +19,8 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { nativeKeyspaceWanted } from "./cache-provider.js"
-import { firstFreePort, KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN, nativeKeyspaceLibraryPresent } from "./postgres-ctl.js"
+import { describeKeyspacePorts, firstFreeKeyspacePort, keyspacePorts } from "./keyspace-port.js"
+import { KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN, nativeKeyspaceLibraryPresent } from "./postgres-ctl.js"
 import { archiveHasKeyspaceAuth, KEYSPACE_AUTH_SINCE } from "./postgres-image.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { answersPing, type RespCredentials } from "./valkey-sidecar.js"
@@ -28,11 +29,18 @@ import { answersPing, type RespCredentials } from "./valkey-sidecar.js"
 export interface NativeKeyspaceChecks {
   libraryPresent: (pgBinDir: string | null) => boolean
   freePort: () => Promise<number | null>
+  /** Where `freePort` looks, for the message when it finds none. */
+  portsLooked?: string
 }
 
-const machineChecks: NativeKeyspaceChecks = {
-  libraryPresent: nativeKeyspaceLibraryPresent,
-  freePort: () => firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN),
+/** The machine's answers for the project at `cwd`: its keyspace ports are `SUPATYPE_KEYSPACE_PORT`'s, else 6379 on. */
+export function machineKeyspaceChecks(cwd: string): NativeKeyspaceChecks {
+  const ports = keyspacePorts(cwd)
+  return {
+    libraryPresent: nativeKeyspaceLibraryPresent,
+    freePort: () => firstFreeKeyspacePort(ports),
+    portsLooked: describeKeyspacePorts(ports),
+  }
 }
 
 /**
@@ -47,7 +55,7 @@ export async function nativeKeyspacePort(
   config: SupatypeProjectConfig,
   pgBinDir: string | null,
   version: string | null,
-  checks: NativeKeyspaceChecks = machineChecks,
+  checks: NativeKeyspaceChecks = machineKeyspaceChecks(process.cwd()),
 ): Promise<number | null> {
   if (!nativeKeyspaceWanted(config) || !checks.libraryPresent(pgBinDir)) return null
   if (!archiveHasKeyspaceAuth(version)) {
@@ -60,7 +68,7 @@ export async function nativeKeyspacePort(
   const port = await checks.freePort()
   if (port === null) {
     console.warn(
-      `[supatype] ⚠  No free port in ${KEYSPACE_PORT_BASE}-${KEYSPACE_PORT_BASE + KEYSPACE_PORT_SPAN - 1} ` +
+      `[supatype] ⚠  No free port in ${checks.portsLooked ?? `${KEYSPACE_PORT_BASE}-${KEYSPACE_PORT_BASE + KEYSPACE_PORT_SPAN - 1}`} ` +
         "for the Postgres keyspace, starting without it.",
     )
   }
