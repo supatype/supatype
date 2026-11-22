@@ -81,6 +81,8 @@ import {
   hasMeaningfulOverrides,
   describeActiveOverrides,
   postgresArchiveTag,
+  download,
+  type PlatformId,
 } from "../binary-cache.js"
 import { ensureBinary } from "../ensure-binary.js"
 import {
@@ -1316,21 +1318,19 @@ async function resolvePgInstall(config: Awaited<ReturnType<typeof loadConfig>>):
   return { binDir: join(extractedDir, "bin"), version }
 }
 
-async function extractPostgresArchive(
+/** Unpacks the cached Postgres archive for `version`, fetching it first when this machine has none. */
+export async function extractPostgresArchive(
   pgCacheDir: string,
   version: string,
-  platform: { os: string; arch: string },
+  platform: PlatformId,
   extractDir: string,
 ): Promise<void> {
   const ext = platform.os === "windows" ? ".zip" : ".tar.gz"
   const archiveName = `supatype-pg-${postgresArchiveTag(version)}-${platform.os}-${platform.arch}${ext}`
   const archivePath = join(pgCacheDir, archiveName)
 
-  if (!existsSync(archivePath)) {
-    throw new Error(
-      `Postgres ${version} archive not found. Run: supatype update`,
-    )
-  }
+  // Fetched like the engine, server and PostgREST are: a first `dev` on a clean home needs no `update`.
+  if (!existsSync(archivePath)) await download("postgres", version, platform)
 
   extractArchive(archivePath, extractDir)
 }
