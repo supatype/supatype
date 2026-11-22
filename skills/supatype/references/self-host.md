@@ -346,7 +346,8 @@ an older archive, a local `overrides.postgres_dir` build, `database.external`,
 and always on Windows (whose archive has no pg_keyspace), it uses a Valkey
 sidecar container bound to 127.0.0.1. Each project starts its own sidecar on
 the first free port from 6379; a Valkey already running is used only when
-`SUPATYPE_VALKEY_ADDR` names it.
+`SUPATYPE_VALKEY_ADDR` names it. That Valkey's password is read only from
+`SUPATYPE_VALKEY_PASSWORD`; `SUPATYPE_KEYSPACE_PASSWORD` is not sent to it.
 
 ### What survives a restart, and what does not
 
